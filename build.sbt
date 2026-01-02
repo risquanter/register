@@ -18,7 +18,7 @@ val tapirVersion      = "1.11.10"
 val zioLoggingVersion = "2.3.1"
 val zioConfigVersion  = "4.0.2"
 val quillVersion      = "4.7.3"
-val ironVersion       = "3.0.1"
+val ironVersion       = "3.2.1"
 
 // Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(

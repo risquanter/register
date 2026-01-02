@@ -124,6 +124,19 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
           name.value == "John" &&
           email.value == "john@test.com"
         )
+      },
+      
+      test("fromString accepts valid name") {
+        val result = SafeName.fromString("Valid Name")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("Valid Name")
+        )
+      },
+      
+      test("fromString rejects invalid name") {
+        val result = SafeName.fromString("")
+        assertTrue(result.isLeft)
       }
     ),
     
@@ -141,6 +154,19 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
         }
         
         assertTrue(result == "user@test.com")
+      },
+      
+      test("fromString accepts valid email") {
+        val result = Email.fromString("user@test.com")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("user@test.com")
+        )
+      },
+      
+      test("fromString rejects invalid email") {
+        val result = Email.fromString("notanemail")
+        assertTrue(result.isLeft)
       }
     ),
     
@@ -158,6 +184,19 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
         }
         
         assertTrue(result == "test.org")
+      },
+      
+      test("fromString accepts valid url") {
+        val result = Url.fromString("test.org")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("test.org")
+        )
+      },
+      
+      test("fromString rejects invalid url") {
+        val result = Url.fromString("notaurl")
+        assertTrue(result.isLeft)
       }
     )
   )
