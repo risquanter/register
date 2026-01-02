@@ -1,9 +1,10 @@
-package com.register.domain.data.iron
+package com.risquanter.register.domain.data.iron
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.MaxLength
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
+import com.risquanter.register.domain.data.iron.{SafeName, Email, Url}
 
 object ValidationUtil {
 

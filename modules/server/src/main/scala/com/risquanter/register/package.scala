@@ -1,4 +1,4 @@
-package com.register
+package com.risquanter.register
 
 // Placeholder for server module
 // This module will contain:

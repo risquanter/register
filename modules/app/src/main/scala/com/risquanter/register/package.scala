@@ -1,4 +1,4 @@
-package com.register
+package com.risquanter.register
 
 // Placeholder for app module
 // This module will contain:
