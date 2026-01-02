@@ -54,7 +54,8 @@ val serverDependencies = Seq(
   "io.getquill"                   %% "quill-jdbc-zio"                    % quillVersion,
   "org.postgresql"                 % "postgresql"                        % "42.7.3",
   "io.github.scottweaver"         %% "zio-2-0-testcontainers-postgresql" % "0.10.0"     % Test,
-  "io.github.iltotore"            %% "iron-zio"                          % ironVersion
+  "io.github.iltotore"            %% "iron-zio"                          % ironVersion,
+  "com.risquanter" % "simulation.util" % "0.8.0"
 )
 
 // Common module (cross-compiled for JVM and JS)
