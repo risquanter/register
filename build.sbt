@@ -26,7 +26,11 @@ val commonDependencies = Seq(
   "com.softwaremill.sttp.tapir"   %% "tapir-json-zio"          % tapirVersion,
   "com.softwaremill.sttp.tapir"   %% "tapir-swagger-ui-bundle" % tapirVersion,
   "com.softwaremill.sttp.client3" %% "zio"                     % sttpVersion,
+  "dev.zio"                       %% "zio"                     % zioVersion,
   "dev.zio"                       %% "zio-json"                % "0.7.1",
+  "dev.zio"                       %% "zio-test"                % zioVersion   % Test,
+  "dev.zio"                       %% "zio-test-sbt"            % zioVersion   % Test,
+  "dev.zio"                       %% "zio-test-magnolia"       % zioVersion   % Test,
   "io.github.iltotore"            %% "iron"                    % ironVersion,
   "io.github.iltotore"            %% "iron-scalacheck"         % ironVersion % Test
 )
