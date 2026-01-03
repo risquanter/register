@@ -14,6 +14,10 @@ This plan integrates Monte Carlo risk simulation into the register service follo
    - Agent-output `Risk` trait = Sampling strategy (pure function)
    - BCG `Risk` → renamed to `SimulationResult` = Aggregated outcomes (data structure)
 5. 🔍 **Review Focus:** Parallelization correctness + functional design consistency
+6. ✅ **Storage Strategy:** Dual-mode architecture
+   - **Exact storage** (Phases 1-4): `Map[TrialId, Loss]` for perfect accuracy, typical simulations (10K-100K trials)
+   - **Sketch-based** (Phase 5+): Optional t-digest/KLL for memory-constrained or distributed scenarios (1M+ trials)
+   - Opt-in via configuration - exact storage remains the default
 
 ---
 
@@ -520,11 +524,22 @@ object Simulator {
 - Performance: profile vs dense storage (measure memory)
 
 **Deliverables:**
-- Simulator.scala with 20+ tests
+## Phase 5A: Port t-digest Aggregator as Monoid (Optional Opt-In)
 
----
+**Objective:** Extract agent-output's TdigestAggregator with lawful Monoid for large-scale simulations
 
-## Phase 5A: Port t-digest Aggregator as Monoid
+**When to use:**
+- ✅ 1M+ trials (memory-constrained environments)
+- ✅ Distributed aggregation across entities
+- ✅ Real-time dashboards (low-latency requirements)
+- ❌ Default simulations (use exact storage for perfect accuracy)
+
+**Trade-offs:**
+- Memory: ~20KB constant vs O(n trials) for exact storage
+- Accuracy: ~0.1-1% quantile error vs exact
+- Capabilities: Quantiles/CDF only vs arbitrary statistics
+
+**File:** `modules/common/src/main/scala/com/risquanter/register/domain/aggregator/TdigestAggregator.scala`
 
 **Objective:** Extract agent-output's TdigestAggregator with lawful Monoid
 
@@ -566,18 +581,9 @@ object TdigestAggregator {
   }
 }
 ```
+## Phase 5B: LEC with Sketch Backing (Optional Opt-In)
 
-**Testing:** 20+ tests
-- Monoid laws (property tests)
-- Quantile accuracy vs sorted array
-- Merge correctness (disjoint samples)
-
-**Deliverables:**
-- TdigestAggregator.scala with 20+ tests
-
----
-
-## Phase 5B: LEC with Sketch Backing
+**Dual implementation strategy:**
 
 **File:** `modules/common/src/main/scala/com/risquanter/register/domain/simulation/LEC.scala`
 
@@ -593,12 +599,60 @@ trait LEC {
   def metadata: Map[String, String]
 }
 
+/** Exact implementation - default for typical simulations */
+case class ExactLEC(
+  result: SimulationResult
+) extends LEC {
+  def quantile(p: Double): Double = {
+    val sorted = result.outcomeCount.toSeq.sortBy(_._1)
+    val idx = (p * result.nTrials).toInt
+    sorted.drop(idx).headOption.map(_._1.toDouble).getOrElse(0.0)
+  }
+  
+  def exceedanceProbability(threshold: Double): Double = 
+    result.probOfExceedance(threshold.toLong).toDouble
+  
+  def trialCount: Int = result.nTrials
+  def metadata: Map[String, String] = Map("storage" -> "exact")
+}
+
+/** Sketch-based implementation - opt-in for large-scale */
 case class OnlineSketchLEC(
   aggregator: TdigestAggregator,
   riskIds: Set[String],
   nTrials: Int,
   metadata: Map[String, String] = Map.empty
 ) extends LEC {
+  
+  def quantile(p: Double): Double = aggregator.quantile(p)
+  
+  def exceedanceProbability(threshold: Double): Double = 
+    1.0 - aggregator.cdf(threshold)
+  
+  def trialCount: Int = nTrials
+}
+
+object LEC {
+  /** Factory - select implementation based on trial count or config */
+  def create(
+    result: SimulationResult,
+    useSketch: Boolean = false,
+    compression: Double = 100.0
+  ): LEC = {
+    if (useSketch) {
+      // Convert to sketch (one-way - loses exact data)
+      val agg = result.outcomes.values.foldLeft(TdigestAggregator.empty(compression)) {
+        (acc, loss) => acc.add(loss.toDouble)
+      }
+      OnlineSketchLEC(agg, Set(result.riskName), result.nTrials)
+    } else {
+      ExactLEC(result)
+    }
+  }
+}
+```
+
+**Testing:** 15+ tests (exact vs sketch accuracy comparison)
   
   def quantile(p: Double): Double = aggregator.quantile(p)
   
