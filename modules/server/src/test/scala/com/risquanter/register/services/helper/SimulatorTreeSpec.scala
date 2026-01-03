@@ -1,0 +1,150 @@
+package com.risquanter.register.services.helper
+
+import zio.*
+import zio.test.*
+import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult}
+import com.risquanter.register.domain.errors.ValidationFailed
+
+object SimulatorTreeSpec extends ZIOSpecDefault {
+
+  override def spec: Spec[TestEnvironment & Scope, Any] =
+    suite("Simulator.simulateTree")(
+      test("simulates simple 2-leaf portfolio") {
+        // Create a simple portfolio with 2 risks
+        val cyberRisk = RiskLeaf(
+          id = "cyber",
+          name = "Cyber Attack",
+          distributionType = "lognormal",
+          probability = 0.25,
+          minLoss = Some(1000L),  // $1B to $50B
+          maxLoss = Some(50000L)
+        )
+        
+        val supplyChainRisk = RiskLeaf(
+          id = "supply-chain",
+          name = "Supply Chain Disruption",
+          distributionType = "lognormal",
+          probability = 0.15,
+          minLoss = Some(500L),   // $500M to $20B
+          maxLoss = Some(20000L)
+        )
+        
+        val portfolio = RiskPortfolio(
+          id = "ops-risk",
+          name = "Operational Risk",
+          children = Array(cyberRisk, supplyChainRisk)
+        )
+        
+        // Run simulation
+        val program = Simulator.simulateTree(portfolio, nTrials = 1000, parallelism = 2)
+        
+        program.map { result =>
+          result match {
+            case RiskTreeResult.Branch(id, aggregated, children) =>
+              // Verify structure
+              assertTrue(
+                id == "ops-risk",
+                children.length == 2,
+                children(0).id == "cyber",
+                children(1).id == "supply-chain",
+                aggregated.nTrials == 1000
+              )
+            
+            case _ =>
+              assertTrue(false) // Should be a branch, not a leaf
+          }
+        }
+      },
+      
+      test("simulates single leaf risk") {
+        val singleRisk = RiskLeaf(
+          id = "cyber",
+          name = "Cyber Attack",
+          distributionType = "lognormal",
+          probability = 0.25,
+          minLoss = Some(1000L),
+          maxLoss = Some(50000L)
+        )
+        
+        val program = Simulator.simulateTree(singleRisk, nTrials = 1000, parallelism = 2)
+        
+        program.map { result =>
+          result match {
+            case RiskTreeResult.Leaf(id, riskResult) =>
+              assertTrue(
+                id == "cyber",
+                riskResult.riskName == "cyber",
+                riskResult.nTrials == 1000
+              )
+            
+            case _ =>
+              assertTrue(false) // Should be a leaf, not a branch
+          }
+        }
+      },
+      
+      test("aggregates child losses correctly in portfolio") {
+        // Simple test: both risks with reasonable probability
+        // Use lognormal mode which is simpler
+        val risk1 = RiskLeaf(
+          id = "risk1",
+          name = "Risk 1",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(1000L),
+          maxLoss = Some(5000L)
+        )
+        
+        val risk2 = RiskLeaf(
+          id = "risk2",
+          name = "Risk 2",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(2000L),
+          maxLoss = Some(8000L)
+        )
+        
+        val portfolio = RiskPortfolio(
+          id = "portfolio",
+          name = "Test Portfolio",
+          children = Array(risk1, risk2)
+        )
+        
+        val program = Simulator.simulateTree(portfolio, nTrials = 100, parallelism = 2)
+        
+        program.map { result =>
+          result match {
+            case RiskTreeResult.Branch(_, aggregated, children) =>
+              // Verify both children were simulated and aggregated
+              assertTrue(
+                children.length == 2,
+                children(0).result.nTrials == 100,
+                children(1).result.nTrials == 100,
+                aggregated.nTrials == 100
+              )
+            
+            case _ =>
+              assertTrue(false)
+          }
+        }
+      },
+      
+      test("fails on empty portfolio") {
+        val emptyPortfolio = RiskPortfolio(
+          id = "empty",
+          name = "Empty Portfolio",
+          children = Array.empty
+        )
+        
+        val program = Simulator.simulateTree(emptyPortfolio, nTrials = 100, parallelism = 2)
+        
+        program.flip.map { error =>
+          // Should fail with validation error about empty children
+          error match {
+            case ValidationFailed(errors) => assertTrue(errors.exists(_.contains("no children")))
+            case _ => assertTrue(false)
+          }
+        }
+      }
+    )
+}

@@ -12,16 +12,16 @@ import zio.http.Header.{
 }
 
 import com.risquanter.register.http.HttpApi
-import com.risquanter.register.http.controllers.SimulationController
-import com.risquanter.register.services.SimulationServiceLive
-import com.risquanter.register.repositories.SimulationRepositoryInMemory
+import com.risquanter.register.http.controllers.RiskTreeController
+import com.risquanter.register.services.RiskTreeServiceLive
+import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 
 /** Main application entry point
   * Sets up HTTP server with CORS, dependency injection, and routing
   */
 object Application extends ZIOAppDefault {
 
-  def startServer: ZIO[SimulationController & Server, Throwable, Unit] = for {
+  def startServer: ZIO[RiskTreeController & Server, Throwable, Unit] = for {
     endpoints <- HttpApi.endpointsZIO
     httpApp   = ZioHttpInterpreter().toHttp(endpoints)
     
@@ -38,7 +38,7 @@ object Application extends ZIOAppDefault {
     _ <- Server.serve(corsApp)
   } yield ()
 
-  def program: ZIO[SimulationController & Server, Throwable, Unit] = for {
+  def program: ZIO[RiskTreeController & Server, Throwable, Unit] = for {
     _ <- ZIO.log("Bootstrapping Risk Register application...")
     _ <- startServer
   } yield ()
@@ -46,10 +46,11 @@ object Application extends ZIOAppDefault {
   override def run: ZIO[Any, Any, Unit] = program.provide(
     Server.default,
     // Controllers
-    ZLayer.fromZIO(SimulationController.makeZIO),
+    ZLayer.fromZIO(RiskTreeController.makeZIO),
     // Services
-    SimulationServiceLive.layer,
+    RiskTreeServiceLive.layer,
+    com.risquanter.register.services.SimulationExecutionService.live,
     // Repositories
-    SimulationRepositoryInMemory.layer
+    RiskTreeRepositoryInMemory.layer
   )
 }

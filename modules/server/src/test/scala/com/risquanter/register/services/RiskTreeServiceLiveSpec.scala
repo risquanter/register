@@ -1,0 +1,163 @@
+package com.risquanter.register.services
+
+import zio.*
+import zio.test.*
+import io.github.iltotore.iron.*
+
+import com.risquanter.register.http.requests.{CreateSimulationRequest, RiskDefinition}
+import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.repositories.RiskTreeRepository
+import com.risquanter.register.domain.errors.ValidationFailed
+import com.risquanter.register.syntax.*
+import com.risquanter.register.domain.data.RiskPortfolio
+
+
+object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
+
+  // Concise service accessor pattern
+  private val service = ZIO.serviceWithZIO[RiskTreeService]
+
+  // Stub repository factory - creates fresh instance per test
+  private def makeStubRepo = new RiskTreeRepository {
+    private val db = collection.mutable.Map[Long, RiskTree]()
+    
+    override def create(riskTree: RiskTree): Task[RiskTree] = ZIO.attempt {
+      val nextId = db.keys.maxOption.getOrElse(0L) + 1L
+      val newRiskTree = riskTree.copy(id = nextId.refineUnsafe)
+      db += (nextId -> newRiskTree)
+      newRiskTree
+    }
+    
+    override def update(id: Long, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
+      val riskTree = db(id)
+      val updated = op(riskTree)
+      db += (id -> updated)
+      updated
+    }
+    
+    override def delete(id: Long): Task[RiskTree] = ZIO.attempt {
+      val riskTree = db(id)
+      db -= id
+      riskTree
+    }
+    
+    override def getById(id: Long): Task[Option[RiskTree]] =
+      ZIO.succeed(db.get(id))
+    
+    override def getAll: Task[List[RiskTree]] =
+      ZIO.succeed(db.values.toList)
+  }
+  
+  private val stubRepoLayer = ZLayer.fromFunction(() => makeStubRepo)
+
+  // Valid request with lognormal risk
+  private val validRequest = CreateSimulationRequest(
+    name = "Test Risk Tree",
+    nTrials = 1000,
+    risks = Array(
+      RiskDefinition(
+        riskName = "test-risk",
+        distributionType = "lognormal",
+        probability = 0.75,
+        minLoss = Some(1000L),
+        maxLoss = Some(50000L)
+      )
+    )
+  )
+
+  override def spec: Spec[TestEnvironment & Scope, Any] =
+    suite("RiskTreeServiceLive")(
+      test("create validates and persists risk tree config") {
+        val program = service(_.create(validRequest))
+
+        program.assert { result =>
+          result.id > 0 &&
+            result.name == SafeName.SafeName("Test Risk Tree".refineUnsafe) &&
+            result.nTrials == 1000 &&
+            result.root.isInstanceOf[RiskPortfolio]
+        }
+      },
+
+      test("computeLEC executes simulation and returns LEC data") {
+        val program = for {
+          created <- service(_.create(validRequest))
+          lec <- service(_.computeLEC(created.id, None, 1))
+        } yield (created, lec)
+
+        program.assert { case (created, lec) =>
+          lec.riskTree.id == created.id &&
+            lec.riskTree.name == created.name
+          // TODO: Assert quantiles.nonEmpty once convertResultToLEC is fully implemented
+        }
+      },
+
+      test("create fails with invalid name") {
+        val invalidRequest = validRequest.copy(name = "")
+        val program = service(_.create(invalidRequest).flip)
+
+        program.assert {
+          case ValidationFailed(errors) => errors.exists(e => e.toLowerCase.contains("name"))
+          case _                        => false
+        }
+      },
+
+      test("create fails with empty risks array") {
+        val invalidRequest = validRequest.copy(risks = Array.empty)
+        val program = service(_.create(invalidRequest).flip)
+
+        program.assert {
+          case ValidationFailed(errors) => errors.exists(_.contains("risks"))
+          case _                        => false
+        }
+      },
+
+      test("create fails with invalid probability") {
+        val invalidRisk = validRequest.risks(0).copy(probability = 1.5)
+        val invalidRequest = validRequest.copy(risks = Array(invalidRisk))
+        val program = service(_.create(invalidRequest).flip)
+
+        program.assert {
+          case ValidationFailed(errors) => errors.exists(_.toLowerCase.contains("prob"))
+          case _                        => false
+        }
+      },
+
+      test("getAll returns all risk trees") {
+        val program = for {
+          tree1 <- service(_.create(validRequest))
+          tree2 <- service(_.create(validRequest.copy(name = "Second Risk Tree")))
+          all  <- service(_.getAll)
+        } yield (tree1, tree2, all)
+
+        program.assert { case (tree1, tree2, all) =>
+          all.length == 2 &&
+            all.map(_.id).toSet == Set(tree1.id, tree2.id)
+        }
+      },
+
+      test("getById returns risk tree when exists") {
+        val program = for {
+          created <- service(_.create(validRequest))
+          found   <- service(_.getById(created.id))
+        } yield (created, found)
+
+        program.assert {
+          case (created, Some(found)) =>
+            found.id == created.id &&
+              found.name == created.name
+          case _ => false
+        }
+      },
+
+      test("getById returns None when not exists") {
+        val program = service(_.getById(999L))
+
+        program.assert(_ == None)
+      }
+    ).provide(
+      RiskTreeServiceLive.layer,
+      SimulationExecutionService.live,
+      stubRepoLayer
+    ) @@ TestAspect.sequential
+}

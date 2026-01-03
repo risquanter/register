@@ -1,7 +1,10 @@
 package com.risquanter.register.services.helper
 
-import com.risquanter.register.simulation.RiskSampler
-import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss}
+import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution}
+import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult}
+import com.risquanter.register.domain.errors.ValidationFailed
+import com.risquanter.register.simulation.LognormalHelper
+import com.risquanter.register.domain.data.iron.ValidationUtil
 import scala.collection.parallel.CollectionConverters.*
 import zio.{ZIO, Task}
 
@@ -13,6 +16,7 @@ import zio.{ZIO, Task}
  * - Parallelization: Uses parallel collections for CPU-bound trial computation
  * - Determinism: Pure functions guarantee identical results for same seeds
  * - Memory efficiency: Avoids materializing zero-loss trials
+ * - Recursive tree simulation: Bottom-up aggregation with lazy evaluation
  */
 object Simulator {
   
@@ -96,4 +100,156 @@ object Simulator {
       }
     }
   }
+  
+  // ══════════════════════════════════════════════════════════════════
+  // Recursive Tree Simulation
+  // ══════════════════════════════════════════════════════════════════
+  
+  /**
+   * Recursively simulate risk tree with bottom-up aggregation.
+   * 
+   * Algorithm:
+   * 1. Leaf: Create sampler, run trials → RiskTreeResult.Leaf
+   * 2. RiskPortfolio: Recurse on children, aggregate results → RiskTreeResult.Branch
+   * 
+   * Aggregation uses RiskResult.identity.combine (outer join semantics).
+   * All nodes in tree share same trial sequence for consistency.
+   * 
+   * @param node Root node of tree (or subtree)
+   * @param nTrials Number of Monte Carlo trials
+   * @param parallelism Max concurrent child simulations
+   * @return RiskTreeResult preserving hierarchy with computed distributions
+   */
+  def simulateTree(
+    node: RiskNode,
+    nTrials: Int,
+    parallelism: Int = 8
+  ): Task[RiskTreeResult] = {
+    node match {
+      case leaf: RiskLeaf =>
+        // Terminal node: create sampler and simulate
+        for {
+          sampler <- createSamplerFromLeaf(leaf)
+          result <- ZIO.attempt {
+            val trials = performTrials(sampler, nTrials)
+            RiskTreeResult.Leaf(leaf.id, RiskResult(leaf.id, trials, nTrials))
+          }
+        } yield result
+      
+      case portfolio: RiskPortfolio =>
+        // Branch node: recurse on children, then aggregate
+        for {
+          // Validate portfolio has children
+          _ <- ZIO.when(portfolio.children.isEmpty)(
+            ZIO.fail(ValidationFailed(List(s"RiskPortfolio '${portfolio.id}' has no children")))
+          )
+          
+          // Recursively simulate all children in parallel
+          childResults <- ZIO.collectAllPar(
+            portfolio.children.map(child => simulateTree(child, nTrials, parallelism))
+          ).withParallelism(parallelism)
+          
+          // Aggregate children using Identity.combine
+          aggregated <- ZIO.attempt {
+            val childRiskResults = childResults.map(_.result)
+            val combined = childRiskResults.reduce((a, b) => RiskResult.identity.combine(a, b))
+            
+            // Update riskName to portfolio ID
+            RiskTreeResult.Branch(
+              id = portfolio.id,
+              result = combined.copy(riskName = portfolio.id),
+              children = childResults.toVector
+            )
+          }
+        } yield aggregated
+    }
+  }
+  
+  /**
+   * Create RiskSampler from RiskLeaf definition.
+   * Validates parameters and builds Metalog distribution.
+   */
+  private def createSamplerFromLeaf(leaf: RiskLeaf): Task[RiskSampler] = {
+    for {
+      // Validate probability
+      probability <- ZIO.fromEither(
+        ValidationUtil.refineProbability(leaf.probability)
+      ).mapError(errors => ValidationFailed(errors))
+      
+      // Create Metalog distribution based on mode
+      metalog <- createMetalogDistribution(leaf)
+      
+      // Build sampler (using entityId = hash of leaf.id for determinism)
+      sampler = RiskSampler.fromMetalog(
+        entityId = leaf.id.hashCode.toLong,
+        riskId = leaf.id,
+        occurrenceProb = probability,
+        lossDistribution = metalog,
+        seed3 = 0L,
+        seed4 = 0L
+      )
+    } yield sampler
+  }
+  
+  /**
+   * Create MetalogDistribution from RiskLeaf parameters.
+   * Handles both expert opinion and lognormal modes.
+   */
+  private def createMetalogDistribution(leaf: RiskLeaf): Task[MetalogDistribution] = {
+    import io.github.iltotore.iron.*
+    import com.risquanter.register.domain.data.iron.Probability
+    import com.risquanter.register.simulation.PositiveInt
+    
+    leaf.distributionType.toLowerCase match {
+      // Expert opinion mode: fit from percentiles + quantiles
+      case "expert" =>
+        (leaf.percentiles, leaf.quantiles) match {
+          case (Some(ps), Some(qs)) if ps.length == qs.length && ps.length >= 2 =>
+            // Refine percentile values to Probability type
+            val percentileResults = ps.map(p => ValidationUtil.refineProbability(p))
+            val percentileErrors = percentileResults.collect { case Left(errors) => errors }.flatten
+            
+            if (percentileErrors.nonEmpty) {
+              ZIO.fail(ValidationFailed(percentileErrors.toList))
+            } else {
+              val percentiles = percentileResults.collect { case Right(p) => p }
+              val terms = ps.length.asInstanceOf[PositiveInt]
+              
+              MetalogDistribution.fromPercentiles(
+                percentiles = percentiles,
+                quantiles = qs,
+                terms = terms,
+                lower = Some(0.0) // Loss cannot be negative
+              ) match {
+                case Right(m) => ZIO.succeed(m)
+                case Left(e) => ZIO.fail(ValidationFailed(List(s"Failed to fit Metalog for '${leaf.id}': ${e.message}")))
+              }
+            }
+          
+          case _ =>
+            ZIO.fail(ValidationFailed(List(
+              s"Expert mode requires percentiles and quantiles arrays with same length (≥2) for '${leaf.id}'"
+            )))
+        }
+      
+      // Lognormal mode: use BCG 80% CI approach
+      case "lognormal" =>
+        (leaf.minLoss, leaf.maxLoss) match {
+          case (Some(min), Some(max)) if min > 0 && min < max =>
+            LognormalHelper.fromLognormal80CI(min, max) match {
+              case Right(m) => ZIO.succeed(m)
+              case Left(e) => ZIO.fail(ValidationFailed(List(s"Failed to create lognormal for '${leaf.id}': ${e.message}")))
+            }
+          
+          case _ =>
+            ZIO.fail(ValidationFailed(List(
+              s"Lognormal mode requires minLoss > 0 and minLoss < maxLoss for '${leaf.id}'"
+            )))
+        }
+      
+      case other =>
+        ZIO.fail(ValidationFailed(List(s"Unsupported distribution type: $other for '${leaf.id}'")))
+    }
+  }
 }
+

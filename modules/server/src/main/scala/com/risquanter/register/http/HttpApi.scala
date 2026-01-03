@@ -26,14 +26,14 @@ object HttpApi {
     * 
     * @return ZIO effect that provides list of all controllers
     */
-  def makeControllers: ZIO[SimulationController, Nothing, List[BaseController]] = for {
-    simulations <- ZIO.service[SimulationController]
-  } yield List(simulations)
+  def makeControllers: ZIO[RiskTreeController, Nothing, List[BaseController]] = for {
+    riskTrees <- ZIO.service[RiskTreeController]
+  } yield List(riskTrees)
 
   /** Complete application endpoints including business logic and documentation
     * 
     * @return ZIO effect providing all HTTP endpoints
     */
-  val endpointsZIO: ZIO[SimulationController, Nothing, List[ServerEndpoint[Any, Task]]] =
+  val endpointsZIO: ZIO[RiskTreeController, Nothing, List[ServerEndpoint[Any, Task]]] =
     makeControllers.map(gatherRoutes)
 }
