@@ -27,6 +27,6 @@ object SimulationResponse {
     minLoss = sim.minLoss,
     maxLoss = sim.maxLoss,
     likelihoodId = sim.likelihoodId,
-    probability = sim.probability
+    probability = sim.probability.toDouble
   )
 }
