@@ -28,6 +28,7 @@ val commonDependencies = Seq(
   "com.softwaremill.sttp.client3" %% "zio"                     % sttpVersion,
   "dev.zio"                       %% "zio"                     % zioVersion,
   "dev.zio"                       %% "zio-json"                % "0.7.1",
+  "dev.zio"                       %% "zio-prelude"             % "1.0.0-RC35",
   "dev.zio"                       %% "zio-test"                % zioVersion   % Test,
   "dev.zio"                       %% "zio-test-sbt"            % zioVersion   % Test,
   "dev.zio"                       %% "zio-test-magnolia"       % zioVersion   % Test,
