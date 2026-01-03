@@ -1,6 +1,7 @@
 package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder}
+import sttp.tapir.Schema
 
 /** Recursive ADT representing a risk hierarchy tree.
   * 
@@ -39,6 +40,9 @@ sealed trait RiskNode {
 object RiskNode {
   // Recursive JSON codec - handles nested structures
   given codec: JsonCodec[RiskNode] = DeriveJsonCodec.gen[RiskNode]
+  
+  // Tapir schema for OpenAPI/endpoint definitions
+  given schema: Schema[RiskNode] = Schema.derived[RiskNode]
 }
 
 /** Leaf node: Represents an actual risk with a loss distribution.

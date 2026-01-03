@@ -2,17 +2,27 @@ package com.risquanter.register.http.requests
 
 import zio.test.*
 import zio.json.*
+import com.risquanter.register.domain.data.{RiskNode, RiskLeaf}
 
 object CreateSimulationRequestSpec extends ZIOSpecDefault {
 
   def spec = suite("CreateSimulationRequest")(
-    test("has JsonCodec for serialization") {
+    test("has JsonCodec for serialization - flat format") {
       val request = CreateSimulationRequest(
         name = "Risk Assessment",
-        minLoss = 1000L,
-        maxLoss = 50000L,
-        likelihoodId = 5L,
-        probability = 0.75
+        nTrials = 10000,
+        root = None,
+        risks = Some(Array(
+          RiskDefinition(
+            riskName = "Risk1",
+            distributionType = "lognormal",
+            probability = 0.5,
+            minLoss = Some(1000L),
+            maxLoss = Some(50000L),
+            percentiles = None,
+            quantiles = None
+          )
+        ))
       )
       
       val json = request.toJson
@@ -20,63 +30,70 @@ object CreateSimulationRequestSpec extends ZIOSpecDefault {
       
       assertTrue(
         decoded.isRight,
-        decoded.contains(request)
+        decoded.map(_.name).contains("Risk Assessment")
       )
     },
     
-    test("can deserialize from JSON string") {
-      val json = """{"name":"Test","minLoss":100,"maxLoss":1000,"likelihoodId":1,"probability":0.5}"""
+    test("can deserialize from JSON string - hierarchical format") {
+      val json = """{"name":"Test","nTrials":5000,"root":{"RiskLeaf":{"id":"single-risk","name":"SingleRisk","distributionType":"lognormal","probability":0.5,"minLoss":100,"maxLoss":1000}}}"""
       val result = json.fromJson[CreateSimulationRequest]
       
       assertTrue(
         result.isRight,
         result.map(_.name).contains("Test"),
-        result.map(_.minLoss).contains(100L),
-        result.map(_.probability).contains(0.5)
+        result.map(_.nTrials).contains(5000),
+        result.map(_.root.isDefined).contains(true)
       )
     },
     
     test("uses plain types - no validation on deserialization") {
       // This documents that validation happens AFTER deserialization
-      // Invalid values can be deserialized, then validated via ValidationUtil
+      // Invalid values can be deserialized, then validated by service layer
       
-      val json = """{"name":"","minLoss":-100,"maxLoss":5000,"likelihoodId":1,"probability":1.5}"""
+      val json = """{"name":"","nTrials":-100}"""
       val result = json.fromJson[CreateSimulationRequest]
       
       assertTrue(
         result.isRight, // Deserializes successfully even with invalid values
-        result.map(_.name).contains(""),
-        result.map(_.minLoss).contains(-100L),
-        result.map(_.probability).contains(1.5)
+        result.map(_.name).contains("")
       )
     },
     
     test("optional fields default to None") {
-      val json = """{"name":"Simple","minLoss":100,"maxLoss":1000,"likelihoodId":1,"probability":0.5}"""
+      val json = """{"name":"Simple","nTrials":10000}"""
       val result = json.fromJson[CreateSimulationRequest]
       
-      // There are no optional fields in CreateSimulationRequest, but this test
-      // serves as a placeholder if optional fields are added in the future.
       assertTrue(
-        result.isRight
+        result.isRight,
+        result.map(_.root.isEmpty).contains(true),
+        result.map(_.risks.isEmpty).contains(true)
       )
     },
     
     test("serializes to JSON correctly") {
       val request = CreateSimulationRequest(
         name = "Test Sim",
-        minLoss = 500L,
-        maxLoss = 10000L,
-        likelihoodId = 3L,
-        probability = 0.25
+        nTrials = 10000,
+        root = None,
+        risks = Some(Array(
+          RiskDefinition(
+            riskName = "Risk1",
+            distributionType = "lognormal",
+            probability = 0.25,
+            minLoss = Some(500L),
+            maxLoss = Some(10000L),
+            percentiles = None,
+            quantiles = None
+          )
+        ))
       )
       
       val json = request.toJson
       
       assertTrue(
         json.contains("\"name\":\"Test Sim\""),
-        json.contains("\"minLoss\":500"),
-        json.contains("\"probability\":0.25")
+        json.contains("\"nTrials\":10000"),
+        json.contains("\"risks\":")
       )
     }
   )

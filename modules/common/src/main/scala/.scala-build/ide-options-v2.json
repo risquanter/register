@@ -1,0 +1,1 @@
+{"dependencies":{"dependency":["com.softwaremill.sttp.tapir::tapir-zio-http-server:1.13.4","dev.zio::zio-logging-slf4j:2.2.4","ch.qos.logback:logback-classic:1.5.23","io.github.iltotore::iron-zio:3.2.1","org.scala-lang.modules::scala-parallel-collections:1.0.4","com.risquanter:simulation.util:0.8.0"]},"scalaVersion":"3.6.3"}

@@ -5,12 +5,11 @@ import zio.test.*
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.http.requests.{CreateSimulationRequest, RiskDefinition}
-import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.ValidationFailed
 import com.risquanter.register.syntax.*
-import com.risquanter.register.domain.data.RiskPortfolio
 
 
 object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
@@ -51,11 +50,11 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   
   private val stubRepoLayer = ZLayer.fromFunction(() => makeStubRepo)
 
-  // Valid request with lognormal risk
+  // Valid request with lognormal risk (flat format for backward compatibility)
   private val validRequest = CreateSimulationRequest(
     name = "Test Risk Tree",
     nTrials = 1000,
-    risks = Array(
+    risks = Some(Array(
       RiskDefinition(
         riskName = "test-risk",
         distributionType = "lognormal",
@@ -63,7 +62,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         minLoss = Some(1000L),
         maxLoss = Some(50000L)
       )
-    )
+    ))
   )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
@@ -92,6 +91,43 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
+      test("create accepts hierarchical RiskNode structure") {
+        val hierarchicalRequest = CreateSimulationRequest(
+          name = "Hierarchical Tree",
+          nTrials = 1000,
+          root = Some(RiskPortfolio(
+            id = "ops-risk",
+            name = "Operational Risk",
+            children = Array(
+              RiskLeaf(
+                id = "cyber",
+                name = "Cyber Attack",
+                distributionType = "lognormal",
+                probability = 0.25,
+                minLoss = Some(1000L),
+                maxLoss = Some(50000L)
+              ),
+              RiskLeaf(
+                id = "fraud",
+                name = "Fraud",
+                distributionType = "lognormal",
+                probability = 0.15,
+                minLoss = Some(500L),
+                maxLoss = Some(10000L)
+              )
+            )
+          ))
+        )
+        
+        val program = service(_.create(hierarchicalRequest))
+
+        program.assert { result =>
+          result.id > 0 &&
+            result.root.isInstanceOf[RiskPortfolio] &&
+            result.root.asInstanceOf[RiskPortfolio].children.length == 2
+        }
+      },
+
       test("create fails with invalid name") {
         val invalidRequest = validRequest.copy(name = "")
         val program = service(_.create(invalidRequest).flip)
@@ -103,7 +139,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("create fails with empty risks array") {
-        val invalidRequest = validRequest.copy(risks = Array.empty)
+        val invalidRequest = validRequest.copy(risks = Some(Array.empty))
         val program = service(_.create(invalidRequest).flip)
 
         program.assert {
@@ -113,12 +149,22 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("create fails with invalid probability") {
-        val invalidRisk = validRequest.risks(0).copy(probability = 1.5)
-        val invalidRequest = validRequest.copy(risks = Array(invalidRisk))
+        val invalidRisk = validRequest.risks.get(0).copy(probability = 1.5)
+        val invalidRequest = validRequest.copy(risks = Some(Array(invalidRisk)))
         val program = service(_.create(invalidRequest).flip)
 
         program.assert {
           case ValidationFailed(errors) => errors.exists(_.toLowerCase.contains("prob"))
+          case _                        => false
+        }
+      },
+
+      test("create fails when neither root nor risks provided") {
+        val invalidRequest = CreateSimulationRequest(name = "Test", nTrials = 1000)
+        val program = service(_.create(invalidRequest).flip)
+
+        program.assert {
+          case ValidationFailed(errors) => errors.exists(_.contains("root"))
           case _                        => false
         }
       },

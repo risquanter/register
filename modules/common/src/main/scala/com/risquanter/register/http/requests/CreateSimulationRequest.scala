@@ -1,29 +1,37 @@
 package com.risquanter.register.http.requests
 
 import zio.json.{JsonCodec, DeriveJsonCodec}
+import com.risquanter.register.domain.data.RiskNode
 
-/** Request DTO for creating a new simulation
+/** Request DTO for creating a new risk tree
   * 
-  * **One-Level Tree (BCG-Compatible):**
-  * - Root portfolio contains array of leaf risks
-  * - Each risk has its own distribution and probability
-  * - Returns aggregated LEC + individual risk LECs
+  * **Hierarchical Structure (Recommended):**
+  * - Provide `root` RiskNode (can be RiskLeaf or RiskPortfolio)
+  * - Supports arbitrary nesting depth
+  * - Each node has its own distribution and probability
   * 
-  * **Two Distribution Modes:**
+  * **Flat Structure (Backward Compatible):**
+  * - Provide `risks` array of RiskDefinition
+  * - Automatically wrapped in root RiskPortfolio
+  * - Limited to one-level trees
+  * 
+  * **Distribution Modes:**
   * 1. **Expert Opinion**: `distributionType="expert"`, provide `percentiles` + `quantiles`
   * 2. **Lognormal (BCG)**: `distributionType="lognormal"`, provide `minLoss` + `maxLoss` (80% CI bounds)
   * 
-  * @param name Simulation name
-  * @param nTrials Number of Monte Carlo trials (max 100,000 for synchronous execution)
-  * @param risks Array of risk definitions (required, must have ≥1 element)
+  * @param name Risk tree name
+  * @param nTrials Number of Monte Carlo trials (default: 10,000)
+  * @param root Hierarchical risk tree structure (preferred)
+  * @param risks Flat array of risks for backward compatibility (deprecated)
   */
 final case class CreateSimulationRequest(
   name: String,
   nTrials: Int = 10000,
-  risks: Array[RiskDefinition]
+  root: Option[RiskNode] = None,
+  risks: Option[Array[RiskDefinition]] = None
 )
 
-/** Individual risk definition for portfolio simulations
+/** Individual risk definition for flat portfolio simulations (deprecated, use RiskNode instead)
   * 
   * @param riskName Unique risk identifier
   * @param distributionType "expert" or "lognormal"

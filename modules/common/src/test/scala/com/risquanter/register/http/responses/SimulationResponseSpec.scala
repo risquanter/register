@@ -4,7 +4,7 @@ import zio.test.*
 import zio.json.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoRefine
-import com.risquanter.register.domain.data.Simulation
+import com.risquanter.register.domain.data.{RiskTree, RiskLeaf}
 import com.risquanter.register.domain.data.iron.SafeName
 
 object SimulationResponseSpec extends ZIOSpecDefault {
@@ -14,10 +14,9 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       val response = SimulationResponse(
         id = 1L,
         name = "Test Simulation",
-        minLoss = 1000L,
-        maxLoss = 50000L,
-        likelihoodId = 5L,
-        probability = 0.75
+        quantiles = Map("p50" -> 10.5, "p90" -> 25.0, "p95" -> 30.0, "p99" -> 40.0),
+        exceedanceCurve = Some("""{"$schema":"https://vega.github.io/schema/vega-lite/v5.json"}"""),
+        individualRisks = Array.empty
       )
       
       val json = response.toJson
@@ -25,43 +24,58 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       
       assertTrue(
         decoded.isRight,
-        decoded.contains(response)
+        decoded.map(_.id).contains(1L),
+        decoded.map(_.name).contains("Test Simulation"),
+        decoded.map(_.quantiles.size).contains(4)
       )
     },
     
-    test("fromSimulation converts domain model to response") {
-      val simulation = Simulation(
+    test("fromRiskTree converts domain model to response (metadata only)") {
+      val riskTree = RiskTree(
         id = 1L,
         name = SafeName.SafeName("Risk Assessment".refineUnsafe),
-        minLoss = 1000L,
-        maxLoss = 50000L,
-        likelihoodId = 5L,
-        probability = 0.75
+        nTrials = 10000,
+        root = RiskLeaf(
+          id = "test-risk",
+          name = "TestRisk",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(1000L),
+          maxLoss = Some(50000L),
+          percentiles = None,
+          quantiles = None
+        )
       )
       
-      val response = SimulationResponse.fromSimulation(simulation)
+      val response = SimulationResponse.fromRiskTree(riskTree)
       
       assertTrue(
         response.id == 1L,
         response.name == "Risk Assessment",
-        response.minLoss == 1000L,
-        response.maxLoss == 50000L,
-        response.likelihoodId == 5L,
-        response.probability == 0.75
+        response.quantiles.isEmpty, // No LEC data yet
+        response.exceedanceCurve.isEmpty,
+        response.individualRisks.isEmpty
       )
     },
     
-    test("fromSimulation extracts .value from opaque types") {
-      val simulation = Simulation(
+    test("fromRiskTree extracts .value from opaque types") {
+      val riskTree = RiskTree(
         id = 2L,
         name = SafeName.SafeName("Test".refineUnsafe),
-        minLoss = 100L,
-        maxLoss = 5000L,
-        likelihoodId = 1L,
-        probability = 0.5
+        nTrials = 5000,
+        root = RiskLeaf(
+          id = "risk1",
+          name = "Risk1",
+          distributionType = "lognormal",
+          probability = 0.3,
+          minLoss = Some(100L),
+          maxLoss = Some(5000L),
+          percentiles = None,
+          quantiles = None
+        )
       )
       
-      val response = SimulationResponse.fromSimulation(simulation)
+      val response = SimulationResponse.fromRiskTree(riskTree)
       
       // Verify that name.value was extracted (SafeName -> String)
       val nameStr: String = response.name
@@ -72,10 +86,9 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       val response = SimulationResponse(
         id = 4L,
         name = "JSON Test",
-        minLoss = 200L,
-        maxLoss = 2000L,
-        likelihoodId = 3L,
-        probability = 0.3
+        quantiles = Map("p50" -> 5.0, "p90" -> 15.0),
+        exceedanceCurve = None,
+        individualRisks = Array.empty
       )
       
       val json = response.toJson
@@ -83,27 +96,35 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       assertTrue(
         json.contains("\"id\":4"),
         json.contains("\"name\":\"JSON Test\""),
-        json.contains("\"probability\":0.3")
+        json.contains("\"quantiles\":")
       )
     },
     
     test("round-trip: domain -> response -> JSON -> response") {
-      val simulation = Simulation(
+      val riskTree = RiskTree(
         id = 5L,
         name = SafeName.SafeName("Round Trip".refineUnsafe),
-        minLoss = 1000L,
-        maxLoss = 15000L,
-        likelihoodId = 4L,
-        probability = 0.8
+        nTrials = 10000,
+        root = RiskLeaf(
+          id = "risk1",
+          name = "Risk1",
+          distributionType = "lognormal",
+          probability = 0.8,
+          minLoss = Some(1000L),
+          maxLoss = Some(15000L),
+          percentiles = None,
+          quantiles = None
+        )
       )
       
-      val response1 = SimulationResponse.fromSimulation(simulation)
+      val response1 = SimulationResponse.fromRiskTree(riskTree)
       val json = response1.toJson
       val response2 = json.fromJson[SimulationResponse]
       
       assertTrue(
         response2.isRight,
-        response2.contains(response1)
+        response2.map(_.id).contains(5L),
+        response2.map(_.name).contains("Round Trip")
       )
     }
   )

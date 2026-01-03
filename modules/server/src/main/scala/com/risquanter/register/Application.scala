@@ -21,36 +21,30 @@ import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
   */
 object Application extends ZIOAppDefault {
 
-  def startServer: ZIO[RiskTreeController & Server, Throwable, Unit] = for {
-    endpoints <- HttpApi.endpointsZIO
-    httpApp   = ZioHttpInterpreter().toHttp(endpoints)
-    
-    // CORS configuration - allow all origins for development
-    corsConfig = CorsConfig(
-      allowedOrigin = _ => Some(AccessControlAllowOrigin.All),
-      allowedHeaders = AccessControlAllowHeaders.All,
-      exposedHeaders = AccessControlExposeHeaders.All
+  override def run = {
+    val program = for {
+      _          <- ZIO.logInfo("Bootstrapping Risk Register application...")
+      endpoints  <- HttpApi.endpointsZIO
+      _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
+      httpApp     = ZioHttpInterpreter().toHttp(endpoints)
+      
+      corsConfig  = CorsConfig(
+        allowedOrigin = _ => Some(AccessControlAllowOrigin.All),
+        allowedHeaders = AccessControlAllowHeaders.All,
+        exposedHeaders = AccessControlExposeHeaders.All
+      )
+      _          <- ZIO.logInfo("CORS configured for all origins")
+      corsApp     = cors(corsConfig)(httpApp)
+      _          <- ZIO.logInfo("Starting HTTP server on port 8080...")
+      _          <- Server.serve(corsApp)
+    } yield ()
+
+    program.provide(
+      Server.default,
+      RiskTreeRepositoryInMemory.layer,
+      com.risquanter.register.services.SimulationExecutionService.live,
+      RiskTreeServiceLive.layer,
+      ZLayer.fromZIO(RiskTreeController.makeZIO)
     )
-    
-    corsApp = cors(corsConfig)(httpApp)
-    _ <- ZIO.log("Starting Risk Register API server on http://localhost:8080")
-    _ <- ZIO.log("Swagger UI available at http://localhost:8080/docs")
-    _ <- Server.serve(corsApp)
-  } yield ()
-
-  def program: ZIO[RiskTreeController & Server, Throwable, Unit] = for {
-    _ <- ZIO.log("Bootstrapping Risk Register application...")
-    _ <- startServer
-  } yield ()
-
-  override def run: ZIO[Any, Any, Unit] = program.provide(
-    Server.default,
-    // Controllers
-    ZLayer.fromZIO(RiskTreeController.makeZIO),
-    // Services
-    RiskTreeServiceLive.layer,
-    com.risquanter.register.services.SimulationExecutionService.live,
-    // Repositories
-    RiskTreeRepositoryInMemory.layer
-  )
+  }
 }

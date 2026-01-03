@@ -105,26 +105,38 @@ class RiskTreeServiceLive private (
       errors += "nTrials must be positive"
     }
     
-    if (req.risks.isEmpty) {
-      errors += "risks array cannot be empty"
+    // Must have either root or risks (not both, not neither)
+    (req.root, req.risks) match {
+      case (None, None) =>
+        errors += "Must provide either 'root' (hierarchical) or 'risks' (flat array)"
+      case (Some(_), Some(_)) =>
+        errors += "Cannot provide both 'root' and 'risks' - use one format only"
+      case _ => // Valid: exactly one is provided
     }
     
-    req.risks.foreach { risk =>
-      if (risk.probability < 0.0 || risk.probability > 1.0) {
-        errors += s"Invalid probability ${risk.probability} for risk '${risk.riskName}'"
+    // Validate flat risks array if provided
+    req.risks.foreach { risksArray =>
+      if (risksArray.isEmpty) {
+        errors += "risks array cannot be empty"
       }
       
-      risk.distributionType match {
-        case "expert" =>
-          if (risk.percentiles.isEmpty || risk.quantiles.isEmpty) {
-            errors += s"Expert distribution requires percentiles and quantiles for '${risk.riskName}'"
-          }
-        case "lognormal" =>
-          if (risk.minLoss.isEmpty || risk.maxLoss.isEmpty) {
-            errors += s"Lognormal distribution requires minLoss and maxLoss for '${risk.riskName}'"
-          }
-        case other =>
-          errors += s"Unsupported distribution type '$other' for '${risk.riskName}'"
+      risksArray.foreach { risk =>
+        if (risk.probability < 0.0 || risk.probability > 1.0) {
+          errors += s"Invalid probability ${risk.probability} for risk '${risk.riskName}'"
+        }
+        
+        risk.distributionType match {
+          case "expert" =>
+            if (risk.percentiles.isEmpty || risk.quantiles.isEmpty) {
+              errors += s"Expert distribution requires percentiles and quantiles for '${risk.riskName}'"
+            }
+          case "lognormal" =>
+            if (risk.minLoss.isEmpty || risk.maxLoss.isEmpty) {
+              errors += s"Lognormal distribution requires minLoss and maxLoss for '${risk.riskName}'"
+            }
+          case other =>
+            errors += s"Unsupported distribution type '$other' for '${risk.riskName}'"
+        }
       }
     }
     
@@ -135,27 +147,36 @@ class RiskTreeServiceLive private (
     }
   }
   
-  // Helper: Build RiskNode from request (flat portfolio for now)
+  // Helper: Build RiskNode from request (supports both hierarchical and flat)
   private def buildRiskNodeFromRequest(req: CreateSimulationRequest): RiskNode = {
-    val leaves: Array[RiskNode] = req.risks.map { risk =>
-      RiskLeaf(
-        id = risk.riskName,
-        name = risk.riskName,
-        distributionType = risk.distributionType,
-        probability = risk.probability,
-        percentiles = risk.percentiles,
-        quantiles = risk.quantiles,
-        minLoss = risk.minLoss,
-        maxLoss = risk.maxLoss
-      ): RiskNode  // Explicit upcast
+    req.root match {
+      case Some(node) =>
+        // Hierarchical format - use directly
+        node
+        
+      case None =>
+        // Flat format - convert to portfolio
+        val risks = req.risks.getOrElse(Array.empty[RiskDefinition])
+        val leaves: Array[RiskNode] = risks.map { risk =>
+          RiskLeaf(
+            id = risk.riskName,
+            name = risk.riskName,
+            distributionType = risk.distributionType,
+            probability = risk.probability,
+            percentiles = risk.percentiles,
+            quantiles = risk.quantiles,
+            minLoss = risk.minLoss,
+            maxLoss = risk.maxLoss
+          ): RiskNode
+        }
+        
+        // Wrap in root portfolio
+        RiskPortfolio(
+          id = "root",
+          name = req.name,
+          children = leaves
+        )
     }
-    
-    // Wrap in root portfolio
-    RiskPortfolio(
-      id = "root",
-      name = req.name,
-      children = leaves
-    )
   }
   
   // Helper: Convert TreeResult to RiskTreeWithLEC
