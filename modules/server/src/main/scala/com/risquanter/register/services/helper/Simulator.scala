@@ -3,6 +3,7 @@ package com.risquanter.register.services.helper
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
 import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult}
 import com.risquanter.register.domain.errors.ValidationFailed
+import zio.prelude.Identity
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
 import scala.collection.parallel.CollectionConverters.*
@@ -112,7 +113,7 @@ object Simulator {
    * 1. Leaf: Create sampler, run trials → RiskTreeResult.Leaf
    * 2. RiskPortfolio: Recurse on children, aggregate results → RiskTreeResult.Branch
    * 
-   * Aggregation uses RiskResult.identity.combine (outer join semantics).
+   * Aggregation uses Identity[RiskResult].combine (outer join semantics).
    * All nodes in tree share same trial sequence for consistency.
    * 
    * @param node Root node of tree (or subtree)
@@ -152,7 +153,7 @@ object Simulator {
           // Aggregate children using Identity.combine
           aggregated <- ZIO.attempt {
             val childRiskResults = childResults.map(_.result)
-            val combined = childRiskResults.reduce((a, b) => RiskResult.identity.combine(a, b))
+            val combined = childRiskResults.reduce((a, b) => Identity[RiskResult].combine(a, b))
             
             // Update name to portfolio ID
             RiskTreeResult.Branch(

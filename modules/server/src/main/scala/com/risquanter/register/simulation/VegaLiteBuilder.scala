@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.{LECPoint, LECNode}
+import com.risquanter.register.domain.data.{LECPoint, LECCurveData}
 
 /** Vega-Lite diagram generator for Loss Exceedance Curves
   * 
@@ -45,7 +45,7 @@ object VegaLiteBuilder {
     * @return Vega-Lite JSON as string
     */
   def generateSpec(
-    rootNode: LECNode,
+    rootNode: LECCurveData,
     width: Int = 950,
     height: Int = 400
   ): String = {

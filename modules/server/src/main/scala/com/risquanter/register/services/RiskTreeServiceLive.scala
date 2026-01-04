@@ -303,10 +303,10 @@ class RiskTreeServiceLive private (
     depth: Int
   ): Task[RiskTreeWithLEC] = {
     import com.risquanter.register.simulation.{LECGenerator, VegaLiteBuilder}
-    import com.risquanter.register.domain.data.{LECNode, LECPoint}
+    import com.risquanter.register.domain.data.{LECCurveData, LECPoint}
     
     // Build hierarchical LEC node structure
-    def buildLECNode(treeResult: com.risquanter.register.domain.data.RiskTreeResult, currentDepth: Int): LECNode = {
+    def buildLECNode(treeResult: com.risquanter.register.domain.data.RiskTreeResult, currentDepth: Int): LECCurveData = {
       val riskResult = treeResult.result
       
       // Generate curve points
@@ -317,13 +317,13 @@ class RiskTreeServiceLive private (
       val quantiles = LECGenerator.calculateQuantiles(riskResult)
       
       // Recursively build children if depth allows
-      val children: Option[Vector[LECNode]] = treeResult match {
+      val children: Option[Vector[LECCurveData]] = treeResult match {
         case com.risquanter.register.domain.data.RiskTreeResult.Branch(_, _, childResults) if currentDepth > 0 =>
           Some(childResults.map(child => buildLECNode(child, currentDepth - 1)))
         case _ => None
       }
       
-      LECNode(
+      LECCurveData(
         id = treeResult.id,
         name = riskResult.name,
         curve = lecPoints,
@@ -345,7 +345,7 @@ class RiskTreeServiceLive private (
       riskTree = tree,
       quantiles = rootQuantiles,
       vegaLiteSpec = Some(vegaLiteSpec),
-      lecNode = Some(lecNode),
+      lecCurveData = Some(lecNode),
       depth = depth
     ))
   }
