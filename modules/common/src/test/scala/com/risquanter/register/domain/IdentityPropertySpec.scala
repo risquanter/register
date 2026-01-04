@@ -27,27 +27,18 @@ object IdentityPropertySpec extends ZIOSpecDefault {
   /** Generate random Loss values (0 to 10M) */
   val genLoss: Gen[Any, Loss] = Gen.long(0L, 10000000L)
   
-  /** Generate random TrialId values (0 to 10000) */
-  val genTrialId: Gen[Any, TrialId] = Gen.int(0, 10000)
-  
-  /** Generate sparse outcome maps (0-50 trials with losses) */
-  val genOutcomes: Gen[Any, Map[TrialId, Loss]] = for {
-    numTrials <- Gen.int(0, 50)
-    trialIds  <- Gen.listOfN(numTrials)(genTrialId)
+  /** Generate sparse outcome maps with trial IDs in valid range [0, nTrials) */
+  def genOutcomes(nTrials: Int): Gen[Any, Map[TrialId, Loss]] = for {
+    numTrials <- Gen.int(0, Math.min(50, nTrials))
+    trialIds  <- Gen.listOfN(numTrials)(Gen.int(0, nTrials - 1))
     losses    <- Gen.listOfN(numTrials)(genLoss)
   } yield trialIds.zip(losses).toMap
   
   /** Generate random RiskResult with consistent nTrials */
   val genRiskResult: Gen[Any, RiskResult] = for {
     name      <- Gen.alphaNumericString.map(s => if (s.isEmpty) "risk" else s)
-    outcomes  <- genOutcomes
     nTrials   <- Gen.int(100, 1000)
-  } yield RiskResult(name, outcomes, nTrials)
-  
-  /** Generate RiskResult with specific nTrials (for combining) */
-  def genRiskResultWithTrials(nTrials: Int): Gen[Any, RiskResult] = for {
-    name     <- Gen.alphaNumericString.map(s => if (s.isEmpty) "risk" else s)
-    outcomes <- genOutcomes
+    outcomes  <- genOutcomes(nTrials)
   } yield RiskResult(name, outcomes, nTrials)
   
   // ══════════════════════════════════════════════════════════════════
@@ -108,12 +99,16 @@ object IdentityPropertySpec extends ZIOSpecDefault {
     
     suite("RiskResult Identity - Property Tests")(
       test("associativity property: (a ⊕ b) ⊕ c = a ⊕ (b ⊕ c)") {
-        check(genRiskResult, genRiskResult, genRiskResult) { (r1, r2, r3) =>
-          // Normalize to same nTrials for valid combining
-          val nTrials = r1.nTrials
-          val a = r1
-          val b = r2.copy(nTrials = nTrials)
-          val c = r3.copy(nTrials = nTrials)
+        check(Gen.int(100, 1000).flatMap { nTrials =>
+          for {
+            outcomes1 <- genOutcomes(nTrials)
+            outcomes2 <- genOutcomes(nTrials)
+            outcomes3 <- genOutcomes(nTrials)
+          } yield (nTrials, outcomes1, outcomes2, outcomes3)
+        }) { case (nTrials, outcomes1, outcomes2, outcomes3) =>
+          val a = RiskResult("a", outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult("b", outcomes2.filter(_._1 < nTrials), nTrials)
+          val c = RiskResult("c", outcomes3.filter(_._1 < nTrials), nTrials)
           
           val left  = Identity[RiskResult].combine(Identity[RiskResult].combine(a, b), c)
           val right = Identity[RiskResult].combine(a, Identity[RiskResult].combine(b, c))
@@ -144,10 +139,14 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       },
       
       test("commutativity property: a ⊕ b = b ⊕ a") {
-        check(genRiskResult, genRiskResult) { (r1, r2) =>
-          // Normalize to same nTrials
-          val a = r1
-          val b = r2.copy(nTrials = r1.nTrials)
+        check(Gen.int(100, 1000).flatMap { nTrials =>
+          for {
+            outcomes1 <- genOutcomes(nTrials)
+            outcomes2 <- genOutcomes(nTrials)
+          } yield (nTrials, outcomes1, outcomes2)
+        }) { case (nTrials, outcomes1, outcomes2) =>
+          val a = RiskResult("a", outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult("b", outcomes2.filter(_._1 < nTrials), nTrials)
           
           val ab = Identity[RiskResult].combine(a, b)
           val ba = Identity[RiskResult].combine(b, a)
@@ -157,9 +156,14 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       },
       
       test("outer join semantics: union of trial IDs") {
-        check(genRiskResult, genRiskResult) { (r1, r2) =>
-          val a = r1
-          val b = r2.copy(nTrials = r1.nTrials)
+        check(Gen.int(100, 1000).flatMap { nTrials =>
+          for {
+            outcomes1 <- genOutcomes(nTrials)
+            outcomes2 <- genOutcomes(nTrials)
+          } yield (nTrials, outcomes1, outcomes2)
+        }) { case (nTrials, outcomes1, outcomes2) =>
+          val a = RiskResult("a", outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult("b", outcomes2.filter(_._1 < nTrials), nTrials)
           
           val combined = Identity[RiskResult].combine(a, b)
           val expectedTrials = a.trialIds() ++ b.trialIds()
@@ -169,9 +173,14 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       },
       
       test("loss summation per trial") {
-        check(genRiskResult, genRiskResult) { (r1, r2) =>
-          val a = r1
-          val b = r2.copy(nTrials = r1.nTrials)
+        check(Gen.int(100, 1000).flatMap { nTrials =>
+          for {
+            outcomes1 <- genOutcomes(nTrials)
+            outcomes2 <- genOutcomes(nTrials)
+          } yield (nTrials, outcomes1, outcomes2)
+        }) { case (nTrials, outcomes1, outcomes2) =>
+          val a = RiskResult("a", outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult("b", outcomes2.filter(_._1 < nTrials), nTrials)
           
           val combined = Identity[RiskResult].combine(a, b)
           
