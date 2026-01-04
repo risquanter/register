@@ -19,9 +19,150 @@ This plan integrates Monte Carlo risk simulation into the register service follo
    - **Sketch-based** (Phase 5+): Optional t-digest/KLL for memory-constrained or distributed scenarios (1M+ trials)
    - Opt-in via configuration - exact storage remains the default
 
+# Implementation Plan: Monte Carlo Risk Simulation with Category Theory Design
+
+## Implementation Status
+
+### ✅ Phase 1 (Partial): ZIO Prelude Type Class Migration - COMPLETE
+**Status:** Stages 1-4 complete, property-based testing validated  
+**Tests:** 167 common tests passing (137 unit + 14 Ord + 16 property)  
+**Details:** See "Phase 1 Completion Summary" section below
+
+### 🚧 Phase 1 (Remaining): simulation-util Integration - PENDING
+**Next:** HDR wrapper, Metalog distribution, RiskSampler implementation
+
+### ⏸️ Phases 2-13: Awaiting Phase 1 completion
+
 ---
 
-## Phase 1: Wrap simulation-util (HDR + Metalog)
+## Overview
+This plan integrates Monte Carlo risk simulation into the register service following a hybrid approach:
+- **BCG implementation:** Production-tested sparse storage and parallelization patterns
+- **Agent-output principles:** Pure functional design with category theory (ZIO Prelude)
+- **simulation-util library:** Trusted HDR PRNG and Metalog distribution (no reimplementation)
+
+## Critical Design Principles
+1. ✅ **simulation-util library:** Use HDR.generate and QPFitter directly (treat as correct)
+2. ✅ **Validation:** Apply Iron refinement types (Probability) before calling Java APIs
+3. ✅ **Category Theory Alignment:** Lawful type classes (Identity/Monoid, Equal, Ord, Debug) **[IMPLEMENTED]**
+4. ✅ **Naming Clarity:** 
+   - Agent-output `Risk` trait = Sampling strategy (pure function)
+   - BCG `Risk` → renamed to `RiskResult` = Aggregated outcomes (data structure) **[IMPLEMENTED]**
+5. 🔍 **Review Focus:** Parallelization correctness + functional design consistency
+6. ✅ **Storage Strategy:** Dual-mode architecture
+   - **Exact storage** (Phases 1-4): `Map[TrialId, Loss]` for perfect accuracy, typical simulations (10K-100K trials)
+   - **Sketch-based** (Phase 5+): Optional t-digest/KLL for memory-constrained or distributed scenarios (1M+ trials)
+   - Opt-in via configuration - exact storage remains the default
+
+---
+
+## Phase 1 Completion Summary: ZIO Prelude Type Classes ✅
+
+### Stage 1: PreludeInstances.scala - COMPLETE ✅
+**File:** `modules/common/src/main/scala/com/risquanter/register/domain/PreludeInstances.scala`
+
+**Implemented:**
+- `Identity[Loss]` (Monoid for Long addition) - identity = 0L
+- `Identity[RiskResult]` (Monoid for outer join semantics) - sparse map aggregation
+- `Ord[Loss]` - explicit ordering for TreeMap operations
+- `Ord[TrialId]` - natural Int ordering
+- `Equal[Loss]`, `Equal[TrialId]` - value equality
+- `Debug[Loss]`, `Debug[TrialId]` - diagnostic output ("Loss(n)", "Trial#n")
+
+**Tests:** 17 unit tests in `PreludeInstancesSpec.scala`
+- Identity laws: associativity, left/right identity, commutativity
+- Ord laws: less than, greater than, equal, transitivity
+- Equal laws: reflexivity, symmetry, transitivity
+- Debug formatting
+
+### Stage 2: Identity[T].combine Syntax Standardization - COMPLETE ✅
+**Objective:** Migrate call sites from `.identity.combine` to explicit `Identity[T].combine` syntax
+
+**Files Updated:**
+- `LossDistribution.scala` - Added `Identity` import, updated all combine calls
+- `Simulator.scala` - Line 156 now uses `Identity[RiskResult].combine(a, b)`
+- `SimulationResultSpec.scala` - 5 tests updated to use `Identity[RiskResult]` syntax
+
+**Tests:** All 137 unit tests passing after migration
+
+### Stage 3: Explicit Ord[Loss] for TreeMap Operations - COMPLETE ✅
+**Objective:** Use explicit `Ord[Loss].toScala` to prevent implicit resolution ambiguities
+
+**File Updated:** `LossDistribution.scala`
+```scala
+// TreeMap construction with explicit ordering
+TreeMap.from(frequencies)(using Ord[Loss].toScala)
+
+// Min/max operations with explicit ordering
+val maxLoss = outcomes.keys.max(using Ord[Loss].toScala)
+val minLoss = outcomes.keys.min(using Ord[Loss].toScala)
+```
+
+**New Tests:** `PreludeOrdUsageSpec.scala` - 14 tests
+- TreeMap ordering verification (ascending Loss order)
+- maxLoss/minLoss with explicit Ord[Loss]
+- outcomeCount sorting behavior
+- rangeFrom threshold queries
+- Empty result handling
+
+**Total Tests:** 151 (137 + 14 new)
+
+### Stage 4: Property-Based Testing for Identity Laws - COMPLETE ✅
+**Objective:** Validate algebraic properties across random inputs using ZIO Test generators
+
+**File Created:** `IdentityPropertySpec.scala` - 16 property tests
+
+**Generators:**
+```scala
+val genLoss: Gen[Any, Loss] = Gen.long(0L, 10000000L)
+
+def genOutcomes(nTrials: Int): Gen[Any, Map[TrialId, Loss]] = for {
+  numTrials <- Gen.int(0, Math.min(50, nTrials))
+  trialIds  <- Gen.listOfN(numTrials)(Gen.int(0, nTrials - 1))  // Semantic validity!
+  losses    <- Gen.listOfN(numTrials)(genLoss)
+} yield trialIds.zip(losses).toMap
+
+val genRiskResult: Gen[Any, RiskResult] = for {
+  name     <- Gen.alphaNumericString.map(s => if (s.isEmpty) "risk" else s)
+  nTrials  <- Gen.int(100, 1000)
+  outcomes <- genOutcomes(nTrials)  // Thread nTrials through
+} yield RiskResult(name, outcomes, nTrials)
+```
+
+**Key Design Decision:** Use `flatMap` to share `nTrials` across multiple generators, ensuring trial IDs are always < nTrials (semantic correctness)
+
+**Property Tests:**
+- 5 Loss Identity tests: associativity, left/right identity, commutativity, self-combination
+- 8 RiskResult Identity tests: monoid laws, outer join semantics, loss summation, empty handling, self-doubling
+- 3 Edge case tests: multiple empty results, overflow handling, zero preservation
+
+**Execution:** Each test runs 200 random examples = 16 × 200 = **3,200 property checks**
+
+**Total Tests:** 167 (151 + 16 new property tests)
+
+### Stage 5: Documentation Updates - COMPLETE ✅
+**Files Updated:**
+- `DEVELOPMENT_CONTEXT.md` - Added "ZIO Prelude Type Classes" section with usage examples
+- `IMPLEMENTATION-PLAN.md` - This section documenting Phase 1 completion
+
+---
+
+## Benefits Realized from ZIO Prelude Migration
+
+1. **Mathematical Correctness:** Lawful type classes guarantee algebraic properties hold
+2. **Explicit Type Class Usage:** `Identity[T].combine(a, b)` clearer than `.identity.combine(a, b)`
+3. **Property-Based Confidence:** 3,200 random checks provide stronger validation than manual cases
+4. **Semantic Validity:** Generators produce realistic domain instances (trial IDs always < nTrials)
+5. **Explicit Ordering:** `Ord[Loss].toScala` prevents Scala 3 implicit resolution ambiguities
+6. **Composability:** Type classes compose naturally for complex operations
+7. **Documentation:** Type class constraints document mathematical requirements
+8. **Refactoring Safety:** Property tests catch regressions across random input space
+9. **Standardization:** Consistent patterns replace ad-hoc implementations
+10. **Future-Proof:** Additional type classes (Associative, Commutative) easy to add
+
+---
+
+## Phase 1 (Remaining): Wrap simulation-util (HDR + Metalog)
 
 **Objective:** Create thin Scala wrappers with validation and defensive testing
 

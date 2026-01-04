@@ -53,14 +53,16 @@ The LEC shows probability of exceeding each loss threshold:
 > **Note:** The system is designed to be extensible. Additional distributions can be added by extending the `Distribution` sealed trait and implementing corresponding sampling logic in the simulation service.
 
 
-## Current Status: Step 7 COMPLETE ✅
+## Current Status: Step 7 COMPLETE ✅ + ZIO Prelude Migration Phase 1 COMPLETE ✅
 
 ### What Works
-- ✅ **All 209 tests passing** (120 common + 89 server tests)
+- ✅ **All 278 tests passing** (167 common + 111 server tests)
 - ✅ **Hierarchical RiskNode implementation complete**
 - ✅ **Dual API format support** (hierarchical + backward-compatible flat)
 - ✅ **Full service layer** with validation and business logic
 - ✅ **Complete test coverage** for new functionality
+- ✅ **ZIO Prelude type classes integrated** (Identity, Ord, Equal, Debug)
+- ✅ **Property-based testing** (16 tests with 200 examples each = 3,200 checks)
 - ✅ **Code is production-ready**
 
 ### Known Environment Issue (NOT Code Problem)
@@ -467,6 +469,113 @@ program.provide(
 given schema: Schema[RiskNode] = Schema.derived[RiskNode]
 ```
 
+## ZIO Prelude Type Classes (Phase 1 Migration)
+
+### Overview
+The codebase now uses **ZIO Prelude 1.0.0-RC44** for lawful type class instances, replacing ad-hoc implementations with mathematically verified abstractions.
+
+### Core Type Classes Implemented
+
+#### 1. Identity (Monoid) for Loss and RiskResult
+**Purpose:** Enables combination of loss values and risk distributions using lawful associative operations.
+
+```scala
+// Loss aggregation (Long addition)
+Identity[Loss].identity                    // 0L
+Identity[Loss].combine(1000L, 2000L)       // 3000L
+
+// RiskResult outer join (trial-level aggregation)
+val r1 = RiskResult("risk1", Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
+val r2 = RiskResult("risk2", Map(2 -> 500L, 3 -> 1500L), nTrials = 100)
+val combined = Identity[RiskResult].combine(r1, r2)
+// Result: Map(1 -> 1000L, 2 -> 2500L, 3 -> 1500L)
+```
+
+**Laws Verified:**
+- Associativity: `combine(a, combine(b, c)) == combine(combine(a, b), c)`
+- Left identity: `combine(identity, a) == a`
+- Right identity: `combine(a, identity) == a`
+- Commutativity: `combine(a, b) == combine(b, a)` (bonus property)
+
+#### 2. Ord for Loss (TreeMap Ordering)
+**Purpose:** Provides explicit ordering for `Loss` values in `TreeMap` operations, ensuring correct quantile calculations.
+
+```scala
+import scala.collection.immutable.TreeMap
+
+// Explicit Ord[Loss] usage for sorted frequency distributions
+val outcomeCount: TreeMap[Loss, Int] = 
+  TreeMap.from(frequencies)(using Ord[Loss].toScala)
+
+// Min/max loss with explicit ordering
+val maxLoss = outcomes.keys.max(using Ord[Loss].toScala)
+val minLoss = outcomes.keys.min(using Ord[Loss].toScala)
+```
+
+**Why Explicit?**
+- Scala 3's implicit resolution can be ambiguous for type aliases
+- Explicit `using Ord[Loss].toScala` prevents compilation errors
+- Makes ordering dependency visible in code
+
+#### 3. Equal for Value Equality
+**Purpose:** Semantic equality for `Loss` and `TrialId` beyond reference equality.
+
+```scala
+import zio.prelude.Equal
+
+Equal[Loss].equal(1000L, 1000L)        // true
+Equal[TrialId].equal(42, 42)           // true
+```
+
+#### 4. Debug for Diagnostic Output
+**Purpose:** Human-readable representations for debugging and logging.
+
+```scala
+import zio.prelude.Debug
+
+Debug[Loss].debug(5000000L)            // "Loss(5000000)"
+Debug[TrialId].debug(42)               // "Trial#42"
+```
+
+### Property-Based Testing
+**File:** `IdentityPropertySpec.scala` - 16 tests covering algebraic laws
+
+**Strategy:** Generate semantically valid random inputs using ZIO Test generators:
+```scala
+// Generator ensures trial IDs are within valid range [0, nTrials)
+def genOutcomes(nTrials: Int): Gen[Any, Map[TrialId, Loss]] = for {
+  numTrials <- Gen.int(0, Math.min(50, nTrials))
+  trialIds  <- Gen.listOfN(numTrials)(Gen.int(0, nTrials - 1))
+  losses    <- Gen.listOfN(numTrials)(Gen.long(0L, 10000000L))
+} yield trialIds.zip(losses).toMap
+```
+
+**Coverage:**
+- 5 Loss Identity tests (associativity, identity laws, commutativity, self-combination)
+- 8 RiskResult Identity tests (monoid laws, outer join semantics, loss summation, empty handling)
+- 3 Edge case tests (empty results, overflow handling, zero preservation)
+- Each test runs 200 random examples = **3,200 total property checks**
+
+### Benefits of ZIO Prelude Integration
+
+1. **Mathematical Correctness:** Lawful type classes guarantee algebraic properties
+2. **Explicit Type Class Usage:** `Identity[T].combine(a, b)` is clearer than `.identity.combine(a, b)`
+3. **Property-Based Confidence:** 3,200 random checks vs. manual test cases
+4. **Semantic Validity:** Generators produce realistic domain instances (trial IDs < nTrials)
+5. **Explicit Ordering:** `Ord[Loss].toScala` prevents implicit resolution issues
+6. **Composability:** Type classes compose naturally for complex operations
+7. **Documentation:** Type class constraints document required properties
+8. **Refactoring Safety:** Property tests catch regressions across random inputs
+9. **Standardization:** Consistent patterns across codebase (no ad-hoc implementations)
+10. **Future-Proof:** Additional type classes (Associative, Commutative) easy to add
+
+### Implementation Files
+- `PreludeInstances.scala` - Type class instances (Identity, Ord, Equal, Debug)
+- `LossDistribution.scala` - Updated with explicit `Identity[T].combine` and `Ord[Loss].toScala`
+- `Simulator.scala` - Uses `Identity[RiskResult].combine` for parallel aggregation
+- `IdentityPropertySpec.scala` - 16 property tests with ZIO Test generators
+- `PreludeOrdUsageSpec.scala` - 14 tests for TreeMap ordering behavior
+
 ## Running the Application (Workarounds)
 
 ### Option 1: Run Tests (Always Works)
@@ -534,12 +643,14 @@ CMD ["java", "-jar", "app.jar"]
 ## Verification Checklist
 
 Before continuing to Step 8, verify:
-- ✅ All 209 tests pass: `sbt test`
+- ✅ All 278 tests pass: `sbt test` (167 common + 111 server)
 - ✅ Code compiles: `sbt compile`
 - ✅ No compilation warnings (except -Xlint deprecation)
 - ✅ Hierarchical and flat formats both validated
 - ✅ API_EXAMPLES.md contains complete usage guide
 - ✅ Build.sbt cleaned of unnecessary dependencies
+- ✅ ZIO Prelude type classes integrated and tested
+- ✅ Property-based tests validate algebraic laws (3,200 checks)
 
 ## Contact & Context
 - **Repository:** risquanter/register (main branch)
