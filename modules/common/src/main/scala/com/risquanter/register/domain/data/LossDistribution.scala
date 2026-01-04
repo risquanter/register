@@ -1,7 +1,8 @@
 package com.risquanter.register.domain.data
 
-import zio.prelude.{Associative, Identity, Equal, Debug}
+import zio.prelude.{Associative, Identity, Equal, Debug, Ord}
 import scala.collection.immutable.TreeMap
+import com.risquanter.register.domain.PreludeInstances.given
 
 /**
  * Risk type discriminator for loss distributions.
@@ -82,13 +83,13 @@ case class RiskResult(
 ) extends LossDistribution(name, outcomes, nTrials, LossDistributionType.Leaf) {
   
   override lazy val outcomeCount: TreeMap[Loss, Int] = 
-    TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))
+    TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))(using Ord[Loss].toScala)
   
   override lazy val maxLoss: Loss = 
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.max
+    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.max(using Ord[Loss].toScala)
   
   override lazy val minLoss: Loss = 
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min
+    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
   
   override def probOfExceedance(threshold: Loss): BigDecimal = {
     val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
@@ -154,13 +155,13 @@ case class RiskResultGroup(
 ) extends LossDistribution(name, outcomes, nTrials, LossDistributionType.Composite) {
   
   override lazy val outcomeCount: TreeMap[Loss, Int] = 
-    TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))
+    TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))(using Ord[Loss].toScala)
   
   override lazy val maxLoss: Loss = 
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.max
+    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.max(using Ord[Loss].toScala)
   
   override lazy val minLoss: Loss = 
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min
+    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
   
   override def probOfExceedance(threshold: Loss): BigDecimal = {
     val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
