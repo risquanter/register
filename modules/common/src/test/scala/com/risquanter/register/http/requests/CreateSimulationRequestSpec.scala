@@ -14,7 +14,7 @@ object CreateSimulationRequestSpec extends ZIOSpecDefault {
         root = None,
         risks = Some(Array(
           RiskDefinition(
-            riskName = "Risk1",
+            name = "Risk1",
             distributionType = "lognormal",
             probability = 0.5,
             minLoss = Some(1000L),
@@ -77,7 +77,7 @@ object CreateSimulationRequestSpec extends ZIOSpecDefault {
         root = None,
         risks = Some(Array(
           RiskDefinition(
-            riskName = "Risk1",
+            name = "Risk1",
             distributionType = "lognormal",
             probability = 0.25,
             minLoss = Some(500L),

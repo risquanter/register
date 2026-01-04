@@ -257,21 +257,21 @@ object SimulationResultSpec extends ZIOSpecDefault {
         val r1 = RiskResult("R1", Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
         val r2 = RiskResult("R1", Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
         
-        assertTrue(RiskResult.equal.equal(r1, r2))
+        assertTrue(Equal[RiskResult].equal(r1, r2))
       },
       
       test("different outcomes are not equal") {
         val r1 = RiskResult("R1", Map(1 -> 1000L), nTrials = 100)
         val r2 = RiskResult("R1", Map(1 -> 2000L), nTrials = 100)
         
-        assertTrue(!RiskResult.equal.equal(r1, r2))
+        assertTrue(!Equal[RiskResult].equal(r1, r2))
       },
       
       test("different trial counts are not equal") {
         val r1 = RiskResult("R1", Map(1 -> 1000L), nTrials = 100)
         val r2 = RiskResult("R1", Map(1 -> 1000L), nTrials = 200)
         
-        assertTrue(!RiskResult.equal.equal(r1, r2))
+        assertTrue(!Equal[RiskResult].equal(r1, r2))
       }
     ),
     
