@@ -83,7 +83,7 @@ object PreludeInstancesSpec extends ZIOSpecDefault {
       }
     ),
     
-    suite("Loss Equal")(
+    suite("Loss Equal (via Ord)")(
       test("reflexivity: a == a") {
         val a: Loss = 1000L
         assertTrue(Equal[Loss].equal(a, a))

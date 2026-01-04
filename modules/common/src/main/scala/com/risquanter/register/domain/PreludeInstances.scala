@@ -24,11 +24,9 @@ object PreludeInstances {
     def combine(l: => Loss, r: => Loss): Loss = l + r
   }
   
-  /** Total ordering for Loss (natural Long ordering) */
+  /** Total ordering for Loss (natural Long ordering)
+    * Note: Ord extends Equal, so this also provides equality */
   given lossOrd: Ord[Loss] = Ord.default[Long]
-  
-  /** Value equality for Loss */
-  given lossEqual: Equal[Loss] = Equal.default[Long]
   
   /** Human-readable representation */
   given lossDebug: Debug[Loss] = Debug.make(loss => s"Loss($$${loss})")
@@ -37,11 +35,9 @@ object PreludeInstances {
   // TrialId Type Class Instances
   // ══════════════════════════════════════════════════════════════════
   
-  /** Total ordering for TrialId (natural Int ordering) */
+  /** Total ordering for TrialId (natural Int ordering)
+    * Note: Ord extends Equal, so this also provides equality */
   given trialIdOrd: Ord[TrialId] = Ord.default[Int]
-  
-  /** Value equality for TrialId */
-  given trialIdEqual: Equal[TrialId] = Equal.default[Int]
   
   /** Human-readable representation */
   given trialIdDebug: Debug[TrialId] = Debug.make(id => s"Trial#$id")
