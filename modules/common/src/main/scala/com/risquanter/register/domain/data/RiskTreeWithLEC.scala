@@ -14,18 +14,24 @@ import zio.json.{JsonCodec, DeriveJsonCodec}
   * - quantiles: Key percentiles from aggregate loss distribution
   * - vegaLiteSpec: Vega-Lite JSON embedding all visible curves
   * 
+  * **Provenance (optional):**
+  * - provenance: Complete reproducibility metadata for all nodes
+  * - Enabled via ?includeProvenance=true query parameter
+  * 
   * @param riskTree Persisted risk tree metadata
   * @param quantiles Aggregated key percentiles from the loss distribution
   * @param vegaLiteSpec Vega-Lite JSON embedding all visible curves
   * @param lecCurveData Hierarchical LEC tree with depth-controlled children
   * @param depth Number of tree levels included in lecCurveData
+  * @param provenance Optional provenance metadata for reproducibility
   */
 final case class RiskTreeWithLEC(
   riskTree: RiskTree,
   quantiles: Map[String, Double],
   vegaLiteSpec: Option[String],
   lecCurveData: Option[LECCurveData] = None,
-  depth: Int = 0
+  depth: Int = 0,
+  provenance: Option[TreeProvenance] = None
 )
 
 object RiskTreeWithLEC {

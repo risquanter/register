@@ -1,13 +1,14 @@
 package com.risquanter.register.services.helper
 
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
-import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult}
+import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, NodeProvenance, TreeProvenance, ExpertDistributionParams, LognormalDistributionParams}
 import com.risquanter.register.domain.errors.ValidationFailed
 import zio.prelude.Identity
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
 import scala.collection.parallel.CollectionConverters.*
 import zio.{ZIO, Task}
+import java.time.Instant
 
 /**
  * Monte Carlo simulation engine with sparse storage optimization.
@@ -119,23 +120,55 @@ object Simulator {
    * @param node Root node of tree (or subtree)
    * @param nTrials Number of Monte Carlo trials
    * @param parallelism Max concurrent child simulations
-   * @return RiskTreeResult preserving hierarchy with computed distributions
+   * @param includeProvenance Whether to capture provenance metadata
+   * @return Tuple of (RiskTreeResult, Option[TreeProvenance])
    */
   def simulateTree(
     node: RiskNode,
     nTrials: Int,
-    parallelism: Int = 8
-  ): Task[RiskTreeResult] = {
+    parallelism: Int = 8,
+    includeProvenance: Boolean = false
+  ): Task[(RiskTreeResult, Option[TreeProvenance])] = {
+    simulateTreeInternal(node, nTrials, parallelism, includeProvenance, Map.empty).map {
+      case (result, provenances) =>
+        val treeProvenance = if (includeProvenance) {
+          Some(TreeProvenance(
+            treeId = 0L, // Will be set by service layer with actual tree ID
+            globalSeeds = (0L, 0L), // Currently hardcoded, future: user-configurable
+            nTrials = nTrials,
+            parallelism = parallelism,
+            nodeProvenances = provenances
+          ))
+        } else None
+        (result, treeProvenance)
+    }
+  }
+  
+  /**
+   * Internal recursive tree simulation that accumulates provenances.
+   */
+  private def simulateTreeInternal(
+    node: RiskNode,
+    nTrials: Int,
+    parallelism: Int,
+    includeProvenance: Boolean,
+    provenances: Map[String, NodeProvenance]
+  ): Task[(RiskTreeResult, Map[String, NodeProvenance])] = {
     node match {
       case leaf: RiskLeaf =>
         // Terminal node: create sampler and simulate
         for {
-          sampler <- createSamplerFromLeaf(leaf)
+          samplerAndProv <- createSamplerFromLeaf(leaf, includeProvenance)
+          (sampler, maybeProv) = samplerAndProv
           result <- ZIO.attempt {
             val trials = performTrials(sampler, nTrials)
             RiskTreeResult.Leaf(leaf.id, RiskResult(leaf.id, trials, nTrials))
           }
-        } yield result
+          updatedProvenances = maybeProv match {
+            case Some(prov) => provenances + (leaf.id -> prov)
+            case None => provenances
+          }
+        } yield (result, updatedProvenances)
       
       case portfolio: RiskPortfolio =>
         // Branch node: recurse on children, then aggregate
@@ -146,9 +179,13 @@ object Simulator {
           )
           
           // Recursively simulate all children in parallel
-          childResults <- ZIO.collectAllPar(
-            portfolio.children.map(child => simulateTree(child, nTrials, parallelism))
+          childResultsWithProv <- ZIO.collectAllPar(
+            portfolio.children.map(child => simulateTreeInternal(child, nTrials, parallelism, includeProvenance, provenances))
           ).withParallelism(parallelism)
+          
+          // Separate results and provenances
+          childResults = childResultsWithProv.map(_._1)
+          mergedProvenances = childResultsWithProv.foldLeft(provenances)((acc, tuple) => acc ++ tuple._2)
           
           // Aggregate children using Identity.combine
           aggregated <- ZIO.attempt {
@@ -162,15 +199,21 @@ object Simulator {
               children = childResults.toVector
             )
           }
-        } yield aggregated
+        } yield (aggregated, mergedProvenances)
     }
   }
   
   /**
    * Create RiskSampler from RiskLeaf definition.
    * Validates parameters and builds Metalog distribution.
+   * Optionally captures provenance metadata.
+   * 
+   * @return Tuple of (RiskSampler, Option[NodeProvenance])
    */
-  private def createSamplerFromLeaf(leaf: RiskLeaf): Task[RiskSampler] = {
+  private def createSamplerFromLeaf(
+    leaf: RiskLeaf,
+    includeProvenance: Boolean = false
+  ): Task[(RiskSampler, Option[NodeProvenance])] = {
     for {
       // Validate probability
       probability <- ZIO.fromEither(
@@ -178,25 +221,43 @@ object Simulator {
       ).mapError(errors => ValidationFailed(errors))
       
       // Create distribution based on mode
-      distribution <- createDistribution(leaf)
+      distAndParams <- createDistributionWithParams(leaf)
+      (distribution, distParams) = distAndParams
       
       // Build sampler (using entityId = hash of leaf.id for determinism)
+      entityId = leaf.id.hashCode.toLong
       sampler = RiskSampler.fromDistribution(
-        entityId = leaf.id.hashCode.toLong,
+        entityId = entityId,
         riskId = leaf.id,
         occurrenceProb = probability,
         lossDistribution = distribution,
         seed3 = 0L,
         seed4 = 0L
       )
-    } yield sampler
+      
+      // Capture provenance if requested
+      provenance = if (includeProvenance) {
+        Some(NodeProvenance(
+          riskId = leaf.id,
+          entityId = entityId,
+          occurrenceVarId = entityId.hashCode + 1000L,
+          lossVarId = entityId.hashCode + 2000L,
+          globalSeed3 = 0L,
+          globalSeed4 = 0L,
+          distributionType = leaf.distributionType,
+          distributionParams = distParams,
+          timestamp = Instant.now(),
+          simulationUtilVersion = "0.8.0" // TODO: Get from build info
+        ))
+      } else None
+    } yield (sampler, provenance)
   }
   
   /**
    * Create MetalogDistribution from RiskLeaf parameters.
-   * Handles both expert opinion and lognormal modes.
+   * Returns both distribution and parameters for provenance.
    */
-  private def createDistribution(leaf: RiskLeaf): Task[Distribution] = {
+  private def createDistributionWithParams(leaf: RiskLeaf): Task[(Distribution, com.risquanter.register.domain.data.DistributionParams)] = {
     import io.github.iltotore.iron.*
     import com.risquanter.register.domain.data.iron.Probability
     import com.risquanter.register.simulation.PositiveInt
@@ -222,7 +283,13 @@ object Simulator {
                 terms = terms,
                 lower = Some(0.0) // Loss cannot be negative
               ) match {
-                case Right(m) => ZIO.succeed(m)
+                case Right(m) =>
+                  val params = ExpertDistributionParams(
+                    percentiles = ps,
+                    quantiles = qs,
+                    terms = ps.length
+                  )
+                  ZIO.succeed((m, params))
                 case Left(e) => ZIO.fail(ValidationFailed(List(s"Failed to fit Metalog for '${leaf.id}': ${e.message}")))
               }
             }
@@ -238,7 +305,13 @@ object Simulator {
         (leaf.minLoss, leaf.maxLoss) match {
           case (Some(min), Some(max)) if min > 0 && min < max =>
             LognormalHelper.fromLognormal90CI(min, max) match {
-              case Right(dist) => ZIO.succeed(dist)
+              case Right(dist) =>
+                val params = LognormalDistributionParams(
+                  minLoss = min,
+                  maxLoss = max,
+                  confidenceInterval = 0.90
+                )
+                ZIO.succeed((dist, params))
               case Left(err) => ZIO.fail(ValidationFailed(List(s"Failed to create lognormal for '${leaf.id}': ${err.message}")))
             }
           

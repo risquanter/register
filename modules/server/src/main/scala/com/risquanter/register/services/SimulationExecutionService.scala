@@ -1,7 +1,7 @@
 package com.risquanter.register.services
 
 import zio._
-import com.risquanter.register.domain.data.{RiskNode, RiskTreeResult}
+import com.risquanter.register.domain.data.{RiskNode, RiskTreeResult, TreeProvenance}
 import com.risquanter.register.services.helper.Simulator
 
 /**
@@ -16,14 +16,16 @@ trait SimulationExecutionService {
    * @param root Root node of the risk tree
    * @param nTrials Number of Monte Carlo trials
    * @param parallelism Degree of parallelism (default: available processors)
-   * @return RiskTreeResult preserving the input hierarchy
+   * @param includeProvenance Whether to capture provenance metadata
+   * @return Tuple of (RiskTreeResult, Option[TreeProvenance])
    */
   def runTreeSimulation(
     simulationId: String,
     root: RiskNode,
     nTrials: Int,
-    parallelism: Int = java.lang.Runtime.getRuntime.availableProcessors()
-  ): Task[RiskTreeResult]
+    parallelism: Int = java.lang.Runtime.getRuntime.availableProcessors(),
+    includeProvenance: Boolean = false
+  ): Task[(RiskTreeResult, Option[TreeProvenance])]
 }
 
 /**
@@ -35,10 +37,11 @@ final class SimulationExecutionServiceLive extends SimulationExecutionService {
     simulationId: String,
     root: RiskNode,
     nTrials: Int,
-    parallelism: Int
-  ): Task[RiskTreeResult] = {
+    parallelism: Int,
+    includeProvenance: Boolean
+  ): Task[(RiskTreeResult, Option[TreeProvenance])] = {
     // Delegate to Simulator.simulateTree for actual Monte Carlo execution
-    Simulator.simulateTree(root, nTrials, parallelism)
+    Simulator.simulateTree(root, nTrials, parallelism, includeProvenance)
       .mapError { error =>
         new RuntimeException(
           s"Tree simulation failed for simulationId=$simulationId: ${error.getMessage}",

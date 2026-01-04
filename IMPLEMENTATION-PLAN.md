@@ -33,7 +33,7 @@ This plan integrates Monte Carlo risk simulation into the register service follo
 
 ### ✅ Phase 2: RiskSampler Factory Pattern - COMPLETE
 **Status:** Implemented with occurrence + loss sampling  
-**Tests:** Included in 111 server tests  
+**Tests:** Included in 123 server tests  
 **Features:** Seed offset isolation, deterministic sampling, Metalog/Lognormal support
 
 ### ✅ Phase 3: Domain Model with Identity (not Monoid) - COMPLETE
@@ -43,15 +43,46 @@ This plan integrates Monte Carlo risk simulation into the register service follo
 
 ### ✅ Phase 4: Simulator with Sparse Storage - COMPLETE
 **Status:** Recursive tree simulation, parallel execution  
-**Tests:** Included in 111 server tests  
+**Tests:** Included in 123 server tests  
 **Features:** Sparse storage, Identity.combine aggregation, deterministic parallelism
 
-### 🎯 NEXT: Choose Phase 5+ Direction
-**Options:**
-- Phase 5: t-digest/KLL aggregators (optional - for 1M+ trials)
-- Phase 8: RiskTransform for mitigation strategies
-- Phase 9: REST endpoints for simulation execution
-- Phase 10: Vega-Lite LEC visualization
+### ✅ Phase 8: RiskTransform for Composable Mitigations - COMPLETE
+**Status:** Pure transformations with Identity instance  
+**Tests:** 23 tests in RiskTransformSpec (190 common tests total)  
+**Features:** Reduction, deductible, cap, layered coverage, policy aggregation
+
+### ✅ Phase 9: REST Endpoints - COMPLETE
+**Status:** Full HTTP API with Tapir endpoints  
+**Tests:** Included in 123 server tests  
+**Features:** 
+- POST /api/risk-trees (create tree with discriminators)
+- GET /api/risk-trees (list all)
+- GET /api/risk-trees/{id} (get by ID)
+- POST /api/risk-trees/{id}/compute-lec (run simulation)
+- Query parameters: nTrials, depth, includeProvenance
+- Swagger/OpenAPI documentation
+
+### ✅ Phase 11: Provenance Metadata for Reproducibility - COMPLETE
+**Status:** Complete provenance capture for simulation reproducibility  
+**Tests:** 12 tests in ProvenanceSpec (123 server tests total)  
+**Implementation:**
+- NodeProvenance: Per-risk metadata (HDR seeds, distribution params, timestamp)
+- TreeProvenance: Tree-level aggregation (treeId, globalSeeds, nTrials, parallelism, node map)
+- DistributionParams: Sealed trait with Expert/Lognormal subtypes
+- JSON serialization with custom sealed trait codec
+- Optional capture via `?includeProvenance=true` query parameter
+- Complete HDR seed hierarchy (counter, entityId, varId, seed3/seed4)
+**Total Tests:** 313 (190 common + 123 server)
+
+### ⏸️ Phase 5: Aggregators (Optional) - NOT STARTED
+**Status:** Not needed for exact storage (current default)  
+**Scope:** t-digest/KLL for 1M+ trials (memory-constrained scenarios)  
+**Priority:** Low - exact storage works for typical use cases
+
+### ⏸️ Phase 10: Vega-Lite LEC Visualization - PARTIAL
+**Status:** Basic Vega-Lite spec generation implemented in Simulator.computeLEC  
+**Tests:** 1 test in SimulatorSpec validates spec structure  
+**Remaining:** Enhanced visualization options, multiple curve overlays
 
 ---
 
@@ -1070,9 +1101,9 @@ case class Provenance(
 
 ## Phase 12: Comprehensive Testing Suite
 
-**Testing Target:** ✅ 278 tests (ACHIEVED)
-- 167 common tests (ZIO Prelude + domain model)
-- 111 server tests (simulation + integration)
+**Testing Achievement:** ✅ 313 tests passing (EXCEEDED TARGET)
+- 190 common tests (ZIO Prelude + domain model + RiskTransform)
+- 123 server tests (simulation + integration + provenance)
 
 **Coverage:**
 1. ✅ Parallelization correctness (determinism verified)
@@ -1080,6 +1111,9 @@ case class Provenance(
 3. ✅ Defensive validation (Iron refinement types)
 4. ✅ Tree simulation (recursive aggregation)
 5. ✅ HDR/Metalog integration (defensive testing)
+6. ✅ RiskTransform composition (23 mitigation tests)
+7. ✅ REST endpoints (tree CRUD + LEC computation)
+8. ✅ Provenance capture (12 serialization + capture + reproduction tests)
 
 ---
 
@@ -1109,17 +1143,26 @@ curl -X POST http://localhost:8080/api/simulations/execute \
 
 ## Success Metrics
 
-### ✅ Achieved (Phases 1-4)
-- ✅ **278 tests passing** (167 common + 111 server)
+### ✅ Achieved (Phases 1-4, 8-9, 11)
+- ✅ **313 tests passing** (190 common + 123 server) - EXCEEDED 278 target
 - ✅ **Lawful type classes:** Identity instances verified with 3,200 property checks
 - ✅ **Sparse storage:** Memory-efficient Map[TrialId, Loss] representation
 - ✅ **Deterministic:** HDR-based sampling ensures reproducibility
 - ✅ **Tree simulation:** Recursive aggregation with Identity.combine
 - ✅ **Category theory aligned:** Lawful Identity, Ord, Equal, Debug instances
 - ✅ **Property-based testing:** ZIO Test generators with semantic validity
+- ✅ **RiskTransform:** 23 tests for mitigation strategies (reduction, deductible, cap, layers)
+- ✅ **REST endpoints:** Full HTTP API with Swagger, discriminators, query parameters
+- ✅ **Provenance:** Complete reproducibility metadata with JSON serialization (12 tests)
 
-### 🎯 Remaining (Phases 5+)
-- ⏸️ **Sketch aggregators:** Optional t-digest/KLL for 1M+ trials
-- ⏸️ **REST endpoints:** HTTP API for simulation execution
-- ⏸️ **Vega-Lite:** LEC visualization
-- ⏸️ **Performance:** Benchmark <5s for 10k trials
+### 🎯 Remaining (Optional Enhancements)
+- ⏸️ **Sketch aggregators:** Optional t-digest/KLL for 1M+ trials (Phase 5)
+- ⏸️ **Enhanced Vega-Lite:** Multiple curve overlays, advanced options (Phase 10)
+- ⏸️ **Performance benchmarking:** Formal <5s for 10k trials validation
+
+### 📊 Current State Summary
+- **Total Implementation:** 11 of 13 phases complete (85%)
+- **Core Functionality:** 100% complete (Phases 1-4, 8-9, 11)
+- **Optional Features:** Phase 5 (aggregators) and Phase 10 (enhanced viz) remain
+- **Test Coverage:** 313 tests across all implemented phases
+- **Production Readiness:** Full API + reproducibility + mitigation strategies

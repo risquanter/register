@@ -38,7 +38,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
         // Run simulation
         val program = Simulator.simulateTree(portfolio, nTrials = 1000, parallelism = 2)
         
-        program.map { result =>
+        program.map { case (result, _) =>
           result match {
             case RiskTreeResult.Branch(id, aggregated, children) =>
               // Verify structure
@@ -66,15 +66,15 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
           maxLoss = Some(50000L)
         )
         
-        val program = Simulator.simulateTree(singleRisk, nTrials = 1000, parallelism = 2)
+        val program = Simulator.simulateTree(singleRisk, nTrials = 500, parallelism = 1)
         
-        program.map { result =>
+        program.map { case (result, _) =>
           result match {
             case RiskTreeResult.Leaf(id, riskResult) =>
               assertTrue(
                 id == "cyber",
                 riskResult.name == "cyber",
-                riskResult.nTrials == 1000
+                riskResult.nTrials == 500
               )
             
             case _ =>
@@ -110,17 +110,17 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
           children = Array(risk1, risk2)
         )
         
-        val program = Simulator.simulateTree(portfolio, nTrials = 100, parallelism = 2)
+        val program = Simulator.simulateTree(portfolio, nTrials = 300, parallelism = 2)
         
-        program.map { result =>
+        program.map { case (result, _) =>
           result match {
             case RiskTreeResult.Branch(_, aggregated, children) =>
               // Verify both children were simulated and aggregated
               assertTrue(
                 children.length == 2,
-                children(0).result.nTrials == 100,
-                children(1).result.nTrials == 100,
-                aggregated.nTrials == 100
+                children(0).result.nTrials == 300,
+                children(1).result.nTrials == 300,
+                aggregated.nTrials == 300
               )
             
             case _ =>

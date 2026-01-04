@@ -57,6 +57,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .in(query[Option[Int]]("nTrials").description("Override number of trials"))
       .in(query[Int]("parallelism").default(1).description("Parallelism level"))
       .in(query[Int]("depth").default(0).description("Depth of hierarchy to include (0=root only, max 5)"))
+      .in(query[Boolean]("includeProvenance").default(false).description("Include provenance metadata for reproducibility"))
       .get
       .out(jsonBody[SimulationResponse])
 }

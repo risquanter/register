@@ -70,7 +70,8 @@ class RiskTreeServiceLive private (
     id: Long,
     nTrialsOverride: Option[Int],
     parallelism: Int,
-    depth: Int = 0
+    depth: Int = 0,
+    includeProvenance: Boolean = false
   ): Task[RiskTreeWithLEC] = {
     // Validate parameters using Iron
     val validated = for {
@@ -98,16 +99,21 @@ class RiskTreeServiceLive private (
           // Determine trials (use override or config)
           nTrials = validTrials.map(t => t: Int).getOrElse(tree.nTrials.toInt)
           
-          // Execute simulation
-          result <- executionService.runTreeSimulation(
+          // Execute simulation with optional provenance
+          resultAndProv <- executionService.runTreeSimulation(
             simulationId = s"tree-${tree.id}",
             root = tree.root,
             nTrials = nTrials,
-            parallelism = validParallelism: Int
+            parallelism = validParallelism: Int,
+            includeProvenance = includeProvenance
           )
+          (result, provenance) = resultAndProv
+          
+          // Set tree ID in provenance if present
+          finalProvenance = provenance.map(_.copy(treeId = tree.id))
           
           // Convert result to LEC data with depth
-          lec <- convertResultToLEC(tree, result, clampedDepth: Int)
+          lec <- convertResultToLEC(tree, result, clampedDepth: Int, finalProvenance)
         } yield lec
     }
   }
@@ -300,7 +306,8 @@ class RiskTreeServiceLive private (
   private def convertResultToLEC(
     tree: RiskTree,
     result: com.risquanter.register.domain.data.RiskTreeResult,
-    depth: Int
+    depth: Int,
+    provenance: Option[com.risquanter.register.domain.data.TreeProvenance] = None
   ): Task[RiskTreeWithLEC] = {
     import com.risquanter.register.simulation.{LECGenerator, VegaLiteBuilder}
     import com.risquanter.register.domain.data.{LECCurveData, LECPoint}
@@ -346,7 +353,8 @@ class RiskTreeServiceLive private (
       quantiles = rootQuantiles,
       vegaLiteSpec = Some(vegaLiteSpec),
       lecCurveData = Some(lecNode),
-      depth = depth
+      depth = depth,
+      provenance = provenance
     ))
   }
 }

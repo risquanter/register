@@ -61,12 +61,14 @@ trait RiskTreeService {
     * @param nTrialsOverride Optional override for number of trials (uses stored default if None)
     * @param parallelism Degree of parallelism (default: available processors)
     * @param depth Hierarchy depth to include (0=root only, 1=+children, max 5)
+    * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @return Risk tree with computed LEC data in hierarchical format
     */
   def computeLEC(
     id: Long,
     nTrialsOverride: Option[Int] = None,
     parallelism: Int = java.lang.Runtime.getRuntime.availableProcessors(),
-    depth: Int = 0
+    depth: Int = 0,
+    includeProvenance: Boolean = false
   ): Task[RiskTreeWithLEC]
 }

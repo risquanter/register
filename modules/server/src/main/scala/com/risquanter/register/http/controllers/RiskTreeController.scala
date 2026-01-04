@@ -30,10 +30,10 @@ class RiskTreeController private (riskTreeService: RiskTreeService)
   }
 
   val computeLEC: ServerEndpoint[Any, Task] = computeLECEndpoint.serverLogic {
-    case (idStr, nTrialsOverride, parallelism, depth) =>
+    case (idStr, nTrialsOverride, parallelism, depth, includeProvenance) =>
       val program = for {
         id <- ZIO.attempt(idStr.toLong)
-        result <- riskTreeService.computeLEC(id, nTrialsOverride, parallelism, depth)
+        result <- riskTreeService.computeLEC(id, nTrialsOverride, parallelism, depth, includeProvenance)
       } yield SimulationResponse.withLEC(
         result.riskTree,
         result.quantiles,
