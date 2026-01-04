@@ -338,14 +338,13 @@ class RiskTreeServiceLive private (
     // Generate Vega-Lite spec for all visible nodes
     val vegaLiteSpec = VegaLiteBuilder.generateSpec(lecNode)
     
-    // Legacy flat quantiles (from root)
+    // Aggregated quantiles from root node
     val rootQuantiles = lecNode.quantiles
     
     ZIO.succeed(RiskTreeWithLEC(
       riskTree = tree,
       quantiles = rootQuantiles,
       vegaLiteSpec = Some(vegaLiteSpec),
-      individualRisks = Array.empty[com.risquanter.register.http.responses.RiskLEC],
       lecNode = Some(lecNode),
       depth = depth
     ))

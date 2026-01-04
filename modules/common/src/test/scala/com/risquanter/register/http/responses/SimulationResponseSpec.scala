@@ -15,8 +15,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         id = 1L,
         name = "Test Simulation",
         quantiles = Map("p50" -> 10.5, "p90" -> 25.0, "p95" -> 30.0, "p99" -> 40.0),
-        exceedanceCurve = Some("""{"$schema":"https://vega.github.io/schema/vega-lite/v5.json"}"""),
-        individualRisks = Array.empty
+        exceedanceCurve = Some("""{"$schema":"https://vega.github.io/schema/vega-lite/v5.json"}""")
       )
       
       val json = response.toJson
@@ -53,8 +52,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         response.id == 1L,
         response.name == "Risk Assessment",
         response.quantiles.isEmpty, // No LEC data yet
-        response.exceedanceCurve.isEmpty,
-        response.individualRisks.isEmpty
+        response.exceedanceCurve.isEmpty
       )
     },
     
@@ -87,8 +85,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         id = 4L,
         name = "JSON Test",
         quantiles = Map("p50" -> 5.0, "p90" -> 15.0),
-        exceedanceCurve = None,
-        individualRisks = Array.empty
+        exceedanceCurve = None
       )
       
       val json = response.toJson

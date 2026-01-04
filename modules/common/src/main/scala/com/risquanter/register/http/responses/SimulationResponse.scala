@@ -5,21 +5,19 @@ import com.risquanter.register.domain.data.RiskTree
 
 /** Response DTO for simulation data with Loss Exceedance Curve
   * 
-  * **Single Risk**: `individualRisks` is empty, only `quantiles` and `exceedanceCurve` are populated
-  * **Portfolio**: `individualRisks` contains per-risk LEC, `quantiles`/`exceedanceCurve` show aggregate
+  * Contains aggregated quantiles and optional Vega-Lite visualization.
+  * Use hierarchical lecNode field in RiskTreeWithLEC for detailed per-risk data.
   * 
   * @param id Unique simulation identifier
   * @param name Simulation name
   * @param quantiles Aggregated key percentiles (p50, p90, p95, p99) in millions
   * @param exceedanceCurve Optional Vega-Lite JSON for aggregated LEC visualization
-  * @param individualRisks Per-risk LEC data (empty for single-risk simulations)
   */
 final case class SimulationResponse(
   id: Long,
   name: String,
   quantiles: Map[String, Double],
-  exceedanceCurve: Option[String], // Vega-Lite JSON as string
-  individualRisks: Array[RiskLEC] = Array.empty
+  exceedanceCurve: Option[String] // Vega-Lite JSON as string
 )
 
 /** Loss Exceedance Curve data for a single risk
@@ -44,8 +42,7 @@ object SimulationResponse {
     id = tree.id,
     name = tree.name.value,
     quantiles = Map.empty,
-    exceedanceCurve = None,
-    individualRisks = Array.empty
+    exceedanceCurve = None
   )
   
   /** Create response with LEC data from simulation execution
@@ -54,19 +51,16 @@ object SimulationResponse {
     * @param tree Persisted risk tree metadata
     * @param quantiles Aggregated quantiles
     * @param vegaLiteJson Aggregated Vega-Lite spec
-    * @param individualRisks Per-risk LEC data (empty for single-risk)
     */
   def withLEC(
     tree: RiskTree,
     quantiles: Map[String, Double],
-    vegaLiteJson: Option[String],
-    individualRisks: Array[RiskLEC] = Array.empty
+    vegaLiteJson: Option[String]
   ): SimulationResponse = SimulationResponse(
     id = tree.id,
     name = tree.name.value,
     quantiles = quantiles,
-    exceedanceCurve = vegaLiteJson,
-    individualRisks = individualRisks
+    exceedanceCurve = vegaLiteJson
   )
 }
 

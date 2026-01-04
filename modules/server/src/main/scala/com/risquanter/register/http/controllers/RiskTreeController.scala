@@ -37,8 +37,7 @@ class RiskTreeController private (riskTreeService: RiskTreeService)
       } yield SimulationResponse.withLEC(
         result.riskTree,
         result.quantiles,
-        result.vegaLiteSpec,
-        result.individualRisks
+        result.vegaLiteSpec
       )
 
       program.either
