@@ -9,6 +9,15 @@ import scala.collection.immutable.TreeMap
   * - Loss values are in millions: 1L = $1M
   * - Quantiles represent loss thresholds at specific percentiles
   * - Exceedance curve shows P(Loss >= x) for various loss levels
+  * 
+  * BCG Implementation Notes:
+  * - Uses evenly-spaced ticks over [minLoss, maxLoss] range
+  * - Default nEntries = 100 provides smooth curves
+  * 
+  * TODO: Future optimization - implement adaptive sampling (Option C):
+  * - Log-scale for fat-tailed distributions
+  * - Percentile-based for critical thresholds
+  * - Hybrid approach with guaranteed key quantiles
   */
 object LECGenerator {
   
@@ -116,5 +125,52 @@ object LECGenerator {
     */
   def generateLEC(result: RiskResult, maxVegaPoints: Int = 100): (Map[String, Double], Option[String]) = {
     (calculateQuantiles(result), generateVegaLiteSpec(result, maxVegaPoints))
+  }
+  
+  /** Generate evenly-spaced loss ticks for LEC curve sampling
+    * 
+    * BCG approach: Linear spacing over [minLoss, maxLoss * 1.1]
+    * Uses actual minimum from data (not hardcoded 0)
+    * 
+    * @param minLoss Minimum loss observed in simulation results
+    * @param maxLoss Maximum loss observed in simulation results
+    * @param nEntries Number of sample points (default 100)
+    * @return Vector of loss values to sample
+    */
+  def getTicks(minLoss: Long, maxLoss: Long, nEntries: Int = 100): Vector[Long] = {
+    require(nEntries > 1, "nEntries must be > 1")
+    require(minLoss >= 0, "minLoss must be >= 0")
+    require(maxLoss >= minLoss, "maxLoss must be >= minLoss")
+    
+    if (minLoss == maxLoss) return Vector(minLoss)
+    
+    // Add 10% buffer to max for better visualization
+    val maxTick = if (maxLoss < Long.MaxValue / 11) (maxLoss * 11) / 10 else maxLoss
+    val minTick = minLoss.max(1L)  // Use actual min, but avoid 0 for log-scale compatibility
+    
+    val step = (maxTick - minTick) / (nEntries - 1)
+    if (step == 0) return Vector(minTick)
+    
+    val range = minTick to maxTick by step
+    range.toVector
+  }
+  
+  /** Generate LEC curve data points (loss → exceedance probability)
+    * 
+    * @param result Risk simulation result
+    * @param nEntries Number of sample points
+    * @return Vector of (loss, exceedanceProbability) tuples
+    */
+  def generateCurvePoints(result: RiskResult, nEntries: Int = 100): Vector[(Long, Double)] = {
+    if (result.outcomeCount.isEmpty) return Vector.empty
+    
+    val minLoss = result.minLoss
+    val maxLoss = result.maxLoss
+    val ticks = getTicks(minLoss, maxLoss, nEntries)
+    
+    ticks.map { loss =>
+      val exceedanceProb = result.probOfExceedance(loss).toDouble
+      (loss, exceedanceProb)
+    }
   }
 }

@@ -57,6 +57,30 @@ object ValidationUtil {
       .map(err => List(s"The parameter probRiskOccurance '$value' failed constraint check: $err"))
   }
 
+  // Refinement for positive integers (must be > 0)
+  def refinePositiveInt(value: Int, param: String): Either[List[String], PositiveInt] = {
+    value
+      .refineEither[Greater[0]]
+      .left
+      .map(err => List(s"The parameter '$param' with value '$value' must be positive (> 0): $err"))
+  }
+
+  // Refinement for non-negative integers (must be >= 0)
+  def refineNonNegativeInt(value: Int, param: String): Either[List[String], NonNegativeInt] = {
+    value
+      .refineEither[GreaterEqual[0]]
+      .left
+      .map(err => List(s"The parameter '$param' with value '$value' must be non-negative (>= 0): $err"))
+  }
+
+  // Refinement for distribution type (must be "expert" or "lognormal")
+  def refineDistributionType(value: String): Either[List[String], DistributionType] = {
+    value
+      .refineEither[Match["^(expert|lognormal)$"]]
+      .left
+      .map(err => List(s"Distribution type '$value' must be either 'expert' or 'lognormal': $err"))
+  }
+
   // Refinement for optional short text (max 20 chars)
   def refineShortOptText(
       value: Option[String],

@@ -200,6 +200,140 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = service(_.getById(999L))
 
         program.assert(_ == None)
+      },
+
+      test("computeLEC with depth=0 returns only root") {
+        val hierarchicalRequest = CreateSimulationRequest(
+          name = "Depth Test Tree",
+          nTrials = 1000,
+          root = Some(RiskPortfolio(
+            id = "root",
+            name = "Root Portfolio",
+            children = Array(
+              RiskLeaf(
+                id = "child1",
+                name = "Child 1",
+                distributionType = "lognormal",
+                probability = 0.5,
+                minLoss = Some(1000L),
+                maxLoss = Some(10000L)
+              ),
+              RiskLeaf(
+                id = "child2",
+                name = "Child 2",
+                distributionType = "lognormal",
+                probability = 0.6,
+                minLoss = Some(2000L),
+                maxLoss = Some(15000L)
+              )
+            )
+          ))
+        )
+
+        val program = for {
+          tree <- service(_.create(hierarchicalRequest))
+          result <- service(_.computeLEC(tree.id, None, 1, depth = 0))
+        } yield result
+
+        program.assert { result =>
+          result.vegaLiteSpec match {
+            case Some(spec) =>
+              spec.contains("\"risk\": \"root\"") &&
+                !spec.contains("\"risk\": \"child1\"") &&
+                !spec.contains("\"risk\": \"child2\"")
+            case None => false
+          }
+        }
+      },
+
+      test("computeLEC with depth=1 includes children") {
+        val hierarchicalRequest = CreateSimulationRequest(
+          name = "Depth 1 Test Tree",
+          nTrials = 1000,
+          root = Some(RiskPortfolio(
+            id = "root",
+            name = "Root Portfolio",
+            children = Array(
+              RiskLeaf(
+                id = "child1",
+                name = "Child 1",
+                distributionType = "lognormal",
+                probability = 0.5,
+                minLoss = Some(1000L),
+                maxLoss = Some(10000L)
+              ),
+              RiskLeaf(
+                id = "child2",
+                name = "Child 2",
+                distributionType = "lognormal",
+                probability = 0.6,
+                minLoss = Some(2000L),
+                maxLoss = Some(15000L)
+              )
+            )
+          ))
+        )
+
+        val program = for {
+          tree <- service(_.create(hierarchicalRequest))
+          result <- service(_.computeLEC(tree.id, None, 1, depth = 1))
+        } yield result
+
+        program.assert { result =>
+          result.vegaLiteSpec match {
+            case Some(spec) =>
+              spec.contains("\"risk\": \"root\"") &&
+                spec.contains("\"risk\": \"child1\"") &&
+                spec.contains("\"risk\": \"child2\"")
+            case None => false
+          }
+        }
+      },
+
+      test("computeLEC clamps depth to maximum of 5") {
+        val program = for {
+          tree <- service(_.create(validRequest))
+          result <- service(_.computeLEC(tree.id, None, 1, depth = 99))
+        } yield result
+
+        program.assert { result =>
+          // Should not fail, depth should be clamped to 5
+          result.vegaLiteSpec.nonEmpty &&
+            result.quantiles.nonEmpty
+        }
+      },
+
+      test("computeLEC rejects negative depth") {
+        val program = for {
+          tree <- service(_.create(validRequest))
+          result <- service(_.computeLEC(tree.id, None, 1, depth = -1).flip)
+        } yield result
+
+        program.assert {
+          case ValidationFailed(errors) => errors.exists(_.toLowerCase.contains("depth"))
+          case _                        => false
+        }
+      },
+
+      test("computeLEC generates valid Vega-Lite spec") {
+        val program = for {
+          tree <- service(_.create(validRequest))
+          result <- service(_.computeLEC(tree.id, None, 1, depth = 0))
+        } yield result
+
+        program.assert { result =>
+          result.vegaLiteSpec match {
+            case Some(spec) =>
+              spec.contains("\"$schema\"") &&
+                spec.contains("vega-lite") &&
+                spec.contains("\"encoding\"") &&
+                spec.contains("\"mark\"") &&
+                spec.contains("\"data\"") &&
+                spec.contains("\"loss\"") &&
+                spec.contains("\"exceedance\"")
+            case None => false
+          }
+        }
       }
     ).provide(
       RiskTreeServiceLive.layer,

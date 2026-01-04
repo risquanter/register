@@ -2,9 +2,10 @@ package com.risquanter.register.services
 
 import zio.*
 import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 import com.risquanter.register.http.requests.{CreateSimulationRequest, RiskDefinition}
 import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.errors.ValidationFailed
 import com.risquanter.register.repositories.RiskTreeRepository
 
@@ -68,41 +69,63 @@ class RiskTreeServiceLive private (
   override def computeLEC(
     id: Long,
     nTrialsOverride: Option[Int],
-    parallelism: Int
+    parallelism: Int,
+    depth: Int = 0
   ): Task[RiskTreeWithLEC] = {
-    for {
-      // Load config
-      treeOpt <- repo.getById(id)
-      tree <- ZIO.fromOption(treeOpt).orElseFail(
-        ValidationFailed(List(s"RiskTree with id=$id not found"))
-      )
-      
-      // Determine trials (use override or config)
-      nTrials = nTrialsOverride.getOrElse(tree.nTrials.toInt)
-      
-      // Execute simulation
-      result <- executionService.runTreeSimulation(
-        simulationId = s"tree-${tree.id}",
-        root = tree.root,
-        nTrials = nTrials,
-        parallelism = parallelism
-      )
-      
-      // Convert result to LEC data
-      lec <- convertResultToLEC(tree, result)
-    } yield lec
+    // Validate parameters using Iron
+    val validated = for {
+      validDepth <- ValidationUtil.refineNonNegativeInt(depth, "depth")
+      validParallelism <- ValidationUtil.refinePositiveInt(parallelism, "parallelism")
+      validTrials <- nTrialsOverride match {
+        case Some(trials) => ValidationUtil.refinePositiveInt(trials, "nTrials").map(Some(_))
+        case None => Right(None)
+      }
+    } yield (validDepth, validParallelism, validTrials)
+    
+    validated match {
+      case Left(errors) => ZIO.fail(ValidationFailed(errors))
+      case Right((validDepth, validParallelism, validTrials)) =>
+        // Clamp depth to maximum of 5
+        val clampedDepth = if (validDepth > 5) 5 else validDepth
+        
+        for {
+          // Load config
+          treeOpt <- repo.getById(id)
+          tree <- ZIO.fromOption(treeOpt).orElseFail(
+            ValidationFailed(List(s"RiskTree with id=$id not found"))
+          )
+          
+          // Determine trials (use override or config)
+          nTrials = validTrials.map(t => t: Int).getOrElse(tree.nTrials.toInt)
+          
+          // Execute simulation
+          result <- executionService.runTreeSimulation(
+            simulationId = s"tree-${tree.id}",
+            root = tree.root,
+            nTrials = nTrials,
+            parallelism = validParallelism: Int
+          )
+          
+          // Convert result to LEC data with depth
+          lec <- convertResultToLEC(tree, result, clampedDepth: Int)
+        } yield lec
+    }
   }
   
   // Helper: Validate request
   private def validateRequest(req: CreateSimulationRequest): Task[Unit] = {
     val errors = collection.mutable.ArrayBuffer[String]()
     
-    if (req.name.trim.isEmpty) {
-      errors += "Name cannot be empty"
+    // Validate name using Iron
+    ValidationUtil.refineName(req.name) match {
+      case Left(errs) => errors ++= errs
+      case Right(_) => // Valid
     }
     
-    if (req.nTrials <= 0) {
-      errors += "nTrials must be positive"
+    // Validate nTrials using Iron (must be positive)
+    ValidationUtil.refinePositiveInt(req.nTrials, "nTrials") match {
+      case Left(errs) => errors ++= errs
+      case Right(_) => // Valid
     }
     
     // Must have either root or risks (not both, not neither)
@@ -114,6 +137,11 @@ class RiskTreeServiceLive private (
       case _ => // Valid: exactly one is provided
     }
     
+    // Validate hierarchical root if provided
+    req.root.foreach { rootNode =>
+      validateRiskNode(rootNode, errors)
+    }
+    
     // Validate flat risks array if provided
     req.risks.foreach { risksArray =>
       if (risksArray.isEmpty) {
@@ -121,22 +149,7 @@ class RiskTreeServiceLive private (
       }
       
       risksArray.foreach { risk =>
-        if (risk.probability < 0.0 || risk.probability > 1.0) {
-          errors += s"Invalid probability ${risk.probability} for risk '${risk.name}'"
-        }
-        
-        risk.distributionType match {
-          case "expert" =>
-            if (risk.percentiles.isEmpty || risk.quantiles.isEmpty) {
-              errors += s"Expert distribution requires percentiles and quantiles for '${risk.name}'"
-            }
-          case "lognormal" =>
-            if (risk.minLoss.isEmpty || risk.maxLoss.isEmpty) {
-              errors += s"Lognormal distribution requires minLoss and maxLoss for '${risk.name}'"
-            }
-          case other =>
-            errors += s"Unsupported distribution type '$other' for '${risk.name}'"
-        }
+        validateRiskDefinition(risk, errors)
       }
     }
     
@@ -144,6 +157,110 @@ class RiskTreeServiceLive private (
       ZIO.fail(ValidationFailed(errors.toList))
     } else {
       ZIO.unit
+    }
+  }
+  
+  // Helper: Validate RiskNode (hierarchical structure)
+  private def validateRiskNode(node: RiskNode, errors: collection.mutable.ArrayBuffer[String]): Unit = {
+    // Validate id
+    if (node.id.trim.isEmpty) {
+      errors += s"Risk node id cannot be empty"
+    }
+    
+    // Validate name
+    ValidationUtil.refineName(node.name) match {
+      case Left(errs) => errors ++= errs.map(err => s"Node '${node.id}': $err")
+      case Right(_) => // Valid
+    }
+    
+    node match {
+      case leaf: RiskLeaf =>
+        // Validate probability
+        ValidationUtil.refineProbability(leaf.probability) match {
+          case Left(errs) => errors ++= errs.map(err => s"Risk '${leaf.id}': $err")
+          case Right(_) => // Valid
+        }
+        
+        // Validate distribution type
+        ValidationUtil.refineDistributionType(leaf.distributionType) match {
+          case Left(errs) => errors ++= errs.map(err => s"Risk '${leaf.id}': $err")
+          case Right(distType) =>
+            // Validate mode-specific fields
+            if (distType == "expert") {
+              if (leaf.percentiles.isEmpty || leaf.quantiles.isEmpty) {
+                errors += s"Risk '${leaf.id}': Expert distribution requires percentiles and quantiles"
+              }
+            } else if (distType == "lognormal") {
+              if (leaf.minLoss.isEmpty || leaf.maxLoss.isEmpty) {
+                errors += s"Risk '${leaf.id}': Lognormal distribution requires minLoss and maxLoss"
+              } else {
+                // Validate minLoss and maxLoss are non-negative
+                leaf.minLoss.foreach { minL =>
+                  ValidationUtil.refineNonNegativeLong(minL, s"minLoss for '${leaf.id}'") match {
+                    case Left(errs) => errors ++= errs
+                    case Right(_) => // Valid
+                  }
+                }
+                leaf.maxLoss.foreach { maxL =>
+                  ValidationUtil.refineNonNegativeLong(maxL, s"maxLoss for '${leaf.id}'") match {
+                    case Left(errs) => errors ++= errs
+                    case Right(_) => // Valid
+                  }
+                }
+              }
+            }
+        }
+        
+      case portfolio: RiskPortfolio =>
+        if (portfolio.children.isEmpty) {
+          errors += s"Portfolio '${portfolio.id}' cannot have empty children array"
+        }
+        // Recursively validate children
+        portfolio.children.foreach(child => validateRiskNode(child, errors))
+    }
+  }
+  
+  // Helper: Validate RiskDefinition (flat structure)
+  private def validateRiskDefinition(risk: RiskDefinition, errors: collection.mutable.ArrayBuffer[String]): Unit = {
+    // Validate name
+    ValidationUtil.refineName(risk.name) match {
+      case Left(errs) => errors ++= errs.map(err => s"Risk '${risk.name}': $err")
+      case Right(_) => // Valid
+    }
+    
+    // Validate probability
+    ValidationUtil.refineProbability(risk.probability) match {
+      case Left(errs) => errors ++= errs.map(err => s"Risk '${risk.name}': $err")
+      case Right(_) => // Valid
+    }
+    
+    // Validate distribution type and mode-specific fields
+    ValidationUtil.refineDistributionType(risk.distributionType) match {
+      case Left(errs) => errors ++= errs.map(err => s"Risk '${risk.name}': $err")
+      case Right(distType) =>
+        if (distType == "expert") {
+          if (risk.percentiles.isEmpty || risk.quantiles.isEmpty) {
+            errors += s"Risk '${risk.name}': Expert distribution requires percentiles and quantiles"
+          }
+        } else if (distType == "lognormal") {
+          if (risk.minLoss.isEmpty || risk.maxLoss.isEmpty) {
+            errors += s"Risk '${risk.name}': Lognormal distribution requires minLoss and maxLoss"
+          } else {
+            // Validate minLoss and maxLoss are non-negative
+            risk.minLoss.foreach { minL =>
+              ValidationUtil.refineNonNegativeLong(minL, s"minLoss for '${risk.name}'") match {
+                case Left(errs) => errors ++= errs
+                case Right(_) => // Valid
+              }
+            }
+            risk.maxLoss.foreach { maxL =>
+              ValidationUtil.refineNonNegativeLong(maxL, s"maxLoss for '${risk.name}'") match {
+                case Left(errs) => errors ++= errs
+                case Right(_) => // Valid
+              }
+            }
+          }
+        }
     }
   }
   
@@ -180,27 +297,57 @@ class RiskTreeServiceLive private (
   }
   
   // Helper: Convert TreeResult to RiskTreeWithLEC
-  private def convertResultToLEC(tree: RiskTree, result: com.risquanter.register.domain.data.RiskTreeResult): Task[RiskTreeWithLEC] = {
-    // Extract aggregated RiskResult from tree result
-    val aggregatedResult = result.result
+  private def convertResultToLEC(
+    tree: RiskTree,
+    result: com.risquanter.register.domain.data.RiskTreeResult,
+    depth: Int
+  ): Task[RiskTreeWithLEC] = {
+    import com.risquanter.register.simulation.{LECGenerator, VegaLiteBuilder}
+    import com.risquanter.register.domain.data.{LECNode, LECPoint}
     
-    // Calculate quantiles from simulation outcomes
-    val quantiles = com.risquanter.register.simulation.LECGenerator.calculateQuantiles(aggregatedResult)
-    
-    // Generate Vega-Lite spec for LEC visualization
-    val vegaLiteSpec = if (quantiles.nonEmpty) {
-      com.risquanter.register.simulation.LECGenerator.generateVegaLiteSpec(aggregatedResult)
-    } else {
-      None
+    // Build hierarchical LEC node structure
+    def buildLECNode(treeResult: com.risquanter.register.domain.data.RiskTreeResult, currentDepth: Int): LECNode = {
+      val riskResult = treeResult.result
+      
+      // Generate curve points
+      val curvePoints = LECGenerator.generateCurvePoints(riskResult, nEntries = 100)
+      val lecPoints = curvePoints.map { case (loss, prob) => LECPoint(loss, prob) }
+      
+      // Calculate quantiles
+      val quantiles = LECGenerator.calculateQuantiles(riskResult)
+      
+      // Recursively build children if depth allows
+      val children: Option[Vector[LECNode]] = treeResult match {
+        case com.risquanter.register.domain.data.RiskTreeResult.Branch(_, _, childResults) if currentDepth > 0 =>
+          Some(childResults.map(child => buildLECNode(child, currentDepth - 1)))
+        case _ => None
+      }
+      
+      LECNode(
+        id = treeResult.id,
+        name = riskResult.name,
+        curve = lecPoints,
+        quantiles = quantiles,
+        children = children
+      )
     }
     
-    // TODO: Extract individual risk data for hierarchical results
-    // For now, return top-level aggregated results
+    // Build root LEC node
+    val lecNode = buildLECNode(result, depth)
+    
+    // Generate Vega-Lite spec for all visible nodes
+    val vegaLiteSpec = VegaLiteBuilder.generateSpec(lecNode)
+    
+    // Legacy flat quantiles (from root)
+    val rootQuantiles = lecNode.quantiles
+    
     ZIO.succeed(RiskTreeWithLEC(
       riskTree = tree,
-      quantiles = quantiles,
-      vegaLiteSpec = vegaLiteSpec,
-      individualRisks = Array.empty[com.risquanter.register.http.responses.RiskLEC]
+      quantiles = rootQuantiles,
+      vegaLiteSpec = Some(vegaLiteSpec),
+      individualRisks = Array.empty[com.risquanter.register.http.responses.RiskLEC],
+      lecNode = Some(lecNode),
+      depth = depth
     ))
   }
 }

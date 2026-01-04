@@ -20,8 +20,17 @@ type ValidUrl = String :| (Not[Blank] & MaxLength[200] & ValidURL)
 // Non-negative long values (IDs, counts, amounts)
 type NonNegativeLong = Long :| GreaterEqual[0L]
 
+// Positive integers (must be > 0)
+type PositiveInt = Int :| Greater[0]
+
+// Non-negative integers (>= 0)
+type NonNegativeInt = Int :| GreaterEqual[0]
+
 // Probability values (must be between 0.0 and 1.0, exclusive)
 type Probability = Double :| (Greater[0.0] & Less[1.0])
+
+// Distribution type string (must be "expert" or "lognormal")
+type DistributionType = String :| Match["^(expert|lognormal)$"]
 
 // Opaque type for names - prevents mixing with other string types
 object SafeName:
