@@ -16,6 +16,10 @@ class RiskTreeController private (riskTreeService: RiskTreeService)
     extends BaseController
     with RiskTreeEndpoints {
 
+  val health: ServerEndpoint[Any, Task] = healthEndpoint.serverLogicSuccess { _ =>
+    ZIO.succeed(Map("status" -> "healthy", "service" -> "risk-register"))
+  }
+
   val create: ServerEndpoint[Any, Task] = createEndpoint.serverLogic { req =>
     // POST creates config only (no LEC computation)
     val program = riskTreeService.create(req).map { result =>
@@ -52,7 +56,7 @@ class RiskTreeController private (riskTreeService: RiskTreeService)
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(create, getAll, computeLEC, getById)
+    List(health, create, getAll, computeLEC, getById)
 }
 
 object RiskTreeController {
