@@ -23,7 +23,7 @@ enum RiskType:
  * - Monoid instance for compositional aggregation
  */
 sealed abstract class SimulationResult(
-  val riskName: String,
+  val name: String,
   val outcomes: Map[TrialId, Loss],
   val nTrials: Int,
   val rType: RiskType
@@ -54,10 +54,10 @@ sealed abstract class SimulationResult(
  * Single risk result (leaf node in hierarchy).
  */
 case class RiskResult(
-  override val riskName: String,
+  override val name: String,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int
-) extends SimulationResult(riskName, outcomes, nTrials, RiskType.Base) {
+) extends SimulationResult(name, outcomes, nTrials, RiskType.Base) {
   
   override lazy val outcomeCount: TreeMap[Loss, Int] = 
     TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))
@@ -95,7 +95,7 @@ object RiskResult {
     def combine(a: => RiskResult, b: => RiskResult): RiskResult = {
       require(a.nTrials == b.nTrials, s"Cannot merge results with different trial counts: ${a.nTrials} vs ${b.nTrials}")
       RiskResult(
-        if (a.riskName.nonEmpty) a.riskName else b.riskName,
+        if (a.name.nonEmpty) a.name else b.name,
         SimulationResult.merge(a, b),
         a.nTrials
       )
@@ -103,13 +103,13 @@ object RiskResult {
   }
   
   /** Value equality for RiskResult */
-  given equal: Equal[RiskResult] = Equal.make { (a, b) =>
-    a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.riskName == b.riskName
+  given Equal[RiskResult] = Equal.make { (a, b) =>
+    a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.name == b.name
   }
   
   /** Human-readable representation */
-  given debug: Debug[RiskResult] = Debug.make { r =>
-    s"RiskResult(${r.riskName}, ${r.outcomes.size} outcomes, ${r.nTrials} trials, max=${r.maxLoss})"
+  given Debug[RiskResult] = Debug.make { r =>
+    s"RiskResult(${r.name}, ${r.outcomes.size} outcomes, ${r.nTrials} trials, max=${r.maxLoss})"
   }
 }
 
@@ -120,11 +120,11 @@ object RiskResult {
  * for drill-down analysis.
  */
 case class RiskResultGroup(
-  val children: List[RiskResult],
-  override val riskName: String,
+  children: List[RiskResult],
+  override val name: String,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int
-) extends SimulationResult(riskName, outcomes, nTrials, RiskType.Aggregate) {
+) extends SimulationResult(name, outcomes, nTrials, RiskType.Aggregate) {
   
   override lazy val outcomeCount: TreeMap[Loss, Int] = 
     TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))
@@ -141,24 +141,24 @@ case class RiskResultGroup(
   }
   
   override def flatten: Vector[SimulationResult] =
-    this +: children.toVector.sortBy(_.riskName)
+    this +: children.toVector.sortBy(_.name)
 }
 
 object RiskResultGroup {
   /**
    * Create aggregated result from multiple risks.
    * 
-   * @param riskName Name for the aggregate
+   * @param name Name for the aggregate
    * @param nTrials Number of trials (must match all children)
    * @param results Individual risk results to aggregate
    */
   def apply(
-    riskName: String,
+    name: String,
     nTrials: Int,
     results: RiskResult*
   ): RiskResultGroup = {
     if (results.isEmpty) {
-      RiskResultGroup(List.empty, riskName, Map.empty, nTrials)
+      RiskResultGroup(List.empty, name, Map.empty, nTrials)
     } else {
       // Verify all children have same trial count
       require(
@@ -168,7 +168,7 @@ object RiskResultGroup {
       
       RiskResultGroup(
         results.toList,
-        riskName,
+        name,
         SimulationResult.merge(results*),
         nTrials
       )

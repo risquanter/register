@@ -33,7 +33,7 @@ final case class CreateSimulationRequest(
 
 /** Individual risk definition for flat portfolio simulations (deprecated, use RiskNode instead)
   * 
-  * @param riskName Unique risk identifier
+  * @param name Unique risk identifier
   * @param distributionType "expert" or "lognormal"
   * @param probability Risk occurrence probability [0.0, 1.0]
   * @param percentiles Expert opinion percentiles (expert mode)
@@ -42,7 +42,7 @@ final case class CreateSimulationRequest(
   * @param maxLoss Lognormal 80% CI upper bound in millions (lognormal mode)
   */
 final case class RiskDefinition(
-  riskName: String,
+  name: String,
   distributionType: String, // "expert" or "lognormal"
   probability: Double,
   percentiles: Option[Array[Double]] = None,

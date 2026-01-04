@@ -73,7 +73,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
             case RiskTreeResult.Leaf(id, riskResult) =>
               assertTrue(
                 id == "cyber",
-                riskResult.riskName == "cyber",
+                riskResult.name == "cyber",
                 riskResult.nTrials == 1000
               )
             

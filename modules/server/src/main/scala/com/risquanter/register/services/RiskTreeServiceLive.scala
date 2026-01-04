@@ -122,20 +122,20 @@ class RiskTreeServiceLive private (
       
       risksArray.foreach { risk =>
         if (risk.probability < 0.0 || risk.probability > 1.0) {
-          errors += s"Invalid probability ${risk.probability} for risk '${risk.riskName}'"
+          errors += s"Invalid probability ${risk.probability} for risk '${risk.name}'"
         }
         
         risk.distributionType match {
           case "expert" =>
             if (risk.percentiles.isEmpty || risk.quantiles.isEmpty) {
-              errors += s"Expert distribution requires percentiles and quantiles for '${risk.riskName}'"
+              errors += s"Expert distribution requires percentiles and quantiles for '${risk.name}'"
             }
           case "lognormal" =>
             if (risk.minLoss.isEmpty || risk.maxLoss.isEmpty) {
-              errors += s"Lognormal distribution requires minLoss and maxLoss for '${risk.riskName}'"
+              errors += s"Lognormal distribution requires minLoss and maxLoss for '${risk.name}'"
             }
           case other =>
-            errors += s"Unsupported distribution type '$other' for '${risk.riskName}'"
+            errors += s"Unsupported distribution type '$other' for '${risk.name}'"
         }
       }
     }
@@ -159,8 +159,8 @@ class RiskTreeServiceLive private (
         val risks = req.risks.getOrElse(Array.empty[RiskDefinition])
         val leaves: Array[RiskNode] = risks.map { risk =>
           RiskLeaf(
-            id = risk.riskName,
-            name = risk.riskName,
+            id = risk.name,
+            name = risk.name,
             distributionType = risk.distributionType,
             probability = risk.probability,
             percentiles = risk.percentiles,
@@ -181,13 +181,26 @@ class RiskTreeServiceLive private (
   
   // Helper: Convert TreeResult to RiskTreeWithLEC
   private def convertResultToLEC(tree: RiskTree, result: com.risquanter.register.domain.data.RiskTreeResult): Task[RiskTreeWithLEC] = {
-    // TODO: Extract quantiles, build Vega-Lite spec, collect individual risks
-    // For now, return minimal structure
+    // Extract aggregated RiskResult from tree result
+    val aggregatedResult = result.result
+    
+    // Calculate quantiles from simulation outcomes
+    val quantiles = com.risquanter.register.simulation.LECGenerator.calculateQuantiles(aggregatedResult)
+    
+    // Generate Vega-Lite spec for LEC visualization
+    val vegaLiteSpec = if (quantiles.nonEmpty) {
+      com.risquanter.register.simulation.LECGenerator.generateVegaLiteSpec(aggregatedResult)
+    } else {
+      None
+    }
+    
+    // TODO: Extract individual risk data for hierarchical results
+    // For now, return top-level aggregated results
     ZIO.succeed(RiskTreeWithLEC(
       riskTree = tree,
-      quantiles = Map.empty, // TODO: compute from result
-      vegaLiteSpec = None,
-      individualRisks = Array.empty
+      quantiles = quantiles,
+      vegaLiteSpec = vegaLiteSpec,
+      individualRisks = Array.empty[com.risquanter.register.http.responses.RiskLEC]
     ))
   }
 }

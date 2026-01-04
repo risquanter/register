@@ -52,7 +52,7 @@ class RiskTreeController private (riskTreeService: RiskTreeService)
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(create, getAll, getById, computeLEC)
+    List(create, getAll, computeLEC, getById)
 }
 
 object RiskTreeController {

@@ -21,30 +21,25 @@ import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
   */
 object Application extends ZIOAppDefault {
 
+  // Build layer dependency graph explicitly
+  val appLayer = ZLayer.make[RiskTreeController & Server](
+    Server.default,
+    RiskTreeRepositoryInMemory.layer,
+    com.risquanter.register.services.SimulationExecutionService.live,
+    RiskTreeServiceLive.layer,
+    ZLayer.fromZIO(RiskTreeController.makeZIO)
+  )
+
   override def run = {
     val program = for {
       _          <- ZIO.logInfo("Bootstrapping Risk Register application...")
       endpoints  <- HttpApi.endpointsZIO
       _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
       httpApp     = ZioHttpInterpreter().toHttp(endpoints)
-      
-      corsConfig  = CorsConfig(
-        allowedOrigin = _ => Some(AccessControlAllowOrigin.All),
-        allowedHeaders = AccessControlAllowHeaders.All,
-        exposedHeaders = AccessControlExposeHeaders.All
-      )
-      _          <- ZIO.logInfo("CORS configured for all origins")
-      corsApp     = cors(corsConfig)(httpApp)
       _          <- ZIO.logInfo("Starting HTTP server on port 8080...")
-      _          <- Server.serve(corsApp)
+      _          <- Server.serve(httpApp)
     } yield ()
 
-    program.provide(
-      Server.default,
-      RiskTreeRepositoryInMemory.layer,
-      com.risquanter.register.services.SimulationExecutionService.live,
-      RiskTreeServiceLive.layer,
-      ZLayer.fromZIO(RiskTreeController.makeZIO)
-    )
+    program.provide(appLayer)
   }
 }

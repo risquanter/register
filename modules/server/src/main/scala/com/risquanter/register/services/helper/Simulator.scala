@@ -154,10 +154,10 @@ object Simulator {
             val childRiskResults = childResults.map(_.result)
             val combined = childRiskResults.reduce((a, b) => RiskResult.identity.combine(a, b))
             
-            // Update riskName to portfolio ID
+            // Update name to portfolio ID
             RiskTreeResult.Branch(
               id = portfolio.id,
-              result = combined.copy(riskName = portfolio.id),
+              result = combined.copy(name = portfolio.id),
               children = childResults.toVector
             )
           }

@@ -24,12 +24,12 @@ final case class SimulationResponse(
 
 /** Loss Exceedance Curve data for a single risk
   * 
-  * @param riskName Risk identifier
+  * @param name Risk identifier
   * @param quantiles Key percentiles (p50, p90, p95, p99) in millions
   * @param exceedanceCurve Optional Vega-Lite JSON for this risk's LEC
   */
 final case class RiskLEC(
-  riskName: String,
+  name: String,
   quantiles: Map[String, Double],
   exceedanceCurve: Option[String]
 )

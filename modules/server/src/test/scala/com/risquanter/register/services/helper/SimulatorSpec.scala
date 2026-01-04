@@ -121,7 +121,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         } yield assertTrue(
           run1.map(_.outcomes) == run2.map(_.outcomes),
           run2.map(_.outcomes) == run3.map(_.outcomes),
-          run1.map(_.riskName) == run2.map(_.riskName)
+          run1.map(_.name) == run2.map(_.name)
         )
       },
       
@@ -155,7 +155,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           results <- Simulator.simulate(samplers, nTrials = 1000)
         } yield assertTrue(
           results.size == 3,
-          results.map(_.riskName).toSet == Set("RISK-MULTI-1", "RISK-MULTI-2", "RISK-MULTI-3"),
+          results.map(_.name).toSet == Set("RISK-MULTI-1", "RISK-MULTI-2", "RISK-MULTI-3"),
           results.forall(_.nTrials == 1000)
         )
       },
@@ -170,10 +170,9 @@ object SimulatorSpec extends ZIOSpecDefault {
         for {
           results <- Simulator.simulate(samplers, nTrials = 500)
         } yield {
-          val risk1 = results.find(_.riskName == "RISK-IND-1").get
-          val risk2 = results.find(_.riskName == "RISK-IND-2").get
-          
-          // Different seeds should produce different outcomes
+        
+          val risk1 = results.find(_.name == "RISK-IND-1").get
+          val risk2 = results.find(_.name == "RISK-IND-2").get          // Different seeds should produce different outcomes
           assertTrue(risk1.outcomes != risk2.outcomes)
         }
       },
@@ -194,7 +193,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           results <- Simulator.simulate(Vector(sampler), nTrials = 200)
         } yield assertTrue(
           results.size == 1,
-          results.head.riskName == "RISK-SINGLE",
+          results.head.name == "RISK-SINGLE",
           results.head.nTrials == 200
         )
       }
@@ -217,7 +216,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           results <- Simulator.simulate(samplers, nTrials = 100, parallelism = 4)
         } yield assertTrue(
           results.size == 20,
-          results.map(_.riskName).toSet.size == 20
+          results.map(_.name).toSet.size == 20
         )
       },
       

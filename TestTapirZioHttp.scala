@@ -1,11 +1,11 @@
 import zio.*
 import zio.http.*
-import sttp.tapir.*
+import sttp.tapir.{endpoint as tapirEndpoint, *}
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 
 object TestTapirZioHttp extends ZIOAppDefault {
   
-  val helloEndpoint = endpoint.get
+  val helloEndpoint = tapirEndpoint.get
     .in("hello")
     .out(stringBody)
     .serverLogicSuccess[Task](_ => ZIO.succeed("Hello from Tapir!"))

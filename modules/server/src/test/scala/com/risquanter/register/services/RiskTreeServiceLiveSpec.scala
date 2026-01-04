@@ -56,7 +56,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     nTrials = 1000,
     risks = Some(Array(
       RiskDefinition(
-        riskName = "test-risk",
+        name = "test-risk",
         distributionType = "lognormal",
         probability = 0.75,
         minLoss = Some(1000L),
