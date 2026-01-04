@@ -86,8 +86,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         program.assert { case (created, lec) =>
           lec.riskTree.id == created.id &&
-            lec.riskTree.name == created.name
-          // TODO: Assert quantiles.nonEmpty once convertResultToLEC is fully implemented
+            lec.riskTree.name == created.name &&
+            lec.quantiles.nonEmpty
         }
       },
 
