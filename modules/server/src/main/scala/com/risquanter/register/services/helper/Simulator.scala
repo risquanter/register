@@ -1,6 +1,6 @@
 package com.risquanter.register.services.helper
 
-import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution}
+import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
 import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult}
 import com.risquanter.register.domain.errors.ValidationFailed
 import com.risquanter.register.simulation.LognormalHelper
@@ -176,15 +176,15 @@ object Simulator {
         ValidationUtil.refineProbability(leaf.probability)
       ).mapError(errors => ValidationFailed(errors))
       
-      // Create Metalog distribution based on mode
-      metalog <- createMetalogDistribution(leaf)
+      // Create distribution based on mode
+      distribution <- createDistribution(leaf)
       
       // Build sampler (using entityId = hash of leaf.id for determinism)
-      sampler = RiskSampler.fromMetalog(
+      sampler = RiskSampler.fromDistribution(
         entityId = leaf.id.hashCode.toLong,
         riskId = leaf.id,
         occurrenceProb = probability,
-        lossDistribution = metalog,
+        lossDistribution = distribution,
         seed3 = 0L,
         seed4 = 0L
       )
@@ -195,7 +195,7 @@ object Simulator {
    * Create MetalogDistribution from RiskLeaf parameters.
    * Handles both expert opinion and lognormal modes.
    */
-  private def createMetalogDistribution(leaf: RiskLeaf): Task[MetalogDistribution] = {
+  private def createDistribution(leaf: RiskLeaf): Task[Distribution] = {
     import io.github.iltotore.iron.*
     import com.risquanter.register.domain.data.iron.Probability
     import com.risquanter.register.simulation.PositiveInt
@@ -232,13 +232,13 @@ object Simulator {
             )))
         }
       
-      // Lognormal mode: use BCG 80% CI approach
+      // Lognormal mode: use BCG 90% CI approach
       case "lognormal" =>
         (leaf.minLoss, leaf.maxLoss) match {
           case (Some(min), Some(max)) if min > 0 && min < max =>
-            LognormalHelper.fromLognormal80CI(min, max) match {
-              case Right(m) => ZIO.succeed(m)
-              case Left(e) => ZIO.fail(ValidationFailed(List(s"Failed to create lognormal for '${leaf.id}': ${e.message}")))
+            LognormalHelper.fromLognormal90CI(min, max) match {
+              case Right(dist) => ZIO.succeed(dist)
+              case Left(err) => ZIO.fail(ValidationFailed(List(s"Failed to create lognormal for '${leaf.id}': ${err.message}")))
             }
           
           case _ =>

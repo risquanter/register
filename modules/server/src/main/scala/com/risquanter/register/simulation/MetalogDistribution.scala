@@ -21,16 +21,19 @@ case class ValidationError(errors: List[String]) {
  * a wide variety of shapes (bounded, semi-bounded, unbounded) using percentile-quantile
  * pairs fitted with a quantile function.
  * 
+ * Used for "expert" mode where user provides percentile-quantile estimates.
+ * 
  * This wrapper adds:
  * - Iron refinement type validation for percentiles (must be in [0,1])
  * - Input validation before calling Java QPFitter
  * - Functional error handling with Either
+ * - Distribution trait implementation for uniform interface with Lognormal
  * 
  * @param fitter The underlying Java Metalog instance from simulation-util
  * @see com.risquanter.simulation.util.distribution.metalog.Metalog
  * @see com.risquanter.simulation.util.distribution.metalog.QPFitter
  */
-case class MetalogDistribution private(fitter: Metalog) {
+case class MetalogDistribution private(fitter: Metalog) extends Distribution {
   
   /**
    * Compute the quantile (inverse CDF) for a given probability.
@@ -39,14 +42,6 @@ case class MetalogDistribution private(fitter: Metalog) {
    * @return The value x such that P(X ≤ x) = p
    */
   def quantile(p: Double): Double = fitter.quantile(p)
-  
-  /**
-   * Sample from the distribution using a uniform random value.
-   * 
-   * @param uniform Uniform random value in [0, 1) from HDR or other PRNG
-   * @return Sampled value from the Metalog distribution
-   */
-  def sample(uniform: Double): Double = quantile(uniform)
 }
 
 object MetalogDistribution {

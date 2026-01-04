@@ -80,11 +80,11 @@ object RiskSampler {
    * val losses = (0L until 1000L).flatMap(sampler.sample)
    * }}}
    */
-  def fromMetalog(
+  def fromDistribution(
     entityId: Long,
     riskId: String,
     occurrenceProb: Probability,
-    lossDistribution: MetalogDistribution,
+    lossDistribution: Distribution,
     seed3: Long = 0L,
     seed4: Long = 0L
   ): RiskSampler = {
