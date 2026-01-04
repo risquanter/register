@@ -18,10 +18,14 @@ object LECPoint {
   given codec: JsonCodec[LECPoint] = DeriveJsonCodec.gen[LECPoint]
 }
 
-/** Hierarchical node in a Loss Exceedance Curve tree
+/** Hierarchical node in a Loss Exceedance Curve tree - serialization format
   * 
+  * This is the serialized representation of LEC curve data for API responses.
   * Matches RiskNode structure but contains computed LEC data.
   * Supports client-side expand/collapse navigation via depth parameter.
+  * 
+  * Note: This is LECCurveData (discrete sampling), not the LECCurve trait
+  * (which represents the Loss → Probability function).
   * 
   * @param id Node identifier (matches RiskNode.id)
   * @param name Human-readable name
@@ -29,16 +33,16 @@ object LECPoint {
   * @param quantiles Key percentiles (p50, p90, p95, p99) for quick reference
   * @param children Child nodes (only populated if depth > 0)
   */
-final case class LECNode(
+final case class LECCurveData(
   id: String,
   name: String,
   curve: Vector[LECPoint],
   quantiles: Map[String, Double],
-  children: Option[Vector[LECNode]] = None
+  children: Option[Vector[LECCurveData]] = None
 )
 
-object LECNode {
-  given codec: JsonCodec[LECNode] = DeriveJsonCodec.gen[LECNode]
+object LECCurveData {
+  given codec: JsonCodec[LECCurveData] = DeriveJsonCodec.gen[LECCurveData]
 }
 
 /** Complete LEC response with visualization spec
@@ -56,7 +60,7 @@ object LECNode {
   * @param depth Number of levels included in response
   */
 final case class LECResponse(
-  node: LECNode,
+  node: LECCurveData,
   vegaLiteSpec: String,
   depth: Int
 )

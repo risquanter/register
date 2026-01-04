@@ -4,9 +4,9 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.*
 
-object SimulationResultSpec extends ZIOSpecDefault {
+object LossDistributionSpec extends ZIOSpecDefault {
   
-  def spec = suite("SimulationResultSpec")(
+  def spec = suite("LossDistributionSpec")(
     suite("RiskResult - basic functionality")(
       test("empty result has zero losses") {
         val result = RiskResult.empty("RISK-001", nTrials = 1000)
@@ -90,12 +90,12 @@ object SimulationResultSpec extends ZIOSpecDefault {
       }
     ),
     
-    suite("SimulationResult.merge - outer join semantics")(
+    suite("LossDistribution.merge - outer join semantics")(
       test("merges disjoint trial IDs") {
         val r1 = RiskResult("R1", Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
         val r2 = RiskResult("R2", Map(3 -> 3000L, 4 -> 4000L), nTrials = 100)
         
-        val merged = SimulationResult.merge(r1, r2)
+        val merged = LossDistribution.merge(r1, r2)
         
         assertTrue(merged == Map(1 -> 1000L, 2 -> 2000L, 3 -> 3000L, 4 -> 4000L))
       },
@@ -104,7 +104,7 @@ object SimulationResultSpec extends ZIOSpecDefault {
         val r1 = RiskResult("R1", Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
         val r2 = RiskResult("R2", Map(1 -> 500L, 3 -> 3000L), nTrials = 100)
         
-        val merged = SimulationResult.merge(r1, r2)
+        val merged = LossDistribution.merge(r1, r2)
         
         assertTrue(merged == Map(1 -> 1500L, 2 -> 2000L, 3 -> 3000L))
       },
@@ -113,7 +113,7 @@ object SimulationResultSpec extends ZIOSpecDefault {
         val r1 = RiskResult("R1", Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
         val empty = RiskResult.empty("EMPTY", nTrials = 100)
         
-        val merged = SimulationResult.merge(r1, empty)
+        val merged = LossDistribution.merge(r1, empty)
         
         assertTrue(merged == r1.outcomes)
       },
@@ -123,7 +123,7 @@ object SimulationResultSpec extends ZIOSpecDefault {
         val r2 = RiskResult("R2", Map(1 -> 2000L, 2 -> 500L), nTrials = 100)
         val r3 = RiskResult("R3", Map(2 -> 1500L, 3 -> 3000L), nTrials = 100)
         
-        val merged = SimulationResult.merge(r1, r2, r3)
+        val merged = LossDistribution.merge(r1, r2, r3)
         
         assertTrue(merged == Map(1 -> 3000L, 2 -> 2000L, 3 -> 3000L))
       }
@@ -294,7 +294,7 @@ object SimulationResultSpec extends ZIOSpecDefault {
         val r1 = RiskResult("R1", Map(1 -> Long.MaxValue / 2), nTrials = 100)
         val r2 = RiskResult("R2", Map(1 -> Long.MaxValue / 2), nTrials = 100)
         
-        val merged = SimulationResult.merge(r1, r2)
+        val merged = LossDistribution.merge(r1, r2)
         
         // This will overflow in current implementation
         // In production, consider BigInt or bounds checking
