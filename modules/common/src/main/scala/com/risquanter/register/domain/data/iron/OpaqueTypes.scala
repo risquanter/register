@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data.iron
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import io.github.iltotore.iron.constraint.collection.MaxLength
+import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
 
 // Base refined type alias used for most short strings:
@@ -77,3 +77,22 @@ object Url:
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[String], Url] = 
     ValidationUtil.refineUrl(s)
+
+// SafeId: Alphanumeric + hyphen/underscore, 3-30 chars (risk/portfolio identifiers)
+// Valid examples: "cyber-attack", "ops_risk_001", "IT-RISK"
+type SafeIdStr = String :| (Not[Blank] & MinLength[3] & MaxLength[30] & Match["^[a-zA-Z0-9_-]+$"])
+
+// Opaque type for risk/portfolio IDs
+object SafeId:
+  opaque type SafeId = SafeIdStr
+  
+  object SafeId:
+    def apply(s: SafeIdStr): SafeId = s
+    def unapply(id: SafeId): Option[SafeIdStr] = Some(id)
+    
+  extension (id: SafeId)
+    def value: SafeIdStr = id
+  
+  // Convenience constructor from plain String
+  def fromString(s: String): Either[List[String], SafeId] =
+    ValidationUtil.refineId(s)

@@ -281,7 +281,7 @@ class RiskTreeServiceLive private (
         // Flat format - convert to portfolio
         val risks = req.risks.getOrElse(Array.empty[RiskDefinition])
         val leaves: Array[RiskNode] = risks.map { risk =>
-          RiskLeaf(
+          RiskLeaf.unsafeApply(
             id = risk.name,
             name = risk.name,
             distributionType = risk.distributionType,

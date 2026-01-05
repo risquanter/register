@@ -37,7 +37,7 @@ A production-grade Monte Carlo risk simulation service built with category theor
 
 ### Sound Simulation Architecture
 - **Trusted Dependencies**: Leverages the purpose-built [`risquanter/simulation-util`](https://github.com/risquanter/simulation-util) library (HDR PRNG, Metalog fitting)
-- **Defensive Validation**: Iron refinement types on the API boundaries to ensure probabilistic constraints before simulations
+- **Defensive Validation**: Iron refinement types enforce constraints at service boundaries—raw DTOs validated before internal processing with refined types (`Probability`, `PositiveInt`, `SafeName`)
 - **Sparse by Default**: Stores only trial outcomes where loss > 0, critical for low-probability risks
 
 ### Category Theory Foundations

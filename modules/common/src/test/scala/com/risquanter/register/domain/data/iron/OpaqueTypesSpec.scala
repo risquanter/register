@@ -198,6 +198,71 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
         val result = Url.fromString("notaurl")
         assertTrue(result.isLeft)
       }
+    ),
+    
+    suite("SafeId opaque type")(
+      test("accepts valid alphanumeric ID") {
+        val result = SafeId.fromString("cyber-attack-001")
+        assertTrue(result.isRight)
+      },
+      
+      test("accepts ID with underscores") {
+        val result = SafeId.fromString("ops_risk_portfolio")
+        assertTrue(result.isRight)
+      },
+      
+      test("accepts ID with hyphens") {
+        val result = SafeId.fromString("IT-RISK-123")
+        assertTrue(result.isRight)
+      },
+      
+      test("accepts minimum length (3 chars)") {
+        val result = SafeId.fromString("abc")
+        assertTrue(result.isRight)
+      },
+      
+      test("accepts maximum length (30 chars)") {
+        val result = SafeId.fromString("a" * 30)
+        assertTrue(result.isRight)
+      },
+      
+      test("rejects empty string") {
+        val result = SafeId.fromString("")
+        assertTrue(result.isLeft)
+      },
+      
+      test("rejects too short (< 3 chars)") {
+        val result = SafeId.fromString("ab")
+        assertTrue(result.isLeft)
+      },
+      
+      test("rejects too long (> 30 chars)") {
+        val result = SafeId.fromString("a" * 31)
+        assertTrue(result.isLeft)
+      },
+      
+      test("rejects spaces") {
+        val result = SafeId.fromString("cyber attack")
+        assertTrue(result.isLeft)
+      },
+      
+      test("rejects special characters") {
+        val result = SafeId.fromString("cyber@attack")
+        assertTrue(result.isLeft)
+      },
+      
+      test("trims whitespace before validation") {
+        val result = SafeId.fromString("  cyber-attack  ")
+        assertTrue(result.isRight)
+      },
+      
+      test("can extract value from SafeId") {
+        val result = SafeId.fromString("test-id-123")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("test-id-123")
+        )
+      }
     )
   )
 }

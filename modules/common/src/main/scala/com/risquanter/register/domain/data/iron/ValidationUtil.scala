@@ -2,9 +2,9 @@ package com.risquanter.register.domain.data.iron
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import io.github.iltotore.iron.constraint.collection.MaxLength
+import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
-import com.risquanter.register.domain.data.iron.{SafeName, Email, Url}
+import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId}
 
 object ValidationUtil {
 
@@ -79,6 +79,16 @@ object ValidationUtil {
       .refineEither[Match["^(expert|lognormal)$"]]
       .left
       .map(err => List(s"Distribution type '$value' must be either 'expert' or 'lognormal': $err"))
+  }
+
+  // Refinement for risk/portfolio IDs (alphanumeric + hyphen/underscore, 3-30 chars)
+  def refineId(value: String): Either[List[String], SafeId.SafeId] = {
+    val sanitized = nonEmpty(value)
+    sanitized
+      .refineEither[Not[Blank] & MinLength[3] & MaxLength[30] & Match["^[a-zA-Z0-9_-]+$"]]
+      .map(SafeId.SafeId(_))
+      .left
+      .map(err => List(s"ID '$sanitized' must be 3-30 alphanumeric characters (with _ or -): $err"))
   }
 
   // Refinement for optional short text (max 20 chars)

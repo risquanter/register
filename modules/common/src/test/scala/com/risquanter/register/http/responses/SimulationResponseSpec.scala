@@ -34,7 +34,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         id = 1L,
         name = SafeName.SafeName("Risk Assessment".refineUnsafe),
         nTrials = 10000,
-        root = RiskLeaf(
+        root = RiskLeaf.unsafeApply(
           id = "test-risk",
           name = "TestRisk",
           distributionType = "lognormal",
@@ -58,10 +58,10 @@ object SimulationResponseSpec extends ZIOSpecDefault {
     
     test("fromRiskTree extracts .value from opaque types") {
       val riskTree = RiskTree(
-        id = 2L,
+        id = 3L,
         name = SafeName.SafeName("Test".refineUnsafe),
-        nTrials = 5000,
-        root = RiskLeaf(
+        nTrials = 10000,
+        root = RiskLeaf.unsafeApply(
           id = "risk1",
           name = "Risk1",
           distributionType = "lognormal",
@@ -102,7 +102,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         id = 5L,
         name = SafeName.SafeName("Round Trip".refineUnsafe),
         nTrials = 10000,
-        root = RiskLeaf(
+        root = RiskLeaf.unsafeApply(
           id = "risk1",
           name = "Risk1",
           distributionType = "lognormal",
