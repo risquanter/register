@@ -2,41 +2,53 @@ package com.risquanter.register
 
 import zio.*
 import zio.http.Server
+import zio.config.typesafe.TypesafeConfigProvider
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
-import zio.http.Middleware.{cors, CorsConfig}
-import zio.http.Header.{
-  AccessControlAllowHeaders,
-  AccessControlAllowOrigin,
-  AccessControlExposeHeaders,
-  Origin
-}
 
+import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig}
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.controllers.RiskTreeController
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 
 /** Main application entry point
-  * Sets up HTTP server with CORS, dependency injection, and routing
+  * Sets up HTTP server with configuration management, dependency injection, and routing
   */
 object Application extends ZIOAppDefault {
 
-  // Build layer dependency graph explicitly
-  val appLayer = ZLayer.make[RiskTreeController & Server](
-    Server.default,
-    RiskTreeRepositoryInMemory.layer,
-    com.risquanter.register.services.SimulationExecutionService.live,
-    RiskTreeServiceLive.layer,
-    ZLayer.fromZIO(RiskTreeController.makeZIO)
-  )
+  // Bootstrap: Configure TypesafeConfigProvider to load from application.conf
+  override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
+    Runtime.setConfigProvider(
+      TypesafeConfigProvider.fromResourcePath()
+    )
+
+  // Application layers (with config dependencies)
+  val appLayer: ZLayer[Any, Throwable, RiskTreeController & Server & ServerConfig] =
+    ZLayer.make[RiskTreeController & Server & ServerConfig](
+      // Config layers
+      Configs.makeLayer[ServerConfig]("register.server"),
+      Configs.makeLayer[SimulationConfig]("register.simulation"),
+      // Server layer uses ServerConfig
+      ZLayer.fromZIO(
+        ZIO.service[ServerConfig].map(cfg => 
+          Server.Config.default.binding(cfg.host, cfg.port)
+        )
+      ) >>> Server.live,
+      RiskTreeRepositoryInMemory.layer,
+      com.risquanter.register.services.SimulationExecutionService.live,
+      RiskTreeServiceLive.layer,  // Will need SimulationConfig
+      ZLayer.fromZIO(RiskTreeController.makeZIO)
+    )
 
   override def run = {
     val program = for {
       _          <- ZIO.logInfo("Bootstrapping Risk Register application...")
+      cfg        <- ZIO.service[ServerConfig]
+      _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
       endpoints  <- HttpApi.endpointsZIO
       _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
       httpApp     = ZioHttpInterpreter().toHttp(endpoints)
-      _          <- ZIO.logInfo("Starting HTTP server on port 8080...")
+      _          <- ZIO.logInfo(s"Starting HTTP server on ${cfg.host}:${cfg.port}...")
       _          <- Server.serve(httpApp)
     } yield ()
 

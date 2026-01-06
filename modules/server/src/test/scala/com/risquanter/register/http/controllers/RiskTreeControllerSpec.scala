@@ -49,7 +49,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
   // Layer factory - creates fresh layer with isolated repository per test
   private def serviceLayer = 
     ZLayer.succeed(makeStubRepo()) >>>
-    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository]) >>>
+    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository] ++ com.risquanter.register.configs.TestConfigs.simulationLayer) >>>
     RiskTreeServiceLive.layer
 
   override def spec = suite("RiskTreeController")(

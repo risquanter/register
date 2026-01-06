@@ -9,10 +9,12 @@ import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC, RiskNode,
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.errors.ValidationFailed
 import com.risquanter.register.repositories.RiskTreeRepository
+import com.risquanter.register.configs.SimulationConfig
 
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
-  executionService: SimulationExecutionService
+  executionService: SimulationExecutionService,
+  config: SimulationConfig
 ) extends RiskTreeService {
   
   // Config CRUD - only persist, no execution
@@ -96,8 +98,9 @@ class RiskTreeServiceLive private (
     validated match {
       case Left(errors) => ZIO.fail(ValidationFailed(errors))
       case Right((validDepth, validParallelism, validTrials)) =>
-        // Clamp depth to maximum of 5
-        val clampedDepth = if (validDepth > 5) 5 else validDepth
+        // Use config for defaults and limits
+        val clampedDepth = Math.min(validDepth, config.maxTreeDepth)
+        val effectiveParallelism = if (validParallelism <= 0) config.defaultParallelism else validParallelism
         
         for {
           // Load config
@@ -106,7 +109,7 @@ class RiskTreeServiceLive private (
             ValidationFailed(List(s"RiskTree with id=$id not found"))
           )
           
-          // Determine trials (use override or config)
+          // Determine trials (use override or tree config or default)
           nTrials = validTrials.map(t => t: Int).getOrElse(tree.nTrials.toInt)
           
           // Execute simulation with optional provenance
@@ -114,7 +117,7 @@ class RiskTreeServiceLive private (
             simulationId = s"tree-${tree.id}",
             root = tree.root,
             nTrials = nTrials,
-            parallelism = validParallelism: Int,
+            parallelism = effectiveParallelism,
             includeProvenance = includeProvenance
           )
           (result, provenance) = resultAndProv
@@ -123,7 +126,7 @@ class RiskTreeServiceLive private (
           finalProvenance = provenance.map(_.copy(treeId = tree.id))
           
           // Convert result to LEC data with depth
-          lec <- convertResultToLEC(tree, result, clampedDepth: Int, finalProvenance)
+          lec <- convertResultToLEC(tree, result, clampedDepth, finalProvenance)
         } yield lec
     }
   }
@@ -186,10 +189,11 @@ class RiskTreeServiceLive private (
 }
 
 object RiskTreeServiceLive {
-  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService, Nothing, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig, Nothing, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       execService <- ZIO.service[SimulationExecutionService]
-    } yield new RiskTreeServiceLive(repo, execService)
+      config <- ZIO.service[SimulationConfig]
+    } yield new RiskTreeServiceLive(repo, execService, config)
   }
 }

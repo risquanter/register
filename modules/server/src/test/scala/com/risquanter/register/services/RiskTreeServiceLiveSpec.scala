@@ -320,6 +320,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     ).provide(
       RiskTreeServiceLive.layer,
       SimulationExecutionService.live,
-      stubRepoLayer
+      stubRepoLayer,
+      com.risquanter.register.configs.TestConfigs.simulationLayer
     ) @@ TestAspect.sequential
 }
