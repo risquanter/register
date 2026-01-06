@@ -2,7 +2,7 @@ package com.risquanter.register.services.helper
 
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
 import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, NodeProvenance, TreeProvenance, ExpertDistributionParams, LognormalDistributionParams}
-import com.risquanter.register.domain.errors.ValidationFailed
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import zio.prelude.Identity
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
@@ -175,7 +175,11 @@ object Simulator {
         for {
           // Validate portfolio has children
           _ <- ZIO.when(portfolio.children.isEmpty)(
-            ZIO.fail(ValidationFailed(List(s"RiskPortfolio '${portfolio.id}' has no children")))
+            ZIO.fail(ValidationFailed(List(ValidationError(
+              field = s"riskPortfolio.${portfolio.id}.children",
+              code = ValidationErrorCode.EmptyCollection,
+              message = s"RiskPortfolio '${portfolio.id}' has no children"
+            ))))
           )
           
           // Recursively simulate all children in parallel
@@ -290,14 +294,20 @@ object Simulator {
                     terms = ps.length
                   )
                   ZIO.succeed((m, params))
-                case Left(e) => ZIO.fail(ValidationFailed(List(s"Failed to fit Metalog for '${leaf.id}': ${e.message}")))
+                case Left(e) => ZIO.fail(ValidationFailed(List(ValidationError(
+                  field = s"riskLeaf.${leaf.id}.metalogFit",
+                  code = ValidationErrorCode.DistributionFitFailed,
+                  message = s"Failed to fit Metalog for '${leaf.id}': ${e.message}"
+                ))))
               }
             }
           
           case _ =>
-            ZIO.fail(ValidationFailed(List(
-              s"Expert mode requires percentiles and quantiles arrays with same length (≥2) for '${leaf.id}'"
-            )))
+            ZIO.fail(ValidationFailed(List(ValidationError(
+              field = s"riskLeaf.${leaf.id}.expertParams",
+              code = ValidationErrorCode.InvalidExpertOpinionParams,
+              message = s"Expert mode requires percentiles and quantiles arrays with same length (≥2) for '${leaf.id}'"
+            ))))
         }
       
       // Lognormal mode: use BCG 90% CI approach
@@ -312,17 +322,27 @@ object Simulator {
                   confidenceInterval = 0.90
                 )
                 ZIO.succeed((dist, params))
-              case Left(err) => ZIO.fail(ValidationFailed(List(s"Failed to create lognormal for '${leaf.id}': ${err.message}")))
+              case Left(err) => ZIO.fail(ValidationFailed(List(ValidationError(
+                field = s"riskLeaf.${leaf.id}.lognormalFit",
+                code = ValidationErrorCode.DistributionFitFailed,
+                message = s"Failed to create lognormal for '${leaf.id}': ${err.message}"
+              ))))
             }
           
           case _ =>
-            ZIO.fail(ValidationFailed(List(
-              s"Lognormal mode requires minLoss > 0 and minLoss < maxLoss for '${leaf.id}'"
-            )))
+            ZIO.fail(ValidationFailed(List(ValidationError(
+              field = s"riskLeaf.${leaf.id}.lognormalParams",
+              code = ValidationErrorCode.InvalidLognormalParams,
+              message = s"Lognormal mode requires minLoss > 0 and minLoss < maxLoss for '${leaf.id}'"
+            ))))
         }
       
       case other =>
-        ZIO.fail(ValidationFailed(List(s"Unsupported distribution type: $other for '${leaf.id}'")))
+        ZIO.fail(ValidationFailed(List(ValidationError(
+          field = s"riskLeaf.${leaf.id}.distributionType",
+          code = ValidationErrorCode.UnsupportedDistributionType,
+          message = s"Unsupported distribution type: $other for '${leaf.id}'"
+        ))))
     }
   }
 }

@@ -7,7 +7,7 @@ import io.github.iltotore.iron.constraint.all.*
 import com.risquanter.register.http.requests.CreateSimulationRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, Probability, DistributionType, NonNegativeLong}
-import com.risquanter.register.domain.errors.ValidationFailed
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 
@@ -97,7 +97,11 @@ class RiskTreeServiceLive private (
           // Load config
           treeOpt <- repo.getById(id)
           tree <- ZIO.fromOption(treeOpt).orElseFail(
-            ValidationFailed(List(s"RiskTree with id=$id not found"))
+            ValidationFailed(List(ValidationError(
+              field = "id",
+              code = com.risquanter.register.domain.errors.ValidationErrorCode.REQUIRED_FIELD,
+              message = s"RiskTree with id=$id not found"
+            )))
           )
           
           // Determine trials (use override or tree config or default)

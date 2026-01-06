@@ -132,7 +132,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = service(_.create(invalidRequest).flip)
 
         program.assert {
-          case ValidationFailed(errors) => errors.exists(e => e.toLowerCase.contains("name"))
+          case ValidationFailed(errors) => errors.exists(e => e.field.toLowerCase.contains("name"))
           case _                        => false
         }
       },
@@ -292,7 +292,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         } yield result
 
         program.assert {
-          case ValidationFailed(errors) => errors.exists(_.toLowerCase.contains("depth"))
+          case ValidationFailed(errors) => errors.exists(e => e.field.toLowerCase.contains("depth") || e.message.toLowerCase.contains("depth"))
           case _                        => false
         }
       },

@@ -20,16 +20,4 @@ final case class ErrorDetail(
 
 object ErrorDetail {
   given codec: JsonCodec[ErrorDetail] = DeriveJsonCodec.gen[ErrorDetail]
-  
-  /** Extract field name from error message if present */
-  def extractFieldFromMessage(message: String): String =
-    // Try to extract field name from patterns like "[fieldName]" or "fieldName:" or "fieldName failed"
-    val bracketPattern = "\\[([^\\]]+)\\]".r
-    val colonPattern = "^([a-zA-Z_][a-zA-Z0-9_.]*)\\s*:".r
-    val failedPattern = "([a-zA-Z_][a-zA-Z0-9_.]*)\\s+failed".r
-    
-    bracketPattern.findFirstMatchIn(message).map(_.group(1))
-      .orElse(colonPattern.findFirstMatchIn(message).map(_.group(1)))
-      .orElse(failedPattern.findFirstMatchIn(message).map(_.group(1)))
-      .getOrElse("unknown")
 }

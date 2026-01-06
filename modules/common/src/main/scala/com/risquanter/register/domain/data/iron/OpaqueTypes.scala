@@ -46,7 +46,7 @@ object SafeName:
   
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[String], SafeName] = 
-    ValidationUtil.refineName(s)
+    ValidationUtil.refineName(s).left.map(_.map(_.message))
 
 // Opaque type for emails
 object Email:
@@ -61,7 +61,7 @@ object Email:
   
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[String], Email] = 
-    ValidationUtil.refineEmail(s)
+    ValidationUtil.refineEmail(s).left.map(_.map(_.message))
 
 // Opaque type for URLs
 object Url:
@@ -76,7 +76,7 @@ object Url:
   
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[String], Url] = 
-    ValidationUtil.refineUrl(s)
+    ValidationUtil.refineUrl(s).left.map(_.map(_.message))
 
 // SafeId: Alphanumeric + hyphen/underscore, 3-30 chars (risk/portfolio identifiers)
 // Valid examples: "cyber-attack", "ops_risk_001", "IT-RISK"
@@ -95,4 +95,4 @@ object SafeId:
   
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[String], SafeId] =
-    ValidationUtil.refineId(s)
+    ValidationUtil.refineId(s).left.map(_.map(_.message))

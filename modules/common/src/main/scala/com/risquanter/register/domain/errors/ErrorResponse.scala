@@ -40,21 +40,19 @@ object ErrorResponse {
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
   }
 
-  def makeValidationResponse(errorList: List[String], domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeValidationResponse(errors: List[ValidationError], domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = "Domain validation error"
     val statusCode = StatusCode.BadRequest
-    val errors = errorList.map { em =>
-      val field = ErrorDetail.extractFieldFromMessage(em)
-      val code = ValidationErrorCode.categorize(em)
+    val errorDetails = errors.map { ve =>
       ErrorDetail(
         domain = domain,
-        field = field,
-        code = code,
-        message = em,
+        field = ve.field,
+        code = ve.code,
+        message = ve.message,
         requestId = requestId
       )
     }
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
+    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errorDetails)))
   }
 
   def makeDataConflictResponse(message: String, domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {

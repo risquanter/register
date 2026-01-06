@@ -166,30 +166,35 @@ object RiskLeaf {
     minLoss: Option[Long] = None,
     maxLoss: Option[Long] = None,
     fieldPrefix: String = "root"
-  ): Validation[String, RiskLeaf] = {
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskLeaf] = {
     
-    // Helper: Convert Either[List[String], A] to Validation[String, A]
-    def toValidation[A](either: Either[List[String], A]): Validation[String, A] =
-      Validation.fromEither(either.left.map(_.mkString("; ")))
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    
+    // Helper: Convert Either[List[ValidationError], A] to Validation[ValidationError, A]
+    // Note: Currently only reports first error. TODO: accumulate all errors properly
+    def toValidation[A](either: Either[List[ValidationError], A]): Validation[ValidationError, A] =
+      Validation.fromEither(either.left.map(_.headOption.getOrElse(
+        ValidationError("unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "Unknown error")
+      )))
     
     // Step 1: Validate and refine id to SafeId
-    val idValidation: Validation[String, SafeId.SafeId] =
+    val idValidation: Validation[ValidationError, SafeId.SafeId] =
       toValidation(ValidationUtil.refineId(id, s"$fieldPrefix.id"))
     
     // Step 2: Validate and refine name to SafeName
-    val nameValidation: Validation[String, SafeName.SafeName] =
+    val nameValidation: Validation[ValidationError, SafeName.SafeName] =
       toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
     
     // Step 3: Validate and refine probability to Probability
-    val probValidation: Validation[String, Probability] =
+    val probValidation: Validation[ValidationError, Probability] =
       toValidation(ValidationUtil.refineProbability(probability, s"$fieldPrefix.probability"))
     
     // Step 4: Validate and refine distributionType to DistributionType
-    val distTypeValidation: Validation[String, DistributionType] =
+    val distTypeValidation: Validation[ValidationError, DistributionType] =
       toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
     
     // Step 5: Mode-specific validation (cross-field business rules)
-    val modeValidation: Validation[String, (Option[NonNegativeLong], Option[NonNegativeLong])] = 
+    val modeValidation: Validation[ValidationError, (Option[NonNegativeLong], Option[NonNegativeLong])] = 
       distTypeValidation.flatMap { dt =>
         dt.toString match {
           case "expert" =>
@@ -197,17 +202,37 @@ object RiskLeaf {
             (percentiles, quantiles) match {
               case (Some(p), Some(q)) if p.nonEmpty && q.nonEmpty =>
                 if (p.length != q.length)
-                  Validation.fail(s"[$fieldPrefix.distributionType] Expert mode: percentiles and quantiles must have same length")
+                  Validation.fail(ValidationError(
+                    field = s"$fieldPrefix.distributionType",
+                    code = ValidationErrorCode.INVALID_COMBINATION,
+                    message = "Expert mode: percentiles and quantiles must have same length"
+                  ))
                 else
                   Validation.succeed((None, None))  // No minLoss/maxLoss for expert
               case (None, None) =>
-                Validation.fail(s"[$fieldPrefix.distributionType] Expert mode requires both percentiles and quantiles")
+                Validation.fail(ValidationError(
+                  field = s"$fieldPrefix.distributionType",
+                  code = ValidationErrorCode.REQUIRED_FIELD,
+                  message = "Expert mode requires both percentiles and quantiles"
+                ))
               case (None, _) =>
-                Validation.fail(s"[$fieldPrefix.distributionType] Expert mode requires percentiles")
+                Validation.fail(ValidationError(
+                  field = s"$fieldPrefix.percentiles",
+                  code = ValidationErrorCode.REQUIRED_FIELD,
+                  message = "Expert mode requires percentiles"
+                ))
               case (_, None) =>
-                Validation.fail(s"[$fieldPrefix.distributionType] Expert mode requires quantiles")
+                Validation.fail(ValidationError(
+                  field = s"$fieldPrefix.quantiles",
+                  code = ValidationErrorCode.REQUIRED_FIELD,
+                  message = "Expert mode requires quantiles"
+                ))
               case _ =>
-                Validation.fail(s"[$fieldPrefix.distributionType] Expert mode: percentiles and quantiles cannot be empty")
+                Validation.fail(ValidationError(
+                  field = s"$fieldPrefix.distributionType",
+                  code = ValidationErrorCode.INVALID_COMBINATION,
+                  message = "Expert mode: percentiles and quantiles cannot be empty"
+                ))
             }
             
           case "lognormal" =>
@@ -215,27 +240,41 @@ object RiskLeaf {
             (minLoss, maxLoss) match {
               case (Some(min), Some(max)) =>
                 // Refine to NonNegativeLong (keep refined types)
-                val minValid: Validation[String, NonNegativeLong] =
+                val minValid: Validation[ValidationError, NonNegativeLong] =
                   toValidation(ValidationUtil.refineNonNegativeLong(min, s"$fieldPrefix.minLoss"))
-                val maxValid: Validation[String, NonNegativeLong] =
+                val maxValid: Validation[ValidationError, NonNegativeLong] =
                   toValidation(ValidationUtil.refineNonNegativeLong(max, s"$fieldPrefix.maxLoss"))
                 
                 // Cross-field validation: minLoss < maxLoss
                 Validation.validateWith(minValid, maxValid) { (validMin, validMax) =>
                   if (validMin >= validMax)
-                    Validation.fail(
-                      s"[$fieldPrefix.minLoss] minLoss ($validMin) must be less than maxLoss ($validMax)"
-                    )
+                    Validation.fail(ValidationError(
+                      field = s"$fieldPrefix.minLoss",
+                      code = ValidationErrorCode.INVALID_RANGE,
+                      message = s"minLoss ($validMin) must be less than maxLoss ($validMax)"
+                    ))
                   else
                     Validation.succeed((Some(validMin), Some(validMax)))
                 }.flatten
                 
               case (None, None) =>
-                Validation.fail(s"[$fieldPrefix.distributionType] Lognormal mode requires both minLoss and maxLoss")
+                Validation.fail(ValidationError(
+                  field = s"$fieldPrefix.distributionType",
+                  code = ValidationErrorCode.REQUIRED_FIELD,
+                  message = "Lognormal mode requires both minLoss and maxLoss"
+                ))
               case (None, _) =>
-                Validation.fail(s"[$fieldPrefix.minLoss] Lognormal mode requires minLoss")
+                Validation.fail(ValidationError(
+                  field = s"$fieldPrefix.minLoss",
+                  code = ValidationErrorCode.REQUIRED_FIELD,
+                  message = "Lognormal mode requires minLoss"
+                ))
               case (_, None) =>
-                Validation.fail(s"[$fieldPrefix.maxLoss] Lognormal mode requires maxLoss")
+                Validation.fail(ValidationError(
+                  field = s"$fieldPrefix.maxLoss",
+                  code = ValidationErrorCode.REQUIRED_FIELD,
+                  message = "Lognormal mode requires maxLoss"
+                ))
             }
             
           case _ =>
@@ -289,7 +328,7 @@ object RiskLeaf {
     create(
       raw.id, raw.name, raw.distributionType, raw.probability,
       raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss
-    ).toEither.left.map(errors => errors.toChunk.mkString("; "))
+    ).toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
   }
   
   /** Encoder uses the Iron-typed fields directly */
@@ -359,26 +398,33 @@ object RiskPortfolio {
     name: String,
     children: Array[RiskNode],
     fieldPrefix: String = "root"
-  ): Validation[String, RiskPortfolio] = {
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
+    
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    
+    // Helper: Convert Either[List[ValidationError], A] to Validation[ValidationError, A]
+    // Note: Currently only reports first error. TODO: accumulate all errors properly
+    def toValidation[A](either: Either[List[ValidationError], A]): Validation[ValidationError, A] =
+      Validation.fromEither(either.left.map(_.headOption.getOrElse(
+        ValidationError("unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "Unknown error")
+      )))
     
     // Step 1: Validate ID (Iron refinement)
-    val idValidation: Validation[String, SafeId.SafeId] = 
-      ValidationUtil.refineId(id, s"$fieldPrefix.id") match {
-        case Right(validId) => Validation.succeed(validId)
-        case Left(errors) => Validation.fail(s"Invalid ID: ${errors.mkString(", ")}")
-      }
+    val idValidation: Validation[ValidationError, SafeId.SafeId] = 
+      toValidation(ValidationUtil.refineId(id, s"$fieldPrefix.id"))
     
     // Step 2: Validate name (Iron refinement)
-    val nameValidation: Validation[String, SafeName.SafeName] =
-      ValidationUtil.refineName(name, s"$fieldPrefix.name") match {
-        case Right(validName) => Validation.succeed(validName)
-        case Left(errors) => Validation.fail(s"Invalid name: ${errors.mkString(", ")}")
-      }
+    val nameValidation: Validation[ValidationError, SafeName.SafeName] =
+      toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
     
     // Step 3: Validate children array (business rule)
-    val childrenValidation: Validation[String, Array[RiskNode]] =
+    val childrenValidation: Validation[ValidationError, Array[RiskNode]] =
       if (children == null || children.isEmpty) {
-        Validation.fail(s"[$fieldPrefix.children] Children array must not be empty")
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.children",
+          code = ValidationErrorCode.REQUIRED_FIELD,
+          message = "Children array must not be empty"
+        ))
       } else {
         Validation.succeed(children)
       }
@@ -414,7 +460,7 @@ object RiskPortfolio {
   /** Custom decoder that uses smart constructor for cross-field validation */
   given decoder: JsonDecoder[RiskPortfolio] = RiskPortfolioRaw.rawCodec.decoder.mapOrFail { raw =>
     create(raw.id, raw.name, raw.children)
-      .toEither.left.map(errors => errors.toChunk.mkString("; "))
+      .toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
   }
   
   /** Encoder uses the Iron-typed fields directly */

@@ -4,6 +4,7 @@ import zio.json.{JsonCodec, DeriveJsonCodec}
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.{RiskTree, RiskNode}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil}
+import com.risquanter.register.domain.errors.ValidationError
 import io.github.iltotore.iron.*
 
 /** Request DTO for creating a new risk tree
@@ -39,10 +40,19 @@ object CreateSimulationRequest {
    * 
    * @return Validation with accumulated errors for name/nTrials, or validated tuple
    */
-  def toDomain(req: CreateSimulationRequest): Validation[String, (SafeName.SafeName, Int, RiskNode)] = {
-    // Helper to convert Either to Validation
-    def toValidation[A](either: Either[List[String], A]): Validation[String, A] =
-      Validation.fromEither(either.left.map(_.mkString("; ")))
+  def toDomain(req: CreateSimulationRequest): Validation[ValidationError, (SafeName.SafeName, Int, RiskNode)] = {
+    import zio.NonEmptyChunk
+    
+    // Helper to convert Either[List[ValidationError], A] to Validation[ValidationError, A]
+    def toValidation[A](either: Either[List[ValidationError], A]): Validation[ValidationError, A] =
+      either match {
+        case Right(a) => Validation.succeed(a)
+        case Left(errors) => 
+          errors match {
+            case head :: tail => Validation.failNonEmptyChunk(NonEmptyChunk(head, tail*))
+            case Nil => Validation.succeed(???) // Impossible: validation errors always have at least one
+          }
+      }
     
     // Validate request-level fields (RiskNode already validated during JSON parsing)
     val nameV = toValidation(ValidationUtil.refineName(req.name))
