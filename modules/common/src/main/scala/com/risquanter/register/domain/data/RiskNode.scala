@@ -327,7 +327,8 @@ object RiskLeaf {
   given decoder: JsonDecoder[RiskLeaf] = RiskLeafRaw.rawCodec.decoder.mapOrFail { raw =>
     create(
       raw.id, raw.name, raw.distributionType, raw.probability,
-      raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss
+      raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss,
+      fieldPrefix = s"riskLeaf[id=${raw.id}]"
     ).toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
   }
   
@@ -459,7 +460,7 @@ object RiskPortfolio {
   
   /** Custom decoder that uses smart constructor for cross-field validation */
   given decoder: JsonDecoder[RiskPortfolio] = RiskPortfolioRaw.rawCodec.decoder.mapOrFail { raw =>
-    create(raw.id, raw.name, raw.children)
+    create(raw.id, raw.name, raw.children, fieldPrefix = s"riskPortfolio[id=${raw.id}]")
       .toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
   }
   

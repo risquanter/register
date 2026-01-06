@@ -55,8 +55,8 @@ object CreateSimulationRequest {
       }
     
     // Validate request-level fields (RiskNode already validated during JSON parsing)
-    val nameV = toValidation(ValidationUtil.refineName(req.name))
-    val trialsV = toValidation(ValidationUtil.refinePositiveInt(req.nTrials, "nTrials"))
+    val nameV = toValidation(ValidationUtil.refineName(req.name, "request.name"))
+    val trialsV = toValidation(ValidationUtil.refinePositiveInt(req.nTrials, "request.nTrials"))
       .map(_ => req.nTrials)
     
     // Combine validations - accumulates name/nTrials errors
