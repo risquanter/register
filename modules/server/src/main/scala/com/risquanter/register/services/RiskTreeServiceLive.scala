@@ -4,7 +4,7 @@ import zio.*
 import zio.prelude.Validation
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import com.risquanter.register.http.requests.{CreateSimulationRequest, RiskDefinition}
+import com.risquanter.register.http.requests.CreateSimulationRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.errors.ValidationFailed
@@ -18,21 +18,25 @@ class RiskTreeServiceLive private (
   // Config CRUD - only persist, no execution
   override def create(req: CreateSimulationRequest): Task[RiskTree] = {
     for {
-      // Validate request
-      _ <- validateRequest(req)
+      // Validate nTrials (positive integer)
+      _ <- ZIO.fromEither(
+        ValidationUtil.refinePositiveInt(req.nTrials, "nTrials")
+          .left.map(errors => ValidationFailed(errors))
+      )
       
-      // Convert to domain model (already validated, safe to use refineUnsafe)
-      safeName = SafeName.SafeName(req.name.refineUnsafe)
-      
-      // Build RiskNode tree from flat risks array (for now)
-      root <- buildRiskNodeFromRequest(req)
+      // Convert name to SafeName
+      safeName <- ZIO.fromEither(
+        ValidationUtil.refineName(req.name)
+          .left.map(errors => ValidationFailed(errors))
+      )
       
       // Create RiskTree entity (id will be assigned by repo)
+      // Note: req.root is already validated by smart constructors during JSON deserialization
       riskTree = RiskTree(
         id = 0L.refineUnsafe, // repo will assign
         name = safeName,
-        nTrials = req.nTrials, // nTrials is just Int, not refined
-        root = root
+        nTrials = req.nTrials,
+        root = req.root
       )
       
       // Persist
@@ -42,17 +46,22 @@ class RiskTreeServiceLive private (
   
   override def update(id: Long, req: CreateSimulationRequest): Task[RiskTree] = {
     for {
-      _ <- validateRequest(req)
+      // Validate nTrials (positive integer)
+      _ <- ZIO.fromEither(
+        ValidationUtil.refinePositiveInt(req.nTrials, "nTrials")
+          .left.map(errors => ValidationFailed(errors))
+      )
       
-      // Convert to domain model (already validated, safe to use refineUnsafe)
-      safeName = SafeName.SafeName(req.name.refineUnsafe)
-      
-      root <- buildRiskNodeFromRequest(req)
+      // Convert name to SafeName
+      safeName <- ZIO.fromEither(
+        ValidationUtil.refineName(req.name)
+          .left.map(errors => ValidationFailed(errors))
+      )
       
       updated <- repo.update(id, tree => tree.copy(
         name = safeName,
         nTrials = req.nTrials,
-        root = root
+        root = req.root
       ))
     } yield updated
   }
@@ -116,120 +125,6 @@ class RiskTreeServiceLive private (
           // Convert result to LEC data with depth
           lec <- convertResultToLEC(tree, result, clampedDepth: Int, finalProvenance)
         } yield lec
-    }
-  }
-  
-  // Helper: Validate request
-  private def validateRequest(req: CreateSimulationRequest): Task[Unit] = {
-    val errors = collection.mutable.ArrayBuffer[String]()
-    
-    // Validate name using Iron
-    ValidationUtil.refineName(req.name) match {
-      case Left(errs) => errors ++= errs
-      case Right(_) => // Valid
-    }
-    
-    // Validate nTrials using Iron (must be positive)
-    ValidationUtil.refinePositiveInt(req.nTrials, "nTrials") match {
-      case Left(errs) => errors ++= errs
-      case Right(_) => // Valid
-    }
-    
-    // Must have either root or risks (not both, not neither)
-    (req.root, req.risks) match {
-      case (None, None) =>
-        errors += "Must provide either 'root' (hierarchical) or 'risks' (flat array)"
-      case (Some(_), Some(_)) =>
-        errors += "Cannot provide both 'root' and 'risks' - use one format only"
-      case _ => // Valid: exactly one is provided
-    }
-    
-    // Validate hierarchical root if provided
-    // NOTE: Validation is redundant - smart constructors already validate
-    // TODO Step 3.1: Remove validateRequest entirely, use smart constructors directly
-    req.root.foreach { rootNode =>
-      // validateRiskNode(rootNode, errors) // REMOVED: redundant validation
-    }
-    
-    // Validate flat risks array if provided
-    // NOTE: Validation is redundant - will use smart constructors when building nodes
-    // TODO Step 3.1: Remove validateRequest entirely
-    req.risks.foreach { risksArray =>
-      if (risksArray.isEmpty) {
-        errors += "risks array cannot be empty"
-      }
-    }
-    
-    if (errors.nonEmpty) {
-      ZIO.fail(ValidationFailed(errors.toList))
-    } else {
-      ZIO.unit
-    }
-  }
-  
-  
-  /** Generate deterministic ID from name for flat format.
-    * 
-    * Flat format is designed for convenience - users provide names only.
-    * We generate IDs automatically to satisfy domain model requirements.
-    * 
-    * Pattern: Sanitize name + append index for uniqueness
-    * Example: "Test Risk" with index 0 → "test-risk-0"
-    * 
-    * @param name Risk name from user
-    * @param index Position in array (ensures uniqueness)
-    * @return Valid SafeId-compliant identifier
-    */
-  private def generateIdFromName(name: String, index: Int): String = {
-    val sanitized = name
-      .toLowerCase
-      .replaceAll("[^a-z0-9_-]", "-")  // Replace invalid chars with hyphen
-      .replaceAll("-+", "-")            // Collapse multiple hyphens
-      .replaceAll("^-|-$", "")          // Remove leading/trailing hyphens
-      .take(25)                         // Leave room for suffix
-    
-    // Append index for guaranteed uniqueness within request
-    s"$sanitized-$index"
-  }
-  
-  // Helper: Build RiskNode from request (supports both hierarchical and flat)
-  private def buildRiskNodeFromRequest(req: CreateSimulationRequest): Task[RiskNode] = {
-    req.root match {
-      case Some(node) =>
-        // Hierarchical format - use directly
-        ZIO.succeed(node)
-        
-      case None =>
-        // Flat format - convert to portfolio using smart constructors
-        val risks = req.risks.getOrElse(Array.empty[RiskDefinition])
-        
-        // Build leaves using create() smart constructor
-        // Generate IDs from names since flat format is designed to be ID-free
-        val leavesTask: Task[Array[RiskNode]] = ZIO.foreach(risks.zipWithIndex) { case (risk, idx) =>
-          ZIO.fromEither(
-            RiskLeaf.create(
-              id = generateIdFromName(risk.name, idx),  // Auto-generate ID for convenience
-              name = risk.name,
-              distributionType = risk.distributionType,
-              probability = risk.probability,
-              percentiles = risk.percentiles,
-              quantiles = risk.quantiles,
-              minLoss = risk.minLoss,
-              maxLoss = risk.maxLoss
-            ).toEitherWith(errors => ValidationFailed(errors.toList))
-          ).map(leaf => leaf: RiskNode)
-        }
-        
-        // Build root portfolio using create() smart constructor
-        leavesTask.flatMap { leaves =>
-          ZIO.fromEither(
-            RiskPortfolio.create(
-              id = "root",
-              name = req.name,
-              children = leaves
-            ).toEitherWith(errors => ValidationFailed(errors.toList))
-          )
-        }
     }
   }
   

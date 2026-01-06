@@ -5,7 +5,7 @@ import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, SimulationExecutionService}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.http.requests.{CreateSimulationRequest, RiskDefinition}
+import com.risquanter.register.http.requests.{CreateSimulationRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.syntax.* // For .assert extension method
 import io.github.iltotore.iron.*
@@ -66,28 +66,28 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val hierarchicalRequest = CreateSimulationRequest(
           name = "Ops Risk Portfolio",
           nTrials = 1000,
-          root = Some(RiskPortfolio.unsafeApply(
+          root = RiskPortfolio.create(
             id = "root",
             name = "Total Operational Risk",
             children = Array(
-              RiskLeaf.unsafeApply(
+              RiskLeaf.create(
                 id = "cyber",
                 name = "Cyber Attack",
                 distributionType = "lognormal",
                 probability = 0.25,
                 minLoss = Some(1000L),
                 maxLoss = Some(50000L)
-              ),
-              RiskLeaf.unsafeApply(
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: cyber")),
+              RiskLeaf.create(
                 id = "breach",
                 name = "Data Breach",
                 distributionType = "lognormal",
                 probability = 0.15,
                 minLoss = Some(500L),
                 maxLoss = Some(25000L)
-              )
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: breach"))
             )
-          ))
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
         )
 
         val program = service(_.create(hierarchicalRequest))
@@ -103,20 +103,20 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val hierarchicalRequest = CreateSimulationRequest(
           name = "Depth Test",
           nTrials = 1000,
-          root = Some(RiskPortfolio.unsafeApply(
+          root = RiskPortfolio.create(
             id = "root",
             name = "Root",
             children = Array(
-              RiskLeaf.unsafeApply(
+              RiskLeaf.create(
                 id = "child1",
                 name = "Child 1",
                 distributionType = "lognormal",
                 probability = 0.5,
                 minLoss = Some(1000L),
                 maxLoss = Some(10000L)
-              )
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child1"))
             )
-          ))
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
         )
 
         val program = for {
@@ -137,28 +137,28 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val hierarchicalRequest = CreateSimulationRequest(
           name = "Depth Test",
           nTrials = 1000,
-          root = Some(RiskPortfolio.unsafeApply(
+          root = RiskPortfolio.create(
             id = "root",
             name = "Root",
             children = Array(
-              RiskLeaf.unsafeApply(
+              RiskLeaf.create(
                 id = "child1",
                 name = "Child 1",
                 distributionType = "lognormal",
                 probability = 0.5,
                 minLoss = Some(1000L),
                 maxLoss = Some(10000L)
-              ),
-              RiskLeaf.unsafeApply(
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child1")),
+              RiskLeaf.create(
                 id = "child2",
                 name = "Child 2",
                 distributionType = "lognormal",
                 probability = 0.6,
                 minLoss = Some(2000L),
                 maxLoss = Some(15000L)
-              )
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child2"))
             )
-          ))
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
         )
 
         val program = for {
@@ -181,20 +181,20 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val hierarchicalRequest = CreateSimulationRequest(
           name = "Depth Test",
           nTrials = 1000,
-          root = Some(RiskPortfolio.unsafeApply(
+          root = RiskPortfolio.create(
             id = "root",
             name = "Root",
             children = Array(
-              RiskLeaf.unsafeApply(
+              RiskLeaf.create(
                 id = "child1",
                 name = "Child 1",
                 distributionType = "lognormal",
                 probability = 0.5,
                 minLoss = Some(1000L),
                 maxLoss = Some(10000L)
-              )
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child1"))
             )
-          ))
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
         )
 
         val program = for {
@@ -215,22 +215,21 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("nTrials override")(
       test("query parameter overrides default nTrials") {
-        val flatRequest = CreateSimulationRequest(
+        val hierarchicalRequest = CreateSimulationRequest(
           name = "Test Tree",
           nTrials = 1000,
-          risks = Some(Array(
-            RiskDefinition(
-              name = "Test Risk",
-              distributionType = "lognormal",
-              probability = 0.5,
-              minLoss = Some(1000L),
-              maxLoss = Some(10000L)
-            )
-          ))
+          root = RiskLeaf.create(
+            id = "test-risk",
+            name = "Test Risk",
+            distributionType = "lognormal",
+            probability = 0.5,
+            minLoss = Some(1000L),
+            maxLoss = Some(10000L)
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
         )
 
         val program = for {
-          tree <- service(_.create(flatRequest))
+          tree <- service(_.create(hierarchicalRequest))
           result <- service(_.computeLEC(tree.id, Some(10000), 1, depth = 0))
         } yield result
 
@@ -243,22 +242,21 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Get by ID")(
       test("returns tree metadata when exists") {
-        val flatRequest = CreateSimulationRequest(
+        val hierarchicalRequest = CreateSimulationRequest(
           name = "Test Tree",
           nTrials = 1000,
-          risks = Some(Array(
-            RiskDefinition(
-              name = "Test Risk",
-              distributionType = "lognormal",
-              probability = 0.5,
-              minLoss = Some(1000L),
-              maxLoss = Some(10000L)
-            )
-          ))
+          root = RiskLeaf.create(
+            id = "test-risk",
+            name = "Test Risk",
+            distributionType = "lognormal",
+            probability = 0.5,
+            minLoss = Some(1000L),
+            maxLoss = Some(10000L)
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
         )
 
         val program = for {
-          tree <- service(_.create(flatRequest))
+          tree <- service(_.create(hierarchicalRequest))
           result <- service(_.getById(tree.id))
         } yield result
 

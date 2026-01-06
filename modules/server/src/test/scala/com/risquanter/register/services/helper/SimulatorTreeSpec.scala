@@ -11,29 +11,29 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
     suite("Simulator.simulateTree")(
       test("simulates simple 2-leaf portfolio") {
         // Create a simple portfolio with 2 risks
-        val cyberRisk = RiskLeaf.unsafeApply(
+        val cyberRisk = RiskLeaf.create(
           id = "cyber",
           name = "Cyber Attack",
           distributionType = "lognormal",
           probability = 0.25,
           minLoss = Some(1000L),  // $1B to $50B
           maxLoss = Some(50000L)
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: cyberRisk"))
         
-        val supplyChainRisk = RiskLeaf.unsafeApply(
+        val supplyChainRisk = RiskLeaf.create(
           id = "supply-chain",
           name = "Supply Chain Disruption",
           distributionType = "lognormal",
           probability = 0.15,
           minLoss = Some(500L),   // $500M to $20B
           maxLoss = Some(20000L)
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: supplyChainRisk"))
         
-        val portfolio = RiskPortfolio.unsafeApply(
+        val portfolio = RiskPortfolio.create(
           id = "ops-risk",
           name = "Operational Risk",
           children = Array(cyberRisk, supplyChainRisk)
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: portfolio"))
         
         // Run simulation
         val program = Simulator.simulateTree(portfolio, nTrials = 1000, parallelism = 2)
@@ -57,14 +57,14 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
       },
       
       test("simulates single leaf risk") {
-        val singleRisk = RiskLeaf.unsafeApply(
+        val singleRisk = RiskLeaf.create(
           id = "cyber",
           name = "Cyber Attack",
           distributionType = "lognormal",
           probability = 0.25,
           minLoss = Some(1000L),
           maxLoss = Some(50000L)
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: singleRisk"))
         
         val program = Simulator.simulateTree(singleRisk, nTrials = 500, parallelism = 1)
         
@@ -86,29 +86,29 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
       test("aggregates child losses correctly in portfolio") {
         // Simple test: both risks with reasonable probability
         // Use lognormal mode which is simpler
-        val risk1 = RiskLeaf.unsafeApply(
+        val risk1 = RiskLeaf.create(
           id = "risk1",
           name = "Risk 1",
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(1000L),
           maxLoss = Some(5000L)
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: risk1"))
         
-        val risk2 = RiskLeaf.unsafeApply(
+        val risk2 = RiskLeaf.create(
           id = "risk2",
           name = "Risk 2",
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(2000L),
           maxLoss = Some(8000L)
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: risk2"))
         
-        val portfolio = RiskPortfolio.unsafeApply(
+        val portfolio = RiskPortfolio.create(
           id = "portfolio",
           name = "Test Portfolio",
           children = Array(risk1, risk2)
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: portfolio"))
         
         val program = Simulator.simulateTree(portfolio, nTrials = 300, parallelism = 2)
         

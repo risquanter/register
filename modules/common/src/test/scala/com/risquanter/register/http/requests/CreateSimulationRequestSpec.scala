@@ -7,22 +7,20 @@ import com.risquanter.register.domain.data.{RiskNode, RiskLeaf}
 object CreateSimulationRequestSpec extends ZIOSpecDefault {
 
   def spec = suite("CreateSimulationRequest")(
-    test("has JsonCodec for serialization - flat format") {
+    test("has JsonCodec for serialization - hierarchical format") {
+      val leaf = RiskLeaf.create(
+        id = "risk1",
+        name = "Risk1",
+        distributionType = "lognormal",
+        probability = 0.5,
+        minLoss = Some(1000L),
+        maxLoss = Some(50000L)
+      ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+
       val request = CreateSimulationRequest(
         name = "Risk Assessment",
         nTrials = 10000,
-        root = None,
-        risks = Some(Array(
-          RiskDefinition(
-            name = "Risk1",
-            distributionType = "lognormal",
-            probability = 0.5,
-            minLoss = Some(1000L),
-            maxLoss = Some(50000L),
-            percentiles = None,
-            quantiles = None
-          )
-        ))
+        root = leaf
       )
       
       val json = request.toJson
@@ -41,51 +39,24 @@ object CreateSimulationRequestSpec extends ZIOSpecDefault {
       assertTrue(
         result.isRight,
         result.map(_.name).contains("Test"),
-        result.map(_.nTrials).contains(5000),
-        result.map(_.root.isDefined).contains(true)
-      )
-    },
-    
-    test("uses plain types - no validation on deserialization") {
-      // This documents that validation happens AFTER deserialization
-      // Invalid values can be deserialized, then validated by service layer
-      
-      val json = """{"name":"","nTrials":-100}"""
-      val result = json.fromJson[CreateSimulationRequest]
-      
-      assertTrue(
-        result.isRight, // Deserializes successfully even with invalid values
-        result.map(_.name).contains("")
-      )
-    },
-    
-    test("optional fields default to None") {
-      val json = """{"name":"Simple","nTrials":10000}"""
-      val result = json.fromJson[CreateSimulationRequest]
-      
-      assertTrue(
-        result.isRight,
-        result.map(_.root.isEmpty).contains(true),
-        result.map(_.risks.isEmpty).contains(true)
+        result.map(_.nTrials).contains(5000)
       )
     },
     
     test("serializes to JSON correctly") {
+      val leaf = RiskLeaf.create(
+        id = "risk1",
+        name = "Risk1",
+        distributionType = "lognormal",
+        probability = 0.25,
+        minLoss = Some(500L),
+        maxLoss = Some(10000L)
+      ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+
       val request = CreateSimulationRequest(
         name = "Test Sim",
         nTrials = 10000,
-        root = None,
-        risks = Some(Array(
-          RiskDefinition(
-            name = "Risk1",
-            distributionType = "lognormal",
-            probability = 0.25,
-            minLoss = Some(500L),
-            maxLoss = Some(10000L),
-            percentiles = None,
-            quantiles = None
-          )
-        ))
+        root = leaf
       )
       
       val json = request.toJson
@@ -93,7 +64,7 @@ object CreateSimulationRequestSpec extends ZIOSpecDefault {
       assertTrue(
         json.contains("\"name\":\"Test Sim\""),
         json.contains("\"nTrials\":10000"),
-        json.contains("\"risks\":")
+        json.contains("\"root\":")
       )
     }
   )

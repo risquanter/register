@@ -361,6 +361,78 @@ object RiskLeafSpec extends ZIOSpecDefault {
           result.isFailure
         )
         // Note: Error accumulation verified by isFailure - Validation accumulates all errors
+      },
+      
+      test("accumulates all field validation errors and returns them") {
+        val result = RiskLeaf.create(
+          id = "x",                     // Too short (< 3 chars)
+          name = "",                    // Empty
+          distributionType = "invalid", // Not "expert" or "lognormal"
+          probability = 2.0,            // > 1.0
+          minLoss = Some(100L),
+          maxLoss = Some(1000L)
+        )
+        
+        result.toEither match {
+          case Left(errors) =>
+            val errorStr = errors.mkString("; ")
+            assertTrue(
+              errorStr.contains("id") || errorStr.contains("ID") || errorStr.contains("3"),
+              errorStr.toLowerCase.contains("name") || errorStr.contains("blank"),
+              errorStr.toLowerCase.contains("distribution") || errorStr.contains("expert") || errorStr.contains("lognormal"),
+              errorStr.toLowerCase.contains("prob") || errorStr.contains("1.0")
+            )
+          case Right(_) =>
+            assertTrue(false) // Should have failed
+        }
+      },
+      
+      test("accumulates cross-field validation errors with field errors") {
+        val result = RiskLeaf.create(
+          id = "",                      // Empty - invalid
+          name = "Valid Name",
+          distributionType = "lognormal",
+          probability = 1.5,            // > 1.0 - invalid
+          minLoss = Some(5000L),        // minLoss > maxLoss - cross-field error
+          maxLoss = Some(1000L)
+        )
+        
+        result.toEither match {
+          case Left(errors) =>
+            val errorStr = errors.mkString("; ")
+            assertTrue(
+              errors.length >= 3,  // At least 3 errors
+              errorStr.toLowerCase.contains("id") || errorStr.contains("blank") || errorStr.contains("empty"),
+              errorStr.toLowerCase.contains("prob"),
+              errorStr.contains("min") && errorStr.contains("max")
+            )
+          case Right(_) =>
+            assertTrue(false) // Should have failed
+        }
+      },
+      
+      test("accumulates mode-specific validation errors") {
+        // Expert mode without required fields
+        val result = RiskLeaf.create(
+          id = "x",                     // Too short
+          name = "",                    // Empty
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = None,           // Missing for expert mode
+          quantiles = None              // Missing for expert mode
+        )
+        
+        result.toEither match {
+          case Left(errors) =>
+            val errorStr = errors.mkString("; ")
+            assertTrue(
+              errors.length >= 3,  // id, name, and mode-specific errors
+              errorStr.toLowerCase.contains("percentile") || errorStr.toLowerCase.contains("quantile"),
+              errorStr.toLowerCase.contains("expert")
+            )
+          case Right(_) =>
+            assertTrue(false)
+        }
       }
     ),
     suite("Successful Construction Properties")(

@@ -7,7 +7,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
 
   // Helper: Create valid RiskLeaf for use as child
   private def createValidLeaf(id: String = "leaf-1", name: String = "Test Leaf"): RiskLeaf = {
-    RiskLeaf.unsafeApply(
+    RiskLeaf.create(
       id = id,
       name = name,
       distributionType = "lognormal",
@@ -16,7 +16,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
       quantiles = None,
       minLoss = Some(1000L),
       maxLoss = Some(50000L)
-    )
+    ).toEither.getOrElse(throw new RuntimeException(s"Invalid test data: $id"))
   }
 
   def spec = suite("RiskPortfolio Smart Constructor")(
@@ -55,11 +55,11 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
 
       test("accept valid nested portfolio (portfolio containing portfolio)") {
         val leaf = createValidLeaf()
-        val childPortfolio: RiskNode = RiskPortfolio.unsafeApply(
+        val childPortfolio: RiskNode = RiskPortfolio.create(
           id = "child-port",
           name = "Child Portfolio",
           children = Array[RiskNode](leaf)
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: childPortfolio"))
         val result = RiskPortfolio.create(
           id = "parent-port",
           name = "Parent Portfolio",
@@ -73,11 +73,11 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
 
       test("accept valid mixed children (leaves and portfolios)") {
         val leaf: RiskNode = createValidLeaf("leaf-1", "Leaf")
-        val childPortfolio: RiskNode = RiskPortfolio.unsafeApply(
+        val childPortfolio: RiskNode = RiskPortfolio.create(
           id = "child-port",
           name = "Child Portfolio",
           children = Array[RiskNode](createValidLeaf("leaf-2", "Nested Leaf"))
-        )
+        ).toEither.getOrElse(throw new RuntimeException("Invalid test data: childPortfolio"))
         val result = RiskPortfolio.create(
           id = "mixed-port",
           name = "Mixed Portfolio",
@@ -251,6 +251,68 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         )
 
         assertTrue(result.isFailure)
+      },
+      
+      test("accumulates all field validation errors and returns them") {
+        val result = RiskPortfolio.create(
+          id = "x",                    // Too short (< 3 chars)
+          name = "",                   // Empty
+          children = Array.empty[RiskNode]  // Empty - invalid
+        )
+        
+        result.toEither match {
+          case Left(errors) =>
+            val errorStr = errors.mkString("; ")
+            assertTrue(
+              errors.length >= 3,  // At least 3 errors (id, name, children)
+              errorStr.toLowerCase.contains("id") || errorStr.contains("3"),
+              errorStr.toLowerCase.contains("name") || errorStr.contains("blank"),
+              errorStr.toLowerCase.contains("children") || errorStr.contains("empty")
+            )
+          case Right(_) =>
+            assertTrue(false) // Should have failed
+        }
+      },
+      
+      test("accumulates ID and children validation errors") {
+        val result = RiskPortfolio.create(
+          id = "this-id-is-way-too-long-and-exceeds-thirty-characters",  // > 30 chars
+          name = "Valid Name",
+          children = null  // Null - invalid
+        )
+        
+        result.toEither match {
+          case Left(errors) =>
+            val errorStr = errors.mkString("; ")
+            assertTrue(
+              errors.length >= 2,
+              errorStr.toLowerCase.contains("id") || errorStr.contains("30"),
+              errorStr.toLowerCase.contains("children") || errorStr.toLowerCase.contains("null") || errorStr.contains("empty")
+            )
+          case Right(_) =>
+            assertTrue(false)
+        }
+      },
+      
+      test("accumulates invalid ID format and empty children errors") {
+        val result = RiskPortfolio.create(
+          id = "invalid id!",          // Contains spaces and special chars
+          name = "a" * 51,              // > 50 chars
+          children = Array.empty[RiskNode]
+        )
+        
+        result.toEither match {
+          case Left(errors) =>
+            val errorStr = errors.mkString("; ")
+            assertTrue(
+              errors.length >= 3,
+              errorStr.toLowerCase.contains("id") || errorStr.contains("alphanumeric"),
+              errorStr.toLowerCase.contains("name") || errorStr.contains("50"),
+              errorStr.toLowerCase.contains("children") || errorStr.contains("empty")
+            )
+          case Right(_) =>
+            assertTrue(false)
+        }
       }
     ),
 
