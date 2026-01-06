@@ -4,6 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
+import com.risquanter.register.domain.errors.ValidationError
 
 // Base refined type alias used for most short strings:
 type SafeShortStr = String :| (Not[Blank] & MaxLength[50])
@@ -45,8 +46,8 @@ object SafeName:
     def value: SafeShortStr = sn
   
   // Convenience constructor from plain String
-  def fromString(s: String): Either[List[String], SafeName] = 
-    ValidationUtil.refineName(s).left.map(_.map(_.message))
+  def fromString(s: String): Either[List[ValidationError], SafeName] = 
+    ValidationUtil.refineName(s)
 
 // Opaque type for emails
 object Email:
@@ -60,8 +61,8 @@ object Email:
     def value: ValidEmail = e
   
   // Convenience constructor from plain String
-  def fromString(s: String): Either[List[String], Email] = 
-    ValidationUtil.refineEmail(s).left.map(_.map(_.message))
+  def fromString(s: String): Either[List[ValidationError], Email] = 
+    ValidationUtil.refineEmail(s)
 
 // Opaque type for URLs
 object Url:
@@ -75,8 +76,8 @@ object Url:
     def value: ValidUrl = u
   
   // Convenience constructor from plain String
-  def fromString(s: String): Either[List[String], Url] = 
-    ValidationUtil.refineUrl(s).left.map(_.map(_.message))
+  def fromString(s: String): Either[List[ValidationError], Url] = 
+    ValidationUtil.refineUrl(s)
 
 // SafeId: Alphanumeric + hyphen/underscore, 3-30 chars (risk/portfolio identifiers)
 // Valid examples: "cyber-attack", "ops_risk_001", "IT-RISK"
@@ -94,5 +95,5 @@ object SafeId:
     def value: SafeIdStr = id
   
   // Convenience constructor from plain String
-  def fromString(s: String): Either[List[String], SafeId] =
-    ValidationUtil.refineId(s).left.map(_.map(_.message))
+  def fromString(s: String): Either[List[ValidationError], SafeId] =
+    ValidationUtil.refineId(s)

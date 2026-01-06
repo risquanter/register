@@ -9,7 +9,10 @@ object ErrorResponseSpec extends ZIOSpecDefault {
   def spec = suite("ErrorResponse")(
     suite("encode")(
       test("encodes ValidationFailed to BadRequest") {
-        val error = ValidationFailed(List("Name is required", "Email is invalid"))
+        val error = ValidationFailed(List(
+          ValidationError("name", ValidationErrorCode.REQUIRED_FIELD, "Name is required"),
+          ValidationError("email", ValidationErrorCode.INVALID_FORMAT, "Email is invalid")
+        ))
         val (status, response) = ErrorResponse.encode(error)
         
         assertTrue(
@@ -112,7 +115,10 @@ object ErrorResponseSpec extends ZIOSpecDefault {
     
     suite("makeValidationResponse")(
       test("creates proper validation error response") {
-        val errors = List("Field1 invalid", "Field2 required")
+        val errors = List(
+          ValidationError("field1", ValidationErrorCode.INVALID_FORMAT, "Field1 invalid"),
+          ValidationError("field2", ValidationErrorCode.REQUIRED_FIELD, "Field2 required")
+        )
         val (status, response) = ErrorResponse.makeValidationResponse(errors)
         
         assertTrue(

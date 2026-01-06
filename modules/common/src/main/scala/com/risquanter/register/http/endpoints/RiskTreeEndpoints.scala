@@ -3,7 +3,7 @@ package com.risquanter.register.http.endpoints
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
-import com.risquanter.register.http.requests.CreateSimulationRequest
+import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.SimulationResponse
 
 /** Tapir endpoint definitions for RiskTree API
@@ -27,7 +27,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .description("Create a new risk tree")
       .in("risk-trees")
       .post
-      .in(jsonBody[CreateSimulationRequest])
+      .in(jsonBody[RiskTreeDefinitionRequest])
       .out(jsonBody[SimulationResponse])
 
   val getAllEndpoint =

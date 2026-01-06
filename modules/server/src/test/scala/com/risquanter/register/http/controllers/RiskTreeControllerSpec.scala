@@ -5,7 +5,7 @@ import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, SimulationExecutionService}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.http.requests.{CreateSimulationRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.syntax.* // For .assert extension method
 import io.github.iltotore.iron.*
@@ -63,7 +63,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Hierarchical tree creation with discriminators")(
       test("POST with RiskPortfolio discriminator creates tree") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Ops Risk Portfolio",
           nTrials = 1000,
           root = RiskPortfolio.create(
@@ -100,7 +100,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Depth parameter")(
       test("depth=0 returns only root curve") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Depth Test",
           nTrials = 1000,
           root = RiskPortfolio.create(
@@ -134,7 +134,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       },
 
       test("depth=1 includes children curves") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Depth Test",
           nTrials = 1000,
           root = RiskPortfolio.create(
@@ -178,7 +178,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       },
 
       test("excessive depth is clamped") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Depth Test",
           nTrials = 1000,
           root = RiskPortfolio.create(
@@ -215,7 +215,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("nTrials override")(
       test("query parameter overrides default nTrials") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Test Tree",
           nTrials = 1000,
           root = RiskLeaf.create(
@@ -242,7 +242,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Get by ID")(
       test("returns tree metadata when exists") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Test Tree",
           nTrials = 1000,
           root = RiskLeaf.create(

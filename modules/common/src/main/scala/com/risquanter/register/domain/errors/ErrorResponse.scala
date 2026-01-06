@@ -27,7 +27,7 @@ object ErrorResponse {
     case _ => makeGeneralResponse()
   }
 
-  def makeGeneralResponse(domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeGeneralResponse(domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = "General server error, please check the logs..."
     val statusCode = StatusCode.InternalServerError
     val errors = List(ErrorDetail(
@@ -40,7 +40,7 @@ object ErrorResponse {
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
   }
 
-  def makeValidationResponse(errors: List[ValidationError], domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeValidationResponse(errors: List[ValidationError], domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = "Domain validation error"
     val statusCode = StatusCode.BadRequest
     val errorDetails = errors.map { ve =>
@@ -55,7 +55,7 @@ object ErrorResponse {
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errorDetails)))
   }
 
-  def makeDataConflictResponse(message: String, domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeDataConflictResponse(message: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val statusCode = StatusCode.Conflict
     val errors = List(ErrorDetail(
       domain = domain,
@@ -67,7 +67,7 @@ object ErrorResponse {
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
   }
 
-  def makeRepositoryFailureResponse(reason: String, domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeRepositoryFailureResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = "Repository operation failed"
     val statusCode = StatusCode.InternalServerError
     val errors = List(ErrorDetail(

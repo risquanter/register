@@ -4,7 +4,7 @@ import zio.*
 import zio.prelude.Validation
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import com.risquanter.register.http.requests.CreateSimulationRequest
+import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError}
@@ -18,11 +18,11 @@ class RiskTreeServiceLive private (
 ) extends RiskTreeService {
   
   // Config CRUD - only persist, no execution
-  override def create(req: CreateSimulationRequest): Task[RiskTree] = {
+  override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     for {
       // Use DTO toDomain method for comprehensive validation
       validated <- ZIO.fromEither(
-        CreateSimulationRequest.toDomain(req)
+        RiskTreeDefinitionRequest.toDomain(req)
           .toEither
           .left.map(errors => ValidationFailed(errors.toList))
       )
@@ -41,11 +41,11 @@ class RiskTreeServiceLive private (
     } yield persisted
   }
   
-  override def update(id: Long, req: CreateSimulationRequest): Task[RiskTree] = {
+  override def update(id: Long, req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     for {
       // Use DTO toDomain method for comprehensive validation
       validated <- ZIO.fromEither(
-        CreateSimulationRequest.toDomain(req)
+        RiskTreeDefinitionRequest.toDomain(req)
           .toEither
           .left.map(errors => ValidationFailed(errors.toList))
       )

@@ -177,7 +177,7 @@ object Simulator {
           _ <- ZIO.when(portfolio.children.isEmpty)(
             ZIO.fail(ValidationFailed(List(ValidationError(
               field = s"riskPortfolio.${portfolio.id}.children",
-              code = ValidationErrorCode.EmptyCollection,
+              code = ValidationErrorCode.EMPTY_COLLECTION,
               message = s"RiskPortfolio '${portfolio.id}' has no children"
             ))))
           )
@@ -296,7 +296,7 @@ object Simulator {
                   ZIO.succeed((m, params))
                 case Left(e) => ZIO.fail(ValidationFailed(List(ValidationError(
                   field = s"riskLeaf.${leaf.id}.metalogFit",
-                  code = ValidationErrorCode.DistributionFitFailed,
+                  code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
                   message = s"Failed to fit Metalog for '${leaf.id}': ${e.message}"
                 ))))
               }
@@ -305,7 +305,7 @@ object Simulator {
           case _ =>
             ZIO.fail(ValidationFailed(List(ValidationError(
               field = s"riskLeaf.${leaf.id}.expertParams",
-              code = ValidationErrorCode.InvalidExpertOpinionParams,
+              code = ValidationErrorCode.INVALID_EXPERT_PARAMS,
               message = s"Expert mode requires percentiles and quantiles arrays with same length (≥2) for '${leaf.id}'"
             ))))
         }
@@ -324,7 +324,7 @@ object Simulator {
                 ZIO.succeed((dist, params))
               case Left(err) => ZIO.fail(ValidationFailed(List(ValidationError(
                 field = s"riskLeaf.${leaf.id}.lognormalFit",
-                code = ValidationErrorCode.DistributionFitFailed,
+                code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
                 message = s"Failed to create lognormal for '${leaf.id}': ${err.message}"
               ))))
             }
@@ -332,7 +332,7 @@ object Simulator {
           case _ =>
             ZIO.fail(ValidationFailed(List(ValidationError(
               field = s"riskLeaf.${leaf.id}.lognormalParams",
-              code = ValidationErrorCode.InvalidLognormalParams,
+              code = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
               message = s"Lognormal mode requires minLoss > 0 and minLoss < maxLoss for '${leaf.id}'"
             ))))
         }
@@ -340,7 +340,7 @@ object Simulator {
       case other =>
         ZIO.fail(ValidationFailed(List(ValidationError(
           field = s"riskLeaf.${leaf.id}.distributionType",
-          code = ValidationErrorCode.UnsupportedDistributionType,
+          code = ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE,
           message = s"Unsupported distribution type: $other for '${leaf.id}'"
         ))))
     }

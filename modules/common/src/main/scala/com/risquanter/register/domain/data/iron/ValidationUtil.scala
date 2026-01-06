@@ -6,11 +6,29 @@ import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
 import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import zio.prelude.Validation
+import zio.NonEmptyChunk
 
 object ValidationUtil {
 
   // Helper: trim and safeguard against null values
   def nonEmpty(s: String): String = if (s == null) "" else s.trim
+
+  /** 
+   * Convert Either[List[ValidationError], A] to Validation[ValidationError, A]
+   * Preserves all errors by using NonEmptyChunk for proper error accumulation.
+   */
+  def toValidation[A](either: Either[List[ValidationError], A]): Validation[ValidationError, A] =
+    either match {
+      case Right(a) => Validation.succeed(a)
+      case Left(errors) => 
+        errors match {
+          case head :: tail => Validation.failNonEmptyChunk(NonEmptyChunk(head, tail*))
+          case Nil => 
+            // Should never happen - ValidationUtil methods always return at least one error
+            Validation.fail(ValidationError("unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "Unknown validation error"))
+        }
+    }
 
   // Refinement for name; using a maximum length of 50
   def refineName(value: String, fieldPath: String = "name"): Either[List[ValidationError], SafeName.SafeName] = {

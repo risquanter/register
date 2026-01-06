@@ -21,11 +21,11 @@ enum ValidationErrorCode(val code: String, val description: String):
   case DUPLICATE_VALUE extends ValidationErrorCode("DUPLICATE_VALUE", "Value must be unique")
   case DEPENDENCY_FAILED extends ValidationErrorCode("DEPENDENCY_FAILED", "Related field validation failed")
   case INVALID_COMBINATION extends ValidationErrorCode("INVALID_COMBINATION", "Field combination is invalid")
-  case EmptyCollection extends ValidationErrorCode("EMPTY_COLLECTION", "Collection must not be empty")
-  case DistributionFitFailed extends ValidationErrorCode("DISTRIBUTION_FIT_FAILED", "Distribution fitting failed")
-  case InvalidExpertOpinionParams extends ValidationErrorCode("INVALID_EXPERT_PARAMS", "Expert opinion parameters invalid")
-  case InvalidLognormalParams extends ValidationErrorCode("INVALID_LOGNORMAL_PARAMS", "Lognormal parameters invalid")
-  case UnsupportedDistributionType extends ValidationErrorCode("UNSUPPORTED_DISTRIBUTION_TYPE", "Distribution type not supported")
+  case EMPTY_COLLECTION extends ValidationErrorCode("EMPTY_COLLECTION", "Collection must not be empty")
+  case DISTRIBUTION_FIT_FAILED extends ValidationErrorCode("DISTRIBUTION_FIT_FAILED", "Distribution fitting failed")
+  case INVALID_EXPERT_PARAMS extends ValidationErrorCode("INVALID_EXPERT_PARAMS", "Expert opinion parameters invalid")
+  case INVALID_LOGNORMAL_PARAMS extends ValidationErrorCode("INVALID_LOGNORMAL_PARAMS", "Lognormal parameters invalid")
+  case UNSUPPORTED_DISTRIBUTION_TYPE extends ValidationErrorCode("UNSUPPORTED_DISTRIBUTION_TYPE", "Distribution type not supported")
 
 object ValidationErrorCode:
   given encoder: JsonEncoder[ValidationErrorCode] = 

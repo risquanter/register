@@ -169,13 +169,7 @@ object RiskLeaf {
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskLeaf] = {
     
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
-    
-    // Helper: Convert Either[List[ValidationError], A] to Validation[ValidationError, A]
-    // Note: Currently only reports first error. TODO: accumulate all errors properly
-    def toValidation[A](either: Either[List[ValidationError], A]): Validation[ValidationError, A] =
-      Validation.fromEither(either.left.map(_.headOption.getOrElse(
-        ValidationError("unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "Unknown error")
-      )))
+    import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
     
     // Step 1: Validate and refine id to SafeId
     val idValidation: Validation[ValidationError, SafeId.SafeId] =
@@ -402,13 +396,7 @@ object RiskPortfolio {
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
     
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
-    
-    // Helper: Convert Either[List[ValidationError], A] to Validation[ValidationError, A]
-    // Note: Currently only reports first error. TODO: accumulate all errors properly
-    def toValidation[A](either: Either[List[ValidationError], A]): Validation[ValidationError, A] =
-      Validation.fromEither(either.left.map(_.headOption.getOrElse(
-        ValidationError("unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "Unknown error")
-      )))
+    import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
     
     // Step 1: Validate ID (Iron refinement)
     val idValidation: Validation[ValidationError, SafeId.SafeId] = 

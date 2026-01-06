@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
 
-import com.risquanter.register.http.requests.{CreateSimulationRequest}
+import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -51,7 +51,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private val stubRepoLayer = ZLayer.fromFunction(() => makeStubRepo)
 
   // Valid request with hierarchical structure
-  private val validRequest = CreateSimulationRequest(
+  private val validRequest = RiskTreeDefinitionRequest(
     name = "Test Risk Tree",
     nTrials = 1000,
     root = RiskLeaf.create(
@@ -91,7 +91,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("create accepts hierarchical RiskNode structure") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Hierarchical Tree",
           nTrials = 1000,
           root = RiskPortfolio.create(
@@ -146,7 +146,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           minLoss = Some(1000L),
           maxLoss = Some(50000L)
         )
-        // create() returns Validation failure, which won't compile into CreateSimulationRequest
+        // create() returns Validation failure, which won't compile into RiskTreeDefinitionRequest
         // So we test this differently - verify the validation fails
         assertTrue(invalidRoot.toEither.isLeft)
       },
@@ -185,7 +185,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("computeLEC with depth=0 returns only root") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Depth Test Tree",
           nTrials = 1000,
           root = RiskPortfolio.create(
@@ -229,7 +229,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("computeLEC with depth=1 includes children") {
-        val hierarchicalRequest = CreateSimulationRequest(
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Depth 1 Test Tree",
           nTrials = 1000,
           root = RiskPortfolio.create(

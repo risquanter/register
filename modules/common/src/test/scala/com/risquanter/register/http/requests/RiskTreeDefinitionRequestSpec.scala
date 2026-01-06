@@ -4,9 +4,9 @@ import zio.test.*
 import zio.json.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf}
 
-object CreateSimulationRequestSpec extends ZIOSpecDefault {
+object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
 
-  def spec = suite("CreateSimulationRequest")(
+  def spec = suite("RiskTreeDefinitionRequest")(
     test("has JsonCodec for serialization - hierarchical format") {
       val leaf = RiskLeaf.create(
         id = "risk1",
@@ -17,14 +17,14 @@ object CreateSimulationRequestSpec extends ZIOSpecDefault {
         maxLoss = Some(50000L)
       ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
 
-      val request = CreateSimulationRequest(
+      val request = RiskTreeDefinitionRequest(
         name = "Risk Assessment",
         nTrials = 10000,
         root = leaf
       )
       
       val json = request.toJson
-      val decoded = json.fromJson[CreateSimulationRequest]
+      val decoded = json.fromJson[RiskTreeDefinitionRequest]
       
       assertTrue(
         decoded.isRight,
@@ -34,7 +34,7 @@ object CreateSimulationRequestSpec extends ZIOSpecDefault {
     
     test("can deserialize from JSON string - hierarchical format") {
       val json = """{"name":"Test","nTrials":5000,"root":{"RiskLeaf":{"id":"single-risk","name":"SingleRisk","distributionType":"lognormal","probability":0.5,"minLoss":100,"maxLoss":1000}}}"""
-      val result = json.fromJson[CreateSimulationRequest]
+      val result = json.fromJson[RiskTreeDefinitionRequest]
       
       assertTrue(
         result.isRight,
@@ -53,7 +53,7 @@ object CreateSimulationRequestSpec extends ZIOSpecDefault {
         maxLoss = Some(10000L)
       ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
 
-      val request = CreateSimulationRequest(
+      val request = RiskTreeDefinitionRequest(
         name = "Test Sim",
         nTrials = 10000,
         root = leaf

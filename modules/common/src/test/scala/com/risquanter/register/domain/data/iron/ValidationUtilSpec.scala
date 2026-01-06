@@ -27,7 +27,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineName("   ")
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.contains("failed constraint check"))
+          result.left.exists(_.head.message.contains("failed constraint check"))
         )
       },
       
@@ -46,7 +46,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineName(longName)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.contains("failed constraint check"))
+          result.left.exists(_.head.message.contains("failed constraint check"))
         )
       },
       
@@ -55,8 +55,8 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         assertTrue(
           result.isLeft &&
           result.left.exists(errors => 
-            errors.head.contains("Name") && 
-            errors.head.contains("failed constraint check")
+            errors.head.message.contains("Name") && 
+            errors.head.message.contains("failed constraint check")
           )
         )
       }
@@ -88,9 +88,9 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineEmail("notanemail")
         assertTrue(
           result.isLeft &&
-          result.left.exists((errors: List[String]) => 
-            errors.head.toLowerCase.contains("email") || 
-            errors.head.contains("@")
+          result.left.exists(errors => 
+            errors.head.message.toLowerCase.contains("email") || 
+            errors.head.message.contains("@")
           )
         )
       },
@@ -146,9 +146,9 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineUrl("notaurl")
         assertTrue(
           result.isLeft &&
-          result.left.exists((errors: List[String]) => 
-            errors.head.toLowerCase.contains("url") ||
-            errors.head.contains(".")
+          result.left.exists(errors => 
+            errors.head.message.toLowerCase.contains("url") ||
+            errors.head.message.contains(".")
           )
         )
       }
@@ -180,7 +180,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineNonNegativeLong(-5L, "quantity")
         assertTrue(
           result.isLeft &&
-          result.left.exists(errors => errors.head.contains("quantity"))
+          result.left.exists(errors => errors.head.field.contains("quantity"))
         )
       }
     ),
@@ -265,7 +265,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineShortOptText(Some("a" * 25), "category")
         assertTrue(
           result.isLeft &&
-          result.left.exists(errors => errors.head.contains("category"))
+          result.left.exists(errors => errors.head.field.contains("category"))
         )
       }
     ),

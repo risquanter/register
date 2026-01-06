@@ -1,7 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
-import com.risquanter.register.http.requests.CreateSimulationRequest
+import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC}
 
 /** Service layer for RiskTree business logic.
@@ -20,18 +20,18 @@ trait RiskTreeService {
   // Config CRUD (NO execution)
   // ========================================
   
-  /** Create risk tree configuration - persists tree structure only
-    * @param req Request containing tree structure
+  /** Create risk tree definition - persists tree structure only
+    * @param req Request containing tree definition
     * @return Persisted risk tree metadata (no LEC data)
     */
-  def create(req: CreateSimulationRequest): Task[RiskTree]
+  def create(req: RiskTreeDefinitionRequest): Task[RiskTree]
   
-  /** Update risk tree configuration - modifies tree structure only
+  /** Update risk tree definition - modifies tree structure only
     * @param id Risk tree ID
-    * @param req Updated tree structure
+    * @param req Updated tree definition
     * @return Updated risk tree metadata
     */
-  def update(id: Long, req: CreateSimulationRequest): Task[RiskTree]
+  def update(id: Long, req: RiskTreeDefinitionRequest): Task[RiskTree]
   
   /** Delete risk tree configuration
     * @param id Risk tree ID
