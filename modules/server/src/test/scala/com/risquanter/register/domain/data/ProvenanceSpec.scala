@@ -139,7 +139,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       test("simulateTree with includeProvenance=true captures metadata") {
         import com.risquanter.register.services.helper.Simulator
         
-        val leaf = RiskLeaf(
+        val leaf = RiskLeaf.unsafeApply(
           id = "test-risk",
           name = "Test Risk",
           distributionType = "lognormal",
@@ -162,7 +162,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       test("simulateTree with includeProvenance=false returns None") {
         import com.risquanter.register.services.helper.Simulator
         
-        val leaf = RiskLeaf(
+        val leaf = RiskLeaf.unsafeApply(
           id = "test-risk",
           name = "Test Risk",
           distributionType = "lognormal",
@@ -183,7 +183,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val riskId = "cyber-attack"
         val expectedEntityId = riskId.hashCode.toLong
         
-        val leaf = RiskLeaf(
+        val leaf = RiskLeaf.unsafeApply(
           id = riskId,
           name = "Cyber Attack",
           distributionType = "lognormal",
@@ -206,7 +206,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       test("provenance captures distribution parameters for lognormal") {
         import com.risquanter.register.services.helper.Simulator
         
-        val leaf = RiskLeaf(
+        val leaf = RiskLeaf.unsafeApply(
           id = "lognormal-risk",
           name = "Lognormal Risk",
           distributionType = "lognormal",
@@ -234,7 +234,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       test("provenance aggregates multiple node provenances in portfolio") {
         import com.risquanter.register.services.helper.Simulator
         
-        val risk1 = RiskLeaf(
+        val risk1 = RiskLeaf.unsafeApply(
           id = "risk1",
           name = "Risk 1",
           distributionType = "lognormal",
@@ -243,7 +243,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(5000L)
         )
         
-        val risk2 = RiskLeaf(
+        val risk2 = RiskLeaf.unsafeApply(
           id = "risk2",
           name = "Risk 2",
           distributionType = "lognormal",
@@ -252,7 +252,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(8000L)
         )
         
-        val portfolio = RiskPortfolio(
+        val portfolio = RiskPortfolio.unsafeApply(
           id = "portfolio",
           name = "Test Portfolio",
           children = Array(risk1, risk2)
@@ -274,7 +274,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       test("same provenance seeds produce identical results") {
         import com.risquanter.register.services.helper.Simulator
         
-        val leaf = RiskLeaf(
+        val leaf = RiskLeaf.unsafeApply(
           id = "deterministic-risk",
           name = "Deterministic Risk",
           distributionType = "lognormal",
@@ -300,7 +300,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       test("provenance contains all information for reconstruction") {
         import com.risquanter.register.services.helper.Simulator
         
-        val leaf = RiskLeaf(
+        val leaf = RiskLeaf.unsafeApply(
           id = "test-reconstruction",
           name = "Test Reconstruction",
           distributionType = "lognormal",

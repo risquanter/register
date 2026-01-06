@@ -1,6 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.Validation
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import com.risquanter.register.http.requests.{CreateSimulationRequest, RiskDefinition}
@@ -24,7 +25,7 @@ class RiskTreeServiceLive private (
       safeName = SafeName.SafeName(req.name.refineUnsafe)
       
       // Build RiskNode tree from flat risks array (for now)
-      root = buildRiskNodeFromRequest(req)
+      root <- buildRiskNodeFromRequest(req)
       
       // Create RiskTree entity (id will be assigned by repo)
       riskTree = RiskTree(
@@ -46,7 +47,7 @@ class RiskTreeServiceLive private (
       // Convert to domain model (already validated, safe to use refineUnsafe)
       safeName = SafeName.SafeName(req.name.refineUnsafe)
       
-      root = buildRiskNodeFromRequest(req)
+      root <- buildRiskNodeFromRequest(req)
       
       updated <- repo.update(id, tree => tree.copy(
         name = safeName,
@@ -144,18 +145,18 @@ class RiskTreeServiceLive private (
     }
     
     // Validate hierarchical root if provided
+    // NOTE: Validation is redundant - smart constructors already validate
+    // TODO Step 3.1: Remove validateRequest entirely, use smart constructors directly
     req.root.foreach { rootNode =>
-      validateRiskNode(rootNode, errors)
+      // validateRiskNode(rootNode, errors) // REMOVED: redundant validation
     }
     
     // Validate flat risks array if provided
+    // NOTE: Validation is redundant - will use smart constructors when building nodes
+    // TODO Step 3.1: Remove validateRequest entirely
     req.risks.foreach { risksArray =>
       if (risksArray.isEmpty) {
         errors += "risks array cannot be empty"
-      }
-      
-      risksArray.foreach { risk =>
-        validateRiskDefinition(risk, errors)
       }
     }
     
@@ -166,139 +167,69 @@ class RiskTreeServiceLive private (
     }
   }
   
-  // Helper: Validate RiskNode (hierarchical structure)
-  private def validateRiskNode(node: RiskNode, errors: collection.mutable.ArrayBuffer[String]): Unit = {
-    // Validate id
-    if (node.id.trim.isEmpty) {
-      errors += s"Risk node id cannot be empty"
-    }
-    
-    // Validate name
-    ValidationUtil.refineName(node.name) match {
-      case Left(errs) => errors ++= errs.map(err => s"Node '${node.id}': $err")
-      case Right(_) => // Valid
-    }
-    
-    node match {
-      case leaf: RiskLeaf =>
-        // Validate probability
-        ValidationUtil.refineProbability(leaf.probability) match {
-          case Left(errs) => errors ++= errs.map(err => s"Risk '${leaf.id}': $err")
-          case Right(_) => // Valid
-        }
-        
-        // Validate distribution type
-        ValidationUtil.refineDistributionType(leaf.distributionType) match {
-          case Left(errs) => errors ++= errs.map(err => s"Risk '${leaf.id}': $err")
-          case Right(distType) =>
-            // Validate mode-specific fields
-            if (distType == "expert") {
-              if (leaf.percentiles.isEmpty || leaf.quantiles.isEmpty) {
-                errors += s"Risk '${leaf.id}': Expert distribution requires percentiles and quantiles"
-              }
-            } else if (distType == "lognormal") {
-              if (leaf.minLoss.isEmpty || leaf.maxLoss.isEmpty) {
-                errors += s"Risk '${leaf.id}': Lognormal distribution requires minLoss and maxLoss"
-              } else {
-                // Validate minLoss and maxLoss are non-negative
-                leaf.minLoss.foreach { minL =>
-                  ValidationUtil.refineNonNegativeLong(minL, s"minLoss for '${leaf.id}'") match {
-                    case Left(errs) => errors ++= errs
-                    case Right(_) => // Valid
-                  }
-                }
-                leaf.maxLoss.foreach { maxL =>
-                  ValidationUtil.refineNonNegativeLong(maxL, s"maxLoss for '${leaf.id}'") match {
-                    case Left(errs) => errors ++= errs
-                    case Right(_) => // Valid
-                  }
-                }
-              }
-            }
-        }
-        
-      case portfolio: RiskPortfolio =>
-        if (portfolio.children.isEmpty) {
-          errors += s"Portfolio '${portfolio.id}' cannot have empty children array"
-        }
-        // Recursively validate children
-        portfolio.children.foreach(child => validateRiskNode(child, errors))
-    }
-  }
   
-  // Helper: Validate RiskDefinition (flat structure)
-  private def validateRiskDefinition(risk: RiskDefinition, errors: collection.mutable.ArrayBuffer[String]): Unit = {
-    // Validate name
-    ValidationUtil.refineName(risk.name) match {
-      case Left(errs) => errors ++= errs.map(err => s"Risk '${risk.name}': $err")
-      case Right(_) => // Valid
-    }
+  /** Generate deterministic ID from name for flat format.
+    * 
+    * Flat format is designed for convenience - users provide names only.
+    * We generate IDs automatically to satisfy domain model requirements.
+    * 
+    * Pattern: Sanitize name + append index for uniqueness
+    * Example: "Test Risk" with index 0 → "test-risk-0"
+    * 
+    * @param name Risk name from user
+    * @param index Position in array (ensures uniqueness)
+    * @return Valid SafeId-compliant identifier
+    */
+  private def generateIdFromName(name: String, index: Int): String = {
+    val sanitized = name
+      .toLowerCase
+      .replaceAll("[^a-z0-9_-]", "-")  // Replace invalid chars with hyphen
+      .replaceAll("-+", "-")            // Collapse multiple hyphens
+      .replaceAll("^-|-$", "")          // Remove leading/trailing hyphens
+      .take(25)                         // Leave room for suffix
     
-    // Validate probability
-    ValidationUtil.refineProbability(risk.probability) match {
-      case Left(errs) => errors ++= errs.map(err => s"Risk '${risk.name}': $err")
-      case Right(_) => // Valid
-    }
-    
-    // Validate distribution type and mode-specific fields
-    ValidationUtil.refineDistributionType(risk.distributionType) match {
-      case Left(errs) => errors ++= errs.map(err => s"Risk '${risk.name}': $err")
-      case Right(distType) =>
-        if (distType == "expert") {
-          if (risk.percentiles.isEmpty || risk.quantiles.isEmpty) {
-            errors += s"Risk '${risk.name}': Expert distribution requires percentiles and quantiles"
-          }
-        } else if (distType == "lognormal") {
-          if (risk.minLoss.isEmpty || risk.maxLoss.isEmpty) {
-            errors += s"Risk '${risk.name}': Lognormal distribution requires minLoss and maxLoss"
-          } else {
-            // Validate minLoss and maxLoss are non-negative
-            risk.minLoss.foreach { minL =>
-              ValidationUtil.refineNonNegativeLong(minL, s"minLoss for '${risk.name}'") match {
-                case Left(errs) => errors ++= errs
-                case Right(_) => // Valid
-              }
-            }
-            risk.maxLoss.foreach { maxL =>
-              ValidationUtil.refineNonNegativeLong(maxL, s"maxLoss for '${risk.name}'") match {
-                case Left(errs) => errors ++= errs
-                case Right(_) => // Valid
-              }
-            }
-          }
-        }
-    }
+    // Append index for guaranteed uniqueness within request
+    s"$sanitized-$index"
   }
   
   // Helper: Build RiskNode from request (supports both hierarchical and flat)
-  private def buildRiskNodeFromRequest(req: CreateSimulationRequest): RiskNode = {
+  private def buildRiskNodeFromRequest(req: CreateSimulationRequest): Task[RiskNode] = {
     req.root match {
       case Some(node) =>
         // Hierarchical format - use directly
-        node
+        ZIO.succeed(node)
         
       case None =>
-        // Flat format - convert to portfolio
+        // Flat format - convert to portfolio using smart constructors
         val risks = req.risks.getOrElse(Array.empty[RiskDefinition])
-        val leaves: Array[RiskNode] = risks.map { risk =>
-          RiskLeaf.unsafeApply(
-            id = risk.name,
-            name = risk.name,
-            distributionType = risk.distributionType,
-            probability = risk.probability,
-            percentiles = risk.percentiles,
-            quantiles = risk.quantiles,
-            minLoss = risk.minLoss,
-            maxLoss = risk.maxLoss
-          ): RiskNode
+        
+        // Build leaves using create() smart constructor
+        // Generate IDs from names since flat format is designed to be ID-free
+        val leavesTask: Task[Array[RiskNode]] = ZIO.foreach(risks.zipWithIndex) { case (risk, idx) =>
+          ZIO.fromEither(
+            RiskLeaf.create(
+              id = generateIdFromName(risk.name, idx),  // Auto-generate ID for convenience
+              name = risk.name,
+              distributionType = risk.distributionType,
+              probability = risk.probability,
+              percentiles = risk.percentiles,
+              quantiles = risk.quantiles,
+              minLoss = risk.minLoss,
+              maxLoss = risk.maxLoss
+            ).toEitherWith(errors => ValidationFailed(errors.toList))
+          ).map(leaf => leaf: RiskNode)
         }
         
-        // Wrap in root portfolio
-        RiskPortfolio(
-          id = "root",
-          name = req.name,
-          children = leaves
-        )
+        // Build root portfolio using create() smart constructor
+        leavesTask.flatMap { leaves =>
+          ZIO.fromEither(
+            RiskPortfolio.create(
+              id = "root",
+              name = req.name,
+              children = leaves
+            ).toEitherWith(errors => ValidationFailed(errors.toList))
+          )
+        }
     }
   }
   

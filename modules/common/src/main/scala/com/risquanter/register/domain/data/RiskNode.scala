@@ -1,6 +1,6 @@
 package com.risquanter.register.domain.data
 
-import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder}
+import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
 import sttp.tapir.Schema
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, NonNegativeLong}
 
@@ -54,14 +54,14 @@ object RiskNode {
   * - Lognormal (BCG): distributionType="lognormal", provide minLoss + maxLoss (80% CI)
   * 
   * Domain Model: Uses Iron refined types for type safety
-  * - _id: SafeId (3-30 alphanumeric chars + hyphen/underscore)
-  * - _name: SafeName (non-blank, max 50 chars)
+  * - safeId: SafeId (3-30 alphanumeric chars + hyphen/underscore)
+  * - safeName: SafeName (non-blank, max 50 chars)
   * - distributionType: DistributionType ("expert" or "lognormal")
   * - probability: Probability (0.0 < p < 1.0)
   * - minLoss/maxLoss: NonNegativeLong (>= 0)
   * 
-  * @param _id Unique identifier for this risk (must be unique within tree)
-  * @param _name Human-readable risk name
+  * @param safeId Unique identifier (Iron refined type)
+  * @param safeName Human-readable risk name (Iron refined type)
   * @param distributionType "expert" or "lognormal"
   * @param probability Risk occurrence probability [0.0, 1.0]
   * @param percentiles Expert opinion: percentiles [0.0, 1.0] (expert mode only)
@@ -70,8 +70,8 @@ object RiskNode {
   * @param maxLoss Lognormal: 80% CI upper bound in millions (lognormal mode only)
   */
 final case class RiskLeaf private (
-  _id: SafeId.SafeId,
-  _name: SafeName.SafeName,
+  @jsonField("id") safeId: SafeId.SafeId,
+  @jsonField("name") safeName: SafeName.SafeName,
   distributionType: DistributionType,
   probability: Probability,
   percentiles: Option[Array[Double]],
@@ -79,9 +79,9 @@ final case class RiskLeaf private (
   minLoss: Option[NonNegativeLong],
   maxLoss: Option[NonNegativeLong]
 ) extends RiskNode {
-  // Implement trait methods by extracting String values from Iron types
-  override def id: String = _id.value.toString
-  override def name: String = _name.value.toString
+  // Public API: Extract String values from Iron types
+  override def id: String = safeId.value.toString
+  override def name: String = safeName.value.toString
 }
 
 object RiskLeaf {
@@ -243,8 +243,8 @@ object RiskLeaf {
       val (validMinLoss, validMaxLoss) = minMaxTuple
       // All validations passed - construct with private constructor using Iron types
       new RiskLeaf(
-        _id = validId,
-        _name = validName,
+        safeId = validId,
+        safeName = validName,
         distributionType = validDistType,
         probability = validProb,
         percentiles = percentiles,
@@ -255,7 +255,7 @@ object RiskLeaf {
     }
   }
   
-  // JSON codec (TODO: Will need custom decoder using create() in next phase)
+  // JSON codec uses DeriveJsonCodec with field name mapping via custom given instances
   given codec: JsonCodec[RiskLeaf] = DeriveJsonCodec.gen[RiskLeaf]
 }
 
@@ -267,20 +267,117 @@ object RiskLeaf {
   * - Loss = sum of all children's losses per trial
   * - Can nest arbitrarily deep (typically 5-6 levels)
   * 
-  * @param id Unique identifier for this portfolio (must be unique within tree)
-  * @param name Human-readable portfolio name
+  * Domain Model: Uses Iron refined types for type safety
+  * - safeId: SafeId (3-30 alphanumeric chars + hyphen/underscore)
+  * - safeName: SafeName (non-blank, max 50 chars)
+  * - children: Array[RiskNode] (must be non-empty)
+  * 
+  * @param safeId Unique identifier (Iron refined type)
+  * @param safeName Human-readable portfolio name (Iron refined type)
   * @param children Array of child nodes (RiskLeaf or RiskPortfolio)
   */
-final case class RiskPortfolio(
-  id: String,
-  name: String,
+final case class RiskPortfolio private (
+  @jsonField("id") safeId: SafeId.SafeId,
+  @jsonField("name") safeName: SafeName.SafeName,
   children: Array[RiskNode]
-) extends RiskNode
+) extends RiskNode {
+  // Public API: Extract String values from Iron types
+  override def id: String = safeId.value.toString
+  override def name: String = safeName.value.toString
+}
 
 object RiskPortfolio {
+  import zio.prelude.Validation
+  import com.risquanter.register.domain.data.iron._
+  
+  // JSON encoders/decoders for Iron types (reuse from RiskLeaf)
+  given JsonEncoder[SafeId.SafeId] = JsonEncoder[String].contramap(_.value.toString)
+  given JsonEncoder[SafeName.SafeName] = JsonEncoder[String].contramap(_.value.toString)
+  
+  given JsonDecoder[SafeId.SafeId] = JsonDecoder[String].mapOrFail(s => 
+    SafeId.fromString(s).left.map(_.mkString(", "))
+  )
+  given JsonDecoder[SafeName.SafeName] = JsonDecoder[String].mapOrFail(s =>
+    SafeName.fromString(s).left.map(_.mkString(", "))
+  )
+  
   given codec: JsonCodec[RiskPortfolio] = DeriveJsonCodec.gen[RiskPortfolio]
+  
+  /** Smart constructor: Validates all fields and returns Validation.
+    * 
+    * Validation Rules:
+    * 1. ID must be valid SafeId (3-30 chars, alphanumeric + hyphen/underscore)
+    * 2. Name must be valid SafeName (non-blank, max 50 chars)
+    * 3. Children array must be non-empty
+    * 
+    * Returns:
+    * - Validation.succeed(RiskPortfolio) if all validations pass
+    * - Validation.fail(errors) if any validation fails (accumulates all errors)
+    */
+  def create(
+    id: String,
+    name: String,
+    children: Array[RiskNode]
+  ): Validation[String, RiskPortfolio] = {
+    
+    // Step 1: Validate ID (Iron refinement)
+    val idValidation: Validation[String, SafeId.SafeId] = 
+      ValidationUtil.refineId(id) match {
+        case Right(validId) => Validation.succeed(validId)
+        case Left(errors) => Validation.fail(s"Invalid ID: ${errors.mkString(", ")}")
+      }
+    
+    // Step 2: Validate name (Iron refinement)
+    val nameValidation: Validation[String, SafeName.SafeName] =
+      ValidationUtil.refineName(name) match {
+        case Right(validName) => Validation.succeed(validName)
+        case Left(errors) => Validation.fail(s"Invalid name: ${errors.mkString(", ")}")
+      }
+    
+    // Step 3: Validate children array (business rule)
+    val childrenValidation: Validation[String, Array[RiskNode]] =
+      if (children == null || children.isEmpty) {
+        Validation.fail("Children array must not be empty")
+      } else {
+        Validation.succeed(children)
+      }
+    
+    // Step 4: Combine all validations (parallel error accumulation)
+    Validation.validateWith(
+      idValidation,
+      nameValidation,
+      childrenValidation
+    ) { case (validId, validName, validChildren) =>
+      // All validations passed - construct with private constructor using Iron types
+      new RiskPortfolio(
+        safeId = validId,
+        safeName = validName,
+        children = validChildren
+      )
+    }
+  }
+  
+  /** Temporary backward compatibility method - bypasses validation.
+    * 
+    * WARNING: This method will be removed once service layer is refactored.
+    * Use create() for new code.
+    */
+  def unsafeApply(
+    id: String,
+    name: String,
+    children: Array[RiskNode]
+  ): RiskPortfolio = {
+    // Force refinement (throws on failure)
+    val validId = SafeId.fromString(id).getOrElse(
+      throw new IllegalArgumentException(s"Invalid ID: $id")
+    )
+    val validName = SafeName.fromString(name).getOrElse(
+      throw new IllegalArgumentException(s"Invalid name: $name")
+    )
+    new RiskPortfolio(safeId = validId, safeName = validName, children)
+  }
   
   /** Helper: Create a flat portfolio from legacy risk array */
   def fromFlatRisks(id: String, name: String, risks: Array[RiskNode]): RiskPortfolio =
-    RiskPortfolio(id, name, risks)
+    unsafeApply(id, name, risks)
 }

@@ -66,11 +66,11 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val hierarchicalRequest = CreateSimulationRequest(
           name = "Ops Risk Portfolio",
           nTrials = 1000,
-          root = Some(RiskPortfolio(
+          root = Some(RiskPortfolio.unsafeApply(
             id = "root",
             name = "Total Operational Risk",
             children = Array(
-              RiskLeaf(
+              RiskLeaf.unsafeApply(
                 id = "cyber",
                 name = "Cyber Attack",
                 distributionType = "lognormal",
@@ -78,7 +78,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
                 minLoss = Some(1000L),
                 maxLoss = Some(50000L)
               ),
-              RiskLeaf(
+              RiskLeaf.unsafeApply(
                 id = "breach",
                 name = "Data Breach",
                 distributionType = "lognormal",
@@ -103,11 +103,11 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val hierarchicalRequest = CreateSimulationRequest(
           name = "Depth Test",
           nTrials = 1000,
-          root = Some(RiskPortfolio(
+          root = Some(RiskPortfolio.unsafeApply(
             id = "root",
             name = "Root",
             children = Array(
-              RiskLeaf(
+              RiskLeaf.unsafeApply(
                 id = "child1",
                 name = "Child 1",
                 distributionType = "lognormal",
@@ -137,11 +137,11 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val hierarchicalRequest = CreateSimulationRequest(
           name = "Depth Test",
           nTrials = 1000,
-          root = Some(RiskPortfolio(
+          root = Some(RiskPortfolio.unsafeApply(
             id = "root",
             name = "Root",
             children = Array(
-              RiskLeaf(
+              RiskLeaf.unsafeApply(
                 id = "child1",
                 name = "Child 1",
                 distributionType = "lognormal",
@@ -149,7 +149,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
                 minLoss = Some(1000L),
                 maxLoss = Some(10000L)
               ),
-              RiskLeaf(
+              RiskLeaf.unsafeApply(
                 id = "child2",
                 name = "Child 2",
                 distributionType = "lognormal",
@@ -181,11 +181,11 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val hierarchicalRequest = CreateSimulationRequest(
           name = "Depth Test",
           nTrials = 1000,
-          root = Some(RiskPortfolio(
+          root = Some(RiskPortfolio.unsafeApply(
             id = "root",
             name = "Root",
             children = Array(
-              RiskLeaf(
+              RiskLeaf.unsafeApply(
                 id = "child1",
                 name = "Child 1",
                 distributionType = "lognormal",

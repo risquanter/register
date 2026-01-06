@@ -11,7 +11,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
     suite("Simulator.simulateTree")(
       test("simulates simple 2-leaf portfolio") {
         // Create a simple portfolio with 2 risks
-        val cyberRisk = RiskLeaf(
+        val cyberRisk = RiskLeaf.unsafeApply(
           id = "cyber",
           name = "Cyber Attack",
           distributionType = "lognormal",
@@ -20,7 +20,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
           maxLoss = Some(50000L)
         )
         
-        val supplyChainRisk = RiskLeaf(
+        val supplyChainRisk = RiskLeaf.unsafeApply(
           id = "supply-chain",
           name = "Supply Chain Disruption",
           distributionType = "lognormal",
@@ -29,7 +29,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
           maxLoss = Some(20000L)
         )
         
-        val portfolio = RiskPortfolio(
+        val portfolio = RiskPortfolio.unsafeApply(
           id = "ops-risk",
           name = "Operational Risk",
           children = Array(cyberRisk, supplyChainRisk)
@@ -57,7 +57,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
       },
       
       test("simulates single leaf risk") {
-        val singleRisk = RiskLeaf(
+        val singleRisk = RiskLeaf.unsafeApply(
           id = "cyber",
           name = "Cyber Attack",
           distributionType = "lognormal",
@@ -86,7 +86,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
       test("aggregates child losses correctly in portfolio") {
         // Simple test: both risks with reasonable probability
         // Use lognormal mode which is simpler
-        val risk1 = RiskLeaf(
+        val risk1 = RiskLeaf.unsafeApply(
           id = "risk1",
           name = "Risk 1",
           distributionType = "lognormal",
@@ -95,7 +95,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
           maxLoss = Some(5000L)
         )
         
-        val risk2 = RiskLeaf(
+        val risk2 = RiskLeaf.unsafeApply(
           id = "risk2",
           name = "Risk 2",
           distributionType = "lognormal",
@@ -104,7 +104,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
           maxLoss = Some(8000L)
         )
         
-        val portfolio = RiskPortfolio(
+        val portfolio = RiskPortfolio.unsafeApply(
           id = "portfolio",
           name = "Test Portfolio",
           children = Array(risk1, risk2)
@@ -130,7 +130,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
       },
       
       test("fails on empty portfolio") {
-        val emptyPortfolio = RiskPortfolio(
+        val emptyPortfolio = RiskPortfolio.unsafeApply(
           id = "empty",
           name = "Empty Portfolio",
           children = Array.empty
