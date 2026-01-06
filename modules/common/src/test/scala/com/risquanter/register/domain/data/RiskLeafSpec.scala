@@ -478,6 +478,114 @@ object RiskLeafSpec extends ZIOSpecDefault {
           result.map(_.quantiles.isDefined).toOption.contains(true)
         )
       }
+    ),
+    suite("Field Path Context in Errors")(
+      test("invalid id includes field path") {
+        val result = RiskLeaf.create(
+          id = "x",  // Too short (< 3)
+          name = "Test",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L)
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("[root.id]")
+        )
+      },
+      test("invalid name includes field path") {
+        val result = RiskLeaf.create(
+          id = "test-id",
+          name = "",  // Blank
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L)
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("[root.name]")
+        )
+      },
+      test("invalid probability includes field path") {
+        val result = RiskLeaf.create(
+          id = "test-id",
+          name = "Test",
+          distributionType = "lognormal",
+          probability = 1.5,  // Out of range
+          minLoss = Some(100L),
+          maxLoss = Some(1000L)
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("[root.probability]")
+        )
+      },
+      test("invalid distributionType includes field path") {
+        val result = RiskLeaf.create(
+          id = "test-id",
+          name = "Test",
+          distributionType = "invalid",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L)
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("[root.distributionType]")
+        )
+      },
+      test("minLoss >= maxLoss includes field path") {
+        val result = RiskLeaf.create(
+          id = "test-id",
+          name = "Test",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(1000L),
+          maxLoss = Some(100L)  // maxLoss < minLoss
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("[root.minLoss]")
+        )
+      },
+      test("missing expert mode fields includes field path") {
+        val result = RiskLeaf.create(
+          id = "test-id",
+          name = "Test",
+          distributionType = "expert",
+          probability = 0.5
+          // Missing percentiles and quantiles
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("[root.distributionType]")
+        )
+      },
+      test("custom field prefix propagates to errors") {
+        val result = RiskLeaf.create(
+          id = "x",  // Too short
+          name = "Test",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L),
+          fieldPrefix = "children[0]"
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("[children[0].id]")
+        )
+      }
     )
   )
 }
+

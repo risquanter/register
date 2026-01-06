@@ -26,7 +26,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         assertTrue(
           status == StatusCode.InternalServerError,
           response.error.code == 500,
-          response.error.errors.head.reason == "repository error"
+          response.error.errors.head.reason == "repository_error"
         )
       },
       
@@ -55,7 +55,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("decodes error response to RuntimeException") {
         val response = ErrorResponse(
           JsonHttpError(400, "Validation failed", List(
-            ErrorDetail("simulations", "validation", "Name is required")
+            ErrorDetail("simulations", "name", ValidationErrorCode.REQUIRED_FIELD, "validation", "Name is required")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.BadRequest, response))
@@ -71,7 +71,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("ErrorResponse can be serialized to JSON") {
         val response = ErrorResponse(
           JsonHttpError(400, "Test error", List(
-            ErrorDetail("test", "reason", "message")
+            ErrorDetail("test", "field", ValidationErrorCode.CONSTRAINT_VIOLATION, "reason", "message")
           ))
         )
         
@@ -85,7 +85,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       },
       
       test("ErrorDetail can be serialized to JSON") {
-        val detail = ErrorDetail("domain", "reason", "message")
+        val detail = ErrorDetail("domain", "field", ValidationErrorCode.INVALID_FORMAT, "reason", "message")
         val json = detail.toJson
         val decoded = json.fromJson[ErrorDetail]
         
@@ -97,7 +97,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       
       test("JsonHttpError can be serialized to JSON") {
         val httpError = JsonHttpError(500, "Error", List(
-          ErrorDetail("test", "test", "test message")
+          ErrorDetail("test", "field", ValidationErrorCode.CONSTRAINT_VIOLATION, "test", "test message")
         ))
         
         val json = httpError.toJson
@@ -119,7 +119,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
           status == StatusCode.BadRequest,
           response.error.code == 400,
           response.error.errors.length == 2,
-          response.error.errors.forall(_.reason == "constraint validation error")
+          response.error.errors.forall(_.reason == "validation_failed")
         )
       }
     )

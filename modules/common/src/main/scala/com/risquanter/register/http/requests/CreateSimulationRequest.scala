@@ -1,7 +1,10 @@
 package com.risquanter.register.http.requests
 
 import zio.json.{JsonCodec, DeriveJsonCodec}
-import com.risquanter.register.domain.data.RiskNode
+import zio.prelude.Validation
+import com.risquanter.register.domain.data.{RiskTree, RiskNode}
+import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil}
+import io.github.iltotore.iron.*
 
 /** Request DTO for creating a new risk tree
   * 
@@ -14,9 +17,9 @@ import com.risquanter.register.domain.data.RiskNode
   * 1. **Expert Opinion**: `distributionType="expert"`, provide `percentiles` + `quantiles`
   * 2. **Lognormal (BCG)**: `distributionType="lognormal"`, provide `minLoss` + `maxLoss` (80% CI bounds)
   * 
-  * @param name Risk tree name
+  * @param name Risk tree name (plain String, validated by toDomain())
   * @param nTrials Number of Monte Carlo trials (default: 10,000)
-  * @param root Hierarchical risk tree structure (required)
+  * @param root Hierarchical risk tree structure
   */
 final case class CreateSimulationRequest(
   name: String,
@@ -26,4 +29,29 @@ final case class CreateSimulationRequest(
 
 object CreateSimulationRequest {
   given codec: JsonCodec[CreateSimulationRequest] = DeriveJsonCodec.gen[CreateSimulationRequest]
+  
+  /** 
+   * Validate top-level request fields with error accumulation.
+   * 
+   * Note: The `root: RiskNode` field is already validated during JSON parsing
+   * by the Iron-based JsonDecoders. This method validates the remaining fields
+   * (name, nTrials) and provides a consistent validation entry point.
+   * 
+   * @return Validation with accumulated errors for name/nTrials, or validated tuple
+   */
+  def toDomain(req: CreateSimulationRequest): Validation[String, (SafeName.SafeName, Int, RiskNode)] = {
+    // Helper to convert Either to Validation
+    def toValidation[A](either: Either[List[String], A]): Validation[String, A] =
+      Validation.fromEither(either.left.map(_.mkString("; ")))
+    
+    // Validate request-level fields (RiskNode already validated during JSON parsing)
+    val nameV = toValidation(ValidationUtil.refineName(req.name))
+    val trialsV = toValidation(ValidationUtil.refinePositiveInt(req.nTrials, "nTrials"))
+      .map(_ => req.nTrials)
+    
+    // Combine validations - accumulates name/nTrials errors
+    Validation.validateWith(nameV, trialsV, Validation.succeed(req.root)) { (name, trials, root) =>
+      (name, trials, root)
+    }
+  }
 }

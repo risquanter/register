@@ -12,13 +12,13 @@ object ValidationUtil {
   def nonEmpty(s: String): String = if (s == null) "" else s.trim
 
   // Refinement for name; using a maximum length of 50
-  def refineName(value: String): Either[List[String], SafeName.SafeName] = {
+  def refineName(value: String, fieldPath: String = "name"): Either[List[String], SafeName.SafeName] = {
     val sanitized = nonEmpty(value)
     sanitized
       .refineEither[Not[Blank] & MaxLength[50]]
       .map(SafeName.SafeName(_))
       .left
-      .map(err => List(s"Name '$sanitized' failed constraint check: $err"))
+      .map(err => List(s"[$fieldPath] Name '$sanitized' failed constraint check: $err"))
   }
 
   // Refinement for email; using a maximum length of 50 and requiring single @ symbol
@@ -46,15 +46,15 @@ object ValidationUtil {
     value
       .refineEither[GreaterEqual[0L]]
       .left
-      .map(err => List(s"The parameter '$param' with value '$value' failed constraint check: $err"))
+      .map(err => List(s"[$param] The parameter '$param' with value '$value' failed constraint check: $err"))
   }
 
   // Refinement for probability (must be between 0.0 and 1.0, exclusive)
-  def refineProbability(value: Double): Either[List[String], Probability] = {
+  def refineProbability(value: Double, fieldPath: String = "probability"): Either[List[String], Probability] = {
     value
       .refineEither[Greater[0.0] & Less[1.0]]
       .left
-      .map(err => List(s"The parameter probRiskOccurance '$value' failed constraint check: $err"))
+      .map(err => List(s"[$fieldPath] The parameter 'probability' with value '$value' failed constraint check: $err"))
   }
 
   // Refinement for positive integers (must be > 0)
@@ -62,7 +62,7 @@ object ValidationUtil {
     value
       .refineEither[Greater[0]]
       .left
-      .map(err => List(s"The parameter '$param' with value '$value' must be positive (> 0): $err"))
+      .map(err => List(s"[$param] The parameter '$param' with value '$value' must be positive (> 0): $err"))
   }
 
   // Refinement for non-negative integers (must be >= 0)
@@ -74,21 +74,21 @@ object ValidationUtil {
   }
 
   // Refinement for distribution type (must be "expert" or "lognormal")
-  def refineDistributionType(value: String): Either[List[String], DistributionType] = {
+  def refineDistributionType(value: String, fieldPath: String = "distributionType"): Either[List[String], DistributionType] = {
     value
       .refineEither[Match["^(expert|lognormal)$"]]
       .left
-      .map(err => List(s"Distribution type '$value' must be either 'expert' or 'lognormal': $err"))
+      .map(err => List(s"[$fieldPath] Distribution type '$value' must be either 'expert' or 'lognormal': $err"))
   }
 
   // Refinement for risk/portfolio IDs (alphanumeric + hyphen/underscore, 3-30 chars)
-  def refineId(value: String): Either[List[String], SafeId.SafeId] = {
+  def refineId(value: String, fieldPath: String = "id"): Either[List[String], SafeId.SafeId] = {
     val sanitized = nonEmpty(value)
     sanitized
       .refineEither[Not[Blank] & MinLength[3] & MaxLength[30] & Match["^[a-zA-Z0-9_-]+$"]]
       .map(SafeId.SafeId(_))
       .left
-      .map(err => List(s"ID '$sanitized' must be 3-30 alphanumeric characters (with _ or -): $err"))
+      .map(err => List(s"[$fieldPath] ID '$sanitized' must be 3-30 alphanumeric characters (with _ or -): $err"))
   }
 
   // Refinement for optional short text (max 20 chars)

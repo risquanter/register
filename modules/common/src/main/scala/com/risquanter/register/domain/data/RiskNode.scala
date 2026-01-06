@@ -79,6 +79,17 @@ final case class RiskLeaf private (
   minLoss: Option[NonNegativeLong],
   maxLoss: Option[NonNegativeLong]
 ) extends RiskNode {
+  // Defense in depth: invariant check as safety net
+  // Should never trigger if custom decoder works correctly
+  require(
+    distributionType.toString match {
+      case "expert" => percentiles.exists(_.nonEmpty) && quantiles.exists(_.nonEmpty)
+      case "lognormal" => minLoss.isDefined && maxLoss.isDefined && minLoss.get < maxLoss.get
+      case _ => true
+    },
+    s"RiskLeaf invariant violated: $distributionType mode missing required fields or invalid bounds"
+  )
+  
   // Public API: Extract String values from Iron types
   override def id: String = safeId.value.toString
   override def name: String = safeName.value.toString
@@ -153,7 +164,8 @@ object RiskLeaf {
     percentiles: Option[Array[Double]] = None,
     quantiles: Option[Array[Double]] = None,
     minLoss: Option[Long] = None,
-    maxLoss: Option[Long] = None
+    maxLoss: Option[Long] = None,
+    fieldPrefix: String = "root"
   ): Validation[String, RiskLeaf] = {
     
     // Helper: Convert Either[List[String], A] to Validation[String, A]
@@ -162,19 +174,19 @@ object RiskLeaf {
     
     // Step 1: Validate and refine id to SafeId
     val idValidation: Validation[String, SafeId.SafeId] =
-      toValidation(ValidationUtil.refineId(id))
+      toValidation(ValidationUtil.refineId(id, s"$fieldPrefix.id"))
     
     // Step 2: Validate and refine name to SafeName
     val nameValidation: Validation[String, SafeName.SafeName] =
-      toValidation(ValidationUtil.refineName(name))
+      toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
     
     // Step 3: Validate and refine probability to Probability
     val probValidation: Validation[String, Probability] =
-      toValidation(ValidationUtil.refineProbability(probability))
+      toValidation(ValidationUtil.refineProbability(probability, s"$fieldPrefix.probability"))
     
     // Step 4: Validate and refine distributionType to DistributionType
     val distTypeValidation: Validation[String, DistributionType] =
-      toValidation(ValidationUtil.refineDistributionType(distributionType))
+      toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
     
     // Step 5: Mode-specific validation (cross-field business rules)
     val modeValidation: Validation[String, (Option[NonNegativeLong], Option[NonNegativeLong])] = 
@@ -185,17 +197,17 @@ object RiskLeaf {
             (percentiles, quantiles) match {
               case (Some(p), Some(q)) if p.nonEmpty && q.nonEmpty =>
                 if (p.length != q.length)
-                  Validation.fail("Expert mode: percentiles and quantiles must have same length")
+                  Validation.fail(s"[$fieldPrefix.distributionType] Expert mode: percentiles and quantiles must have same length")
                 else
                   Validation.succeed((None, None))  // No minLoss/maxLoss for expert
               case (None, None) =>
-                Validation.fail("Expert mode requires both percentiles and quantiles")
+                Validation.fail(s"[$fieldPrefix.distributionType] Expert mode requires both percentiles and quantiles")
               case (None, _) =>
-                Validation.fail("Expert mode requires percentiles")
+                Validation.fail(s"[$fieldPrefix.distributionType] Expert mode requires percentiles")
               case (_, None) =>
-                Validation.fail("Expert mode requires quantiles")
+                Validation.fail(s"[$fieldPrefix.distributionType] Expert mode requires quantiles")
               case _ =>
-                Validation.fail("Expert mode: percentiles and quantiles cannot be empty")
+                Validation.fail(s"[$fieldPrefix.distributionType] Expert mode: percentiles and quantiles cannot be empty")
             }
             
           case "lognormal" =>
@@ -204,26 +216,26 @@ object RiskLeaf {
               case (Some(min), Some(max)) =>
                 // Refine to NonNegativeLong (keep refined types)
                 val minValid: Validation[String, NonNegativeLong] =
-                  toValidation(ValidationUtil.refineNonNegativeLong(min, "minLoss"))
+                  toValidation(ValidationUtil.refineNonNegativeLong(min, s"$fieldPrefix.minLoss"))
                 val maxValid: Validation[String, NonNegativeLong] =
-                  toValidation(ValidationUtil.refineNonNegativeLong(max, "maxLoss"))
+                  toValidation(ValidationUtil.refineNonNegativeLong(max, s"$fieldPrefix.maxLoss"))
                 
                 // Cross-field validation: minLoss < maxLoss
                 Validation.validateWith(minValid, maxValid) { (validMin, validMax) =>
                   if (validMin >= validMax)
                     Validation.fail(
-                      s"minLoss ($validMin) must be less than maxLoss ($validMax)"
+                      s"[$fieldPrefix.minLoss] minLoss ($validMin) must be less than maxLoss ($validMax)"
                     )
                   else
                     Validation.succeed((Some(validMin), Some(validMax)))
                 }.flatten
                 
               case (None, None) =>
-                Validation.fail("Lognormal mode requires both minLoss and maxLoss")
+                Validation.fail(s"[$fieldPrefix.distributionType] Lognormal mode requires both minLoss and maxLoss")
               case (None, _) =>
-                Validation.fail("Lognormal mode requires minLoss")
+                Validation.fail(s"[$fieldPrefix.minLoss] Lognormal mode requires minLoss")
               case (_, None) =>
-                Validation.fail("Lognormal mode requires maxLoss")
+                Validation.fail(s"[$fieldPrefix.maxLoss] Lognormal mode requires maxLoss")
             }
             
           case _ =>
@@ -255,8 +267,46 @@ object RiskLeaf {
     }
   }
   
-  // JSON codec uses DeriveJsonCodec with field name mapping via custom given instances
-  given codec: JsonCodec[RiskLeaf] = DeriveJsonCodec.gen[RiskLeaf]
+  // --- Custom JSON Codec that enforces cross-field validation via smart constructor ---
+  
+  /** Raw intermediate type for JSON parsing (no validation) */
+  private case class RiskLeafRaw(
+    id: String,
+    name: String,
+    distributionType: String,
+    probability: Double,
+    percentiles: Option[Array[Double]],
+    quantiles: Option[Array[Double]],
+    minLoss: Option[Long],
+    maxLoss: Option[Long]
+  )
+  private object RiskLeafRaw {
+    given rawCodec: JsonCodec[RiskLeafRaw] = DeriveJsonCodec.gen[RiskLeafRaw]
+  }
+  
+  /** Custom decoder that uses smart constructor for cross-field validation */
+  given decoder: JsonDecoder[RiskLeaf] = RiskLeafRaw.rawCodec.decoder.mapOrFail { raw =>
+    create(
+      raw.id, raw.name, raw.distributionType, raw.probability,
+      raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss
+    ).toEither.left.map(errors => errors.toChunk.mkString("; "))
+  }
+  
+  /** Encoder uses the Iron-typed fields directly */
+  given encoder: JsonEncoder[RiskLeaf] = JsonEncoder[RiskLeafRaw].contramap { leaf =>
+    RiskLeafRaw(
+      id = leaf.id,
+      name = leaf.name,
+      distributionType = leaf.distributionType.toString,
+      probability = leaf.probability,
+      percentiles = leaf.percentiles,
+      quantiles = leaf.quantiles,
+      minLoss = leaf.minLoss.map(identity),
+      maxLoss = leaf.maxLoss.map(identity)
+    )
+  }
+  
+  given codec: JsonCodec[RiskLeaf] = JsonCodec(encoder, decoder)
 }
 
 /** RiskPortfolio node: Aggregates child risks (can be leaves or other portfolios).
@@ -281,6 +331,9 @@ final case class RiskPortfolio private (
   @jsonField("name") safeName: SafeName.SafeName,
   children: Array[RiskNode]
 ) extends RiskNode {
+  // Defense in depth: invariant check as safety net
+  require(children != null && children.nonEmpty, "RiskPortfolio invariant violated: children must be non-empty")
+  
   // Public API: Extract String values from Iron types
   override def id: String = safeId.value.toString
   override def name: String = safeName.value.toString
@@ -289,19 +342,6 @@ final case class RiskPortfolio private (
 object RiskPortfolio {
   import zio.prelude.Validation
   import com.risquanter.register.domain.data.iron._
-  
-  // JSON encoders/decoders for Iron types (reuse from RiskLeaf)
-  given JsonEncoder[SafeId.SafeId] = JsonEncoder[String].contramap(_.value.toString)
-  given JsonEncoder[SafeName.SafeName] = JsonEncoder[String].contramap(_.value.toString)
-  
-  given JsonDecoder[SafeId.SafeId] = JsonDecoder[String].mapOrFail(s => 
-    SafeId.fromString(s).left.map(_.mkString(", "))
-  )
-  given JsonDecoder[SafeName.SafeName] = JsonDecoder[String].mapOrFail(s =>
-    SafeName.fromString(s).left.map(_.mkString(", "))
-  )
-  
-  given codec: JsonCodec[RiskPortfolio] = DeriveJsonCodec.gen[RiskPortfolio]
   
   /** Smart constructor: Validates all fields and returns Validation.
     * 
@@ -317,19 +357,20 @@ object RiskPortfolio {
   def create(
     id: String,
     name: String,
-    children: Array[RiskNode]
+    children: Array[RiskNode],
+    fieldPrefix: String = "root"
   ): Validation[String, RiskPortfolio] = {
     
     // Step 1: Validate ID (Iron refinement)
     val idValidation: Validation[String, SafeId.SafeId] = 
-      ValidationUtil.refineId(id) match {
+      ValidationUtil.refineId(id, s"$fieldPrefix.id") match {
         case Right(validId) => Validation.succeed(validId)
         case Left(errors) => Validation.fail(s"Invalid ID: ${errors.mkString(", ")}")
       }
     
     // Step 2: Validate name (Iron refinement)
     val nameValidation: Validation[String, SafeName.SafeName] =
-      ValidationUtil.refineName(name) match {
+      ValidationUtil.refineName(name, s"$fieldPrefix.name") match {
         case Right(validName) => Validation.succeed(validName)
         case Left(errors) => Validation.fail(s"Invalid name: ${errors.mkString(", ")}")
       }
@@ -337,7 +378,7 @@ object RiskPortfolio {
     // Step 3: Validate children array (business rule)
     val childrenValidation: Validation[String, Array[RiskNode]] =
       if (children == null || children.isEmpty) {
-        Validation.fail("Children array must not be empty")
+        Validation.fail(s"[$fieldPrefix.children] Children array must not be empty")
       } else {
         Validation.succeed(children)
       }
@@ -356,6 +397,36 @@ object RiskPortfolio {
       )
     }
   }
+  
+  // --- Custom JSON Codec that enforces cross-field validation via smart constructor ---
+  
+  /** Raw intermediate type for JSON parsing (no validation) */
+  private case class RiskPortfolioRaw(
+    id: String,
+    name: String,
+    children: Array[RiskNode]
+  )
+  private object RiskPortfolioRaw {
+    // Note: This needs the RiskNode codec to handle recursive children
+    given rawCodec: JsonCodec[RiskPortfolioRaw] = DeriveJsonCodec.gen[RiskPortfolioRaw]
+  }
+  
+  /** Custom decoder that uses smart constructor for cross-field validation */
+  given decoder: JsonDecoder[RiskPortfolio] = RiskPortfolioRaw.rawCodec.decoder.mapOrFail { raw =>
+    create(raw.id, raw.name, raw.children)
+      .toEither.left.map(errors => errors.toChunk.mkString("; "))
+  }
+  
+  /** Encoder uses the Iron-typed fields directly */
+  given encoder: JsonEncoder[RiskPortfolio] = JsonEncoder[RiskPortfolioRaw].contramap { portfolio =>
+    RiskPortfolioRaw(
+      id = portfolio.id,
+      name = portfolio.name,
+      children = portfolio.children
+    )
+  }
+  
+  given codec: JsonCodec[RiskPortfolio] = JsonCodec(encoder, decoder)
   
   /** Temporary backward compatibility method - bypasses validation.
     * 

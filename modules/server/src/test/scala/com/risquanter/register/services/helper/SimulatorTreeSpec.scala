@@ -129,22 +129,23 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
         }
       },
       
-      test("fails on empty portfolio") {
-        val emptyPortfolio = RiskPortfolio.unsafeApply(
-          id = "empty",
-          name = "Empty Portfolio",
-          children = Array.empty
-        )
-        
-        val program = Simulator.simulateTree(emptyPortfolio, nTrials = 100, parallelism = 2)
-        
-        program.flip.map { error =>
-          // Should fail with validation error about empty children
-          error match {
-            case ValidationFailed(errors) => assertTrue(errors.exists(_.contains("no children")))
-            case _ => assertTrue(false)
-          }
+      test("fails on empty portfolio - require clause prevents construction") {
+        // The require clause in RiskPortfolio prevents construction with empty children
+        // This test documents that behavior: attempting to create an empty portfolio
+        // throws IllegalArgumentException at construction time (defense in depth)
+        val result = scala.util.Try {
+          RiskPortfolio.unsafeApply(
+            id = "empty",
+            name = "Empty Portfolio",
+            children = Array.empty
+          )
         }
+        
+        assertTrue(
+          result.isFailure,
+          result.failed.get.isInstanceOf[IllegalArgumentException],
+          result.failed.get.getMessage.contains("children must be non-empty")
+        )
       }
     )
 }

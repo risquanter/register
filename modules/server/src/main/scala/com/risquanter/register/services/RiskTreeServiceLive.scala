@@ -20,25 +20,20 @@ class RiskTreeServiceLive private (
   // Config CRUD - only persist, no execution
   override def create(req: CreateSimulationRequest): Task[RiskTree] = {
     for {
-      // Validate nTrials (positive integer)
-      _ <- ZIO.fromEither(
-        ValidationUtil.refinePositiveInt(req.nTrials, "nTrials")
-          .left.map(errors => ValidationFailed(errors))
+      // Use DTO toDomain method for comprehensive validation
+      validated <- ZIO.fromEither(
+        CreateSimulationRequest.toDomain(req)
+          .toEither
+          .left.map(errors => ValidationFailed(errors.toList))
       )
-      
-      // Convert name to SafeName
-      safeName <- ZIO.fromEither(
-        ValidationUtil.refineName(req.name)
-          .left.map(errors => ValidationFailed(errors))
-      )
+      (safeName, nTrials, rootNode) = validated
       
       // Create RiskTree entity (id will be assigned by repo)
-      // Note: req.root is already validated by smart constructors during JSON deserialization
       riskTree = RiskTree(
         id = 0L.refineUnsafe, // repo will assign
         name = safeName,
-        nTrials = req.nTrials,
-        root = req.root
+        nTrials = nTrials,
+        root = rootNode
       )
       
       // Persist
@@ -48,22 +43,18 @@ class RiskTreeServiceLive private (
   
   override def update(id: Long, req: CreateSimulationRequest): Task[RiskTree] = {
     for {
-      // Validate nTrials (positive integer)
-      _ <- ZIO.fromEither(
-        ValidationUtil.refinePositiveInt(req.nTrials, "nTrials")
-          .left.map(errors => ValidationFailed(errors))
+      // Use DTO toDomain method for comprehensive validation
+      validated <- ZIO.fromEither(
+        CreateSimulationRequest.toDomain(req)
+          .toEither
+          .left.map(errors => ValidationFailed(errors.toList))
       )
-      
-      // Convert name to SafeName
-      safeName <- ZIO.fromEither(
-        ValidationUtil.refineName(req.name)
-          .left.map(errors => ValidationFailed(errors))
-      )
+      (safeName, nTrials, rootNode) = validated
       
       updated <- repo.update(id, tree => tree.copy(
         name = safeName,
-        nTrials = req.nTrials,
-        root = req.root
+        nTrials = nTrials,
+        root = rootNode
       ))
     } yield updated
   }
