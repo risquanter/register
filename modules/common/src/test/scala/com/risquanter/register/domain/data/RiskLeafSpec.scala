@@ -492,7 +492,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("[root.id]")
+          errorMsg.contains("root.id")
         )
       },
       test("invalid name includes field path") {
@@ -507,7 +507,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("[root.name]")
+          errorMsg.contains("root.name")
         )
       },
       test("invalid probability includes field path") {
@@ -522,7 +522,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("[root.probability]")
+          errorMsg.contains("root.probability")
         )
       },
       test("invalid distributionType includes field path") {
@@ -537,7 +537,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("[root.distributionType]")
+          errorMsg.contains("root.distributionType")
         )
       },
       test("minLoss >= maxLoss includes field path") {
@@ -552,7 +552,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("[root.minLoss]")
+          errorMsg.contains("root.minLoss")
         )
       },
       test("missing expert mode fields includes field path") {
@@ -566,7 +566,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("[root.distributionType]")
+          errorMsg.contains("root.distributionType")
         )
       },
       test("custom field prefix propagates to errors") {
@@ -582,7 +582,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
-          errorMsg.contains("[children[0].id]")
+          errorMsg.contains("children[0].id")
         )
       }
     )

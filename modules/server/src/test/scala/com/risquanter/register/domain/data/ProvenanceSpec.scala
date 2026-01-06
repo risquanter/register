@@ -1,5 +1,6 @@
 package com.risquanter.register.domain.data
 
+import com.risquanter.register.BuildInfo
 import zio.test.*
 import zio.test.Assertion.*
 import zio.json.*
@@ -33,7 +34,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
             confidenceInterval = 0.90
           ),
           timestamp = Instant.parse("2026-01-04T12:34:56Z"),
-          simulationUtilVersion = "0.8.0"
+          simulationUtilVersion = BuildInfo.simulationUtilVersion
         )
         
         val json = provenance.toJson
@@ -92,7 +93,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
             terms = 3
           ),
           timestamp = Instant.now(),
-          simulationUtilVersion = "0.8.0"
+          simulationUtilVersion = BuildInfo.simulationUtilVersion
         )
         
         val treeProvenance = TreeProvenance(

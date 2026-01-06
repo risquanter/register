@@ -71,6 +71,7 @@ lazy val common = crossProject(JVMPlatform, JSPlatform)
 
 // Server module (JVM only)
 lazy val server = (project in file("modules/server"))
+  .enablePlugins(BuildInfoPlugin)
   .settings(
     name := "register-server",
     libraryDependencies ++= serverDependencies,
@@ -78,7 +79,12 @@ lazy val server = (project in file("modules/server"))
     run / javaOptions ++= Seq(
       "-Xms512m",
       "-Xmx2g"
-    )
+    ),
+    buildInfoKeys := Seq[BuildInfoKey](
+      version,
+      "simulationUtilVersion" -> "0.8.0"
+    ),
+    buildInfoPackage := "com.risquanter.register"
   )
   .dependsOn(common.jvm)
 

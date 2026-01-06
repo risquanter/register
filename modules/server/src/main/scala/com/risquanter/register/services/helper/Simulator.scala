@@ -1,5 +1,6 @@
 package com.risquanter.register.services.helper
 
+import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
 import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, NodeProvenance, TreeProvenance, ExpertDistributionParams, LognormalDistributionParams}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
@@ -251,7 +252,7 @@ object Simulator {
           distributionType = leaf.distributionType,
           distributionParams = distParams,
           timestamp = Instant.now(),
-          simulationUtilVersion = "0.8.0" // TODO: Get from build info
+          simulationUtilVersion = BuildInfo.simulationUtilVersion
         ))
       } else None
     } yield (sampler, provenance)
