@@ -27,31 +27,29 @@ object ErrorResponse {
     case _ => makeGeneralResponse()
   }
 
-  def makeGeneralResponse(requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeGeneralResponse(domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = "General server error, please check the logs..."
     val statusCode = StatusCode.InternalServerError
     val errors = List(ErrorDetail(
-      domain = "simulations",
+      domain = domain,
       field = "unknown",
       code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      reason = "internal_error",
       message = message,
       requestId = requestId
     ))
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
   }
 
-  def makeValidationResponse(errorList: List[String], requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeValidationResponse(errorList: List[String], domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = "Domain validation error"
     val statusCode = StatusCode.BadRequest
     val errors = errorList.map { em =>
       val field = ErrorDetail.extractFieldFromMessage(em)
       val code = ValidationErrorCode.categorize(em)
       ErrorDetail(
-        domain = "simulations",
+        domain = domain,
         field = field,
         code = code,
-        reason = "validation_failed",
         message = em,
         requestId = requestId
       )
@@ -59,27 +57,25 @@ object ErrorResponse {
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
   }
 
-  def makeDataConflictResponse(message: String, requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeDataConflictResponse(message: String, domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val statusCode = StatusCode.Conflict
     val errors = List(ErrorDetail(
-      domain = "simulations",
+      domain = domain,
       field = "unknown",
       code = ValidationErrorCode.DUPLICATE_VALUE,
-      reason = "data_conflict",
       message = message,
       requestId = requestId
     ))
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
   }
 
-  def makeRepositoryFailureResponse(reason: String, requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeRepositoryFailureResponse(reason: String, domain: String = "simulations", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = "Repository operation failed"
     val statusCode = StatusCode.InternalServerError
     val errors = List(ErrorDetail(
-      domain = "simulations",
+      domain = domain,
       field = "unknown",
       code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      reason = "repository_error",
       message = reason,
       requestId = requestId
     ))

@@ -4,10 +4,9 @@ import zio.json.{JsonCodec, DeriveJsonCodec}
 
 /** Detailed error information for API responses
   * 
-  * @param domain Business domain (e.g., "simulations", "risk-trees")
+  * @param domain Business domain (e.g., "simulations", "risk-trees", "users")
   * @param field JSON path to the problematic field (e.g., "name", "root.children[0].minLoss")
-  * @param code Machine-readable error code for categorization
-  * @param reason Human-readable error category
+  * @param code Machine-readable error code for categorization and client-side handling
   * @param message Detailed error message for debugging
   * @param requestId Optional correlation ID linking error to specific request
   */
@@ -15,24 +14,12 @@ final case class ErrorDetail(
   domain: String,
   field: String,
   code: ValidationErrorCode,
-  reason: String,
   message: String,
   requestId: Option[String] = None
 )
 
 object ErrorDetail {
   given codec: JsonCodec[ErrorDetail] = DeriveJsonCodec.gen[ErrorDetail]
-  
-  /** Create error detail from legacy format (backward compatibility) */
-  def fromLegacy(domain: String, reason: String, message: String): ErrorDetail =
-    ErrorDetail(
-      domain = domain,
-      field = extractFieldFromMessage(message),
-      code = ValidationErrorCode.categorize(message),
-      reason = reason,
-      message = message,
-      requestId = None
-    )
   
   /** Extract field name from error message if present */
   def extractFieldFromMessage(message: String): String =

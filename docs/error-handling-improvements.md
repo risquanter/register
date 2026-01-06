@@ -32,14 +32,15 @@ Error messages now include JSON paths to failing fields:
 ### 3. Enhanced ErrorDetail Structure
 ```scala
 case class ErrorDetail(
-  domain: String,                    // Business domain (e.g., "simulations")
+  domain: String,                    // Business domain (e.g., "simulations", "users")
   field: String,                     // JSON path (e.g., "root.children[0].id")
   code: ValidationErrorCode,         // Machine-readable error code
-  reason: String,                    // Error category
-  message: String,                   // Detailed message
+  message: String,                   // Detailed error message
   requestId: Option[String] = None   // Request correlation ID
 )
 ```
+
+**Design Decision**: Removed `reason` field in favor of `code` alone. The typed `ValidationErrorCode` enum provides sufficient categorization without the ambiguity of having two overlapping machine-readable fields.
 
 ### 4. Automatic Field Extraction
 `ErrorDetail.extractFieldFromMessage()` parses field paths from error messages:
@@ -79,16 +80,24 @@ refineProbability(value, "root.probability")
 refineNonNegativeLong(value, "root.minLoss")
 ```
 
-### Backward Compatibility
-`ErrorDetail.fromLegacy()` provides migration path:
+### ErrorDetail Construction
+All code uses the full 4-parameter constructor directly:
 ```scala
-// Legacy format
-ErrorDetail.fromLegacy(
-  domain = "simulations",
-  reason = "validation",
-  message = "Name is required"
+ErrorDetail(
+  domain = "simulations",            // Configurable per domain
+  field = "root.id",                 // Extracted or specified
+  code = ValidationErrorCode.INVALID_LENGTH,  // Typed code
+  message = "[root.id] ID 'x' must be 3-30 chars",
+  requestId = Some("req-123")        // Optional correlation
 )
-// Auto-extracts field, categorizes code
+```
+
+### Domain Parameter Support
+Error response helpers accept optional `domain` parameter for reusability:
+```scala
+makeValidationResponse(errors, domain = "users")
+makeRepositoryFailureResponse(reason, domain = "analytics")
+makeGeneralResponse(domain = "risk-trees")
 ```
 
 ## Testing
@@ -121,7 +130,6 @@ suite("Field Path Context in Errors")(
         "domain": "simulations",
         "field": "root.id",
         "code": "INVALID_LENGTH",
-        "reason": "validation_failed",
         "message": "[root.id] ID 'x' must be 3-30 alphanumeric characters",
         "requestId": "req-123"
       },
@@ -129,7 +137,6 @@ suite("Field Path Context in Errors")(
         "domain": "simulations",
         "field": "root.minLoss",
         "code": "INVALID_RANGE",
-        "reason": "validation_failed",
         "message": "[root.minLoss] minLoss (1000) must be less than maxLoss (100)"
       }
     ]

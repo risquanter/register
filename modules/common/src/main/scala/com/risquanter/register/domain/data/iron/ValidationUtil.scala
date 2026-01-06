@@ -22,31 +22,31 @@ object ValidationUtil {
   }
 
   // Refinement for email; using a maximum length of 50 and requiring single @ symbol
-  def refineEmail(value: String): Either[List[String], Email.Email] = {
+  def refineEmail(value: String, fieldPath: String = "email"): Either[List[String], Email.Email] = {
     val sanitized = nonEmpty(value)
     sanitized
       .refineEither[Not[Blank] & MaxLength[50] & Match["[^@]+@[^@]+"]]
       .map(Email.Email(_))
       .left
-      .map(err => List(s"Email '$sanitized' failed constraint check: $err"))
+      .map(err => List(s"[$fieldPath] Email '$sanitized' is invalid: $err"))
   }
 
   // Refinement for URL using Iron's built-in ValidURL constraint
-  def refineUrl(value: String): Either[List[String], Url.Url] = {
+  def refineUrl(value: String, fieldPath: String = "url"): Either[List[String], Url.Url] = {
     val sanitized = nonEmpty(value)
     sanitized
       .refineEither[Not[Blank] & MaxLength[200] & ValidURL]
       .map(Url.Url(_))
       .left
-      .map(err => List(s"URL '$sanitized' failed constraint check: $err"))
+      .map(err => List(s"[$fieldPath] URL '$sanitized' is invalid: $err"))
   }
 
   // Refinement for non-negative long values
-  def refineNonNegativeLong(value: Long, param: String): Either[List[String], NonNegativeLong] = {
+  def refineNonNegativeLong(value: Long, fieldPath: String = "value"): Either[List[String], NonNegativeLong] = {
     value
       .refineEither[GreaterEqual[0L]]
       .left
-      .map(err => List(s"[$param] The parameter '$param' with value '$value' failed constraint check: $err"))
+      .map(err => List(s"[$fieldPath] Value must be non-negative: $err"))
   }
 
   // Refinement for probability (must be between 0.0 and 1.0, exclusive)
@@ -54,23 +54,23 @@ object ValidationUtil {
     value
       .refineEither[Greater[0.0] & Less[1.0]]
       .left
-      .map(err => List(s"[$fieldPath] The parameter 'probability' with value '$value' failed constraint check: $err"))
+      .map(err => List(s"[$fieldPath] Value '$value' must be between 0.0 and 1.0: $err"))
   }
 
   // Refinement for positive integers (must be > 0)
-  def refinePositiveInt(value: Int, param: String): Either[List[String], PositiveInt] = {
+  def refinePositiveInt(value: Int, fieldPath: String = "value"): Either[List[String], PositiveInt] = {
     value
       .refineEither[Greater[0]]
       .left
-      .map(err => List(s"[$param] The parameter '$param' with value '$value' must be positive (> 0): $err"))
+      .map(err => List(s"[$fieldPath] Value must be positive (> 0): $err"))
   }
 
   // Refinement for non-negative integers (must be >= 0)
-  def refineNonNegativeInt(value: Int, param: String): Either[List[String], NonNegativeInt] = {
+  def refineNonNegativeInt(value: Int, fieldPath: String = "value"): Either[List[String], NonNegativeInt] = {
     value
       .refineEither[GreaterEqual[0]]
       .left
-      .map(err => List(s"The parameter '$param' with value '$value' must be non-negative (>= 0): $err"))
+      .map(err => List(s"[$fieldPath] Value must be non-negative (>= 0): $err"))
   }
 
   // Refinement for distribution type (must be "expert" or "lognormal")
@@ -94,7 +94,7 @@ object ValidationUtil {
   // Refinement for optional short text (max 20 chars)
   def refineShortOptText(
       value: Option[String],
-      param: String
+      fieldPath: String = "value"
   ): Either[List[String], Option[SafeExtraShortStr]] = value match {
     case None =>
       // No value provided; that's acceptable
@@ -111,7 +111,7 @@ object ValidationUtil {
           .refineEither[Not[Blank] & MaxLength[20]]
           .left
           .map(err =>
-            List(s"The request's $param parameter '$sanitized' failed constraint check: $err")
+            List(s"[$fieldPath] Value failed constraint check: $err")
           )
           .map(refined => Some(refined))
       }
