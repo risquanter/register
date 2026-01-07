@@ -35,17 +35,19 @@ This implementation plan addresses architectural improvements while maintaining 
 - ✅ Services injected with config (`RiskTreeServiceLive` uses `SimulationConfig`)
 - ✅ No hardcoded server/simulation values
 
-**Phase 2: DTO/Domain Separation** (January 7, 2026) - ~90% Complete
+**Phase 2: DTO/Domain Separation** (January 7, 2026) - ✅ 100% Complete
 - ✅ **Architecture:** Validation-during-parsing with private intermediate DTOs
 - ✅ Request validation at boundary: Custom `JsonDecoder` validates via smart constructors
 - ✅ Private DTOs: `RiskLeafRaw`, `RiskPortfolioRaw` separate plain types from domain
 - ✅ Response DTOs: `SimulationResponse` with `fromRiskTree()` and `withLEC()` factories
-- ✅ Field path tracking: Errors show precise location (e.g., `"root.children[0].id"`)
+- ✅ Field path tracking: ID-based paths (e.g., `"riskLeaf[id=cyber].probability"`)
 - ✅ Error accumulation: `Validation` monad collects all errors in one pass
 - ✅ Iron type confinement: Refined types stay in domain, plain types in DTOs
 - ✅ Test coverage: Field path tests passing (see `RiskLeafSpec`)
 - ✅ Documentation: See `docs/DTO_DOMAIN_SEPARATION_DESIGN.md`
-- 🔄 Optional enhancement: Nested portfolio field paths (currently `"riskLeaf[id=...]"`, could be `"root.children[0]"`)
+- ✅ **Field Path Design Decision:** Uses ID-based format for better semantic meaning
+  - **Rationale:** Risk node IDs are globally unique within trees, making `"riskLeaf[id=cyber]"` more meaningful than `"root.children[0]"`
+  - **Alternative considered:** Positional paths with array indices (not implemented)
 
 ### ⚠️ Partially Complete Work
 
@@ -156,7 +158,7 @@ If any of these tests fail, the phase has violated the preservation guarantee an
 |-------|------|--------|-------|-------|
 | **Phase 0** | **Error Handling & Typed Error Codes** | **\u2705 COMPLETE** | **408** | ValidationErrorCode, field paths, BuildInfo, RiskTreeDefinitionRequest |
 | **Phase 1** | **Configuration Management** | **✅ COMPLETE (100%)** | **408** | application.conf, TypesafeConfigProvider, Configs.makeLayer[T], all config case classes |
-| **Phase 2** | **DTO/Domain Separation** | **✅ COMPLETE (90%)** | **408** | Validation-during-parsing with private DTOs (RiskLeafRaw), field paths implemented |
+| **Phase 2** | **DTO/Domain Separation** | **✅ COMPLETE (100%)** | **408** | Validation-during-parsing with private DTOs, ID-based field paths |
 | Phase 3 | Structured Logging | 🔄 PARTIAL (30%) | 408 | Basic ZIO.logInfo() added, JSON logging & context missing |
 | Phase 4 | Telemetry | 🕰 Not Started (0%) | 408 | Metrics, tracing (may defer to K8s) |
 | Phase 5 | Pure ZIO Parallelism | 🕰 Not Started (0%) | 408 | Replace `.par` with ZIO.foreachPar |
@@ -512,9 +514,10 @@ test("service uses config.defaultParallelism when not specified") { ... }
 
 ---
 
-## Phase 2: DTO/Domain Separation ✅ COMPLETE (~90%)
+## Phase 2: DTO/Domain Separation ✅ COMPLETE (100%)
 
 **Status:** Clean separation achieved via validation-during-parsing pattern.
+**Field Path Decision:** ID-based format chosen over positional format for better semantic meaning.
 
 **Architecture Decision:** Use private intermediate types (`RiskLeafRaw`, `RiskPortfolioRaw`) with validation embedded in custom JSON decoders. This achieves DTO/Domain separation without duplicating validation logic.
 
@@ -529,8 +532,12 @@ test("service uses config.defaultParallelism when not specified") { ... }
 - ✅ **Private Constructors** - Domain types enforce validation (secure by default)
 - ✅ **Test Coverage** - Field path tests passing (see `RiskLeafSpec`)
 
-**Remaining Enhancement (~0.5 hours):**
-- 🔄 Optional: Enhanced nested field path tracking for portfolios (current paths like `"riskLeaf[id=cyber]"` work but could show full tree path like `"root.children[0]"`)
+**Field Path Format Decision:**
+- ✅ **Current Implementation:** ID-based paths like `"riskLeaf[id=cyber].probability"`
+- ✅ **Design Rationale:** Risk node IDs are globally unique within risk trees
+- ✅ **Alternative Considered:** Positional paths like `"root.children[0].probability"` (not implemented)
+- ✅ **Decision:** ID-based format provides better semantic meaning for debugging
+- ✅ **Status:** Feature considered complete - no further enhancement needed
 
 **Design Documentation:**
 - See `docs/DTO_DOMAIN_SEPARATION_DESIGN.md` for complete architecture rationale
