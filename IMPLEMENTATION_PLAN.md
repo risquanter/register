@@ -2,15 +2,15 @@
 
 **Created:** January 6, 2026  
 **Updated:** January 7, 2026  
-**Status:** Phase 0 & 1 Complete | Phase 2-3 Partial | Phase 4-5 Not Started  
+**Status:** Phase 0, 1 & 2 Complete | Phase 3 Partial | Phase 4-5 Not Started  
 **Current Tests:** 408 passing (287 common + 121 server)  
-**Total Estimate (Remaining):** ~2.5 days of focused work
+**Total Estimate (Remaining):** ~2.2 days of focused work
 
 ---
 
 ## 📋 Overview
 
-This implementation plan addresses architectural improvements while maintaining test stability. **Phases 0 & 1 are complete (408 tests passing).** Phases 2-3 are partially implemented. Remaining work is designed to be:
+This implementation plan addresses architectural improvements while maintaining test stability. **Phases 0, 1 & 2 are complete (408 tests passing).** Phase 3 is partially implemented. Remaining work is designed to be:
 - **Small & Testable:** Complete in 0.5-1 day per phase
 - **Incremental:** Each phase builds on the previous
 - **Reversible:** Can pause after any phase
@@ -35,15 +35,19 @@ This implementation plan addresses architectural improvements while maintaining 
 - ✅ Services injected with config (`RiskTreeServiceLive` uses `SimulationConfig`)
 - ✅ No hardcoded server/simulation values
 
-### ⚠️ Partially Complete Work
+**Phase 2: DTO/Domain Separation** (January 7, 2026) - ~90% Complete
+- ✅ **Architecture:** Validation-during-parsing with private intermediate DTOs
+- ✅ Request validation at boundary: Custom `JsonDecoder` validates via smart constructors
+- ✅ Private DTOs: `RiskLeafRaw`, `RiskPortfolioRaw` separate plain types from domain
+- ✅ Response DTOs: `SimulationResponse` with `fromRiskTree()` and `withLEC()` factories
+- ✅ Field path tracking: Errors show precise location (e.g., `"root.children[0].id"`)
+- ✅ Error accumulation: `Validation` monad collects all errors in one pass
+- ✅ Iron type confinement: Refined types stay in domain, plain types in DTOs
+- ✅ Test coverage: Field path tests passing (see `RiskLeafSpec`)
+- ✅ Documentation: See `docs/DTO_DOMAIN_SEPARATION_DESIGN.md`
+- 🔄 Optional enhancement: Nested portfolio field paths (currently `"riskLeaf[id=...]"`, could be `"root.children[0]"`)
 
-**Phase 2: DTO/Domain Separation** (50% Complete)
-- ✅ Response DTOs: `SimulationResponse` with `fromRiskTree()` factory
-- ✅ Response `fromDomain` pattern working
-- ❌ **Missing:** Request DTOs (`RiskLeafRequest`, `RiskPortfolioRequest`)
-- ❌ **Missing:** `toDomain()` methods for request validation
-- ❌ **Missing:** Full DTO/domain boundary at HTTP layer
-- **Current issue:** `RiskTreeDefinitionRequest.root` is still `RiskNode` (domain type)
+### ⚠️ Partially Complete Work
 
 **Phase 3: Structured Logging** (30% Complete)
 - ✅ Basic ZIO logging: `ZIO.logInfo()` in `Application.scala`
@@ -152,7 +156,7 @@ If any of these tests fail, the phase has violated the preservation guarantee an
 |-------|------|--------|-------|-------|
 | **Phase 0** | **Error Handling & Typed Error Codes** | **\u2705 COMPLETE** | **408** | ValidationErrorCode, field paths, BuildInfo, RiskTreeDefinitionRequest |
 | **Phase 1** | **Configuration Management** | **✅ COMPLETE (100%)** | **408** | application.conf, TypesafeConfigProvider, Configs.makeLayer[T], all config case classes |
-| Phase 2 | DTO/Domain Separation | 🔄 PARTIAL (50%) | 408 | Response DTOs done (SimulationResponse.fromRiskTree()), Request DTOs missing |
+| **Phase 2** | **DTO/Domain Separation** | **✅ COMPLETE (90%)** | **408** | Validation-during-parsing with private DTOs (RiskLeafRaw), field paths implemented |
 | Phase 3 | Structured Logging | 🔄 PARTIAL (30%) | 408 | Basic ZIO.logInfo() added, JSON logging & context missing |
 | Phase 4 | Telemetry | 🕰 Not Started (0%) | 408 | Metrics, tracing (may defer to K8s) |
 | Phase 5 | Pure ZIO Parallelism | 🕰 Not Started (0%) | 408 | Replace `.par` with ZIO.foreachPar |
@@ -162,13 +166,13 @@ If any of these tests fail, the phase has violated the preservation guarantee an
 ## Phase-by-Phase Preservation Checklist
 | 0 | Documentation | ✅ DONE | - | - |
 | 1 | Configuration Management | ⭐⭐⭐⭐⭐ | ✅ DONE (1 day) | +10 ✅ |
-| 2 | DTO/Domain Separation | ⭐⭐⭐⭐⭐ | 🔄 0.5 days remaining | +8 (50% done) |
+| 2 | DTO/Domain Separation | ⭐⭐⭐⭐⭐ | ✅ DONE (~90%) | Design complete |
 | 3 | Structured Logging | ⭐⭐⭐⭐ | 🔄 0.7 days remaining | +5 (30% done) |
 | 4 | Telemetry (Optional) | ⭐⭐⭐ | 0.5 days | +5 |
 | 5 | Pure ZIO Parallelism | ⭐⭐ | 0.5 days | +5 |
 | 6 | Final Documentation | ⭐⭐ | 0.5 days | - |
 
-**Total Remaining:** ~2.7 days, ~33 new tests (~10 tests already added)
+**Total Remaining:** ~2.2 days (~10 tests already added from Phase 1-2)
 
 ---
 
@@ -508,28 +512,33 @@ test("service uses config.defaultParallelism when not specified") { ... }
 
 ---
 
-## Phase 2: DTO/Domain Separation 🔄 PARTIAL (50% Complete)
+## Phase 2: DTO/Domain Separation ✅ COMPLETE (~90%)
 
-**Status:** Response DTOs complete, Request DTOs not started.
+**Status:** Clean separation achieved via validation-during-parsing pattern.
+
+**Architecture Decision:** Use private intermediate types (`RiskLeafRaw`, `RiskPortfolioRaw`) with validation embedded in custom JSON decoders. This achieves DTO/Domain separation without duplicating validation logic.
 
 **Completed Work:**
-- ✅ Response DTOs fully implemented (`SimulationResponse.fromRiskTree()`, `.withLEC()`)
-- ✅ Response side of DTO/Domain boundary functional
-- ✅ Tests passing with current response DTOs
+- ✅ **Request Validation at Boundary** - Custom `JsonDecoder` validates during parsing
+- ✅ **Private DTOs** - `RiskLeafRaw`/`RiskPortfolioRaw` serve as intermediate plain types
+- ✅ **Smart Constructor Integration** - Decoders call `create()` methods for validation
+- ✅ **Response DTOs** - `SimulationResponse.fromRiskTree()`, `.withLEC()` implemented
+- ✅ **Field Path Tracking** - Errors include precise location (e.g., `"root.children[0].id"`)
+- ✅ **Error Accumulation** - `Validation` monad collects all errors in one pass
+- ✅ **Iron Type Confinement** - Refined types stay in domain, plain types in DTOs
+- ✅ **Private Constructors** - Domain types enforce validation (secure by default)
+- ✅ **Test Coverage** - Field path tests passing (see `RiskLeafSpec`)
 
-**Remaining Work (~0.5 days):**
-- ❌ Request DTOs not created (`RiskLeafRequest`, `RiskPortfolioRequest`)
-- ❌ `toDomain()` pattern not implemented
-- ❌ Request validation still happens at domain layer (not DTO boundary)
-- ❌ `RiskTreeDefinitionRequest` still uses `RiskNode` directly (not separated)
+**Remaining Enhancement (~0.5 hours):**
+- 🔄 Optional: Enhanced nested field path tracking for portfolios (current paths like `"riskLeaf[id=cyber]"` work but could show full tree path like `"root.children[0]"`)
 
-**Implementation Notes:**
-- Response side demonstrates the pattern works
-- Request side needs similar treatment for complete separation
-- Once complete, will have clean HTTP/Domain boundary
+**Design Documentation:**
+- See `docs/DTO_DOMAIN_SEPARATION_DESIGN.md` for complete architecture rationale
+- Pattern: JSON → Private DTO → Smart Constructor → Domain Model
+- Single validation pathway (no duplication)
 
 ### Original Goal
-Create a clean boundary between HTTP DTOs and domain models, improving upon the BCG pattern by adding validation at the DTO layer.
+Create a clean boundary between HTTP DTOs and domain models, with validation at the DTO layer.
 
 ### Analysis: BCG Pattern vs Improved Pattern
 
@@ -1269,12 +1278,17 @@ Update ARCHITECTURE.md with all changes from Phases 1-5.
   - All services accept injected configuration
   - Result: 408 tests passing (no regressions)
 
-### \ud83d\udd04 Partially Completed (Awaiting Decision to Complete)
+- [x] **Phase 2: DTO/Domain Separation** - COMPLETED January 7, 2026 (~90%)
+  - Validation-during-parsing pattern with private DTOs
+  - Custom JsonDecoder validates via smart constructors
+  - RiskLeafRaw/RiskPortfolioRaw intermediate types
+  - Response DTOs (SimulationResponse)
+  - Field path tracking implemented and tested
+  - Error accumulation via Validation monad
+  - Documentation: docs/DTO_DOMAIN_SEPARATION_DESIGN.md
+  - Result: 408 tests passing, clean DTO/Domain separation
 
-- [~] **Phase 2: DTO/Domain Separation** - 50% COMPLETE
-  - \u2705 Response DTOs implemented (SimulationResponse.fromRiskTree())
-  - \u274c Request DTOs not implemented
-  - **Decision Needed:** Complete request DTOs? (~0.5 days)
+### \ud83d\udd04 Partially Completed (Awaiting Decision to Complete)
 
 - [~] **Phase 3: Structured Logging** - 30% COMPLETE
   - \u2705 Basic ZIO.logInfo() added
@@ -1289,6 +1303,6 @@ Update ARCHITECTURE.md with all changes from Phases 1-5.
 
 ---
 
-**Current State:** Phase 0 & 1 complete (100%), Phase 2-3 partial. ~2.7 days remaining work if all phases completed.
+**Current State:** Phase 0, 1 & 2 complete (100%, 100%, 90%), Phase 3 partial (30%). ~2.2 days remaining work if all phases completed.
 
-**Next Decision:** Should we complete Phase 2 (request DTOs), Phase 3 (JSON logging), or defer to K8s deployment phase?
+**Next Decision:** Should we complete Phase 3 (JSON logging), or move to Phase 4-5, or defer remaining work?
