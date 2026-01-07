@@ -25,13 +25,34 @@ When persistence is added:
 
 ## Completed Work (Historical Reference)
 
+### ✅ Error Handling & Typed Error Codes (2026-01-06/07)
+
+**Status**: COMPLETE
+
+#### Implementation Summary
+- **Typed ValidationErrorCode**: Enum with 15 codes in SCREAMING_SNAKE_CASE
+- **Structured ValidationError**: `case class ValidationError(field: String, code: ValidationErrorCode, message: String)`
+- **Field Path Context**: All smart constructors accept `fieldPrefix` parameter
+- **Error Accumulation**: All validation methods return `Either[List[ValidationError], T]`
+- **BuildInfo Integration**: Version management via sbt-buildinfo
+- **Naming Improvements**: `CreateSimulationRequest` → `RiskTreeDefinitionRequest`
+- **Domain Standardization**: Error domain changed to "risk-trees"
+
+#### What Was Achieved
+1. All validation methods preserve structured error information through the call chain
+2. Field paths built with dot notation: `root.id`, `children[0].probability`
+3. ValidationUtil methods integrated with typed codes: `REQUIRED_FIELD`, `INVALID_RANGE`, `INVALID_PATTERN`
+4. ErrorResponse helpers use typed codes for API responses
+5. BuildInfo eliminates hardcoded version strings
+6. 408 tests passing (287 common + 121 server)
+
 ### ✅ Iron Refinement Type Migration (2026-01-06)
 
 **Status**: COMPLETE
 
 #### Implementation Summary
 - **Option A Architecture**: Public API returns `String`, internal storage uses Iron types
-- **Smart Constructors**: `RiskLeaf.create()`, `RiskPortfolio.create()` return `Validation[String, T]`
+- **Smart Constructors**: `RiskLeaf.create()`, `RiskPortfolio.create()` return `Validation[ValidationError, T]`
 - **Private Constructors**: `final case class RiskLeaf private (...)`
 - **Error Accumulation**: `Validation.validateWith()` collects all errors in parallel
 
@@ -40,7 +61,6 @@ When persistence is added:
 2. Smart constructors enforce all validation at construction time
 3. Public API uses clean `String` types via accessor methods
 4. JSON codecs work seamlessly with `@jsonField` annotations
-5. 401 tests passing (280 common + 121 server)
 
 ### ✅ Priority 1 Cleanup (2026-01-06)
 

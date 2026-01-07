@@ -1,6 +1,6 @@
 # Risk Register - Architecture Documentation
 
-**Last Updated:** January 6, 2026  
+**Last Updated:** January 7, 2026  
 **Status:** Active Development  
 **Version:** 0.1.0
 
@@ -29,10 +29,12 @@
 **Risk Register** is a functional Scala application for hierarchical Monte Carlo risk simulation. It enables users to model complex risk portfolios as trees, execute simulations, and analyze Loss Exceedance Curves (LECs).
 
 **Current State:**
-- ✅ 401 tests passing (280 common + 121 server)
+- ✅ 408 tests passing (287 common + 121 server)
 - ✅ Core simulation engine functional with parallel execution
 - ✅ Type-safe domain model using Iron refinement types
 - ✅ Clean separation of concerns (domain/service/HTTP layers)
+- ✅ Typed error codes with field path context (ValidationErrorCode)
+- ✅ BuildInfo integration for version management
 - ⚠️ Configuration hardcoded (needs externalization)
 - ⚠️ Minimal structured logging (needs enhancement)
 - ⚠️ DTO/Domain separation incomplete (architectural debt)
@@ -119,7 +121,7 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
 **Current Problem:**
 ```scala
 // ❌ Request DTO contains domain model directly
-final case class CreateSimulationRequest(
+final case class RiskTreeDefinitionRequest(
   name: String,              // Plain String - not validated
   nTrials: Int,              // Plain Int - not validated
   root: RiskNode             // Domain model in DTO - tight coupling
@@ -658,7 +660,7 @@ POST /risk-trees
 
 JSON Request
   ↓
-CreateSimulationRequest (DTO)
+RiskTreeDefinitionRequest (DTO)
   ↓ [Validation]
 RiskTree (Domain)
   ↓ [Repository]
@@ -729,7 +731,7 @@ def create(
 
 ### **Layer 3: Service Layer (Orchestration)**
 ```scala
-override def create(req: CreateSimulationRequest): Task[RiskTree] = {
+override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
   for {
     _ <- ZIO.fromEither(ValidationUtil.refinePositiveInt(req.nTrials, "nTrials"))
     safeName <- ZIO.fromEither(ValidationUtil.refineName(req.name))

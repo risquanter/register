@@ -160,7 +160,7 @@ trait SimulationService {
     * - nTrials <= 100K: Synchronous (BCG pattern)
     * - nTrials > 100K: Async with job tracking
     */
-  def create(req: CreateSimulationRequest): Task[Either[SimulationWithLEC, SimulationJob]]
+  def create(req: RiskTreeDefinitionRequest): Task[Either[SimulationWithLEC, SimulationJob]]
 }
 ```
 
