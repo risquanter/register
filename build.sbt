@@ -17,7 +17,7 @@ ThisBuild / testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
 val sttpVersion       = "3.10.1"
 val zioVersion        = "2.1.24"
 val tapirVersion      = "1.13.4"
-val zioLoggingVersion = "2.2.4"
+val zioLoggingVersion = "2.5.2"
 val zioConfigVersion  = "4.0.2"
 val quillVersion      = "4.8.6"
   val ironVersion       = "3.2.2"// Common dependencies (shared between JVM and JS)
@@ -45,7 +45,7 @@ val serverDependencies = Seq(
   "com.softwaremill.sttp.tapir"   %% "tapir-zio-http-server"             % tapirVersion,
   "com.softwaremill.sttp.tapir"   %% "tapir-sttp-stub-server"            % tapirVersion % Test,
   "dev.zio"                       %% "zio-logging"                       % zioLoggingVersion,
-  "dev.zio"                       %% "zio-logging-slf4j"                 % zioLoggingVersion,
+  "dev.zio"                       %% "zio-logging-slf4j2"                % zioLoggingVersion,
   "ch.qos.logback"                 % "logback-classic"                   % "1.5.23",
   "dev.zio"                       %% "zio-test"                          % zioVersion   % Test,
   "dev.zio"                       %% "zio-test-sbt"                      % zioVersion   % Test,
