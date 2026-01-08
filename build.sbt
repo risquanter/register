@@ -20,7 +20,9 @@ val tapirVersion      = "1.13.4"
 val zioLoggingVersion = "2.5.2"
 val zioConfigVersion  = "4.0.2"
 val quillVersion      = "4.8.6"
-  val ironVersion       = "3.2.2"// Common dependencies (shared between JVM and JS)
+val ironVersion       = "3.2.2"
+val zioTelemetryVersion = "3.0.1"
+val openTelemetryVersion = "1.42.1"// Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(
   "com.softwaremill.sttp.tapir"   %% "tapir-sttp-client"       % tapirVersion,
   "com.softwaremill.sttp.tapir"   %% "tapir-json-zio"          % tapirVersion,
@@ -47,9 +49,19 @@ val serverDependencies = Seq(
   "dev.zio"                       %% "zio-logging"                       % zioLoggingVersion,
   "dev.zio"                       %% "zio-logging-slf4j2"                % zioLoggingVersion,
   "ch.qos.logback"                 % "logback-classic"                   % "1.5.23",
+  // OpenTelemetry / ZIO Telemetry
+  "dev.zio"                       %% "zio-opentelemetry"                 % zioTelemetryVersion,
+  "io.opentelemetry"               % "opentelemetry-sdk"                 % openTelemetryVersion,
+  "io.opentelemetry"               % "opentelemetry-sdk-trace"           % openTelemetryVersion,
+  "io.opentelemetry"               % "opentelemetry-sdk-metrics"         % openTelemetryVersion,
+  "io.opentelemetry"               % "opentelemetry-exporter-logging"    % openTelemetryVersion,
+  "io.opentelemetry"               % "opentelemetry-exporter-otlp"       % openTelemetryVersion,
+  "io.opentelemetry.semconv"       % "opentelemetry-semconv"             % "1.27.0-alpha",
+  // Test dependencies
   "dev.zio"                       %% "zio-test"                          % zioVersion   % Test,
   "dev.zio"                       %% "zio-test-sbt"                      % zioVersion   % Test,
   "dev.zio"                       %% "zio-test-magnolia"                 % zioVersion   % Test,
+  // Other
   "io.github.iltotore"            %% "iron-zio"                          % ironVersion,
   "org.scala-lang.modules"        %% "scala-parallel-collections"        % "1.0.4",
   "com.risquanter"                 % "simulation.util"                   % "0.8.0"
