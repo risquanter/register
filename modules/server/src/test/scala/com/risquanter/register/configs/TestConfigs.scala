@@ -11,4 +11,14 @@ object TestConfigs {
   )
   
   val simulationLayer: ULayer[SimulationConfig] = ZLayer.succeed(simulation)
+  
+  val telemetry: TelemetryConfig = TelemetryConfig(
+    serviceName = "risk-register-test",
+    instrumentationScope = "com.risquanter.register.test",
+    otlpEndpoint = "http://localhost:4317",
+    devExportIntervalSeconds = 1,
+    prodExportIntervalSeconds = 10
+  )
+  
+  val telemetryLayer: ULayer[TelemetryConfig] = ZLayer.succeed(telemetry)
 }

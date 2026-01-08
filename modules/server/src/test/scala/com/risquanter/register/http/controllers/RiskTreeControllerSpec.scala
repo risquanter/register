@@ -48,10 +48,15 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
   }
 
   // Layer factory - creates fresh layer with isolated repository per test
-  private def serviceLayer = 
+  private def serviceLayer = {
+    // Telemetry layers require TelemetryConfig
+    val tracingLayer = com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console
+    val metricsLayer = com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+    
     ZLayer.succeed(makeStubRepo()) >>>
-    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository] ++ com.risquanter.register.configs.TestConfigs.simulationLayer ++ TracingLive.console ++ MetricsLive.console) >>>
+    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository] ++ com.risquanter.register.configs.TestConfigs.simulationLayer ++ tracingLayer ++ metricsLayer) >>>
     RiskTreeServiceLive.layer
+  }
 
   override def spec = suite("RiskTreeController")(
     suite("Health endpoint")(

@@ -17,9 +17,11 @@ import io.opentelemetry.sdk.resources.Resource
 import io.opentelemetry.semconv.ServiceAttributes
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api
-import java.time.Duration
+import com.risquanter.register.configs.TelemetryConfig
 
 /** Combined OpenTelemetry layer providing both Tracing and Metrics
+  * 
+  * Configuration-driven: all settings come from TelemetryConfig.
   * 
   * Uses a single OpenTelemetry SDK instance with both providers,
   * which is more efficient than separate layers and ensures
@@ -36,25 +38,10 @@ import java.time.Duration
   */
 object TelemetryLive {
   
-  /** Service name for OpenTelemetry resource attributes */
-  private val ServiceName = "risk-register"
-  
-  /** Instrumentation scope name */
-  private val InstrumentationScopeName = "com.risquanter.register"
-  
-  /** Metric export interval for development (5 seconds) */
-  private val DevMetricExportInterval = Duration.ofSeconds(5)
-  
-  /** Metric export interval for production (60 seconds) */
-  private val ProdMetricExportInterval = Duration.ofSeconds(60)
-  
-  /** Default OTLP endpoint */
-  private val DefaultOtlpEndpoint = "http://localhost:4317"
-  
-  /** Shared resource for all providers */
-  private val otelResource: Resource =
+  /** Build OpenTelemetry resource with service name from config */
+  private def otelResource(config: TelemetryConfig): Resource =
     Resource.create(
-      Attributes.of(ServiceAttributes.SERVICE_NAME, ServiceName)
+      Attributes.of(ServiceAttributes.SERVICE_NAME, config.serviceName)
     )
   
   /** Build combined SDK with both tracing and metrics (console exporters)
@@ -65,7 +52,7 @@ object TelemetryLive {
     * 
     * All resources are scoped for proper cleanup.
     */
-  private val consoleOtelSdk: RIO[Scope, OpenTelemetrySdk] =
+  private def consoleOtelSdk(config: TelemetryConfig): RIO[Scope, OpenTelemetrySdk] =
     for {
       // Tracing components
       spanExporter <- ZIO.fromAutoCloseable(
@@ -77,7 +64,7 @@ object TelemetryLive {
       tracerProvider <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           SdkTracerProvider.builder()
-            .setResource(otelResource)
+            .setResource(otelResource(config))
             .addSpanProcessor(spanProcessor)
             .build()
         )
@@ -90,14 +77,14 @@ object TelemetryLive {
       metricReader <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           PeriodicMetricReader.builder(metricExporter)
-            .setInterval(DevMetricExportInterval)
+            .setInterval(config.devExportInterval)
             .build()
         )
       )
       meterProvider <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           SdkMeterProvider.builder()
-            .setResource(otelResource)
+            .setResource(otelResource(config))
             .registerMetricReader(metricReader)
             .build()
         )
@@ -115,45 +102,58 @@ object TelemetryLive {
     } yield sdk
   
   /** OpenTelemetry SDK layer with both tracing and metrics (console exporters) */
-  val otelSdkConsoleLayer: TaskLayer[api.OpenTelemetry] =
-    OpenTelemetry.custom(consoleOtelSdk)
+  private def otelSdkConsoleLayer(config: TelemetryConfig): TaskLayer[api.OpenTelemetry] =
+    OpenTelemetry.custom(consoleOtelSdk(config))
   
   /** Complete telemetry layer providing Tracing + Meter (console exporters)
     * 
     * Usage:
     * {{{
-    * myEffect.provide(TelemetryLive.console)
+    * myEffect.provide(
+    *   TelemetryLive.console,
+    *   Configs.makeLayer[TelemetryConfig]("register.telemetry")
+    * )
     * }}}
     * 
     * This is preferred over using TracingLive.console + MetricsLive.console
     * separately, as it uses a single SDK instance.
     */
-  val console: ZLayer[Any, Throwable, Tracing & Meter & Instrument.Builder] = {
-    val contextLayer = OpenTelemetry.contextZIO
-    val tracingLayer = OpenTelemetry.tracing(InstrumentationScopeName)
-    val metricsLayer = OpenTelemetry.metrics(InstrumentationScopeName)
-    
-    otelSdkConsoleLayer ++ contextLayer >>> (tracingLayer ++ metricsLayer)
-  }
+  val console: ZLayer[TelemetryConfig, Throwable, Tracing & Meter & Instrument.Builder] =
+    ZLayer.service[TelemetryConfig].flatMap { configEnv =>
+      val config = configEnv.get
+      val contextLayer = OpenTelemetry.contextZIO
+      val tracingLayer = OpenTelemetry.tracing(config.instrumentationScope)
+      val metricsLayer = OpenTelemetry.metrics(config.instrumentationScope)
+      
+      otelSdkConsoleLayer(config) ++ contextLayer >>> (tracingLayer ++ metricsLayer)
+    }
   
   /** Tracing-only layer (console exporter) - for backward compatibility */
-  val tracingConsole: ZLayer[Any, Throwable, Tracing] =
-    otelSdkConsoleLayer ++ OpenTelemetry.contextZIO >>> OpenTelemetry.tracing(InstrumentationScopeName)
+  val tracingConsole: ZLayer[TelemetryConfig, Throwable, Tracing] =
+    ZLayer.service[TelemetryConfig].flatMap { configEnv =>
+      val config = configEnv.get
+      otelSdkConsoleLayer(config) ++ OpenTelemetry.contextZIO >>> 
+        OpenTelemetry.tracing(config.instrumentationScope)
+    }
   
   /** Metrics-only layer (console exporter) */
-  val metricsConsole: ZLayer[Any, Throwable, Meter & Instrument.Builder] =
-    otelSdkConsoleLayer ++ OpenTelemetry.contextZIO >>> OpenTelemetry.metrics(InstrumentationScopeName)
+  val metricsConsole: ZLayer[TelemetryConfig, Throwable, Meter & Instrument.Builder] =
+    ZLayer.service[TelemetryConfig].flatMap { configEnv =>
+      val config = configEnv.get
+      otelSdkConsoleLayer(config) ++ OpenTelemetry.contextZIO >>> 
+        OpenTelemetry.metrics(config.instrumentationScope)
+    }
   
   // ===== OTLP Configuration (Production) =====
   
   /** Build combined SDK with both tracing and metrics (OTLP exporters) */
-  private def otlpOtelSdk(endpoint: String): RIO[Scope, OpenTelemetrySdk] =
+  private def otlpOtelSdk(config: TelemetryConfig): RIO[Scope, OpenTelemetrySdk] =
     for {
       // Tracing components (batched for production)
       spanExporter <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           OtlpGrpcSpanExporter.builder()
-            .setEndpoint(endpoint)
+            .setEndpoint(config.otlpEndpoint)
             .build()
         )
       )
@@ -163,7 +163,7 @@ object TelemetryLive {
       tracerProvider <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           SdkTracerProvider.builder()
-            .setResource(otelResource)
+            .setResource(otelResource(config))
             .addSpanProcessor(spanProcessor)
             .build()
         )
@@ -173,21 +173,21 @@ object TelemetryLive {
       metricExporter <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           OtlpGrpcMetricExporter.builder()
-            .setEndpoint(endpoint)
+            .setEndpoint(config.otlpEndpoint)
             .build()
         )
       )
       metricReader <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           PeriodicMetricReader.builder(metricExporter)
-            .setInterval(ProdMetricExportInterval)
+            .setInterval(config.prodExportInterval)
             .build()
         )
       )
       meterProvider <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           SdkMeterProvider.builder()
-            .setResource(otelResource)
+            .setResource(otelResource(config))
             .registerMetricReader(metricReader)
             .build()
         )
@@ -205,26 +205,33 @@ object TelemetryLive {
     } yield sdk
   
   /** OpenTelemetry SDK layer with OTLP exporters */
-  private def otelSdkOtlpLayer(endpoint: String): TaskLayer[api.OpenTelemetry] =
-    OpenTelemetry.custom(otlpOtelSdk(endpoint))
+  private def otelSdkOtlpLayer(config: TelemetryConfig): TaskLayer[api.OpenTelemetry] =
+    OpenTelemetry.custom(otlpOtelSdk(config))
   
   /** Complete telemetry layer for production (OTLP export)
     * 
     * Uses OTLP gRPC exporters for both traces and metrics.
-    * Default endpoint: http://localhost:4317 (OpenTelemetry Collector)
+    * Endpoint from TelemetryConfig (default: http://localhost:4317)
+    * 
+    * Override endpoint via:
+    * - application.conf: register.telemetry.otlpEndpoint
+    * - Environment: OTEL_EXPORTER_OTLP_ENDPOINT
     * 
     * Usage:
     * {{{
-    * myEffect.provide(TelemetryLive.otlp())
-    * // or with custom endpoint
-    * myEffect.provide(TelemetryLive.otlp("http://collector:4317"))
+    * myEffect.provide(
+    *   TelemetryLive.otlp,
+    *   Configs.makeLayer[TelemetryConfig]("register.telemetry")
+    * )
     * }}}
     */
-  def otlp(endpoint: String = DefaultOtlpEndpoint): ZLayer[Any, Throwable, Tracing & Meter & Instrument.Builder] = {
-    val contextLayer = OpenTelemetry.contextZIO
-    val tracingLayer = OpenTelemetry.tracing(InstrumentationScopeName)
-    val metricsLayer = OpenTelemetry.metrics(InstrumentationScopeName)
-    
-    otelSdkOtlpLayer(endpoint) ++ contextLayer >>> (tracingLayer ++ metricsLayer)
-  }
+  val otlp: ZLayer[TelemetryConfig, Throwable, Tracing & Meter & Instrument.Builder] =
+    ZLayer.service[TelemetryConfig].flatMap { configEnv =>
+      val config = configEnv.get
+      val contextLayer = OpenTelemetry.contextZIO
+      val tracingLayer = OpenTelemetry.tracing(config.instrumentationScope)
+      val metricsLayer = OpenTelemetry.metrics(config.instrumentationScope)
+      
+      otelSdkOtlpLayer(config) ++ contextLayer >>> (tracingLayer ++ metricsLayer)
+    }
 }

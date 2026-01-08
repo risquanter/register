@@ -5,7 +5,7 @@ import zio.http.Server
 import zio.config.typesafe.TypesafeConfigProvider
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 
-import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig}
+import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig}
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.controllers.RiskTreeController
 import com.risquanter.register.services.RiskTreeServiceLive
@@ -29,13 +29,14 @@ object Application extends ZIOAppDefault {
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
+      Configs.makeLayer[TelemetryConfig]("register.telemetry"),
       // Server layer uses ServerConfig
       ZLayer.fromZIO(
         ZIO.service[ServerConfig].map(cfg => 
           Server.Config.default.binding(cfg.host, cfg.port)
         )
       ) >>> Server.live,
-      // Telemetry - provides Tracing + Meter for observability
+      // Telemetry - provides Tracing + Meter for observability (requires TelemetryConfig)
       TracingLive.console,
       MetricsLive.console,
       RiskTreeRepositoryInMemory.layer,
