@@ -4,6 +4,9 @@ import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
 import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, NodeProvenance, TreeProvenance, ExpertDistributionParams, LognormalDistributionParams}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.iron.{PositiveInt, Probability}
+import io.github.iltotore.iron.refineUnsafe
+import io.github.iltotore.iron.constraint.numeric.Greater
 import zio.prelude.Identity
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
@@ -36,15 +39,16 @@ object Simulator {
    * Thread safety: sampler functions are pure (HDR-based determinism)
    * 
    * @param sampler RiskSampler with occurrence + loss distribution
-   * @param nTrials Total number of trials to simulate
+   * @param nTrials Total number of trials to simulate (must be positive)
    * @return Sparse map of trial ID → loss (only non-zero outcomes)
    */
   def performTrials(
     sampler: RiskSampler,
-    nTrials: Int
+    nTrials: PositiveInt
   ): Map[TrialId, Loss] = {
     // Lazy view: filter successful trials without intermediate allocation
-    val successfulTrials = (0 until nTrials).view
+    val n: Int = nTrials
+    val successfulTrials = (0 until n).view
       .filter(trial => sampler.sampleOccurrence(trial.toLong))
       .toVector
     
@@ -65,19 +69,20 @@ object Simulator {
    * - Determinism: Same seeds produce identical results regardless of parallelism
    * 
    * @param samplers Vector of risk samplers to simulate
-   * @param nTrials Number of trials per risk
-   * @param parallelism Maximum concurrent fibers (default: 8)
+   * @param nTrials Number of trials per risk (must be positive)
+   * @param parallelism Maximum concurrent fibers (must be positive, default: 8)
    * @return Task of RiskResult for each risk
    */
   def simulate(
     samplers: Vector[RiskSampler],
-    nTrials: Int,
-    parallelism: Int = 8
+    nTrials: PositiveInt,
+    parallelism: PositiveInt = 8.refineUnsafe
   ): Task[Vector[RiskResult]] = {
+    val n: Int = nTrials
     val trialSets = samplers.map { sampler =>
       ZIO.attempt {
         val trials = performTrials(sampler, nTrials)
-        RiskResult(sampler.id, trials, nTrials)
+        RiskResult(sampler.id, trials, n)
       }
     }
     
@@ -89,17 +94,18 @@ object Simulator {
    * Guaranteed deterministic execution order.
    * 
    * @param samplers Vector of risk samplers to simulate
-   * @param nTrials Number of trials per risk
+   * @param nTrials Number of trials per risk (must be positive)
    * @return Task of RiskResult for each risk
    */
   def simulateSequential(
     samplers: Vector[RiskSampler],
-    nTrials: Int
+    nTrials: PositiveInt
   ): Task[Vector[RiskResult]] = {
+    val n: Int = nTrials
     ZIO.foreach(samplers) { sampler =>
       ZIO.attempt {
         val trials = performTrials(sampler, nTrials)
-        RiskResult(sampler.id, trials, nTrials)
+        RiskResult(sampler.id, trials, n)
       }
     }
   }
@@ -119,25 +125,27 @@ object Simulator {
    * All nodes in tree share same trial sequence for consistency.
    * 
    * @param node Root node of tree (or subtree)
-   * @param nTrials Number of Monte Carlo trials
-   * @param parallelism Max concurrent child simulations
+   * @param nTrials Number of Monte Carlo trials (must be positive)
+   * @param parallelism Max concurrent child simulations (must be positive)
    * @param includeProvenance Whether to capture provenance metadata
    * @return Tuple of (RiskTreeResult, Option[TreeProvenance])
    */
   def simulateTree(
     node: RiskNode,
-    nTrials: Int,
-    parallelism: Int = 8,
+    nTrials: PositiveInt,
+    parallelism: PositiveInt = 8.refineUnsafe,
     includeProvenance: Boolean = false
   ): Task[(RiskTreeResult, Option[TreeProvenance])] = {
+    val n: Int = nTrials
+    val p: Int = parallelism
     simulateTreeInternal(node, nTrials, parallelism, includeProvenance, Map.empty).map {
       case (result, provenances) =>
         val treeProvenance = if (includeProvenance) {
           Some(TreeProvenance(
             treeId = 0L, // Will be set by service layer with actual tree ID
             globalSeeds = (0L, 0L), // Currently hardcoded, future: user-configurable
-            nTrials = nTrials,
-            parallelism = parallelism,
+            nTrials = n,
+            parallelism = p,
             nodeProvenances = provenances
           ))
         } else None
@@ -150,11 +158,12 @@ object Simulator {
    */
   private def simulateTreeInternal(
     node: RiskNode,
-    nTrials: Int,
-    parallelism: Int,
+    nTrials: PositiveInt,
+    parallelism: PositiveInt,
     includeProvenance: Boolean,
     provenances: Map[String, NodeProvenance]
   ): Task[(RiskTreeResult, Map[String, NodeProvenance])] = {
+    val n: Int = nTrials
     node match {
       case leaf: RiskLeaf =>
         // Terminal node: create sampler and simulate
@@ -163,7 +172,7 @@ object Simulator {
           (sampler, maybeProv) = samplerAndProv
           result <- ZIO.attempt {
             val trials = performTrials(sampler, nTrials)
-            RiskTreeResult.Leaf(leaf.id, RiskResult(leaf.id, trials, nTrials))
+            RiskTreeResult.Leaf(leaf.id, RiskResult(leaf.id, trials, n))
           }
           updatedProvenances = maybeProv match {
             case Some(prov) => provenances + (leaf.id -> prov)

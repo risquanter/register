@@ -2,7 +2,9 @@ package com.risquanter.register.services
 
 import zio._
 import com.risquanter.register.domain.data.{RiskNode, RiskTreeResult, TreeProvenance}
+import com.risquanter.register.domain.data.iron.PositiveInt
 import com.risquanter.register.services.helper.Simulator
+import io.github.iltotore.iron.*
 
 /**
  * Service for orchestrating Monte Carlo simulations.
@@ -14,16 +16,16 @@ trait SimulationExecutionService {
    * 
    * @param simulationId Unique identifier for this execution
    * @param root Root node of the risk tree
-   * @param nTrials Number of Monte Carlo trials
-   * @param parallelism Degree of parallelism (default: available processors)
+   * @param nTrials Number of Monte Carlo trials (must be positive)
+   * @param parallelism Degree of parallelism (must be positive, default: available processors)
    * @param includeProvenance Whether to capture provenance metadata
    * @return Tuple of (RiskTreeResult, Option[TreeProvenance])
    */
   def runTreeSimulation(
     simulationId: String,
     root: RiskNode,
-    nTrials: Int,
-    parallelism: Int = java.lang.Runtime.getRuntime.availableProcessors(),
+    nTrials: PositiveInt,
+    parallelism: PositiveInt = java.lang.Runtime.getRuntime.availableProcessors().refineUnsafe,
     includeProvenance: Boolean = false
   ): Task[(RiskTreeResult, Option[TreeProvenance])]
 }
@@ -36,8 +38,8 @@ final class SimulationExecutionServiceLive extends SimulationExecutionService {
   override def runTreeSimulation(
     simulationId: String,
     root: RiskNode,
-    nTrials: Int,
-    parallelism: Int,
+    nTrials: PositiveInt,
+    parallelism: PositiveInt,
     includeProvenance: Boolean
   ): Task[(RiskTreeResult, Option[TreeProvenance])] = {
     // Delegate to Simulator.simulateTree for actual Monte Carlo execution

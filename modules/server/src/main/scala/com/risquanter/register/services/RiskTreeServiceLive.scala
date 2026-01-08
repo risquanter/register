@@ -288,7 +288,8 @@ class RiskTreeServiceLive private (
       _ <- tracing.setAttribute("risk_tree.effective_trials", tree.nTrials.toLong)
       
       // Determine trials (use override or tree config or default)
-      nTrials: Int = nTrialsOverride.map(t => t: Int).getOrElse(tree.nTrials.toInt)
+      // nTrialsOverride is already PositiveInt; tree.nTrials is Long (convert via refineUnsafe since stored values are validated)
+      nTrials: PositiveInt = nTrialsOverride.getOrElse(tree.nTrials.toInt.refineUnsafe[Greater[0]])
       
       // Execute simulation with nested span and record metrics
       startTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -296,7 +297,7 @@ class RiskTreeServiceLive private (
         tracing.span("runTreeSimulation", SpanKind.INTERNAL) {
           for {
             _ <- tracing.setAttribute("simulation.id", s"tree-${tree.id}")
-            _ <- tracing.setAttribute("simulation.n_trials", nTrials.toLong)
+            _ <- tracing.setAttribute("simulation.n_trials", (nTrials: Int).toLong)
             _ <- tracing.setAttribute("simulation.parallelism", (parallelism: Int).toLong)
             _ <- tracing.addEvent("simulation_started")
             
@@ -304,7 +305,7 @@ class RiskTreeServiceLive private (
               simulationId = s"tree-${tree.id}",
               root = tree.root,
               nTrials = nTrials,
-              parallelism = parallelism,  // Iron type auto-widens to Int
+              parallelism = parallelism,
               includeProvenance = includeProvenance
             )
             
@@ -314,8 +315,8 @@ class RiskTreeServiceLive private (
       }
       endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
       
-      // Record simulation metrics
-      _ <- recordSimulationMetrics(tree.name.toString, nTrials, endTime - startTime)
+      // Record simulation metrics (convert PositiveInt to Int for metrics)
+      _ <- recordSimulationMetrics(tree.name.toString, nTrials: Int, endTime - startTime)
       
       (result, provenance) = resultAndProv
       

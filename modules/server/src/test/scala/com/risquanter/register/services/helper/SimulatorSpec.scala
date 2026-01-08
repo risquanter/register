@@ -6,6 +6,7 @@ import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution}
 import com.risquanter.register.domain.data.iron.Probability
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
+import io.github.iltotore.iron.autoRefine
 
 object SimulatorSpec extends ZIOSpecDefault {
   
@@ -74,7 +75,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         val nTrials = 500
-        val trials = Simulator.performTrials(sampler, nTrials)
+        val trials = Simulator.performTrials(sampler, nTrials.refineUnsafe)
         
         assertTrue(
           trials.forall { case (trialId, _) => trialId >= 0 && trialId < nTrials }
@@ -270,7 +271,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         
         val nTrials = 500
         for {
-          results <- Simulator.simulate(Vector(sampler), nTrials)
+          results <- Simulator.simulate(Vector(sampler), nTrials.refineUnsafe)
         } yield {
           val result = results.head
           // Expect most trials to have occurrences

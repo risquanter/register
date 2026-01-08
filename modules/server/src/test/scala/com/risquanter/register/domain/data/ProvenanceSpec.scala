@@ -5,6 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.json.*
 import java.time.Instant
+import io.github.iltotore.iron.autoRefine
 
 /**
  * Tests for Provenance metadata structures.

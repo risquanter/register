@@ -4,6 +4,7 @@ import zio.*
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult}
 import com.risquanter.register.domain.errors.ValidationFailed
+import io.github.iltotore.iron.autoRefine
 
 object SimulatorTreeSpec extends ZIOSpecDefault {
 

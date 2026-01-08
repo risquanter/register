@@ -1,7 +1,7 @@
 package com.risquanter.register.simulation
 
 import org.apache.commons.math3.distribution.LogNormalDistribution
-
+import scala.math.log
 /** Scala wrapper around Apache Commons Math LogNormalDistribution.
   * 
   * Lognormal distribution is used for "lognormal" mode where user provides
@@ -71,7 +71,6 @@ object LognormalDistribution {
     * @return Right(LognormalDistribution) or Left(ValidationError)
     */
   def fromConfidenceInterval(lowerBound: Long, upperBound: Long): Either[ValidationError, LognormalDistribution] = {
-    import scala.math.log
     
     if (lowerBound <= 0 || upperBound <= lowerBound) {
       return Left(ValidationError(List(
