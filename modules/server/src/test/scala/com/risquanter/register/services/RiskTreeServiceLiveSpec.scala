@@ -8,7 +8,7 @@ import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.domain.errors.ValidationFailed
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.*
 
@@ -81,7 +81,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("computeLEC executes simulation and returns LEC data") {
         val program = for {
           created <- service(_.create(validRequest))
-          lec <- service(_.computeLEC(created.id, None, 1))
+          lec <- service(_.computeLEC(created.id, None, Some(1)))
         } yield (created, lec)
 
         program.assert { case (created, lec) =>
@@ -215,7 +215,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, 1, depth = 0))
+          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 0))
         } yield result
 
         program.assert { result =>
@@ -259,7 +259,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, 1, depth = 1))
+          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 1))
         } yield result
 
         program.assert { result =>
@@ -273,23 +273,25 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("computeLEC clamps depth to maximum of 5") {
+      test("computeLEC rejects depth exceeding maximum") {
         val program = for {
           tree <- service(_.create(validRequest))
-          result <- service(_.computeLEC(tree.id, None, 1, depth = 99))
+          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 99).flip)
         } yield result
 
-        program.assert { result =>
-          // Should not fail, depth should be clamped to 5
-          result.vegaLiteSpec.nonEmpty &&
-            result.quantiles.nonEmpty
+        program.assert { error =>
+          error match {
+            case ValidationFailed(errors) =>
+              errors.exists(e => e.field == "depth" && e.code == ValidationErrorCode.INVALID_RANGE)
+            case _ => false
+          }
         }
       },
 
       test("computeLEC rejects negative depth") {
         val program = for {
           tree <- service(_.create(validRequest))
-          result <- service(_.computeLEC(tree.id, None, 1, depth = -1).flip)
+          result <- service(_.computeLEC(tree.id, None, Some(1), depth = -1).flip)
         } yield result
 
         program.assert {
@@ -301,7 +303,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("computeLEC generates valid Vega-Lite spec") {
         val program = for {
           tree <- service(_.create(validRequest))
-          result <- service(_.computeLEC(tree.id, None, 1, depth = 0))
+          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 0))
         } yield result
 
         program.assert { result =>

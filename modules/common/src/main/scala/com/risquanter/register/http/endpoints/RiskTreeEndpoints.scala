@@ -55,7 +55,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .description("Compute LEC for an existing risk tree")
       .in("risk-trees" / path[String]("id") / "lec")
       .in(query[Option[Int]]("nTrials").description("Override number of trials"))
-      .in(query[Int]("parallelism").default(1).description("Parallelism level"))
+      .in(query[Option[Int]]("parallelism").description("Parallelism level (uses server default if omitted)"))
       .in(query[Int]("depth").default(0).description("Depth of hierarchy to include (0=root only, max 5)"))
       .in(query[Boolean]("includeProvenance").default(false).description("Include provenance metadata for reproducibility"))
       .get

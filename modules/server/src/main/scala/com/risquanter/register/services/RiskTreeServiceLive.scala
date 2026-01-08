@@ -209,21 +209,26 @@ class RiskTreeServiceLive private (
   override def computeLEC(
     id: Long,
     nTrialsOverride: Option[Int],
-    parallelism: Int,
+    parallelism: Option[Int] = None,
     depth: Int = 0,
     includeProvenance: Boolean = false
   ): Task[RiskTreeWithLEC] = {
+    // Resolve effective parallelism: use config default when client omits the parameter.
+    // This allows clients to rely on server-side defaults (recommended) while still
+    // permitting explicit override when needed for testing or specific workloads.
+    val effectiveParallelism = parallelism.getOrElse(config.defaultParallelism)
+    
     // Wrap entire computation in a span with metrics
     val operation = tracing.span("computeLEC", SpanKind.INTERNAL) {
       for {
         // Set span attributes for observability
         _ <- tracing.setAttribute("risk_tree.id", id)
         _ <- tracing.setAttribute("risk_tree.depth", depth.toLong)
-        _ <- tracing.setAttribute("risk_tree.parallelism", parallelism.toLong)
+        _ <- tracing.setAttribute("risk_tree.parallelism", effectiveParallelism.toLong)
         _ <- tracing.setAttribute("risk_tree.include_provenance", includeProvenance)
         _ <- nTrialsOverride.fold(ZIO.unit)(n => tracing.setAttribute("risk_tree.n_trials_override", n.toLong))
         
-        result <- computeLECInternal(id, nTrialsOverride, parallelism, depth, includeProvenance)
+        result <- computeLECInternal(id, nTrialsOverride, effectiveParallelism, depth, includeProvenance)
       } yield result
     }
     
@@ -238,7 +243,7 @@ class RiskTreeServiceLive private (
   private def computeLECInternal(
     id: Long,
     nTrialsOverride: Option[Int],
-    parallelism: Int,
+    parallelism: Int,  // Already resolved from Option at public API boundary
     depth: Int,
     includeProvenance: Boolean
   ): Task[RiskTreeWithLEC] = {
@@ -255,12 +260,11 @@ class RiskTreeServiceLive private (
     validated match {
       case Left(errors) => ZIO.fail(ValidationFailed(errors))
       case Right((validDepth, validParallelism, validTrials)) =>
-        // Use config for defaults and limits
-        val clampedDepth = Math.min(validDepth, config.maxTreeDepth)
-        val effectiveParallelism = if (validParallelism <= 0) config.defaultParallelism else validParallelism
-        
         for {
-          // Load config
+          // Enforce hard limits first (reject if exceeded)
+          _ <- validateHardLimits(validTrials, validParallelism, validDepth)
+          
+          // Load tree from repository
           treeOpt <- repo.getById(id)
           tree <- ZIO.fromOption(treeOpt).orElseFail(
             ValidationFailed(List(ValidationError(
@@ -284,14 +288,14 @@ class RiskTreeServiceLive private (
               for {
                 _ <- tracing.setAttribute("simulation.id", s"tree-${tree.id}")
                 _ <- tracing.setAttribute("simulation.n_trials", nTrials.toLong)
-                _ <- tracing.setAttribute("simulation.parallelism", effectiveParallelism.toLong)
+                _ <- tracing.setAttribute("simulation.parallelism", validParallelism.toLong)
                 _ <- tracing.addEvent("simulation_started")
                 
                 result <- executionService.runTreeSimulation(
                   simulationId = s"tree-${tree.id}",
                   root = tree.root,
                   nTrials = nTrials,
-                  parallelism = effectiveParallelism,
+                  parallelism = validParallelism,
                   includeProvenance = includeProvenance
                 )
                 
@@ -309,10 +313,55 @@ class RiskTreeServiceLive private (
           // Set tree ID in provenance if present
           finalProvenance = provenance.map(_.copy(treeId = tree.id))
           
-          // Convert result to LEC data with depth
-          lec <- convertResultToLEC(tree, result, clampedDepth, finalProvenance)
+          // Convert result to LEC data with validated depth
+          // (validation already rejected values > maxTreeDepth, natural recursion stops at actual tree depth)
+          lec <- convertResultToLEC(tree, result, validDepth, finalProvenance)
         } yield lec
     }
+  }
+  
+  /** Validate request parameters against hard limits.
+    * 
+    * Rejects requests that exceed configured maximum values to prevent
+    * resource exhaustion and protect system stability.
+    * 
+    * @param nTrialsOpt Optional trials override (if None, uses tree's nTrials)
+    * @param parallelism Requested parallelism level
+    * @param depth Requested tree depth
+    * @return Effect that fails with ValidationFailed if limits exceeded
+    */
+  private def validateHardLimits(
+    nTrialsOpt: Option[Int],
+    parallelism: Int,
+    depth: Int
+  ): IO[ValidationFailed, Unit] = {
+    val errors = List(
+      nTrialsOpt.flatMap { nTrials =>
+        Option.when(nTrials > config.maxNTrials)(
+          ValidationError(
+            "nTrials",
+            ValidationErrorCode.INVALID_RANGE,
+            s"nTrials ($nTrials) exceeds maximum (${config.maxNTrials})"
+          )
+        )
+      },
+      Option.when(parallelism > config.maxParallelism)(
+        ValidationError(
+          "parallelism",
+          ValidationErrorCode.INVALID_RANGE,
+          s"parallelism ($parallelism) exceeds maximum (${config.maxParallelism})"
+        )
+      ),
+      Option.when(depth > config.maxTreeDepth)(
+        ValidationError(
+          "depth",
+          ValidationErrorCode.INVALID_RANGE,
+          s"depth ($depth) exceeds maximum (${config.maxTreeDepth})"
+        )
+      )
+    ).flatten
+    
+    ZIO.when(errors.nonEmpty)(ZIO.fail(ValidationFailed(errors))).unit
   }
   
   // Helper: Convert TreeResult to RiskTreeWithLEC

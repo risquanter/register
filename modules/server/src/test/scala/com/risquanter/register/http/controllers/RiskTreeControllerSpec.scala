@@ -131,7 +131,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, 1, depth = 0))
+          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 0))
         } yield result
 
         program.assert { result =>
@@ -173,7 +173,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, 1, depth = 1))
+          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 1))
         } yield result
 
         program.assert { result =>
@@ -187,7 +187,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         }.provide(serviceLayer)
       },
 
-      test("excessive depth is clamped") {
+      test("excessive depth is rejected") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Depth Test",
           nTrials = 1000,
@@ -209,15 +209,15 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, 1, depth = 10))
+          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 10).flip)
         } yield result
 
-        program.assert { result =>
-          result.vegaLiteSpec match {
-            case Some(spec) =>
-              // Should still work, depth clamped to actual tree depth (2 levels)
-              spec.contains("\"risk\": \"root\"") && spec.contains("\"risk\": \"child1\"")
-            case None => false
+        program.assert { error =>
+          error match {
+            case com.risquanter.register.domain.errors.ValidationFailed(errors) =>
+              errors.exists(e => e.field == "depth" && 
+                e.code == com.risquanter.register.domain.errors.ValidationErrorCode.INVALID_RANGE)
+            case _ => false
           }
         }.provide(serviceLayer)
       }
@@ -240,7 +240,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, Some(10000), 1, depth = 0))
+          result <- service(_.computeLEC(tree.id, Some(10000), Some(1), depth = 0))
         } yield result
 
         program.assert { result =>
