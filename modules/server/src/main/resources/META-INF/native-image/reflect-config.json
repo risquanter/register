@@ -1,0 +1,14 @@
+[
+  {
+    "name": "com.risquanter.register.Application",
+    "methods": [{"name": "<init>", "parameterTypes": []}]
+  },
+  {
+    "name": "zio.ZIOAppDefault",
+    "methods": [{"name": "<init>", "parameterTypes": []}]
+  },
+  {
+    "name": "scala.runtime.Statics$VM",
+    "methods": [{"name": "<clinit>", "parameterTypes": []}]
+  }
+]

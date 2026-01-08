@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  # Risk Register Server
+  register-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: register-server
+    ports:
+      - "8080:8080"
+    environment:
+      # Server configuration
+      REGISTER_SERVER_HOST: "0.0.0.0"
+      REGISTER_SERVER_PORT: "8080"
+      
+      # Simulation configuration
+      REGISTER_DEFAULT_NTRIALS: "10000"
+      REGISTER_MAX_TREE_DEPTH: "5"
+      REGISTER_PARALLELISM: "8"
+      REGISTER_MAX_CONCURRENT_SIMULATIONS: "4"
+      REGISTER_MAX_NTRIALS: "1000000"
+      REGISTER_MAX_PARALLELISM: "16"
+      
+      # CORS configuration
+      REGISTER_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      
+      # Telemetry configuration
+      OTEL_SERVICE_NAME: "risk-register"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+      
+      # JVM options
+      JAVA_OPTS: "-Xms512m -Xmx2g -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - register-network
+    image: register-server:latest
+
+  # OpenTelemetry Collector (optional - for observability)
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.95.0
+    container_name: otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics
+      - "8889:8889"   # Prometheus exporter
+    networks:
+      - register-network
+    profiles:
+      - observability
+
+networks:
+  register-network:
+    driver: bridge

@@ -4,10 +4,12 @@ import zio.*
 import zio.http.Server
 import zio.config.typesafe.TypesafeConfigProvider
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
+import zio.http.{Middleware, Header}
+import zio.http.Header.{AccessControlAllowHeaders, AccessControlAllowOrigin, AccessControlExposeHeaders, Origin}
 
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig}
 import com.risquanter.register.http.HttpApi
-import com.risquanter.register.http.controllers.RiskTreeController
+import com.risquanter.register.http.controllers.{RiskTreeController, HealthController}
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -24,12 +26,13 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, RiskTreeController & Server & ServerConfig] =
-    ZLayer.make[RiskTreeController & Server & ServerConfig](
+  val appLayer: ZLayer[Any, Throwable, RiskTreeController & HealthController & Server & ServerConfig & CorsConfig] =
+    ZLayer.make[RiskTreeController & HealthController & Server & ServerConfig & CorsConfig](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
       Configs.makeLayer[TelemetryConfig]("register.telemetry"),
+      Configs.makeLayer[CorsConfig]("register.cors"),
       // Server layer uses ServerConfig
       ZLayer.fromZIO(
         ZIO.service[ServerConfig].map(cfg => 
@@ -44,21 +47,40 @@ object Application extends ZIOAppDefault {
       RiskTreeRepositoryInMemory.layer,
       com.risquanter.register.services.SimulationExecutionService.live,
       RiskTreeServiceLive.layer,  // Requires SimulationConfig + Tracing + SimulationSemaphore + Meter
-      ZLayer.fromZIO(RiskTreeController.makeZIO)
+      ZLayer.fromZIO(RiskTreeController.makeZIO),
+      HealthController.live
     )
 
-  override def run = {
-    val program = for {
-      _          <- ZIO.logInfo("Bootstrapping Risk Register application...")
-      cfg        <- ZIO.service[ServerConfig]
-      _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
-      endpoints  <- HttpApi.endpointsZIO
-      _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
-      httpApp     = ZioHttpInterpreter().toHttp(endpoints)
-      _          <- ZIO.logInfo(s"Starting HTTP server on ${cfg.host}:${cfg.port}...")
-      _          <- Server.serve(httpApp)
-    } yield ()
+  def startServer = for {
+    cfg        <- ZIO.service[ServerConfig]
+    corsConfig <- ZIO.service[CorsConfig]
+    _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
+    _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.allowedOrigins.mkString(", ")}")
+    endpoints  <- HttpApi.endpointsZIO
+    _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
+    httpApp     = ZioHttpInterpreter().toHttp(endpoints)
+    
+    // Apply CORS middleware
+    corsMiddleware = Middleware.cors(Middleware.CorsConfig(
+      allowedOrigin = { origin =>
+        if (corsConfig.allowedOrigins.exists(allowed => Origin.parse(allowed).toOption.contains(origin)))
+          Some(AccessControlAllowOrigin.Specific(origin))
+        else
+          None
+      },
+      allowedHeaders = AccessControlAllowHeaders.All,
+      exposedHeaders = AccessControlExposeHeaders.All
+    ))
+    corsApp = corsMiddleware(httpApp)
+    
+    _          <- ZIO.logInfo(s"Starting HTTP server on ${cfg.host}:${cfg.port}...")
+    _          <- Server.serve(corsApp)
+  } yield ()
 
-    program.provide(appLayer)
-  }
+  def program = for {
+    _ <- ZIO.logInfo("Bootstrapping Risk Register application...")
+    _ <- startServer
+  } yield ()
+
+  override def run = program.provide(appLayer)
 }

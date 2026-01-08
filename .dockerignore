@@ -1,0 +1,56 @@
+# Git
+.git/
+.gitignore
+
+# Build artifacts
+target/
+.bloop/
+.bsp/
+.metals/
+.scala-build/
+.vscode/
+
+# IDE
+*.iml
+.idea/
+.metals/
+metals.sbt
+
+# SBT
+project/target/
+project/project/
+
+# Logs
+*.log
+logs/
+server.log
+test_output.log
+test-baseline.log
+
+# Temp files
+temp/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node (if frontend is added later)
+node_modules/
+npm-debug.log*
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# Test files
+test/
+*Spec.scala
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore

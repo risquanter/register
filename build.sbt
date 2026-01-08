@@ -83,7 +83,7 @@ lazy val common = crossProject(JVMPlatform, JSPlatform)
 
 // Server module (JVM only)
 lazy val server = (project in file("modules/server"))
-  .enablePlugins(BuildInfoPlugin)
+  .enablePlugins(BuildInfoPlugin, NativeImagePlugin)
   .settings(
     name := "register-server",
     libraryDependencies ++= serverDependencies,
@@ -96,7 +96,22 @@ lazy val server = (project in file("modules/server"))
       version,
       "simulationUtilVersion" -> "0.8.0"
     ),
-    buildInfoPackage := "com.risquanter.register"
+    buildInfoPackage := "com.risquanter.register",
+    // Native image configuration
+    nativeImageJvm := "graalvm-ce-java21",
+    nativeImageVersion := "21.0.2",
+    nativeImageOptions ++= Seq(
+      "--no-fallback",
+      "--initialize-at-build-time",
+      "--install-exit-handlers",
+      "-H:+ReportExceptionStackTraces",
+      "-H:+AddAllCharsets",
+      "--enable-url-protocols=http,https",
+      "--allow-incomplete-classpath",
+      "-H:ReflectionConfigurationFiles=" + (baseDirectory.value / "src" / "main" / "resources" / "META-INF" / "native-image" / "reflect-config.json").getAbsolutePath,
+      "-H:ResourceConfigurationFiles=" + (baseDirectory.value / "src" / "main" / "resources" / "META-INF" / "native-image" / "resource-config.json").getAbsolutePath
+    ),
+    nativeImageOutput := target.value / "register-server"
   )
   .dependsOn(common.jvm)
 
