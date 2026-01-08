@@ -98,18 +98,26 @@ lazy val server = (project in file("modules/server"))
     ),
     buildInfoPackage := "com.risquanter.register",
     // Native image configuration
-    nativeImageJvm := "graalvm-ce-java21",
-    nativeImageVersion := "21.0.2",
+    Compile / mainClass := Some("com.risquanter.register.Application"),
+    nativeImageInstalled := true,
     nativeImageOptions ++= Seq(
       "--no-fallback",
-      "--initialize-at-build-time",
-      "--install-exit-handlers",
       "-H:+ReportExceptionStackTraces",
       "-H:+AddAllCharsets",
       "--enable-url-protocols=http,https",
       "--allow-incomplete-classpath",
-      "-H:ReflectionConfigurationFiles=" + (baseDirectory.value / "src" / "main" / "resources" / "META-INF" / "native-image" / "reflect-config.json").getAbsolutePath,
-      "-H:ResourceConfigurationFiles=" + (baseDirectory.value / "src" / "main" / "resources" / "META-INF" / "native-image" / "resource-config.json").getAbsolutePath
+      "-H:IncludeResources=application.conf",
+      "-H:IncludeResources=logback.xml",
+      "-H:IncludeResources=reference.conf",
+      // Include Swagger UI resources
+      "-H:IncludeResources=META-INF/resources/webjars/.*",
+      "-H:IncludeResources=swagger-ui/.*",
+      "-H:ConfigurationFileDirectories=" + (Compile / resourceDirectory).value / "META-INF" / "native-image",
+      // Initialize Netty at runtime (required by Netty's own native-image config)
+      "--initialize-at-run-time=io.netty",
+      // Initialize logging at runtime to avoid conflicts
+      "--initialize-at-run-time=org.slf4j,ch.qos.logback",
+      "--verbose"
     ),
     nativeImageOutput := target.value / "register-server"
   )

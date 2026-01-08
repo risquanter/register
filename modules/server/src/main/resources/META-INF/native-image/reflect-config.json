@@ -1,11 +1,14 @@
 [
   {
     "name": "com.risquanter.register.Application",
-    "methods": [{"name": "<init>", "parameterTypes": []}]
+    "methods": [
+      {"name": "<init>", "parameterTypes": []},
+      {"name": "run", "parameterTypes": []}
+    ]
   },
   {
-    "name": "zio.ZIOAppDefault",
-    "methods": [{"name": "<init>", "parameterTypes": []}]
+    "name": "com.risquanter.register.Application$",
+    "methods": [{"name": "MODULE$", "parameterTypes": []}]
   },
   {
     "name": "scala.runtime.Statics$VM",
