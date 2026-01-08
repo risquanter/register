@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import zio.prelude.Validation
 import zio.telemetry.opentelemetry.tracing.Tracing
-import zio.telemetry.opentelemetry.metrics.Meter
+import zio.telemetry.opentelemetry.metrics.{Meter, Counter, Histogram}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -15,56 +15,36 @@ import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 
+/**
+ * Live implementation of RiskTreeService with telemetry instrumentation.
+ * 
+ * Metric instruments (Counter, Histogram) are created once during layer construction
+ * and cached for the lifetime of the service, avoiding repeated instrument creation.
+ */
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   executionService: SimulationExecutionService,
   config: SimulationConfig,
   tracing: Tracing,
-  meter: Meter
+  // Pre-created metric instruments (cached at construction time)
+  operationsCounter: Counter[Long],
+  simulationDuration: Histogram[Double],
+  trialsCounter: Counter[Long]
 ) extends RiskTreeService {
   
-  // ===== Metrics =====
-  
-  /** Counter for CRUD operations */
-  private val operationsCounter = meter.counter(
-    "risk_tree.operations",
-    Some("1"),
-    Some("Number of risk tree operations")
-  )
-  
-  /** Histogram for simulation duration */
-  private val simulationDuration = meter.histogram(
-    "risk_tree.simulation.duration_ms",
-    Some("ms"),
-    Some("Duration of LEC simulation in milliseconds")
-  )
-  
-  /** Counter for simulation trials executed */
-  private val trialsCounter = meter.counter(
-    "risk_tree.simulation.trials",
-    Some("1"),
-    Some("Total number of simulation trials executed")
-  )
-  
   // Helper to record operation with attributes
-  private def recordOperation(operation: String, success: Boolean): Task[Unit] =
-    for {
-      counter <- operationsCounter
-      _ <- counter.add(1, Attributes(
-        Attribute.string("operation", operation),
-        Attribute.boolean("success", success)
-      ))
-    } yield ()
+  private def recordOperation(operation: String, success: Boolean): UIO[Unit] =
+    operationsCounter.add(1, Attributes(
+      Attribute.string("operation", operation),
+      Attribute.boolean("success", success)
+    ))
   
   // Helper to record simulation metrics
-  private def recordSimulationMetrics(treeName: String, nTrials: Int, durationMs: Long): Task[Unit] =
-    for {
-      histogram <- simulationDuration
-      counter <- trialsCounter
-      attrs = Attributes(Attribute.string("tree_name", treeName))
-      _ <- histogram.record(durationMs.toDouble, attrs)
-      _ <- counter.add(nTrials.toLong, attrs)
-    } yield ()
+  private def recordSimulationMetrics(treeName: String, nTrials: Int, durationMs: Long): UIO[Unit] = {
+    val attrs = Attributes(Attribute.string("tree_name", treeName))
+    simulationDuration.record(durationMs.toDouble, attrs) *>
+      trialsCounter.add(nTrials.toLong, attrs)
+  }
   
   // Config CRUD - only persist, no execution
   override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
@@ -303,13 +283,46 @@ class RiskTreeServiceLive private (
 }
 
 object RiskTreeServiceLive {
-  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & Tracing & Meter, Nothing, RiskTreeService] = ZLayer {
+  
+  /** Metric names and descriptions - centralized for consistency */
+  private object MetricNames {
+    val operationsCounter = "risk_tree.operations"
+    val operationsUnit = "1"
+    val operationsDesc = "Number of risk tree operations"
+    
+    val simulationDuration = "risk_tree.simulation.duration_ms"
+    val simulationDurationUnit = "ms"
+    val simulationDurationDesc = "Duration of LEC simulation in milliseconds"
+    
+    val trialsCounter = "risk_tree.simulation.trials"
+    val trialsUnit = "1"
+    val trialsDesc = "Total number of simulation trials executed"
+  }
+  
+  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & Tracing & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       execService <- ZIO.service[SimulationExecutionService]
       config <- ZIO.service[SimulationConfig]
       tracing <- ZIO.service[Tracing]
       meter <- ZIO.service[Meter]
-    } yield new RiskTreeServiceLive(repo, execService, config, tracing, meter)
+      
+      // Create metric instruments once at layer construction time
+      opsCounter <- meter.counter(
+        MetricNames.operationsCounter,
+        Some(MetricNames.operationsUnit),
+        Some(MetricNames.operationsDesc)
+      )
+      simDuration <- meter.histogram(
+        MetricNames.simulationDuration,
+        Some(MetricNames.simulationDurationUnit),
+        Some(MetricNames.simulationDurationDesc)
+      )
+      trials <- meter.counter(
+        MetricNames.trialsCounter,
+        Some(MetricNames.trialsUnit),
+        Some(MetricNames.trialsDesc)
+      )
+    } yield new RiskTreeServiceLive(repo, execService, config, tracing, opsCounter, simDuration, trials)
   }
 }
