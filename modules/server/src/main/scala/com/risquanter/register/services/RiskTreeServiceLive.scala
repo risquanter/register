@@ -11,7 +11,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, Probability, DistributionType, NonNegativeLong}
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 
@@ -32,12 +32,73 @@ class RiskTreeServiceLive private (
   trialsCounter: Counter[Long]
 ) extends RiskTreeService {
   
-  // Helper to record operation with attributes
-  private def recordOperation(operation: String, success: Boolean): UIO[Unit] =
-    operationsCounter.add(1, Attributes(
-      Attribute.string("operation", operation),
-      Attribute.boolean("success", success)
-    ))
+  // Helper to record operation with attributes and optional error context
+  private def recordOperation(
+    operation: String, 
+    success: Boolean,
+    errorInfo: Option[ErrorContext] = None
+  ): UIO[Unit] = {
+    errorInfo match {
+      case Some(ctx) =>
+        val attrs = ctx.errorField match {
+          case Some(field) => Attributes(
+            Attribute.string("operation", operation),
+            Attribute.boolean("success", success),
+            Attribute.string("error_type", ctx.errorType),
+            Attribute.string("error_code", ctx.errorCode),
+            Attribute.string("error_field", field)
+          )
+          case None => Attributes(
+            Attribute.string("operation", operation),
+            Attribute.boolean("success", success),
+            Attribute.string("error_type", ctx.errorType),
+            Attribute.string("error_code", ctx.errorCode)
+          )
+        }
+        operationsCounter.add(1, attrs)
+      
+      case None =>
+        operationsCounter.add(1, Attributes(
+          Attribute.string("operation", operation),
+          Attribute.boolean("success", success)
+        ))
+    }
+  }
+  
+  // Error context for structured telemetry
+  private case class ErrorContext(
+    errorType: String,
+    errorCode: String,
+    errorField: Option[String] = None
+  )
+  
+  // Extract error context from Throwable
+  private def extractErrorContext(throwable: Throwable): ErrorContext = throwable match {
+    case ValidationFailed(errors) =>
+      // Use first error for primary context
+      val primaryError = errors.headOption.getOrElse(
+        ValidationError("unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "Unknown validation error")
+      )
+      ErrorContext(
+        errorType = "ValidationFailed",
+        errorCode = primaryError.code.code,
+        errorField = Some(primaryError.field)
+      )
+    
+    case RepositoryFailure(reason) =>
+      ErrorContext(
+        errorType = "RepositoryFailure", 
+        errorCode = "REPOSITORY_ERROR",
+        errorField = None
+      )
+    
+    case _ =>
+      ErrorContext(
+        errorType = throwable.getClass.getSimpleName,
+        errorCode = "UNKNOWN_ERROR",
+        errorField = None
+      )
+  }
   
   // Helper to record simulation metrics
   private def recordSimulationMetrics(treeName: String, nTrials: Int, durationMs: Long): UIO[Unit] = {
@@ -69,9 +130,9 @@ class RiskTreeServiceLive private (
       persisted <- repo.create(riskTree)
     } yield persisted
     
-    // Record metrics based on success/failure
+    // Record metrics based on success/failure with error context
     operation.tapBoth(
-      _ => recordOperation("create", success = false),
+      error => recordOperation("create", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("create", success = true)
     )
   }
@@ -94,26 +155,26 @@ class RiskTreeServiceLive private (
     } yield updated
     
     operation.tapBoth(
-      _ => recordOperation("update", success = false),
+      error => recordOperation("update", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("update", success = true)
     )
   }
   
   override def delete(id: Long): Task[RiskTree] =
     repo.delete(id).tapBoth(
-      _ => recordOperation("delete", success = false),
+      error => recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
     )
   
   override def getAll: Task[List[RiskTree]] =
     repo.getAll.tapBoth(
-      _ => recordOperation("getAll", success = false),
+      error => recordOperation("getAll", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getAll", success = true)
     )
   
   override def getById(id: Long): Task[Option[RiskTree]] =
     repo.getById(id).tapBoth(
-      _ => recordOperation("getById", success = false),
+      error => recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
     )
   
@@ -139,9 +200,9 @@ class RiskTreeServiceLive private (
       } yield result
     }
     
-    // Record operation metric (traces already have timing via spans)
+    // Record operation metric with error context (traces already have timing via spans)
     operation.tapBoth(
-      _ => recordOperation("computeLEC", success = false),
+      error => recordOperation("computeLEC", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("computeLEC", success = true)
     )
   }
