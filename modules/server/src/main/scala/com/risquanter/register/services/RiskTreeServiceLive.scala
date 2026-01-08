@@ -2,8 +2,10 @@ package com.risquanter.register.services
 
 import zio.*
 import zio.prelude.Validation
+import zio.telemetry.opentelemetry.tracing.Tracing
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
+import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, Probability, DistributionType, NonNegativeLong}
@@ -14,7 +16,8 @@ import com.risquanter.register.configs.SimulationConfig
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   executionService: SimulationExecutionService,
-  config: SimulationConfig
+  config: SimulationConfig,
+  tracing: Tracing
 ) extends RiskTreeService {
   
   // Config CRUD - only persist, no execution
@@ -68,13 +71,36 @@ class RiskTreeServiceLive private (
   override def getById(id: Long): Task[Option[RiskTree]] =
     repo.getById(id)
   
-  // LEC Computation - load config and execute
+  // LEC Computation - load config and execute with tracing
   override def computeLEC(
     id: Long,
     nTrialsOverride: Option[Int],
     parallelism: Int,
     depth: Int = 0,
     includeProvenance: Boolean = false
+  ): Task[RiskTreeWithLEC] = {
+    // Wrap entire computation in a span
+    tracing.span("computeLEC", SpanKind.INTERNAL) {
+      for {
+        // Set span attributes for observability
+        _ <- tracing.setAttribute("risk_tree.id", id)
+        _ <- tracing.setAttribute("risk_tree.depth", depth.toLong)
+        _ <- tracing.setAttribute("risk_tree.parallelism", parallelism.toLong)
+        _ <- tracing.setAttribute("risk_tree.include_provenance", includeProvenance)
+        _ <- nTrialsOverride.fold(ZIO.unit)(n => tracing.setAttribute("risk_tree.n_trials_override", n.toLong))
+        
+        result <- computeLECInternal(id, nTrialsOverride, parallelism, depth, includeProvenance)
+      } yield result
+    }
+  }
+  
+  // Internal implementation without tracing (for cleaner separation)
+  private def computeLECInternal(
+    id: Long,
+    nTrialsOverride: Option[Int],
+    parallelism: Int,
+    depth: Int,
+    includeProvenance: Boolean
   ): Task[RiskTreeWithLEC] = {
     // Validate parameters using Iron
     val validated = for {
@@ -104,17 +130,32 @@ class RiskTreeServiceLive private (
             )))
           )
           
+          // Add tree name to span for better observability
+          _ <- tracing.setAttribute("risk_tree.name", tree.name.toString)
+          _ <- tracing.setAttribute("risk_tree.effective_trials", tree.nTrials.toLong)
+          
           // Determine trials (use override or tree config or default)
           nTrials = validTrials.map(t => t: Int).getOrElse(tree.nTrials.toInt)
           
-          // Execute simulation with optional provenance
-          resultAndProv <- executionService.runTreeSimulation(
-            simulationId = s"tree-${tree.id}",
-            root = tree.root,
-            nTrials = nTrials,
-            parallelism = effectiveParallelism,
-            includeProvenance = includeProvenance
-          )
+          // Execute simulation with nested span
+          resultAndProv <- tracing.span("runTreeSimulation", SpanKind.INTERNAL) {
+            for {
+              _ <- tracing.setAttribute("simulation.id", s"tree-${tree.id}")
+              _ <- tracing.setAttribute("simulation.n_trials", nTrials.toLong)
+              _ <- tracing.setAttribute("simulation.parallelism", effectiveParallelism.toLong)
+              _ <- tracing.addEvent("simulation_started")
+              
+              result <- executionService.runTreeSimulation(
+                simulationId = s"tree-${tree.id}",
+                root = tree.root,
+                nTrials = nTrials,
+                parallelism = effectiveParallelism,
+                includeProvenance = includeProvenance
+              )
+              
+              _ <- tracing.addEvent("simulation_completed")
+            } yield result
+          }
           (result, provenance) = resultAndProv
           
           // Set tree ID in provenance if present
@@ -184,11 +225,12 @@ class RiskTreeServiceLive private (
 }
 
 object RiskTreeServiceLive {
-  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig, Nothing, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & Tracing, Nothing, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       execService <- ZIO.service[SimulationExecutionService]
       config <- ZIO.service[SimulationConfig]
-    } yield new RiskTreeServiceLive(repo, execService, config)
+      tracing <- ZIO.service[Tracing]
+    } yield new RiskTreeServiceLive(repo, execService, config, tracing)
   }
 }
