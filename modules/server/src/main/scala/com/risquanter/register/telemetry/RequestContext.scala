@@ -20,17 +20,23 @@ final case class RequestContext(
   userId: Option[String] = None
 )
 
+/** Type alias for the FiberRef service */
+type RequestContextRef = FiberRef[Option[RequestContext]]
+
 object RequestContext {
   
-  /** FiberRef for request context propagation
+  /** Layer providing FiberRef for request context propagation
     * 
-    * Initialized with None, set at request boundary.
-    * Automatically inherited by child fibers.
+    * This is the referentially transparent way to create the FiberRef.
+    * Use this layer in your application's layer composition.
+    * 
+    * Usage:
+    * {{{
+    * myEffect.provide(RequestContext.layer)
+    * }}}
     */
-  val ref: FiberRef[Option[RequestContext]] = 
-    Unsafe.unsafe { implicit unsafe =>
-      FiberRef.unsafe.make[Option[RequestContext]](None)
-    }
+  val layer: ULayer[RequestContextRef] =
+    ZLayer.scoped(FiberRef.make[Option[RequestContext]](None))
   
   /** Generate new request context with random UUID
     * 
@@ -41,39 +47,49 @@ object RequestContext {
   
   /** Get current request context from FiberRef
     * 
+    * Requires RequestContextRef in the environment.
+    * 
     * @return Current context if set, None otherwise
     */
-  def get: UIO[Option[RequestContext]] = 
-    ref.get
+  def get: ZIO[RequestContextRef, Nothing, Option[RequestContext]] = 
+    ZIO.serviceWithZIO[RequestContextRef](_.get)
   
   /** Set request context in FiberRef
     * 
+    * Requires RequestContextRef in the environment.
+    * 
     * @param ctx Context to set
     */
-  def set(ctx: RequestContext): UIO[Unit] = 
-    ref.set(Some(ctx))
+  def set(ctx: RequestContext): ZIO[RequestContextRef, Nothing, Unit] = 
+    ZIO.serviceWithZIO[RequestContextRef](_.set(Some(ctx)))
   
   /** Run effect with request context
     * 
     * Sets context for the duration of the effect, automatically cleaning up.
     * Context is inherited by all child fibers.
     * 
+    * Requires RequestContextRef in the environment.
+    * 
     * @param ctx Context to use
     * @param effect Effect to run with context
     * @return Result of effect
     */
-  def withContext[R, E, A](ctx: RequestContext)(effect: ZIO[R, E, A]): ZIO[R, E, A] =
-    ZIO.scoped {
-      ref.locallyScoped(Some(ctx)) *> effect
+  def withContext[R, E, A](ctx: RequestContext)(effect: ZIO[R, E, A]): ZIO[R & RequestContextRef, E, A] =
+    ZIO.serviceWithZIO[RequestContextRef] { ref =>
+      ZIO.scoped {
+        ref.locallyScoped(Some(ctx)) *> effect
+      }
     }
   
   /** Run effect with generated request context
     * 
     * Convenience method that generates a new context and runs the effect with it.
     * 
+    * Requires RequestContextRef in the environment.
+    * 
     * @param effect Effect to run
     * @return Result of effect
     */
-  def withGenerated[R, E, A](effect: ZIO[R, E, A]): ZIO[R, E, A] =
+  def withGenerated[R, E, A](effect: ZIO[R, E, A]): ZIO[R & RequestContextRef, E, A] =
     generate.flatMap(ctx => withContext(ctx)(effect))
 }

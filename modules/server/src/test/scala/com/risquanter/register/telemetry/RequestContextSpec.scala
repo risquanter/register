@@ -86,5 +86,5 @@ object RequestContextSpec extends ZIOSpecDefault {
         afterScope.isEmpty
       )
     }
-  )
+  ).provide(RequestContext.layer)  // All tests require RequestContextRef
 }
