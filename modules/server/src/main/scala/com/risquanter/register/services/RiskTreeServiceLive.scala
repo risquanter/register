@@ -32,50 +32,64 @@ class RiskTreeServiceLive private (
   trialsCounter: Counter[Long]
 ) extends RiskTreeService {
   
-  // Helper to record operation with attributes and optional error context
+  import RiskTreeServiceLive.ErrorContext
+  
+  /** Record operation metric with optional error context
+    * 
+    * Base attributes (operation, success) are always included.
+    * Error attributes (error_type, error_code, error_field) added when error occurs.
+    * 
+    * @param operation Operation name (create, update, delete, getAll, getById, computeLEC)
+    * @param success Whether operation succeeded
+    * @param errorInfo Optional error context for failed operations
+    */
   private def recordOperation(
     operation: String, 
     success: Boolean,
     errorInfo: Option[ErrorContext] = None
   ): UIO[Unit] = {
-    errorInfo match {
+    // Build attributes list starting with base attributes
+    val baseAttrs = Vector(
+      Attribute.string("operation", operation),
+      Attribute.boolean("success", success)
+    )
+    
+    // Append error attributes if present
+    val allAttrs = errorInfo match {
       case Some(ctx) =>
-        val attrs = ctx.errorField match {
-          case Some(field) => Attributes(
-            Attribute.string("operation", operation),
-            Attribute.boolean("success", success),
-            Attribute.string("error_type", ctx.errorType),
-            Attribute.string("error_code", ctx.errorCode),
-            Attribute.string("error_field", field)
-          )
-          case None => Attributes(
-            Attribute.string("operation", operation),
-            Attribute.boolean("success", success),
-            Attribute.string("error_type", ctx.errorType),
-            Attribute.string("error_code", ctx.errorCode)
-          )
-        }
-        operationsCounter.add(1, attrs)
+        val errorAttrs = Vector(
+          Attribute.string("error_type", ctx.errorType),
+          Attribute.string("error_code", ctx.errorCode)
+        ) ++ ctx.errorField.map(field => Vector(Attribute.string("error_field", field))).getOrElse(Vector.empty)
+        baseAttrs ++ errorAttrs
       
-      case None =>
-        operationsCounter.add(1, Attributes(
-          Attribute.string("operation", operation),
-          Attribute.boolean("success", success)
-        ))
+      case None => baseAttrs
     }
+    
+    // Convert Vector to individual arguments for Attributes constructor
+    val attrs = allAttrs match {
+      case v if v.size == 2 => Attributes(v(0), v(1))
+      case v if v.size == 4 => Attributes(v(0), v(1), v(2), v(3))
+      case v if v.size == 5 => Attributes(v(0), v(1), v(2), v(3), v(4))
+      case _ => Attributes(allAttrs.head) // Fallback, should not happen
+    }
+    
+    operationsCounter.add(1, attrs)
   }
   
-  // Error context for structured telemetry
-  private case class ErrorContext(
-    errorType: String,
-    errorCode: String,
-    errorField: Option[String] = None
-  )
-  
-  // Extract error context from Throwable
+  /** Extract structured error context from Throwable
+    * 
+    * Maps domain errors to metric-friendly error context:
+    * - ValidationFailed → error_type, error_code (from first validation error), error_field
+    * - RepositoryFailure → error_type, REPOSITORY_ERROR code
+    * - Other → error_type (class name), UNKNOWN_ERROR code
+    * 
+    * @param throwable Error to extract context from
+    * @return Structured error context for metrics
+    */
   private def extractErrorContext(throwable: Throwable): ErrorContext = throwable match {
     case ValidationFailed(errors) =>
-      // Use first error for primary context
+      // Use first error for primary context (could extend to aggregate all)
       val primaryError = errors.headOption.getOrElse(
         ValidationError("unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "Unknown validation error")
       )
@@ -100,7 +114,16 @@ class RiskTreeServiceLive private (
       )
   }
   
-  // Helper to record simulation metrics
+  /** Record simulation performance metrics
+    * 
+    * Tracks:
+    * - Simulation duration (histogram for percentiles)
+    * - Number of trials executed (counter for aggregation)
+    * 
+    * @param treeName Name of risk tree being simulated
+    * @param nTrials Number of Monte Carlo trials
+    * @param durationMs Elapsed time in milliseconds
+    */
   private def recordSimulationMetrics(treeName: String, nTrials: Int, durationMs: Long): UIO[Unit] = {
     val attrs = Attributes(Attribute.string("tree_name", treeName))
     simulationDuration.record(durationMs.toDouble, attrs) *>
@@ -344,6 +367,20 @@ class RiskTreeServiceLive private (
 }
 
 object RiskTreeServiceLive {
+  
+  /** Structured error context for metrics
+    * 
+    * Used to enrich metric attributes with error details for better observability.
+    * 
+    * @param errorType High-level error category (ValidationFailed, RepositoryFailure, etc.)
+    * @param errorCode Specific error code (REQUIRED_FIELD, INVALID_RANGE, REPOSITORY_ERROR, etc.)
+    * @param errorField Optional field name that caused the error (for validation errors)
+    */
+  private case class ErrorContext(
+    errorType: String,
+    errorCode: String,
+    errorField: Option[String] = None
+  )
   
   /** Metric names and descriptions - centralized for consistency */
   private object MetricNames {
