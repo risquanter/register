@@ -51,13 +51,21 @@ This implementation plan addresses architectural improvements while maintaining 
 
 ### ⚠️ Partially Complete Work
 
-**Phase 3: Structured Logging** (30% Complete)
+**Phase 3: Structured Logging** ⏭️ DEFERRED
 - ✅ Basic ZIO logging: `ZIO.logInfo()` in `Application.scala`
-- ❌ **Missing:** JSON logging configuration (Logback + logstash-encoder)
-- ❌ **Missing:** Request context propagation (FiberRef)
-- ❌ **Missing:** Logging aspects for timing/errors
-- ❌ **Missing:** Request ID generation
-- **Current issue:** Logs are plain text, not structured JSON
+- ⏭️ **Deferred:** JSON logging superseded by OpenTelemetry
+- ⏭️ **Deferred:** Request context propagation → moved to Phase 4
+- **Rationale:** OpenTelemetry provides unified logs/traces/metrics, avoiding duplicate implementation
+
+### 🔄 In Progress
+
+**Phase 4: OpenTelemetry (Telemetry + Structured Logging)** (0% Complete)
+- ❌ **TODO:** Add ZIO Telemetry + OpenTelemetry dependencies
+- ❌ **TODO:** Request context propagation (FiberRef)
+- ❌ **TODO:** Distributed tracing with spans
+- ❌ **TODO:** Metrics collection (counters, histograms)
+- ❌ **TODO:** OTLP exporter configuration
+- **Benefit:** Single implementation provides logs, traces, AND metrics
 
 ### ❌ Not Started
 
@@ -159,8 +167,8 @@ If any of these tests fail, the phase has violated the preservation guarantee an
 | **Phase 0** | **Error Handling & Typed Error Codes** | **\u2705 COMPLETE** | **408** | ValidationErrorCode, field paths, BuildInfo, RiskTreeDefinitionRequest |
 | **Phase 1** | **Configuration Management** | **✅ COMPLETE (100%)** | **408** | application.conf, TypesafeConfigProvider, Configs.makeLayer[T], all config case classes |
 | **Phase 2** | **DTO/Domain Separation** | **✅ COMPLETE (100%)** | **408** | Validation-during-parsing with private DTOs, ID-based field paths |
-| Phase 3 | Structured Logging | 🔄 PARTIAL (30%) | 408 | Basic ZIO.logInfo() added, JSON logging & context missing |
-| Phase 4 | Telemetry | 🕰 Not Started (0%) | 408 | Metrics, tracing (may defer to K8s) |
+| Phase 3 | Structured Logging | ⏭️ DEFERRED → Phase 4 | 408 | Superseded by OpenTelemetry (unified observability) |
+| Phase 4 | OpenTelemetry (Telemetry + Logging) | 🔄 IN PROGRESS (0%) | 408 | Unified tracing, metrics, and structured logs |
 | Phase 5 | Pure ZIO Parallelism | 🕰 Not Started (0%) | 408 | Replace `.par` with ZIO.foreachPar |
 
 ---
@@ -169,8 +177,8 @@ If any of these tests fail, the phase has violated the preservation guarantee an
 | 0 | Documentation | ✅ DONE | - | - |
 | 1 | Configuration Management | ⭐⭐⭐⭐⭐ | ✅ DONE (1 day) | +10 ✅ |
 | 2 | DTO/Domain Separation | ⭐⭐⭐⭐⭐ | ✅ DONE (~90%) | Design complete |
-| 3 | Structured Logging | ⭐⭐⭐⭐ | 🔄 0.7 days remaining | +5 (30% done) |
-| 4 | Telemetry (Optional) | ⭐⭐⭐ | 0.5 days | +5 |
+| 3 | Structured Logging | ⭐⭐⭐⭐ | ⏭️ DEFERRED → Phase 4 | Superseded by OpenTelemetry |
+| 4 | OpenTelemetry (Unified Observability) | ⭐⭐⭐⭐⭐ | 🔄 1.0 days | Traces + Logs + Metrics |
 | 5 | Pure ZIO Parallelism | ⭐⭐ | 0.5 days | +5 |
 | 6 | Final Documentation | ⭐⭐ | 0.5 days | - |
 
@@ -937,7 +945,30 @@ val create: ServerEndpoint[Any, Task] = createEndpoint.serverLogic { req =>
 
 ---
 
-## Phase 3: Structured Logging 🔄 PARTIAL (30% Complete)
+## Phase 3: Structured Logging ⏭️ DEFERRED
+
+**Status:** Deferred - superseded by Phase 4 (OpenTelemetry)
+
+**Rationale:**
+- OpenTelemetry provides unified observability (logs + traces + metrics)
+- Implementing structured logging separately would duplicate effort:
+  - Both need FiberRef for request context
+  - Both need middleware for request lifecycle
+  - OpenTelemetry automatically captures structured logs
+- More efficient to implement once with full observability stack
+
+**Work Completed:**
+- ✅ Basic `ZIO.logInfo()` calls in Application.scala (sufficient for development)
+
+**Deferred to Phase 4:**
+- ⏭️ Request context propagation (FiberRef)
+- ⏭️ JSON log formatting
+- ⏭️ MDC keys configuration
+- ⏭️ Logging aspects
+
+---
+
+## Phase 4: OpenTelemetry (Unified Observability) 🔄 IN PROGRESS (0%)
 
 **Status:** Basic logging added, structured JSON logging not implemented.
 
@@ -1136,7 +1167,223 @@ def withRequestContext[R, E, A](
 
 ---
 
-## Phase 4: Telemetry (Optional) ❌ NOT STARTED (0%)
+## Phase 4: OpenTelemetry (Unified Observability) 🔄 IN PROGRESS (0%)
+
+**Status:** In progress - replacing Phase 3 with comprehensive observability solution.
+
+**Goal:** Implement OpenTelemetry for unified logs, traces, and metrics in a single implementation.
+
+**Benefits over separate structured logging:**
+- ✅ Single implementation for all observability needs
+- ✅ Automatic correlation: logs/traces/metrics share requestId/traceId
+- ✅ Industry standard: Works with Jaeger, Tempo, Prometheus, Grafana
+- ✅ Production-ready: OTLP exporter for Kubernetes observability stack
+
+**Planned Work (~1.0 days):**
+- ❌ Add ZIO Telemetry + OpenTelemetry dependencies (0.5h)
+- ❌ Create RequestContext FiberRef for propagation (1h)
+- ❌ Add OpenTelemetry tracing layer with console exporter (1h)
+- ❌ Instrument RiskTreeService with trace spans (2h)
+- ❌ Add metrics (request count, latency histogram) (1h)
+- ❌ Configure OTLP exporter for production (1h)
+- ❌ Testing and validation (1.5h)
+
+### Tasks
+
+#### Task 4.1: Add Dependencies (30 min) ❌ Not Started
+
+**Add to `build.sbt`:**
+```scala
+val zioTelemetryVersion = "3.0.1"
+val openTelemetryVersion = "1.42.1"
+
+libraryDependencies ++= Seq(
+  // ZIO Telemetry
+  "dev.zio" %% "zio-opentelemetry" % zioTelemetryVersion,
+  
+  // OpenTelemetry SDK
+  "io.opentelemetry" % "opentelemetry-sdk" % openTelemetryVersion,
+  "io.opentelemetry" % "opentelemetry-sdk-trace" % openTelemetryVersion,
+  "io.opentelemetry" % "opentelemetry-sdk-metrics" % openTelemetryVersion,
+  
+  // Exporters
+  "io.opentelemetry" % "opentelemetry-exporter-logging" % openTelemetryVersion, // Development
+  "io.opentelemetry" % "opentelemetry-exporter-otlp" % openTelemetryVersion,     // Production
+  
+  // Semantic conventions
+  "io.opentelemetry.semconv" % "opentelemetry-semconv" % "1.27.0-alpha"
+)
+```
+
+**Test:** `sbt compile` succeeds
+
+---
+
+#### Task 4.2: Create RequestContext (1h)
+
+**Create `modules/server/src/main/scala/com/risquanter/register/telemetry/RequestContext.scala`:**
+```scala
+package com.risquanter.register.telemetry
+
+import zio.*
+import java.util.UUID
+
+/** Request context propagated through ZIO fiber
+  * Contains correlation IDs for distributed tracing and logging
+  */
+final case class RequestContext(
+  requestId: String,
+  traceId: Option[String] = None,
+  spanId: Option[String] = None,
+  userId: Option[String] = None
+)
+
+object RequestContext {
+  /** FiberRef for request context propagation */
+  val ref: FiberRef[Option[RequestContext]] = 
+    FiberRef.unsafe.make[Option[RequestContext]](None)
+  
+  /** Generate new request context with random ID */
+  def generate: UIO[RequestContext] = 
+    ZIO.succeed(RequestContext(requestId = UUID.randomUUID().toString))
+  
+  /** Get current request context from FiberRef */
+  def get: UIO[Option[RequestContext]] = ref.get
+  
+  /** Set request context in FiberRef */
+  def set(ctx: RequestContext): UIO[Unit] = ref.set(Some(ctx))
+  
+  /** Run effect with request context */
+  def withContext[R, E, A](ctx: RequestContext)(effect: ZIO[R, E, A]): ZIO[R, E, A] =
+    ref.locallyScoped(Some(ctx))(effect)
+}
+```
+
+**Test:** Create unit test for context propagation
+
+---
+
+#### Task 4.3: Add Tracing Layer (1h)
+
+**Create `modules/server/src/main/scala/com/risquanter/register/telemetry/Tracing.scala`:**
+```scala
+package com.risquanter.register.telemetry
+
+import zio.*
+import zio.telemetry.opentelemetry.*
+import io.opentelemetry.api.trace.Tracer
+import io.opentelemetry.sdk.OpenTelemetrySdk
+import io.opentelemetry.sdk.trace.SdkTracerProvider
+import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor
+import io.opentelemetry.exporter.logging.LoggingSpanExporter
+
+object Tracing {
+  /** Create OpenTelemetry tracing layer with console exporter (development) */
+  val live: ZLayer[Any, Throwable, Tracing] = {
+    ZLayer.scoped {
+      for {
+        // Create tracer provider with console exporter
+        spanExporter <- ZIO.succeed(LoggingSpanExporter.create())
+        spanProcessor <- ZIO.succeed(SimpleSpanProcessor.create(spanExporter))
+        tracerProvider <- ZIO.succeed(
+          SdkTracerProvider.builder()
+            .addSpanProcessor(spanProcessor)
+            .build()
+        )
+        
+        // Build OpenTelemetry SDK
+        openTelemetry <- ZIO.succeed(
+          OpenTelemetrySdk.builder()
+            .setTracerProvider(tracerProvider)
+            .build()
+        )
+        
+        // Create tracer
+        tracer <- ZIO.succeed(openTelemetry.getTracer("risk-register"))
+        
+        // Register shutdown hook
+        _ <- ZIO.addFinalizer(ZIO.succeed(tracerProvider.close()))
+        
+      } yield Tracing.fromTracer(tracer)
+    }
+  }
+  
+  private def fromTracer(tracer: Tracer): Tracing = new Tracing {
+    override def tracer: Tracer = tracer
+  }
+}
+
+trait Tracing {
+  def tracer: Tracer
+}
+```
+
+**Test:** Application starts with tracing layer
+
+---
+
+#### Task 4.4: Instrument Service (2h)
+
+**Update `RiskTreeServiceLive` to add spans:**
+```scala
+def computeLEC(
+  treeId: Long,
+  nTrials: Option[Int],
+  depth: Option[Int],
+  parallelism: Option[Int],
+  includeProvenance: Boolean
+): Task[RiskTreeWithLEC] = {
+  Tracing.span("computeLEC") {
+    for {
+      _ <- Tracing.setAttribute("treeId", treeId)
+      _ <- Tracing.setAttribute("nTrials", nTrials.getOrElse(defaultNTrials))
+      
+      tree <- repo.get(treeId)
+      result <- tree match {
+        case Some(t) => 
+          Tracing.span("simulation") {
+            simulationService.execute(/* ... */)
+          }
+        case None => ZIO.fail(...)
+      }
+    } yield result
+  }
+}
+```
+
+**Test:** Console shows span hierarchy with timing
+
+---
+
+#### Task 4.5: Add Metrics (1h)
+
+**Create basic metrics:**
+```scala
+object Metrics {
+  val requestCounter: Counter = // ...
+  val latencyHistogram: Histogram = // ...
+}
+```
+
+**Test:** Metrics increment correctly
+
+---
+
+#### Task 4.6: OTLP Exporter (1h)
+
+**Configure production exporter:**
+```scala
+// Replace LoggingSpanExporter with OTLP
+val otlpExporter = OtlpGrpcSpanExporter.builder()
+  .setEndpoint("http://localhost:4317")
+  .build()
+```
+
+**Test:** OTLP endpoint receives spans
+
+---
+
+## Phase 5: Pure ZIO Parallelism ❌ NOT STARTED (0%)
 
 **Status:** Not yet started. Can be deferred to Kubernetes deployment phase.
 
