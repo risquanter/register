@@ -7,7 +7,8 @@ object TestConfigs {
   val simulation: SimulationConfig = SimulationConfig(
     defaultNTrials = 10000,
     maxTreeDepth = 5,
-    defaultParallelism = 8
+    defaultParallelism = 8,
+    maxConcurrentSimulations = 4
   )
   
   val simulationLayer: ULayer[SimulationConfig] = ZLayer.succeed(simulation)
