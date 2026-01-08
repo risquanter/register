@@ -20,12 +20,16 @@ import com.risquanter.register.configs.SimulationConfig
  * 
  * Metric instruments (Counter, Histogram) are created once during layer construction
  * and cached for the lifetime of the service, avoiding repeated instrument creation.
+ * 
+ * Concurrency control: SimulationSemaphore limits concurrent simulation executions
+ * to prevent resource exhaustion under high load.
  */
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   executionService: SimulationExecutionService,
   config: SimulationConfig,
   tracing: Tracing,
+  semaphore: SimulationSemaphore,
   // Pre-created metric instruments (cached at construction time)
   operationsCounter: Counter[Long],
   simulationDuration: Histogram[Double],
@@ -275,23 +279,25 @@ class RiskTreeServiceLive private (
           
           // Execute simulation with nested span and record metrics
           startTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
-          resultAndProv <- tracing.span("runTreeSimulation", SpanKind.INTERNAL) {
-            for {
-              _ <- tracing.setAttribute("simulation.id", s"tree-${tree.id}")
-              _ <- tracing.setAttribute("simulation.n_trials", nTrials.toLong)
-              _ <- tracing.setAttribute("simulation.parallelism", effectiveParallelism.toLong)
-              _ <- tracing.addEvent("simulation_started")
-              
-              result <- executionService.runTreeSimulation(
-                simulationId = s"tree-${tree.id}",
-                root = tree.root,
-                nTrials = nTrials,
-                parallelism = effectiveParallelism,
-                includeProvenance = includeProvenance
-              )
-              
-              _ <- tracing.addEvent("simulation_completed")
-            } yield result
+          resultAndProv <- semaphore.withPermit {
+            tracing.span("runTreeSimulation", SpanKind.INTERNAL) {
+              for {
+                _ <- tracing.setAttribute("simulation.id", s"tree-${tree.id}")
+                _ <- tracing.setAttribute("simulation.n_trials", nTrials.toLong)
+                _ <- tracing.setAttribute("simulation.parallelism", effectiveParallelism.toLong)
+                _ <- tracing.addEvent("simulation_started")
+                
+                result <- executionService.runTreeSimulation(
+                  simulationId = s"tree-${tree.id}",
+                  root = tree.root,
+                  nTrials = nTrials,
+                  parallelism = effectiveParallelism,
+                  includeProvenance = includeProvenance
+                )
+                
+                _ <- tracing.addEvent("simulation_completed")
+              } yield result
+            }
           }
           endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
           
@@ -397,12 +403,13 @@ object RiskTreeServiceLive {
     val trialsDesc = "Total number of simulation trials executed"
   }
   
-  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & Tracing & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       execService <- ZIO.service[SimulationExecutionService]
       config <- ZIO.service[SimulationConfig]
       tracing <- ZIO.service[Tracing]
+      semaphore <- ZIO.service[SimulationSemaphore]
       meter <- ZIO.service[Meter]
       
       // Create metric instruments once at layer construction time
@@ -421,6 +428,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.trialsUnit),
         Some(MetricNames.trialsDesc)
       )
-    } yield new RiskTreeServiceLive(repo, execService, config, tracing, opsCounter, simDuration, trials)
+    } yield new RiskTreeServiceLive(repo, execService, config, tracing, semaphore, opsCounter, simDuration, trials)
   }
 }

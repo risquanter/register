@@ -53,8 +53,12 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
     val tracingLayer = com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console
     val metricsLayer = com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
     
+    // Semaphore layer requires SimulationConfig
+    val simConfigLayer = com.risquanter.register.configs.TestConfigs.simulationLayer
+    val semaphoreLayer = simConfigLayer >>> com.risquanter.register.services.SimulationSemaphore.layer
+    
     ZLayer.succeed(makeStubRepo()) >>>
-    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository] ++ com.risquanter.register.configs.TestConfigs.simulationLayer ++ tracingLayer ++ metricsLayer) >>>
+    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository] ++ simConfigLayer ++ tracingLayer ++ metricsLayer ++ semaphoreLayer) >>>
     RiskTreeServiceLive.layer
   }
 

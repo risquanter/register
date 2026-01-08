@@ -39,9 +39,11 @@ object Application extends ZIOAppDefault {
       // Telemetry - provides Tracing + Meter for observability (requires TelemetryConfig)
       TracingLive.console,
       MetricsLive.console,
+      // Concurrency control - limits concurrent simulations (requires SimulationConfig)
+      com.risquanter.register.services.SimulationSemaphore.layer,
       RiskTreeRepositoryInMemory.layer,
       com.risquanter.register.services.SimulationExecutionService.live,
-      RiskTreeServiceLive.layer,  // Requires SimulationConfig + Tracing + Meter
+      RiskTreeServiceLive.layer,  // Requires SimulationConfig + Tracing + SimulationSemaphore + Meter
       ZLayer.fromZIO(RiskTreeController.makeZIO)
     )
 
