@@ -213,6 +213,9 @@ object Simulator {
    * Validates parameters and builds Metalog distribution.
    * Optionally captures provenance metadata.
    * 
+   * Note: leaf.probability is already refined to Probability type at the boundary,
+   * so no additional validation is needed here.
+   * 
    * @return Tuple of (RiskSampler, Option[NodeProvenance])
    */
   private def createSamplerFromLeaf(
@@ -220,11 +223,6 @@ object Simulator {
     includeProvenance: Boolean = false
   ): Task[(RiskSampler, Option[NodeProvenance])] = {
     for {
-      // Validate probability
-      probability <- ZIO.fromEither(
-        ValidationUtil.refineProbability(leaf.probability)
-      ).mapError(errors => ValidationFailed(errors))
-      
       // Create distribution based on mode
       distAndParams <- createDistributionWithParams(leaf)
       (distribution, distParams) = distAndParams
@@ -234,7 +232,7 @@ object Simulator {
       sampler = RiskSampler.fromDistribution(
         entityId = entityId,
         riskId = leaf.id,
-        occurrenceProb = probability,
+        occurrenceProb = leaf.probability, // Already Probability type from domain model
         lossDistribution = distribution,
         seed3 = 0L,
         seed4 = 0L
@@ -264,16 +262,15 @@ object Simulator {
    */
   private def createDistributionWithParams(leaf: RiskLeaf): Task[(Distribution, com.risquanter.register.domain.data.DistributionParams)] = {
     import io.github.iltotore.iron.*
-    import com.risquanter.register.domain.data.iron.Probability
-    import com.risquanter.register.simulation.PositiveInt
+    import com.risquanter.register.domain.data.iron.{Probability, PositiveInt}
     
     leaf.distributionType.toLowerCase match {
       // Expert opinion mode: fit from percentiles + quantiles
       case "expert" =>
         (leaf.percentiles, leaf.quantiles) match {
           case (Some(ps), Some(qs)) if ps.length == qs.length && ps.length >= 2 =>
-            // Refine percentile values to Probability type
-            val percentileResults = ps.map(p => ValidationUtil.refineProbability(p))
+            // Refine percentile values to Probability type (exclusive bounds (0,1) per QPFitter)
+            val percentileResults = ps.map(p => ValidationUtil.refineProbability(p, "percentiles"))
             val percentileErrors = percentileResults.collect { case Left(errors) => errors }.flatten
             
             if (percentileErrors.nonEmpty) {
@@ -288,17 +285,17 @@ object Simulator {
                 terms = terms,
                 lower = Some(0.0) // Loss cannot be negative
               ) match {
-                case Right(m) =>
+                case Right(metalog) =>
                   val params = ExpertDistributionParams(
                     percentiles = ps,
                     quantiles = qs,
                     terms = ps.length
                   )
-                  ZIO.succeed((m, params))
-                case Left(e) => ZIO.fail(ValidationFailed(List(ValidationError(
+                  ZIO.succeed((metalog, params))
+                case Left(validationError) => ZIO.fail(ValidationFailed(List(ValidationError(
                   field = s"riskLeaf.${leaf.id}.metalogFit",
                   code = ValidationErrorCode.DISTRIBUTION_FIT_FAILED,
-                  message = s"Failed to fit Metalog for '${leaf.id}': ${e.message}"
+                  message = s"Failed to fit Metalog for '${leaf.id}': ${validationError.message}"
                 ))))
               }
             }

@@ -28,6 +28,10 @@ type PositiveInt = Int :| Greater[0]
 type NonNegativeInt = Int :| GreaterEqual[0]
 
 // Probability values (must be between 0.0 and 1.0, exclusive)
+// Exclusive bounds are required for numerical stability in simulation-util's
+// inverse CDF calculations where 0.0 and 1.0 would cause division by zero or infinity.
+// NOTE: Used for both occurrence probabilities AND Metalog percentiles, since QPFitter
+// requires exclusive (0,1) bounds: "p must be in (0,1)"
 type Probability = Double :| (Greater[0.0] & Less[1.0])
 
 // Distribution type string (must be "expert" or "lognormal")

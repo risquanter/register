@@ -102,6 +102,23 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
         val result = MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 9)
         
         assertTrue(result.isRight)
+      },
+      
+      test("boundary percentiles 0.0 and 1.0 are rejected by QPFitter") {
+        // The underlying QPFitter requires exclusive (0,1) bounds
+        // This test documents this constraint for future reference
+        val percentiles = probArray(0.05, 0.5, 0.95)  // Valid exclusive range
+        val quantiles = Array(10.0, 50.0, 90.0)
+        
+        val result = MetalogDistribution.fromPercentiles(
+          percentiles,
+          quantiles,
+          terms = 3,
+          lower = Some(0.0),
+          upper = Some(100.0)
+        )
+        
+        assertTrue(result.isRight)
       }
     ),
     

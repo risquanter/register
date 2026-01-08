@@ -1,11 +1,9 @@
 package com.risquanter.register.simulation
 
 import com.risquanter.simulation.util.distribution.metalog.{Metalog, QPFitter}
-import com.risquanter.register.domain.data.iron.Probability
+import com.risquanter.register.domain.data.iron.{Probability, PositiveInt}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-
-type PositiveInt = Int :| Positive
 
 /**
  * Validation error for Metalog distribution creation.
@@ -24,7 +22,7 @@ case class ValidationError(errors: List[String]) {
  * Used for "expert" mode where user provides percentile-quantile estimates.
  * 
  * This wrapper adds:
- * - Iron refinement type validation for percentiles (must be in [0,1])
+ * - Iron refinement type validation for percentiles (must be in (0,1) - exclusive bounds)
  * - Input validation before calling Java QPFitter
  * - Functional error handling with Either
  * - Distribution trait implementation for uniform interface with Lognormal
@@ -49,11 +47,13 @@ object MetalogDistribution {
   /**
    * Create a Metalog distribution from percentile-quantile pairs.
    * 
-   * Uses Iron Probability type to ensure percentiles are in [0,1].
+   * Uses Iron Probability type to ensure percentiles are in (0,1) (exclusive bounds).
+   * The underlying QPFitter library requires strict (0,1) bounds - 0.0 and 1.0 are not valid.
+   * 
    * Validates inputs before calling simulation-util's QPFitter to provide
    * better error messages and defensive testing against library changes.
    * 
-   * @param percentiles Probabilities in [0, 1], must be sorted ascending
+   * @param percentiles Probabilities in (0, 1) (exclusive), must be sorted ascending
    * @param quantiles Corresponding quantile values
    * @param terms Number of terms in the Metalog expansion (default 9, max = percentiles.length)
    * @param lower Optional lower bound for bounded distribution
@@ -62,7 +62,7 @@ object MetalogDistribution {
    * 
    * @example
    * {{{
-   * val percentiles: Array[Probability] = Array(0.05, 0.5, 0.95).asInstanceOf[Array[Probability]]
+   * val percentiles: Array[Probability] = Array(0.05, 0.5, 0.95).map(_.refineUnsafe)
    * val quantiles = Array(1000.0, 5000.0, 25000.0)
    * 
    * MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3) match {
@@ -74,7 +74,7 @@ object MetalogDistribution {
   def fromPercentiles(
     percentiles: Array[Probability],
     quantiles: Array[Double],
-    terms: PositiveInt = 9,
+    terms: PositiveInt = 9.refineUnsafe,
     lower: Option[Double] = None,
     upper: Option[Double] = None
   ): Either[ValidationError, MetalogDistribution] = {
@@ -124,7 +124,7 @@ object MetalogDistribution {
     upper: Option[Double] = None
   ): Either[ValidationError, MetalogDistribution] = {
     
-    // Validate percentiles are in [0,1] before refining
+    // Validate percentiles are in (0,1) before refining (exclusive bounds per QPFitter)
     if (percentiles.exists(p => p <= 0.0 || p >= 1.0)) {
       Left(ValidationError(List("All percentiles must be in (0.0, 1.0)")))
     } else if (terms <= 0) {

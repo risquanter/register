@@ -92,7 +92,7 @@ object ValidationUtil {
       .map(err => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_RANGE,
-        message = s"Value must be between 0.0 and 1.0: $err"
+        message = s"Value must be between 0.0 and 1.0 (exclusive): $err"
       )))
   }
 
