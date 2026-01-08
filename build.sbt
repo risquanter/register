@@ -21,8 +21,8 @@ val zioLoggingVersion = "2.5.2"
 val zioConfigVersion  = "4.0.2"
 val quillVersion      = "4.8.6"
 val ironVersion       = "3.2.2"
-val zioTelemetryVersion = "3.0.1"
-val openTelemetryVersion = "1.42.1"// Common dependencies (shared between JVM and JS)
+val zioTelemetryVersion = "3.1.13"
+val openTelemetryVersion = "1.57.0"// Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(
   "com.softwaremill.sttp.tapir"   %% "tapir-sttp-client"       % tapirVersion,
   "com.softwaremill.sttp.tapir"   %% "tapir-json-zio"          % tapirVersion,

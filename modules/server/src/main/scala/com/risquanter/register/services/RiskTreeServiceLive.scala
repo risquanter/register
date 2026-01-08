@@ -3,6 +3,8 @@ package com.risquanter.register.services
 import zio.*
 import zio.prelude.Validation
 import zio.telemetry.opentelemetry.tracing.Tracing
+import zio.telemetry.opentelemetry.metrics.Meter
+import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
@@ -17,12 +19,56 @@ class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   executionService: SimulationExecutionService,
   config: SimulationConfig,
-  tracing: Tracing
+  tracing: Tracing,
+  meter: Meter
 ) extends RiskTreeService {
+  
+  // ===== Metrics =====
+  
+  /** Counter for CRUD operations */
+  private val operationsCounter = meter.counter(
+    "risk_tree.operations",
+    Some("1"),
+    Some("Number of risk tree operations")
+  )
+  
+  /** Histogram for simulation duration */
+  private val simulationDuration = meter.histogram(
+    "risk_tree.simulation.duration_ms",
+    Some("ms"),
+    Some("Duration of LEC simulation in milliseconds")
+  )
+  
+  /** Counter for simulation trials executed */
+  private val trialsCounter = meter.counter(
+    "risk_tree.simulation.trials",
+    Some("1"),
+    Some("Total number of simulation trials executed")
+  )
+  
+  // Helper to record operation with attributes
+  private def recordOperation(operation: String, success: Boolean): Task[Unit] =
+    for {
+      counter <- operationsCounter
+      _ <- counter.add(1, Attributes(
+        Attribute.string("operation", operation),
+        Attribute.boolean("success", success)
+      ))
+    } yield ()
+  
+  // Helper to record simulation metrics
+  private def recordSimulationMetrics(treeName: String, nTrials: Int, durationMs: Long): Task[Unit] =
+    for {
+      histogram <- simulationDuration
+      counter <- trialsCounter
+      attrs = Attributes(Attribute.string("tree_name", treeName))
+      _ <- histogram.record(durationMs.toDouble, attrs)
+      _ <- counter.add(nTrials.toLong, attrs)
+    } yield ()
   
   // Config CRUD - only persist, no execution
   override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
-    for {
+    val operation = for {
       // Use DTO toDomain method for comprehensive validation
       validated <- ZIO.fromEither(
         RiskTreeDefinitionRequest.toDomain(req)
@@ -42,10 +88,16 @@ class RiskTreeServiceLive private (
       // Persist
       persisted <- repo.create(riskTree)
     } yield persisted
+    
+    // Record metrics based on success/failure
+    operation.tapBoth(
+      _ => recordOperation("create", success = false),
+      _ => recordOperation("create", success = true)
+    )
   }
   
   override def update(id: Long, req: RiskTreeDefinitionRequest): Task[RiskTree] = {
-    for {
+    val operation = for {
       // Use DTO toDomain method for comprehensive validation
       validated <- ZIO.fromEither(
         RiskTreeDefinitionRequest.toDomain(req)
@@ -60,18 +112,32 @@ class RiskTreeServiceLive private (
         root = rootNode
       ))
     } yield updated
+    
+    operation.tapBoth(
+      _ => recordOperation("update", success = false),
+      _ => recordOperation("update", success = true)
+    )
   }
   
   override def delete(id: Long): Task[RiskTree] =
-    repo.delete(id)
+    repo.delete(id).tapBoth(
+      _ => recordOperation("delete", success = false),
+      _ => recordOperation("delete", success = true)
+    )
   
   override def getAll: Task[List[RiskTree]] =
-    repo.getAll
+    repo.getAll.tapBoth(
+      _ => recordOperation("getAll", success = false),
+      _ => recordOperation("getAll", success = true)
+    )
   
   override def getById(id: Long): Task[Option[RiskTree]] =
-    repo.getById(id)
+    repo.getById(id).tapBoth(
+      _ => recordOperation("getById", success = false),
+      _ => recordOperation("getById", success = true)
+    )
   
-  // LEC Computation - load config and execute with tracing
+  // LEC Computation - load config and execute with tracing and metrics
   override def computeLEC(
     id: Long,
     nTrialsOverride: Option[Int],
@@ -79,8 +145,8 @@ class RiskTreeServiceLive private (
     depth: Int = 0,
     includeProvenance: Boolean = false
   ): Task[RiskTreeWithLEC] = {
-    // Wrap entire computation in a span
-    tracing.span("computeLEC", SpanKind.INTERNAL) {
+    // Wrap entire computation in a span with metrics
+    val operation = tracing.span("computeLEC", SpanKind.INTERNAL) {
       for {
         // Set span attributes for observability
         _ <- tracing.setAttribute("risk_tree.id", id)
@@ -92,6 +158,12 @@ class RiskTreeServiceLive private (
         result <- computeLECInternal(id, nTrialsOverride, parallelism, depth, includeProvenance)
       } yield result
     }
+    
+    // Record operation metric (traces already have timing via spans)
+    operation.tapBoth(
+      _ => recordOperation("computeLEC", success = false),
+      _ => recordOperation("computeLEC", success = true)
+    )
   }
   
   // Internal implementation without tracing (for cleaner separation)
@@ -137,7 +209,8 @@ class RiskTreeServiceLive private (
           // Determine trials (use override or tree config or default)
           nTrials = validTrials.map(t => t: Int).getOrElse(tree.nTrials.toInt)
           
-          // Execute simulation with nested span
+          // Execute simulation with nested span and record metrics
+          startTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
           resultAndProv <- tracing.span("runTreeSimulation", SpanKind.INTERNAL) {
             for {
               _ <- tracing.setAttribute("simulation.id", s"tree-${tree.id}")
@@ -156,6 +229,11 @@ class RiskTreeServiceLive private (
               _ <- tracing.addEvent("simulation_completed")
             } yield result
           }
+          endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+          
+          // Record simulation metrics
+          _ <- recordSimulationMetrics(tree.name.toString, nTrials, endTime - startTime)
+          
           (result, provenance) = resultAndProv
           
           // Set tree ID in provenance if present
@@ -225,12 +303,13 @@ class RiskTreeServiceLive private (
 }
 
 object RiskTreeServiceLive {
-  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & Tracing, Nothing, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & Tracing & Meter, Nothing, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       execService <- ZIO.service[SimulationExecutionService]
       config <- ZIO.service[SimulationConfig]
       tracing <- ZIO.service[Tracing]
-    } yield new RiskTreeServiceLive(repo, execService, config, tracing)
+      meter <- ZIO.service[Meter]
+    } yield new RiskTreeServiceLive(repo, execService, config, tracing, meter)
   }
 }

@@ -7,7 +7,7 @@ import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.SimulationResponse
-import com.risquanter.register.telemetry.TracingLive
+import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
 import io.github.iltotore.iron.*
 
@@ -50,7 +50,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
   // Layer factory - creates fresh layer with isolated repository per test
   private def serviceLayer = 
     ZLayer.succeed(makeStubRepo()) >>>
-    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository] ++ com.risquanter.register.configs.TestConfigs.simulationLayer ++ TracingLive.console) >>>
+    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository] ++ com.risquanter.register.configs.TestConfigs.simulationLayer ++ TracingLive.console ++ MetricsLive.console) >>>
     RiskTreeServiceLive.layer
 
   override def spec = suite("RiskTreeController")(

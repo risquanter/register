@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPo
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.ValidationFailed
-import com.risquanter.register.telemetry.TracingLive
+import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.*
 
 
@@ -323,6 +323,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       SimulationExecutionService.live,
       stubRepoLayer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
-      TracingLive.console
+      TracingLive.console,
+      MetricsLive.console
     ) @@ TestAspect.sequential
 }

@@ -10,7 +10,7 @@ import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.controllers.RiskTreeController
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
-import com.risquanter.register.telemetry.TracingLive
+import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 
 /** Main application entry point
   * Sets up HTTP server with configuration management, dependency injection, and routing
@@ -35,11 +35,12 @@ object Application extends ZIOAppDefault {
           Server.Config.default.binding(cfg.host, cfg.port)
         )
       ) >>> Server.live,
-      // Telemetry - provides Tracing for observability
+      // Telemetry - provides Tracing + Meter for observability
       TracingLive.console,
+      MetricsLive.console,
       RiskTreeRepositoryInMemory.layer,
       com.risquanter.register.services.SimulationExecutionService.live,
-      RiskTreeServiceLive.layer,  // Will need SimulationConfig + Tracing
+      RiskTreeServiceLive.layer,  // Requires SimulationConfig + Tracing + Meter
       ZLayer.fromZIO(RiskTreeController.makeZIO)
     )
 

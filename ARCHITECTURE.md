@@ -1,6 +1,6 @@
 # Risk Register - Architecture Documentation
 
-**Last Updated:** January 7, 2026  
+**Last Updated:** January 8, 2026  
 **Status:** Active Development  
 **Version:** 0.1.0
 
@@ -21,6 +21,8 @@
 11. [Testing Strategy](#testing-strategy)
 12. [Future Roadmap](#future-roadmap)
 13. [Deployment Architecture](#deployment-architecture)
+14. [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogram-for-million-scale-trials)
+15. [Appendix B: ZIO Metrics Bridge for Runtime Observability](#appendix-b-zio-metrics-bridge-for-runtime-observability)
 
 ---
 
@@ -272,7 +274,7 @@ The current sparse storage approach using `Map[TrialId, Loss]` provides excellen
 - **Identity-based aggregation:** Associative merge operation scales to arbitrary tree depths without recomputation
 - **Deterministic parallelism:** HDR-based PRNG ensures identical results regardless of parallelization strategy
 
-See [Appendix: HDR Histogram Evaluation](#appendix-hdr-histogram-evaluation) for detailed comparison with alternative approaches.
+See [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogram-for-million-scale-trials) for detailed comparison with alternative approaches.
 
 ---
 
@@ -756,15 +758,15 @@ Key completed work:
 
 ---
 
-## Appendix
-
-### **HDR Histogram Evaluation**
+## Appendix A: HDR Histogram for Million-Scale Trials
 
 **Date:** January 8, 2026  
 **Decision:** High Dynamic Range (HDR) Histogram approach evaluated and determined to be **Not Applicable**  
 **Status:** ✅ Sparse storage validated as optimal for this use case
 
-#### **What is HDR Histogram?**
+> **Note:** This appendix discusses **HDR Histogram** (a data structure for recording value distributions), not to be confused with **HDR PRNG** (the deterministic pseudo-random number generator used elsewhere in this codebase for reproducible sampling).
+
+### What is HDR Histogram?
 
 High Dynamic Range (HDR) Histogram is a space-efficient data structure for recording and analyzing value distributions. It uses logarithmic bucketing to compress millions of observations into a fixed-size histogram (~10-50KB) while maintaining configurable precision.
 
@@ -774,7 +776,7 @@ High Dynamic Range (HDR) Histogram is a space-efficient data structure for recor
 - Histogram merging for distributed aggregation
 - Efficient serialization for persistence
 
-#### **Why HDR Histogram Was Considered**
+### Why HDR Histogram Was Considered
 
 For large-scale Monte Carlo simulations (1M+ trials), memory consumption of sparse storage could become a concern:
 - Current sparse map: 1M trials × 50% probability × 12 bytes/entry = ~6MB per risk
@@ -782,7 +784,7 @@ For large-scale Monte Carlo simulations (1M+ trials), memory consumption of spar
 
 This appears to offer a 100x memory reduction for high-volume simulations.
 
-#### **Why HDR Histogram Was Rejected**
+### Why HDR Histogram Was Rejected
 
 **Critical incompatibility with trial-level aggregation:**
 
@@ -807,7 +809,7 @@ HDR histograms cannot provide `outcomeOf(trialId)` - they only know "bucket 5000
 3. **Hierarchical merge:** Bottom-up tree aggregation depends on matching trial sequences
 4. **Provenance/reproducibility:** Cannot reconstruct exact trial outcomes from bucketed histogram
 
-#### **Technical Comparison**
+### Technical Comparison
 
 | Aspect | Sparse Storage (Current) | HDR Histogram (Rejected) |
 |--------|-------------------------|-------------------------|
@@ -820,7 +822,7 @@ HDR histograms cannot provide `outcomeOf(trialId)` - they only know "bucket 5000
 | **Provenance** | ✅ Full trial reconstruction | ❌ Lossy compression |
 | **Percentile queries** | ✅ O(log n) via lazy TreeMap | ✅ O(1) from histogram |
 
-#### **Alternative Scaling Path: Horizontal Distribution**
+### Alternative Scaling Path: Horizontal Distribution
 
 Instead of algorithmic compression (HDR), the current architecture scales horizontally through referential transparency:
 
@@ -843,7 +845,7 @@ workers.map { case (worker, trialRange) =>
 - Associative merge preserves exact aggregation semantics
 - Works with current codebase (zero architectural changes)
 
-#### **Conclusion**
+### Conclusion
 
 Sparse storage using `Map[TrialId, Loss]` is the optimal approach because:
 
@@ -896,6 +898,70 @@ HDR Histogram would require fundamental architecture changes (approximate merge,
 - **Rationale:** Separation of concerns, standard K8s pattern
 - **Status:** 🔄 Planned
 - **Alternatives Rejected:** Implement OAuth2 in-app
+
+---
+
+## Appendix B: ZIO Metrics Bridge for Runtime Observability
+
+**Status:** Available but not yet implemented  
+**Priority:** Low (nice-to-have)
+
+### Context
+
+The current telemetry implementation uses OpenTelemetry directly for:
+- **Tracing** - Distributed spans via `Tracing` service
+- **Metrics** - Business metrics via `Meter` service (counters, histograms)
+
+ZIO has built-in runtime metrics (fiber counts, execution times, etc.) that are separate from our OpenTelemetry instrumentation.
+
+### Technical Option
+
+zio-telemetry provides `OpenTelemetry.zioMetrics` layer that bridges ZIO's internal metrics to OpenTelemetry exporters. Combined with `DefaultJvmMetrics`, this provides comprehensive runtime observability with zero additional instrumentation code.
+
+### Implementation
+
+```scala
+// In Application.scala appLayer, add:
+import zio.metrics.jvm.DefaultJvmMetrics
+
+val appLayer: ZLayer[Any, Throwable, ...] =
+  ZLayer.make[...](
+    // ... existing layers ...
+    
+    // Optional: Bridge ZIO runtime metrics to OpenTelemetry
+    OpenTelemetry.zioMetrics,
+    
+    // Optional: JVM metrics (heap, GC, threads)
+    DefaultJvmMetrics.liveV2.unit
+  )
+```
+
+### Metrics Provided
+
+| Category | Metrics |
+|----------|---------|
+| **JVM Heap** | `jvm.memory.used`, `jvm.memory.committed`, `jvm.memory.max` |
+| **GC** | `jvm.gc.duration`, `jvm.gc.count` |
+| **Threads** | `jvm.threads.count`, `jvm.threads.daemon` |
+| **ZIO Runtime** | Fiber execution times, fiber counts (when enabled) |
+
+### Trade-offs
+
+| Pros | Cons |
+|------|------|
+| Zero instrumentation code | Additional telemetry volume |
+| Standard JVM metrics | May clutter dashboards |
+| Useful for capacity planning | Requires filtering in observability backend |
+| Free with existing OpenTelemetry setup | Minor runtime overhead |
+
+### Recommendation
+
+**Defer until production deployment.** JVM metrics are most valuable when:
+1. Running in containers with resource limits
+2. Debugging memory leaks or GC pressure
+3. Capacity planning for scaling decisions
+
+For development, the current business metrics (operations counter, simulation duration, trials counter) provide sufficient observability.
 
 ---
 

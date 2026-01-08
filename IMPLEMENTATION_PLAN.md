@@ -2,7 +2,7 @@
 
 **Created:** January 6, 2026  
 **Updated:** January 7, 2026  
-**Status:** Phase 0, 1 & 2 Complete | Phase 3 Partial | Phase 4-5 Not Started  
+**Status:** Phase 0, 1, 2 & 4 Complete | Phase 3 Deferred | Phase 5 Not Started  
 **Current Tests:** 408 passing (287 common + 121 server)  
 **Total Estimate (Remaining):** ~2.2 days of focused work
 
@@ -59,20 +59,16 @@ This implementation plan addresses architectural improvements while maintaining 
 
 ### 🔄 In Progress
 
-**Phase 4: OpenTelemetry (Telemetry + Structured Logging)** (0% Complete)
-- ❌ **TODO:** Add ZIO Telemetry + OpenTelemetry dependencies
-- ❌ **TODO:** Request context propagation (FiberRef)
-- ❌ **TODO:** Distributed tracing with spans
-- ❌ **TODO:** Metrics collection (counters, histograms)
-- ❌ **TODO:** OTLP exporter configuration
+**Phase 4: OpenTelemetry (Telemetry + Structured Logging)** ✅ COMPLETE
+- ✅ **DONE:** Add ZIO Telemetry + OpenTelemetry dependencies (zio-opentelemetry 3.1.13)
+- ✅ **DONE:** Request context propagation (FiberRef) - RequestContext.scala
+- ✅ **DONE:** Distributed tracing with spans - TracingLive.scala
+- ✅ **DONE:** Metrics collection (counters, histograms) - MetricsLive.scala
+- ✅ **DONE:** OTLP exporter configuration - TracingLive.otlp(), MetricsLive.otlp(), TelemetryLive.otlp()
+- ✅ **DONE:** RiskTreeServiceLive instrumented with spans and metrics
 - **Benefit:** Single implementation provides logs, traces, AND metrics
 
 ### ❌ Not Started
-
-**Phase 4: Telemetry** (0% Complete)
-- ❌ Metrics collection
-- ❌ Distributed tracing
-- ❌ OpenTelemetry integration
 
 **Phase 5: Pure ZIO Parallelism** (0% Complete)
 - ❌ Replace `.par.map` with `ZIO.foreachPar`
@@ -164,11 +160,11 @@ If any of these tests fail, the phase has violated the preservation guarantee an
 
 | Phase | Name | Status | Tests | Notes |
 |-------|------|--------|-------|-------|
-| **Phase 0** | **Error Handling & Typed Error Codes** | **\u2705 COMPLETE** | **408** | ValidationErrorCode, field paths, BuildInfo, RiskTreeDefinitionRequest |
+| **Phase 0** | **Error Handling & Typed Error Codes** | **✅ COMPLETE** | **408** | ValidationErrorCode, field paths, BuildInfo, RiskTreeDefinitionRequest |
 | **Phase 1** | **Configuration Management** | **✅ COMPLETE (100%)** | **408** | application.conf, TypesafeConfigProvider, Configs.makeLayer[T], all config case classes |
 | **Phase 2** | **DTO/Domain Separation** | **✅ COMPLETE (100%)** | **408** | Validation-during-parsing with private DTOs, ID-based field paths |
 | Phase 3 | Structured Logging | ⏭️ DEFERRED → Phase 4 | 408 | Superseded by OpenTelemetry (unified observability) |
-| Phase 4 | OpenTelemetry (Telemetry + Logging) | 🔄 IN PROGRESS (0%) | 408 | Unified tracing, metrics, and structured logs |
+| **Phase 4** | **OpenTelemetry (Telemetry + Logging)** | **✅ COMPLETE** | **127** | TracingLive, MetricsLive, TelemetryLive, OTLP exporters |
 | Phase 5 | Pure ZIO Parallelism | 🕰 Not Started (0%) | 408 | Replace `.par` with ZIO.foreachPar |
 
 ---

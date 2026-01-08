@@ -6,8 +6,9 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProvider
-import io.opentelemetry.sdk.trace.`export`.SimpleSpanProcessor
+import io.opentelemetry.sdk.trace.`export`.{SimpleSpanProcessor, BatchSpanProcessor}
 import io.opentelemetry.exporter.logging.LoggingSpanExporter
+import io.opentelemetry.exporter.otlp.trace.OtlpGrpcSpanExporter
 import io.opentelemetry.sdk.resources.Resource
 import io.opentelemetry.semconv.ServiceAttributes
 import io.opentelemetry.api.common.Attributes
@@ -18,9 +19,10 @@ import io.opentelemetry.api
   * - Uses OpenTelemetry.tracing() for Tracing layer
   * - Uses OpenTelemetry.contextZIO for fiber-based context storage
   * - Resource-safe with ZIO.fromAutoCloseable
-  *   * 
-  * Uses logging exporter for development (console output).
-  * Production should use OTLP exporter.
+  *
+  * Provides two configurations:
+  * - `console`: Logging exporter for development (immediate output)
+  * - `otlp`: OTLP gRPC exporter for production (batched, async)
   */
 object TracingLive {
   
@@ -29,6 +31,9 @@ object TracingLive {
   
   /** Instrumentation scope name for tracer */
   private val InstrumentationScopeName = "com.risquanter.register"
+  
+  /** Default OTLP endpoint (standard OpenTelemetry Collector port) */
+  private val DefaultOtlpEndpoint = "http://localhost:4317"
   
   /** Build SdkTracerProvider with logging exporter
     * 
@@ -91,6 +96,73 @@ object TracingLive {
   val console: ZLayer[Any, Throwable, Tracing] =
     otelSdkLayer ++ OpenTelemetry.contextZIO >>> OpenTelemetry.tracing(InstrumentationScopeName)
   
+  // ===== OTLP Configuration (Production) =====
+  
+  /** Build SdkTracerProvider with OTLP gRPC exporter
+    * 
+    * Uses BatchSpanProcessor for efficient async export.
+    * Endpoint configurable via OTEL_EXPORTER_OTLP_ENDPOINT env var.
+    */
+  private def otlpTracerProvider(endpoint: String): RIO[Scope, SdkTracerProvider] =
+    for {
+      spanExporter <- ZIO.fromAutoCloseable(
+        ZIO.succeed(
+          OtlpGrpcSpanExporter.builder()
+            .setEndpoint(endpoint)
+            .build()
+        )
+      )
+      spanProcessor <- ZIO.fromAutoCloseable(
+        ZIO.succeed(BatchSpanProcessor.builder(spanExporter).build())
+      )
+      tracerProvider <- ZIO.fromAutoCloseable(
+        ZIO.succeed(
+          SdkTracerProvider.builder()
+            .setResource(
+              Resource.create(
+                Attributes.of(ServiceAttributes.SERVICE_NAME, ServiceName)
+              )
+            )
+            .addSpanProcessor(spanProcessor)
+            .build()
+        )
+      )
+    } yield tracerProvider
+  
+  /** OpenTelemetry SDK layer with OTLP exporter */
+  private def otelSdkOtlpLayer(endpoint: String): TaskLayer[api.OpenTelemetry] =
+    OpenTelemetry.custom(
+      for {
+        tracerProvider <- otlpTracerProvider(endpoint)
+        sdk <- ZIO.fromAutoCloseable(
+          ZIO.succeed(
+            OpenTelemetrySdk.builder()
+              .setTracerProvider(tracerProvider)
+              .build()
+          )
+        )
+      } yield sdk
+    )
+  
+  /** Complete tracing layer for production (OTLP export)
+    * 
+    * Uses OTLP gRPC exporter with batched, async span export.
+    * Default endpoint: http://localhost:4317 (OpenTelemetry Collector)
+    * 
+    * Override endpoint via:
+    * - Parameter: `TracingLive.otlp("http://jaeger:4317")`
+    * - Environment: OTEL_EXPORTER_OTLP_ENDPOINT
+    * 
+    * Usage:
+    * {{{
+    * myEffect.provide(TracingLive.otlp())
+    * // or with custom endpoint
+    * myEffect.provide(TracingLive.otlp("http://jaeger:4317"))
+    * }}}
+    */
+  def otlp(endpoint: String = DefaultOtlpEndpoint): ZLayer[Any, Throwable, Tracing] =
+    otelSdkOtlpLayer(endpoint) ++ OpenTelemetry.contextZIO >>> OpenTelemetry.tracing(InstrumentationScopeName)
+
   /** Create span with name and kind
     * 
     * Pure function - returns ZIO effect that creates span.
