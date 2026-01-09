@@ -1,0 +1,56 @@
+package com.risquanter.register.http.codecs
+
+import sttp.tapir.*
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, ValidationUtil}
+
+/**
+ * Tapir codecs for Iron refined types.
+ * 
+ * Enables using Iron types directly in Tapir endpoint definitions:
+ * ```scala
+ * .in(query[Option[PositiveInt]]("nTrials"))
+ * .in(query[NonNegativeInt]("depth"))
+ * .in(path[NonNegativeLong]("id"))
+ * ```
+ * 
+ * Validation happens at the HTTP layer (codec decode), following the
+ * "Parse, don't validate" principle. Invalid input returns 400 Bad Request
+ * before reaching controllers or services.
+ * 
+ * @see ADR-001 for validation strategy details
+ */
+object IronTapirCodecs {
+
+  /** Codec for PositiveInt (Int > 0). */
+  given Codec[String, PositiveInt, CodecFormat.TextPlain] =
+    Codec.int.mapDecode[PositiveInt](raw =>
+      ValidationUtil.refinePositiveInt(raw, "value").fold(
+        errs => DecodeResult.Error(raw.toString, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(identity)
+
+  /** Codec for NonNegativeInt (Int >= 0). */
+  given Codec[String, NonNegativeInt, CodecFormat.TextPlain] =
+    Codec.int.mapDecode[NonNegativeInt](raw =>
+      ValidationUtil.refineNonNegativeInt(raw, "value").fold(
+        errs => DecodeResult.Error(raw.toString, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(identity)
+
+  /** Codec for NonNegativeLong (Long >= 0).
+    * Used for internally-generated domain identifiers (e.g., RiskTree IDs).
+    * 
+    * This codec validates at the HTTP boundary that external clients provide
+    * valid ID references. The validated type flows through the entire stack
+    * (controller → service → repository), maintaining type safety.
+    */
+  given Codec[String, NonNegativeLong, CodecFormat.TextPlain] =
+    Codec.long.mapDecode[NonNegativeLong](raw =>
+      ValidationUtil.refineNonNegativeLong(raw, "id").fold(
+        errs => DecodeResult.Error(raw.toString, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(identity)
+}

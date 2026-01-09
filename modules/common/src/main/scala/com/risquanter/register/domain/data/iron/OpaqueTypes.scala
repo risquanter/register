@@ -27,6 +27,51 @@ type PositiveInt = Int :| Greater[0]
 // Non-negative integers (>= 0)
 type NonNegativeInt = Int :| GreaterEqual[0]
 
+/**
+ * Common constant values for Iron refined types.
+ * 
+ * Use these instead of `1.refineUnsafe[Greater[0]]` scattered throughout the codebase.
+ * Import with: `import com.risquanter.register.domain.data.iron.IronConstants.*`
+ * 
+ * These are compile-time safe since Iron validates literal values at compile time.
+ */
+object IronConstants:
+  // PositiveInt constants (Int > 0)
+  val One: PositiveInt = 1
+  val Two: PositiveInt = 2
+  val Four: PositiveInt = 4
+  val Ten: PositiveInt = 10
+  val Hundred: PositiveInt = 100
+  val Thousand: PositiveInt = 1000
+  val TenThousand: PositiveInt = 10000
+  
+  // NonNegativeInt constants (Int >= 0)
+  val Zero: NonNegativeInt = 0
+  val NNOne: NonNegativeInt = 1   // "NN" prefix = NonNegative (avoids clash with One)
+  val NNFive: NonNegativeInt = 5
+  val NNTen: NonNegativeInt = 10
+  
+  // NonNegativeLong constants (Long >= 0)
+  val ZeroL: NonNegativeLong = 0L
+  val OneL: NonNegativeLong = 1L
+
+// Opaque type for Metalog/HDR PRNG counters (zero-cost abstraction)
+// Used for the 4-5 Long counter parameters in HDR.generate(counter, entityId, varId, seed3, seed4)
+// This signals that these Longs are semantically distinct from regular numeric values—
+// they're stream identifiers for deterministic random number generation, not quantities or IDs.
+// No validation needed; any Long is valid, but the type prevents accidental mixing.
+object PRNGCounter:
+  opaque type PRNGCounter = Long
+  
+  object PRNGCounter:
+    /** Create counter from any Long value */
+    def apply(value: Long): PRNGCounter = value
+    def unapply(counter: PRNGCounter): Option[Long] = Some(counter)
+    
+  extension (counter: PRNGCounter)
+    /** Extract underlying Long value */
+    def value: Long = counter
+
 // Probability values (must be between 0.0 and 1.0, exclusive)
 // Exclusive bounds are required for numerical stability in simulation-util's
 // inverse CDF calculations where 0.0 and 1.0 would cause division by zero or infinity.

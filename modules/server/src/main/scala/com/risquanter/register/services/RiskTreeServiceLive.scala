@@ -164,7 +164,7 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def update(id: Long, req: RiskTreeDefinitionRequest): Task[RiskTree] = {
+  override def update(id: NonNegativeLong, req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     val operation = for {
       // Use DTO toDomain method for comprehensive validation
       validated <- ZIO.fromEither(
@@ -187,7 +187,7 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def delete(id: Long): Task[RiskTree] =
+  override def delete(id: NonNegativeLong): Task[RiskTree] =
     repo.delete(id).tapBoth(
       error => recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
@@ -199,63 +199,37 @@ class RiskTreeServiceLive private (
       _ => recordOperation("getAll", success = true)
     )
   
-  override def getById(id: Long): Task[Option[RiskTree]] =
+  override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
     repo.getById(id).tapBoth(
       error => recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
     )
   
   // LEC Computation - load config and execute with tracing and metrics
+  // Parameters are Iron types - validation already done at controller boundary
   override def computeLEC(
-    id: Long,
-    nTrialsOverride: Option[Int],
-    parallelism: Option[Int] = None,
-    depth: Int = 0,
-    includeProvenance: Boolean = false
+    id: NonNegativeLong,
+    nTrialsOverride: Option[PositiveInt],
+    parallelism: PositiveInt,
+    depth: NonNegativeInt,
+    includeProvenance: Boolean
   ): Task[RiskTreeWithLEC] = {
-    // Resolve effective parallelism: use config default when client omits the parameter.
-    // This allows clients to rely on server-side defaults (recommended) while still
-    // permitting explicit override when needed for testing or specific workloads.
-    val effectiveParallelism = parallelism.getOrElse(config.defaultParallelism)
-    
-    // Validate and refine parameters at the API boundary using Iron types.
-    // This ensures computeLECInternal receives type-safe refined values.
-    val validated = for {
-      validDepth <- ValidationUtil.refineNonNegativeInt(depth, "depth")
-      validParallelism <- ValidationUtil.refinePositiveInt(effectiveParallelism, "parallelism")
-      validTrials <- nTrialsOverride match {
-        case Some(trials) => ValidationUtil.refinePositiveInt(trials, "nTrials").map(Some(_))
-        case None => Right(None)
-      }
-    } yield (validDepth, validParallelism, validTrials)
-    
-    validated match {
-      case Left(errors) => 
-        // Early rejection with metrics recording
-        recordOperation("computeLEC", success = false, Some(ErrorContext("ValidationFailed", errors.head.code.code, Some(errors.head.field)))) *>
-          ZIO.fail(ValidationFailed(errors))
-      
-      case Right((validDepth, validParallelism, validTrials)) =>
-        // Wrap entire computation in a span with metrics
-        val operation = tracing.span("computeLEC", SpanKind.INTERNAL) {
-          for {
-            // Set span attributes for observability
-            _ <- tracing.setAttribute("risk_tree.id", id)
-            _ <- tracing.setAttribute("risk_tree.depth", (validDepth: Int).toLong)
-            _ <- tracing.setAttribute("risk_tree.parallelism", (validParallelism: Int).toLong)
-            _ <- tracing.setAttribute("risk_tree.include_provenance", includeProvenance)
-            _ <- validTrials.fold(ZIO.unit)(n => tracing.setAttribute("risk_tree.n_trials_override", (n: Int).toLong))
-            
-            result <- computeLECInternal(id, validTrials, validParallelism, validDepth, includeProvenance)
-          } yield result
-        }
+    val operation = tracing.span("computeLEC", SpanKind.INTERNAL) {
+      for {
+        _ <- tracing.setAttribute("risk_tree.id", (id: Long))
+        _ <- tracing.setAttribute("risk_tree.depth", (depth: Int).toLong)
+        _ <- tracing.setAttribute("risk_tree.parallelism", (parallelism: Int).toLong)
+        _ <- tracing.setAttribute("risk_tree.include_provenance", includeProvenance)
+        _ <- nTrialsOverride.fold(ZIO.unit)(n => tracing.setAttribute("risk_tree.n_trials_override", (n: Int).toLong))
         
-        // Record operation metric with error context (traces already have timing via spans)
-        operation.tapBoth(
-          error => recordOperation("computeLEC", success = false, Some(extractErrorContext(error))),
-          _ => recordOperation("computeLEC", success = true)
-        )
+        result <- computeLECInternal(id, nTrialsOverride, parallelism, depth, includeProvenance)
+      } yield result
     }
+    
+    operation.tapBoth(
+      error => recordOperation("computeLEC", success = false, Some(extractErrorContext(error))),
+      _ => recordOperation("computeLEC", success = true)
+    )
   }
   
   // Internal implementation without tracing (for cleaner separation)
@@ -263,7 +237,7 @@ class RiskTreeServiceLive private (
   // make illegal states unrepresentable). The public API validates and refines raw
   // inputs; internal methods can then trust their parameters.
   private def computeLECInternal(
-    id: Long,
+    id: NonNegativeLong,
     nTrialsOverride: Option[PositiveInt],
     parallelism: PositiveInt,
     depth: NonNegativeInt,

@@ -9,7 +9,10 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, IronConstants}
+import IronConstants.{One, Zero, NNOne, NNTen, TenThousand}
 import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.numeric.*
 
 object RiskTreeControllerSpec extends ZIOSpecDefault {
 
@@ -18,29 +21,29 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo() = new RiskTreeRepository {
-    private val db = collection.mutable.Map[Long, RiskTree]()
+    private val db = collection.mutable.Map[NonNegativeLong, RiskTree]()
     
     override def create(riskTree: RiskTree): Task[RiskTree] = ZIO.attempt {
-      val nextId = db.keys.maxOption.getOrElse(0L) + 1L
-      val newRiskTree = riskTree.copy(id = nextId.refineUnsafe)
+      val nextId: NonNegativeLong = (db.keys.map(k => (k: Long)).maxOption.getOrElse(0L) + 1L).refineUnsafe
+      val newRiskTree = riskTree.copy(id = nextId)
       db += (nextId -> newRiskTree)
       newRiskTree
     }
     
-    override def update(id: Long, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
+    override def update(id: NonNegativeLong, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
       val riskTree = db(id)
       val updated = op(riskTree)
       db += (id -> updated)
       updated
     }
     
-    override def delete(id: Long): Task[RiskTree] = ZIO.attempt {
+    override def delete(id: NonNegativeLong): Task[RiskTree] = ZIO.attempt {
       val riskTree = db(id)
       db -= id
       riskTree
     }
     
-    override def getById(id: Long): Task[Option[RiskTree]] =
+    override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
       ZIO.succeed(db.get(id))
     
     override def getAll: Task[List[RiskTree]] =
@@ -131,7 +134,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 0))
+          result <- service(_.computeLEC(tree.id, None, One, Zero, includeProvenance = false))
         } yield result
 
         program.assert { result =>
@@ -173,7 +176,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 1))
+          result <- service(_.computeLEC(tree.id, None, One, NNOne, includeProvenance = false))
         } yield result
 
         program.assert { result =>
@@ -209,7 +212,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 10).flip)
+          result <- service(_.computeLEC(tree.id, None, One, NNTen, includeProvenance = false).flip)
         } yield result
 
         program.assert { error =>
@@ -240,7 +243,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, Some(10000), Some(1), depth = 0))
+          result <- service(_.computeLEC(tree.id, Some(TenThousand), One, Zero, includeProvenance = false))
         } yield result
 
         program.assert { result =>
@@ -273,6 +276,67 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         program.assert { maybeTree =>
           maybeTree.exists(_.name.value == "Test Tree")
         }.provide(serviceLayer)
+      }
+    ),
+
+    suite("Path parameter validation (Tapir codec)")(
+      test("NonNegativeLong codec accepts valid positive IDs") {
+        // Test the codec directly
+        import sttp.tapir.*
+        import com.risquanter.register.http.codecs.IronTapirCodecs.given
+        
+        val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
+        
+        assertTrue(
+          codec.decode("1") match { case DecodeResult.Value(_) => true; case _ => false },
+          codec.decode("123") match { case DecodeResult.Value(_) => true; case _ => false },
+          codec.decode("999999") match { case DecodeResult.Value(_) => true; case _ => false },
+          codec.decode("0") match { case DecodeResult.Value(_) => true; case _ => false }  // Zero is valid (NonNegative)
+        )
+      },
+      
+      test("NonNegativeLong codec rejects non-numeric strings") {
+        import sttp.tapir.*
+        import com.risquanter.register.http.codecs.IronTapirCodecs.given
+        
+        val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
+        
+        assertTrue(
+          codec.decode("abc") match { case DecodeResult.Error(_, _) => true; case _ => false },
+          codec.decode("12-34") match { case DecodeResult.Error(_, _) => true; case _ => false },
+          codec.decode("risk-tree-id") match { case DecodeResult.Error(_, _) => true; case _ => false },
+          codec.decode("") match { case DecodeResult.Error(_, _) => true; case _ => false }
+        )
+      },
+      
+      test("NonNegativeLong codec rejects negative IDs") {
+        import sttp.tapir.*
+        import com.risquanter.register.http.codecs.IronTapirCodecs.given
+        
+        val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
+        
+        assertTrue(
+          codec.decode("-1") match { case DecodeResult.Error(_, _) => true; case _ => false },
+          codec.decode("-999") match { case DecodeResult.Error(_, _) => true; case _ => false }
+        )
+      },
+      
+      test("NonNegativeLong codec error messages are descriptive") {
+        import sttp.tapir.*
+        import com.risquanter.register.http.codecs.IronTapirCodecs.given
+        
+        val codec = summon[Codec[String, NonNegativeLong, CodecFormat.TextPlain]]
+        
+        val result = codec.decode("-5")
+        result match {
+          case DecodeResult.Error(_, error) => 
+            val msg = error.getMessage.toLowerCase
+            assertTrue(
+              msg.contains("non-negative") || msg.contains(">= 0") || msg.contains("greater")
+            )
+          case _ => 
+            assertTrue(false) // Expected DecodeResult.Error for negative value
+        }
       }
     )
   )

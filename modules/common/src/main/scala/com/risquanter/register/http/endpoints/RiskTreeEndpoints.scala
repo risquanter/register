@@ -5,9 +5,17 @@ import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.SimulationResponse
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, IronConstants}
+import IronConstants.Zero
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.numeric.*
 
 /** Tapir endpoint definitions for RiskTree API
   * Extends BaseEndpoint for standardized error handling
+  * 
+  * Iron types (PositiveInt, NonNegativeInt) are validated at the HTTP layer
+  * via Tapir codecs—invalid input returns 400 before reaching controllers.
   */
 trait RiskTreeEndpoints extends BaseEndpoint {
   
@@ -44,7 +52,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .tag("risk-trees")
       .name("getById")
       .description("Get a risk tree by ID")
-      .in("risk-trees" / path[String]("id"))
+      .in("risk-trees" / path[NonNegativeLong]("id"))
       .get
       .out(jsonBody[Option[SimulationResponse]])
 
@@ -53,10 +61,10 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .tag("risk-trees")
       .name("computeLEC")
       .description("Compute LEC for an existing risk tree")
-      .in("risk-trees" / path[String]("id") / "lec")
-      .in(query[Option[Int]]("nTrials").description("Override number of trials"))
-      .in(query[Option[Int]]("parallelism").description("Parallelism level (uses server default if omitted)"))
-      .in(query[Int]("depth").default(0).description("Depth of hierarchy to include (0=root only, max 5)"))
+      .in("risk-trees" / path[NonNegativeLong]("id") / "lec")
+      .in(query[Option[PositiveInt]]("nTrials").description("Override number of trials (must be > 0)"))
+      .in(query[Option[PositiveInt]]("parallelism").description("Parallelism level (must be > 0, uses server default if omitted)"))
+      .in(query[NonNegativeInt]("depth").default(Zero).description("Depth of hierarchy to include (0=root only, max 5)"))
       .in(query[Boolean]("includeProvenance").default(false).description("Include provenance metadata for reproducibility"))
       .get
       .out(jsonBody[SimulationResponse])

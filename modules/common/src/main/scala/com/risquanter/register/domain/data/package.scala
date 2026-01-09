@@ -1,5 +1,7 @@
 package com.risquanter.register.domain
 
+import com.risquanter.register.domain.data.iron.PRNGCounter.PRNGCounter
+
 /**
  * Type aliases for simulation domain.
  * 
@@ -11,4 +13,7 @@ package object data {
   
   /** Loss amount in base currency units (e.g., cents, pennies) */
   type Loss = Long
+  
+  /** Re-export PRNGCounter for convenient access in simulation code */
+  export com.risquanter.register.domain.data.iron.PRNGCounter.PRNGCounter
 }

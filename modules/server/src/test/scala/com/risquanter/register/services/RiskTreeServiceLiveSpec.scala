@@ -3,10 +3,12 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.numeric.*
 
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.data.iron.{SafeName, PositiveInt, NonNegativeInt, NonNegativeLong, IronConstants}
+import IronConstants.{One, Zero, NNOne, NNTen}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -20,29 +22,29 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo = new RiskTreeRepository {
-    private val db = collection.mutable.Map[Long, RiskTree]()
+    private val db = collection.mutable.Map[NonNegativeLong, RiskTree]()
     
     override def create(riskTree: RiskTree): Task[RiskTree] = ZIO.attempt {
-      val nextId = db.keys.maxOption.getOrElse(0L) + 1L
-      val newRiskTree = riskTree.copy(id = nextId.refineUnsafe)
+      val nextId: NonNegativeLong = (db.keys.map(k => (k: Long)).maxOption.getOrElse(0L) + 1L).refineUnsafe
+      val newRiskTree = riskTree.copy(id = nextId)
       db += (nextId -> newRiskTree)
       newRiskTree
     }
     
-    override def update(id: Long, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
+    override def update(id: NonNegativeLong, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
       val riskTree = db(id)
       val updated = op(riskTree)
       db += (id -> updated)
       updated
     }
     
-    override def delete(id: Long): Task[RiskTree] = ZIO.attempt {
+    override def delete(id: NonNegativeLong): Task[RiskTree] = ZIO.attempt {
       val riskTree = db(id)
       db -= id
       riskTree
     }
     
-    override def getById(id: Long): Task[Option[RiskTree]] =
+    override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
       ZIO.succeed(db.get(id))
     
     override def getAll: Task[List[RiskTree]] =
@@ -81,7 +83,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("computeLEC executes simulation and returns LEC data") {
         val program = for {
           created <- service(_.create(validRequest))
-          lec <- service(_.computeLEC(created.id, None, Some(1)))
+          lec <- service(_.computeLEC(created.id, None, One, Zero, includeProvenance = false))
         } yield (created, lec)
 
         program.assert { case (created, lec) =>
@@ -180,7 +182,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("getById returns None when not exists") {
-        val program = service(_.getById(999L))
+        val program = service(_.getById(999L.refineUnsafe))
 
         program.assert(_ == None)
       },
@@ -215,7 +217,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 0))
+          result <- service(_.computeLEC(tree.id, None, One, Zero, includeProvenance = false))
         } yield result
 
         program.assert { result =>
@@ -259,7 +261,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 1))
+          result <- service(_.computeLEC(tree.id, None, One, NNOne, includeProvenance = false))
         } yield result
 
         program.assert { result =>
@@ -276,7 +278,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("computeLEC rejects depth exceeding maximum") {
         val program = for {
           tree <- service(_.create(validRequest))
-          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 99).flip)
+          result <- service(_.computeLEC(tree.id, None, One, 99.refineUnsafe[GreaterEqual[0]], includeProvenance = false).flip)
         } yield result
 
         program.assert { error =>
@@ -288,22 +290,13 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("computeLEC rejects negative depth") {
-        val program = for {
-          tree <- service(_.create(validRequest))
-          result <- service(_.computeLEC(tree.id, None, Some(1), depth = -1).flip)
-        } yield result
-
-        program.assert {
-          case ValidationFailed(errors) => errors.exists(e => e.field.toLowerCase.contains("depth") || e.message.toLowerCase.contains("depth"))
-          case _                        => false
-        }
-      },
+      // Note: depth=-1 test removed - NonNegativeInt type prevents negative values at compile time
+      // This is the desired behavior per ADR-001: "correct by construction"
 
       test("computeLEC generates valid Vega-Lite spec") {
         val program = for {
           tree <- service(_.create(validRequest))
-          result <- service(_.computeLEC(tree.id, None, Some(1), depth = 0))
+          result <- service(_.computeLEC(tree.id, None, One, Zero, includeProvenance = false))
         } yield result
 
         program.assert { result =>
