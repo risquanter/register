@@ -3,6 +3,7 @@ package com.risquanter.register.services
 import zio._
 import com.risquanter.register.domain.data.{RiskNode, RiskTreeResult, TreeProvenance}
 import com.risquanter.register.domain.data.iron.PositiveInt
+import com.risquanter.register.domain.errors.SimulationFailure
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.*
 
@@ -32,6 +33,10 @@ trait SimulationExecutionService {
 
 /**
  * Live implementation delegating to Simulator for Monte Carlo execution.
+ * 
+ * Error handling (ADR-002 Decision 5):
+ * - Logs errors with full cause at this boundary (single logging point)
+ * - Wraps in typed SimulationFailure for proper pattern matching at HTTP layer
  */
 final class SimulationExecutionServiceLive extends SimulationExecutionService {
   
@@ -42,17 +47,11 @@ final class SimulationExecutionServiceLive extends SimulationExecutionService {
     parallelism: PositiveInt,
     includeProvenance: Boolean
   ): Task[(RiskTreeResult, Option[TreeProvenance])] = {
-    // Delegate to Simulator.simulateTree for actual Monte Carlo execution
     Simulator.simulateTree(root, nTrials, parallelism, includeProvenance)
-      .mapError { error =>
-        // DEBUG: Print full stack trace for native image debugging
-        java.lang.System.err.println(s"[ERROR] Simulation failed for $simulationId:")
-        error.printStackTrace(java.lang.System.err)
-        new RuntimeException(
-          s"Tree simulation failed for simulationId=$simulationId: ${Option(error.getMessage).getOrElse(error.getClass.getName)}",
-          error
-        )
-      }
+      .tapErrorCause(cause => 
+        ZIO.logErrorCause(s"Simulation failed: simulationId=$simulationId", cause)
+      )
+      .mapError(error => SimulationFailure(simulationId, error))
   }
 }
 

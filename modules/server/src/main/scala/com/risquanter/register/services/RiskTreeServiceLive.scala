@@ -11,7 +11,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, TreeProvenance, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, LECCurveData, LECPoint}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, NonNegativeInt, Probability, DistributionType, NonNegativeLong}
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, SimulationError}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.{LECGenerator, VegaLiteBuilder}
@@ -86,6 +86,7 @@ class RiskTreeServiceLive private (
     * Maps domain errors to metric-friendly error context:
     * - ValidationFailed → error_type, error_code (from first validation error), error_field
     * - RepositoryFailure → error_type, REPOSITORY_ERROR code
+    * - SimulationFailure → error_type, SIMULATION_ERROR code
     * - Other → error_type (class name), UNKNOWN_ERROR code
     * 
     * @param throwable Error to extract context from
@@ -110,12 +111,29 @@ class RiskTreeServiceLive private (
         errorField = None
       )
     
+    case SimulationFailure(id, _) =>
+      ErrorContext(
+        errorType = "SimulationFailure",
+        errorCode = "SIMULATION_ERROR",
+        errorField = Some("simulation")
+      )
+    
     case _ =>
       ErrorContext(
         errorType = throwable.getClass.getSimpleName,
         errorCode = "UNKNOWN_ERROR",
         errorField = None
       )
+  }
+  
+  /** Log unexpected errors (ADR-002 Decision 5).
+    * 
+    * Domain errors (SimulationError hierarchy) are expected - each has its own logging point.
+    * Other errors are truly unexpected and logged with full stack trace.
+    */
+  private def logIfUnexpected(operation: String)(error: Throwable): UIO[Unit] = error match {
+    case _: SimulationError => ZIO.unit  // Domain errors: logged at origin or expected
+    case _ => ZIO.logErrorCause(s"Unexpected error in $operation", Cause.fail(error))
   }
   
   /** Record simulation performance metrics
@@ -157,9 +175,9 @@ class RiskTreeServiceLive private (
       persisted <- repo.create(riskTree)
     } yield persisted
     
-    // Record metrics based on success/failure with error context
+    // Record metrics and log unexpected errors (ADR-002 Decision 5)
     operation.tapBoth(
-      error => recordOperation("create", success = false, Some(extractErrorContext(error))),
+      error => logIfUnexpected("create")(error) *> recordOperation("create", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("create", success = true)
     )
   }
@@ -182,26 +200,26 @@ class RiskTreeServiceLive private (
     } yield updated
     
     operation.tapBoth(
-      error => recordOperation("update", success = false, Some(extractErrorContext(error))),
+      error => logIfUnexpected("update")(error) *> recordOperation("update", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("update", success = true)
     )
   }
   
   override def delete(id: NonNegativeLong): Task[RiskTree] =
     repo.delete(id).tapBoth(
-      error => recordOperation("delete", success = false, Some(extractErrorContext(error))),
+      error => logIfUnexpected("delete")(error) *> recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
     )
   
   override def getAll: Task[List[RiskTree]] =
     repo.getAll.tapBoth(
-      error => recordOperation("getAll", success = false, Some(extractErrorContext(error))),
+      error => logIfUnexpected("getAll")(error) *> recordOperation("getAll", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getAll", success = true)
     )
   
   override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
     repo.getById(id).tapBoth(
-      error => recordOperation("getById", success = false, Some(extractErrorContext(error))),
+      error => logIfUnexpected("getById")(error) *> recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
     )
   
@@ -227,7 +245,7 @@ class RiskTreeServiceLive private (
     }
     
     operation.tapBoth(
-      error => recordOperation("computeLEC", success = false, Some(extractErrorContext(error))),
+      error => logIfUnexpected("computeLEC")(error) *> recordOperation("computeLEC", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("computeLEC", success = true)
     )
   }

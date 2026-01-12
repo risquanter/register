@@ -13,25 +13,22 @@ object ErrorResponse {
   def decode(tuple: (StatusCode, ErrorResponse)): Throwable =
     new RuntimeException(tuple._2.error.errors.mkString("; "))
 
-  /** Encode Throwable to error response tuple for HTTP */
+  /** Encode Throwable to error response tuple for HTTP.
+    * 
+    * Note: This is a pure function called by Tapir outside the ZIO runtime.
+    * All error logging should happen at the service layer using tapErrorCause
+    * before errors reach this boundary. See ADR-002 Decision 5.
+    * 
+    * Uses typed pattern matching on SimulationError hierarchy - no string matching.
+    */
   def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
-    case ValidationFailed(errors) => makeValidationResponse(errors)
-    case RepositoryFailure(reason) => makeRepositoryFailureResponse(reason)
-    case e: Exception =>
-      val message = Option(e.getMessage).getOrElse("")
-      if (message.contains("duplicate key")) {
-        makeDataConflictResponse("duplicate key value violates unique constraint")
-      } else {
-        // DEBUG: Print stack trace to stderr for investigation
-        System.err.println(s"[ERROR] Unhandled exception in HTTP layer:")
-        e.printStackTrace(System.err)
-        makeGeneralResponse()
-      }
-    case _ =>
-      // DEBUG: Print stack trace for non-Exception throwables
-      System.err.println(s"[ERROR] Unhandled throwable in HTTP layer:")
-      error.printStackTrace(System.err)
-      makeGeneralResponse()
+    // Domain errors - typed hierarchy
+    case ValidationFailed(errors)     => makeValidationResponse(errors)
+    case RepositoryFailure(reason)    => makeRepositoryFailureResponse(reason)
+    case SimulationFailure(id, cause) => makeSimulationFailureResponse(id)
+    case DataConflict(reason)         => makeDataConflictResponse(reason)
+    // Unexpected errors - already logged at service layer (ADR-002 Decision 5)
+    case _ => makeGeneralResponse()
   }
 
   def makeGeneralResponse(domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
@@ -82,6 +79,19 @@ object ErrorResponse {
       field = "unknown",
       code = ValidationErrorCode.CONSTRAINT_VIOLATION,
       message = reason,
+      requestId = requestId
+    ))
+    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
+  }
+
+  def makeSimulationFailureResponse(simulationId: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+    val message = s"Simulation $simulationId failed"
+    val statusCode = StatusCode.InternalServerError
+    val errors = List(ErrorDetail(
+      domain = domain,
+      field = "simulation",
+      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message = message,
       requestId = requestId
     ))
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))

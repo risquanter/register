@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+  Logback configuration for Risk Register
+  See ADR-002: Logging Strategy
+  
+  Log levels controllable via environment:
+  - LOG_LEVEL: Application log level (default: INFO)
+  - Set LOG_LEVEL=DEBUG for development
+-->
+<configuration>
+  
+  <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{ISO8601} %-5level [%thread] %logger{36} - %msg%n</pattern>
+    </encoder>
+  </appender>
+  
+  <!-- Application logging: DEBUG in dev, INFO in prod -->
+  <logger name="com.risquanter" level="${LOG_LEVEL:-INFO}"/>
+  
+  <!-- Quiet third-party noise -->
+  <logger name="io.netty" level="WARN"/>
+  <logger name="io.opentelemetry" level="WARN"/>
+  <logger name="io.grpc" level="WARN"/>
+  
+  <root level="INFO">
+    <appender-ref ref="STDOUT"/>
+  </root>
+  
+</configuration>
