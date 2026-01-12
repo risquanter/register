@@ -40,6 +40,11 @@ object Application extends ZIOAppDefault {
         )
       ) >>> Server.live,
       // Telemetry - provides Tracing + Meter for observability (requires TelemetryConfig)
+      // Current setup: LoggingSpanExporter & LoggingMetricExporter configured
+      // NOTE: Console exporters produce no visible output in application logs
+      // (likely log at DEBUG/FINE level filtered by default log config)
+      // TODO: Configure log level or switch to TracingLive.otlp & MetricsLive.otlp
+      // for actual telemetry export to otel-collector
       TracingLive.console,
       MetricsLive.console,
       // Concurrency control - limits concurrent simulations (requires SimulationConfig)

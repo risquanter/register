@@ -102,6 +102,8 @@ lazy val server = (project in file("modules/server"))
     nativeImageInstalled := true,
     nativeImageOptions ++= Seq(
       "--no-fallback",
+      "--static",
+      "--libc=musl",
       "-H:+ReportExceptionStackTraces",
       "-H:+AddAllCharsets",
       "--enable-url-protocols=http,https",

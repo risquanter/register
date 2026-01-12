@@ -1,0 +1,14 @@
+{
+  "name": "Data Breach Scenario",
+  "nTrials": 25000,
+  "root": {
+    "RiskLeaf": {
+      "id": "data-breach",
+      "name": "Data Breach",
+      "probability": 0.05,
+      "distributionType": "expert",
+      "percentiles": [0.05, 0.5, 0.95],
+      "quantiles": [100000, 500000, 2000000]
+    }
+  }
+}

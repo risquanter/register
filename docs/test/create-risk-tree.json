@@ -1,0 +1,33 @@
+{
+  "name": "Production System Outage",
+  "nTrials": 50000,
+  "root": {
+    "RiskPortfolio": {
+      "id": "prod-outage",
+      "name": "Total Impact",
+      "probability": 0.15,
+      "children": [
+        {
+          "RiskLeaf": {
+            "id": "revenue-loss",
+            "name": "Revenue Loss",
+            "probability": 0.8,
+            "distributionType": "lognormal",
+            "minLoss": 30000,
+            "maxLoss": 300000
+          }
+        },
+        {
+          "RiskLeaf": {
+            "id": "recovery-costs",
+            "name": "Recovery Costs",
+            "probability": 0.95,
+            "distributionType": "expert",
+            "percentiles": [0.1, 0.5, 0.9],
+            "quantiles": [5000, 15000, 50000]
+          }
+        }
+      ]
+    }
+  }
+}

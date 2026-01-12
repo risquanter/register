@@ -1,56 +1,53 @@
-# Git
-.git/
-.gitignore
+# Security: Deny everything by default, allow only what's needed
+*
 
-# Build artifacts
+# Build essentials only
+!build.sbt
+!project/
+!modules/
+!version.sbt
+
+# Exclude nested build artifacts even from allowed dirs
+project/target/
+project/project/target/
 target/
 .bloop/
 .bsp/
 .metals/
-.scala-build/
-.vscode/
 
-# IDE
-*.iml
+# Security: Block sensitive files
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.jks
+*.crt
+secrets/
+
+# Development artifacts
+.git/
 .idea/
-.metals/
+.vscode/
+*.iml
 metals.sbt
 
-# SBT
-project/target/
-project/project/
+# Documentation and tests
+docs/
+test/
+*Spec.scala
+*.md
 
-# Logs
-*.log
-logs/
-server.log
-test_output.log
-test-baseline.log
-
-# Temp files
+# Temporary files
 temp/
+*.log
 *.swp
 *.swo
 *~
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Node (if frontend is added later)
-node_modules/
-npm-debug.log*
-
-# Documentation (not needed in image)
-docs/
-*.md
-!README.md
-
-# Test files
-test/
-*Spec.scala
-
-# Docker
-Dockerfile
-docker-compose.yml
+# CI/CD and Docker
+.github/
+.gitlab-ci.yml
+Dockerfile*
+docker-compose*.yml
 .dockerignore

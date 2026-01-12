@@ -1,3 +1,10 @@
+# ============================================
+# DEVELOPMENT IMAGE - NOT FOR PRODUCTION
+# ============================================
+# This image runs sbt at runtime for development/debugging.
+# For production, use Dockerfile.native (GraalVM Native Image)
+# ============================================
+
 # Stage 1: Build the application using sbt
 FROM eclipse-temurin:21-jdk-jammy AS builder
 
@@ -14,7 +21,7 @@ RUN apt-get update && \
 # Set working directory
 WORKDIR /app
 
-# Copy all project files
+# Copy only build-essential files (see .dockerignore for exclusions)
 COPY . .
 
 # Compile and package application

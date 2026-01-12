@@ -1,11 +1,9 @@
-version: '3.8'
-
 services:
-  # Risk Register Server
+  # Risk Register Server (Native GraalVM on Distroless)
   register-server:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.native
     container_name: register-server
     ports:
       - "8080:8080"
@@ -26,21 +24,29 @@ services:
       REGISTER_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
       
       # Telemetry configuration
+      # NOTE: TracingLive.console & MetricsLive.console are configured but produce
+      # no visible output (likely log at DEBUG level filtered by default log config).
+      # For working telemetry: switch to TracingLive.otlp & MetricsLive.otlp, then run:
+      # docker-compose --profile observability up
       OTEL_SERVICE_NAME: "risk-register"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
-      
-      # JVM options
-      JAVA_OPTS: "-Xms512m -Xmx2g -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"  # Unused with console exporters
+    image: register-server:native
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 256M
+        reservations:
+          cpus: '0.5'
+          memory: 64M
+    # Healthcheck disabled: distroless has no curl/shell
+    # Use external monitoring: curl http://localhost:8080/health
     restart: unless-stopped
     networks:
       - register-network
-    image: register-server:latest
 
   # OpenTelemetry Collector (optional - for observability)
   otel-collector:
