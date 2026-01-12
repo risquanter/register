@@ -13,5 +13,46 @@
   {
     "name": "scala.runtime.Statics$VM",
     "methods": [{"name": "<clinit>", "parameterTypes": []}]
+  },
+  {
+    "name": "org.ojalgo.optimisation.ExpressionsBasedModel",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "org.ojalgo.optimisation.Expression",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "org.ojalgo.optimisation.Variable",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "org.ojalgo.optimisation.Optimisation",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "org.apache.commons.math3.distribution.LogNormalDistribution",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "org.apache.commons.math3.random.Well19937c",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true,
+    "allDeclaredFields": true
+  },
+  {
+    "name": "org.apache.commons.math3.random.RandomGenerator",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
   }
 ]

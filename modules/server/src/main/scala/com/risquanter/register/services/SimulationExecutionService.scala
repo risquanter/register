@@ -45,8 +45,11 @@ final class SimulationExecutionServiceLive extends SimulationExecutionService {
     // Delegate to Simulator.simulateTree for actual Monte Carlo execution
     Simulator.simulateTree(root, nTrials, parallelism, includeProvenance)
       .mapError { error =>
+        // DEBUG: Print full stack trace for native image debugging
+        java.lang.System.err.println(s"[ERROR] Simulation failed for $simulationId:")
+        error.printStackTrace(java.lang.System.err)
         new RuntimeException(
-          s"Tree simulation failed for simulationId=$simulationId: ${error.getMessage}",
+          s"Tree simulation failed for simulationId=$simulationId: ${Option(error.getMessage).getOrElse(error.getClass.getName)}",
           error
         )
       }

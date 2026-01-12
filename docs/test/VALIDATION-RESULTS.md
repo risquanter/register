@@ -284,13 +284,13 @@ curl -s "http://localhost:8080/risk-trees/1/lec?depth=0&nTrials=10000"
 
 **Hypothesis:**
 - Native image reflection configuration issue?
-- Missing runtime initialization for simulation libraries?
-- Breeze/Apache Commons Math native access problem?
+- Missing runtime initialization for simulation libraries (ojAlgo, Apache Commons Math)?
+- ojAlgo optimization solver initialization problem?
 
 **Recommended Actions:**
 1. Enable DEBUG logging to capture exception details
-2. Check native-image configuration for Breeze/math libraries
-3. Review reflection/JNI config for Apache Commons Math
+2. Check native-image configuration for ojAlgo/Commons Math libraries
+3. Review reflection/initialization config for quadratic programming solver
 4. Test simulation in JVM mode to verify functionality
 5. Compare native vs JVM stack traces
 

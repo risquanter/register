@@ -1,0 +1,14 @@
+{
+  "name": "Simple Lognormal Test",
+  "nTrials": 5000,
+  "root": {
+    "RiskLeaf": {
+      "id": "lognormal-test",
+      "name": "Lognormal Risk",
+      "probability": 0.5,
+      "distributionType": "lognormal",
+      "minLoss": 10000,
+      "maxLoss": 100000
+    }
+  }
+}

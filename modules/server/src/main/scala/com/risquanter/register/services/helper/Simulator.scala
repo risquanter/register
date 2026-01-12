@@ -10,53 +10,98 @@ import io.github.iltotore.iron.constraint.numeric.Greater
 import zio.prelude.Identity
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
-import scala.collection.parallel.CollectionConverters.*
-import zio.{ZIO, Task}
+import zio.{ZIO, Task, Chunk}
 import java.time.Instant
+
+// Default parallelism for trial-level computation within a single risk
+private val DefaultTrialParallelism: Int = Runtime.getRuntime.availableProcessors()
 
 /**
  * Monte Carlo simulation engine with sparse storage optimization.
  * 
  * Design principles:
  * - Sparse storage: Only stores trials where risk occurred (loss > 0)
- * - Parallelization: Uses parallel collections for CPU-bound trial computation
+ * - Parallelization: Uses ZIO fibers for parallel computation at both:
+ *   - Risk level: Multiple risks simulated concurrently
+ *   - Trial level: Trials within a risk computed in parallel batches
  * - Determinism: Pure functions guarantee identical results for same seeds
  * - Memory efficiency: Avoids materializing zero-loss trials
  * - Recursive tree simulation: Bottom-up aggregation with lazy evaluation
+ * - GraalVM Native Image compatible: No Scala parallel collections
  */
 object Simulator {
   
   /** 
-   * Run trials for a single risk using sparse storage.
+   * Run trials for a single risk using sparse storage with ZIO parallelization.
    * Only stores trials where risk occurred (non-zero loss).
    * 
-   * Parallelization strategy:
-   * 1. Filter: Lazy view identifies successful trials (no allocation)
-   * 2. Materialize: toVector creates collection of trial IDs only
-   * 3. Parallel map: Compute losses for successful trials in parallel
-   * 4. Convert back: seq.toMap for final result
+   * Computation strategy:
+   * 1. Filter: Identify successful trials (where risk occurred)
+   * 2. Chunk: Split successful trials into batches for parallel processing
+   * 3. Parallel map: Compute losses across batches using ZIO fibers
+   * 4. Combine: Merge results into final sparse map
+   * 
+   * Why ZIO parallelization vs sequential:
+   * - A single risk with 100K trials benefits from multi-core processing
+   * - GraalVM native image has efficient thread handling (no JIT warm-up)
+   * - ZIO fibers are lightweight and work well with native images
+   * - Risk-level parallelism alone is insufficient for trees with few leaves
    * 
    * Thread safety: sampler functions are pure (HDR-based determinism)
    * 
    * @param sampler RiskSampler with occurrence + loss distribution
    * @param nTrials Total number of trials to simulate (must be positive)
-   * @return Sparse map of trial ID → loss (only non-zero outcomes)
+   * @param parallelism Number of parallel fibers for trial computation
+   * @return Task of sparse map: trial ID → loss (only non-zero outcomes)
    */
   def performTrials(
     sampler: RiskSampler,
+    nTrials: PositiveInt,
+    parallelism: Int = DefaultTrialParallelism
+  ): Task[Map[TrialId, Loss]] = {
+    ZIO.attempt {
+      // Filter phase: identify successful trials (pure, sequential is fine)
+      val n: Int = nTrials
+      (0 until n).filter(trial => sampler.sampleOccurrence(trial.toLong)).toVector
+    }.flatMap { successfulTrials =>
+      if (successfulTrials.isEmpty) {
+        ZIO.succeed(Map.empty[TrialId, Loss])
+      } else if (successfulTrials.size < 100 || parallelism <= 1) {
+        // Small workload: sequential is more efficient (avoid fiber overhead)
+        ZIO.attempt {
+          successfulTrials.map(trial => (trial, sampler.sampleLoss(trial.toLong))).toMap
+        }
+      } else {
+        // Large workload: parallel computation across batches
+        val batchSize = math.max(1, successfulTrials.size / parallelism)
+        val batches = successfulTrials.grouped(batchSize).toVector
+        
+        ZIO.foreachPar(batches) { batch =>
+          ZIO.attempt {
+            batch.map(trial => (trial, sampler.sampleLoss(trial.toLong)))
+          }
+        }.map(_.flatten.toMap)
+         .withParallelism(parallelism)
+      }
+    }
+  }
+  
+  /**
+   * Synchronous version of performTrials for tests and simple use cases.
+   * Uses sequential processing - suitable for small trial counts.
+   */
+  def performTrialsSync(
+    sampler: RiskSampler,
     nTrials: PositiveInt
   ): Map[TrialId, Loss] = {
-    // Lazy view: filter successful trials without intermediate allocation
     val n: Int = nTrials
     val successfulTrials = (0 until n).view
       .filter(trial => sampler.sampleOccurrence(trial.toLong))
       .toVector
     
-    // Parallel computation: map trial IDs to loss amounts
-    // Thread-safe: sampleLoss is pure function (no shared mutable state)
-    successfulTrials.par.map { trial =>
+    successfulTrials.map { trial =>
       (trial, sampler.sampleLoss(trial.toLong))
-    }.seq.toMap
+    }.toMap
   }
   
   /** 
@@ -79,9 +124,9 @@ object Simulator {
     parallelism: PositiveInt = 8.refineUnsafe
   ): Task[Vector[RiskResult]] = {
     val n: Int = nTrials
+    val p: Int = parallelism
     val trialSets = samplers.map { sampler =>
-      ZIO.attempt {
-        val trials = performTrials(sampler, nTrials)
+      performTrials(sampler, nTrials, p).map { trials =>
         RiskResult(sampler.id, trials, n)
       }
     }
@@ -103,8 +148,9 @@ object Simulator {
   ): Task[Vector[RiskResult]] = {
     val n: Int = nTrials
     ZIO.foreach(samplers) { sampler =>
+      // Use sync version for sequential simulation (no parallelism overhead)
       ZIO.attempt {
-        val trials = performTrials(sampler, nTrials)
+        val trials = performTrialsSync(sampler, nTrials)
         RiskResult(sampler.id, trials, n)
       }
     }
@@ -167,13 +213,12 @@ object Simulator {
     node match {
       case leaf: RiskLeaf =>
         // Terminal node: create sampler and simulate
+        val p: Int = parallelism
         for {
           samplerAndProv <- createSamplerFromLeaf(leaf, includeProvenance)
           (sampler, maybeProv) = samplerAndProv
-          result <- ZIO.attempt {
-            val trials = performTrials(sampler, nTrials)
-            RiskTreeResult.Leaf(leaf.id, RiskResult(leaf.id, trials, n))
-          }
+          trials <- performTrials(sampler, nTrials, p)
+          result = RiskTreeResult.Leaf(leaf.id, RiskResult(leaf.id, trials, n))
           updatedProvenances = maybeProv match {
             case Some(prov) => provenances + (leaf.id -> prov)
             case None => provenances

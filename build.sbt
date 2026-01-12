@@ -119,6 +119,9 @@ lazy val server = (project in file("modules/server"))
       "--initialize-at-run-time=io.netty",
       // Initialize logging at runtime to avoid conflicts
       "--initialize-at-run-time=org.slf4j,ch.qos.logback",
+      // Initialize mathematical libraries at runtime
+      "--initialize-at-run-time=org.ojalgo",
+      "--initialize-at-run-time=org.apache.commons.math3.random",
       "--verbose"
     ),
     nativeImageOutput := target.value / "register-server"

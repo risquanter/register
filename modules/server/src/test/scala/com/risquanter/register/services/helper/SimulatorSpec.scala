@@ -24,7 +24,7 @@ object SimulatorSpec extends ZIOSpecDefault {
   
   def spec = suite("SimulatorSpec")(
     
-    suite("performTrials - sparse storage")(
+    suite("performTrialsSync - sparse storage")(
       
       test("stores only successful trials for low probability risk") {
         val metalog = createSimpleLossDistribution()
@@ -35,7 +35,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           lossDistribution = metalog
         )
         
-        val sparseMap = Simulator.performTrials(sampler, nTrials = 10000)
+        val sparseMap = Simulator.performTrialsSync(sampler, nTrials = 10000)
         
         // With 1% probability, expect ~100 occurrences (not 10,000)
         // Note: Unbounded metalog can produce negative values at extreme probabilities
@@ -55,7 +55,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           lossDistribution = metalog
         )
         
-        val trials = Simulator.performTrials(sampler, nTrials = 1000)
+        val trials = Simulator.performTrialsSync(sampler, nTrials = 1000)
         
         // Unbounded metalog can produce negative values at tail probabilities
         // Just verify we have reasonable trial counts
@@ -75,7 +75,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         val nTrials = 500
-        val trials = Simulator.performTrials(sampler, nTrials.refineUnsafe)
+        val trials = Simulator.performTrialsSync(sampler, nTrials.refineUnsafe)
         
         assertTrue(
           trials.forall { case (trialId, _) => trialId >= 0 && trialId < nTrials }
@@ -85,7 +85,7 @@ object SimulatorSpec extends ZIOSpecDefault {
     
     suite("determinism - identical results with same seeds")(
       
-      test("performTrials produces identical results across runs") {
+      test("performTrialsSync produces identical results across runs") {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entityId = 100L,
@@ -96,9 +96,9 @@ object SimulatorSpec extends ZIOSpecDefault {
           seed4 = 67890L
         )
         
-        val run1 = Simulator.performTrials(sampler, nTrials = 1000)
-        val run2 = Simulator.performTrials(sampler, nTrials = 1000)
-        val run3 = Simulator.performTrials(sampler, nTrials = 1000)
+        val run1 = Simulator.performTrialsSync(sampler, nTrials = 1000)
+        val run2 = Simulator.performTrialsSync(sampler, nTrials = 1000)
+        val run3 = Simulator.performTrialsSync(sampler, nTrials = 1000)
         
         assertTrue(
           run1 == run2,

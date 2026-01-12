@@ -22,9 +22,16 @@ object ErrorResponse {
       if (message.contains("duplicate key")) {
         makeDataConflictResponse("duplicate key value violates unique constraint")
       } else {
+        // DEBUG: Print stack trace to stderr for investigation
+        System.err.println(s"[ERROR] Unhandled exception in HTTP layer:")
+        e.printStackTrace(System.err)
         makeGeneralResponse()
       }
-    case _ => makeGeneralResponse()
+    case _ =>
+      // DEBUG: Print stack trace for non-Exception throwables
+      System.err.println(s"[ERROR] Unhandled throwable in HTTP layer:")
+      error.printStackTrace(System.err)
+      makeGeneralResponse()
   }
 
   def makeGeneralResponse(domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
