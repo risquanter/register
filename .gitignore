@@ -62,3 +62,4 @@ _opam/
 # Temp folder
 /temp/
 /temp/*
+private-docs/*
