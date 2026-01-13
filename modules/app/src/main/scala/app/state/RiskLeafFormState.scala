@@ -1,19 +1,20 @@
 package app.state
 
 import com.raquo.laminar.api.L.{*, given}
+import com.risquanter.register.domain.data.iron.ValidationUtil
 
 /**
  * Reactive form state for creating a RiskLeaf.
  * 
  * Features:
  * - Input filters: prevent invalid characters from being typed
- * - Reactive validation signals: auto-update on field changes
+ * - Reactive validation signals: auto-update on field changes (using ValidationUtil from common)
  * - Error display timing: controlled by showErrors flag (set on blur/submit)
  * 
- * Validation rules mirror RiskNode.scala smart constructor:
+ * Validation rules use Iron types from common module (same as backend):
  * - SafeId: 3-30 alphanumeric chars + hyphen/underscore
  * - SafeName: non-blank, max 50 chars
- * - Probability: 0.0 < p < 1.0
+ * - Probability: 0.0 < p < 1.0 (exclusive - open interval)
  * - Expert mode: requires percentiles + quantiles of equal length
  * - Lognormal mode: requires minLoss < maxLoss (both non-negative)
  */
@@ -62,7 +63,7 @@ class RiskLeafFormState extends FormState:
   val maxLossVar: Var[String] = Var("")
 
   // ============================================================
-  // Input Filters (prevent invalid characters - BCG pattern)
+  // Input Filters (prevent invalid characters - UX only)
   // ============================================================
   
   /** Filter for ID field: alphanumeric + hyphen + underscore only */
@@ -71,46 +72,59 @@ class RiskLeafFormState extends FormState:
   /** Filter for name field: any printable characters */
   val nameFilter: String => Boolean = _ => true
   
-  /** Filter for probability field: digits and decimal point */
-  val probabilityFilter: String => Boolean = _.forall(c => c.isDigit || c == '.')
+  /** 
+   * Filter for probability field: digits and single decimal point.
+   * Prevents patterns like "0.2.5" or "1..2"
+   */
+  val probabilityFilter: String => Boolean = { s =>
+    val hasSingleDot = s.count(_ == '.') <= 1
+    val allValidChars = s.forall(c => c.isDigit || c == '.')
+    hasSingleDot && allValidChars
+  }
   
-  /** Filter for percentiles/quantiles: digits, commas, spaces, decimal points */
-  val arrayFilter: String => Boolean = _.forall(c => c.isDigit || c == ',' || c == ' ' || c == '.')
+  /** 
+   * Filter for percentiles/quantiles: digits, commas, spaces, decimal points.
+   * Prevents consecutive dots.
+   */
+  val arrayFilter: String => Boolean = { s =>
+    val validChars = s.forall(c => c.isDigit || c == ',' || c == ' ' || c == '.')
+    val noConsecutiveDots = !s.contains("..")
+    validChars && noConsecutiveDots
+  }
   
   /** Filter for loss values: digits only */
   val lossFilter: String => Boolean = _.forall(_.isDigit)
 
   // ============================================================
-  // Raw Validation Signals (always computed, may not be shown)
+  // Raw Validation Signals (using ValidationUtil from common)
   // ============================================================
   
-  /** ID validation: 3-30 alphanumeric + hyphen/underscore */
+  /** ID validation using Iron SafeId rules */
   private val idErrorRaw: Signal[Option[String]] = idVar.signal.map { v =>
-    if v.isBlank then Some("ID is required")
-    else if v.length < 3 then Some("ID must be at least 3 characters")
-    else if v.length > 30 then Some("ID must be at most 30 characters")
-    else if !v.matches("^[a-zA-Z0-9_-]+$") then Some("ID can only contain letters, numbers, hyphens, and underscores")
-    else None
+    ValidationUtil.refineId(v) match
+      case Right(_) => None
+      case Left(errors) => Some(errors.head.message)
   }
   
-  /** Name validation: non-blank, max 50 chars */
+  /** Name validation using Iron SafeName rules */
   private val nameErrorRaw: Signal[Option[String]] = nameVar.signal.map { v =>
-    if v.isBlank then Some("Name is required")
-    else if v.length > 50 then Some("Name must be at most 50 characters")
-    else None
+    ValidationUtil.refineName(v) match
+      case Right(_) => None
+      case Left(errors) => Some(errors.head.message)
   }
   
-  /** Probability validation: 0.0 < p < 1.0 */
+  /** Probability validation using Iron Probability type (open interval 0 < p < 1) */
   private val probabilityErrorRaw: Signal[Option[String]] = probabilityVar.signal.map { v =>
     if v.isBlank then Some("Probability is required")
     else parseDouble(v) match
       case None => Some("Probability must be a number")
-      case Some(p) if p <= 0.0 => Some("Probability must be greater than 0")
-      case Some(p) if p >= 1.0 => Some("Probability must be less than 1")
-      case _ => None
+      case Some(p) => 
+        ValidationUtil.refineProbability(p) match
+          case Right(_) => None
+          case Left(errors) => Some(errors.head.message)
   }
   
-  /** Expert mode: percentiles validation */
+  /** Expert mode: percentiles validation (0-100, but Metalog needs 0 < p < 100) */
   private val percentilesErrorRaw: Signal[Option[String]] = 
     distributionModeVar.signal.combineWith(percentilesVar.signal).map {
       case (DistributionMode.Expert, v) =>
@@ -118,12 +132,13 @@ class RiskLeafFormState extends FormState:
         else
           val values = parseDoubleList(v)
           if values.isEmpty then Some("Enter comma-separated percentile values")
-          else if values.exists(p => p < 0 || p > 100) then Some("Percentiles must be between 0 and 100")
+          else if values.exists(p => p <= 0 || p >= 100) then 
+            Some("Percentiles must be between 0 and 100 (exclusive)")
           else None
       case _ => None
     }
   
-  /** Expert mode: quantiles validation */
+  /** Expert mode: quantiles validation (non-negative loss amounts) */
   private val quantilesErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(quantilesVar.signal).map {
       case (DistributionMode.Expert, v) =>
@@ -150,27 +165,31 @@ class RiskLeafFormState extends FormState:
         case _ => None
       }
   
-  /** Lognormal mode: minLoss validation */
+  /** Lognormal mode: minLoss validation using Iron NonNegativeLong */
   private val minLossErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(minLossVar.signal).map {
       case (DistributionMode.Lognormal, v) =>
         if v.isBlank then Some("Minimum loss is required for lognormal mode")
         else parseLong(v) match
           case None => Some("Minimum loss must be a whole number")
-          case Some(n) if n < 0 => Some("Minimum loss must be non-negative")
-          case _ => None
+          case Some(n) => 
+            ValidationUtil.refineNonNegativeLong(n, "minLoss") match
+              case Right(_) => None
+              case Left(errors) => Some(errors.head.message)
       case _ => None
     }
   
-  /** Lognormal mode: maxLoss validation */
+  /** Lognormal mode: maxLoss validation using Iron NonNegativeLong */
   private val maxLossErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(maxLossVar.signal).map {
       case (DistributionMode.Lognormal, v) =>
         if v.isBlank then Some("Maximum loss is required for lognormal mode")
         else parseLong(v) match
           case None => Some("Maximum loss must be a whole number")
-          case Some(n) if n < 0 => Some("Maximum loss must be non-negative")
-          case _ => None
+          case Some(n) =>
+            ValidationUtil.refineNonNegativeLong(n, "maxLoss") match
+              case Right(_) => None
+              case Left(errors) => Some(errors.head.message)
       case _ => None
     }
   
