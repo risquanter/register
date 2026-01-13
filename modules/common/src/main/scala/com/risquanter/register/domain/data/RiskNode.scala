@@ -171,133 +171,148 @@ object RiskLeaf {
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
     
-    // Step 1: Validate and refine id to SafeId
-    val idValidation: Validation[ValidationError, SafeId.SafeId] =
-      toValidation(ValidationUtil.refineId(id, s"$fieldPrefix.id"))
+    // Step 1: Validate all individual fields in parallel
+    val idV = toValidation(ValidationUtil.refineId(id, s"$fieldPrefix.id"))
+    val nameV = toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
+    val probV = toValidation(ValidationUtil.refineProbability(probability, s"$fieldPrefix.probability"))
+    val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
     
-    // Step 2: Validate and refine name to SafeName
-    val nameValidation: Validation[ValidationError, SafeName.SafeName] =
-      toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
-    
-    // Step 3: Validate and refine probability to Probability
-    val probValidation: Validation[ValidationError, Probability] =
-      toValidation(ValidationUtil.refineProbability(probability, s"$fieldPrefix.probability"))
-    
-    // Step 4: Validate and refine distributionType to DistributionType
-    val distTypeValidation: Validation[ValidationError, DistributionType] =
-      toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
-    
-    // Step 5: Mode-specific validation (cross-field business rules)
-    val modeValidation: Validation[ValidationError, (Option[NonNegativeLong], Option[NonNegativeLong])] = 
-      distTypeValidation.flatMap { dt =>
-        dt.toString match {
-          case "expert" =>
-            // Expert mode: requires percentiles AND quantiles
-            (percentiles, quantiles) match {
-              case (Some(p), Some(q)) if p.nonEmpty && q.nonEmpty =>
-                if (p.length != q.length)
-                  Validation.fail(ValidationError(
-                    field = s"$fieldPrefix.distributionType",
-                    code = ValidationErrorCode.INVALID_COMBINATION,
-                    message = "Expert mode: percentiles and quantiles must have same length"
-                  ))
-                else
-                  Validation.succeed((None, None))  // No minLoss/maxLoss for expert
-              case (None, None) =>
-                Validation.fail(ValidationError(
-                  field = s"$fieldPrefix.distributionType",
-                  code = ValidationErrorCode.REQUIRED_FIELD,
-                  message = "Expert mode requires both percentiles and quantiles"
-                ))
-              case (None, _) =>
-                Validation.fail(ValidationError(
-                  field = s"$fieldPrefix.percentiles",
-                  code = ValidationErrorCode.REQUIRED_FIELD,
-                  message = "Expert mode requires percentiles"
-                ))
-              case (_, None) =>
-                Validation.fail(ValidationError(
-                  field = s"$fieldPrefix.quantiles",
-                  code = ValidationErrorCode.REQUIRED_FIELD,
-                  message = "Expert mode requires quantiles"
-                ))
-              case _ =>
-                Validation.fail(ValidationError(
-                  field = s"$fieldPrefix.distributionType",
-                  code = ValidationErrorCode.INVALID_COMBINATION,
-                  message = "Expert mode: percentiles and quantiles cannot be empty"
-                ))
-            }
-            
-          case "lognormal" =>
-            // Lognormal mode: requires minLoss AND maxLoss
-            (minLoss, maxLoss) match {
-              case (Some(min), Some(max)) =>
-                // Refine to NonNegativeLong (keep refined types)
-                val minValid: Validation[ValidationError, NonNegativeLong] =
-                  toValidation(ValidationUtil.refineNonNegativeLong(min, s"$fieldPrefix.minLoss"))
-                val maxValid: Validation[ValidationError, NonNegativeLong] =
-                  toValidation(ValidationUtil.refineNonNegativeLong(max, s"$fieldPrefix.maxLoss"))
-                
-                // Cross-field validation: minLoss < maxLoss
-                Validation.validateWith(minValid, maxValid) { (validMin, validMax) =>
-                  if (validMin >= validMax)
-                    Validation.fail(ValidationError(
-                      field = s"$fieldPrefix.minLoss",
-                      code = ValidationErrorCode.INVALID_RANGE,
-                      message = s"minLoss ($validMin) must be less than maxLoss ($validMax)"
-                    ))
-                  else
-                    Validation.succeed((Some(validMin), Some(validMax)))
-                }.flatten
-                
-              case (None, None) =>
-                Validation.fail(ValidationError(
-                  field = s"$fieldPrefix.distributionType",
-                  code = ValidationErrorCode.REQUIRED_FIELD,
-                  message = "Lognormal mode requires both minLoss and maxLoss"
-                ))
-              case (None, _) =>
-                Validation.fail(ValidationError(
-                  field = s"$fieldPrefix.minLoss",
-                  code = ValidationErrorCode.REQUIRED_FIELD,
-                  message = "Lognormal mode requires minLoss"
-                ))
-              case (_, None) =>
-                Validation.fail(ValidationError(
-                  field = s"$fieldPrefix.maxLoss",
-                  code = ValidationErrorCode.REQUIRED_FIELD,
-                  message = "Lognormal mode requires maxLoss"
-                ))
-            }
-            
-          case _ =>
-            // Should never happen due to Iron validation
-            Validation.succeed((None, None))
-        }
+    // Step 2: Apply cross-field business rules based on distribution type
+    // Use flatMap for dependent validation (requires distTypeV to succeed first)
+    val crossFieldV = distTypeV.flatMap { dt =>
+      dt.toString match {
+        case "expert" => validateExpertMode(percentiles, quantiles, fieldPrefix)
+        case "lognormal" => validateLognormalMode(minLoss, maxLoss, fieldPrefix)
+        case unknown => failOnUnknownDistributionType(unknown, fieldPrefix)
       }
-    
-    // Step 6: Combine all validations (parallel error accumulation)
-    Validation.validateWith(
-      idValidation,
-      nameValidation,
-      probValidation,
-      distTypeValidation,
-      modeValidation
-    ) { case (validId, validName, validProb, validDistType, minMaxTuple) =>
-      val (validMinLoss, validMaxLoss) = minMaxTuple
-      // All validations passed - construct with private constructor using Iron types
-      new RiskLeaf(
-        safeId = validId,
-        safeName = validName,
-        distributionType = validDistType,
-        probability = validProb,
-        percentiles = percentiles,
-        quantiles = quantiles,
-        minLoss = validMinLoss,
-        maxLoss = validMaxLoss
-      )
     }
+    
+    // Step 3: Combine all validations (parallel accumulation where possible)
+    Validation.validateWith(idV, nameV, probV, distTypeV, crossFieldV) {
+      case (validId, validName, validProb, validDistType, (validMinLoss, validMaxLoss)) =>
+        new RiskLeaf(
+          safeId = validId,
+          safeName = validName,
+          distributionType = validDistType,
+          probability = validProb,
+          percentiles = percentiles,
+          quantiles = quantiles,
+          minLoss = validMinLoss,
+          maxLoss = validMaxLoss
+        )
+    }
+  }
+  
+  /** Validate expert mode: requires non-empty percentiles and quantiles of equal length */
+  private def validateExpertMode(
+    percentiles: Option[Array[Double]],
+    quantiles: Option[Array[Double]],
+    fieldPrefix: String
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[NonNegativeLong], Option[NonNegativeLong])] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    
+    (percentiles, quantiles) match {
+      case (Some(p), Some(q)) if p.nonEmpty && q.nonEmpty =>
+        if (p.length != q.length)
+          Validation.fail(ValidationError(
+            field = s"$fieldPrefix.distributionType",
+            code = ValidationErrorCode.INVALID_COMBINATION,
+            message = s"Expert mode: percentiles and quantiles must have same length (got ${p.length} vs ${q.length})"
+          ))
+        else
+          Validation.succeed((None, None))
+      
+      case (None, None) =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.distributionType",
+          code = ValidationErrorCode.REQUIRED_FIELD,
+          message = "Expert mode requires both percentiles and quantiles"
+        ))
+      
+      case (None, _) =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.percentiles",
+          code = ValidationErrorCode.REQUIRED_FIELD,
+          message = "Expert mode requires percentiles"
+        ))
+      
+      case (_, None) =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.quantiles",
+          code = ValidationErrorCode.REQUIRED_FIELD,
+          message = "Expert mode requires quantiles"
+        ))
+      
+      case _ =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.distributionType",
+          code = ValidationErrorCode.INVALID_COMBINATION,
+          message = "Expert mode: percentiles and quantiles cannot be empty"
+        ))
+    }
+  }
+  
+  /** Validate lognormal mode: requires minLoss < maxLoss */
+  private def validateLognormalMode(
+    minLoss: Option[Long],
+    maxLoss: Option[Long],
+    fieldPrefix: String
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[NonNegativeLong], Option[NonNegativeLong])] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
+    
+    (minLoss, maxLoss) match {
+      case (Some(min), Some(max)) =>
+        val minV = toValidation(ValidationUtil.refineNonNegativeLong(min, s"$fieldPrefix.minLoss"))
+        val maxV = toValidation(ValidationUtil.refineNonNegativeLong(max, s"$fieldPrefix.maxLoss"))
+        
+        // Validate both, then check cross-field constraint
+        Validation.validateWith(minV, maxV) { (validMin, validMax) =>
+          if (validMin >= validMax)
+            Validation.fail(ValidationError(
+              field = s"$fieldPrefix.minLoss",
+              code = ValidationErrorCode.INVALID_RANGE,
+              message = s"minLoss ($validMin) must be less than maxLoss ($validMax)"
+            ))
+          else
+            Validation.succeed((Some(validMin), Some(validMax)))
+        }.flatten
+      
+      case (None, None) =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.distributionType",
+          code = ValidationErrorCode.REQUIRED_FIELD,
+          message = "Lognormal mode requires both minLoss and maxLoss"
+        ))
+      
+      case (None, _) =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.minLoss",
+          code = ValidationErrorCode.REQUIRED_FIELD,
+          message = "Lognormal mode requires minLoss"
+        ))
+      
+      case (_, None) =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.maxLoss",
+          code = ValidationErrorCode.REQUIRED_FIELD,
+          message = "Lognormal mode requires maxLoss"
+        ))
+    }
+  }
+  
+  /** Defense in depth: Fail validation for unknown distribution types that bypass Iron constraint */
+  private def failOnUnknownDistributionType(
+    unknown: String,
+    fieldPrefix: String
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[NonNegativeLong], Option[NonNegativeLong])] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    
+    Validation.fail(ValidationError(
+      field = s"$fieldPrefix.distributionType",
+      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message = s"Invalid distribution type '$unknown' - expected 'expert' or 'lognormal'"
+    ))
   }
   
   // --- Custom JSON Codec that enforces cross-field validation via smart constructor ---
