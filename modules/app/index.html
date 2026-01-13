@@ -86,6 +86,122 @@
       color: #9ca3af;
     }
     
+    /* Form Fields */
+    .form-field {
+      margin-bottom: 20px;
+    }
+    
+    .form-label {
+      display: block;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: #374151;
+    }
+    
+    .form-input {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 1rem;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    
+    .form-input:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+    }
+    
+    .form-input.error {
+      border-color: #ef4444;
+      background-color: #fef2f2;
+    }
+    
+    .form-input.error:focus {
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+    }
+    
+    .form-textarea {
+      resize: vertical;
+      min-height: 60px;
+    }
+    
+    .form-error {
+      display: block;
+      color: #ef4444;
+      font-size: 0.875rem;
+      margin-top: 4px;
+    }
+    
+    .cross-field-error {
+      margin-bottom: 16px;
+    }
+    
+    /* Radio Group */
+    .radio-group {
+      display: flex;
+      gap: 24px;
+    }
+    
+    .radio-option {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+    }
+    
+    .radio-option input[type="radio"] {
+      width: 18px;
+      height: 18px;
+      margin-right: 8px;
+      accent-color: #2563eb;
+    }
+    
+    .radio-label {
+      color: #374151;
+    }
+    
+    /* Conditional Field Groups */
+    .mode-fields {
+      margin-top: 20px;
+      padding: 16px;
+      background: #f9fafb;
+      border-radius: 6px;
+      border: 1px solid #e5e7eb;
+    }
+    
+    .mode-fields-title {
+      font-weight: 500;
+      color: #6b7280;
+      margin-bottom: 16px;
+      font-size: 0.875rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    /* Submit Button */
+    .form-submit {
+      width: 100%;
+      padding: 12px 24px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 0.15s;
+    }
+    
+    .form-submit:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+    
+    .form-submit:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+
     /* Footer */
     .app-footer {
       background: #1f2937;

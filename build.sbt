@@ -141,7 +141,10 @@ lazy val app = (project in file("modules/app"))
       "dev.zio"                       %%% "zio-json"          % "0.8.0",
       "dev.zio"                       %%% "zio-prelude"       % "1.0.0-RC44",
       "io.github.iltotore"            %%% "iron"              % ironVersion,
-      "io.github.cquiroz"             %%% "scala-java-time"   % "2.5.0"
+      "io.github.cquiroz"             %%% "scala-java-time"   % "2.5.0",
+      // Test dependencies
+      "dev.zio"                       %%% "zio-test"          % zioVersion   % Test,
+      "dev.zio"                       %%% "zio-test-sbt"      % zioVersion   % Test
     ),
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.ESModule) },
     scalaJSUseMainModuleInitializer := true
