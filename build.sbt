@@ -9,7 +9,10 @@ ThisBuild / scalacOptions ++= Seq(
   "-Xmax-inlines:64"
 )
 
-ThisBuild / libraryDependencySchemes += "dev.zio" %% "zio-json" % VersionScheme.Always
+ThisBuild / libraryDependencySchemes ++= Seq(
+  "dev.zio" %% "zio-json" % VersionScheme.Always,
+  "dev.zio" % "zio-json_sjs1_3" % VersionScheme.Always
+)
 
 ThisBuild / testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
 
@@ -125,27 +128,30 @@ lazy val server = (project in file("modules/server"))
   )
   .dependsOn(common.jvm)
 
-// App module (ScalaJS frontend - placeholder for future)
-// DISABLED: Uncomment when Node.js is installed
-// lazy val app = (project in file("modules/app"))
-//   .settings(
-//     name := "register-app",
-//     libraryDependencies ++= Seq(
-//       "com.softwaremill.sttp.tapir"   %%% "tapir-sttp-client" % tapirVersion,
-//       "com.softwaremill.sttp.tapir"   %%% "tapir-json-zio"    % tapirVersion,
-//       "com.softwaremill.sttp.client3" %%% "zio"               % sttpVersion,
-//       "dev.zio"                       %%% "zio-json"          % "0.7.44"
-//     ),
-//     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule) },
-//     scalaJSUseMainModuleInitializer := true
-//   )
-//   .enablePlugins(ScalaJSPlugin)
-//   .dependsOn(common.js)
+// App module (ScalaJS frontend with Laminar)
+lazy val app = (project in file("modules/app"))
+  .enablePlugins(ScalaJSPlugin)
+  .settings(
+    name := "register-app",
+    libraryDependencies ++= Seq(
+      "com.raquo"                     %%% "laminar"           % "17.2.0",
+      "com.softwaremill.sttp.tapir"   %%% "tapir-sttp-client" % tapirVersion,
+      "com.softwaremill.sttp.tapir"   %%% "tapir-json-zio"    % tapirVersion,
+      "com.softwaremill.sttp.client3" %%% "core"              % sttpVersion,
+      "dev.zio"                       %%% "zio-json"          % "0.8.0",
+      "dev.zio"                       %%% "zio-prelude"       % "1.0.0-RC44",
+      "io.github.iltotore"            %%% "iron"              % ironVersion,
+      "io.github.cquiroz"             %%% "scala-java-time"   % "2.5.0"
+    ),
+    scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.ESModule) },
+    scalaJSUseMainModuleInitializer := true
+  )
+  .dependsOn(common.js)
 
 // Root project
 lazy val root = (project in file("."))
   .settings(
     name := "register"
   )
-  .aggregate(server) // removed app from aggregation
+  .aggregate(server, app)
   .dependsOn(server)
