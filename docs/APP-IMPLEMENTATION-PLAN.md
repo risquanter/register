@@ -4,6 +4,8 @@
 
 This document outlines an incremental plan to create a Laminar frontend app for the Register project. The app will provide a form for creating `RiskLeaf` entities with expert/lognormal mode toggle, validation feedback, and backend submission.
 
+**Architecture Context:** This plan implements the browser layer of the architecture described in ADR-004a/b. The frontend receives real-time LEC updates via SSE (Phase 1) or WebSocket (Phase 2), with the ZIO backend performing all simulation and aggregation (ADR-009).
+
 ## Goals
 
 1. **Expert/lognormal mode toggle** via radio button
@@ -12,6 +14,43 @@ This document outlines an incremental plan to create a Laminar frontend app for 
 4. **Latest Laminar version** (17.2.1+)
 5. **Good local developer experience** using Vite
 6. **Meaningful test coverage** for view layer
+7. **Real-time LEC updates** via SSE stream (future: WebSocket)
+8. **Clear error feedback** following ADR-008 patterns
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Frontend Architecture                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                   Laminar App                            │   │
+│  ├─────────────────────────────────────────────────────────┤   │
+│  │  Views           │  State          │  API Client        │   │
+│  │  ─────           │  ─────          │  ──────────        │   │
+│  │  • RiskLeafForm  │  • FormState    │  • REST mutations  │   │
+│  │  • TreeView      │  • TreeState    │  • SSE events      │   │
+│  │  • LECChart      │  • LECCache     │  • Error handling  │   │
+│  │  • ScenarioBar   │  • UIState      │                    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                           │                                     │
+│                    SSE / WebSocket                              │
+│                           │                                     │
+│                           ▼                                     │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                   ZIO Backend                            │   │
+│  │  • Computes LEC via Identity[RiskResult].combine         │   │
+│  │  • Caches per-node LECCurveData (ADR-005)               │   │
+│  │  • Pushes updates on tree changes                        │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key insight from ADR-009:** The browser only displays precomputed `LECCurveData`. All aggregation happens server-side using `Identity[RiskResult].combine`. The frontend treats leaf and aggregate LEC data uniformly.
 
 ---
 
@@ -485,6 +524,233 @@ Based on research, Laminar testing typically uses one of these approaches:
 
 ---
 
+## Phase 8: Real-Time LEC Updates (SSE)
+
+> **Reference:** ADR-004a-proposal (SSE variant)
+
+### Context
+
+After form submission, the backend computes LEC curves and pushes updates via Server-Sent Events. The browser maintains a local cache of `LECCurveData` per node.
+
+### Tasks
+
+1. **Create SSE event stream client**:
+   ```scala
+   package app.api
+   
+   import org.scalajs.dom.{EventSource, MessageEvent}
+   import com.raquo.laminar.api.L.*
+   
+   object LECEventStream:
+     def connect(treeId: String): EventStream[LECEvent] =
+       EventStream.fromCustomSource[LECEvent](
+         start = (fireEvent, _, _, _) =>
+           val source = new EventSource(s"/api/events/tree/$treeId")
+           source.onmessage = (e: MessageEvent) =>
+             decode[LECEvent](e.data.toString).foreach(fireEvent)
+           source,
+         stop = source => source.close()
+       )
+   
+   enum LECEvent:
+     case LECUpdated(nodeId: String, curve: LECCurveData)
+     case NodeChanged(nodeId: String)
+     case Error(message: String)
+   ```
+
+2. **Create frontend LEC cache**:
+   ```scala
+   package app.state
+   
+   class LECCacheState:
+     private val cache: Var[Map[String, LECCurveData]] = Var(Map.empty)
+     
+     def lecFor(nodeId: String): Signal[Option[LECCurveData]] =
+       cache.signal.map(_.get(nodeId))
+     
+     def update(nodeId: String, lec: LECCurveData): Unit =
+       cache.update(_ + (nodeId -> lec))
+     
+     def invalidate(nodeId: String): Unit =
+       cache.update(_ - nodeId)
+   ```
+
+3. **Wire SSE to cache**:
+   ```scala
+   val sseObserver = Observer[LECEvent]:
+     case LECEvent.LECUpdated(nodeId, curve) =>
+       lecCache.update(nodeId, curve)
+       // Optionally update Vega chart
+     case LECEvent.NodeChanged(nodeId) =>
+       lecCache.invalidate(nodeId)
+       // Chart shows loading state until LECUpdated arrives
+     case LECEvent.Error(msg) =>
+       showError(msg)  // See ADR-008 error handling
+   ```
+
+4. **Create LEC visualization component** (Vega-Lite):
+   ```scala
+   def lecChart(lecSignal: Signal[Option[LECCurveData]]): HtmlElement =
+     div(
+       cls := "lec-chart",
+       child <-- lecSignal.map:
+         case None => div(cls := "loading", "Computing LEC...")
+         case Some(lec) => 
+           // Embed Vega-Lite spec or render with vega-embed
+           div(idAttr := "vega-container")
+           // Use onMountCallback to call vegaEmbed
+     )
+   ```
+
+### Approval Checkpoint
+- [ ] SSE connection established on page load
+- [ ] LEC updates reflected in chart
+- [ ] Graceful handling of connection drops (auto-reconnect)
+
+---
+
+## Phase 9: Error Handling (ADR-008 Patterns)
+
+> **Reference:** ADR-008-proposal
+
+### Tasks
+
+1. **Create error state model**:
+   ```scala
+   package app.state
+   
+   enum AppError:
+     case ValidationFailed(errors: List[String])
+     case NetworkError(message: String, retryable: Boolean)
+     case Conflict(message: String, refreshAction: () => Unit)
+     case ServerError(referenceId: String)
+   
+   class ErrorState:
+     val currentError: Var[Option[AppError]] = Var(None)
+     val isRetrying: Var[Boolean] = Var(false)
+     
+     def show(error: AppError): Unit = currentError.set(Some(error))
+     def clear(): Unit = currentError.set(None)
+   ```
+
+2. **Create error display component**:
+   ```scala
+   def errorBanner(errorState: ErrorState): HtmlElement =
+     div(
+       cls := "error-banner",
+       display <-- errorState.currentError.signal.map(_.fold("none")(_ => "block")),
+       child.maybe <-- errorState.currentError.signal.map(_.map(renderError))
+     )
+   
+   private def renderError(error: AppError): HtmlElement = error match
+     case AppError.ValidationFailed(errors) =>
+       div(cls := "error validation", errors.map(e => p(e)))
+     case AppError.NetworkError(msg, retryable) =>
+       div(
+         cls := "error network",
+         p(msg),
+         if retryable then button("Retry", onClick --> retryAction) else emptyNode
+       )
+     case AppError.Conflict(msg, refresh) =>
+       div(
+         cls := "error conflict",
+         p(msg),
+         button("Refresh", onClick.mapTo(()) --> Observer(_ => refresh()))
+       )
+     case AppError.ServerError(refId) =>
+       div(cls := "error server", p(s"Server error. Reference: $refId"))
+   ```
+
+3. **Implement SSE reconnection with backoff**:
+   ```scala
+   def maintainSSEConnection(treeId: String, errorState: ErrorState): Unit =
+     var retryCount = 0
+     val maxRetries = 10
+     
+     def connect(): Unit =
+       val source = new EventSource(s"/api/events/tree/$treeId")
+       source.onerror = _ =>
+         source.close()
+         if retryCount < maxRetries then
+           retryCount += 1
+           val delay = Math.min(1000 * Math.pow(2, retryCount), 30000)
+           errorState.show(AppError.NetworkError(
+             s"Connection lost. Retrying in ${delay/1000}s...",
+             retryable = false
+           ))
+           js.timers.setTimeout(delay)(connect())
+         else
+           errorState.show(AppError.NetworkError(
+             "Unable to connect. Please refresh the page.",
+             retryable = true
+           ))
+       source.onopen = _ =>
+         retryCount = 0
+         errorState.clear()
+   ```
+
+### Approval Checkpoint
+- [ ] Error banner displays on API failure
+- [ ] SSE auto-reconnects with exponential backoff
+- [ ] Conflict errors show refresh action
+
+---
+
+## Phase 10: Scenario Branching UI (Future)
+
+> **Reference:** ADR-007-proposal
+
+### Context
+
+Once the core tree editing and LEC visualization work, add scenario management for what-if analysis.
+
+### Tasks (Outline)
+
+1. **Scenario state**:
+   ```scala
+   class ScenarioState:
+     val currentScenario: Var[Option[Scenario]] = Var(None)  // None = main
+     val availableScenarios: Var[List[Scenario]] = Var(List.empty)
+   ```
+
+2. **Scenario switcher component**:
+   - Dropdown showing available scenarios
+   - "New Scenario" button
+   - Visual indicator for current branch
+
+3. **Scenario comparison view**:
+   - Side-by-side LEC curves
+   - Diff summary (added/removed/modified nodes)
+   - Delta at key percentiles (p95, expected loss)
+
+4. **Merge UI** (if conflicts):
+   - Show conflict details from `MergeResult.Conflict`
+   - Resolution options per ADR-007
+
+### Approval Checkpoint (Future)
+- [ ] Can create new scenario from current state
+- [ ] Can switch between scenarios
+- [ ] LEC comparison view works
+
+---
+
+## Phase 11: WebSocket Enhancement (Future)
+
+> **Reference:** ADR-004b-proposal
+
+### Context
+
+Replace SSE with WebSocket for bidirectional communication when collaborative editing is needed.
+
+### Tasks (Outline)
+
+1. Replace `EventSource` with `WebSocket`
+2. Add client→server messages (cursor position, presence)
+3. Show other users' cursors in tree view
+4. Pre-commit conflict detection (soft locks)
+
+---
+
 ## Summary of Checkpoints
 
 | Phase | Description | Key Deliverable |
@@ -496,6 +762,10 @@ Based on research, Laminar testing typically uses one of these approaches:
 | 5 | Form Assembly | Complete form with toggle |
 | 6 | Backend Integration | Submit works end-to-end |
 | 7 | Testing | Meaningful test coverage |
+| 8 | Real-Time LEC | SSE stream → chart updates |
+| 9 | Error Handling | ADR-008 patterns implemented |
+| 10 | Scenario Branching | What-if analysis UI (future) |
+| 11 | WebSocket | Collaborative features (future) |
 
 ---
 
@@ -507,6 +777,8 @@ libraryDependencies ++= Seq(
   "com.raquo" %%% "laminar" % "17.2.1",
   "com.softwaremill.sttp.tapir" %%% "tapir-sttp-client" % tapirVersion,
   "com.softwaremill.sttp.client4" %%% "core" % sttpVersion,
+  // JSON encoding for API communication
+  "dev.zio" %%% "zio-json" % zioJsonVersion,
   // Test
   "org.scalameta" %%% "munit" % "1.0.0" % Test,
   "com.raquo" %%% "domtestutils" % "0.18.0" % Test
@@ -519,9 +791,27 @@ libraryDependencies ++= Seq(
   "devDependencies": {
     "vite": "^7.3.0",
     "@anthropic/vite-plugin-scalajs": "^1.1.0"
+  },
+  "dependencies": {
+    "vega-embed": "^6.24.0",
+    "vega-lite": "^5.16.0"
   }
 }
 ```
+
+---
+
+## Related ADRs
+
+| ADR | Relevance to Frontend |
+|-----|----------------------|
+| ADR-004a-proposal | SSE for real-time LEC updates (Phase 8) |
+| ADR-004b-proposal | WebSocket for collaboration (Phase 11) |
+| ADR-005-proposal | Backend caches LECCurveData; frontend just displays |
+| ADR-006-proposal | Event types for real-time updates |
+| ADR-007-proposal | Scenario UI patterns (Phase 10) |
+| ADR-008-proposal | Error handling patterns (Phase 9) |
+| ADR-009 | Frontend treats leaf/aggregate LEC uniformly |
 
 ---
 
