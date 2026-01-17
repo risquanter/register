@@ -187,8 +187,19 @@ def streamChanges: ZStream[Any, Throwable, NodeUpdate]
 |-----------|------------|---------|
 | `IrminClient` | sttp + GraphQL | Mutations and subscriptions to Irmin |
 | `LECCache` | ZIO Ref + Map | In-memory LEC curve storage |
-| `SSEController` | Tapir SSE | Push updates to browsers |
+| `SSEController` | Tapir streamBody + ZioStreams | Push updates to browsers (text/event-stream) |
+| `SSEHub` | ZIO Hub | Fan-out broadcasting to SSE subscribers |
 | `TreeWatcher` | ZStream | Process Irmin notifications |
+
+### SSE Implementation Notes
+
+Tapir does not have a dedicated `serverSentEventsBody` output type. SSE is implemented using:
+- `streamBody(ZioStreams)` with `text/event-stream` content type
+- Standard Tapir endpoint definition for Swagger documentation
+- ZIO Hub for fan-out broadcasting to multiple subscribers
+
+This maintains consistency with existing Tapir endpoint patterns while providing 
+proper SSE semantics (newline-delimited JSON events with `event:` and `data:` fields).
 
 ---
 
@@ -196,6 +207,7 @@ def streamChanges: ZStream[Any, Throwable, NodeUpdate]
 
 - [Irmin Documentation](https://irmin.org/)
 - [irmin-graphql](https://github.com/mirage/irmin)
-- [Tapir SSE Support](https://tapir.softwaremill.com/en/latest/endpoint/sse.html)
+- [Tapir Streaming Support](https://tapir.softwaremill.com/en/latest/endpoint/streaming.html)
 - [REQUIREMENTS-PERSISTENCE.md](./REQUIREMENTS-PERSISTENCE.md)
 - ADR-003: Provenance (simulation reproducibility)
+
