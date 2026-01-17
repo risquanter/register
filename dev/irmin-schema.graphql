@@ -1,0 +1,180 @@
+npm WARN deprecated graphql@14.7.0: No longer supported; please update to a newer version. Details: https://github.com/graphql/graphql-js#version-support
+schema {
+  query: query
+  mutation: mutation
+  subscription: subscription
+}
+
+type Branch {
+  name: BranchName!
+  head: Commit
+  tree: Tree!
+  last_modified(n: Int, depth: Int, path: Path!): [Commit!]!
+  lcas(commit: Hash!): [Commit!]!
+}
+
+scalar BranchName
+
+type Commit {
+  tree: Tree!
+  parents: [CommitKey!]!
+  info: Info!
+  hash: Hash!
+  key: CommitKey!
+}
+
+scalar CommitKey
+
+type Contents {
+  path: Path!
+  metadata: Metadata!
+  value: Value!
+  hash: Hash!
+}
+
+scalar ContentsKey
+
+type ContentsKeyValue {
+  metadata: Metadata!
+  contents: ContentsKey!
+}
+
+type Diff {
+  commit: Commit!
+}
+
+scalar Hash
+
+type Info {
+  date: String!
+  author: String!
+  message: String!
+}
+
+input InfoInput {
+  parents: [CommitKey!]
+  allow_empty: Boolean
+  retries: Int
+  message: String
+  author: String
+}
+
+union KindedKey = ContentsKeyValue | NodeKeyValue
+
+scalar Metadata
+
+type mutation {
+  """Associate contents with the given path"""
+  set(info: InfoInput, value: Value!, path: Path!, branch: BranchName): Commit
+
+  """
+  Set the tree at "path"
+  """
+  set_tree(info: InfoInput, tree: [TreeItem!]!, path: Path!, branch: BranchName): Commit
+
+  """
+  Add/remove items from the tree specified by "path"
+  """
+  update_tree(info: InfoInput, tree: [TreeItem!]!, path: Path!, branch: BranchName): Commit
+
+  """Set contents and metadata"""
+  set_all(info: InfoInput, metadata: Metadata, value: Value!, path: Path!, branch: BranchName): Commit
+
+  """Update a value with "set" argument if "test" matches the current value"""
+  test_and_set(info: InfoInput, set: Value, test: Value, path: Path!, branch: BranchName): Commit
+
+  """
+  Update a value with "set" argument if "test" matches the current value. The
+  commit returned is gauranteed to be that of a successful update to the store.
+  """
+  test_set_and_get(info: InfoInput, set: Value, test: Value, path: Path!, branch: BranchName): Commit
+
+  """
+  Update a branch with "set" argument if "test" matches the current value
+  """
+  test_and_set_branch(set: CommitKey, test: CommitKey, branch: BranchName!): Boolean!
+
+  """Remove a path from the store"""
+  remove(info: InfoInput, path: Path!, branch: BranchName): Commit
+
+  """Merge the current value at the given path with another value"""
+  merge(info: InfoInput, old: Value, value: Value, path: Path!, branch: BranchName): Hash
+
+  """Merge a branch with a tree"""
+  merge_tree(info: InfoInput, old: [TreeItem!], value: [TreeItem!], path: Path!, branch: BranchName): Commit
+
+  """Merge a branch with another branch"""
+  merge_with_branch(n: Int, max_depth: Int, info: InfoInput, from: BranchName!, branch: BranchName): Commit
+
+  """Merge a branch with a specific commit"""
+  merge_with_commit(n: Int, max_depth: Int, info: InfoInput, from: Hash!, branch: BranchName): Commit
+
+  """Revert to a previous commit"""
+  revert(commit: Hash!, branch: BranchName): Commit
+  clone(remote: Remote!, branch: BranchName): Commit
+  push(depth: Int, remote: Remote!, branch: BranchName): Commit
+  pull(depth: Int, info: InfoInput, remote: Remote!, branch: BranchName): Commit
+}
+
+union Node = Contents | Tree
+
+scalar NodeKey
+
+type NodeKeyValue {
+  node: NodeKey!
+}
+
+scalar Path
+
+type query {
+  """Find commit by hash"""
+  commit(hash: Hash!): Commit
+
+  """Find contents by hash"""
+  contents(hash: Hash!): Value
+
+  """Get the hash of some contents"""
+  contents_hash(value: Value!): Hash!
+
+  """Find commit by key"""
+  commit_of_key(key: CommitKey!): Commit
+
+  """Find contents by key"""
+  contents_of_key(key: ContentsKey!): Value
+
+  """Get a list of all branches"""
+  branches: [Branch!]!
+
+  """Get main branch"""
+  main: Branch
+
+  """Get branch by name"""
+  branch(name: BranchName!): Branch
+}
+
+scalar Remote
+
+type subscription {
+  """Watch for changes to a branch"""
+  watch(path: Path, branch: BranchName): Diff!
+}
+
+type Tree {
+  path: Path!
+  get(path: Path!): Value
+  get_contents(path: Path!): Contents
+  get_tree(path: Path!): Tree
+  list_contents_recursively: [Contents!]!
+  hash: Hash!
+  key: KindedKey
+  list: [Node!]!
+}
+
+input TreeItem {
+  metadata: Metadata
+  value: Value
+  path: Path!
+}
+
+scalar Value
+

@@ -59,9 +59,10 @@ WORKDIR /data
 # Expose GraphQL port
 EXPOSE 8080
 
-# Health check using wget (available in Alpine)
+# Health check using a simple GraphQL query
+# Note: Using 127.0.0.1 instead of localhost to ensure IPv4 (Alpine resolves localhost to ::1)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget -q --spider http://localhost:8080/graphql || exit 1
+    CMD wget -q -O - --post-data='{"query":"{ __typename }"}' --header='Content-Type: application/json' http://127.0.0.1:8080/graphql | grep -q data || exit 1
 
 # ============================================================================
 # Entrypoint
@@ -69,7 +70,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Start Irmin GraphQL server
 # --root: Data directory (persistent via volume)
 # --port: GraphQL server port
+# --address: Bind to all interfaces (0.0.0.0) for container access
 # Default backend is irmin-pack (persistent, optimized)
 
 ENTRYPOINT ["opam", "exec", "--", "irmin", "graphql"]
-CMD ["--port", "8080", "--root", "/data"]
+CMD ["--port", "8080", "--address", "0.0.0.0", "--root", "/data"]

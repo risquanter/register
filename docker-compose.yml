@@ -15,7 +15,7 @@ services:
       # Irmin uses CLI args, not env vars, but we can set opam env
       OPAMROOT: /home/opam/.opam
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/graphql"]
+      test: ["CMD-SHELL", "wget -q -O - --post-data='{\"query\":\"{ __typename }\"}' --header='Content-Type: application/json' http://127.0.0.1:8080/graphql | grep -q data"]
       interval: 30s
       timeout: 10s
       retries: 3
