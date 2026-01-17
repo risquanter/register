@@ -5,6 +5,8 @@ import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.http.controllers.*
+import com.risquanter.register.http.sse.SSEController
+import com.risquanter.register.http.cache.CacheController
 
 /** Aggregates all HTTP controllers and generates Swagger documentation
   */
@@ -26,15 +28,17 @@ object HttpApi {
     * 
     * @return ZIO effect that provides list of all controllers
     */
-  def makeControllers: ZIO[RiskTreeController & HealthController, Nothing, List[BaseController]] = for {
+  def makeControllers: ZIO[RiskTreeController & HealthController & SSEController & CacheController, Nothing, List[BaseController]] = for {
     riskTrees <- ZIO.service[RiskTreeController]
     health <- ZIO.service[HealthController]
-  } yield List(health, riskTrees)
+    sse <- ZIO.service[SSEController]
+    cache <- ZIO.service[CacheController]
+  } yield List(health, riskTrees, sse, cache)
 
   /** Complete application endpoints including business logic and documentation
     * 
     * @return ZIO effect providing all HTTP endpoints
     */
-  val endpointsZIO: ZIO[RiskTreeController & HealthController, Nothing, List[ServerEndpoint[Any, Task]]] =
+  val endpointsZIO: ZIO[RiskTreeController & HealthController & SSEController & CacheController, Nothing, List[ServerEndpoint[Any, Task]]] =
     makeControllers.map(gatherRoutes)
 }

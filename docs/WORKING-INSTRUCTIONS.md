@@ -201,8 +201,42 @@ Implement in order of dependencies:
 - [ ] ADR compliance verified at planning stage
 - [ ] Code compiles
 - [ ] Tests pass
+- [ ] **Integration verified** (see Integration Verification below)
 - [ ] User approves
 ```
+
+### Integration Verification
+
+After implementation, verify that new components are **actually connected** to the application:
+
+#### For New Controllers:
+- [ ] Controller wired into `HttpApi.makeControllers`
+- [ ] Controller's routes included in `gatherRoutes` output
+- [ ] Required layers added to `Application.appLayer`
+
+#### For New Endpoints:
+- [ ] Endpoint accessible via curl or HTTP client
+- [ ] Endpoint appears in Swagger documentation (`/docs`)
+- [ ] At least one test hits the actual HTTP layer (not just unit test)
+
+#### For New Services:
+- [ ] Service layer added to `Application.appLayer`
+- [ ] Service injected into dependent components
+- [ ] Service tested via integration test (not just unit test)
+
+#### Verification Commands:
+```bash
+# List registered endpoints (after server starts)
+curl http://localhost:8080/docs/openapi.json | jq '.paths | keys'
+
+# Verify specific endpoint exists
+curl -I http://localhost:8080/events/tree/1
+
+# Run all tests including integration
+sbt test
+```
+
+**If any integration check fails, the phase is NOT complete.**
 
 ### Completion Report
 
@@ -256,6 +290,55 @@ User will confirm at these points:
 - [ ] **Agent re-reads `docs/WORKING-INSTRUCTIONS.md` before marking phase complete** (mandatory guardrail)
 - [ ] Each ADR acceptance approved
 - [ ] Final integration approved
+
+---
+
+## Decision Triggers
+
+**STOP and ASK the user before proceeding** when encountering ANY of these:
+
+1. **Schema/API changes** — Any change affecting OpenAPI/Swagger output
+2. **Workarounds** — Using `Schema.any`, `asInstanceOf`, unsafe casts, or "escape hatches"
+3. **New dependencies** — Adding imports from libraries not already in use
+4. **Type changes** — Modifying case class fields, adding/removing parameters
+5. **Behavioral changes** — Changing how existing code works (not just adding new code)
+6. **"It works but..."** — Any solution with tradeoffs, limitations, or caveats
+7. **Recursive/complex types** — Types that require special handling for serialization
+
+**Litmus test:** If the change affects anything a user/consumer of the API would notice → ASK FIRST.
+
+**Format for decision requests:**
+```markdown
+⚠️ **Decision Required**
+
+**Context:** [What I was implementing]
+**Issue:** [What problem arose]
+
+**Options:**
+- A) [Option with tradeoffs]
+- B) [Alternative with different tradeoffs]
+- C) [Other alternatives]
+
+**My assessment:** [Which I'd lean toward and why]
+**Decision needed:** Which option should I implement?
+```
+
+---
+
+## Memory Enforcement
+
+**Problem:** Agent context can lose track of this document mid-session.
+
+**Mitigation:** User may issue these commands at any time:
+
+- `"Re-read WORKING-INSTRUCTIONS.md"` — Agent must re-read and acknowledge
+- `"Decision check"` — Agent must verify current action doesn't require a decision
+- `"Protocol check"` — Agent must state which protocol section applies to current work
+
+**Agent self-check:** Before ANY file edit, mentally verify:
+1. Is this a decision trigger? → If yes, STOP and ask
+2. Does this deviate from an ADR? → If yes, STOP and ask
+3. Am I assuming user approval? → If yes, STOP and ask
 
 ---
 

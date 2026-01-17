@@ -4,6 +4,17 @@
 
 This document outlines an incremental plan to create a Laminar frontend app for the Register project. The app will provide a form for creating `RiskLeaf` entities with expert/lognormal mode toggle, validation feedback, and backend submission.
 
+## REMARK I
+this decision was made regarding SEE notification of stale state
+Implement SSE Notification as Infrastructure
+
+CacheInvalidated events are published
+No frontend consumes them yet
+Useful for testing and future integration
+
+## REMARK II 
+revalidation of the whole document is needed and critical update based on [the state of the proposal](IMPLEMENTATION-PLAN-PROPOSALS.md)
+
 **Architecture Context:** This plan implements the browser layer of the architecture described in ADR-004a/b. The frontend receives real-time LEC updates via SSE (Phase 1) or WebSocket (Phase 2), with the ZIO backend performing all simulation and aggregation (ADR-009).
 
 ## Goals

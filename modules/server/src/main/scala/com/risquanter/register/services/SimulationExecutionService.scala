@@ -20,6 +20,8 @@ trait SimulationExecutionService {
    * @param nTrials Number of Monte Carlo trials (must be positive)
    * @param parallelism Degree of parallelism (must be positive, default: available processors)
    * @param includeProvenance Whether to capture provenance metadata
+   * @param seed3 Global seed 3 for HDR random number generation (enables reproducibility)
+   * @param seed4 Global seed 4 for HDR random number generation (enables reproducibility)
    * @return Tuple of (RiskTreeResult, Option[TreeProvenance])
    */
   def runTreeSimulation(
@@ -27,7 +29,9 @@ trait SimulationExecutionService {
     root: RiskNode,
     nTrials: PositiveInt,
     parallelism: PositiveInt = java.lang.Runtime.getRuntime.availableProcessors().refineUnsafe,
-    includeProvenance: Boolean = false
+    includeProvenance: Boolean = false,
+    seed3: Long = 0L,
+    seed4: Long = 0L
   ): Task[(RiskTreeResult, Option[TreeProvenance])]
 }
 
@@ -45,9 +49,11 @@ final class SimulationExecutionServiceLive extends SimulationExecutionService {
     root: RiskNode,
     nTrials: PositiveInt,
     parallelism: PositiveInt,
-    includeProvenance: Boolean
+    includeProvenance: Boolean,
+    seed3: Long,
+    seed4: Long
   ): Task[(RiskTreeResult, Option[TreeProvenance])] = {
-    Simulator.simulateTree(root, nTrials, parallelism, includeProvenance)
+    Simulator.simulateTree(root, nTrials, parallelism, includeProvenance, seed3, seed4)
       .tapErrorCause(cause => 
         ZIO.logErrorCause(s"Simulation failed: simulationId=$simulationId", cause)
       )

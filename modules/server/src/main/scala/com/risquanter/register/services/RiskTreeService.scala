@@ -63,6 +63,8 @@ trait RiskTreeService {
     * @param parallelism Parallelism level (guaranteed positive by Iron type)
     * @param depth Hierarchy depth to include (0=root only, 1=+children, max 5)
     * @param includeProvenance Whether to include provenance metadata for reproducibility
+    * @param seed3 Global seed 3 for HDR random number generation (enables reproducibility)
+    * @param seed4 Global seed 4 for HDR random number generation (enables reproducibility)
     * @return Risk tree with computed LEC data in hierarchical format
     */
   def computeLEC(
@@ -70,6 +72,8 @@ trait RiskTreeService {
     nTrialsOverride: Option[PositiveInt],
     parallelism: PositiveInt,
     depth: NonNegativeInt,
-    includeProvenance: Boolean
+    includeProvenance: Boolean,
+    seed3: Long = 0L,
+    seed4: Long = 0L
   ): Task[RiskTreeWithLEC]
 }

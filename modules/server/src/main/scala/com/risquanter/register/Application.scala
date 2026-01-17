@@ -10,7 +10,14 @@ import zio.http.Header.{AccessControlAllowHeaders, AccessControlAllowOrigin, Acc
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig}
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.controllers.{RiskTreeController, HealthController}
+import com.risquanter.register.http.sse.SSEController
+import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.services.RiskTreeServiceLive
+import com.risquanter.register.services.pipeline.InvalidationHandler
+import com.risquanter.register.services.cache.LECCache
+import com.risquanter.register.services.sse.SSEHub
+import com.risquanter.register.services.tree.TreeIndexService
+import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 
@@ -25,9 +32,14 @@ object Application extends ZIOAppDefault {
       TypesafeConfigProvider.fromResourcePath()
     )
 
+  // TreeIndex layer - provides empty index for LECCache (Phase 5: dormant infrastructure)
+  // Future: TreeIndexService will manage per-tree indices
+  val treeIndexLayer: ZLayer[Any, Nothing, TreeIndex] =
+    ZLayer.succeed(TreeIndex.empty)
+
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, RiskTreeController & HealthController & Server & ServerConfig & CorsConfig] =
-    ZLayer.make[RiskTreeController & HealthController & Server & ServerConfig & CorsConfig](
+  val appLayer: ZLayer[Any, Throwable, RiskTreeController & HealthController & SSEController & CacheController & Server & ServerConfig & CorsConfig] =
+    ZLayer.make[RiskTreeController & HealthController & SSEController & CacheController & Server & ServerConfig & CorsConfig](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
@@ -52,6 +64,13 @@ object Application extends ZIOAppDefault {
       RiskTreeRepositoryInMemory.layer,
       com.risquanter.register.services.SimulationExecutionService.live,
       RiskTreeServiceLive.layer,  // Requires SimulationConfig + Tracing + SimulationSemaphore + Meter
+      // Phase 5: Cache invalidation + SSE infrastructure
+      treeIndexLayer,
+      LECCache.layer,
+      SSEHub.live,
+      InvalidationHandler.live,
+      SSEController.layer,
+      CacheController.layer,
       ZLayer.fromZIO(RiskTreeController.makeZIO),
       HealthController.live
     )

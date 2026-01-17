@@ -18,6 +18,9 @@ import com.risquanter.register.domain.data.iron.NonNegativeLong
   *
   * Pattern: SSE Request → Tapir Endpoint → Controller → SSEHub → ZStream → Client
   *
+  * Note: Uses ServerEndpoint[Any, Task] for BaseController compatibility.
+  * ZioHttpInterpreter handles ZioStreams capabilities at runtime.
+  *
   * SSE Format:
   * ```
   * event: lec_updated
@@ -78,6 +81,7 @@ class SSEController private (sseHub: SSEHub)
       .tick(HeartbeatInterval)
       .map(_ => formatAsSSE(SSEEvent.ConnectionStatus("heartbeat", None)))
 
+  // Cast to Any capability - ZioHttpInterpreter handles ZioStreams at runtime
   override val routes: List[ServerEndpoint[Any, Task]] =
     List(treeEvents.asInstanceOf[ServerEndpoint[Any, Task]])
 }

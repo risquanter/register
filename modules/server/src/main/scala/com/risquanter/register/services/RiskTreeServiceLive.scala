@@ -230,7 +230,9 @@ class RiskTreeServiceLive private (
     nTrialsOverride: Option[PositiveInt],
     parallelism: PositiveInt,
     depth: NonNegativeInt,
-    includeProvenance: Boolean
+    includeProvenance: Boolean,
+    seed3: Long = 0L,
+    seed4: Long = 0L
   ): Task[RiskTreeWithLEC] = {
     val operation = tracing.span("computeLEC", SpanKind.INTERNAL) {
       for {
@@ -238,9 +240,11 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("risk_tree.depth", (depth: Int).toLong)
         _ <- tracing.setAttribute("risk_tree.parallelism", (parallelism: Int).toLong)
         _ <- tracing.setAttribute("risk_tree.include_provenance", includeProvenance)
+        _ <- tracing.setAttribute("risk_tree.seed3", seed3)
+        _ <- tracing.setAttribute("risk_tree.seed4", seed4)
         _ <- nTrialsOverride.fold(ZIO.unit)(n => tracing.setAttribute("risk_tree.n_trials_override", (n: Int).toLong))
         
-        result <- computeLECInternal(id, nTrialsOverride, parallelism, depth, includeProvenance)
+        result <- computeLECInternal(id, nTrialsOverride, parallelism, depth, includeProvenance, seed3, seed4)
       } yield result
     }
     
@@ -259,7 +263,9 @@ class RiskTreeServiceLive private (
     nTrialsOverride: Option[PositiveInt],
     parallelism: PositiveInt,
     depth: NonNegativeInt,
-    includeProvenance: Boolean
+    includeProvenance: Boolean,
+    seed3: Long,
+    seed4: Long
   ): Task[RiskTreeWithLEC] = {
     for {
       // Enforce hard limits first (reject if exceeded)
@@ -298,7 +304,9 @@ class RiskTreeServiceLive private (
               root = tree.root,
               nTrials = nTrials,
               parallelism = parallelism,
-              includeProvenance = includeProvenance
+              includeProvenance = includeProvenance,
+              seed3 = seed3,
+              seed4 = seed4
             )
             
             _ <- tracing.addEvent("simulation_completed")

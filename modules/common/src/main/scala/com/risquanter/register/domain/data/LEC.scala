@@ -42,7 +42,10 @@ final case class LECCurveData(
 )
 
 object LECCurveData {
+  import sttp.tapir.Schema
   given codec: JsonCodec[LECCurveData] = DeriveJsonCodec.gen[LECCurveData]
+  // Schema.any for recursive types (children contains LECCurveData)
+  given schema: Schema[LECCurveData] = Schema.any[LECCurveData]
 }
 
 /** Complete LEC response with visualization spec

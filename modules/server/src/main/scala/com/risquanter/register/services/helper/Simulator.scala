@@ -174,22 +174,26 @@ object Simulator {
    * @param nTrials Number of Monte Carlo trials (must be positive)
    * @param parallelism Max concurrent child simulations (must be positive)
    * @param includeProvenance Whether to capture provenance metadata
+   * @param seed3 Global seed 3 for HDR random number generation
+   * @param seed4 Global seed 4 for HDR random number generation
    * @return Tuple of (RiskTreeResult, Option[TreeProvenance])
    */
   def simulateTree(
     node: RiskNode,
     nTrials: PositiveInt,
     parallelism: PositiveInt = 8.refineUnsafe,
-    includeProvenance: Boolean = false
+    includeProvenance: Boolean = false,
+    seed3: Long = 0L,
+    seed4: Long = 0L
   ): Task[(RiskTreeResult, Option[TreeProvenance])] = {
     val n: Int = nTrials
     val p: Int = parallelism
-    simulateTreeInternal(node, nTrials, parallelism, includeProvenance, Map.empty).map {
+    simulateTreeInternal(node, nTrials, parallelism, includeProvenance, seed3, seed4, Map.empty).map {
       case (result, provenances) =>
         val treeProvenance = if (includeProvenance) {
           Some(TreeProvenance(
             treeId = 0L, // Will be set by service layer with actual tree ID
-            globalSeeds = (0L, 0L), // Currently hardcoded, future: user-configurable
+            globalSeeds = (seed3, seed4),
             nTrials = n,
             parallelism = p,
             nodeProvenances = provenances
@@ -207,6 +211,8 @@ object Simulator {
     nTrials: PositiveInt,
     parallelism: PositiveInt,
     includeProvenance: Boolean,
+    seed3: Long,
+    seed4: Long,
     provenances: Map[String, NodeProvenance]
   ): Task[(RiskTreeResult, Map[String, NodeProvenance])] = {
     val n: Int = nTrials
@@ -215,7 +221,7 @@ object Simulator {
         // Terminal node: create sampler and simulate
         val p: Int = parallelism
         for {
-          samplerAndProv <- createSamplerFromLeaf(leaf, includeProvenance)
+          samplerAndProv <- createSamplerFromLeaf(leaf, includeProvenance, seed3, seed4)
           (sampler, maybeProv) = samplerAndProv
           trials <- performTrials(sampler, nTrials, p)
           result = RiskTreeResult.Leaf(leaf.id, RiskResult(leaf.id, trials, n))
@@ -239,7 +245,7 @@ object Simulator {
           
           // Recursively simulate all children in parallel
           childResultsWithProv <- ZIO.collectAllPar(
-            portfolio.children.map(child => simulateTreeInternal(child, nTrials, parallelism, includeProvenance, provenances))
+            portfolio.children.map(child => simulateTreeInternal(child, nTrials, parallelism, includeProvenance, seed3, seed4, provenances))
           ).withParallelism(parallelism)
           
           // Separate results and provenances
@@ -270,11 +276,17 @@ object Simulator {
    * Note: leaf.probability is already refined to Probability type at the boundary,
    * so no additional validation is needed here.
    * 
+   * @param leaf RiskLeaf definition
+   * @param includeProvenance Whether to capture provenance metadata
+   * @param seed3 Global seed 3 for HDR random number generation
+   * @param seed4 Global seed 4 for HDR random number generation
    * @return Tuple of (RiskSampler, Option[NodeProvenance])
    */
   private def createSamplerFromLeaf(
     leaf: RiskLeaf,
-    includeProvenance: Boolean = false
+    includeProvenance: Boolean = false,
+    seed3: Long = 0L,
+    seed4: Long = 0L
   ): Task[(RiskSampler, Option[NodeProvenance])] = {
     for {
       // Create distribution based on mode
@@ -288,8 +300,8 @@ object Simulator {
         riskId = leaf.id,
         occurrenceProb = leaf.probability, // Already Probability type from domain model
         lossDistribution = distribution,
-        seed3 = 0L,
-        seed4 = 0L
+        seed3 = seed3,
+        seed4 = seed4
       )
       
       // Capture provenance if requested
@@ -299,8 +311,8 @@ object Simulator {
           entityId = entityId,
           occurrenceVarId = entityId.hashCode + 1000L,
           lossVarId = entityId.hashCode + 2000L,
-          globalSeed3 = 0L,
-          globalSeed4 = 0L,
+          globalSeed3 = seed3,
+          globalSeed4 = seed4,
           distributionType = leaf.distributionType,
           distributionParams = distParams,
           timestamp = Instant.now(),

@@ -6,7 +6,7 @@ import sttp.tapir.generic.auto.*
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, IronConstants}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, IronConstants}
 import IronConstants.Zero
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
@@ -66,6 +66,22 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .in(query[Option[PositiveInt]]("parallelism").description("Parallelism level (must be > 0, uses server default if omitted)"))
       .in(query[NonNegativeInt]("depth").default(Zero).description("Depth of hierarchy to include (0=root only, max 5)"))
       .in(query[Boolean]("includeProvenance").default(false).description("Include provenance metadata for reproducibility"))
+      .in(query[Option[Long]]("seed3").description("Global seed 3 for reproducibility (default: 0)"))
+      .in(query[Option[Long]]("seed4").description("Global seed 4 for reproducibility (default: 0)"))
       .get
       .out(jsonBody[SimulationResponse])
+
+  /** Manual cache invalidation endpoint for testing SSE pipeline.
+    * Triggers cache invalidation for a specific node and broadcasts SSE event.
+    * 
+    * @return Number of invalidated cache entries (node + ancestors)
+    */
+  val invalidateCacheEndpoint =
+    baseEndpoint
+      .tag("risk-trees")
+      .name("invalidateCache")
+      .description("Manually invalidate cache for a node (triggers SSE notification)")
+      .in("risk-trees" / path[NonNegativeLong]("id") / "invalidate" / path[SafeId.SafeId]("nodeId"))
+      .post
+      .out(jsonBody[Map[String, Int]])
 }

@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, ValidationUtil}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -11,6 +11,7 @@ import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, No
  * .in(query[Option[PositiveInt]]("nTrials"))
  * .in(query[NonNegativeInt]("depth"))
  * .in(path[NonNegativeLong]("id"))
+ * .in(path[SafeId.SafeId]("nodeId"))
  * ```
  * 
  * Validation happens at the HTTP layer (codec decode), following the
@@ -53,4 +54,20 @@ object IronTapirCodecs {
         DecodeResult.Value(_)
       )
     )(identity)
+
+  /** Codec for SafeId (3-30 alphanumeric chars + hyphen/underscore).
+    * Used for node identifiers in risk trees (e.g., "cyber-attack", "ops_risk_001").
+    * 
+    * Validates:
+    * - Not blank
+    * - Length: 3-30 characters
+    * - Pattern: ^[a-zA-Z0-9_-]+$
+    */
+  given Codec[String, SafeId.SafeId, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[SafeId.SafeId](raw =>
+      SafeId.fromString(raw).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.value.toString)
 }

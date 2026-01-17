@@ -107,6 +107,13 @@ trait LECCache {
     * @return true if cached
     */
   def contains(nodeId: NodeId): UIO[Boolean]
+
+  /**
+    * Get all cached node IDs.
+    *
+    * @return List of node IDs in cache
+    */
+  def keys: UIO[List[NodeId]]
 }
 
 object LECCache {
@@ -146,6 +153,9 @@ object LECCache {
 
   def contains(nodeId: NodeId): URIO[LECCache, Boolean] =
     ZIO.serviceWithZIO[LECCache](_.contains(nodeId))
+
+  def keys: URIO[LECCache, List[NodeId]] =
+    ZIO.serviceWithZIO[LECCache](_.keys)
 }
 
 /**
@@ -192,4 +202,7 @@ final class LECCacheLive(
 
   override def contains(nodeId: NodeId): UIO[Boolean] =
     cacheRef.get.map(_.contains(nodeId))
+
+  override def keys: UIO[List[NodeId]] =
+    cacheRef.get.map(_.keys.toList)
 }
