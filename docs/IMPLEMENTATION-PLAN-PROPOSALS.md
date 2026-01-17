@@ -239,8 +239,10 @@ The Dockerfile is structured for future distroless migration:
 
 ## Phase 2: Irmin GraphQL Client
 
+### Status: 🔄 IN PROGRESS
+
 ### Objective
-Create the ZIO client that communicates with Irmin via GraphQL for reads, writes, and subscriptions.
+Create the ZIO client that communicates with Irmin via GraphQL for reads and writes.
 
 ### ADR Reference
 - ADR-004a-proposal: Persistence Architecture (Channel A: Irmin ↔ ZIO)
@@ -249,81 +251,100 @@ Create the ZIO client that communicates with Irmin via GraphQL for reads, writes
 **Reviewed ADRs:** ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011
 **Deviations detected:** None
 **Alignment notes:**
-- Uses Iron types for NodeId, TreeId
+- Uses Iron types for paths (validated path format)
 - Logs GraphQL operations at service layer (ADR-002)
-- Uses extended SimulationError hierarchy (ADR-010)
+- Uses extended SimulationError hierarchy: `IrminUnavailable`, `NetworkTimeout` (ADR-010)
 - Top-level imports throughout (ADR-011)
+- **No retry logic** - delegated to service mesh per ADR-012
 
 ### Validation Checklist
-- [ ] Compliant with ADR-001 (Iron types for node IDs)
+- [ ] Compliant with ADR-001 (Iron types for paths)
 - [ ] Compliant with ADR-002 (log GraphQL operations at service layer)
 - [ ] Compliant with ADR-009 (no impact on aggregation)
-- [ ] Compliant with ADR-010 (use SimulationError subtypes, retry policy)
+- [ ] Compliant with ADR-010 (use SimulationError subtypes)
 - [ ] Compliant with ADR-011 (top-level imports, no FQNs)
+- [ ] Compliant with ADR-012 (no retry logic, mesh handles resilience)
 
 ### Prerequisites
-- Irmin running with GraphQL endpoint (external service)
-- Known GraphQL schema for tree operations
+- ✅ Irmin running with GraphQL endpoint on port 9080
+- ✅ GraphQL schema extracted to `dev/irmin-schema.graphql`
+
+### Scope: Queries & Mutations Only
+
+This phase implements **queries and mutations** using sttp HTTP client.
+
+> ⚠️ **Subscription Dependency Note:**
+> GraphQL subscriptions require WebSocket transport (graphql-ws protocol).
+> STTP HTTP client handles request-response but not persistent WebSocket subscriptions.
+> 
+> **Subscriptions will be implemented in Phase 4/5** when building the cache invalidation
+> pipeline, potentially using:
+> - Caliban client (built-in ZIO subscription support)
+> - Raw WebSocket with sttp-ws
+> - SSE polling as fallback
+>
+> Affected features (deferred to Phase 4/5):
+> - `watchChanges(path)` - listen to tree modifications
+> - Cache invalidation triggers from Irmin events
 
 ### Tasks
 
-1. **Define Irmin data models**
+1. **Create IrminConfig**
    ```
-   infra/irmin/model/IrminNode.scala
-   infra/irmin/model/IrminCommit.scala
+   configs/IrminConfig.scala
    ```
-   - Node structure matching Irmin schema
-   - Commit metadata (hash, timestamp, author)
+   - Endpoint URL, branch name, timeout settings
 
-2. **Create GraphQL queries/mutations**
+2. **Define Irmin data models**
+   ```
+   infra/irmin/model/IrminPath.scala
+   infra/irmin/model/IrminCommit.scala
+   infra/irmin/model/IrminValue.scala
+   ```
+   - Iron-refined path type
+   - Commit metadata (hash, timestamp, author, message)
+   - JSON codecs for GraphQL responses
+
+3. **Create GraphQL queries/mutations**
    ```
    infra/irmin/IrminQueries.scala
    ```
-   - `getNode(path)` query
-   - `setNode(path, value)` mutation
-   - `getTree(path)` query
-   - `createBranch(name, from)` mutation
+   - `getValue(path)` query
+   - `setValue(path, value, info)` mutation
+   - `listTree(path)` query
+   - `getBranches()` query
 
-3. **Create GraphQL subscription handler**
-   ```
-   infra/irmin/IrminSubscription.scala
-   ```
-   - Subscribe to tree changes
-   - Parse watch events into domain events
-
-4. **Create `IrminClient` service**
+4. **Create `IrminClient` service trait**
    ```
    infra/irmin/IrminClient.scala
    ```
-   - ZIO service with sttp GraphQL backend
-   - Integrates retry policy and circuit breaker
-   - Methods: `getNode`, `setNode`, `watchChanges`, etc.
+   - ZIO service interface
+   - Methods: `get`, `set`, `list`, `branches`
 
-5. **Create `IrminClient` ZLayer**
+5. **Create `IrminClientLive` implementation**
    ```
    infra/irmin/IrminClientLive.scala
    ```
-   - Configuration from environment
-   - Proper resource management for subscriptions
+   - sttp HTTP client with ZIO backend
+   - Configuration from IrminConfig layer
+   - Errors mapped to SimulationError subtypes
 
-6. **Add integration tests** (requires Irmin running)
+6. **Add integration tests**
    ```
    test/.../IrminClientIntegrationSpec.scala
    ```
+   - Requires Irmin container running
 
 ### Deliverables
 - [ ] Client connects to Irmin GraphQL endpoint
-- [ ] Can read/write nodes
-- [ ] Subscription receives change events
-- [ ] Errors wrapped in `SimulationError` subtypes
-
-### Questions for User
-- What is the Irmin GraphQL endpoint URL for development?
-- Do we need to set up Irmin locally first? (May require OCaml setup)
+- [ ] Can read values (`get`)
+- [ ] Can write values (`set`) with commit metadata
+- [ ] Can list tree contents
+- [ ] Errors wrapped in `IrminUnavailable` / `NetworkTimeout`
 
 ### Approval Checkpoint
 - [ ] Code compiles
-- [ ] Integration tests pass (or manual verification)
+- [ ] Integration tests pass with Irmin container
 - [ ] User approves Phase 2
 
 ---

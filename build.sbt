@@ -67,7 +67,9 @@ val serverDependencies = Seq(
   // Other
   "io.github.iltotore"            %% "iron-zio"                          % ironVersion,
   "org.scala-lang.modules"        %% "scala-parallel-collections"        % "1.0.4",
-  "com.risquanter"                 % "simulation.util"                   % "0.8.0"
+  "com.risquanter"                 % "simulation.util"                   % "0.8.0",
+  // STTP zio-json integration for Irmin GraphQL client
+  "com.softwaremill.sttp.client3" %% "zio-json"                          % sttpVersion
 )
 
 // Common module (cross-compiled for JVM and JS)
