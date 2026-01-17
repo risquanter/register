@@ -1,34 +1,56 @@
-# API Test Plan - Native Image Validation
+# Testing Guide - Risk Register
 
-## Purpose
+## Overview
 
-Validate the GraalVM native image production deployment by:
-1. Testing all API endpoints work correctly
-2. Verifying simulation computations produce valid results
-3. Confirming native binary performance (startup, memory, response time)
-4. Ensuring no regressions from JVM version
+This document provides comprehensive testing procedures for the Risk Register application, covering:
 
-## Test Environment
+1. **API Testing** - REST endpoint validation
+2. **Container Testing** - Docker image verification
+3. **Irmin GraphQL Testing** - Persistence layer validation
+4. **Performance Testing** - Benchmarks and metrics
 
-**Image:** `register-server:native` (118MB, distroless, static musl binary)
-**Deployment:** docker-compose with production configuration
-**Base URL:** `http://localhost:8080`
+---
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [API Testing - Register Server](#api-testing---register-server)
+- [Container Testing](#container-testing)
+- [Irmin GraphQL Server Tests](#irmin-graphql-server-tests)
+- [Performance Benchmarks](#performance-benchmarks)
+- [Automated Test Scripts](#automated-test-scripts)
+
+---
 
 ## Prerequisites
 
 ```bash
 # Clean environment
-docker-compose down -v
+docker compose down -v
 docker system prune -f
 
-# Build and start native image
-docker-compose up -d --build
+# Build and start services
+docker compose --profile persistence up -d --build
 
-# Wait for startup (~9ms)
+# Wait for startup
 sleep 2
 ```
 
-## Test Cases
+**Services:**
+- Register Server: `http://localhost:8080`
+- Irmin GraphQL: `http://localhost:9080/graphql`
+
+---
+
+## API Testing - Register Server
+
+### Test Environment
+
+**Image:** `register-server:native` (118MB, distroless, static binary)  
+**Base URL:** `http://localhost:8080`  
+**Deployment:** Docker Compose with production configuration
+
+### Test Cases
 
 ### 1. Health Check
 
@@ -363,6 +385,246 @@ curl -X GET http://localhost:8080/api/risk-trees/999
 - Validation errors return HTTP 400
 - Error messages are descriptive
 - Non-existent resources handled gracefully
+
+---
+
+## Container Testing
+
+### Overview
+
+Verify Docker container functionality, resource usage, and security posture.
+
+### CT-1: Container Startup
+
+**Purpose:** Verify container starts successfully
+
+```bash
+docker run --rm -d --name register-test -p 8080:8080 register-server:latest
+```
+
+**Expected Output:**
+```
+<container-id>
+```
+
+**Success Criteria:**
+- Container starts without errors
+- Port 8080 is mapped
+- Container reaches healthy state within 10s
+
+---
+
+### CT-2: Startup Logs
+
+**Purpose:** Verify application initialization
+
+```bash
+docker logs register-test 2>&1 | head -20
+```
+
+**Expected Output:**
+```
+timestamp=2026-01-17T... level=INFO message="Bootstrapping Risk Register application..."
+timestamp=2026-01-17T... level=INFO message="Server config: host=0.0.0.0, port=8080"
+timestamp=2026-01-17T... level=INFO message="CORS allowed origins: ..."
+timestamp=2026-01-17T... level=INFO message="Registered 10 HTTP endpoints"
+timestamp=2026-01-17T... level=INFO message="Starting HTTP server on 0.0.0.0:8080..."
+timestamp=2026-01-17T... level=INFO message="Server started"
+```
+
+**Success Criteria:**
+- ✅ Application bootstrapped
+- ✅ Server configuration loaded
+- ✅ Endpoints registered (10 endpoints)
+- ✅ Server started (< 100ms for native)
+
+---
+
+### CT-3: Resource Usage
+
+**Purpose:** Verify memory and CPU efficiency
+
+```bash
+docker stats register-test --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}"
+```
+
+**Expected Output:**
+```
+CONTAINER       CPU %    MEM USAGE / LIMIT      MEM %
+register-test   0.03%    50-80MiB / 31GiB      0.15-0.25%
+```
+
+**Success Criteria:**
+- **CPU:** ~0.03% (idle)
+- **Memory:** 50-80 MB (native binary)
+- **Comparison:** 75-85% less memory than JVM (~250MB)
+
+---
+
+### CT-4: Image Size
+
+**Purpose:** Verify minimal image footprint
+
+```bash
+docker images register-server:latest --format "{{.Repository}}:{{.Tag}}\t{{.Size}}"
+```
+
+**Expected Output:**
+```
+register-server:latest    118MB
+```
+
+**Success Criteria:**
+- **Total:** ~118 MB
+- **Breakdown:**
+  - Native binary: 80-90 MB
+  - Distroless base: ~2 MB
+  - Resources: 10-20 MB
+
+---
+
+### CT-5: Security Verification
+
+**Purpose:** Verify distroless security posture
+
+**Test 5a: No Shell Access**
+
+```bash
+docker exec -it register-test /bin/sh
+```
+
+**Expected:** `exec failed: no such file or directory` (distroless has no shell)
+
+**Test 5b: Non-Root User**
+
+```bash
+docker inspect register-test --format='{{.Config.User}}'
+```
+
+**Expected:** `nonroot` or `65532:65532`
+
+**Test 5c: Vulnerability Scan**
+
+```bash
+trivy image register-server:latest
+```
+
+**Expected:** No HIGH or CRITICAL CVEs
+
+**Success Criteria:**
+- ✅ No shell access
+- ✅ Runs as non-root
+- ✅ Minimal attack surface
+- ✅ No dynamic libraries
+- ✅ Clean vulnerability scan
+
+---
+
+### CT-6: Health Check Mechanism
+
+**Purpose:** Verify Docker health check works
+
+```bash
+# Wait for health check to run
+sleep 30
+
+# Check health status
+docker inspect register-test --format='{{.State.Health.Status}}'
+```
+
+**Expected Output:**
+```
+healthy
+```
+
+**View Health Logs:**
+```bash
+docker inspect register-test --format='{{range .State.Health.Log}}{{.Output}}{{end}}'
+```
+
+**Success Criteria:**
+- Health check passes
+- Status transitions: starting → healthy
+- Health endpoint responds correctly
+
+---
+
+### CT-7: Container Restart Behavior
+
+**Purpose:** Verify container restarts gracefully
+
+```bash
+# Restart container
+docker restart register-test
+
+# Wait for restart
+sleep 3
+
+# Check health
+curl -s http://localhost:8080/health
+```
+
+**Expected:**
+- Container restarts successfully
+- Health endpoint responds within 5s
+- No data loss (in-memory state reset is expected)
+
+---
+
+### CT-8: Port Mapping
+
+**Purpose:** Verify network configuration
+
+```bash
+docker port register-test
+```
+
+**Expected Output:**
+```
+8080/tcp -> 0.0.0.0:8080
+8080/tcp -> [::]:8080
+```
+
+**Test Access:**
+```bash
+# From host
+curl http://localhost:8080/health
+
+# From another container
+docker run --rm --network container:register-test alpine wget -qO- http://localhost:8080/health
+```
+
+---
+
+### CT-9: Log Output
+
+**Purpose:** Verify structured logging
+
+```bash
+docker logs register-test 2>&1 | grep -E "level=(INFO|WARN|ERROR)"
+```
+
+**Success Criteria:**
+- Logs are structured (timestamp, level, message)
+- No ERROR or WARN during normal operation
+- JSON or key-value format
+- Proper log levels used
+
+---
+
+### CT-10: Cleanup
+
+**Purpose:** Verify proper shutdown
+
+```bash
+# Stop container gracefully
+docker stop register-test
+
+# Check exit code
+docker inspect register-test --format='{{.State.ExitCode}}'
+```
+
+**Expected Exit Code:** `0` (graceful shutdown)
 
 ---
 
