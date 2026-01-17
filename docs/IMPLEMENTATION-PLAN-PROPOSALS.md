@@ -22,11 +22,11 @@ This plan implements the ADR proposals in logical dependency order, with explici
 ```
 Phase 1: Error Domain Model (ADR-008 foundation) ✅ COMPLETE
     ↓
-Phase 1.5: Irmin Dev Environment Setup (prerequisite)
+Phase 1.5: Irmin Dev Environment Setup (prerequisite) ✅ COMPLETE
     ↓
-Phase 2: Irmin GraphQL Client (ADR-004a foundation)
+Phase 2: Irmin GraphQL Client (ADR-004a foundation) ✅ COMPLETE
     ↓
-Phase 3: Tree Index & Cache Structure (ADR-005 foundation)
+Phase 3: Tree Index & Cache Structure (ADR-005 foundation) ✅ COMPLETE
     ↓
 Phase 4: SSE Infrastructure (ADR-004a completion)
     ↓
@@ -362,11 +362,13 @@ This phase implements **queries and mutations** using sttp HTTP client.
 - [x] Code compiles
 - [x] Integration tests pass (8/8 tests)
 - [x] ADR compliance verified post-implementation
-- [ ] User approves Phase 2
+- [x] User approves Phase 2
 
 ---
 
 ## Phase 3: Tree Index & Cache Structure
+
+### Status: COMPLETE
 
 ### Objective
 Implement the parent-pointer index and LEC cache data structures that enable O(depth) invalidation.
@@ -384,60 +386,71 @@ Implement the parent-pointer index and LEC cache data structures that enable O(d
 - Cache operations logged at service layer (ADR-002)
 
 ### Validation Checklist
-- [ ] Compliant with ADR-001 (Iron types for NodeId)
-- [ ] Compliant with ADR-002 (cache operations logged)
-- [ ] Compliant with ADR-009 (uses existing RiskResult, LECCurveData)
-- [ ] Compliant with ADR-010 (cache errors use SimulationError)
-- [ ] Compliant with ADR-011 (top-level imports)
+- [x] Compliant with ADR-001 (Iron types for NodeId — uses `type NodeId = SafeId.SafeId`)
+- [x] Compliant with ADR-002 (cache operations logged)
+- [x] Compliant with ADR-009 (uses existing RiskResult, LECCurveData)
+- [x] Compliant with ADR-010 (cache errors use SimulationError)
+- [x] Compliant with ADR-011 (top-level imports)
 
-### Tasks
+### Completed Tasks ✅
 
-1. **Create `TreeIndex` data structure**
+1. **Created `TreeIndex` data structure**
    ```
    domain/tree/TreeIndex.scala
    ```
-   - `nodes: Map[NodeId, RiskNode]` — O(1) lookup
-   - `parents: Map[NodeId, NodeId]` — child → parent
-   - `children: Map[NodeId, List[NodeId]]` — parent → children
-   - `ancestorPath(nodeId): List[NodeId]` — walk to root
+   - ✅ `type NodeId = SafeId.SafeId` — type alias for Iron type
+   - ✅ `nodes: Map[NodeId, RiskNode]` — O(1) lookup
+   - ✅ `parents: Map[NodeId, NodeId]` — child → parent
+   - ✅ `children: Map[NodeId, List[NodeId]]` — parent → children
+   - ✅ `ancestorPath(nodeId): List[NodeId]` — walk to root
+   - ✅ `descendants(nodeId): Set[NodeId]` — subtree nodes
+   - ✅ `fromTree(root: RiskNode)` — factory method
 
-2. **Create `LECCache` service**
+2. **Created `LECCache` service**
    ```
-   service/cache/LECCache.scala
+   services/cache/LECCache.scala
    ```
-   - `Ref[Map[NodeId, LECCurveData]]` for cache storage
-   - `get(nodeId): UIO[Option[LECCurveData]]`
-   - `set(nodeId, lec): UIO[Unit]`
-   - `invalidate(nodeId): UIO[List[NodeId]]` — returns invalidated ancestors
+   - ✅ `Ref[Map[NodeId, LECCurveData]]` for cache storage
+   - ✅ `get(nodeId): UIO[Option[LECCurveData]]`
+   - ✅ `set(nodeId, lec): UIO[Unit]`
+   - ✅ `invalidate(nodeId): UIO[List[NodeId]]` — returns invalidated ancestors
+   - ✅ `clear`, `size`, `contains`, `remove` helpers
+   - ✅ Logging at service layer (ADR-002)
 
-3. **Create `TreeIndexService`**
+3. **Created `TreeIndexService`**
    ```
-   service/tree/TreeIndexService.scala
+   services/tree/TreeIndexService.scala
    ```
-   - Build index from tree structure
-   - Update index on node changes
-   - Provide ancestor lookup for invalidation
+   - ✅ `buildFromTree(root: RiskNode): UIO[TreeIndex]`
+   - ✅ `ancestorPath(nodeId): UIO[List[NodeId]]`
+   - ✅ `descendants(nodeId): UIO[Set[NodeId]]`
+   - ✅ `updateTree(newRoot: RiskNode): UIO[TreeIndex]`
 
-4. **Add tests**
+4. **Added tests**
    ```
-   test/.../TreeIndexSpec.scala
-   test/.../LECCacheSpec.scala
+   test/.../TreeIndexSpec.scala (14 tests)
+   test/.../LECCacheSpec.scala (11 tests)
    ```
-   - Verify O(depth) ancestor lookup
-   - Verify invalidation returns correct path
+   - ✅ 25 tests all passing
+   - ✅ Tests use `SafeId.fromString(...).getOrElse(throw...)` pattern
 
-### Deliverables
-- [ ] TreeIndex correctly tracks parent pointers
-- [ ] ancestorPath returns root-to-node path
-- [ ] LECCache invalidation clears ancestor entries
-- [ ] Tests cover edge cases (root node, leaf node, deep tree)
+### Deliverables ✅
+- [x] TreeIndex correctly tracks parent pointers
+- [x] ancestorPath returns correct leaf-to-root path
+- [x] LECCache invalidation clears ancestor entries
+- [x] Tests cover edge cases (root node, leaf node, deep tree)
+- [x] All internal structures use `NodeId` (SafeId.SafeId) per ADR-001
 
-### Questions for User
-- None anticipated
+### ADR-001 Compliance Verification
+Ran executable validation checklist:
+- ✅ Check 1: No raw String domain IDs in cache/index structures
+- ✅ Check 2: No String keys in cache/index structures
+- ✅ Check 3: No raw String IDs in service methods
+- ✅ Check 4: refineUnsafe only in tests and known-valid literals
 
 ### Approval Checkpoint
-- [ ] Code compiles
-- [ ] Tests pass
+- [x] Code compiles
+- [x] Tests pass (25/25)
 - [ ] User approves Phase 3
 
 ---
