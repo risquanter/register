@@ -181,6 +181,10 @@ Decisions made:
 - [ ] ADR compliance verified at planning stage
 - [ ] Code compiles
 - [ ] Tests pass
+- [ ] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [ ] All accepted ADRs validated (ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011)
+  - [ ] No deviations introduced during implementation
+  - [ ] Completion report follows prescribed format
 - [ ] User approves Phase 1
 
 ---
@@ -270,6 +274,10 @@ The Dockerfile is structured for future distroless migration:
 - [x] GraphQL schema extracted to `dev/irmin-schema.graphql`
 - [x] Docker Compose updated with Irmin service
 - [x] Documentation updated (DOCKER-DEVELOPMENT.md, TESTING.md)
+- [x] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [x] All accepted ADRs validated
+  - [x] No deviations introduced during implementation
+  - [x] Completion report follows prescribed format
 - [x] User approves Phase 1.5
 
 ---
@@ -399,6 +407,10 @@ This phase implements **queries and mutations** using sttp HTTP client.
 - [x] Code compiles
 - [x] Integration tests pass (8/8 tests)
 - [x] ADR compliance verified post-implementation
+- [x] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [x] All accepted ADRs validated (ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011)
+  - [x] No deviations introduced during implementation
+  - [x] Completion report follows prescribed format
 - [x] User approves Phase 2
 
 ---
@@ -488,6 +500,10 @@ Ran executable validation checklist:
 ### Approval Checkpoint
 - [x] Code compiles
 - [x] Tests pass (25/25)
+- [ ] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [ ] All accepted ADRs validated (ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011)
+  - [ ] No deviations introduced during implementation
+  - [ ] Completion report follows prescribed format
 - [ ] User approves Phase 3
 
 ---
@@ -586,52 +602,11 @@ Implement Server-Sent Events endpoint for pushing LEC updates and tree changes t
 - [x] Code compiles
 - [x] Tests pass (7/7)
 - [ ] Manual test: connect with curl/browser, see events (pending wiring to HttpApi)
-- [ ] User approves Phase 4
-   - JSON encoding for each
-
-2. **Create SSE subscriber registry**
-   ```
-   service/sse/SSEHub.scala
-   ```
-   - `subscribers: Ref[Map[TreeId, Set[Queue[SSEEvent]]]]`
-   - `subscribe(treeId): ZStream[Any, Nothing, SSEEvent]`
-   - `broadcast(treeId, event): UIO[Unit]`
-
-3. **Create SSE endpoint**
-   ```
-   api/sse/SSEEndpoint.scala
-   ```
-   - Tapir SSE endpoint: `GET /events/tree/{treeId}`
-   - Returns `ZStream` of SSE events
-   - Handles client disconnection cleanup
-
-4. **Wire to existing routes**
-   ```
-   api/Routes.scala (update)
-   ```
-   - Add SSE endpoint to server
-
-5. **Add tests**
-   ```
-   test/.../SSEHubSpec.scala
-   ```
-   - Verify broadcast reaches subscribers
-   - Verify cleanup on disconnect
-
-### Deliverables
-- [ ] SSE endpoint accessible at `/events/tree/{treeId}`
-- [ ] Events stream to connected clients
-- [ ] Multiple clients receive broadcasts
-- [ ] Client disconnect cleans up resources
-
-### Questions for User
-- None anticipated
-
-### Approval Checkpoint
-- [ ] Code compiles
-- [ ] Tests pass
-- [ ] Manual test: connect with curl/browser, see events
-- [ ] User approves Phase 4
+- [x] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [x] All accepted ADRs validated (ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011)
+  - [x] No deviations introduced during implementation
+  - [x] Completion report follows prescribed format
+- [x] User approves Phase 4
 
 ---
 
@@ -715,6 +690,10 @@ Connect Irmin watch notifications to cache invalidation and SSE broadcast.
 - [ ] Code compiles
 - [ ] Integration tests pass
 - [ ] End-to-end: edit node → see LEC update in browser
+- [ ] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [ ] All accepted ADRs validated (ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011)
+  - [ ] No deviations introduced during implementation
+  - [ ] Completion report follows prescribed format
 - [ ] User approves Phase 5
 
 ---
@@ -827,6 +806,10 @@ Implement multi-user event distribution and conflict detection.
 - [ ] Code compiles
 - [ ] Tests pass
 - [ ] Two browser tabs see each other's changes
+- [ ] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [ ] All accepted ADRs validated (ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011)
+  - [ ] No deviations introduced during implementation
+  - [ ] Completion report follows prescribed format
 - [ ] User approves Phase 6
 
 ---
@@ -920,6 +903,10 @@ Implement what-if scenario management via Irmin branches.
 - [ ] Code compiles
 - [ ] Tests pass
 - [ ] End-to-end scenario workflow demonstrated
+- [ ] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [ ] All accepted ADRs validated (ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011)
+  - [ ] No deviations introduced during implementation
+  - [ ] Completion report follows prescribed format
 - [ ] User approves Phase 7
 
 ---
@@ -1017,6 +1004,10 @@ Replace SSE with WebSocket for bidirectional communication and enhanced collabor
 ### Approval Checkpoint
 - [ ] Code compiles
 - [ ] Tests pass
+- [ ] **Final Review** — Re-read `docs/WORKING-INSTRUCTIONS.md` and verify:
+  - [ ] All accepted ADRs validated (ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011)
+  - [ ] No deviations introduced during implementation
+  - [ ] Completion report follows prescribed format
 - [ ] User approves Phase 8
 
 ---

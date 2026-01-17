@@ -116,11 +116,11 @@ final class SSEHubLive(
     for
       hub <- getOrCreateHub(treeId)
       _   <- subscribersRef.update(subs => subs + (treeId -> (subs.getOrElse(treeId, 0) + 1)))
-      _   <- ZIO.logInfo(s"SSE client subscribed to tree $treeId")
+      _   <- ZIO.logInfo(s"SSE stream created for tree $treeId")
       stream = ZStream.fromHub(hub).ensuring(
                  subscribersRef.update(subs => 
                    subs.get(treeId).map(c => subs + (treeId -> (c - 1).max(0))).getOrElse(subs)
-                 ) *> ZIO.logInfo(s"SSE client disconnected from tree $treeId")
+                 ) *> ZIO.logInfo(s"SSE stream ended for tree $treeId")
                )
     yield stream
 

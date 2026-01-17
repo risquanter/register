@@ -253,6 +253,7 @@ User will confirm at these points:
 - [ ] **ADR compliance verified at planning phase** (mandatory before implementation)
 - [ ] Each phase completion approved
 - [ ] **ADR compliance re-verified post-implementation** (mandatory before phase sign-off)
+- [ ] **Agent re-reads `docs/WORKING-INSTRUCTIONS.md` before marking phase complete** (mandatory guardrail)
 - [ ] Each ADR acceptance approved
 - [ ] Final integration approved
 
