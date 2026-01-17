@@ -1,5 +1,34 @@
 services:
+  # ============================================================================
+  # Irmin GraphQL Server (Persistence Layer)
+  # ============================================================================
+  irmin:
+    build:
+      context: ./dev
+      dockerfile: Dockerfile.irmin
+    container_name: irmin-graphql
+    ports:
+      - "9080:8080"  # Expose on 9080 to avoid conflict with register-server
+    volumes:
+      - irmin-data:/data
+    environment:
+      # Irmin uses CLI args, not env vars, but we can set opam env
+      OPAMROOT: /home/opam/.opam
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/graphql"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - register-network
+    profiles:
+      - persistence  # Start with: docker compose --profile persistence up
+
+  # ============================================================================
   # Risk Register Server (Native GraalVM on Distroless)
+  # ============================================================================
   register-server:
     build:
       context: .
@@ -68,3 +97,7 @@ services:
 networks:
   register-network:
     driver: bridge
+
+volumes:
+  irmin-data:
+    driver: local

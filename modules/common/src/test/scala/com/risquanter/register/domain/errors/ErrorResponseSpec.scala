@@ -1,5 +1,7 @@
 package com.risquanter.register.domain.errors
 
+import scala.concurrent.duration.*
+
 import zio.test.*
 import zio.json.*
 import sttp.model.StatusCode
@@ -43,13 +45,62 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         )
       },
       
-      test("encodes duplicate key exception to Conflict") {
-        val error = new RuntimeException("duplicate key value")
+      test("encodes DataConflict to Conflict") {
+        val error = DataConflict("Duplicate key value")
         val (status, response) = ErrorResponse.encode(error)
         
         assertTrue(
           status == StatusCode.Conflict,
           response.error.code == 409
+        )
+      },
+      
+      // Infrastructure errors (ADR-008)
+      test("encodes IrminUnavailable to ServiceUnavailable (503)") {
+        val error = IrminUnavailable("Connection refused")
+        val (status, response) = ErrorResponse.encode(error)
+        
+        assertTrue(
+          status == StatusCode.ServiceUnavailable,
+          response.error.code == 503,
+          response.error.errors.head.code == ValidationErrorCode.DEPENDENCY_FAILED,
+          response.error.message.contains("unavailable")
+        )
+      },
+      
+      test("encodes NetworkTimeout to GatewayTimeout (504)") {
+        val error = NetworkTimeout("getNode", 5.seconds)
+        val (status, response) = ErrorResponse.encode(error)
+        
+        assertTrue(
+          status == StatusCode.GatewayTimeout,
+          response.error.code == 504,
+          response.error.errors.head.code == ValidationErrorCode.DEPENDENCY_FAILED,
+          response.error.message.contains("timeout")
+        )
+      },
+      
+      test("encodes VersionConflict to Conflict (409)") {
+        val error = VersionConflict("node-123", "v1", "v2")
+        val (status, response) = ErrorResponse.encode(error)
+        
+        assertTrue(
+          status == StatusCode.Conflict,
+          response.error.code == 409,
+          response.error.message.contains("Version conflict"),
+          response.error.message.contains("node-123")
+        )
+      },
+      
+      test("encodes MergeConflict to Conflict (409)") {
+        val error = MergeConflict("feature-branch", "Conflicting changes in node X")
+        val (status, response) = ErrorResponse.encode(error)
+        
+        assertTrue(
+          status == StatusCode.Conflict,
+          response.error.code == 409,
+          response.error.message.contains("Merge conflict"),
+          response.error.errors.head.field == "branch"
         )
       }
     ),

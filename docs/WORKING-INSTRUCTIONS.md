@@ -43,6 +43,60 @@ This document defines the working protocol for implementing the ADR proposals.
 
 ## ADR Compliance
 
+### Mandatory Review Process
+
+**ALL proposed code changes MUST be reviewed against existing ADRs** at two critical points:
+
+#### 1. Planning Phase (Before Implementation)
+
+Before writing any code, agent must:
+
+1. **Review all accepted ADRs** to understand current architecture
+2. **Identify potential conflicts** with proposed changes
+3. **Document alignment or deviations** in planning proposal
+4. **Notify user immediately** if any deviation is detected:
+   ```markdown
+   ⚠️ **ADR Deviation Detected**
+   
+   **Affected ADR:** ADR-XXX (Title)
+   **Deviation:** [Specific conflict description]
+   **Proposed approach:** [What you plan to do]
+   **ADR states:** [What the ADR requires]
+   
+   **Options:**
+   - A) Modify proposal to comply with ADR-XXX
+   - B) Update ADR-XXX to accommodate new requirements
+   - C) [Other alternatives]
+   
+   **Decision required:** How should we proceed?
+   ```
+5. **Wait for user decision** before proceeding
+
+#### 2. Review Phase (After Implementation)
+
+After implementing changes, agent must:
+
+1. **Re-validate all code** against accepted ADRs
+2. **Check for unintended deviations** introduced during implementation
+3. **Document compliance** in completion report
+4. **Notify user immediately** if any deviation is found:
+   ```markdown
+   ⚠️ **ADR Compliance Issue Detected**
+   
+   **Affected ADR:** ADR-XXX (Title)
+   **Issue:** [What was violated]
+   **Code location:** `path/to/file.scala:line`
+   **Current implementation:** [What was done]
+   **ADR requirement:** [What should have been done]
+   
+   **Remediation options:**
+   - A) Refactor code to comply with ADR-XXX
+   - B) Update ADR-XXX if requirements have changed
+   
+   **Decision required:** How should we resolve this?
+   ```
+5. **Wait for user decision** before marking phase complete
+
 ### Validation Requirements
 
 At each phase, validate implementation against:
@@ -52,6 +106,8 @@ At each phase, validate implementation against:
    - ADR-002: Logging strategy (ZIO logging + OpenTelemetry)
    - ADR-003: Provenance & reproducibility (HDR seeds)
    - ADR-009: Compositional Risk Aggregation via Identity
+   - ADR-010: Error Handling Strategy (hybrid error channels)
+   - ADR-011: Import Conventions (top-level imports, no FQNs)
 
 2. **Proposals being implemented** (validate as they're accepted):
    - ADR-004a-proposal: Persistence Architecture (SSE)
@@ -60,6 +116,7 @@ At each phase, validate implementation against:
    - ADR-006-proposal: Real-Time Collaboration
    - ADR-007-proposal: Scenario Branching
    - ADR-008-proposal: Error Handling & Resilience
+   - ADR-012: Service Mesh Strategy (Istio Ambient Mode)
 
 ### ADR Lifecycle
 
@@ -118,11 +175,18 @@ Implement in order of dependencies:
 ### ADR References
 [Which proposals this implements]
 
+### ADR Compliance Review (Planning Phase)
+**Reviewed ADRs:** ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011
+**Deviations detected:** None / [List of deviations with decisions required]
+**Alignment notes:** [How this phase aligns with existing ADRs]
+
 ### Validation Checklist
 - [ ] Compliant with ADR-001 (Iron types)
 - [ ] Compliant with ADR-002 (Logging)
 - [ ] Compliant with ADR-003 (Provenance)
 - [ ] Compliant with ADR-009 (Identity aggregation)
+- [ ] Compliant with ADR-010 (Error handling)
+- [ ] Compliant with ADR-011 (Import conventions)
 - [ ] [Additional validations as ADRs are accepted]
 
 ### Tasks
@@ -134,6 +198,7 @@ Implement in order of dependencies:
 - [Question about ambiguity]
 
 ### Approval Checkpoint
+- [ ] ADR compliance verified at planning stage
 - [ ] Code compiles
 - [ ] Tests pass
 - [ ] User approves
@@ -152,6 +217,11 @@ Implement in order of dependencies:
 
 ### Tests Added
 - [Test file and coverage]
+
+### ADR Compliance Review (Post-Implementation)
+**Re-validated ADRs:** ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011
+**Compliance status:** ✅ All ADRs compliant / ⚠️ [Deviations found - see below]
+**Issues detected:** None / [List of compliance issues requiring user decision]
 
 ### ADR Status
 - [Proposal name]: Ready for acceptance / Needs more work
@@ -172,17 +242,6 @@ When agent encounters ambiguity:
 4. **Ask specific question** — not open-ended
 5. **Wait for answer** — do not assume
 
-Example:
-> I'm implementing the cache invalidation logic and need clarification:
-> 
-> **Context:** ADR-005 mentions cache key could use `nodeId` or `contentHash`
-> 
-> **Options:**
-> - A) Use `nodeId` only (simpler, explicit invalidation)
-> - B) Use `contentHash` (content-addressed, auto-dedupe)
-> 
-> **Question:** Which approach should I implement?
-
 ---
 
 ## Checkpoints
@@ -191,11 +250,29 @@ User will confirm at these points:
 
 - [ ] Working instructions reviewed and approved
 - [ ] Implementation plan reviewed and approved
+- [ ] **ADR compliance verified at planning phase** (mandatory before implementation)
 - [ ] Each phase completion approved
+- [ ] **ADR compliance re-verified post-implementation** (mandatory before phase sign-off)
 - [ ] Each ADR acceptance approved
 - [ ] Final integration approved
 
 ---
 
+## ADR Deviation Protocol Summary
+
+**Agent must NEVER:**
+- Implement code that deviates from accepted ADRs without user approval
+- Assume deviation is acceptable without asking
+- Proceed with implementation if deviation is detected at planning stage
+
+**Agent must ALWAYS:**
+- Review ALL accepted ADRs before proposing any code changes
+- Notify user immediately when deviation is detected (planning OR review phase)
+- Present clear options and wait for user decision
+- Document all deviations and resolutions in phase reports
+
+---
+
 *Document created: 2026-01-17*  
+*Last updated: 2026-01-17*  
 *Status: Awaiting user approval*

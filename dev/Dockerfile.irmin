@@ -1,0 +1,75 @@
+# ============================================================================
+# Irmin GraphQL Server - Development Image (Alpine)
+# ============================================================================
+# This is a development image with full toolchain for debugging.
+# For production, this will be converted to a multi-stage distroless build.
+#
+# Build:   docker build -f dev/Dockerfile.irmin -t irmin-graphql:dev dev/
+# Run:     docker run -p 8080:8080 -v irmin-data:/data irmin-graphql:dev
+# ============================================================================
+
+FROM ocaml/opam:alpine-ocaml-5.2
+
+LABEL maintainer="risquanter"
+LABEL description="Irmin GraphQL server for development"
+LABEL version="dev"
+
+# ============================================================================
+# Build Stage (will become separate stage in distroless version)
+# ============================================================================
+
+USER root
+
+# Install system dependencies required by Irmin/OCaml packages
+RUN apk add --no-cache \
+    gmp-dev \
+    libffi-dev
+
+USER opam
+WORKDIR /home/opam
+
+# Update opam repository
+RUN opam update
+
+# Install Irmin with GraphQL support
+# - irmin-cli: Command-line interface with `irmin graphql` command
+# - irmin-graphql: GraphQL server implementation
+# - irmin-pack: Optimized on-disk storage backend (default)
+# - irmin-git: Git-compatible storage (for debugging with git CLI)
+RUN opam install -y \
+    irmin-cli \
+    irmin-graphql \
+    irmin-pack \
+    irmin-git
+
+# Verify installation
+RUN opam exec -- irmin --version
+
+# ============================================================================
+# Runtime Configuration
+# ============================================================================
+
+# Create data directory
+USER root
+RUN mkdir -p /data && chown opam:opam /data
+USER opam
+
+WORKDIR /data
+
+# Expose GraphQL port
+EXPOSE 8080
+
+# Health check using wget (available in Alpine)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget -q --spider http://localhost:8080/graphql || exit 1
+
+# ============================================================================
+# Entrypoint
+# ============================================================================
+# Start Irmin GraphQL server
+# --root: Data directory (persistent via volume)
+# --port: GraphQL server port
+# Default backend is irmin-pack (persistent, optimized)
+
+ENTRYPOINT ["opam", "exec", "--", "irmin", "graphql"]
+CMD ["--port", "8080", "--root", "/data"]
