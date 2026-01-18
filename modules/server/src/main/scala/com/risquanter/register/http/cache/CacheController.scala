@@ -29,7 +29,7 @@ import com.risquanter.register.domain.tree.NodeId
   *
   * - GET /cache/stats - Cache size and metadata
   * - GET /cache/nodes - List of cached node IDs
-  * - GET /cache/node/nodeId - Full LECCurveData for a node
+  * - GET /cache/node/nodeId - Full LECCurve for a node
   * - DELETE /cache - Clear entire cache
   * - DELETE /cache/node/nodeId - Invalidate node + ancestors
   */

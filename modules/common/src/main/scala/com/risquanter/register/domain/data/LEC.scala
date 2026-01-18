@@ -1,6 +1,7 @@
 package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec}
+import sttp.tapir.Schema
 
 /** Single point on a Loss Exceedance Curve
   * 
@@ -16,58 +17,34 @@ final case class LECPoint(
 
 object LECPoint {
   given codec: JsonCodec[LECPoint] = DeriveJsonCodec.gen[LECPoint]
+  given schema: Schema[LECPoint] = Schema.derived[LECPoint]
 }
 
-/** Hierarchical node in a Loss Exceedance Curve tree - serialization format
+/** LEC curve data for a single node (flat, non-recursive)
   * 
-  * This is the serialized representation of LEC curve data for API responses.
-  * Matches RiskNode structure but contains computed LEC data.
-  * Supports client-side expand/collapse navigation via depth parameter.
+  * Serialized representation of computed LEC data for API responses.
+  * Contains curve points sampled at specific loss values (ticks).
   * 
-  * Note: This is LECCurveData (discrete sampling), not the LECCurve trait
-  * (which represents the Loss → Probability function).
+  * Design (post ADR-004a/005 redesign):
+  * - Flat structure: no embedded children, just childIds for navigation
+  * - Client fetches child curves separately via node-specific endpoints
+  * - Enables per-node caching and SSE streaming
   * 
   * @param id Node identifier (matches RiskNode.id)
   * @param name Human-readable name
-  * @param curve Array of (loss, exceedanceProbability) points
+  * @param curve Loss exceedance curve points (loss → P(Loss >= loss))
   * @param quantiles Key percentiles (p50, p90, p95, p99) for quick reference
-  * @param children Child nodes (only populated if depth > 0)
+  * @param childIds IDs of child nodes (for navigation, not embedded data)
   */
-final case class LECCurveData(
+final case class LECCurveResponse(
   id: String,
   name: String,
   curve: Vector[LECPoint],
   quantiles: Map[String, Double],
-  children: Option[Vector[LECCurveData]] = None
+  childIds: Option[List[String]] = None
 )
 
-object LECCurveData {
-  import sttp.tapir.Schema
-  given codec: JsonCodec[LECCurveData] = DeriveJsonCodec.gen[LECCurveData]
-  // Schema.any for recursive types (children contains LECCurveData)
-  given schema: Schema[LECCurveData] = Schema.any[LECCurveData]
-}
-
-/** Complete LEC response with visualization spec
-  * 
-  * Server-side computed, client-side rendered.
-  * Contains both curve data and Vega-Lite JSON for immediate visualization.
-  * 
-  * Navigation:
-  * - depth=0: Just root node's aggregate curve
-  * - depth=1: Root + immediate children
-  * - depth=N: N levels deep (max 5)
-  * 
-  * @param node Root node with optional children based on depth
-  * @param vegaLiteSpec Vega-Lite JSON embedding all visible curves
-  * @param depth Number of levels included in response
-  */
-final case class LECResponse(
-  node: LECCurveData,
-  vegaLiteSpec: String,
-  depth: Int
-)
-
-object LECResponse {
-  given codec: JsonCodec[LECResponse] = DeriveJsonCodec.gen[LECResponse]
+object LECCurveResponse {
+  given codec: JsonCodec[LECCurveResponse] = DeriveJsonCodec.gen[LECCurveResponse]
+  given schema: Schema[LECCurveResponse] = Schema.derived[LECCurveResponse]
 }

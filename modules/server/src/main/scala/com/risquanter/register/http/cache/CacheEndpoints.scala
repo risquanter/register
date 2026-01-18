@@ -8,7 +8,7 @@ import zio.json.*
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.domain.data.iron.SafeId
-import com.risquanter.register.domain.data.LECCurveData
+import com.risquanter.register.domain.data.LECCurveResponse
 
 /**
   * Cache management endpoint definitions.
@@ -91,7 +91,7 @@ trait CacheEndpoints extends BaseEndpoint {
     *
     * GET /cache/node/{nodeId}
     *
-    * Returns full LECCurveData if cached, 404 otherwise.
+    * Returns full LECCurve if cached, 404 otherwise.
     * Admin-only: Protected by service mesh policy.
     */
   val cacheNodeEndpoint =
@@ -99,10 +99,10 @@ trait CacheEndpoints extends BaseEndpoint {
       .tag("cache-admin")
       .name("cacheNode")
       .summary("Get cached LEC data for a node")
-      .description("Returns cached LECCurveData for a specific node. 404 if not cached. Admin-only endpoint.")
+      .description("Returns cached LECCurve for a specific node. 404 if not cached. Admin-only endpoint.")
       .in("cache" / "node" / path[SafeId.SafeId]("nodeId"))
       .get
-      .out(jsonBody[Option[LECCurveData]])
+      .out(jsonBody[Option[LECCurveResponse]])
 
   /**
     * Clear entire cache.

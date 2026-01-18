@@ -22,6 +22,12 @@ final case class RiskTree(
 )
 
 object RiskTree {
+  import sttp.tapir.Schema
+  
+  // Tapir schema: Use Schema.any to avoid recursive derivation issues with Iron types
+  // TODO: Phase D - Replace with proper Schema derivation once Iron type schemas are implemented
+  given schema: Schema[RiskTree] = Schema.any[RiskTree]
+  
   // JSON codecs for Iron refined types
   given nonNegativeLongEncoder: JsonEncoder[NonNegativeLong] = 
     JsonEncoder[Long].contramap(identity)

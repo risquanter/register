@@ -1,7 +1,7 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.data.LECCurveData
+import com.risquanter.register.domain.data.LECCurveResponse
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 
 /**
@@ -60,7 +60,7 @@ trait LECCache {
     * @param nodeId Node identifier (SafeId.SafeId)
     * @return Cached LEC data if present
     */
-  def get(nodeId: NodeId): UIO[Option[LECCurveData]]
+  def get(nodeId: NodeId): UIO[Option[LECCurveResponse]]
 
   /**
     * Store LEC data in cache.
@@ -68,7 +68,7 @@ trait LECCache {
     * @param nodeId Node identifier (SafeId.SafeId)
     * @param lec LEC curve data
     */
-  def set(nodeId: NodeId, lec: LECCurveData): UIO[Unit]
+  def set(nodeId: NodeId, lec: LECCurveResponse): UIO[Unit]
 
   /**
     * Remove LEC data from cache.
@@ -128,15 +128,15 @@ object LECCache {
     ZLayer.fromZIO {
       for
         treeIndex <- ZIO.service[TreeIndex]
-        cache     <- Ref.make(Map.empty[NodeId, LECCurveData])
+        cache     <- Ref.make(Map.empty[NodeId, LECCurveResponse])
       yield LECCacheLive(treeIndex, cache)
     }
 
   // Accessor methods for ZIO service pattern
-  def get(nodeId: NodeId): URIO[LECCache, Option[LECCurveData]] =
+  def get(nodeId: NodeId): URIO[LECCache, Option[LECCurveResponse]] =
     ZIO.serviceWithZIO[LECCache](_.get(nodeId))
 
-  def set(nodeId: NodeId, lec: LECCurveData): URIO[LECCache, Unit] =
+  def set(nodeId: NodeId, lec: LECCurveResponse): URIO[LECCache, Unit] =
     ZIO.serviceWithZIO[LECCache](_.set(nodeId, lec))
 
   def remove(nodeId: NodeId): URIO[LECCache, Unit] =
@@ -166,13 +166,13 @@ object LECCache {
   */
 final class LECCacheLive(
     treeIndex: TreeIndex,
-    cacheRef: Ref[Map[NodeId, LECCurveData]]
+    cacheRef: Ref[Map[NodeId, LECCurveResponse]]
 ) extends LECCache {
 
-  override def get(nodeId: NodeId): UIO[Option[LECCurveData]] =
+  override def get(nodeId: NodeId): UIO[Option[LECCurveResponse]] =
     cacheRef.get.map(_.get(nodeId))
 
-  override def set(nodeId: NodeId, lec: LECCurveData): UIO[Unit] =
+  override def set(nodeId: NodeId, lec: LECCurveResponse): UIO[Unit] =
     for
       _ <- cacheRef.update(_ + (nodeId -> lec))
       _ <- ZIO.logDebug(s"Cache SET: ${nodeId.value}")

@@ -2,13 +2,14 @@ package com.risquanter.register.domain.data
 
 import com.risquanter.register.http.responses.RiskLEC
 import zio.json.{JsonCodec, DeriveJsonCodec}
+import sttp.tapir.Schema
 
 /** Result of creating and executing a risk tree with LEC computation
   * Combines persisted tree metadata with computed LEC data
   * 
-  * **Hierarchical structure:**
-  * - lecCurveData: Hierarchical LEC tree with curves
-  * - depth: Number of levels included
+  * **Flat LEC structure (post ADR-004a/005 redesign):**
+  * - lecCurve: LEC data for root node only (no embedded children)
+  * - Client fetches child curves separately via node-specific endpoints
   * 
   * **Top-level aggregates:**
   * - quantiles: Key percentiles from aggregate loss distribution
@@ -21,19 +22,18 @@ import zio.json.{JsonCodec, DeriveJsonCodec}
   * @param riskTree Persisted risk tree metadata
   * @param quantiles Aggregated key percentiles from the loss distribution
   * @param vegaLiteSpec Vega-Lite JSON embedding all visible curves
-  * @param lecCurveData Hierarchical LEC tree with depth-controlled children
-  * @param depth Number of tree levels included in lecCurveData
+  * @param lecCurve Root node LEC curve (flat, children fetched separately)
   * @param provenance Optional provenance metadata for reproducibility
   */
 final case class RiskTreeWithLEC(
   riskTree: RiskTree,
   quantiles: Map[String, Double],
   vegaLiteSpec: Option[String],
-  lecCurveData: Option[LECCurveData] = None,
-  depth: Int = 0,
+  lecCurve: Option[LECCurveResponse] = None,
   provenance: Option[TreeProvenance] = None
 )
 
 object RiskTreeWithLEC {
   given codec: JsonCodec[RiskTreeWithLEC] = DeriveJsonCodec.gen[RiskTreeWithLEC]
+  given schema: Schema[RiskTreeWithLEC] = Schema.derived[RiskTreeWithLEC]
 }

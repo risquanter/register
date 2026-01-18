@@ -143,5 +143,10 @@ object NodeProvenance {
 }
 
 object TreeProvenance {
+  import sttp.tapir.Schema
+  
   given codec: JsonCodec[TreeProvenance] = DeriveJsonCodec.gen[TreeProvenance]
+  
+  // TODO: Phase D - Replace with proper Schema derivation
+  given schema: Schema[TreeProvenance] = Schema.any[TreeProvenance]
 }

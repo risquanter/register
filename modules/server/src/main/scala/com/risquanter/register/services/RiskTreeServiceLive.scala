@@ -9,7 +9,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.domain.data.{RiskTree, TreeProvenance, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, LECCurveData, LECPoint}
+import com.risquanter.register.domain.data.{RiskTree, TreeProvenance, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, LECCurveResponse, LECPoint}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, NonNegativeInt, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, SimulationError}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -384,10 +384,8 @@ class RiskTreeServiceLive private (
     provenance: Option[TreeProvenance] = None
   ): Task[RiskTreeWithLEC] = {    
     
-    // Build hierarchical LEC node structure
-    // currentDepth is NonNegativeInt: starts at depth (≥0), and recursion only occurs
-    // when currentDepth > 0, so (currentDepth - 1) is always ≥ 0.
-    def buildLECNode(treeResult: RiskTreeResult, currentDepth: NonNegativeInt): LECCurveData = {
+    // Build flat LEC curve for a single node (no recursive children)
+    def buildLECCurve(treeResult: RiskTreeResult): LECCurveResponse = {
       val riskResult = treeResult.result
       
       // Generate curve points
@@ -397,39 +395,37 @@ class RiskTreeServiceLive private (
       // Calculate quantiles
       val quantiles = LECGenerator.calculateQuantiles(riskResult)
       
-      // Recursively build children if depth allows
-      // Guard ensures currentDepth > 0, so (currentDepth - 1) ≥ 0 → safe to refineUnsafe
-      val children: Option[Vector[LECCurveData]] = treeResult match {
-        case RiskTreeResult.Branch(_, _, childResults) if (currentDepth: Int) > 0 =>
-          val nextDepth: NonNegativeInt = ((currentDepth: Int) - 1).refineUnsafe[GreaterEqual[0]]
-          Some(childResults.map(child => buildLECNode(child, nextDepth)))
+      // Extract child IDs (flat reference, not embedded data)
+      val childIds: Option[List[String]] = treeResult match {
+        case RiskTreeResult.Branch(_, _, childResults) if childResults.nonEmpty =>
+          Some(childResults.map(_.id).toList)
         case _ => None
       }
       
-      LECCurveData(
+      LECCurveResponse(
         id = treeResult.id,
         name = riskResult.name,
         curve = lecPoints,
         quantiles = quantiles,
-        children = children
+        childIds = childIds
       )
     }
     
-    // Build root LEC node
-    val lecNode = buildLECNode(result, depth)
+    // Build root LEC curve (flat)
+    val lecCurve = buildLECCurve(result)
     
-    // Generate Vega-Lite spec for all visible nodes
-    val vegaLiteSpec = VegaLiteBuilder.generateSpec(lecNode)
+    // Generate Vega-Lite spec for root node only
+    // Multi-curve charts will be generated via separate endpoint
+    val vegaLiteSpec = VegaLiteBuilder.generateSpec(lecCurve)
     
     // Aggregated quantiles from root node
-    val rootQuantiles = lecNode.quantiles
+    val rootQuantiles = lecCurve.quantiles
     
     ZIO.succeed(RiskTreeWithLEC(
       riskTree = tree,
       quantiles = rootQuantiles,
       vegaLiteSpec = Some(vegaLiteSpec),
-      lecCurveData = Some(lecNode),
-      depth = depth,
+      lecCurve = Some(lecCurve),
       provenance = provenance
     ))
   }

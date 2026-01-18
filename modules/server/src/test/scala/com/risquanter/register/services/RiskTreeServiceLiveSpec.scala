@@ -231,7 +231,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("computeLEC with depth=1 includes children") {
+      test("computeLEC with depth=1 includes childIds for navigation") {
+        // Post ADR-004a/005 redesign: LEC response is flat with childIds
+        // Children's curves are fetched separately via node-specific endpoints
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Depth 1 Test Tree",
           nTrials = 1000,
@@ -265,11 +267,11 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         } yield result
 
         program.assert { result =>
-          result.vegaLiteSpec match {
-            case Some(spec) =>
-              spec.contains("\"risk\": \"root\"") &&
-                spec.contains("\"risk\": \"child1\"") &&
-                spec.contains("\"risk\": \"child2\"")
+          // Verify flat structure with childIds
+          result.lecCurve match {
+            case Some(lec) =>
+              lec.id == "root" &&
+                lec.childIds.contains(List("child1", "child2"))
             case None => false
           }
         }

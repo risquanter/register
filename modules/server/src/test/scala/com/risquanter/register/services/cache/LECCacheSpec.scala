@@ -3,7 +3,7 @@ package com.risquanter.register.services.cache
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
-import com.risquanter.register.domain.data.{LECCurveData, LECPoint, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.data.{LECCurveResponse, LECPoint, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 import com.risquanter.register.domain.data.iron.*
 
@@ -65,14 +65,14 @@ object LECCacheSpec extends ZIOSpecDefault {
   val hardwareId = safeId("hardware")
 
   // Sample LEC data
-  val cyberLEC = LECCurveData(
+  val cyberLEC = LECCurveResponse(
     id = "cyber",
     name = "Cyber Attack",
     curve = Vector(LECPoint(1000, 0.99), LECPoint(50000, 0.01)),
     quantiles = Map("p50" -> 5000.0, "p90" -> 25000.0)
   )
 
-  val hardwareLEC = LECCurveData(
+  val hardwareLEC = LECCurveResponse(
     id = "hardware",
     name = "Hardware Failure",
     curve = Vector(LECPoint(500, 0.99), LECPoint(10000, 0.01)),

@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.{LECPoint, LECCurveData}
+import com.risquanter.register.domain.data.{LECPoint, LECCurveResponse}
 
 /** Vega-Lite diagram generator for Loss Exceedance Curves
   * 
@@ -31,7 +31,22 @@ object VegaLiteBuilder {
     "#350c28"   // Purple-black
   )
   
-  /** Generate Vega-Lite JSON specification for LEC visualization
+  /** Generate Vega-Lite JSON specification for single LEC curve
+    * 
+    * @param curve Single LEC curve to display
+    * @param width Diagram width in pixels
+    * @param height Diagram height in pixels
+    * @return Vega-Lite JSON as string
+    */
+  def generateSpec(
+    curve: LECCurveResponse,
+    width: Int = 950,
+    height: Int = 400
+  ): String = {
+    generateMultiCurveSpec(Vector(curve), width, height)
+  }
+  
+  /** Generate Vega-Lite JSON specification for multiple LEC curves
     * 
     * Creates multi-layer diagram with:
     * - One curve per risk node
@@ -39,51 +54,57 @@ object VegaLiteBuilder {
     * - Color-coded by risk name
     * - Smooth interpolation
     * 
-    * @param rootNode Root node with optional children
+    * Flat design (post ADR-004a/005 redesign):
+    * - Accepts explicit list of curves (no embedded children)
+    * - First curve treated as "root" for color ordering
+    * - Remaining curves sorted alphabetically
+    * 
+    * @param curves LEC curves to display (first is root)
     * @param width Diagram width in pixels
     * @param height Diagram height in pixels
     * @return Vega-Lite JSON as string
     */
-  def generateSpec(
-    rootNode: LECCurveData,
+  def generateMultiCurveSpec(
+    curves: Vector[LECCurveResponse],
     width: Int = 950,
     height: Int = 400
   ): String = {
-    
-    // Collect all nodes (root + children if present)
-    val allNodes = rootNode +: rootNode.children.getOrElse(Vector.empty)
-    
-    // Assign colors: root gets first color, children get rest alphabetically
-    val sortedChildren = rootNode.children.getOrElse(Vector.empty).sortBy(_.name)
-    val sortedNodes = rootNode +: sortedChildren
-    val colorMapping = sortedNodes.zip(themeColorsRisk).toMap
-    
-    // Find global min/max loss for shared axis
-    val allCurves = allNodes.flatMap(_.curve)
-    if (allCurves.isEmpty) {
+    if (curves.isEmpty) {
       return generateEmptySpec(width, height)
     }
     
-    val minLoss = allCurves.map(_.loss).min
-    val maxLoss = allCurves.map(_.loss).max
+    // Sort: first curve stays first (root), rest alphabetically
+    val rootCurve = curves.head
+    val sortedChildren = curves.tail.sortBy(_.name)
+    val sortedCurves = rootCurve +: sortedChildren
+    val colorMapping = sortedCurves.zip(themeColorsRisk).toMap
+    
+    // Find global min/max loss for shared axis
+    val allPoints = curves.flatMap(_.curve)
+    if (allPoints.isEmpty) {
+      return generateEmptySpec(width, height)
+    }
+    
+    val minLoss = allPoints.map(_.loss).min
+    val maxLoss = allPoints.map(_.loss).max
     
     // Generate data points in Vega-Lite format
-    val dataValues = allNodes.flatMap { node =>
-      node.curve.map { point =>
+    val dataValues = curves.flatMap { curve =>
+      curve.curve.map { point =>
         s"""{
-          "risk": "${escapeJson(node.name)}",
+          "risk": "${escapeJson(curve.name)}",
           "loss": ${point.loss},
           "exceedance": ${point.exceedanceProbability}
         }"""
       }
     }.mkString(",\n        ")
     
-    // Sorted risk names for legend order (aggregate first, then alphabetically)
-    val sortedRiskNames = sortedNodes.map(node => s""""${escapeJson(node.name)}"""").mkString(", ")
+    // Sorted risk names for legend order (root first, then alphabetically)
+    val sortedRiskNames = sortedCurves.map(c => s""""${escapeJson(c.name)}"""").mkString(", ")
     
     // Color scale matching BCG approach
-    val colorDomain = sortedNodes.map(node => s""""${escapeJson(node.name)}"""").mkString(", ")
-    val colorRange = sortedNodes.map(n => s""""${colorMapping.getOrElse(n, "#000000")}"""").mkString(", ")
+    val colorDomain = sortedCurves.map(c => s""""${escapeJson(c.name)}"""").mkString(", ")
+    val colorRange = sortedCurves.map(c => s""""${colorMapping.getOrElse(c, "#000000")}"""").mkString(", ")
     
     s"""{
   "$$schema": "https://vega.github.io/schema/vega-lite/v6.json",

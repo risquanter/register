@@ -146,7 +146,9 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         }.provide(serviceLayer)
       },
 
-      test("depth=1 includes children curves") {
+      test("depth=1 returns flat response with childIds") {
+        // Post ADR-004a/005 redesign: LEC response is flat with childIds
+        // Multi-curve charts require separate endpoint (Phase C)
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Depth Test",
           nTrials = 1000,
@@ -180,11 +182,12 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         } yield result
 
         program.assert { result =>
-          result.vegaLiteSpec match {
-            case Some(spec) =>
-              spec.contains("\"risk\": \"root\"") && 
-              spec.contains("\"risk\": \"child1\"") &&
-              spec.contains("\"risk\": \"child2\"")
+          // Verify flat structure with root curve only, childIds for navigation
+          result.lecCurve match {
+            case Some(lec) =>
+              lec.id == "root" &&
+                lec.childIds.contains(List("child1", "child2")) &&
+                result.vegaLiteSpec.exists(_.contains("\"risk\": \"root\""))
             case None => false
           }
         }.provide(serviceLayer)
