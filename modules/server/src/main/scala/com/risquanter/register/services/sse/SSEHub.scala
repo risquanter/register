@@ -102,8 +102,14 @@ object SSEHub {
 /**
   * Live implementation of SSEHub using ZIO Hub for fan-out.
   *
+  * == Subscription Semantics ==
+  * Subscriber count reflects ACTIVE consumers only. The count is incremented
+  * when stream consumption begins (first pull), not when `subscribe` is called.
+  * This ensures `subscriberCount` accurately reflects how many consumers will
+  * receive a published event.
+  *
   * @param hubsRef Map of tree ID → Hub (created lazily on first subscribe)
-  * @param subscribersRef Map of tree ID → subscriber count
+  * @param subscribersRef Map of tree ID → subscriber count (active consumers only)
   * @param capacity Buffer capacity for each hub
   */
 final class SSEHubLive(
@@ -115,14 +121,18 @@ final class SSEHubLive(
   override def subscribe(treeId: NonNegativeLong): UIO[ZStream[Any, Nothing, SSEEvent]] =
     for
       hub <- getOrCreateHub(treeId)
-      _   <- subscribersRef.update(subs => subs + (treeId -> (subs.getOrElse(treeId, 0) + 1)))
-      _   <- ZIO.logInfo(s"SSE stream created for tree $treeId")
-      stream = ZStream.fromHub(hub).ensuring(
-                 subscribersRef.update(subs => 
-                   subs.get(treeId).map(c => subs + (treeId -> (c - 1).max(0))).getOrElse(subs)
-                 ) *> ZIO.logInfo(s"SSE stream ended for tree $treeId")
-               )
-    yield stream
+    yield ZStream.unwrapScoped(
+      for
+        dequeue <- hub.subscribe  // Hub subscription happens here (scope acquisition)
+        _       <- subscribersRef.update(subs => subs + (treeId -> (subs.getOrElse(treeId, 0) + 1)))
+        _       <- ZIO.logInfo(s"SSE stream created for tree $treeId")
+        _       <- ZIO.addFinalizer(
+                     subscribersRef.update(subs => 
+                       subs.get(treeId).map(c => subs + (treeId -> (c - 1).max(0))).getOrElse(subs)
+                     ) *> ZIO.logInfo(s"SSE stream ended for tree $treeId")
+                   )
+      yield ZStream.fromQueue(dequeue)
+    )
 
   override def publish(treeId: NonNegativeLong, event: SSEEvent): UIO[Int] =
     for

@@ -1,3 +1,4 @@
+
 package com.risquanter.register.services.sse
 
 import zio.*
@@ -15,6 +16,13 @@ object SSEHubSpec extends ZIOSpecDefault {
   // Helper to create NonNegativeLong for tests
   private def treeId(n: Long): NonNegativeLong = n.refineUnsafe[GreaterEqual[0L]]
 
+  /** 
+   * Wait for subscriber count to reach expected value.
+   * Uses polling with exponential backoff to avoid flaky tests.
+   */
+  private def awaitSubscribers(hub: SSEHub, tree: NonNegativeLong, expected: Int): ZIO[Any, Nothing, Unit] =
+    hub.subscriberCount(tree).repeatUntil(_ >= expected).unit
+
   def spec = suite("SSEHubSpec")(
     test("subscribe returns stream") {
       for
@@ -22,6 +30,27 @@ object SSEHubSpec extends ZIOSpecDefault {
         stream <- hub.subscribe(treeId(1L))
       yield assertTrue(stream != null)
     },
+
+    test("subscriberCount is zero until stream is consumed (lazy subscription semantics)") {
+      // Documents the lazy subscription model: count reflects ACTIVE consumers,
+      // not just callers of subscribe(). This ensures subscriberCount accurately
+      // predicts how many consumers will receive a published event.
+      for
+        hub         <- ZIO.service[SSEHub]
+        countBefore <- hub.subscriberCount(treeId(500L))
+        stream      <- hub.subscribe(treeId(500L))
+        countAfter  <- hub.subscriberCount(treeId(500L))  // Still 0 - stream not consumed yet
+        queue       <- Queue.unbounded[SSEEvent]
+        fiber       <- stream.foreach(queue.offer).fork
+        _           <- awaitSubscribers(hub, treeId(500L), 1)  // Now count is 1
+        countActive <- hub.subscriberCount(treeId(500L))
+        _           <- fiber.interrupt
+      yield assertTrue(
+        countBefore == 0,
+        countAfter == 0,   // Key assertion: subscribe() alone doesn't increment count
+        countActive == 1   // Only incremented when stream is being consumed
+      )
+    } @@ TestAspect.withLiveClock,
 
     test("publish with no subscribers returns 0") {
       for
@@ -40,8 +69,8 @@ object SSEHubSpec extends ZIOSpecDefault {
         queue  <- Queue.unbounded[SSEEvent]
         // Start consuming in background
         fiber  <- stream.foreach(queue.offer).fork
-        // Small delay with live clock to let fiber start
-        _      <- Live.live(ZIO.sleep(100.millis))
+        // Wait for subscriber to be registered (avoids flaky timing)
+        _      <- awaitSubscribers(hub, treeId(1L), 1)
         _      <- hub.publish(treeId(1L), event)
         result <- queue.take.timeout(5.seconds)
         _      <- fiber.interrupt
@@ -61,7 +90,7 @@ object SSEHubSpec extends ZIOSpecDefault {
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork
         fiber2   <- stream2.foreach(queue2.offer).fork
-        _        <- Live.live(ZIO.sleep(100.millis))
+        _        <- awaitSubscribers(hub, treeId(2L), 2)
         _        <- hub.publish(treeId(2L), event)
         result1  <- queue1.take.timeout(5.seconds)
         result2  <- queue2.take.timeout(5.seconds)
@@ -80,7 +109,7 @@ object SSEHubSpec extends ZIOSpecDefault {
         stream <- hub.subscribe(treeId(3L))
         queue  <- Queue.unbounded[SSEEvent]
         fiber  <- stream.foreach(queue.offer).fork
-        _      <- Live.live(ZIO.sleep(100.millis))
+        _      <- awaitSubscribers(hub, treeId(3L), 1)
         count1 <- hub.subscriberCount(treeId(3L))
         _      <- fiber.interrupt
       yield assertTrue(
@@ -100,7 +129,7 @@ object SSEHubSpec extends ZIOSpecDefault {
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork
         fiber2   <- stream2.foreach(queue2.offer).fork
-        _        <- Live.live(ZIO.sleep(100.millis))
+        _        <- awaitSubscribers(hub, treeId(10L), 1) *> awaitSubscribers(hub, treeId(20L), 1)
         _        <- hub.publish(treeId(10L), event1)
         _        <- hub.publish(treeId(20L), event2)
         result1  <- queue1.take.timeout(5.seconds)
@@ -122,7 +151,7 @@ object SSEHubSpec extends ZIOSpecDefault {
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork
         fiber2   <- stream2.foreach(queue2.offer).fork
-        _        <- Live.live(ZIO.sleep(100.millis))
+        _        <- awaitSubscribers(hub, treeId(100L), 1) *> awaitSubscribers(hub, treeId(200L), 1)
         total    <- hub.broadcastAll(event)
         result1  <- queue1.take.timeout(5.seconds)
         result2  <- queue2.take.timeout(5.seconds)
