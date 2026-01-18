@@ -136,7 +136,7 @@ object CurveBundleSpec extends ZIOSpecDefault with TestHelpers {
 
       test("withCurve adds curve to bundle") {
         val bundle = CurveBundle.single(cyberId, domain3, cyberLosses3)
-          .withCurve(hardwareId, hardwareLosses3)
+          .withCurveUnsafe(hardwareId, hardwareLosses3)
         assertTrue(
           bundle.size == 2,
           bundle.contains(cyberId),
@@ -146,12 +146,32 @@ object CurveBundleSpec extends ZIOSpecDefault with TestHelpers {
 
       test("without removes curve from bundle") {
         val bundle = CurveBundle.single(cyberId, domain3, cyberLosses3)
-          .withCurve(hardwareId, hardwareLosses3)
+          .withCurveUnsafe(hardwareId, hardwareLosses3)
           .without(cyberId)
         assertTrue(
           bundle.size == 1,
           !bundle.contains(cyberId),
           bundle.contains(hardwareId)
+        )
+      },
+
+      test("withCurve validates curve size matches domain") {
+        val bundle = CurveBundle.single(cyberId, domain3, cyberLosses3)
+        val wrongSizeLosses = Vector(100L, 200L)  // 2 elements, domain has 3
+
+        val result = bundle.withCurve(hardwareId, wrongSizeLosses)
+
+        assertTrue(result.isFailure)
+      },
+
+      test("withCurve succeeds with correct curve size") {
+        val bundle = CurveBundle.single(cyberId, domain3, cyberLosses3)
+
+        val result = bundle.withCurve(hardwareId, hardwareLosses3)
+
+        assertTrue(
+          result.isSuccess,
+          result.fold(_ => false, b => b.size == 2)
         )
       },
 
@@ -311,6 +331,116 @@ object CurveBundleSpec extends ZIOSpecDefault with TestHelpers {
           parent.domain.contains(childADomain),
           parent.domain.contains(childBDomain),
           parent.size == 2  // Both children present
+        )
+      }
+    ),
+
+    suite("LEC Boundary Semantics")(
+      
+      test("expansion beyond upper tick uses loss at max tick (floor)") {
+        // Source domain: [0.90, 0.50, 0.10] - max tick is 0.90
+        // Target domain includes 0.99 (> 0.90)
+        // LEC semantics: at 99% exceedance (very common), use loss at 90%
+        val sourceDomain = TickDomain.fromProbabilities(Seq(0.90, 0.50, 0.10))
+        val sourceLosses = Vector(100000L, 500000L, 2000000L)  // losses at 90%, 50%, 10%
+        
+        val targetDomain = TickDomain.fromProbabilities(Seq(0.99, 0.90, 0.50, 0.10))
+        
+        val bundle = CurveBundle.single(cyberId, sourceDomain, sourceLosses)
+        val expanded = bundle.expandTo(targetDomain)
+        val expandedLosses = expanded.get(cyberId).get
+        
+        // At 0.99 (higher prob than we measured), use floor = loss at 0.90
+        assertTrue(
+          expandedLosses(0) == 100000L,  // 0.99 → floor to 0.90 loss
+          expandedLosses(1) == 100000L,  // 0.90 → exact
+          expandedLosses(2) == 500000L,  // 0.50 → exact
+          expandedLosses(3) == 2000000L  // 0.10 → exact
+        )
+      },
+
+      test("expansion beyond lower tick uses loss at min tick (ceiling)") {
+        // Source domain: [0.90, 0.50, 0.10] - min tick is 0.10
+        // Target domain includes 0.01 (< 0.10)
+        // LEC semantics: at 1% exceedance (rare tail), use loss at 10%
+        val sourceDomain = TickDomain.fromProbabilities(Seq(0.90, 0.50, 0.10))
+        val sourceLosses = Vector(100000L, 500000L, 2000000L)
+        
+        val targetDomain = TickDomain.fromProbabilities(Seq(0.90, 0.50, 0.10, 0.01))
+        
+        val bundle = CurveBundle.single(cyberId, sourceDomain, sourceLosses)
+        val expanded = bundle.expandTo(targetDomain)
+        val expandedLosses = expanded.get(cyberId).get
+        
+        // At 0.01 (lower prob than we measured), use ceiling = loss at 0.10
+        assertTrue(
+          expandedLosses(0) == 100000L,  // 0.90 → exact
+          expandedLosses(1) == 500000L,  // 0.50 → exact
+          expandedLosses(2) == 2000000L, // 0.10 → exact
+          expandedLosses(3) == 2000000L  // 0.01 → ceiling to 0.10 loss
+        )
+      },
+
+      test("interpolation within range is linear") {
+        // Source: [0.90, 0.10] with losses [100000, 1000000]
+        // Target includes 0.50 (midpoint)
+        // Linear interpolation: (100000 + 1000000) / 2 = 550000
+        val sourceDomain = TickDomain.fromProbabilities(Seq(0.90, 0.10))
+        val sourceLosses = Vector(100000L, 1000000L)
+        
+        val targetDomain = TickDomain.fromProbabilities(Seq(0.90, 0.50, 0.10))
+        
+        val bundle = CurveBundle.single(cyberId, sourceDomain, sourceLosses)
+        val expanded = bundle.expandTo(targetDomain)
+        val expandedLosses = expanded.get(cyberId).get
+        
+        // 0.50 is exactly between 0.10 and 0.90
+        // ratio = (0.50 - 0.10) / (0.90 - 0.10) = 0.5
+        // interpolated = 1000000 + (100000 - 1000000) * 0.5 = 550000
+        assertTrue(
+          expandedLosses(0) == 100000L,   // 0.90 → exact
+          expandedLosses(1) == 550000L,   // 0.50 → interpolated
+          expandedLosses(2) == 1000000L   // 0.10 → exact
+        )
+      },
+
+      test("combining domains with different ranges preserves all data") {
+        // Child A: narrow range [0.90, 0.10]
+        // Child B: wide range [0.99, 0.90, 0.10, 0.01]
+        // Union should have all ticks, A's values extended at boundaries
+        val narrowDomain = TickDomain.fromProbabilities(Seq(0.90, 0.10))
+        val narrowLosses = Vector(100000L, 1000000L)
+        
+        val wideDomain = TickDomain.fromProbabilities(Seq(0.99, 0.90, 0.10, 0.01))
+        val wideLosses = Vector(50000L, 100000L, 500000L, 2000000L)
+        
+        val narrow = CurveBundle.single(cyberId, narrowDomain, narrowLosses)
+        val wide = CurveBundle.single(hardwareId, wideDomain, wideLosses)
+        
+        val combined = Identity[CurveBundle].combine(narrow, wide)
+        
+        // Combined domain is union
+        assertTrue(
+          combined.domain.size == 4,  // [0.99, 0.90, 0.10, 0.01]
+          combined.size == 2          // both curves present
+        )
+        
+        // Check narrow curve was extended correctly
+        val cyberLosses = combined.get(cyberId).get
+        assertTrue(
+          cyberLosses(0) == 100000L,   // 0.99 → floor to 0.90 value
+          cyberLosses(1) == 100000L,   // 0.90 → exact
+          cyberLosses(2) == 1000000L,  // 0.10 → exact
+          cyberLosses(3) == 1000000L   // 0.01 → ceiling to 0.10 value
+        )
+        
+        // Wide curve should be unchanged
+        val hwLosses = combined.get(hardwareId).get
+        assertTrue(
+          hwLosses(0) == 50000L,
+          hwLosses(1) == 100000L,
+          hwLosses(2) == 500000L,
+          hwLosses(3) == 2000000L
         )
       }
     )

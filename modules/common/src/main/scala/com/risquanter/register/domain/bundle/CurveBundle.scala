@@ -308,9 +308,20 @@ final case class CurveBundle(
   /**
     * Interpolate curve to new tick domain.
     *
-    * INVARIANT: Target domain ticks must be within the range of source domain.
-    * This is guaranteed when expanding to a union domain (monoidal combine).
-    * Extrapolation beyond known range is an assertion failure (programming error).
+    * == LEC Semantics ==
+    *
+    * Loss Exceedance Curves are step functions (empirical distributions).
+    * When querying a tick not in our sampled domain:
+    *
+    * - **Within range**: Linear interpolation between adjacent known points
+    * - **Above max tick** (higher probability): Use loss at max tick (floor)
+    * - **Below min tick** (lower probability, rarer events): Use loss at min tick (ceiling)
+    *
+    * This follows the natural semantics of empirical exceedance curves:
+    * - If we ask "what loss has 99% exceedance?" and we only measured up to 95%,
+    *   we use the 95% value as a conservative lower bound.
+    * - If we ask "what loss has 1% exceedance?" and we only measured down to 5%,
+    *   we use the 5% value as a conservative upper bound.
     */
   private def interpolateTo(
       losses: Vector[Long],
@@ -324,22 +335,23 @@ final case class CurveBundle(
     def findLoss(tick: Double): Option[Long] =
       tickLossPairs.find { case (t, _) => math.abs(t - tick) < Epsilon }.map(_._2)
     
-    val sortedTicks = fromDomain.ticks.sorted  // ascending for range check
+    val sortedTicks = fromDomain.ticks.sorted  // ascending
     val minTick = sortedTicks.headOption.getOrElse(0.0)
     val maxTick = sortedTicks.lastOption.getOrElse(1.0)
+    val minLoss = findLoss(minTick).getOrElse(0L)
+    val maxLoss = findLoss(maxTick).getOrElse(0L)
     
     toDomain.ticks.map { tick =>
       findLoss(tick) match {
         case Some(loss) => loss
+        case None if tick > maxTick + Epsilon =>
+          // Above max tick (higher probability) → use loss at max tick
+          maxLoss
+        case None if tick < minTick - Epsilon =>
+          // Below min tick (lower probability, rarer) → use loss at min tick
+          minLoss
         case None =>
-          // Verify tick is within interpolatable range (not extrapolation)
-          assert(
-            tick >= minTick - Epsilon && tick <= maxTick + Epsilon,
-            s"Extrapolation not supported: tick $tick outside range [$minTick, $maxTick]. " +
-            "This indicates a bug in domain expansion logic."
-          )
-          
-          // Linear interpolation between adjacent known ticks
+          // Within range: linear interpolation between adjacent known ticks
           val lowerOpt = sortedTicks.filter(_ < tick - Epsilon).lastOption
           val upperOpt = sortedTicks.filter(_ > tick + Epsilon).headOption
           
@@ -349,9 +361,9 @@ final case class CurveBundle(
               val upperLoss = findLoss(upper).get
               val ratio = (tick - lower) / (upper - lower)
               (lowerLoss + ((upperLoss - lowerLoss) * ratio)).toLong
-            case _ =>
-              // Edge case: tick at boundary - use nearest
-              findLoss(minTick).orElse(findLoss(maxTick)).getOrElse(0L)
+            case (Some(lower), None) => findLoss(lower).getOrElse(minLoss)
+            case (None, Some(upper)) => findLoss(upper).getOrElse(maxLoss)
+            case (None, None) => minLoss
           }
       }
     }
