@@ -11,6 +11,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, TreeProvenance, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, LECCurveResponse, LECPoint}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, NonNegativeInt, Probability, DistributionType, NonNegativeLong}
+import com.risquanter.register.domain.tree.NodeId
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, SimulationError}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
@@ -223,8 +224,25 @@ class RiskTreeServiceLive private (
       _ => recordOperation("getById", success = true)
     )
   
-  // LEC Computation - load config and execute with tracing and metrics
-  // Parameters are Iron types - validation already done at controller boundary
+  // ========================================
+  // New LEC Query APIs (ADR-015)
+  // ========================================
+  
+  // TODO: Implement these methods using RiskResultResolver
+  override def getLECCurve(nodeId: NodeId): Task[LECCurveResponse] =
+    ZIO.fail(new NotImplementedError("getLECCurve not yet implemented"))
+  
+  override def probOfExceedance(nodeId: NodeId, threshold: Long): Task[BigDecimal] =
+    ZIO.fail(new NotImplementedError("probOfExceedance not yet implemented"))
+  
+  override def getLECCurvesMulti(nodeIds: Set[NodeId]): Task[Map[NodeId, Vector[LECPoint]]] =
+    ZIO.fail(new NotImplementedError("getLECCurvesMulti not yet implemented"))
+  
+  // ========================================
+  // DEPRECATED: Old computeLEC implementation
+  // ========================================
+  
+  @deprecated("Use getLECCurve(nodeId) instead", "0.2.0")
   override def computeLEC(
     id: NonNegativeLong,
     nTrialsOverride: Option[PositiveInt],
