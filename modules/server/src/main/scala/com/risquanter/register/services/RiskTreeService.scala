@@ -2,18 +2,20 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong}
+import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint}
+import com.risquanter.register.domain.data.iron.{NonNegativeLong}
+import com.risquanter.register.domain.tree.NodeId
 
 /** Service layer for RiskTree business logic.
   * 
   * Separation of Concerns:
   * - Config CRUD: Persists risk tree structure only (no execution)
-  * - LEC Computation: Executes Monte Carlo on-demand (separate endpoint)
+  * - LEC Query APIs: Node-based queries composing on RiskResultResolver.ensureCached
   * 
-  * Design Pattern:
+  * Design Pattern (ADR-015):
   * - Tree Manipulation: POST/PUT/DELETE → synchronous, fast (config only)
-  * - LEC Query: GET /risk-trees/:id/lec → executes bottom-up, returns hierarchical results
+  * - LEC Query: Node-based APIs that use cache-aside pattern
+  * - Simulation parameters come from SimulationConfig (not API parameters)
   */
 trait RiskTreeService {
   
@@ -52,28 +54,34 @@ trait RiskTreeService {
   def getById(id: NonNegativeLong): Task[Option[RiskTree]]
   
   // ========================================
-  // LEC Computation (on-demand execution)
+  // LEC Query APIs (ADR-015: compose on ensureCached)
   // ========================================
   
-  /** Execute simulation and compute LEC for entire tree.
-    * Returns hierarchical results preserving tree structure.
+  /** Get LEC curve for a single node.
     * 
-    * @param id Risk tree ID to execute
-    * @param nTrialsOverride Optional override for number of trials (uses stored default if None)
-    * @param parallelism Parallelism level (guaranteed positive by Iron type)
-    * @param depth Hierarchy depth to include (0=root only, 1=+children, max 5)
-    * @param includeProvenance Whether to include provenance metadata for reproducibility
-    * @param seed3 Global seed 3 for HDR random number generation (enables reproducibility)
-    * @param seed4 Global seed 4 for HDR random number generation (enables reproducibility)
-    * @return Risk tree with computed LEC data in hierarchical format
+    * Uses cache-aside pattern: returns cached result if available,
+    * otherwise simulates and caches before returning.
+    * 
+    * @param nodeId Node identifier (SafeId)
+    * @return LEC curve response with quantiles, curve points, and childIds for navigation
     */
-  def computeLEC(
-    id: NonNegativeLong,
-    nTrialsOverride: Option[PositiveInt],
-    parallelism: PositiveInt,
-    depth: NonNegativeInt,
-    includeProvenance: Boolean,
-    seed3: Long = 0L,
-    seed4: Long = 0L
-  ): Task[RiskTreeWithLEC]
+  def getLECCurve(nodeId: NodeId): Task[LECCurveResponse]
+  
+  /** Get exceedance probability at a threshold for a node.
+    * 
+    * @param nodeId Node identifier
+    * @param threshold Loss threshold to compute P(Loss >= threshold)
+    * @return Probability as BigDecimal
+    */
+  def probOfExceedance(nodeId: NodeId, threshold: Long): Task[BigDecimal]
+  
+  /** Get LEC curves for multiple nodes with shared tick domain.
+    * 
+    * Used for multi-curve overlay (e.g., split pane comparison).
+    * All curves share the same loss ticks for aligned rendering.
+    * 
+    * @param nodeIds Set of node identifiers
+    * @return Map from nodeId to curve points
+    */
+  def getLECCurvesMulti(nodeIds: Set[NodeId]): Task[Map[NodeId, Vector[LECPoint]]]
 }

@@ -14,7 +14,7 @@ import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.pipeline.InvalidationHandler
-import com.risquanter.register.services.cache.RiskResultCache
+import com.risquanter.register.services.cache.{RiskResultCache, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.tree.TreeIndexService
 import com.risquanter.register.domain.tree.TreeIndex
@@ -67,6 +67,7 @@ object Application extends ZIOAppDefault {
       // Phase 5: Cache invalidation + SSE infrastructure
       treeIndexLayer,
       RiskResultCache.layer,
+      RiskResultResolverLive.layer,  // ADR-015: ensureCached primitive
       SSEHub.live,
       InvalidationHandler.live,
       SSEController.layer,
