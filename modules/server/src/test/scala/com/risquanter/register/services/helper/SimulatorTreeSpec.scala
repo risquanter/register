@@ -3,10 +3,17 @@ package com.risquanter.register.services.helper
 import zio.*
 import zio.test.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult}
+import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.errors.ValidationFailed
 import io.github.iltotore.iron.autoRefine
 
 object SimulatorTreeSpec extends ZIOSpecDefault {
+
+  // Helper to create SafeId from string literal
+  private def safeId(s: String): SafeId.SafeId = 
+    SafeId.fromString(s).getOrElse(
+      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
+    )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
     suite("Simulator.simulateTree")(
@@ -74,7 +81,7 @@ object SimulatorTreeSpec extends ZIOSpecDefault {
             case RiskTreeResult.Leaf(id, riskResult) =>
               assertTrue(
                 id == "cyber",
-                riskResult.name == "cyber",
+                riskResult.name == safeId("cyber"),
                 riskResult.nTrials == 500
               )
             

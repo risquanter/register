@@ -3,6 +3,7 @@ package com.risquanter.register.domain.data
 import zio.prelude.{Associative, Identity, Equal, Debug, Ord}
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
+import com.risquanter.register.domain.data.iron.SafeId
 
 /**
  * Risk type discriminator for loss distributions.
@@ -50,9 +51,10 @@ trait LECCurve {
  * - Renamed from BCG's "Risk" to avoid confusion with Risk sampling trait
  * - Outer join merge semantics (union of trial IDs, sum losses)
  * - Identity/Monoid instance for compositional aggregation
+ * - Uses SafeId.SafeId for name per ADR-001 (Iron types internally)
  */
 sealed abstract class LossDistribution(
-  val name: String,
+  val name: SafeId.SafeId,
   val outcomes: Map[TrialId, Loss],
   override val nTrials: Int,
   val distributionType: LossDistributionType
@@ -77,7 +79,7 @@ sealed abstract class LossDistribution(
  * across multiple Monte Carlo trials.
  */
 case class RiskResult(
-  override val name: String,
+  override val name: SafeId.SafeId,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int
 ) extends LossDistribution(name, outcomes, nTrials, LossDistributionType.Leaf) {
@@ -101,7 +103,7 @@ case class RiskResult(
 
 object RiskResult {
   /** Empty result (no losses occurred) */
-  def empty(name: String, nTrials: Int): RiskResult = 
+  def empty(name: SafeId.SafeId, nTrials: Int): RiskResult = 
     RiskResult(name, Map.empty, nTrials)
   
   /**
@@ -117,12 +119,19 @@ object RiskResult {
    * losses in each trial, creating a composite loss distribution.
    */
   given identity: Identity[RiskResult] with {
-    def identity: RiskResult = RiskResult("", Map.empty, 0)
+    // Empty identity uses a placeholder SafeId
+    private val emptyId: SafeId.SafeId = SafeId.fromString("empty").getOrElse(
+      throw new IllegalStateException("Invalid empty SafeId - should never happen")
+    )
+    
+    def identity: RiskResult = RiskResult(emptyId, Map.empty, 0)
     
     def combine(a: => RiskResult, b: => RiskResult): RiskResult = {
       require(a.nTrials == b.nTrials, s"Cannot merge results with different trial counts: ${a.nTrials} vs ${b.nTrials}")
+      // Prefer non-empty name (non-empty means not the identity element)
+      val combinedName = if (a.name.value.toString != "empty") a.name else b.name
       RiskResult(
-        if (a.name.nonEmpty) a.name else b.name,
+        combinedName,
         LossDistribution.merge(a, b),
         a.nTrials
       )
@@ -149,7 +158,7 @@ object RiskResult {
  */
 case class RiskResultGroup(
   children: List[RiskResult],
-  override val name: String,
+  override val name: SafeId.SafeId,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int
 ) extends LossDistribution(name, outcomes, nTrials, LossDistributionType.Composite) {
@@ -169,7 +178,7 @@ case class RiskResultGroup(
   }
   
   override def flatten: Vector[LossDistribution] =
-    this +: children.toVector.sortBy(_.name)
+    this +: children.toVector.sortBy(_.name.value.toString)
 }
 
 object RiskResultGroup {
@@ -181,7 +190,7 @@ object RiskResultGroup {
    * @param results Individual risk loss distributions to aggregate
    */
   def apply(
-    name: String,
+    name: SafeId.SafeId,
     nTrials: Int,
     results: RiskResult*
   ): RiskResultGroup = {

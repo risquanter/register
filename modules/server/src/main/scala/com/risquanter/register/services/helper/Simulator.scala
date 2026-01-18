@@ -224,9 +224,10 @@ object Simulator {
           samplerAndProv <- createSamplerFromLeaf(leaf, includeProvenance, seed3, seed4)
           (sampler, maybeProv) = samplerAndProv
           trials <- performTrials(sampler, nTrials, p)
-          result = RiskTreeResult.Leaf(leaf.id, RiskResult(leaf.id, trials, n))
+          // RiskTreeResult uses String id for wire format (deprecated - see ADR-015)
+          result = RiskTreeResult.Leaf(leaf.id.value.toString, RiskResult(leaf.id, trials, n))
           updatedProvenances = maybeProv match {
-            case Some(prov) => provenances + (leaf.id -> prov)
+            case Some(prov) => provenances + (leaf.id.value.toString -> prov)
             case None => provenances
           }
         } yield (result, updatedProvenances)
@@ -257,9 +258,9 @@ object Simulator {
             val childRiskResults = childResults.map(_.result)
             val combined = childRiskResults.reduce((a, b) => Identity[RiskResult].combine(a, b))
             
-            // Update name to portfolio ID
+            // Update name to portfolio ID (String for wire format - deprecated, see ADR-015)
             RiskTreeResult.Branch(
-              id = portfolio.id,
+              id = portfolio.id.value.toString,
               result = combined.copy(name = portfolio.id),
               children = childResults.toVector
             )
@@ -282,7 +283,7 @@ object Simulator {
    * @param seed4 Global seed 4 for HDR random number generation
    * @return Tuple of (RiskSampler, Option[NodeProvenance])
    */
-  private def createSamplerFromLeaf(
+  private[services] def createSamplerFromLeaf(
     leaf: RiskLeaf,
     includeProvenance: Boolean = false,
     seed3: Long = 0L,
@@ -294,7 +295,7 @@ object Simulator {
       (distribution, distParams) = distAndParams
       
       // Build sampler (using entityId = hash of leaf.id for determinism)
-      entityId = leaf.id.hashCode.toLong
+      entityId = leaf.id.value.toString.hashCode.toLong
       sampler = RiskSampler.fromDistribution(
         entityId = entityId,
         riskId = leaf.id,
@@ -304,10 +305,10 @@ object Simulator {
         seed4 = seed4
       )
       
-      // Capture provenance if requested
+      // Capture provenance if requested (riskId as String for wire format)
       provenance = if (includeProvenance) {
         Some(NodeProvenance(
-          riskId = leaf.id,
+          riskId = leaf.id.value.toString,
           entityId = entityId,
           occurrenceVarId = entityId.hashCode + 1000L,
           lossVarId = entityId.hashCode + 2000L,

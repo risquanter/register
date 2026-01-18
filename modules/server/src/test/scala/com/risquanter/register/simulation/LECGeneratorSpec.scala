@@ -3,30 +3,37 @@ package com.risquanter.register.simulation
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.RiskResult
+import com.risquanter.register.domain.data.iron.SafeId
 
 object LECGeneratorSpec extends ZIOSpecDefault {
 
+  // Helper to create SafeId from string literal
+  private def safeId(s: String): SafeId.SafeId = 
+    SafeId.fromString(s).getOrElse(
+      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
+    )
+
   // Test fixtures - simulation outcomes
   val cyberResult = RiskResult(
-    name = "cyber",
+    name = safeId("cyber"),
     outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
     nTrials = 5
   )
   
   val hardwareResult = RiskResult(
-    name = "hardware",
+    name = safeId("hardware"),
     outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
     nTrials = 5
   )
   
   val wideRangeResult = RiskResult(
-    name = "wide",
+    name = safeId("wide"),
     outcomes = Map(1 -> 1000L, 2 -> 100000L, 3 -> 50000L),
     nTrials = 3
   )
   
   val emptyResult = RiskResult(
-    name = "empty",
+    name = safeId("empty"),
     outcomes = Map.empty,
     nTrials = 5
   )

@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.iron.Probability
+import com.risquanter.register.domain.data.iron.{Probability, SafeId}
 
 /**
  * Samples risk events combining occurrence probability and loss distribution.
@@ -17,7 +17,7 @@ import com.risquanter.register.domain.data.iron.Probability
  */
 trait RiskSampler {
   /** Unique identifier for this risk */
-  def id: String
+  def id: SafeId.SafeId
   
   /** 
    * Sample occurrence for a trial.
@@ -82,7 +82,7 @@ object RiskSampler {
    */
   def fromDistribution(
     entityId: Long,
-    riskId: String,
+    riskId: SafeId.SafeId,
     occurrenceProb: Probability,
     lossDistribution: Distribution,
     seed3: Long = 0L,
@@ -90,7 +90,7 @@ object RiskSampler {
   ): RiskSampler = {
     
     // Hash risk ID and offset for occurrence vs loss sampling
-    val riskHash = riskId.hashCode.toLong
+    val riskHash = riskId.value.toString.hashCode.toLong
     val occurrenceVarId = riskHash + 1000L
     val lossVarId = riskHash + 2000L
     
@@ -99,7 +99,7 @@ object RiskSampler {
     val lossRng = HDRWrapper.createGenerator(entityId, lossVarId, seed3, seed4)
     
     new RiskSampler {
-      val id: String = riskId
+      val id: SafeId.SafeId = riskId
       
       def sampleOccurrence(trial: Long): Boolean = {
         val uniform = occurrenceRng(trial)

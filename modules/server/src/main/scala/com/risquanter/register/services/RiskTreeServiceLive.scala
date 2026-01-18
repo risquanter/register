@@ -402,9 +402,10 @@ class RiskTreeServiceLive private (
         case _ => None
       }
       
+      // LECCurveResponse uses String for wire format
       LECCurveResponse(
         id = treeResult.id,
-        name = riskResult.name,
+        name = riskResult.name.value.toString,
         curve = lecPoints,
         quantiles = quantiles,
         childIds = childIds

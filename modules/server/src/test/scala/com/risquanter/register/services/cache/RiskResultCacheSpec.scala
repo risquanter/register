@@ -66,13 +66,13 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
 
   // Sample RiskResult data (simulation outcomes)
   val cyberResult = RiskResult(
-    name = "cyber",
+    name = safeId("cyber"),
     outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
     nTrials = 5
   )
   
   val hardwareResult = RiskResult(
-    name = "hardware",
+    name = safeId("hardware"),
     outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
     nTrials = 5
   )
@@ -92,7 +92,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
         result <- RiskResultCache.get(cyberId)
       yield assertTrue(
         result.isDefined,
-        result.get.name == "cyber",
+        result.get.name == cyberId,
         result.get.nTrials == 5,
         result.get.outcomes.size == 5
       )

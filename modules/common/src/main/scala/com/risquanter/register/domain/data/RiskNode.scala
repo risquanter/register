@@ -34,7 +34,7 @@ import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionT
   * }}}
   */
 sealed trait RiskNode {
-  def id: String
+  def id: SafeId.SafeId
   def name: String
 }
 
@@ -90,8 +90,8 @@ final case class RiskLeaf private (
     s"RiskLeaf invariant violated: $distributionType mode missing required fields or invalid bounds"
   )
   
-  // Public API: Extract String values from Iron types
-  override def id: String = safeId.value.toString
+  // Public API: Extract values from Iron types
+  override def id: SafeId.SafeId = safeId
   override def name: String = safeName.value.toString
 }
 
@@ -317,7 +317,12 @@ object RiskLeaf {
   
   // --- Custom JSON Codec that enforces cross-field validation via smart constructor ---
   
-  /** Raw intermediate type for JSON parsing (no validation) */
+  /** Raw intermediate type for JSON wire format (primitives only).
+    * 
+    * Per ADR-001: Wire format uses primitives, domain uses Iron types.
+    * - Decoder: RiskLeafRaw (primitives) → create() → RiskLeaf (Iron types)
+    * - Encoder: RiskLeaf (Iron types) → RiskLeafRaw (primitives) → JSON
+    */
   private case class RiskLeafRaw(
     id: String,
     name: String,
@@ -341,10 +346,10 @@ object RiskLeaf {
     ).toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
   }
   
-  /** Encoder uses the Iron-typed fields directly */
+  /** Encoder: Extract primitives from Iron types for wire format */
   given encoder: JsonEncoder[RiskLeaf] = JsonEncoder[RiskLeafRaw].contramap { leaf =>
     RiskLeafRaw(
-      id = leaf.id,
+      id = leaf.id.value.toString,
       name = leaf.name,
       distributionType = leaf.distributionType.toString,
       probability = leaf.probability,
@@ -383,8 +388,8 @@ final case class RiskPortfolio private (
   // Defense in depth: invariant check as safety net
   require(children != null && children.nonEmpty, "RiskPortfolio invariant violated: children must be non-empty")
   
-  // Public API: Extract String values from Iron types
-  override def id: String = safeId.value.toString
+  // Public API: Extract values from Iron types
+  override def id: SafeId.SafeId = safeId
   override def name: String = safeName.value.toString
 }
 
@@ -450,7 +455,9 @@ object RiskPortfolio {
   
   // --- Custom JSON Codec that enforces cross-field validation via smart constructor ---
   
-  /** Raw intermediate type for JSON parsing (no validation) */
+  /** Raw intermediate type for JSON wire format (primitives only).
+    * Per ADR-001: Wire format uses primitives, domain uses Iron types.
+    */
   private case class RiskPortfolioRaw(
     id: String,
     name: String,
@@ -467,10 +474,10 @@ object RiskPortfolio {
       .toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
   }
   
-  /** Encoder uses the Iron-typed fields directly */
+  /** Encoder: Extract primitives from Iron types for wire format */
   given encoder: JsonEncoder[RiskPortfolio] = JsonEncoder[RiskPortfolioRaw].contramap { portfolio =>
     RiskPortfolioRaw(
-      id = portfolio.id,
+      id = portfolio.id.value.toString,
       name = portfolio.name,
       children = portfolio.children
     )
