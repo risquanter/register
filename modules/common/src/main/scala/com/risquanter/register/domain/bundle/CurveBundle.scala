@@ -376,10 +376,15 @@ object CurveBundle {
   val empty: CurveBundle = CurveBundle(TickDomain.empty, Map.empty)
   
   /**
-    * Create bundle with single curve.
+    * Create a bundle with a single curve.
+    *
+    * @param nodeId Node identifier
+    * @param domain Tick domain
+    * @param values Loss values at each tick
+    * @return Bundle containing one curve
     */
-  def single(nodeId: NodeId, domain: TickDomain, losses: Vector[Long]): CurveBundle =
-    CurveBundle(domain, Map(nodeId -> losses))
+  def single(nodeId: NodeId, domain: TickDomain, values: Vector[Long]): CurveBundle =
+    CurveBundle(domain, Map(nodeId -> values))
   
   /**
     * ZIO Prelude Identity instance for CurveBundle.

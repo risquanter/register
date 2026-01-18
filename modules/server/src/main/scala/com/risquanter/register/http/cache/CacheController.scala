@@ -4,14 +4,14 @@ import zio.*
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.http.controllers.BaseController
-import com.risquanter.register.services.cache.LECCache
+import com.risquanter.register.services.cache.CurveBundleCache
 import com.risquanter.register.domain.tree.NodeId
 
 /**
   * Controller for cache management endpoints.
   *
   * Per ADR-004a-proposal: "Controllers wire endpoints to services"
-  * This controller connects cache management endpoints to LECCache service.
+  * This controller connects cache management endpoints to CurveBundleCache service.
   *
   * == Security Model (ADR-012 Compliant) ==
   *
@@ -29,11 +29,10 @@ import com.risquanter.register.domain.tree.NodeId
   *
   * - GET /cache/stats - Cache size and metadata
   * - GET /cache/nodes - List of cached node IDs
-  * - GET /cache/node/nodeId - Full LECCurve for a node
   * - DELETE /cache - Clear entire cache
   * - DELETE /cache/node/nodeId - Invalidate node + ancestors
   */
-class CacheController private (lecCache: LECCache)
+class CacheController private (cache: CurveBundleCache)
     extends BaseController
     with CacheEndpoints {
 
@@ -43,7 +42,7 @@ class CacheController private (lecCache: LECCache)
   val getStats: ServerEndpoint[Any, Task] =
     cacheStatsEndpoint.serverLogicSuccess { _ =>
       for
-        size <- lecCache.size
+        size <- cache.size
       yield CacheStatsResponse(
         size = size,
         capacityNote = "Unbounded cache (entries persist until invalidation)"
@@ -56,19 +55,11 @@ class CacheController private (lecCache: LECCache)
   val getNodes: ServerEndpoint[Any, Task] =
     cacheNodesEndpoint.serverLogicSuccess { _ =>
       for
-        ids <- lecCache.keys
+        ids <- cache.keys
       yield CacheNodesResponse(
         nodeIds = ids.map(_.value),
         count = ids.size
       )
-    }
-
-  /**
-    * Get cached LEC data for a specific node.
-    */
-  val getNode: ServerEndpoint[Any, Task] =
-    cacheNodeEndpoint.serverLogicSuccess { nodeId =>
-      lecCache.get(nodeId)
     }
 
   /**
@@ -77,8 +68,8 @@ class CacheController private (lecCache: LECCache)
   val clearCache: ServerEndpoint[Any, Task] =
     cacheClearEndpoint.serverLogicSuccess { _ =>
       for
-        size <- lecCache.size
-        _    <- lecCache.clear
+        size <- cache.size
+        _    <- cache.clear
       yield CacheClearResponse(
         cleared = size,
         message = s"Cleared $size cache entries"
@@ -91,7 +82,7 @@ class CacheController private (lecCache: LECCache)
   val invalidateNode: ServerEndpoint[Any, Task] =
     cacheInvalidateNodeEndpoint.serverLogicSuccess { nodeId =>
       for
-        invalidated <- lecCache.invalidate(nodeId)
+        invalidated <- cache.invalidate(nodeId)
       yield CacheInvalidateResponse(
         invalidatedNodeIds = invalidated.map(_.value),
         count = invalidated.size
@@ -99,23 +90,23 @@ class CacheController private (lecCache: LECCache)
     }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(getStats, getNodes, getNode, clearCache, invalidateNode)
+    List(getStats, getNodes, clearCache, invalidateNode)
 }
 
 object CacheController {
 
   /**
-    * Create CacheController with LECCache dependency.
+    * Create CacheController with CurveBundleCache dependency.
     */
-  val layer: ZLayer[LECCache, Nothing, CacheController] =
+  val layer: ZLayer[CurveBundleCache, Nothing, CacheController] =
     ZLayer.fromZIO {
       for
-        cache <- ZIO.service[LECCache]
+        cache <- ZIO.service[CurveBundleCache]
       yield new CacheController(cache)
     }
 
   /**
-    * Create CacheController directly from LECCache.
+    * Create CacheController directly from CurveBundleCache.
     */
-  def make(cache: LECCache): CacheController = new CacheController(cache)
+  def make(cache: CurveBundleCache): CacheController = new CacheController(cache)
 }

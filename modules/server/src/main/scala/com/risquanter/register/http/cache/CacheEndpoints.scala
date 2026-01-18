@@ -8,7 +8,6 @@ import zio.json.*
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.domain.data.iron.SafeId
-import com.risquanter.register.domain.data.LECCurveResponse
 
 /**
   * Cache management endpoint definitions.
@@ -81,35 +80,17 @@ trait CacheEndpoints extends BaseEndpoint {
       .tag("cache-admin")
       .name("cacheNodes")
       .summary("List cached node IDs")
-      .description("Returns all node IDs currently in the LEC cache. Admin-only endpoint.")
+      .description("Returns all node IDs currently in the CurveBundle cache. Admin-only endpoint.")
       .in("cache" / "nodes")
       .get
       .out(jsonBody[CacheNodesResponse])
-
-  /**
-    * Get cached LEC data for a specific node.
-    *
-    * GET /cache/node/{nodeId}
-    *
-    * Returns full LECCurve if cached, 404 otherwise.
-    * Admin-only: Protected by service mesh policy.
-    */
-  val cacheNodeEndpoint =
-    baseEndpoint
-      .tag("cache-admin")
-      .name("cacheNode")
-      .summary("Get cached LEC data for a node")
-      .description("Returns cached LECCurve for a specific node. 404 if not cached. Admin-only endpoint.")
-      .in("cache" / "node" / path[SafeId.SafeId]("nodeId"))
-      .get
-      .out(jsonBody[Option[LECCurveResponse]])
 
   /**
     * Clear entire cache.
     *
     * DELETE /cache
     *
-    * Removes all entries from the LEC cache.
+    * Removes all entries from the cache.
     * Admin-only: Protected by service mesh policy.
     */
   val cacheClearEndpoint =

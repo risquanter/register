@@ -1,7 +1,7 @@
 package com.risquanter.register.services.pipeline
 
 import zio.*
-import com.risquanter.register.services.cache.LECCache
+import com.risquanter.register.services.cache.CurveBundleCache
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
 import com.risquanter.register.domain.tree.NodeId
@@ -47,7 +47,7 @@ object InvalidationHandler {
   /**
     * Create live InvalidationHandler layer.
     */
-  val live: ZLayer[LECCache & SSEHub, Nothing, InvalidationHandler] =
+  val live: ZLayer[CurveBundleCache & SSEHub, Nothing, InvalidationHandler] =
     ZLayer.fromFunction(InvalidationHandlerLive(_, _))
 
   // Accessor methods for ZIO service pattern
@@ -59,14 +59,14 @@ object InvalidationHandler {
   * Live implementation of InvalidationHandler.
   */
 final case class InvalidationHandlerLive(
-    lecCache: LECCache,
-    sseHub: SSEHub
+    cache: CurveBundleCache,
+    hub: SSEHub
 ) extends InvalidationHandler {
 
   override def handleNodeChange(treeId: NonNegativeLong, nodeId: NodeId): UIO[Int] =
     for {
       // Step 1: Invalidate cache for node and ancestors
-      invalidated <- lecCache.invalidate(nodeId)
+      invalidated <- cache.invalidate(nodeId)
       
       // Step 2: Log the invalidation (ADR-002)
       _ <- ZIO.logInfo(s"Cache invalidated: treeId=$treeId, nodeId=${nodeId.value}, affected=${invalidated.map(_.value).mkString(", ")}")
@@ -76,7 +76,7 @@ final case class InvalidationHandlerLive(
         nodeIds = invalidated.map(_.value),
         treeId = treeId: Long  // Extract Long from NonNegativeLong
       )
-      subscriberCount <- sseHub.publish(treeId, event)
+      subscriberCount <- hub.publish(treeId, event)
       
       // Step 4: Log notification (ADR-002)
       _ <- ZIO.logDebug(s"SSE notification sent: treeId=$treeId, subscribers=$subscriberCount")

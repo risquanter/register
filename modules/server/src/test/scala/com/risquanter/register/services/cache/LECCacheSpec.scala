@@ -3,14 +3,14 @@ package com.risquanter.register.services.cache
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
-import com.risquanter.register.domain.data.{LECCurveResponse, LECPoint, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.bundle.{CurveBundle, TickDomain}
+import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 import com.risquanter.register.domain.data.iron.*
 
-object LECCacheSpec extends ZIOSpecDefault {
+object CurveBundleCacheSpec extends ZIOSpecDefault {
 
   // Helper to create SafeId from string literal (safe for tests with known-valid values)
-  // Pattern from RiskPortfolio.unsafeApply
   def safeId(s: String): SafeId.SafeId = 
     SafeId.fromString(s).getOrElse(
       throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
@@ -64,59 +64,53 @@ object LECCacheSpec extends ZIOSpecDefault {
   val itRiskId   = safeId("it-risk")
   val hardwareId = safeId("hardware")
 
-  // Sample LEC data
-  val cyberLEC = LECCurveResponse(
-    id = "cyber",
-    name = "Cyber Attack",
-    curve = Vector(LECPoint(1000, 0.99), LECPoint(50000, 0.01)),
-    quantiles = Map("p50" -> 5000.0, "p90" -> 25000.0)
-  )
+  // Sample CurveBundle data
+  val domain3 = TickDomain.fromProbabilities(Seq(0.90, 0.50, 0.10))
+  
+  val cyberBundle = CurveBundle.single(cyberId, domain3, Vector(100000L, 500000L, 2000000L))
+  val hardwareBundle = CurveBundle.single(hardwareId, domain3, Vector(50000L, 250000L, 1000000L))
 
-  val hardwareLEC = LECCurveResponse(
-    id = "hardware",
-    name = "Hardware Failure",
-    curve = Vector(LECPoint(500, 0.99), LECPoint(10000, 0.01)),
-    quantiles = Map("p50" -> 2000.0, "p90" -> 7000.0)
-  )
+  val cacheLayer = ZLayer.succeed(treeIndex) >>> CurveBundleCache.layer
 
-  val cacheLayer = ZLayer.succeed(treeIndex) >>> LECCache.layer
-
-  def spec = suite("LECCacheSpec")(
+  def spec = suite("CurveBundleCacheSpec")(
     test("get returns None for uncached node") {
       for
-        result <- LECCache.get(cyberId)
+        result <- CurveBundleCache.get(cyberId)
       yield assertTrue(result.isEmpty)
     }.provide(cacheLayer),
+    
     test("set and get roundtrip") {
       for
-        _      <- LECCache.set(cyberId, cyberLEC)
-        result <- LECCache.get(cyberId)
+        _      <- CurveBundleCache.set(cyberId, cyberBundle)
+        result <- CurveBundleCache.get(cyberId)
       yield assertTrue(
         result.isDefined,
-        result.get.id == "cyber",
-        result.get.name == "Cyber Attack"
+        result.get.contains(cyberId),
+        result.get.domain.size == 3
       )
     }.provide(cacheLayer),
+    
     test("remove deletes cached entry") {
       for
-        _      <- LECCache.set(cyberId, cyberLEC)
-        before <- LECCache.get(cyberId)
-        _      <- LECCache.remove(cyberId)
-        after  <- LECCache.get(cyberId)
+        _      <- CurveBundleCache.set(cyberId, cyberBundle)
+        before <- CurveBundleCache.get(cyberId)
+        _      <- CurveBundleCache.remove(cyberId)
+        after  <- CurveBundleCache.get(cyberId)
       yield assertTrue(
         before.isDefined,
         after.isEmpty
       )
     }.provide(cacheLayer),
+    
     test("invalidate clears node and all ancestors") {
       for
-        _           <- LECCache.set(opsRiskId, cyberLEC.copy(id = "ops-risk"))
-        _           <- LECCache.set(itRiskId, hardwareLEC.copy(id = "it-risk"))
-        _           <- LECCache.set(hardwareId, hardwareLEC)
-        invalidated <- LECCache.invalidate(hardwareId)
-        opsResult   <- LECCache.get(opsRiskId)
-        itResult    <- LECCache.get(itRiskId)
-        hwResult    <- LECCache.get(hardwareId)
+        _           <- CurveBundleCache.set(opsRiskId, cyberBundle)
+        _           <- CurveBundleCache.set(itRiskId, hardwareBundle)
+        _           <- CurveBundleCache.set(hardwareId, hardwareBundle)
+        invalidated <- CurveBundleCache.invalidate(hardwareId)
+        opsResult   <- CurveBundleCache.get(opsRiskId)
+        itResult    <- CurveBundleCache.get(itRiskId)
+        hwResult    <- CurveBundleCache.get(hardwareId)
       yield assertTrue(
         invalidated == List(opsRiskId, itRiskId, hardwareId),
         opsResult.isEmpty,
@@ -124,79 +118,86 @@ object LECCacheSpec extends ZIOSpecDefault {
         hwResult.isEmpty
       )
     }.provide(cacheLayer),
+    
     test("invalidate does not affect unrelated branches") {
       for
-        _           <- LECCache.set(cyberId, cyberLEC)
-        _           <- LECCache.set(hardwareId, hardwareLEC)
-        invalidated <- LECCache.invalidate(hardwareId)
-        cyberResult <- LECCache.get(cyberId)
-        hwResult    <- LECCache.get(hardwareId)
+        _           <- CurveBundleCache.set(cyberId, cyberBundle)
+        _           <- CurveBundleCache.set(hardwareId, hardwareBundle)
+        invalidated <- CurveBundleCache.invalidate(hardwareId)
+        cyberResult <- CurveBundleCache.get(cyberId)
+        hwResult    <- CurveBundleCache.get(hardwareId)
       yield assertTrue(
         cyberResult.isDefined, // Cyber branch unaffected
-        hwResult.isEmpty // Hardware invalidated
+        hwResult.isEmpty       // Hardware invalidated
       )
     }.provide(cacheLayer),
+    
     test("invalidate on root clears only root") {
       for
-        _           <- LECCache.set(opsRiskId, cyberLEC.copy(id = "ops-risk"))
-        _           <- LECCache.set(cyberId, cyberLEC)
-        invalidated <- LECCache.invalidate(opsRiskId)
-        opsResult   <- LECCache.get(opsRiskId)
-        cyberResult <- LECCache.get(cyberId)
+        _           <- CurveBundleCache.set(opsRiskId, cyberBundle)
+        _           <- CurveBundleCache.set(cyberId, cyberBundle)
+        invalidated <- CurveBundleCache.invalidate(opsRiskId)
+        opsResult   <- CurveBundleCache.get(opsRiskId)
+        cyberResult <- CurveBundleCache.get(cyberId)
       yield assertTrue(
         invalidated == List(opsRiskId),
         opsResult.isEmpty,
         cyberResult.isDefined // Children not invalidated
       )
     }.provide(cacheLayer),
+    
     test("clear removes all entries") {
       for
-        _      <- LECCache.set(cyberId, cyberLEC)
-        _      <- LECCache.set(hardwareId, hardwareLEC)
-        _      <- LECCache.clear
-        cyber  <- LECCache.get(cyberId)
-        hw     <- LECCache.get(hardwareId)
-        sz     <- LECCache.size
+        _     <- CurveBundleCache.set(cyberId, cyberBundle)
+        _     <- CurveBundleCache.set(hardwareId, hardwareBundle)
+        _     <- CurveBundleCache.clear
+        cyber <- CurveBundleCache.get(cyberId)
+        hw    <- CurveBundleCache.get(hardwareId)
+        sz    <- CurveBundleCache.size
       yield assertTrue(
         cyber.isEmpty,
         hw.isEmpty,
         sz == 0
       )
     }.provide(cacheLayer),
+    
     test("size returns correct count") {
       for
-        before <- LECCache.size
-        _      <- LECCache.set(cyberId, cyberLEC)
-        after1 <- LECCache.size
-        _      <- LECCache.set(hardwareId, hardwareLEC)
-        after2 <- LECCache.size
+        before <- CurveBundleCache.size
+        _      <- CurveBundleCache.set(cyberId, cyberBundle)
+        after1 <- CurveBundleCache.size
+        _      <- CurveBundleCache.set(hardwareId, hardwareBundle)
+        after2 <- CurveBundleCache.size
       yield assertTrue(
         before == 0,
         after1 == 1,
         after2 == 2
       )
     }.provide(cacheLayer),
+    
     test("contains checks cache membership") {
       for
-        before <- LECCache.contains(cyberId)
-        _      <- LECCache.set(cyberId, cyberLEC)
-        after  <- LECCache.contains(cyberId)
+        before <- CurveBundleCache.contains(cyberId)
+        _      <- CurveBundleCache.set(cyberId, cyberBundle)
+        after  <- CurveBundleCache.contains(cyberId)
       yield assertTrue(
         !before,
         after
       )
     }.provide(cacheLayer),
+    
     test("invalidate on non-existent node returns empty list") {
       val nonExistent = safeId("non-existent")
       for
-        invalidated <- LECCache.invalidate(nonExistent)
+        invalidated <- CurveBundleCache.invalidate(nonExistent)
       yield assertTrue(invalidated.isEmpty)
     }.provide(cacheLayer),
+    
     test("concurrent access is thread-safe") {
       for
-        _       <- LECCache.set(cyberId, cyberLEC)
+        _       <- CurveBundleCache.set(cyberId, cyberBundle)
         results <- ZIO.foreachPar((1 to 100).toList)(_ =>
-                     LECCache.get(cyberId)
+                     CurveBundleCache.get(cyberId)
                    )
       yield assertTrue(
         results.forall(_.isDefined)

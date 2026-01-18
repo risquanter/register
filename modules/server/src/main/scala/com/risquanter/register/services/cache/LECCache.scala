@@ -1,20 +1,20 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.data.LECCurveResponse
+import com.risquanter.register.domain.bundle.CurveBundle
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 
 /**
-  * LEC (Loss Exceedance Curve) cache service.
+  * CurveBundle cache service (ADR-014).
   *
-  * Caches computed LEC data by node ID (SafeId.SafeId per ADR-001). When a node 
-  * changes, uses TreeIndex to invalidate affected ancestors in O(depth) time.
+  * Caches tick-aligned LEC curve bundles by node ID (SafeId.SafeId per ADR-001).
+  * When a node changes, uses TreeIndex to invalidate affected ancestors in O(depth) time.
   *
   * Thread-safe via ZIO Ref.
   *
   * == Cache Invalidation Semantics ==
   *
-  * When a leaf node changes, its ancestors' cached LEC curves become stale
+  * When a leaf node changes, its ancestors' cached bundles become stale
   * because aggregate LECs are computed bottom-up. This cache automatically
   * invalidates the entire ancestor path when `invalidate` is called.
   *
@@ -31,20 +31,20 @@ import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
   * {{{
   * for
   *   // 1. Initial state: cache populated after simulation
-  *   _           <- LECCache.set(hardware, hardwareLEC)
-  *   _           <- LECCache.set(cyber, cyberLEC)
-  *   _           <- LECCache.set(opsRisk, opsRiskLEC)    // aggregated from children
-  *   _           <- LECCache.set(portfolio, portfolioLEC) // aggregated from all
+  *   _           <- CurveBundleCache.set(hardware, hardwareBundle)
+  *   _           <- CurveBundleCache.set(cyber, cyberBundle)
+  *   _           <- CurveBundleCache.set(opsRisk, opsRiskBundle)    // aggregated from children
+  *   _           <- CurveBundleCache.set(portfolio, portfolioBundle) // aggregated from all
   *   
   *   // 2. User modifies hardware node (e.g., changes probability)
-  *   //    Hardware's LEC is now stale, AND so are all ancestors
+  *   //    Hardware's bundle is now stale, AND so are all ancestors
   *   
   *   // 3. Invalidate hardware → clears hardware, ops-risk, portfolio
-  *   invalidated <- LECCache.invalidate(hardware)
+  *   invalidated <- CurveBundleCache.invalidate(hardware)
   *   // invalidated = List(portfolio, ops-risk, hardware)  (root to leaf)
   *   
   *   // 4. market-risk cache is PRESERVED (not an ancestor of hardware)
-  *   stillCached <- LECCache.contains(marketRisk)
+  *   stillCached <- CurveBundleCache.contains(marketRisk)
   *   // stillCached = true
   * yield invalidated
   * }}}
@@ -52,26 +52,26 @@ import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
   * This enables O(depth) invalidation instead of clearing the entire cache,
   * preserving expensive LEC computations for unaffected subtrees.
   */
-trait LECCache {
+trait CurveBundleCache {
 
   /**
-    * Get cached LEC data for a node.
+    * Get cached bundle for a node.
     *
     * @param nodeId Node identifier (SafeId.SafeId)
-    * @return Cached LEC data if present
+    * @return Cached bundle if present
     */
-  def get(nodeId: NodeId): UIO[Option[LECCurveResponse]]
+  def get(nodeId: NodeId): UIO[Option[CurveBundle]]
 
   /**
-    * Store LEC data in cache.
+    * Store bundle in cache.
     *
     * @param nodeId Node identifier (SafeId.SafeId)
-    * @param lec LEC curve data
+    * @param bundle CurveBundle to cache
     */
-  def set(nodeId: NodeId, lec: LECCurveResponse): UIO[Unit]
+  def set(nodeId: NodeId, bundle: CurveBundle): UIO[Unit]
 
   /**
-    * Remove LEC data from cache.
+    * Remove bundle from cache.
     *
     * @param nodeId Node identifier (SafeId.SafeId)
     */
@@ -116,85 +116,85 @@ trait LECCache {
   def keys: UIO[List[NodeId]]
 }
 
-object LECCache {
+object CurveBundleCache {
   
   /**
     * Create live implementation with empty cache.
     *
     * @param treeIndex Tree index for ancestor lookup
-    * @return ZLayer providing LECCache
+    * @return ZLayer providing CurveBundleCache
     */
-  def layer: ZLayer[TreeIndex, Nothing, LECCache] =
+  def layer: ZLayer[TreeIndex, Nothing, CurveBundleCache] =
     ZLayer.fromZIO {
       for
         treeIndex <- ZIO.service[TreeIndex]
-        cache     <- Ref.make(Map.empty[NodeId, LECCurveResponse])
-      yield LECCacheLive(treeIndex, cache)
+        cache     <- Ref.make(Map.empty[NodeId, CurveBundle])
+      yield CurveBundleCacheLive(treeIndex, cache)
     }
 
   // Accessor methods for ZIO service pattern
-  def get(nodeId: NodeId): URIO[LECCache, Option[LECCurveResponse]] =
-    ZIO.serviceWithZIO[LECCache](_.get(nodeId))
+  def get(nodeId: NodeId): URIO[CurveBundleCache, Option[CurveBundle]] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.get(nodeId))
 
-  def set(nodeId: NodeId, lec: LECCurveResponse): URIO[LECCache, Unit] =
-    ZIO.serviceWithZIO[LECCache](_.set(nodeId, lec))
+  def set(nodeId: NodeId, bundle: CurveBundle): URIO[CurveBundleCache, Unit] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.set(nodeId, bundle))
 
-  def remove(nodeId: NodeId): URIO[LECCache, Unit] =
-    ZIO.serviceWithZIO[LECCache](_.remove(nodeId))
+  def remove(nodeId: NodeId): URIO[CurveBundleCache, Unit] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.remove(nodeId))
 
-  def invalidate(nodeId: NodeId): URIO[LECCache, List[NodeId]] =
-    ZIO.serviceWithZIO[LECCache](_.invalidate(nodeId))
+  def invalidate(nodeId: NodeId): URIO[CurveBundleCache, List[NodeId]] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.invalidate(nodeId))
 
-  def clear: URIO[LECCache, Unit] =
-    ZIO.serviceWithZIO[LECCache](_.clear)
+  def clear: URIO[CurveBundleCache, Unit] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.clear)
 
-  def size: URIO[LECCache, Int] =
-    ZIO.serviceWithZIO[LECCache](_.size)
+  def size: URIO[CurveBundleCache, Int] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.size)
 
-  def contains(nodeId: NodeId): URIO[LECCache, Boolean] =
-    ZIO.serviceWithZIO[LECCache](_.contains(nodeId))
+  def contains(nodeId: NodeId): URIO[CurveBundleCache, Boolean] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.contains(nodeId))
 
-  def keys: URIO[LECCache, List[NodeId]] =
-    ZIO.serviceWithZIO[LECCache](_.keys)
+  def keys: URIO[CurveBundleCache, List[NodeId]] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.keys)
 }
 
 /**
-  * Live implementation of LECCache.
+  * Live implementation of CurveBundleCache.
   *
   * @param treeIndex Tree structure for ancestor lookup
   * @param cacheRef Thread-safe cache storage
   */
-final class LECCacheLive(
+final class CurveBundleCacheLive(
     treeIndex: TreeIndex,
-    cacheRef: Ref[Map[NodeId, LECCurveResponse]]
-) extends LECCache {
+    cacheRef: Ref[Map[NodeId, CurveBundle]]
+) extends CurveBundleCache {
 
-  override def get(nodeId: NodeId): UIO[Option[LECCurveResponse]] =
+  override def get(nodeId: NodeId): UIO[Option[CurveBundle]] =
     cacheRef.get.map(_.get(nodeId))
 
-  override def set(nodeId: NodeId, lec: LECCurveResponse): UIO[Unit] =
+  override def set(nodeId: NodeId, bundle: CurveBundle): UIO[Unit] =
     for
-      _ <- cacheRef.update(_ + (nodeId -> lec))
-      _ <- ZIO.logDebug(s"Cache SET: ${nodeId.value}")
+      _ <- cacheRef.update(_ + (nodeId -> bundle))
+      _ <- ZIO.logDebug(s"CurveBundleCache SET: ${nodeId.value} (${bundle.size} curves, ${bundle.domain.size} ticks)")
     yield ()
 
   override def remove(nodeId: NodeId): UIO[Unit] =
     for
       _ <- cacheRef.update(_ - nodeId)
-      _ <- ZIO.logDebug(s"Cache REMOVE: ${nodeId.value}")
+      _ <- ZIO.logDebug(s"CurveBundleCache REMOVE: ${nodeId.value}")
     yield ()
 
   override def invalidate(nodeId: NodeId): UIO[List[NodeId]] =
     for
       path <- ZIO.succeed(treeIndex.ancestorPath(nodeId))
       _    <- cacheRef.update(cache => cache -- path)
-      _    <- ZIO.logInfo(s"Cache invalidated: ${path.map(_.value).mkString(" → ")}")
+      _    <- ZIO.logInfo(s"CurveBundleCache invalidated: ${path.map(_.value).mkString(" → ")}")
     yield path
 
   override def clear: UIO[Unit] =
     for
       _ <- cacheRef.set(Map.empty)
-      _ <- ZIO.logDebug("Cache cleared")
+      _ <- ZIO.logDebug("CurveBundleCache cleared")
     yield ()
 
   override def size: UIO[Int] =
@@ -206,3 +206,10 @@ final class LECCacheLive(
   override def keys: UIO[List[NodeId]] =
     cacheRef.get.map(_.keys.toList)
 }
+
+// Type alias for backward compatibility during migration
+@deprecated("Use CurveBundleCache instead", "Phase C")
+type LECCache = CurveBundleCache
+
+@deprecated("Use CurveBundleCache instead", "Phase C")
+val LECCache = CurveBundleCache
