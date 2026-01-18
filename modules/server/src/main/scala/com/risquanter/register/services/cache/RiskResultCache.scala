@@ -1,21 +1,33 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.bundle.CurveBundle
+import com.risquanter.register.domain.data.RiskResult
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 
 /**
-  * CurveBundle cache service (ADR-014).
+  * RiskResult cache service (ADR-014).
   *
-  * Caches tick-aligned LEC curve bundles by node ID (SafeId.SafeId per ADR-001).
+  * Caches simulation outcomes (RiskResult) by node ID.
+  * LEC curves are computed at render time from cached outcomes using
+  * LECGenerator.generateCurvePoints or generateCurvePointsMulti.
+  *
   * When a node changes, uses TreeIndex to invalidate affected ancestors in O(depth) time.
   *
   * Thread-safe via ZIO Ref.
   *
+  * == Why Cache RiskResult, Not Rendered Curves ==
+  *
+  * LEC curves depend on display context - the X-axis (loss ticks) range depends
+  * on which nodes are displayed together. Caching rendered curves would require
+  * interpolation when the tick domain changes, producing mathematical errors.
+  *
+  * By caching RiskResult (simulation outcomes), we can compute exact exceedance
+  * probabilities at any tick value using RiskResult.probOfExceedance(loss).
+  *
   * == Cache Invalidation Semantics ==
   *
-  * When a leaf node changes, its ancestors' cached bundles become stale
-  * because aggregate LECs are computed bottom-up. This cache automatically
+  * When a leaf node changes, its ancestors' cached results become stale
+  * because aggregate distributions are computed bottom-up. This cache automatically
   * invalidates the entire ancestor path when `invalidate` is called.
   *
   * Example tree:
@@ -31,47 +43,47 @@ import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
   * {{{
   * for
   *   // 1. Initial state: cache populated after simulation
-  *   _           <- CurveBundleCache.set(hardware, hardwareBundle)
-  *   _           <- CurveBundleCache.set(cyber, cyberBundle)
-  *   _           <- CurveBundleCache.set(opsRisk, opsRiskBundle)    // aggregated from children
-  *   _           <- CurveBundleCache.set(portfolio, portfolioBundle) // aggregated from all
+  *   _           <- RiskResultCache.put(hardware, hardwareResult)
+  *   _           <- RiskResultCache.put(cyber, cyberResult)
+  *   _           <- RiskResultCache.put(opsRisk, opsRiskResult)    // aggregated from children
+  *   _           <- RiskResultCache.put(portfolio, portfolioResult) // aggregated from all
   *   
   *   // 2. User modifies hardware node (e.g., changes probability)
-  *   //    Hardware's bundle is now stale, AND so are all ancestors
+  *   //    Hardware's result is now stale, AND so are all ancestors
   *   
   *   // 3. Invalidate hardware → clears hardware, ops-risk, portfolio
-  *   invalidated <- CurveBundleCache.invalidate(hardware)
+  *   invalidated <- RiskResultCache.invalidate(hardware)
   *   // invalidated = List(portfolio, ops-risk, hardware)  (root to leaf)
   *   
   *   // 4. market-risk cache is PRESERVED (not an ancestor of hardware)
-  *   stillCached <- CurveBundleCache.contains(marketRisk)
+  *   stillCached <- RiskResultCache.contains(marketRisk)
   *   // stillCached = true
   * yield invalidated
   * }}}
   *
   * This enables O(depth) invalidation instead of clearing the entire cache,
-  * preserving expensive LEC computations for unaffected subtrees.
+  * preserving expensive simulation results for unaffected subtrees.
   */
-trait CurveBundleCache {
+trait RiskResultCache {
 
   /**
-    * Get cached bundle for a node.
+    * Get cached result for a node.
     *
     * @param nodeId Node identifier (SafeId.SafeId)
-    * @return Cached bundle if present
+    * @return Cached RiskResult if present
     */
-  def get(nodeId: NodeId): UIO[Option[CurveBundle]]
+  def get(nodeId: NodeId): UIO[Option[RiskResult]]
 
   /**
-    * Store bundle in cache.
+    * Store result in cache.
     *
     * @param nodeId Node identifier (SafeId.SafeId)
-    * @param bundle CurveBundle to cache
+    * @param result RiskResult to cache
     */
-  def set(nodeId: NodeId, bundle: CurveBundle): UIO[Unit]
+  def put(nodeId: NodeId, result: RiskResult): UIO[Unit]
 
   /**
-    * Remove bundle from cache.
+    * Remove result from cache.
     *
     * @param nodeId Node identifier (SafeId.SafeId)
     */
@@ -127,95 +139,95 @@ trait CurveBundleCache {
   def keys: UIO[List[NodeId]]
 }
 
-object CurveBundleCache {
+object RiskResultCache {
   
   /**
     * Create live implementation with empty cache.
     *
     * @param treeIndex Tree index for ancestor lookup
-    * @return ZLayer providing CurveBundleCache
+    * @return ZLayer providing RiskResultCache
     */
-  def layer: ZLayer[TreeIndex, Nothing, CurveBundleCache] =
+  def layer: ZLayer[TreeIndex, Nothing, RiskResultCache] =
     ZLayer.fromZIO {
       for
         treeIndex <- ZIO.service[TreeIndex]
-        cache     <- Ref.make(Map.empty[NodeId, CurveBundle])
-      yield CurveBundleCacheLive(treeIndex, cache)
+        cache     <- Ref.make(Map.empty[NodeId, RiskResult])
+      yield RiskResultCacheLive(treeIndex, cache)
     }
 
   // Accessor methods for ZIO service pattern
-  def get(nodeId: NodeId): URIO[CurveBundleCache, Option[CurveBundle]] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.get(nodeId))
+  def get(nodeId: NodeId): URIO[RiskResultCache, Option[RiskResult]] =
+    ZIO.serviceWithZIO[RiskResultCache](_.get(nodeId))
 
-  def set(nodeId: NodeId, bundle: CurveBundle): URIO[CurveBundleCache, Unit] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.set(nodeId, bundle))
+  def put(nodeId: NodeId, result: RiskResult): URIO[RiskResultCache, Unit] =
+    ZIO.serviceWithZIO[RiskResultCache](_.put(nodeId, result))
 
-  def remove(nodeId: NodeId): URIO[CurveBundleCache, Unit] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.remove(nodeId))
+  def remove(nodeId: NodeId): URIO[RiskResultCache, Unit] =
+    ZIO.serviceWithZIO[RiskResultCache](_.remove(nodeId))
 
-  def invalidate(nodeId: NodeId): URIO[CurveBundleCache, List[NodeId]] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.invalidate(nodeId))
+  def invalidate(nodeId: NodeId): URIO[RiskResultCache, List[NodeId]] =
+    ZIO.serviceWithZIO[RiskResultCache](_.invalidate(nodeId))
 
-  def clear: URIO[CurveBundleCache, Unit] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.clear)
+  def clear: URIO[RiskResultCache, Unit] =
+    ZIO.serviceWithZIO[RiskResultCache](_.clear)
 
-  def clearAndGetSize: URIO[CurveBundleCache, Int] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.clearAndGetSize)
+  def clearAndGetSize: URIO[RiskResultCache, Int] =
+    ZIO.serviceWithZIO[RiskResultCache](_.clearAndGetSize)
 
-  def size: URIO[CurveBundleCache, Int] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.size)
+  def size: URIO[RiskResultCache, Int] =
+    ZIO.serviceWithZIO[RiskResultCache](_.size)
 
-  def contains(nodeId: NodeId): URIO[CurveBundleCache, Boolean] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.contains(nodeId))
+  def contains(nodeId: NodeId): URIO[RiskResultCache, Boolean] =
+    ZIO.serviceWithZIO[RiskResultCache](_.contains(nodeId))
 
-  def keys: URIO[CurveBundleCache, List[NodeId]] =
-    ZIO.serviceWithZIO[CurveBundleCache](_.keys)
+  def keys: URIO[RiskResultCache, List[NodeId]] =
+    ZIO.serviceWithZIO[RiskResultCache](_.keys)
 }
 
 /**
-  * Live implementation of CurveBundleCache.
+  * Live implementation of RiskResultCache.
   *
   * @param treeIndex Tree structure for ancestor lookup
   * @param cacheRef Thread-safe cache storage
   */
-final class CurveBundleCacheLive(
+final class RiskResultCacheLive(
     treeIndex: TreeIndex,
-    cacheRef: Ref[Map[NodeId, CurveBundle]]
-) extends CurveBundleCache {
+    cacheRef: Ref[Map[NodeId, RiskResult]]
+) extends RiskResultCache {
 
-  override def get(nodeId: NodeId): UIO[Option[CurveBundle]] =
+  override def get(nodeId: NodeId): UIO[Option[RiskResult]] =
     cacheRef.get.map(_.get(nodeId))
 
-  override def set(nodeId: NodeId, bundle: CurveBundle): UIO[Unit] =
+  override def put(nodeId: NodeId, result: RiskResult): UIO[Unit] =
     for
-      _ <- cacheRef.update(_ + (nodeId -> bundle))
-      _ <- ZIO.logDebug(s"CurveBundleCache SET: ${nodeId.value} (${bundle.size} curves, ${bundle.domain.size} ticks)")
+      _ <- cacheRef.update(_ + (nodeId -> result))
+      _ <- ZIO.logDebug(s"RiskResultCache PUT: ${nodeId.value} (${result.outcomes.size} outcomes, max=${result.maxLoss})")
     yield ()
 
   override def remove(nodeId: NodeId): UIO[Unit] =
     for
       _ <- cacheRef.update(_ - nodeId)
-      _ <- ZIO.logDebug(s"CurveBundleCache REMOVE: ${nodeId.value}")
+      _ <- ZIO.logDebug(s"RiskResultCache REMOVE: ${nodeId.value}")
     yield ()
 
   override def invalidate(nodeId: NodeId): UIO[List[NodeId]] =
     for
       path <- ZIO.succeed(treeIndex.ancestorPath(nodeId))
       _    <- cacheRef.update(cache => cache -- path)
-      _    <- ZIO.logInfo(s"CurveBundleCache invalidated: ${path.map(_.value).mkString(" → ")}")
+      _    <- ZIO.logInfo(s"RiskResultCache invalidated: ${path.map(_.value).mkString(" → ")}")
     yield path
 
   override def clear: UIO[Unit] =
     for
       _ <- cacheRef.set(Map.empty)
-      _ <- ZIO.logDebug("CurveBundleCache cleared")
+      _ <- ZIO.logDebug("RiskResultCache cleared")
     yield ()
 
   override def clearAndGetSize: UIO[Int] =
     for
       // Atomic read-and-clear: size returned matches exactly what was cleared
       size <- cacheRef.modify(m => (m.size, Map.empty))
-      _    <- ZIO.logDebug(s"CurveBundleCache cleared $size entries (atomic)")
+      _    <- ZIO.logDebug(s"RiskResultCache cleared $size entries (atomic)")
     yield size
 
   override def size: UIO[Int] =
@@ -227,10 +239,3 @@ final class CurveBundleCacheLive(
   override def keys: UIO[List[NodeId]] =
     cacheRef.get.map(_.keys.toList)
 }
-
-// Type alias for backward compatibility during migration
-@deprecated("Use CurveBundleCache instead", "Phase C")
-type LECCache = CurveBundleCache
-
-@deprecated("Use CurveBundleCache instead", "Phase C")
-val LECCache = CurveBundleCache

@@ -1,7 +1,7 @@
 package com.risquanter.register.services.pipeline
 
 import zio.*
-import com.risquanter.register.services.cache.CurveBundleCache
+import com.risquanter.register.services.cache.RiskResultCache
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
 import com.risquanter.register.domain.tree.NodeId
@@ -47,7 +47,7 @@ object InvalidationHandler {
   /**
     * Create live InvalidationHandler layer.
     */
-  val live: ZLayer[CurveBundleCache & SSEHub, Nothing, InvalidationHandler] =
+  val live: ZLayer[RiskResultCache & SSEHub, Nothing, InvalidationHandler] =
     ZLayer.fromFunction(InvalidationHandlerLive(_, _))
 
   // Accessor methods for ZIO service pattern
@@ -59,7 +59,7 @@ object InvalidationHandler {
   * Live implementation of InvalidationHandler.
   */
 final case class InvalidationHandlerLive(
-    cache: CurveBundleCache,
+    cache: RiskResultCache,
     hub: SSEHub
 ) extends InvalidationHandler {
 

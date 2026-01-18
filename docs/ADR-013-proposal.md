@@ -93,17 +93,17 @@ object SSEControllerWiringSpec extends ZIOSpecDefault {
 #### 5.1 Unit Tests (In-Memory)
 
 ```scala
-object LECCacheSpec extends ZIOSpecDefault {
-  def spec = suite("LECCache")(
+object RiskResultCacheSpec extends ZIOSpecDefault {
+  def spec = suite("RiskResultCache")(
     test("invalidate clears ancestors") {
       for {
-        cache <- ZIO.service[LECCache]
-        _     <- cache.set(nodeId, lecData)
+        cache <- ZIO.service[RiskResultCache]
+        _     <- cache.put(nodeId, riskResult)
         inv   <- cache.invalidate(nodeId)
       } yield assertTrue(inv.contains(nodeId))
     }
   ).provide(
-    LECCache.layer,
+    RiskResultCache.layer,
     TreeIndex.layer  // In-memory test layer
   )
 }

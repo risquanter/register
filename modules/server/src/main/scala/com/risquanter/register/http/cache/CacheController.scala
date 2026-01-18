@@ -4,14 +4,14 @@ import zio.*
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.http.controllers.BaseController
-import com.risquanter.register.services.cache.CurveBundleCache
+import com.risquanter.register.services.cache.RiskResultCache
 import com.risquanter.register.domain.tree.NodeId
 
 /**
   * Controller for cache management endpoints.
   *
   * Per ADR-004a-proposal: "Controllers wire endpoints to services"
-  * This controller connects cache management endpoints to CurveBundleCache service.
+  * This controller connects cache management endpoints to RiskResultCache service.
   *
   * == Security Model (ADR-012 Compliant) ==
   *
@@ -32,7 +32,7 @@ import com.risquanter.register.domain.tree.NodeId
   * - DELETE /cache - Clear entire cache
   * - DELETE /cache/node/nodeId - Invalidate node + ancestors
   */
-class CacheController private (cache: CurveBundleCache)
+class CacheController private (cache: RiskResultCache)
     extends BaseController
     with CacheEndpoints {
 
@@ -98,17 +98,17 @@ class CacheController private (cache: CurveBundleCache)
 object CacheController {
 
   /**
-    * Create CacheController with CurveBundleCache dependency.
+    * Create CacheController with RiskResultCache dependency.
     */
-  val layer: ZLayer[CurveBundleCache, Nothing, CacheController] =
+  val layer: ZLayer[RiskResultCache, Nothing, CacheController] =
     ZLayer.fromZIO {
       for
-        cache <- ZIO.service[CurveBundleCache]
+        cache <- ZIO.service[RiskResultCache]
       yield new CacheController(cache)
     }
 
   /**
-    * Create CacheController directly from CurveBundleCache.
+    * Create CacheController directly from RiskResultCache.
     */
-  def make(cache: CurveBundleCache): CacheController = new CacheController(cache)
+  def make(cache: RiskResultCache): CacheController = new CacheController(cache)
 }
