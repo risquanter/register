@@ -147,8 +147,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
             outcomes2 <- genOutcomes(nTrials)
           } yield (nTrials, outcomes1, outcomes2)
         }) { case (nTrials, outcomes1, outcomes2) =>
-          val a = RiskResult("a", outcomes1.filter(_._1 < nTrials), nTrials)
-          val b = RiskResult("b", outcomes2.filter(_._1 < nTrials), nTrials)
+          val a = RiskResult(SafeId.SafeId("a".refineUnsafe), outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult(SafeId.SafeId("b".refineUnsafe), outcomes2.filter(_._1 < nTrials), nTrials)
           
           val ab = Identity[RiskResult].combine(a, b)
           val ba = Identity[RiskResult].combine(b, a)
