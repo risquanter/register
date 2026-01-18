@@ -173,4 +173,50 @@ object LECGenerator {
       (loss, exceedanceProb)
     }
   }
+  
+  /** Generate LEC curves for multiple nodes with a shared tick domain.
+    * 
+    * When displaying multiple LEC curves together, they must share the same
+    * X-axis (loss ticks) for proper comparison. This method:
+    * 1. Computes the combined loss range across all results
+    * 2. Generates a shared tick domain covering that range
+    * 3. Computes exact exceedance probabilities for each result at each tick
+    * 
+    * This is the core of ADR-014's render-time computation strategy:
+    * - No interpolation (mathematically exact probOfExceedance)
+    * - Display-context dependent tick domain
+    * - Cached RiskResult enables this without re-simulation
+    * 
+    * @param results Map of node ID to RiskResult (simulation outcomes)
+    * @param nEntries Number of sample points for the shared tick domain
+    * @return Map of node ID to curve points (loss, exceedanceProbability)
+    */
+  def generateCurvePointsMulti[K](
+    results: Map[K, RiskResult], 
+    nEntries: Int = 100
+  ): Map[K, Vector[(Long, Double)]] = {
+    if (results.isEmpty) return Map.empty
+    
+    // Filter out empty results
+    val nonEmpty = results.filter(_._2.outcomeCount.nonEmpty)
+    if (nonEmpty.isEmpty) return results.map((k, _) => k -> Vector.empty)
+    
+    // Compute combined loss range
+    val combinedMin = nonEmpty.values.map(_.minLoss).min
+    val combinedMax = nonEmpty.values.map(_.maxLoss).max
+    
+    // Generate shared tick domain
+    val sharedTicks = getTicks(combinedMin, combinedMax, nEntries)
+    
+    // Compute curves for all results using shared ticks
+    results.map { case (nodeId, result) =>
+      if (result.outcomeCount.isEmpty) {
+        nodeId -> Vector.empty
+      } else {
+        nodeId -> sharedTicks.map { loss =>
+          (loss, result.probOfExceedance(loss).toDouble)
+        }
+      }
+    }
+  }
 }
