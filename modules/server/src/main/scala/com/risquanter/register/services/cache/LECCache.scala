@@ -94,6 +94,17 @@ trait CurveBundleCache {
   def clear: UIO[Unit]
 
   /**
+    * Atomically clear cache and return the number of entries cleared.
+    *
+    * Uses Ref.modify for correct semantics: the returned count is exactly
+    * the number of entries that were removed, with no race window between
+    * reading the size and clearing the map.
+    *
+    * @return Number of entries that were cleared
+    */
+  def clearAndGetSize: UIO[Int]
+
+  /**
     * Get current cache size.
     *
     * @return Number of cached entries
@@ -148,6 +159,9 @@ object CurveBundleCache {
   def clear: URIO[CurveBundleCache, Unit] =
     ZIO.serviceWithZIO[CurveBundleCache](_.clear)
 
+  def clearAndGetSize: URIO[CurveBundleCache, Int] =
+    ZIO.serviceWithZIO[CurveBundleCache](_.clearAndGetSize)
+
   def size: URIO[CurveBundleCache, Int] =
     ZIO.serviceWithZIO[CurveBundleCache](_.size)
 
@@ -196,6 +210,13 @@ final class CurveBundleCacheLive(
       _ <- cacheRef.set(Map.empty)
       _ <- ZIO.logDebug("CurveBundleCache cleared")
     yield ()
+
+  override def clearAndGetSize: UIO[Int] =
+    for
+      // Atomic read-and-clear: size returned matches exactly what was cleared
+      size <- cacheRef.modify(m => (m.size, Map.empty))
+      _    <- ZIO.logDebug(s"CurveBundleCache cleared $size entries (atomic)")
+    yield size
 
   override def size: UIO[Int] =
     cacheRef.get.map(_.size)

@@ -64,12 +64,14 @@ class CacheController private (cache: CurveBundleCache)
 
   /**
     * Clear entire cache.
+    *
+    * Uses atomic clearAndGetSize to ensure the reported count exactly
+    * matches the number of entries removed (no race window).
     */
   val clearCache: ServerEndpoint[Any, Task] =
     cacheClearEndpoint.serverLogicSuccess { _ =>
       for
-        size <- cache.size
-        _    <- cache.clear
+        size <- cache.clearAndGetSize
       yield CacheClearResponse(
         cleared = size,
         message = s"Cleared $size cache entries"
