@@ -1,7 +1,8 @@
 package com.risquanter.register.domain.data
 
-import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
+import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder, JsonFieldEncoder, JsonFieldDecoder}
 import java.time.Instant
+import com.risquanter.register.domain.data.iron.SafeId
 
 /**
  * Per-node provenance metadata for reproducible Monte Carlo simulations.
@@ -30,7 +31,7 @@ import java.time.Instant
  */
 case class NodeProvenance(
   // HDR Configuration - Deterministic Random Number Generation
-  riskId: String,
+  riskId: SafeId.SafeId,
   entityId: Long,
   occurrenceVarId: Long,
   lossVarId: Long,
@@ -69,7 +70,7 @@ case class TreeProvenance(
   globalSeeds: (Long, Long),
   nTrials: Int,
   parallelism: Int,
-  nodeProvenances: Map[String, NodeProvenance]
+  nodeProvenances: Map[SafeId.SafeId, NodeProvenance]
 )
 
 /**
@@ -139,11 +140,29 @@ object DistributionParams {
 }
 
 object NodeProvenance {
+  // SafeId encodes as String in JSON wire format
+  private given safeIdEncoder: JsonEncoder[SafeId.SafeId] = JsonEncoder.string.contramap(_.value.toString)
+  private given safeIdDecoder: JsonDecoder[SafeId.SafeId] = JsonDecoder.string.mapOrFail(s =>
+    SafeId.fromString(s).left.map(errors => errors.map(_.message).mkString(", "))
+  )
+  
   given codec: JsonCodec[NodeProvenance] = DeriveJsonCodec.gen[NodeProvenance]
 }
 
 object TreeProvenance {
   import sttp.tapir.Schema
+  
+  // SafeId encodes as String in JSON wire format
+  private given safeIdEncoder: JsonEncoder[SafeId.SafeId] = JsonEncoder.string.contramap(_.value.toString)
+  private given safeIdDecoder: JsonDecoder[SafeId.SafeId] = JsonDecoder.string.mapOrFail(s =>
+    SafeId.fromString(s).left.map(errors => errors.map(_.message).mkString(", "))
+  )
+  
+  // Map[SafeId.SafeId, _] needs field encoder/decoder for JSON object keys
+  private given safeIdFieldEncoder: JsonFieldEncoder[SafeId.SafeId] = JsonFieldEncoder.string.contramap(_.value.toString)
+  private given safeIdFieldDecoder: JsonFieldDecoder[SafeId.SafeId] = JsonFieldDecoder.string.mapOrFail(s =>
+    SafeId.fromString(s).left.map(errors => errors.map(_.message).mkString(", "))
+  )
   
   given codec: JsonCodec[TreeProvenance] = DeriveJsonCodec.gen[TreeProvenance]
   

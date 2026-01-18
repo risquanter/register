@@ -4,7 +4,7 @@ import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
 import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, NodeProvenance, TreeProvenance, ExpertDistributionParams, LognormalDistributionParams}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
-import com.risquanter.register.domain.data.iron.{PositiveInt, Probability}
+import com.risquanter.register.domain.data.iron.{PositiveInt, Probability, SafeId}
 import io.github.iltotore.iron.refineUnsafe
 import io.github.iltotore.iron.constraint.numeric.Greater
 import zio.prelude.Identity
@@ -213,8 +213,8 @@ object Simulator {
     includeProvenance: Boolean,
     seed3: Long,
     seed4: Long,
-    provenances: Map[String, NodeProvenance]
-  ): Task[(RiskTreeResult, Map[String, NodeProvenance])] = {
+    provenances: Map[SafeId.SafeId, NodeProvenance]
+  ): Task[(RiskTreeResult, Map[SafeId.SafeId, NodeProvenance])] = {
     val n: Int = nTrials
     node match {
       case leaf: RiskLeaf =>
@@ -227,7 +227,7 @@ object Simulator {
           // RiskTreeResult uses String id for wire format (deprecated - see ADR-015)
           result = RiskTreeResult.Leaf(leaf.id.value.toString, RiskResult(leaf.id, trials, n))
           updatedProvenances = maybeProv match {
-            case Some(prov) => provenances + (leaf.id.value.toString -> prov)
+            case Some(prov) => provenances + (leaf.id -> prov)
             case None => provenances
           }
         } yield (result, updatedProvenances)
@@ -305,10 +305,10 @@ object Simulator {
         seed4 = seed4
       )
       
-      // Capture provenance if requested (riskId as String for wire format)
+      // Capture provenance if requested
       provenance = if (includeProvenance) {
         Some(NodeProvenance(
-          riskId = leaf.id.value.toString,
+          riskId = leaf.id,
           entityId = entityId,
           occurrenceVarId = entityId.hashCode + 1000L,
           lossVarId = entityId.hashCode + 2000L,

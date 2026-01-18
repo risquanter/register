@@ -1,6 +1,7 @@
 package com.risquanter.register.domain.data
 
 import com.risquanter.register.BuildInfo
+import com.risquanter.register.domain.data.iron.SafeId
 import zio.test.*
 import zio.test.Assertion.*
 import zio.json.*
@@ -17,12 +18,18 @@ import io.github.iltotore.iron.autoRefine
  */
 object ProvenanceSpec extends ZIOSpecDefault {
   
+  // Helper to create SafeId from string literal
+  private def safeId(s: String): SafeId.SafeId = 
+    SafeId.fromString(s).getOrElse(
+      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
+    )
+  
   def spec = suite("ProvenanceSpec")(
     
     suite("JSON Serialization")(
       test("NodeProvenance serializes and deserializes correctly") {
         val provenance = NodeProvenance(
-          riskId = "cyber-attack",
+          riskId = safeId("cyber-attack"),
           entityId = 42L,
           occurrenceVarId = 1042L,
           lossVarId = 2042L,
@@ -42,7 +49,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val decoded = json.fromJson[NodeProvenance]
         
         assertTrue(decoded.isRight) &&
-        assertTrue(decoded.toOption.get.riskId == "cyber-attack") &&
+        assertTrue(decoded.toOption.get.riskId == safeId("cyber-attack")) &&
         assertTrue(decoded.toOption.get.entityId == 42L) &&
         assertTrue(decoded.toOption.get.distributionType == "lognormal")
       },
@@ -81,7 +88,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       
       test("TreeProvenance serializes with node provenances") {
         val nodeProvenance = NodeProvenance(
-          riskId = "risk1",
+          riskId = safeId("risk1"),
           entityId = 123L,
           occurrenceVarId = 1123L,
           lossVarId = 2123L,
@@ -102,7 +109,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           globalSeeds = (0L, 0L),
           nTrials = 10000,
           parallelism = 4,
-          nodeProvenances = Map("risk1" -> nodeProvenance)
+          nodeProvenances = Map(safeId("risk1") -> nodeProvenance)
         )
         
         val json = treeProvenance.toJson
@@ -112,7 +119,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         assertTrue(decoded.toOption.get.treeId == 1L) &&
         assertTrue(decoded.toOption.get.nTrials == 10000) &&
         assertTrue(decoded.toOption.get.nodeProvenances.size == 1) &&
-        assertTrue(decoded.toOption.get.nodeProvenances.contains("risk1"))
+        assertTrue(decoded.toOption.get.nodeProvenances.contains(safeId("risk1")))
       },
       
       test("DistributionParams sealed trait handles both subtypes") {
@@ -155,7 +162,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           (result, provenance) = resultWithProv
         } yield {
           assertTrue(provenance.isDefined) &&
-          assertTrue(provenance.get.nodeProvenances.contains("test-risk")) &&
+          assertTrue(provenance.get.nodeProvenances.contains(safeId("test-risk"))) &&
           assertTrue(provenance.get.nTrials == 100) &&
           assertTrue(provenance.get.parallelism == 1)
         }
@@ -182,11 +189,11 @@ object ProvenanceSpec extends ZIOSpecDefault {
       test("provenance captures correct entityId from riskId hash") {
         import com.risquanter.register.services.helper.Simulator
         
-        val riskId = "cyber-attack"
-        val expectedEntityId = riskId.hashCode.toLong
+        val riskIdStr = "cyber-attack"
+        val expectedEntityId = riskIdStr.hashCode.toLong
         
         val leaf = RiskLeaf.unsafeApply(
-          id = riskId,
+          id = riskIdStr,
           name = "Cyber Attack",
           distributionType = "lognormal",
           probability = 0.25,
@@ -198,7 +205,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resultWithProv <- Simulator.simulateTree(leaf, nTrials = 100, parallelism = 1, includeProvenance = true)
           (_, provenance) = resultWithProv
         } yield {
-          val nodeProv = provenance.get.nodeProvenances(riskId)
+          val nodeProv = provenance.get.nodeProvenances(safeId(riskIdStr))
           assertTrue(nodeProv.entityId == expectedEntityId) &&
           assertTrue(nodeProv.occurrenceVarId == expectedEntityId.hashCode + 1000L) &&
           assertTrue(nodeProv.lossVarId == expectedEntityId.hashCode + 2000L)
@@ -221,7 +228,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resultWithProv <- Simulator.simulateTree(leaf, nTrials = 100, parallelism = 1, includeProvenance = true)
           (_, provenance) = resultWithProv
         } yield {
-          val nodeProv = provenance.get.nodeProvenances("lognormal-risk")
+          val nodeProv = provenance.get.nodeProvenances(safeId("lognormal-risk"))
           assertTrue(nodeProv.distributionType == "lognormal") &&
           assertTrue(nodeProv.distributionParams.isInstanceOf[LognormalDistributionParams]) &&
           assertTrue(
@@ -266,8 +273,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
         } yield {
           assertTrue(provenance.isDefined) &&
           assertTrue(provenance.get.nodeProvenances.size == 2) &&
-          assertTrue(provenance.get.nodeProvenances.contains("risk1")) &&
-          assertTrue(provenance.get.nodeProvenances.contains("risk2"))
+          assertTrue(provenance.get.nodeProvenances.contains(safeId("risk1"))) &&
+          assertTrue(provenance.get.nodeProvenances.contains(safeId("risk2")))
         }
       }
     ),
@@ -315,10 +322,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resultWithProv <- Simulator.simulateTree(leaf, nTrials = 300, parallelism = 1, includeProvenance = true)
           (result, provenance) = resultWithProv
         } yield {
-          val nodeProv = provenance.get.nodeProvenances("test-reconstruction")
+          val nodeProv = provenance.get.nodeProvenances(safeId("test-reconstruction"))
           
           // Verify all essential information is captured
-          assertTrue(nodeProv.riskId == "test-reconstruction") &&
+          assertTrue(nodeProv.riskId == safeId("test-reconstruction")) &&
           assertTrue(nodeProv.entityId != 0L) &&
           assertTrue(nodeProv.occurrenceVarId != 0L) &&
           assertTrue(nodeProv.lossVarId != 0L) &&
