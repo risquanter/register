@@ -6,6 +6,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf}
 import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.tree.TreeIndex
 
 object SimulationResponseSpec extends ZIOSpecDefault {
 
@@ -30,20 +31,22 @@ object SimulationResponseSpec extends ZIOSpecDefault {
     },
     
     test("fromRiskTree converts domain model to response (metadata only)") {
+      val root = RiskLeaf.unsafeApply(
+        id = "test-risk",
+        name = "TestRisk",
+        distributionType = "lognormal",
+        probability = 0.5,
+        minLoss = Some(1000L),
+        maxLoss = Some(50000L),
+        percentiles = None,
+        quantiles = None
+      )
       val riskTree = RiskTree(
         id = 1L,
         name = SafeName.SafeName("Risk Assessment".refineUnsafe),
         nTrials = 10000,
-        root = RiskLeaf.unsafeApply(
-          id = "test-risk",
-          name = "TestRisk",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(1000L),
-          maxLoss = Some(50000L),
-          percentiles = None,
-          quantiles = None
-        )
+        root = root,
+        index = TreeIndex.fromTree(root)
       )
       
       val response = SimulationResponse.fromRiskTree(riskTree)
@@ -57,20 +60,22 @@ object SimulationResponseSpec extends ZIOSpecDefault {
     },
     
     test("fromRiskTree extracts .value from opaque types") {
+      val root = RiskLeaf.unsafeApply(
+        id = "risk1",
+        name = "Risk1",
+        distributionType = "lognormal",
+        probability = 0.3,
+        minLoss = Some(100L),
+        maxLoss = Some(5000L),
+        percentiles = None,
+        quantiles = None
+      )
       val riskTree = RiskTree(
         id = 3L,
         name = SafeName.SafeName("Test".refineUnsafe),
         nTrials = 10000,
-        root = RiskLeaf.unsafeApply(
-          id = "risk1",
-          name = "Risk1",
-          distributionType = "lognormal",
-          probability = 0.3,
-          minLoss = Some(100L),
-          maxLoss = Some(5000L),
-          percentiles = None,
-          quantiles = None
-        )
+        root = root,
+        index = TreeIndex.fromTree(root)
       )
       
       val response = SimulationResponse.fromRiskTree(riskTree)
@@ -98,20 +103,22 @@ object SimulationResponseSpec extends ZIOSpecDefault {
     },
     
     test("round-trip: domain -> response -> JSON -> response") {
+      val root = RiskLeaf.unsafeApply(
+        id = "risk1",
+        name = "Risk1",
+        distributionType = "lognormal",
+        probability = 0.8,
+        minLoss = Some(1000L),
+        maxLoss = Some(15000L),
+        percentiles = None,
+        quantiles = None
+      )
       val riskTree = RiskTree(
         id = 5L,
         name = SafeName.SafeName("Round Trip".refineUnsafe),
         nTrials = 10000,
-        root = RiskLeaf.unsafeApply(
-          id = "risk1",
-          name = "Risk1",
-          distributionType = "lognormal",
-          probability = 0.8,
-          minLoss = Some(1000L),
-          maxLoss = Some(15000L),
-          percentiles = None,
-          quantiles = None
-        )
+        root = root,
+        index = TreeIndex.fromTree(root)
       )
       
       val response1 = SimulationResponse.fromRiskTree(riskTree)

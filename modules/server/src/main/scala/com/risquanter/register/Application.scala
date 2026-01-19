@@ -16,7 +16,6 @@ import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.cache.{RiskResultCache, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.services.tree.TreeIndexService
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -32,8 +31,8 @@ object Application extends ZIOAppDefault {
       TypesafeConfigProvider.fromResourcePath()
     )
 
-  // TreeIndex layer - provides empty index for LECCache (Phase 5: dormant infrastructure)
-  // Future: TreeIndexService will manage per-tree indices
+  // TreeIndex layer - temporary static index (will be replaced with per-tree indices in Task 1)
+  // TODO: Remove this when TreeIndex is stored with RiskTree (tree-scoped design)
   val treeIndexLayer: ZLayer[Any, Nothing, TreeIndex] =
     ZLayer.succeed(TreeIndex.empty)
 

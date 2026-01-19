@@ -42,6 +42,24 @@ class RiskTreeServiceLive private (
   
   import RiskTreeServiceLive.ErrorContext
   
+  /** Find which tree contains a given node.
+    * 
+    * Scans all trees in repository to find the one with the node in its index.
+    * 
+    * @param nodeId Node to search for
+    * @return RiskTree containing the node, or ValidationFailed if not found
+    */
+  private def findTreeContainingNode(nodeId: NodeId): Task[RiskTree] =
+    for {
+      allTrees <- repo.getAll
+      tree <- ZIO.fromOption(allTrees.find(t => t.index.nodes.contains(nodeId)))
+        .orElseFail(ValidationFailed(List(ValidationError(
+          field = "nodeId",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = s"Node ${nodeId.value} not found in any tree"
+        ))))
+    } yield tree
+  
   /** Record operation metric with optional error context
     * 
     * Base attributes (operation, success) are always included.
@@ -172,7 +190,8 @@ class RiskTreeServiceLive private (
         id = 0L.refineUnsafe, // repo will assign
         name = safeName,
         nTrials = nTrials,
-        root = rootNode
+        root = rootNode,
+        index = TreeIndex.fromTree(rootNode)
       )
       
       // Persist
@@ -236,12 +255,15 @@ class RiskTreeServiceLive private (
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value)
         
+        // Find tree containing this node
+        tree <- findTreeContainingNode(nodeId)
+        
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
-        result <- resolver.ensureCached(nodeId)
+        result <- resolver.ensureCached(tree, nodeId)
         _ <- tracing.setAttribute("cache_resolved", true)
         
         // Get node from tree index for metadata
-        node <- ZIO.fromOption(treeIndex.nodes.get(nodeId))
+        node <- ZIO.fromOption(tree.index.nodes.get(nodeId))
           .orElseFail(ValidationFailed(List(ValidationError(
             field = "nodeId",
             code = ValidationErrorCode.REQUIRED_FIELD,
@@ -285,8 +307,11 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("threshold", threshold)
         
+        // Find tree containing this node
+        tree <- findTreeContainingNode(nodeId)
+        
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
-        result <- resolver.ensureCached(nodeId)
+        result <- resolver.ensureCached(tree, nodeId)
         _ <- tracing.setAttribute("cache_resolved", true)
         
         // Compute exceedance probability from cached result
@@ -307,8 +332,19 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
         _ <- tracing.setAttribute("node_ids", nodeIds.map(_.value).mkString(","))
         
+        // Find tree containing the first node (assuming all nodes from same tree)
+        tree <- if (nodeIds.isEmpty) {
+          ZIO.fail(ValidationFailed(List(ValidationError(
+            field = "nodeIds",
+            code = ValidationErrorCode.EMPTY_COLLECTION,
+            message = "nodeIds set is empty"
+          ))))
+        } else {
+          findTreeContainingNode(nodeIds.head)
+        }
+        
         // Batch cache-aside: ensure all results are cached
-        results <- resolver.ensureCachedAll(nodeIds)
+        results <- resolver.ensureCachedAll(tree, nodeIds)
         _ <- tracing.setAttribute("results_resolved", results.size.toLong)
         
         // Generate curves with shared tick domain (ADR-014 render-time strategy)

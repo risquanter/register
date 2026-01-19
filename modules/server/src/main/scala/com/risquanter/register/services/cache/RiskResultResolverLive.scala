@@ -6,7 +6,7 @@ import zio.telemetry.opentelemetry.metrics.{Meter, Histogram, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 import com.risquanter.register.domain.data.iron.{PositiveInt, SafeId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
@@ -19,11 +19,11 @@ import zio.prelude.Identity
   *
   * Dependencies:
   * - RiskResultCache: Pure storage for cached results
-  * - TreeIndex: Node lookup and parent structure
   * - SimulationConfig: Simulation parameters (nTrials, parallelism)
   * - Tracing: OpenTelemetry tracing for observability
   * - Meter: Metrics instrumentation
   *
+  * TreeIndex is now obtained from RiskTree parameter per operation (tree-scoped design).
   * Simulation parameters are read from config at construction time.
   * Seeds are hardwired for now (TODO: add to config when reproducibility API is defined).
   *
@@ -33,7 +33,6 @@ import zio.prelude.Identity
   */
 final case class RiskResultResolverLive(
     cache: RiskResultCache,
-    treeIndex: TreeIndex,
     config: SimulationConfig,
     tracing: Tracing,
     simulationDuration: Histogram[Double],
@@ -47,7 +46,7 @@ final case class RiskResultResolverLive(
   private val seed3: Long = 0L
   private val seed4: Long = 0L
 
-  override def ensureCached(nodeId: NodeId): Task[RiskResult] =
+  override def ensureCached(tree: RiskTree, nodeId: NodeId): Task[RiskResult] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value.toString)
@@ -56,19 +55,19 @@ final case class RiskResultResolverLive(
           case Some(cached) =>
             tracing.setAttribute("cache_hit", true) *> ZIO.succeed(cached)
           case None =>
-            tracing.setAttribute("cache_hit", false) *> simulateSubtree(nodeId)
+            tracing.setAttribute("cache_hit", false) *> simulateSubtree(tree.index, nodeId)
         }
       } yield result
     }
 
-  override def ensureCachedAll(nodeIds: Set[NodeId]): Task[Map[NodeId, RiskResult]] =
-    ZIO.foreach(nodeIds.toList)(id => ensureCached(id).map(id -> _)).map(_.toMap)
+  override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId]): Task[Map[NodeId, RiskResult]] =
+    ZIO.foreach(nodeIds.toList)(id => ensureCached(tree, id).map(id -> _)).map(_.toMap)
 
   /**
     * Simulate subtree rooted at nodeId, caching all results.
     * Wraps simulation in span with timing metrics.
     */
-  private def simulateSubtree(nodeId: NodeId): Task[RiskResult] =
+  private def simulateSubtree(treeIndex: TreeIndex, nodeId: NodeId): Task[RiskResult] =
     tracing.span("simulateSubtree", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value.toString)
@@ -153,13 +152,12 @@ object RiskResultResolverLive {
   }
 
   /**
-    * Create ZLayer for RiskResultResolver with telemetry.
+    * Create ZLayer for RiskResultResolver with telemetry (no longer depends on TreeIndex).
     */
-  val layer: ZLayer[RiskResultCache & TreeIndex & SimulationConfig & Tracing & Meter, Throwable, RiskResultResolver] =
+  val layer: ZLayer[RiskResultCache & SimulationConfig & Tracing & Meter, Throwable, RiskResultResolver] =
     ZLayer.fromZIO {
       for
         cache     <- ZIO.service[RiskResultCache]
-        treeIndex <- ZIO.service[TreeIndex]
         config    <- ZIO.service[SimulationConfig]
         tracing   <- ZIO.service[Tracing]
         meter     <- ZIO.service[Meter]
@@ -175,6 +173,6 @@ object RiskResultResolverLive {
           Some(MetricNames.trialsUnit),
           Some(MetricNames.trialsDesc)
         )
-      yield RiskResultResolverLive(cache, treeIndex, config, tracing, simDuration, trials)
+      yield RiskResultResolverLive(cache, config, tracing, simDuration, trials)
     }
 }
