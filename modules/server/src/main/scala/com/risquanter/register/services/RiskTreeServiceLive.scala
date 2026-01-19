@@ -234,7 +234,7 @@ class RiskTreeServiceLive private (
   override def getLECCurve(nodeId: NodeId): Task[LECCurveResponse] = {
     val operation = tracing.span("getLECCurve", SpanKind.INTERNAL) {
       for {
-        _ <- tracing.setAttribute("node_id", nodeId.toString)
+        _ <- tracing.setAttribute("node_id", nodeId.value)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
         result <- resolver.ensureCached(nodeId)
@@ -257,15 +257,15 @@ class RiskTreeServiceLive private (
         
         // Get child IDs if portfolio node
         childIds = node match {
-          case portfolio: RiskPortfolio => Some(portfolio.children.map(_.toString).toList)
+          case portfolio: RiskPortfolio => Some(portfolio.children.map(_.id.value).toList)
           case _: RiskLeaf => None
         }
         
         // Convert to response format
         lecPoints = curvePoints.map { case (loss, prob) => LECPoint(loss, prob) }
         response = LECCurveResponse(
-          id = nodeId.toString,
-          name = result.name.toString,
+          id = nodeId.value,
+          name = result.name.value,
           curve = lecPoints,
           quantiles = quantiles,
           childIds = childIds
@@ -282,7 +282,7 @@ class RiskTreeServiceLive private (
   override def probOfExceedance(nodeId: NodeId, threshold: Long): Task[BigDecimal] = {
     val operation = tracing.span("probOfExceedance", SpanKind.INTERNAL) {
       for {
-        _ <- tracing.setAttribute("node_id", nodeId.toString)
+        _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("threshold", threshold)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
@@ -305,7 +305,7 @@ class RiskTreeServiceLive private (
     val operation = tracing.span("getLECCurvesMulti", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
-        _ <- tracing.setAttribute("node_ids", nodeIds.map(_.toString).mkString(","))
+        _ <- tracing.setAttribute("node_ids", nodeIds.map(_.value).mkString(","))
         
         // Batch cache-aside: ensure all results are cached
         results <- resolver.ensureCachedAll(nodeIds)
@@ -391,7 +391,7 @@ class RiskTreeServiceLive private (
       )
       
       // Add tree name to span for better observability
-      _ <- tracing.setAttribute("risk_tree.name", tree.name.toString)
+      _ <- tracing.setAttribute("risk_tree.name", tree.name.value)
       _ <- tracing.setAttribute("risk_tree.effective_trials", tree.nTrials.toLong)
       
       // Determine trials (use override or tree config or default)
@@ -425,7 +425,7 @@ class RiskTreeServiceLive private (
       endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
       
       // Record simulation metrics (convert PositiveInt to Int for metrics)
-      _ <- recordSimulationMetrics(tree.name.toString, nTrials: Int, endTime - startTime)
+      _ <- recordSimulationMetrics(tree.name.value, nTrials: Int, endTime - startTime)
       
       (result, provenance) = resultAndProv
       

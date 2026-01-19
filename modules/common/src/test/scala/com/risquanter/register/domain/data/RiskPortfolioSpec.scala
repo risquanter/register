@@ -2,8 +2,13 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.test.Assertion.*
+import com.risquanter.register.domain.data.iron.SafeId
+import io.github.iltotore.iron.refineUnsafe
 
 object RiskPortfolioSpec extends ZIOSpecDefault {
+
+  // Helper for test SafeIds
+  private def safeId(s: String): SafeId.SafeId = SafeId.SafeId(s.refineUnsafe)
 
   // Helper: Create valid RiskLeaf for use as child
   private def createValidLeaf(id: String = "leaf-1", name: String = "Test Leaf"): RiskLeaf = {
@@ -32,7 +37,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         )
 
         assertTrue(result.isSuccess) &&
-        assertTrue(result.toEither.toOption.get.id == "portfolio-1") &&
+        assertTrue(result.toEither.toOption.get.id == safeId("portfolio-1")) &&
         assertTrue(result.toEither.toOption.get.name == "Test Portfolio") &&
         assertTrue(result.toEither.toOption.get.children.length == 1)
       },
@@ -67,7 +72,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         )
 
         assertTrue(result.isSuccess) &&
-        assertTrue(result.toEither.toOption.get.id == "parent-port") &&
+        assertTrue(result.toEither.toOption.get.id == safeId("parent-port")) &&
         assertTrue(result.toEither.toOption.get.children.length == 1)
       },
 
@@ -326,7 +331,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         )
 
         assertTrue(result.isSuccess) &&
-        assertTrue(result.toEither.toOption.get.id == "test-id")
+        assertTrue(result.toEither.toOption.get.id == safeId("test-id"))
       },
 
       test("extract name as String correctly") {
@@ -353,8 +358,8 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
 
         assertTrue(result.isSuccess) &&
         assertTrue(result.toEither.toOption.get.children.length == 2) &&
-        assertTrue(result.toEither.toOption.get.children(0).id == "leaf-1") &&
-        assertTrue(result.toEither.toOption.get.children(1).id == "leaf-2")
+        assertTrue(result.toEither.toOption.get.children(0).id == safeId("leaf-1")) &&
+        assertTrue(result.toEither.toOption.get.children(1).id == safeId("leaf-2"))
       }
     )
   )
