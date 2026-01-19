@@ -11,11 +11,12 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, TreeProvenance, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, LECCurveResponse, LECPoint}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, NonNegativeInt, Probability, DistributionType, NonNegativeLong}
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.domain.tree.{NodeId, TreeIndex}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, SimulationError}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.{LECGenerator, VegaLiteBuilder}
+import com.risquanter.register.services.cache.RiskResultResolver
 /**
  * Live implementation of RiskTreeService with telemetry instrumentation.
  * 
@@ -29,6 +30,8 @@ class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   executionService: SimulationExecutionService,
   config: SimulationConfig,
+  resolver: RiskResultResolver,
+  treeIndex: TreeIndex,
   tracing: Tracing,
   semaphore: SimulationSemaphore,
   // Pre-created metric instruments (cached at construction time)
@@ -228,15 +231,103 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  // TODO: Implement these methods using RiskResultResolver
-  override def getLECCurve(nodeId: NodeId): Task[LECCurveResponse] =
-    ZIO.fail(new NotImplementedError("getLECCurve not yet implemented"))
+  override def getLECCurve(nodeId: NodeId): Task[LECCurveResponse] = {
+    val operation = tracing.span("getLECCurve", SpanKind.INTERNAL) {
+      for {
+        _ <- tracing.setAttribute("node_id", nodeId.toString)
+        
+        // Ensure result is cached (cache-aside pattern via RiskResultResolver)
+        result <- resolver.ensureCached(nodeId)
+        _ <- tracing.setAttribute("cache_resolved", true)
+        
+        // Get node from tree index for metadata
+        node <- ZIO.fromOption(treeIndex.nodes.get(nodeId))
+          .orElseFail(ValidationFailed(List(ValidationError(
+            field = "nodeId",
+            code = ValidationErrorCode.REQUIRED_FIELD,
+            message = s"Node not found: $nodeId"
+          ))))
+        
+        // Generate LEC curve points from cached result
+        curvePoints = LECGenerator.generateCurvePoints(result)
+        _ <- tracing.setAttribute("curve_points", curvePoints.size.toLong)
+        
+        // Calculate quantiles
+        quantiles = LECGenerator.calculateQuantiles(result)
+        
+        // Get child IDs if portfolio node
+        childIds = node match {
+          case portfolio: RiskPortfolio => Some(portfolio.children.map(_.toString).toList)
+          case _: RiskLeaf => None
+        }
+        
+        // Convert to response format
+        lecPoints = curvePoints.map { case (loss, prob) => LECPoint(loss, prob) }
+        response = LECCurveResponse(
+          id = nodeId.toString,
+          name = result.name.toString,
+          curve = lecPoints,
+          quantiles = quantiles,
+          childIds = childIds
+        )
+      } yield response
+    }
+    
+    operation.tapBoth(
+      error => logIfUnexpected("getLECCurve")(error) *> recordOperation("getLECCurve", success = false, Some(extractErrorContext(error))),
+      _ => recordOperation("getLECCurve", success = true)
+    )
+  }
   
-  override def probOfExceedance(nodeId: NodeId, threshold: Long): Task[BigDecimal] =
-    ZIO.fail(new NotImplementedError("probOfExceedance not yet implemented"))
+  override def probOfExceedance(nodeId: NodeId, threshold: Long): Task[BigDecimal] = {
+    val operation = tracing.span("probOfExceedance", SpanKind.INTERNAL) {
+      for {
+        _ <- tracing.setAttribute("node_id", nodeId.toString)
+        _ <- tracing.setAttribute("threshold", threshold)
+        
+        // Ensure result is cached (cache-aside pattern via RiskResultResolver)
+        result <- resolver.ensureCached(nodeId)
+        _ <- tracing.setAttribute("cache_resolved", true)
+        
+        // Compute exceedance probability from cached result
+        prob = result.probOfExceedance(threshold)
+        _ <- tracing.setAttribute("exceedance_probability", prob.toDouble)
+      } yield prob
+    }
+    
+    operation.tapBoth(
+      error => logIfUnexpected("probOfExceedance")(error) *> recordOperation("probOfExceedance", success = false, Some(extractErrorContext(error))),
+      _ => recordOperation("probOfExceedance", success = true)
+    )
+  }
   
-  override def getLECCurvesMulti(nodeIds: Set[NodeId]): Task[Map[NodeId, Vector[LECPoint]]] =
-    ZIO.fail(new NotImplementedError("getLECCurvesMulti not yet implemented"))
+  override def getLECCurvesMulti(nodeIds: Set[NodeId]): Task[Map[NodeId, Vector[LECPoint]]] = {
+    val operation = tracing.span("getLECCurvesMulti", SpanKind.INTERNAL) {
+      for {
+        _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
+        _ <- tracing.setAttribute("node_ids", nodeIds.map(_.toString).mkString(","))
+        
+        // Batch cache-aside: ensure all results are cached
+        results <- resolver.ensureCachedAll(nodeIds)
+        _ <- tracing.setAttribute("results_resolved", results.size.toLong)
+        
+        // Generate curves with shared tick domain (ADR-014 render-time strategy)
+        curvesData = LECGenerator.generateCurvePointsMulti(results)
+        
+        // Convert to API response format
+        curves = curvesData.map { case (nodeId, points) =>
+          nodeId -> points.map { case (loss, prob) => LECPoint(loss, prob) }
+        }
+        
+        _ <- tracing.setAttribute("curves_generated", curves.size.toLong)
+      } yield curves
+    }
+    
+    operation.tapBoth(
+      error => logIfUnexpected("getLECCurvesMulti")(error) *> recordOperation("getLECCurvesMulti", success = false, Some(extractErrorContext(error))),
+      _ => recordOperation("getLECCurvesMulti", success = true)
+    )
+  }
   
   // ========================================
   // DEPRECATED: Old computeLEC implementation
@@ -481,11 +572,13 @@ object RiskTreeServiceLive {
     val trialsDesc = "Total number of simulation trials executed"
   }
   
-  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & RiskResultResolver & TreeIndex & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       execService <- ZIO.service[SimulationExecutionService]
       config <- ZIO.service[SimulationConfig]
+      resolver <- ZIO.service[RiskResultResolver]
+      treeIndex <- ZIO.service[TreeIndex]
       tracing <- ZIO.service[Tracing]
       semaphore <- ZIO.service[SimulationSemaphore]
       meter <- ZIO.service[Meter]
@@ -506,6 +599,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.trialsUnit),
         Some(MetricNames.trialsDesc)
       )
-    } yield new RiskTreeServiceLive(repo, execService, config, tracing, semaphore, opsCounter, simDuration, trials)
+    } yield new RiskTreeServiceLive(repo, execService, config, resolver, treeIndex, tracing, semaphore, opsCounter, simDuration, trials)
   }
 }
