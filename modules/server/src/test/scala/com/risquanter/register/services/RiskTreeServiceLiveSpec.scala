@@ -314,12 +314,232 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             case None => false
           }
         }
+      },
+
+      // ========================================
+      // New Query APIs (ADR-015)
+      // ========================================
+
+      test("getLECCurve returns curve for leaf node") {
+        val program = for {
+          tree <- service(_.create(validRequest))
+          // Build TreeIndex from created tree
+          index = com.risquanter.register.domain.tree.TreeIndex.fromTree(tree.root)
+          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          
+          // Call new getLECCurve API
+          response <- service(_.getLECCurve(rootId))
+        } yield response
+
+        program.assert { response =>
+          response.id == "test-risk" &&
+            response.name == "Test Risk" &&
+            response.curve.nonEmpty &&
+            response.quantiles.nonEmpty &&
+            response.quantiles.contains("p50") &&
+            response.quantiles.contains("p90") &&
+            response.childIds.isEmpty  // Leaf has no children
+        }
+      },
+
+      test("getLECCurve returns curve with childIds for portfolio node") {
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
+          name = "Portfolio Test",
+          nTrials = 1000,
+          root = RiskPortfolio.create(
+            id = "portfolio-root",
+            name = "Portfolio",
+            children = Array(
+              RiskLeaf.create(
+                id = "child-a",
+                name = "Child A",
+                distributionType = "lognormal",
+                probability = 0.3,
+                minLoss = Some(1000L),
+                maxLoss = Some(20000L)
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data")),
+              RiskLeaf.create(
+                id = "child-b",
+                name = "Child B",
+                distributionType = "lognormal",
+                probability = 0.2,
+                minLoss = Some(500L),
+                maxLoss = Some(10000L)
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+            )
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+        )
+
+        val program = for {
+          tree <- service(_.create(hierarchicalRequest))
+          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("portfolio-root".refineUnsafe)
+          response <- service(_.getLECCurve(rootId))
+        } yield response
+
+        program.assert { response =>
+          response.id == "portfolio-root" &&
+            response.childIds.isDefined &&
+            response.childIds.get.toSet == Set("child-a", "child-b")
+        }
+      },
+
+      test("getLECCurve fails for nonexistent node") {
+        val program = for {
+          _ <- service(_.create(validRequest))
+          invalidId = com.risquanter.register.domain.data.iron.SafeId.SafeId("nonexistent".refineUnsafe)
+          result <- service(_.getLECCurve(invalidId).flip)
+        } yield result
+
+        program.assert {
+          case ValidationFailed(errors) => errors.exists(e => e.field == "nodeId")
+          case _ => false
+        }
+      },
+
+      test("probOfExceedance returns probability for given threshold") {
+        val program = for {
+          tree <- service(_.create(validRequest))
+          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          
+          // Test at multiple thresholds
+          prob1 <- service(_.probOfExceedance(rootId, 1000L))   // Low threshold
+          prob2 <- service(_.probOfExceedance(rootId, 25000L))  // Mid threshold
+          prob3 <- service(_.probOfExceedance(rootId, 50000L))  // High threshold
+        } yield (prob1, prob2, prob3)
+
+        program.assert { case (prob1, prob2, prob3) =>
+          // Probabilities should be in range [0, 1]
+          prob1 >= 0 && prob1 <= 1 &&
+            prob2 >= 0 && prob2 <= 1 &&
+            prob3 >= 0 && prob3 <= 1 &&
+            // Higher thresholds should have lower exceedance probability
+            prob1 >= prob2 && prob2 >= prob3
+        }
+      },
+
+      test("probOfExceedance returns deterministic results") {
+        val program = for {
+          tree <- service(_.create(validRequest))
+          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          
+          // Call twice with same threshold
+          prob1 <- service(_.probOfExceedance(rootId, 10000L))
+          prob2 <- service(_.probOfExceedance(rootId, 10000L))
+        } yield (prob1, prob2)
+
+        program.assert { case (prob1, prob2) =>
+          prob1 == prob2  // Should be identical (cached result)
+        }
+      },
+
+      test("getLECCurvesMulti returns curves for multiple nodes") {
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
+          name = "Multi-Node Test",
+          nTrials = 1000,
+          root = RiskPortfolio.create(
+            id = "multi-root",
+            name = "Multi Root",
+            children = Array(
+              RiskLeaf.create(
+                id = "leaf-1",
+                name = "Leaf 1",
+                distributionType = "lognormal",
+                probability = 0.3,
+                minLoss = Some(1000L),
+                maxLoss = Some(30000L)
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data")),
+              RiskLeaf.create(
+                id = "leaf-2",
+                name = "Leaf 2",
+                distributionType = "lognormal",
+                probability = 0.2,
+                minLoss = Some(2000L),
+                maxLoss = Some(40000L)
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+            )
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+        )
+
+        val program = for {
+          tree <- service(_.create(hierarchicalRequest))
+          leaf1Id = com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-1".refineUnsafe)
+          leaf2Id = com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-2".refineUnsafe)
+          
+          curves <- service(_.getLECCurvesMulti(Set(leaf1Id, leaf2Id)))
+        } yield curves
+
+        program.assert { curves =>
+          curves.size == 2 &&
+            curves.contains(com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-1".refineUnsafe)) &&
+            curves.contains(com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-2".refineUnsafe)) &&
+            curves.values.forall(_.nonEmpty)  // All curves have points
+        }
+      },
+
+      test("getLECCurvesMulti uses shared tick domain") {
+        val hierarchicalRequest = RiskTreeDefinitionRequest(
+          name = "Shared Domain Test",
+          nTrials = 1000,
+          root = RiskPortfolio.create(
+            id = "shared-root",
+            name = "Shared Root",
+            children = Array(
+              RiskLeaf.create(
+                id = "node-a",
+                name = "Node A",
+                distributionType = "lognormal",
+                probability = 0.3,
+                minLoss = Some(5000L),
+                maxLoss = Some(15000L)
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data")),
+              RiskLeaf.create(
+                id = "node-b",
+                name = "Node B",
+                distributionType = "lognormal",
+                probability = 0.2,
+                minLoss = Some(10000L),
+                maxLoss = Some(50000L)
+              ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+            )
+          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+        )
+
+        val program = for {
+          tree <- service(_.create(hierarchicalRequest))
+          nodeAId = com.risquanter.register.domain.data.iron.SafeId.SafeId("node-a".refineUnsafe)
+          nodeBId = com.risquanter.register.domain.data.iron.SafeId.SafeId("node-b".refineUnsafe)
+          
+          curves <- service(_.getLECCurvesMulti(Set(nodeAId, nodeBId)))
+        } yield curves
+
+        program.assert { curves =>
+          val curveA = curves(com.risquanter.register.domain.data.iron.SafeId.SafeId("node-a".refineUnsafe))
+          val curveB = curves(com.risquanter.register.domain.data.iron.SafeId.SafeId("node-b".refineUnsafe))
+          
+          // Both curves should have same number of points (shared tick domain)
+          curveA.size == curveB.size &&
+            // Loss values should be identical (shared ticks)
+            curveA.map(_.loss) == curveB.map(_.loss)
+        }
+      },
+
+      test("getLECCurvesMulti handles empty set") {
+        val program = service(_.getLECCurvesMulti(Set.empty))
+
+        program.assert { curves =>
+          curves.isEmpty
+        }
       }
     ).provide(
       RiskTreeServiceLive.layer,
       SimulationExecutionService.live,
       stubRepoLayer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
+      // Cache and resolver layers (ADR-015)
+      com.risquanter.register.services.cache.RiskResultCache.layer,
+      com.risquanter.register.services.cache.RiskResultResolverLive.layer,
+      // TreeIndex - needs to be created from test data, use layer that builds from default tree
+      ZLayer.succeed(com.risquanter.register.domain.tree.TreeIndex.fromTree(validRequest.root)),
       // Concurrency control (uses SimulationConfig)
       com.risquanter.register.configs.TestConfigs.simulationLayer >>> com.risquanter.register.services.SimulationSemaphore.layer,
       // Telemetry layers require TelemetryConfig

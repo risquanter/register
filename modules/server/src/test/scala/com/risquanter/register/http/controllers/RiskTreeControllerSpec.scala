@@ -52,17 +52,29 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
   // Layer factory - creates fresh layer with isolated repository per test
   private def serviceLayer = {
-    // Telemetry layers require TelemetryConfig
-    val tracingLayer = com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console
-    val metricsLayer = com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+    // Default TreeIndex - empty for controller tests that use create endpoint
+    val defaultRoot = RiskLeaf.create(
+      id = "test-root", 
+      name = "Test Root", 
+      distributionType = "lognormal", 
+      probability = 0.1, 
+      minLoss = Some(1000L), 
+      maxLoss = Some(10000L)
+    ).toEither.getOrElse(throw new RuntimeException("Invalid default root"))
+    val treeIndexLayer = ZLayer.succeed(com.risquanter.register.domain.tree.TreeIndex.fromTree(defaultRoot))
     
-    // Semaphore layer requires SimulationConfig
-    val simConfigLayer = com.risquanter.register.configs.TestConfigs.simulationLayer
-    val semaphoreLayer = simConfigLayer >>> com.risquanter.register.services.SimulationSemaphore.layer
-    
-    ZLayer.succeed(makeStubRepo()) >>>
-    (SimulationExecutionService.live ++ ZLayer.environment[RiskTreeRepository] ++ simConfigLayer ++ tracingLayer ++ metricsLayer ++ semaphoreLayer) >>>
-    RiskTreeServiceLive.layer
+    ZLayer.make[RiskTreeService](
+      RiskTreeServiceLive.layer,
+      SimulationExecutionService.live,
+      ZLayer.succeed(makeStubRepo()),
+      com.risquanter.register.configs.TestConfigs.simulationLayer,
+      com.risquanter.register.services.SimulationSemaphore.layer,
+      com.risquanter.register.services.cache.RiskResultCache.layer,
+      com.risquanter.register.services.cache.RiskResultResolverLive.layer,
+      treeIndexLayer,
+      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
+      com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
+    )
   }
 
   override def spec = suite("RiskTreeController")(
