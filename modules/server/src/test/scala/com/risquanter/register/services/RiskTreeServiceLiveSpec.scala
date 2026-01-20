@@ -523,23 +523,20 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("getLECCurvesMulti handles empty set") {
-        val program = service(_.getLECCurvesMulti(Set.empty))
-
-        program.assert { curves =>
-          curves.isEmpty
-        }
+      test("getLECCurvesMulti rejects empty set") {
+        for {
+          exit <- service(_.getLECCurvesMulti(Set.empty)).exit
+        } yield assertTrue(
+          exit.isFailure
+        )
       }
     ).provide(
       RiskTreeServiceLive.layer,
       SimulationExecutionService.live,
       stubRepoLayer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
-      // Cache and resolver layers (ADR-015)
-      com.risquanter.register.services.cache.RiskResultCache.layer,
       com.risquanter.register.services.cache.RiskResultResolverLive.layer,
-      // TreeIndex - needs to be created from test data, use layer that builds from default tree
-      ZLayer.succeed(com.risquanter.register.domain.tree.TreeIndex.fromTree(validRequest.root)),
+      com.risquanter.register.services.cache.TreeCacheManager.layer,
       // Concurrency control (uses SimulationConfig)
       com.risquanter.register.configs.TestConfigs.simulationLayer >>> com.risquanter.register.services.SimulationSemaphore.layer,
       // Telemetry layers require TelemetryConfig

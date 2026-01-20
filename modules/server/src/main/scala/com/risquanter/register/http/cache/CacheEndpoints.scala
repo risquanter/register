@@ -7,10 +7,20 @@ import zio.json.*
 
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.NonNegativeLong
 
 /**
   * Cache management endpoint definitions.
+  *
+  * == Tree-Scoped Endpoints ==
+  *
+  * Cache operations are scoped to individual trees:
+  * - GET  /risk-trees/{treeId}/cache/stats  - Stats for tree's cache
+  * - GET  /risk-trees/{treeId}/cache/nodes  - Cached node IDs for tree
+  * - DELETE /risk-trees/{treeId}/cache      - Clear tree's cache
+  *
+  * Global operation:
+  * - DELETE /cache/clear-all                - Clear all caches
   *
   * == Security Model (ADR-012 Compliant) ==
   *
@@ -29,18 +39,10 @@ import com.risquanter.register.domain.data.iron.SafeId
   *   rules:
   *   - to:
   *     - operation:
-  *         paths: ["/cache", "/cache/..."]
+  *         paths: ["/risk-trees/{treeId}/cache/...", "/cache/..."]
   *     when:
   *     - key: request.auth.claims[roles]
   *       values: ["admin", "cache-admin"]
-  * }}}
-  *
-  * '''OPA ext_authz (recommended):'''
-  * {{{
-  * allow {
-  *   startswith(input.path, "/cache")
-  *   "admin" in input.claims.roles
-  * }
   * }}}
   *
   * No application-level auth code is implemented—this follows ADR-012's
@@ -50,85 +52,87 @@ import com.risquanter.register.domain.data.iron.SafeId
 trait CacheEndpoints extends BaseEndpoint {
 
   /**
-    * Get cache statistics.
+    * Get cache statistics for a specific tree.
     *
-    * GET /cache/stats
+    * GET /risk-trees/{treeId}/cache/stats
     *
-    * Returns current cache size and other metrics.
+    * Returns current cache size for the specified tree.
     * Admin-only: Protected by service mesh policy.
     */
   val cacheStatsEndpoint =
     baseEndpoint
       .tag("cache-admin")
       .name("cacheStats")
-      .summary("Get LEC cache statistics")
-      .description("Returns cache size and metadata. Admin-only endpoint.")
-      .in("cache" / "stats")
+      .summary("Get LEC cache statistics for a tree")
+      .description("Returns cache size and metadata for the specified tree. Admin-only endpoint.")
+      .in("risk-trees" / path[NonNegativeLong]("treeId") / "cache" / "stats")
       .get
       .out(jsonBody[CacheStatsResponse])
 
   /**
-    * List all cached node IDs.
+    * List all cached node IDs for a specific tree.
     *
-    * GET /cache/nodes
+    * GET /risk-trees/{treeId}/cache/nodes
     *
-    * Returns list of node IDs currently in cache.
+    * Returns list of node IDs currently in cache for the specified tree.
     * Admin-only: Protected by service mesh policy.
     */
   val cacheNodesEndpoint =
     baseEndpoint
       .tag("cache-admin")
       .name("cacheNodes")
-      .summary("List cached node IDs")
-      .description("Returns all node IDs currently in the CurveBundle cache. Admin-only endpoint.")
-      .in("cache" / "nodes")
+      .summary("List cached node IDs for a tree")
+      .description("Returns all node IDs currently cached for the specified tree. Admin-only endpoint.")
+      .in("risk-trees" / path[NonNegativeLong]("treeId") / "cache" / "nodes")
       .get
       .out(jsonBody[CacheNodesResponse])
 
   /**
-    * Clear entire cache.
+    * Clear cache for a specific tree.
     *
-    * DELETE /cache
+    * DELETE /risk-trees/{treeId}/cache
     *
-    * Removes all entries from the cache.
+    * Removes all entries from the cache for the specified tree.
     * Admin-only: Protected by service mesh policy.
     */
   val cacheClearEndpoint =
     baseEndpoint
       .tag("cache-admin")
       .name("cacheClear")
-      .summary("Clear entire LEC cache")
-      .description("Removes all entries from the cache. Admin-only endpoint.")
-      .in("cache")
+      .summary("Clear LEC cache for a tree")
+      .description("Removes all cache entries for the specified tree. Admin-only endpoint.")
+      .in("risk-trees" / path[NonNegativeLong]("treeId") / "cache")
       .delete
       .out(jsonBody[CacheClearResponse])
 
   /**
-    * Invalidate cache for a specific node.
+    * Clear all caches globally.
     *
-    * DELETE /cache/node/{nodeId}
+    * DELETE /cache/clear-all
     *
-    * Removes cache entry for the node and all ancestors (per ADR-005).
+    * Removes all entries from all tree caches.
     * Admin-only: Protected by service mesh policy.
     */
-  val cacheInvalidateNodeEndpoint =
+  val cacheClearAllEndpoint =
     baseEndpoint
       .tag("cache-admin")
-      .name("cacheInvalidateNode")
-      .summary("Invalidate cache for a node and ancestors")
-      .description("Removes cache entries for the node and all ancestors in the tree. Admin-only endpoint.")
-      .in("cache" / "node" / path[SafeId.SafeId]("nodeId"))
+      .name("cacheClearAll")
+      .summary("Clear all LEC caches")
+      .description("Removes all entries from all tree caches. Admin-only endpoint.")
+      .in("cache" / "clear-all")
       .delete
-      .out(jsonBody[CacheInvalidateResponse])
+      .out(jsonBody[CacheClearAllResponse])
 }
 
 /**
   * Cache statistics response.
   *
+  * @param treeId Tree identifier
   * @param size Number of entries in cache
   * @param capacityNote Note about cache capacity (unbounded in current impl)
   */
 final case class CacheStatsResponse(
+  treeId: Long,
   size: Int,
   capacityNote: String
 )
@@ -140,10 +144,12 @@ object CacheStatsResponse {
 /**
   * Cached node IDs response.
   *
+  * @param treeId Tree identifier
   * @param nodeIds List of node IDs currently cached
   * @param count Total count
   */
 final case class CacheNodesResponse(
+  treeId: Long,
   nodeIds: List[String],
   count: Int
 )
@@ -155,10 +161,12 @@ object CacheNodesResponse {
 /**
   * Cache clear response.
   *
+  * @param treeId Tree identifier
   * @param cleared Number of entries cleared
   * @param message Confirmation message
   */
 final case class CacheClearResponse(
+  treeId: Long,
   cleared: Int,
   message: String
 )
@@ -168,16 +176,18 @@ object CacheClearResponse {
 }
 
 /**
-  * Cache invalidation response.
+  * Global cache clear response.
   *
-  * @param invalidatedNodeIds Node IDs that were invalidated (node + ancestors)
-  * @param count Number of invalidated entries
+  * @param treesCleared Number of tree caches cleared
+  * @param totalEntriesCleared Total number of entries cleared across all trees
+  * @param message Confirmation message
   */
-final case class CacheInvalidateResponse(
-  invalidatedNodeIds: List[String],
-  count: Int
+final case class CacheClearAllResponse(
+  treesCleared: Int,
+  totalEntriesCleared: Int,
+  message: String
 )
 
-object CacheInvalidateResponse {
-  given codec: JsonCodec[CacheInvalidateResponse] = DeriveJsonCodec.gen[CacheInvalidateResponse]
+object CacheClearAllResponse {
+  given codec: JsonCodec[CacheClearAllResponse] = DeriveJsonCodec.gen[CacheClearAllResponse]
 }

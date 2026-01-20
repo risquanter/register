@@ -3,16 +3,20 @@ package com.risquanter.register.services.cache
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
+import io.github.iltotore.iron.*
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
-import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, NonNegativeLong}
 
 /**
  * Tests for RiskResultResolverLive (ADR-015).
  * 
  * Verifies cache-aside behavior, telemetry recording, and error handling.
+ * 
+ * With per-tree cache architecture, `ensureCached(tree, nodeId)` takes the
+ * RiskTree parameter to access tree-scoped cache via TreeCacheManager.
  */
 object RiskResultResolverSpec extends ZIOSpecDefault {
 
@@ -41,22 +45,31 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
     maxLoss = Some(20000L)
   )
 
-  val testTree: RiskNode = RiskPortfolio.unsafeApply(
+  val rootNode: RiskNode = RiskPortfolio.unsafeApply(
     id = "root",
     name = "Root Portfolio",
     children = Array(risk1Leaf, risk2Leaf)
   )
 
-  val testIndex: TreeIndex = TreeIndex.fromTree(testTree)
+  val testIndex: TreeIndex = TreeIndex.fromTree(rootNode)
   val rootId = safeId("root")
   val risk1Id = safeId("risk1")
   val risk2Id = safeId("risk2")
 
+  // Create test RiskTree
+  val testTreeId: NonNegativeLong = 1L
+  val testTree = RiskTree(
+    id = testTreeId,
+    name = SafeName.SafeName("Test Tree".refineUnsafe),
+    nTrials = 1000,
+    root = rootNode,
+    index = testIndex
+  )
+
   // Test layer with all dependencies
-  val testLayer: ZLayer[Any, Throwable, RiskResultResolver & RiskResultCache] = 
-    ZLayer.make[RiskResultResolver & RiskResultCache](
-      RiskResultCache.layer,
-      ZLayer.succeed(testIndex),
+  val testLayer: ZLayer[Any, Throwable, RiskResultResolver & TreeCacheManager] = 
+    ZLayer.make[RiskResultResolver & TreeCacheManager](
+      TreeCacheManager.layer,
       ZLayer.succeed(TestConfigs.simulation),
       TestConfigs.telemetryLayer >>> TracingLive.console,
       TestConfigs.telemetryLayer >>> MetricsLive.console,
@@ -70,44 +83,49 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
       test("cache miss: simulates and caches result") {
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          cache <- ZIO.service[RiskResultCache]
+          cacheManager <- ZIO.service[TreeCacheManager]
+          cache <- cacheManager.cacheFor(testTreeId)
           
           // Verify cache is empty initially
           initialCached <- cache.get(risk1Id)
-          _ <- ZIO.succeed(assert(initialCached)(isNone))
+          _ <- ZIO.succeed(assertTrue(initialCached.isEmpty))
           
           // Call ensureCached - should simulate
-          result <- resolver.ensureCached(risk1Id)
+          result <- resolver.ensureCached(testTree, risk1Id)
           
           // Verify result is valid
-          _ <- ZIO.succeed(assert(result.name.value)(equalTo("Risk 1")))
-          _ <- ZIO.succeed(assert(result.nTrials)(isGreaterThan(0)))
+          _ <- ZIO.succeed(assertTrue(result.name.value == "risk1"))
+          _ <- ZIO.succeed(assertTrue(result.nTrials > 0))
           
           // Verify result is now cached
           cachedResult <- cache.get(risk1Id)
-          _ <- ZIO.succeed(assert(cachedResult)(isSome(equalTo(result))))
-        } yield assertCompletes
+        } yield assertTrue(
+          cachedResult.isDefined,
+          cachedResult.get == result
+        )
       },
       
       test("cache hit: returns cached result without simulation") {
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          cache <- ZIO.service[RiskResultCache]
+          cacheManager <- ZIO.service[TreeCacheManager]
+          cache <- cacheManager.cacheFor(testTreeId)
           
           // First call: simulate and cache
-          firstResult <- resolver.ensureCached(risk1Id)
+          firstResult <- resolver.ensureCached(testTree, risk1Id)
           
           // Manually verify what's in cache before second call
           cachedBefore <- cache.get(risk1Id)
-          _ <- ZIO.succeed(assert(cachedBefore)(isSome))
+          _ <- ZIO.succeed(assertTrue(cachedBefore.isDefined))
           
           // Second call: should hit cache (same RiskResult instance)
-          secondResult <- resolver.ensureCached(risk1Id)
+          secondResult <- resolver.ensureCached(testTree, risk1Id)
           
           // Verify both results are identical
-          _ <- ZIO.succeed(assert(firstResult)(equalTo(secondResult)))
-          _ <- ZIO.succeed(assert(firstResult.outcomes)(equalTo(secondResult.outcomes)))
-        } yield assertCompletes
+        } yield assertTrue(
+          firstResult == secondResult,
+          firstResult.outcomes == secondResult.outcomes
+        )
       },
       
       test("simulates portfolio by aggregating children") {
@@ -115,15 +133,15 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           
           // Simulate root portfolio
-          rootResult <- resolver.ensureCached(rootId)
+          rootResult <- resolver.ensureCached(testTree, rootId)
           
+        } yield assertTrue(
           // Verify root aggregates child risks
-          _ <- ZIO.succeed(assert(rootResult.name.value)(equalTo("Root Portfolio")))
-          _ <- ZIO.succeed(assert(rootResult.nTrials)(isGreaterThan(0)))
-          
+          rootResult.name.value == "root",
+          rootResult.nTrials > 0,
           // Root should have outcomes (aggregated from children)
-          _ <- ZIO.succeed(assert(rootResult.outcomes.size)(isGreaterThanEqualTo(0)))
-        } yield assertCompletes
+          rootResult.outcomes.size >= 0
+        )
       }
     ),
     
@@ -132,63 +150,64 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
       test("caches multiple nodes in one call") {
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          cache <- ZIO.service[RiskResultCache]
+          cacheManager <- ZIO.service[TreeCacheManager]
+          cache <- cacheManager.cacheFor(testTreeId)
           
           // Call with multiple node IDs
-          results <- resolver.ensureCachedAll(Set(risk1Id, risk2Id))
-          
-          // Verify all results returned
-          _ <- ZIO.succeed(assert(results.size)(equalTo(2)))
-          _ <- ZIO.succeed(assert(results.contains(risk1Id))(isTrue))
-          _ <- ZIO.succeed(assert(results.contains(risk2Id))(isTrue))
+          results <- resolver.ensureCachedAll(testTree, Set(risk1Id, risk2Id))
           
           // Verify all are now cached
           cached1 <- cache.get(risk1Id)
           cached2 <- cache.get(risk2Id)
-          _ <- ZIO.succeed(assert(cached1)(isSome))
-          _ <- ZIO.succeed(assert(cached2)(isSome))
-        } yield assertCompletes
+        } yield assertTrue(
+          // Verify all results returned
+          results.size == 2,
+          results.contains(risk1Id),
+          results.contains(risk2Id),
+          cached1.isDefined,
+          cached2.isDefined
+        )
       },
       
       test("handles empty set") {
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          results <- resolver.ensureCachedAll(Set.empty)
-          _ <- ZIO.succeed(assert(results)(isEmpty))
-        } yield assertCompletes
+          results <- resolver.ensureCachedAll(testTree, Set.empty)
+        } yield assertTrue(results.isEmpty)
       },
       
       test("mix of cached and uncached nodes") {
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          cache <- ZIO.service[RiskResultCache]
           
           // Pre-cache risk1
-          _ <- resolver.ensureCached(risk1Id)
+          _ <- resolver.ensureCached(testTree, risk1Id)
           
           // Call with both cached and uncached
-          results <- resolver.ensureCachedAll(Set(risk1Id, risk2Id))
+          results <- resolver.ensureCachedAll(testTree, Set(risk1Id, risk2Id))
           
+        } yield assertTrue(
           // Verify both returned
-          _ <- ZIO.succeed(assert(results.size)(equalTo(2)))
-          _ <- ZIO.succeed(assert(results.contains(risk1Id))(isTrue))
-          _ <- ZIO.succeed(assert(results.contains(risk2Id))(isTrue))
-        } yield assertCompletes
+          results.size == 2,
+          results.contains(risk1Id),
+          results.contains(risk2Id)
+        )
       }
     ),
     
     suite("error handling")(
       
-      test("fails when node not found in index") {
+      test("fails when node not found in tree") {
         val invalidId = safeId("nonexistent")
         
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          result <- resolver.ensureCached(invalidId).exit
+          result <- resolver.ensureCached(testTree, invalidId).exit
           
-          // Should fail with validation error
-          _ <- ZIO.succeed(assert(result)(fails(anything)))
-        } yield assertCompletes
+        } yield assertTrue(
+          // Should fail with some error
+          result.isFailure
+        )
       }
     ),
     
@@ -201,9 +220,9 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           
           // This should trigger simulation and record metrics
-          _ <- resolver.ensureCached(risk1Id)
+          _ <- resolver.ensureCached(testTree, risk1Id)
           
-          // Telemetry is recorded via TestTelemetry layer
+          // Telemetry is recorded via TracingLive.console
           // In a full implementation, we would assert on captured spans/metrics
         } yield assertCompletes
       },
@@ -213,10 +232,10 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           
           // First call: cache_hit = false
-          _ <- resolver.ensureCached(risk1Id)
+          _ <- resolver.ensureCached(testTree, risk1Id)
           
           // Second call: cache_hit = true
-          _ <- resolver.ensureCached(risk1Id)
+          _ <- resolver.ensureCached(testTree, risk1Id)
           
           // Telemetry assertions would go here if we had test instrumentation
         } yield assertCompletes
@@ -228,22 +247,23 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
       test("same node produces identical results across calls") {
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          cache <- ZIO.service[RiskResultCache]
+          cacheManager <- ZIO.service[TreeCacheManager]
           
           // Clear cache to force simulation
-          _ <- cache.clear
+          _ <- cacheManager.onTreeStructureChanged(testTreeId)
           
           // Simulate twice (with cache clearing)
-          result1 <- resolver.ensureCached(risk1Id)
-          _ <- cache.clear
-          result2 <- resolver.ensureCached(risk1Id)
+          result1 <- resolver.ensureCached(testTree, risk1Id)
+          _ <- cacheManager.onTreeStructureChanged(testTreeId)
+          result2 <- resolver.ensureCached(testTree, risk1Id)
           
+        } yield assertTrue(
           // Should be identical due to fixed seeds
-          _ <- ZIO.succeed(assert(result1.outcomes)(equalTo(result2.outcomes)))
-          _ <- ZIO.succeed(assert(result1.nTrials)(equalTo(result2.nTrials)))
-        } yield assertCompletes
+          result1.outcomes == result2.outcomes,
+          result1.nTrials == result2.nTrials
+        )
       }
     )
     
-  ).provide(testLayer)
+  ).provide(testLayer) @@ TestAspect.sequential
 }

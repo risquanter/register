@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
-import com.risquanter.register.domain.data.iron.{PositiveInt, SafeId}
+import com.risquanter.register.domain.data.iron.PositiveInt
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
@@ -18,12 +18,13 @@ import zio.prelude.Identity
   * Live implementation of RiskResultResolver (ADR-015).
   *
   * Dependencies:
-  * - RiskResultCache: Pure storage for cached results
+  * - TreeCacheManager: Per-tree cache management
   * - SimulationConfig: Simulation parameters (nTrials, parallelism)
   * - Tracing: OpenTelemetry tracing for observability
   * - Meter: Metrics instrumentation
   *
-  * TreeIndex is now obtained from RiskTree parameter per operation (tree-scoped design).
+  * TreeIndex is obtained from RiskTree parameter per operation (tree-scoped design).
+  * Cache is obtained from TreeCacheManager using tree.id.
   * Simulation parameters are read from config at construction time.
   * Seeds are hardwired for now (TODO: add to config when reproducibility API is defined).
   *
@@ -32,7 +33,7 @@ import zio.prelude.Identity
   * - Metrics: simulation duration histogram, trials counter
   */
 final case class RiskResultResolverLive(
-    cache: RiskResultCache,
+    cacheManager: TreeCacheManager,
     config: SimulationConfig,
     tracing: Tracing,
     simulationDuration: Histogram[Double],
@@ -49,13 +50,15 @@ final case class RiskResultResolverLive(
   override def ensureCached(tree: RiskTree, nodeId: NodeId): Task[RiskResult] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
-        _ <- tracing.setAttribute("node_id", nodeId.value.toString)
+        _         <- tracing.setAttribute("tree_id", tree.id.toString)
+        _         <- tracing.setAttribute("node_id", nodeId.value.toString)
+        cache     <- cacheManager.cacheFor(tree.id)
         resultOpt <- cache.get(nodeId)
         result <- resultOpt match {
           case Some(cached) =>
             tracing.setAttribute("cache_hit", true) *> ZIO.succeed(cached)
           case None =>
-            tracing.setAttribute("cache_hit", false) *> simulateSubtree(tree.index, nodeId)
+            tracing.setAttribute("cache_hit", false) *> simulateSubtree(tree, nodeId)
         }
       } yield result
     }
@@ -67,7 +70,7 @@ final case class RiskResultResolverLive(
     * Simulate subtree rooted at nodeId, caching all results.
     * Wraps simulation in span with timing metrics.
     */
-  private def simulateSubtree(treeIndex: TreeIndex, nodeId: NodeId): Task[RiskResult] =
+  private def simulateSubtree(tree: RiskTree, nodeId: NodeId): Task[RiskResult] =
     tracing.span("simulateSubtree", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value.toString)
@@ -77,14 +80,15 @@ final case class RiskResultResolverLive(
         
         startTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
         
-        node <- ZIO.fromOption(treeIndex.nodes.get(nodeId))
+        node <- ZIO.fromOption(tree.index.nodes.get(nodeId))
           .orElseFail(ValidationFailed(List(ValidationError(
             field = "nodeId",
             code = ValidationErrorCode.CONSTRAINT_VIOLATION,
             message = s"Node not found in tree index: $nodeId"
           ))))
         
-        result <- simulateNode(node)
+        cache  <- cacheManager.cacheFor(tree.id)
+        result <- simulateNode(tree, cache, node)
         
         endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
         durationMs = endTime - startTime
@@ -101,17 +105,17 @@ final case class RiskResultResolverLive(
       trialsCounter.add(nTrials.toLong, attrs)
   }
 
-  private def simulateNode(node: RiskNode): Task[RiskResult] =
+  private def simulateNode(tree: RiskTree, cache: RiskResultCache, node: RiskNode): Task[RiskResult] =
     node match {
       case leaf: RiskLeaf =>
-        simulateLeaf(leaf)
+        simulateLeaf(cache, leaf)
 
       case portfolio: RiskPortfolio =>
         for
           childResults <- ZIO.foreach(portfolio.children.toList) { child =>
             cache.get(child.id).flatMap {
               case Some(cached) => ZIO.succeed(cached)
-              case None         => simulateNode(child)
+              case None         => simulateNode(tree, cache, child)
             }
           }
           combined <- ZIO.attempt {
@@ -128,7 +132,7 @@ final case class RiskResultResolverLive(
         yield combined
     }
 
-  private def simulateLeaf(leaf: RiskLeaf): Task[RiskResult] =
+  private def simulateLeaf(cache: RiskResultCache, leaf: RiskLeaf): Task[RiskResult] =
     for
       samplerAndProv <- Simulator.createSamplerFromLeaf(leaf, includeProvenance = false, seed3, seed4)
       (sampler, _) = samplerAndProv
@@ -152,15 +156,16 @@ object RiskResultResolverLive {
   }
 
   /**
-    * Create ZLayer for RiskResultResolver with telemetry (no longer depends on TreeIndex).
+    * Create ZLayer for RiskResultResolver with telemetry.
+    * Uses TreeCacheManager for per-tree cache access.
     */
-  val layer: ZLayer[RiskResultCache & SimulationConfig & Tracing & Meter, Throwable, RiskResultResolver] =
+  val layer: ZLayer[TreeCacheManager & SimulationConfig & Tracing & Meter, Throwable, RiskResultResolver] =
     ZLayer.fromZIO {
       for
-        cache     <- ZIO.service[RiskResultCache]
-        config    <- ZIO.service[SimulationConfig]
-        tracing   <- ZIO.service[Tracing]
-        meter     <- ZIO.service[Meter]
+        cacheManager <- ZIO.service[TreeCacheManager]
+        config       <- ZIO.service[SimulationConfig]
+        tracing      <- ZIO.service[Tracing]
+        meter        <- ZIO.service[Meter]
         
         // Create metric instruments
         simDuration <- meter.histogram(
@@ -173,6 +178,6 @@ object RiskResultResolverLive {
           Some(MetricNames.trialsUnit),
           Some(MetricNames.trialsDesc)
         )
-      yield RiskResultResolverLive(cache, config, tracing, simDuration, trials)
+      yield RiskResultResolverLive(cacheManager, config, tracing, simDuration, trials)
     }
 }

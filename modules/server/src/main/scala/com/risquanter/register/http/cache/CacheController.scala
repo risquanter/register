@@ -2,16 +2,27 @@ package com.risquanter.register.http.cache
 
 import zio.*
 import sttp.tapir.server.ServerEndpoint
+import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.http.controllers.BaseController
-import com.risquanter.register.services.cache.RiskResultCache
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.services.cache.TreeCacheManager
+import com.risquanter.register.domain.data.iron.NonNegativeLong
 
 /**
   * Controller for cache management endpoints.
   *
   * Per ADR-004a-proposal: "Controllers wire endpoints to services"
-  * This controller connects cache management endpoints to RiskResultCache service.
+  * This controller connects cache management endpoints to TreeCacheManager service.
+  *
+  * == Tree-Scoped Design ==
+  *
+  * Cache operations are scoped to individual trees via path parameter:
+  * - GET  /risk-trees/{treeId}/cache/stats
+  * - GET  /risk-trees/{treeId}/cache/nodes
+  * - DELETE /risk-trees/{treeId}/cache
+  *
+  * Global clear:
+  * - DELETE /cache/clear-all
   *
   * == Security Model (ADR-012 Compliant) ==
   *
@@ -19,96 +30,88 @@ import com.risquanter.register.domain.tree.NodeId
   * service mesh layer (Istio + OPA), not in application code.
   *
   * - Development: Endpoints unrestricted (no mesh)
-  * - Production: Mesh enforces `admin` role requirement via:
-  *   - Istio AuthorizationPolicy on `/cache/` paths
-  *   - OPA ext_authz checking JWT claims
-  *
-  * See `CacheEndpoints.scala` for policy examples.
-  *
-  * == Cache Operations ==
-  *
-  * - GET /cache/stats - Cache size and metadata
-  * - GET /cache/nodes - List of cached node IDs
-  * - DELETE /cache - Clear entire cache
-  * - DELETE /cache/node/nodeId - Invalidate node + ancestors
+  * - Production: Mesh enforces `admin` role requirement
   */
-class CacheController private (cache: RiskResultCache)
+class CacheController private (cacheManager: TreeCacheManager)
     extends BaseController
     with CacheEndpoints {
 
   /**
-    * Get cache statistics.
+    * Get cache statistics for a specific tree.
     */
   val getStats: ServerEndpoint[Any, Task] =
-    cacheStatsEndpoint.serverLogicSuccess { _ =>
+    cacheStatsEndpoint.serverLogicSuccess { treeId =>
       for
-        size <- cache.size
+        cache <- cacheManager.cacheFor(treeId)
+        size  <- cache.size
       yield CacheStatsResponse(
+        treeId = treeId: Long,
         size = size,
         capacityNote = "Unbounded cache (entries persist until invalidation)"
       )
     }
 
   /**
-    * List all cached node IDs.
+    * List all cached node IDs for a specific tree.
     */
   val getNodes: ServerEndpoint[Any, Task] =
-    cacheNodesEndpoint.serverLogicSuccess { _ =>
+    cacheNodesEndpoint.serverLogicSuccess { treeId =>
       for
-        ids <- cache.keys
+        cache <- cacheManager.cacheFor(treeId)
+        ids   <- cache.keys
       yield CacheNodesResponse(
+        treeId = treeId: Long,
         nodeIds = ids.map(_.value),
         count = ids.size
       )
     }
 
   /**
-    * Clear entire cache.
-    *
-    * Uses atomic clearAndGetSize to ensure the reported count exactly
-    * matches the number of entries removed (no race window).
+    * Clear cache for a specific tree.
     */
   val clearCache: ServerEndpoint[Any, Task] =
-    cacheClearEndpoint.serverLogicSuccess { _ =>
+    cacheClearEndpoint.serverLogicSuccess { treeId =>
       for
-        size <- cache.clearAndGetSize
+        size <- cacheManager.onTreeStructureChanged(treeId)
       yield CacheClearResponse(
+        treeId = treeId: Long,
         cleared = size,
-        message = s"Cleared $size cache entries"
+        message = s"Cleared $size cache entries for tree $treeId"
       )
     }
 
   /**
-    * Invalidate cache for a specific node and ancestors.
+    * Clear all caches globally.
     */
-  val invalidateNode: ServerEndpoint[Any, Task] =
-    cacheInvalidateNodeEndpoint.serverLogicSuccess { nodeId =>
+  val clearAllCaches: ServerEndpoint[Any, Task] =
+    cacheClearAllEndpoint.serverLogicSuccess { _ =>
       for
-        invalidated <- cache.invalidate(nodeId)
-      yield CacheInvalidateResponse(
-        invalidatedNodeIds = invalidated.map(_.value),
-        count = invalidated.size
+        (treesCleared, entriesCleared) <- cacheManager.clearAll
+      yield CacheClearAllResponse(
+        treesCleared = treesCleared,
+        totalEntriesCleared = entriesCleared,
+        message = s"Cleared $entriesCleared entries across $treesCleared trees"
       )
     }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(getStats, getNodes, clearCache, invalidateNode)
+    List(getStats, getNodes, clearCache, clearAllCaches)
 }
 
 object CacheController {
 
   /**
-    * Create CacheController with RiskResultCache dependency.
+    * Create CacheController with TreeCacheManager dependency.
     */
-  val layer: ZLayer[RiskResultCache, Nothing, CacheController] =
+  val layer: ZLayer[TreeCacheManager, Nothing, CacheController] =
     ZLayer.fromZIO {
       for
-        cache <- ZIO.service[RiskResultCache]
-      yield new CacheController(cache)
+        cacheManager <- ZIO.service[TreeCacheManager]
+      yield new CacheController(cacheManager)
     }
 
   /**
-    * Create CacheController directly from RiskResultCache.
+    * Create CacheController directly from TreeCacheManager.
     */
-  def make(cache: RiskResultCache): CacheController = new CacheController(cache)
+  def make(cacheManager: TreeCacheManager): CacheController = new CacheController(cacheManager)
 }

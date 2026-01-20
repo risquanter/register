@@ -61,7 +61,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       minLoss = Some(1000L), 
       maxLoss = Some(10000L)
     ).toEither.getOrElse(throw new RuntimeException("Invalid default root"))
-    val treeIndexLayer = ZLayer.succeed(com.risquanter.register.domain.tree.TreeIndex.fromTree(defaultRoot))
     
     ZLayer.make[RiskTreeService](
       RiskTreeServiceLive.layer,
@@ -69,9 +68,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       ZLayer.succeed(makeStubRepo()),
       com.risquanter.register.configs.TestConfigs.simulationLayer,
       com.risquanter.register.services.SimulationSemaphore.layer,
-      com.risquanter.register.services.cache.RiskResultCache.layer,
+      com.risquanter.register.services.cache.TreeCacheManager.layer,
       com.risquanter.register.services.cache.RiskResultResolverLive.layer,
-      treeIndexLayer,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
     )

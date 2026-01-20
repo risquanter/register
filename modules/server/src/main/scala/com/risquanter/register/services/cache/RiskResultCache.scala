@@ -2,16 +2,17 @@ package com.risquanter.register.services.cache
 
 import zio.*
 import com.risquanter.register.domain.data.RiskResult
-import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
+import com.risquanter.register.domain.tree.NodeId
 
 /**
   * RiskResult cache service (ADR-014).
   *
-  * Caches simulation outcomes (RiskResult) by node ID.
+  * Pure storage for simulation outcomes (RiskResult) by node ID.
+  * This is a simple cache with no tree-awareness — invalidation logic
+  * is handled by TreeCacheManager which uses TreeIndex.
+  *
   * LEC curves are computed at render time from cached outcomes using
   * LECGenerator.generateCurvePoints or generateCurvePointsMulti.
-  *
-  * When a node changes, uses TreeIndex to invalidate affected ancestors in O(depth) time.
   *
   * Thread-safe via ZIO Ref.
   *
@@ -24,45 +25,10 @@ import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
   * By caching RiskResult (simulation outcomes), we can compute exact exceedance
   * probabilities at any tick value using RiskResult.probOfExceedance(loss).
   *
-  * == Cache Invalidation Semantics ==
+  * == Cache Invalidation ==
   *
-  * When a leaf node changes, its ancestors' cached results become stale
-  * because aggregate distributions are computed bottom-up. This cache automatically
-  * invalidates the entire ancestor path when `invalidate` is called.
-  *
-  * Example tree:
-  * {{{
-  *        portfolio (root)
-  *           /    \
-  *      ops-risk   market-risk
-  *        /   \
-  *    cyber  hardware   <-- leaf nodes
-  * }}}
-  *
-  * Example: Hardware parameters change, requiring parent recalculation:
-  * {{{
-  * for
-  *   // 1. Initial state: cache populated after simulation
-  *   _           <- RiskResultCache.put(hardware, hardwareResult)
-  *   _           <- RiskResultCache.put(cyber, cyberResult)
-  *   _           <- RiskResultCache.put(opsRisk, opsRiskResult)    // aggregated from children
-  *   _           <- RiskResultCache.put(portfolio, portfolioResult) // aggregated from all
-  *   
-  *   // 2. User modifies hardware node (e.g., changes probability)
-  *   //    Hardware's result is now stale, AND so are all ancestors
-  *   
-  *   // 3. Invalidate hardware → clears hardware, ops-risk, portfolio
-  *   invalidated <- RiskResultCache.invalidate(hardware)
-  *   // invalidated = List(portfolio, ops-risk, hardware)  (root to leaf)
-  *   
-  *   // 4. market-risk cache is PRESERVED (not an ancestor of hardware)
-  *   stillCached <- RiskResultCache.contains(marketRisk)
-  *   // stillCached = true
-  * yield invalidated
-  * }}}
-  *
-  * This enables O(depth) invalidation instead of clearing the entire cache,
-  * preserving expensive simulation results for unaffected subtrees.
+  * Invalidation (walking ancestor paths) is handled by TreeCacheManager,
+  * which calls removeAll() with the computed path. This cache is tree-agnostic.
   */
 trait RiskResultCache {
 
@@ -90,15 +56,14 @@ trait RiskResultCache {
   def remove(nodeId: NodeId): UIO[Unit]
 
   /**
-    * Invalidate cache for a node and all its ancestors.
+    * Remove multiple entries from cache.
     *
-    * Uses TreeIndex to walk up the tree and clear cache entries
-    * for the entire affected path.
+    * Used by TreeCacheManager for ancestor-path invalidation.
     *
-    * @param nodeId Changed node identifier (SafeId.SafeId)
-    * @return List of invalidated node IDs (top-down: root to nodeId)
+    * @param nodeIds Node identifiers to remove
+    * @return Number of entries actually removed
     */
-  def invalidate(nodeId: NodeId): UIO[List[NodeId]]
+  def removeAll(nodeIds: List[NodeId]): UIO[Int]
 
   /**
     * Clear all cache entries.
@@ -142,56 +107,26 @@ trait RiskResultCache {
 object RiskResultCache {
   
   /**
-    * Create live implementation with empty cache.
+    * Create a new RiskResultCache instance with empty cache.
     *
-    * @param treeIndex Tree index for ancestor lookup
-    * @return ZLayer providing RiskResultCache
+    * This is NOT a ZLayer - caches are created per-tree by TreeCacheManager.
+    *
+    * @return Effect producing a new RiskResultCache
     */
-  def layer: ZLayer[TreeIndex, Nothing, RiskResultCache] =
-    ZLayer.fromZIO {
-      for
-        treeIndex <- ZIO.service[TreeIndex]
-        cache     <- Ref.make(Map.empty[NodeId, RiskResult])
-      yield RiskResultCacheLive(treeIndex, cache)
-    }
+  def make: UIO[RiskResultCache] =
+    Ref.make(Map.empty[NodeId, RiskResult]).map(RiskResultCacheLive(_))
 
-  // Accessor methods for ZIO service pattern
-  def get(nodeId: NodeId): URIO[RiskResultCache, Option[RiskResult]] =
-    ZIO.serviceWithZIO[RiskResultCache](_.get(nodeId))
-
-  def put(nodeId: NodeId, result: RiskResult): URIO[RiskResultCache, Unit] =
-    ZIO.serviceWithZIO[RiskResultCache](_.put(nodeId, result))
-
-  def remove(nodeId: NodeId): URIO[RiskResultCache, Unit] =
-    ZIO.serviceWithZIO[RiskResultCache](_.remove(nodeId))
-
-  def invalidate(nodeId: NodeId): URIO[RiskResultCache, List[NodeId]] =
-    ZIO.serviceWithZIO[RiskResultCache](_.invalidate(nodeId))
-
-  def clear: URIO[RiskResultCache, Unit] =
-    ZIO.serviceWithZIO[RiskResultCache](_.clear)
-
-  def clearAndGetSize: URIO[RiskResultCache, Int] =
-    ZIO.serviceWithZIO[RiskResultCache](_.clearAndGetSize)
-
-  def size: URIO[RiskResultCache, Int] =
-    ZIO.serviceWithZIO[RiskResultCache](_.size)
-
-  def contains(nodeId: NodeId): URIO[RiskResultCache, Boolean] =
-    ZIO.serviceWithZIO[RiskResultCache](_.contains(nodeId))
-
-  def keys: URIO[RiskResultCache, List[NodeId]] =
-    ZIO.serviceWithZIO[RiskResultCache](_.keys)
+  // Accessor methods removed - use TreeCacheManager.cacheFor(treeId) instead
 }
 
 /**
   * Live implementation of RiskResultCache.
   *
-  * @param treeIndex Tree structure for ancestor lookup
+  * Pure storage with no tree-awareness.
+  *
   * @param cacheRef Thread-safe cache storage
   */
 final class RiskResultCacheLive(
-    treeIndex: TreeIndex,
     cacheRef: Ref[Map[NodeId, RiskResult]]
 ) extends RiskResultCache {
 
@@ -210,12 +145,12 @@ final class RiskResultCacheLive(
       _ <- ZIO.logDebug(s"RiskResultCache REMOVE: ${nodeId.value}")
     yield ()
 
-  override def invalidate(nodeId: NodeId): UIO[List[NodeId]] =
-    for
-      path <- ZIO.succeed(treeIndex.ancestorPath(nodeId))
-      _    <- cacheRef.update(cache => cache -- path)
-      _    <- ZIO.logInfo(s"RiskResultCache invalidated: ${path.map(_.value).mkString(" → ")}")
-    yield path
+  override def removeAll(nodeIds: List[NodeId]): UIO[Int] =
+    cacheRef.modify { cache =>
+      val toRemove = nodeIds.toSet
+      val removed = cache.keys.count(toRemove.contains)
+      (removed, cache -- toRemove)
+    }
 
   override def clear: UIO[Unit] =
     for

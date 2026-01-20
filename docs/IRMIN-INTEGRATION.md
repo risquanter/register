@@ -131,6 +131,24 @@ What's implemented now:
 - Parent-pointer index for O(depth) invalidation
 - LEC (Loss Exceedance Curve) cache keyed by path
 
+**Path Convention (Planned):**
+Irmin paths will encode `treeId` to enable tree-scoped operations:
+```
+/trees/{treeId}/nodes/{nodeId}
+
+Example:
+/trees/1/nodes/cyber-risk      ← treeId=1, nodeId="cyber-risk"
+/trees/1/nodes/ops-risk        ← treeId=1, nodeId="ops-risk"  
+/trees/2/nodes/cyber-risk      ← treeId=2 (different tree!)
+```
+
+This ensures:
+- Irmin watch notifications include treeId (parseable from path)
+- Cache invalidation targets the correct tree's cache
+- Node IDs (SafeId) only need to be unique within a tree, not globally
+
+**Note:** Irmin branches are reserved for scenario/what-if analysis (Phase 7), not for tree isolation.
+
 ### Phase 4: SSE Infrastructure
 
 Server-Sent Events for pushing updates to browsers:

@@ -31,7 +31,6 @@ class RiskTreeServiceLive private (
   executionService: SimulationExecutionService,
   config: SimulationConfig,
   resolver: RiskResultResolver,
-  treeIndex: TreeIndex,
   tracing: Tracing,
   semaphore: SimulationSemaphore,
   // Pre-created metric instruments (cached at construction time)
@@ -287,7 +286,7 @@ class RiskTreeServiceLive private (
         lecPoints = curvePoints.map { case (loss, prob) => LECPoint(loss, prob) }
         response = LECCurveResponse(
           id = nodeId.value,
-          name = result.name.value,
+          name = node.name,  // Use node.name (display name), not result.name (which is the ID)
           curve = lecPoints,
           quantiles = quantiles,
           childIds = childIds
@@ -608,13 +607,12 @@ object RiskTreeServiceLive {
     val trialsDesc = "Total number of simulation trials executed"
   }
   
-  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & RiskResultResolver & TreeIndex & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & RiskResultResolver & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       execService <- ZIO.service[SimulationExecutionService]
       config <- ZIO.service[SimulationConfig]
       resolver <- ZIO.service[RiskResultResolver]
-      treeIndex <- ZIO.service[TreeIndex]
       tracing <- ZIO.service[Tracing]
       semaphore <- ZIO.service[SimulationSemaphore]
       meter <- ZIO.service[Meter]
@@ -635,6 +633,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.trialsUnit),
         Some(MetricNames.trialsDesc)
       )
-    } yield new RiskTreeServiceLive(repo, execService, config, resolver, treeIndex, tracing, semaphore, opsCounter, simDuration, trials)
+    } yield new RiskTreeServiceLive(repo, execService, config, resolver, tracing, semaphore, opsCounter, simDuration, trials)
   }
 }

@@ -55,16 +55,13 @@ trait RiskResultResolver {
     */
   def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId]): Task[Map[NodeId, RiskResult]]
 }
-    */
-  def ensureCachedAll(nodeIds: Set[NodeId]): Task[Map[NodeId, RiskResult]]
-}
 
 object RiskResultResolver {
 
   // Accessor methods for ZIO service pattern
-  def ensureCached(nodeId: NodeId): ZIO[RiskResultResolver, Throwable, RiskResult] =
-    ZIO.serviceWithZIO[RiskResultResolver](_.ensureCached(nodeId))
+  def ensureCached(tree: RiskTree, nodeId: NodeId): ZIO[RiskResultResolver, Throwable, RiskResult] =
+    ZIO.serviceWithZIO[RiskResultResolver](_.ensureCached(tree, nodeId))
 
-  def ensureCachedAll(nodeIds: Set[NodeId]): ZIO[RiskResultResolver, Throwable, Map[NodeId, RiskResult]] =
-    ZIO.serviceWithZIO[RiskResultResolver](_.ensureCachedAll(nodeIds))
+  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId]): ZIO[RiskResultResolver, Throwable, Map[NodeId, RiskResult]] =
+    ZIO.serviceWithZIO[RiskResultResolver](_.ensureCachedAll(tree, nodeIds))
 }
