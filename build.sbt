@@ -130,6 +130,21 @@ lazy val server = (project in file("modules/server"))
   )
   .dependsOn(common.jvm)
 
+// Server integration tests (separate subproject)
+lazy val serverIt = (project in file("modules/server-it"))
+  .settings(
+    name := "register-server-it",
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio-test"          % zioVersion % Test,
+      "dev.zio" %% "zio-test-sbt"      % zioVersion % Test,
+      "dev.zio" %% "zio-test-magnolia" % zioVersion % Test
+    ),
+    publish / skip := true,
+    Test / fork := true,
+    Test / parallelExecution := false
+  )
+  .dependsOn(server % "compile->compile;test->test")
+
 // App module (ScalaJS frontend with Laminar)
 lazy val app = (project in file("modules/app"))
   .enablePlugins(ScalaJSPlugin)
@@ -158,5 +173,5 @@ lazy val root = (project in file("."))
   .settings(
     name := "register"
   )
-  .aggregate(server, app)
+  .aggregate(server, serverIt, app)
   .dependsOn(server)

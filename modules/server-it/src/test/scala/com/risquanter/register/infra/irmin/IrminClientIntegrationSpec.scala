@@ -10,11 +10,15 @@ import com.risquanter.register.domain.errors.IrminUnavailable
 /**
   * Integration tests for IrminClient.
   *
-  * These tests require a running Irmin container on port 9080.
-  * Start with: docker compose --profile persistence up -d
+  * PREREQUISITES:
+  *   These tests require a running Irmin container on port 9080.
+  *   Start with: docker compose --profile persistence up -d
+  *   Stop with:  docker compose --profile persistence down
   *
-  * To run only these tests:
-  *   sbt "server/testOnly *IrminClientIntegrationSpec"
+  * TO RUN:
+  *   sbt "serverIt/test"                              # Run all integration tests
+  *   sbt "serverIt/testOnly *IrminClient*"            # Run only Irmin tests
+  *   sbt "test"                                       # Run unit tests (excludes integration tests)
   *
   * NOTE: Tests use unique paths with timestamps to avoid conflicts from
   * Irmin's content-addressed storage returning cached commits for identical
