@@ -47,35 +47,37 @@ final case class RiskResultResolverLive(
   private val seed3: Long = 0L
   private val seed4: Long = 0L
 
-  override def ensureCached(tree: RiskTree, nodeId: NodeId): Task[RiskResult] =
+  override def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): Task[RiskResult] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
         _         <- tracing.setAttribute("tree_id", tree.id.toString)
         _         <- tracing.setAttribute("node_id", nodeId.value.toString)
+        _         <- tracing.setAttribute("include_provenance", includeProvenance)
         cache     <- cacheManager.cacheFor(tree.id)
         resultOpt <- cache.get(nodeId)
         result <- resultOpt match {
           case Some(cached) =>
             tracing.setAttribute("cache_hit", true) *> ZIO.succeed(cached)
           case None =>
-            tracing.setAttribute("cache_hit", false) *> simulateSubtree(tree, nodeId)
+            tracing.setAttribute("cache_hit", false) *> simulateSubtree(tree, nodeId, includeProvenance)
         }
       } yield result
     }
 
-  override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId]): Task[Map[NodeId, RiskResult]] =
-    ZIO.foreach(nodeIds.toList)(id => ensureCached(tree, id).map(id -> _)).map(_.toMap)
+  override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]] =
+    ZIO.foreach(nodeIds.toList)(id => ensureCached(tree, id, includeProvenance).map(id -> _)).map(_.toMap)
 
   /**
     * Simulate subtree rooted at nodeId, caching all results.
     * Wraps simulation in span with timing metrics.
     */
-  private def simulateSubtree(tree: RiskTree, nodeId: NodeId): Task[RiskResult] =
+  private def simulateSubtree(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean): Task[RiskResult] =
     tracing.span("simulateSubtree", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value.toString)
         _ <- tracing.setAttribute("n_trials", nTrials.toLong)
         _ <- tracing.setAttribute("parallelism", parallelism.toLong)
+        _ <- tracing.setAttribute("include_provenance", includeProvenance)
         _ <- tracing.addEvent("simulation_started")
         
         startTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
@@ -88,7 +90,7 @@ final case class RiskResultResolverLive(
           ))))
         
         cache  <- cacheManager.cacheFor(tree.id)
-        result <- simulateNode(tree, cache, node)
+        result <- simulateNode(tree, cache, node, includeProvenance)
         
         endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
         durationMs = endTime - startTime
@@ -105,17 +107,17 @@ final case class RiskResultResolverLive(
       trialsCounter.add(nTrials.toLong, attrs)
   }
 
-  private def simulateNode(tree: RiskTree, cache: RiskResultCache, node: RiskNode): Task[RiskResult] =
+  private def simulateNode(tree: RiskTree, cache: RiskResultCache, node: RiskNode, includeProvenance: Boolean): Task[RiskResult] =
     node match {
       case leaf: RiskLeaf =>
-        simulateLeaf(cache, leaf)
+        simulateLeaf(cache, leaf, includeProvenance)
 
       case portfolio: RiskPortfolio =>
         for
           childResults <- ZIO.foreach(portfolio.children.toList) { child =>
             cache.get(child.id).flatMap {
               case Some(cached) => ZIO.succeed(cached)
-              case None         => simulateNode(tree, cache, child)
+              case None         => simulateNode(tree, cache, child, includeProvenance)
             }
           }
           combined <- ZIO.attempt {
@@ -132,12 +134,12 @@ final case class RiskResultResolverLive(
         yield combined
     }
 
-  private def simulateLeaf(cache: RiskResultCache, leaf: RiskLeaf): Task[RiskResult] =
+  private def simulateLeaf(cache: RiskResultCache, leaf: RiskLeaf, includeProvenance: Boolean): Task[RiskResult] =
     for
-      samplerAndProv <- Simulator.createSamplerFromLeaf(leaf, includeProvenance = false, seed3, seed4)
-      (sampler, _) = samplerAndProv
+      samplerAndProv <- Simulator.createSamplerFromLeaf(leaf, includeProvenance, seed3, seed4)
+      (sampler, provenanceOpt) = samplerAndProv
       trials <- Simulator.performTrials(sampler, nTrials, parallelism)
-      result = RiskResult(leaf.id, trials, nTrials)
+      result = RiskResult(leaf.id, trials, nTrials, provenanceOpt.toList)
       _ <- cache.put(leaf.id, result)
     yield result
 }

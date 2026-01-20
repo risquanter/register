@@ -55,7 +55,6 @@ object Application extends ZIOAppDefault {
       // Concurrency control - limits concurrent simulations (requires SimulationConfig)
       com.risquanter.register.services.SimulationSemaphore.layer,
       RiskTreeRepositoryInMemory.layer,
-      com.risquanter.register.services.SimulationExecutionService.live,
       RiskTreeServiceLive.layer,  // Requires SimulationConfig + Tracing + SimulationSemaphore + Meter
       // Per-tree cache management (ADR-014)
       TreeCacheManager.layer,

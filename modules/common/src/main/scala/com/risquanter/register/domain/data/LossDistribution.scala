@@ -81,7 +81,8 @@ sealed abstract class LossDistribution(
 case class RiskResult(
   override val name: SafeId.SafeId,
   override val outcomes: Map[TrialId, Loss],
-  override val nTrials: Int
+  override val nTrials: Int,
+  provenances: List[NodeProvenance] = Nil
 ) extends LossDistribution(name, outcomes, nTrials, LossDistributionType.Leaf) {
   
   override lazy val outcomeCount: TreeMap[Loss, Int] = 
@@ -104,7 +105,7 @@ case class RiskResult(
 object RiskResult {
   /** Empty result (no losses occurred) */
   def empty(name: SafeId.SafeId, nTrials: Int): RiskResult = 
-    RiskResult(name, Map.empty, nTrials)
+    RiskResult(name, Map.empty, nTrials, Nil)
   
   /**
    * ZIO Prelude Identity instance for RiskResult (combines Associative + Identity).
@@ -124,7 +125,7 @@ object RiskResult {
       throw new IllegalStateException("Invalid empty SafeId - should never happen")
     )
     
-    def identity: RiskResult = RiskResult(emptyId, Map.empty, 0)
+    def identity: RiskResult = RiskResult(emptyId, Map.empty, 0, Nil)
     
     def combine(a: => RiskResult, b: => RiskResult): RiskResult = {
       require(a.nTrials == b.nTrials, s"Cannot merge results with different trial counts: ${a.nTrials} vs ${b.nTrials}")
@@ -133,19 +134,20 @@ object RiskResult {
       RiskResult(
         combinedName,
         LossDistribution.merge(a, b),
-        a.nTrials
+        a.nTrials,
+        a.provenances ++ b.provenances  // Accumulate provenances from children
       )
     }
   }
   
   /** Value equality for RiskResult */
   given Equal[RiskResult] = Equal.make { (a, b) =>
-    a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.name == b.name
+    a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.name == b.name && a.provenances == b.provenances
   }
   
   /** Human-readable representation */
   given Debug[RiskResult] = Debug.make { r =>
-    s"RiskResult(${r.name}, ${r.outcomes.size} outcomes, ${r.nTrials} trials, max=${r.maxLoss})"
+    s"RiskResult(${r.name}, ${r.outcomes.size} outcomes, ${r.nTrials} trials, max=${r.maxLoss}, ${r.provenances.size} provenances)"
   }
 }
 

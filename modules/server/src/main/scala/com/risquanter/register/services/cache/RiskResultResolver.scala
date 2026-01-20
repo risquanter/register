@@ -38,9 +38,10 @@ trait RiskResultResolver {
     *
     * @param tree Risk tree containing the node (provides TreeIndex)
     * @param nodeId Node identifier
+    * @param includeProvenance Whether to capture provenance metadata (default: false)
     * @return RiskResult (from cache or freshly simulated)
     */
-  def ensureCached(tree: RiskTree, nodeId: NodeId): Task[RiskResult]
+  def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): Task[RiskResult]
 
   /**
     * Batch version of ensureCached for multiple nodes.
@@ -51,17 +52,18 @@ trait RiskResultResolver {
     *
     * @param tree Risk tree containing the nodes
     * @param nodeIds Set of node identifiers
+    * @param includeProvenance Whether to capture provenance metadata (default: false)
     * @return Map from nodeId to RiskResult
     */
-  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId]): Task[Map[NodeId, RiskResult]]
+  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]]
 }
 
 object RiskResultResolver {
 
   // Accessor methods for ZIO service pattern
-  def ensureCached(tree: RiskTree, nodeId: NodeId): ZIO[RiskResultResolver, Throwable, RiskResult] =
-    ZIO.serviceWithZIO[RiskResultResolver](_.ensureCached(tree, nodeId))
+  def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): ZIO[RiskResultResolver, Throwable, RiskResult] =
+    ZIO.serviceWithZIO[RiskResultResolver](_.ensureCached(tree, nodeId, includeProvenance))
 
-  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId]): ZIO[RiskResultResolver, Throwable, Map[NodeId, RiskResult]] =
-    ZIO.serviceWithZIO[RiskResultResolver](_.ensureCachedAll(tree, nodeIds))
+  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], includeProvenance: Boolean = false): ZIO[RiskResultResolver, Throwable, Map[NodeId, RiskResult]] =
+    ZIO.serviceWithZIO[RiskResultResolver](_.ensureCachedAll(tree, nodeIds, includeProvenance))
 }

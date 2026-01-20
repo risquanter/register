@@ -2,7 +2,7 @@ package com.risquanter.register.services.helper
 
 import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
-import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, NodeProvenance, TreeProvenance, ExpertDistributionParams, LognormalDistributionParams}
+import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, NodeProvenance, ExpertDistributionParams, LognormalDistributionParams}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.iron.{PositiveInt, Probability, SafeId}
 import io.github.iltotore.iron.refineUnsafe
@@ -153,119 +153,6 @@ object Simulator {
         val trials = performTrialsSync(sampler, nTrials)
         RiskResult(sampler.id, trials, n)
       }
-    }
-  }
-  
-  // ══════════════════════════════════════════════════════════════════
-  // Recursive Tree Simulation
-  // ══════════════════════════════════════════════════════════════════
-  
-  /**
-   * Recursively simulate risk tree with bottom-up aggregation.
-   * 
-   * Algorithm:
-   * 1. Leaf: Create sampler, run trials → RiskTreeResult.Leaf
-   * 2. RiskPortfolio: Recurse on children, aggregate results → RiskTreeResult.Branch
-   * 
-   * Aggregation uses Identity[RiskResult].combine (outer join semantics).
-   * All nodes in tree share same trial sequence for consistency.
-   * 
-   * @param node Root node of tree (or subtree)
-   * @param nTrials Number of Monte Carlo trials (must be positive)
-   * @param parallelism Max concurrent child simulations (must be positive)
-   * @param includeProvenance Whether to capture provenance metadata
-   * @param seed3 Global seed 3 for HDR random number generation
-   * @param seed4 Global seed 4 for HDR random number generation
-   * @return Tuple of (RiskTreeResult, Option[TreeProvenance])
-   */
-  def simulateTree(
-    node: RiskNode,
-    nTrials: PositiveInt,
-    parallelism: PositiveInt = 8.refineUnsafe,
-    includeProvenance: Boolean = false,
-    seed3: Long = 0L,
-    seed4: Long = 0L
-  ): Task[(RiskTreeResult, Option[TreeProvenance])] = {
-    val n: Int = nTrials
-    val p: Int = parallelism
-    simulateTreeInternal(node, nTrials, parallelism, includeProvenance, seed3, seed4, Map.empty).map {
-      case (result, provenances) =>
-        val treeProvenance = if (includeProvenance) {
-          Some(TreeProvenance(
-            treeId = 0L, // Will be set by service layer with actual tree ID
-            globalSeeds = (seed3, seed4),
-            nTrials = n,
-            parallelism = p,
-            nodeProvenances = provenances
-          ))
-        } else None
-        (result, treeProvenance)
-    }
-  }
-  
-  /**
-   * Internal recursive tree simulation that accumulates provenances.
-   */
-  private def simulateTreeInternal(
-    node: RiskNode,
-    nTrials: PositiveInt,
-    parallelism: PositiveInt,
-    includeProvenance: Boolean,
-    seed3: Long,
-    seed4: Long,
-    provenances: Map[SafeId.SafeId, NodeProvenance]
-  ): Task[(RiskTreeResult, Map[SafeId.SafeId, NodeProvenance])] = {
-    val n: Int = nTrials
-    node match {
-      case leaf: RiskLeaf =>
-        // Terminal node: create sampler and simulate
-        val p: Int = parallelism
-        for {
-          samplerAndProv <- createSamplerFromLeaf(leaf, includeProvenance, seed3, seed4)
-          (sampler, maybeProv) = samplerAndProv
-          trials <- performTrials(sampler, nTrials, p)
-          // RiskTreeResult uses String id for wire format (deprecated - see ADR-015)
-          result = RiskTreeResult.Leaf(leaf.id.value.toString, RiskResult(leaf.id, trials, n))
-          updatedProvenances = maybeProv match {
-            case Some(prov) => provenances + (leaf.id -> prov)
-            case None => provenances
-          }
-        } yield (result, updatedProvenances)
-      
-      case portfolio: RiskPortfolio =>
-        // Branch node: recurse on children, then aggregate
-        for {
-          // Validate portfolio has children
-          _ <- ZIO.when(portfolio.children.isEmpty)(
-            ZIO.fail(ValidationFailed(List(ValidationError(
-              field = s"riskPortfolio.${portfolio.id}.children",
-              code = ValidationErrorCode.EMPTY_COLLECTION,
-              message = s"RiskPortfolio '${portfolio.id}' has no children"
-            ))))
-          )
-          
-          // Recursively simulate all children in parallel
-          childResultsWithProv <- ZIO.collectAllPar(
-            portfolio.children.map(child => simulateTreeInternal(child, nTrials, parallelism, includeProvenance, seed3, seed4, provenances))
-          ).withParallelism(parallelism)
-          
-          // Separate results and provenances
-          childResults = childResultsWithProv.map(_._1)
-          mergedProvenances = childResultsWithProv.foldLeft(provenances)((acc, tuple) => acc ++ tuple._2)
-          
-          // Aggregate children using Identity.combine
-          aggregated <- ZIO.attempt {
-            val childRiskResults = childResults.map(_.result)
-            val combined = childRiskResults.reduce((a, b) => Identity[RiskResult].combine(a, b))
-            
-            // Update name to portfolio ID (String for wire format - deprecated, see ADR-015)
-            RiskTreeResult.Branch(
-              id = portfolio.id.value.toString,
-              result = combined.copy(name = portfolio.id),
-              children = childResults.toVector
-            )
-          }
-        } yield (aggregated, mergedProvenances)
     }
   }
   

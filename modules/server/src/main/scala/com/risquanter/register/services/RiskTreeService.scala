@@ -2,8 +2,8 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.domain.data.{RiskTree, RiskTreeWithLEC, LECCurveResponse, LECPoint}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong}
+import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint}
+import com.risquanter.register.domain.data.iron.NonNegativeLong
 import com.risquanter.register.domain.tree.NodeId
 
 /** Service layer for RiskTree business logic.
@@ -84,24 +84,4 @@ trait RiskTreeService {
     * @return Map from nodeId to curve points
     */
   def getLECCurvesMulti(nodeIds: Set[NodeId]): Task[Map[NodeId, Vector[LECPoint]]]
-  
-  // ========================================
-  // DEPRECATED: Will be removed in next phase
-  // ========================================
-  
-  /** TEMPORARY STUB: Deprecated, use getLECCurve instead.
-    * 
-    * @deprecated Use node-based APIs: getLECCurve, probOfExceedance, getLECCurvesMulti
-    */
-  @deprecated("Use getLECCurve(nodeId) instead", "0.2.0")
-  def computeLEC(
-    id: NonNegativeLong,
-    nTrialsOverride: Option[PositiveInt],
-    parallelism: PositiveInt,
-    depth: NonNegativeInt,
-    includeProvenance: Boolean,
-    seed3: Long = 0L,
-    seed4: Long = 0L
-  ): Task[RiskTreeWithLEC] = 
-    ZIO.fail(new NotImplementedError("computeLEC is deprecated. Use getLECCurve(nodeId) instead."))
 }

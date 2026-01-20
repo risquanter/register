@@ -2,15 +2,14 @@ package com.risquanter.register.http.controllers
 
 import zio.*
 import zio.test.*
-import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, SimulationExecutionService}
+import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, IronConstants}
-import IronConstants.{One, Zero, NNOne, NNTen, TenThousand}
+import com.risquanter.register.domain.data.iron.NonNegativeLong
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
 
@@ -64,7 +63,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
     
     ZLayer.make[RiskTreeService](
       RiskTreeServiceLive.layer,
-      SimulationExecutionService.live,
       ZLayer.succeed(makeStubRepo()),
       com.risquanter.register.configs.TestConfigs.simulationLayer,
       com.risquanter.register.services.SimulationSemaphore.layer,
@@ -117,151 +115,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
         program.assert { tree =>
           tree.name.value == "Ops Risk Portfolio" && tree.id > 0
-        }.provide(serviceLayer)
-      }
-    ),
-
-    suite("Depth parameter")(
-      test("depth=0 returns only root curve") {
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
-          name = "Depth Test",
-          nTrials = 1000,
-          root = RiskPortfolio.create(
-            id = "root",
-            name = "Root",
-            children = Array(
-              RiskLeaf.create(
-                id = "child1",
-                name = "Child 1",
-                distributionType = "lognormal",
-                probability = 0.5,
-                minLoss = Some(1000L),
-                maxLoss = Some(10000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child1"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
-        )
-
-        val program = for {
-          tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, One, Zero, includeProvenance = false))
-        } yield result
-
-        program.assert { result =>
-          result.vegaLiteSpec match {
-            case Some(spec) =>
-              spec.contains("\"risk\": \"root\"") && !spec.contains("\"risk\": \"child1\"")
-            case None => false
-          }
-        }.provide(serviceLayer)
-      },
-
-      test("depth=1 returns flat response with childIds") {
-        // Post ADR-004a/005 redesign: LEC response is flat with childIds
-        // Multi-curve charts require separate endpoint (Phase C)
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
-          name = "Depth Test",
-          nTrials = 1000,
-          root = RiskPortfolio.create(
-            id = "root",
-            name = "Root",
-            children = Array(
-              RiskLeaf.create(
-                id = "child1",
-                name = "Child 1",
-                distributionType = "lognormal",
-                probability = 0.5,
-                minLoss = Some(1000L),
-                maxLoss = Some(10000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child1")),
-              RiskLeaf.create(
-                id = "child2",
-                name = "Child 2",
-                distributionType = "lognormal",
-                probability = 0.6,
-                minLoss = Some(2000L),
-                maxLoss = Some(15000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child2"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
-        )
-
-        val program = for {
-          tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, One, NNOne, includeProvenance = false))
-        } yield result
-
-        program.assert { result =>
-          // Verify flat structure with root curve only, childIds for navigation
-          result.lecCurve match {
-            case Some(lec) =>
-              lec.id == "root" &&
-                lec.childIds.contains(List("child1", "child2")) &&
-                result.vegaLiteSpec.exists(_.contains("\"risk\": \"root\""))
-            case None => false
-          }
-        }.provide(serviceLayer)
-      },
-
-      test("excessive depth is rejected") {
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
-          name = "Depth Test",
-          nTrials = 1000,
-          root = RiskPortfolio.create(
-            id = "root",
-            name = "Root",
-            children = Array(
-              RiskLeaf.create(
-                id = "child1",
-                name = "Child 1",
-                distributionType = "lognormal",
-                probability = 0.5,
-                minLoss = Some(1000L),
-                maxLoss = Some(10000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child1"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
-        )
-
-        val program = for {
-          tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, One, NNTen, includeProvenance = false).flip)
-        } yield result
-
-        program.assert { error =>
-          error match {
-            case com.risquanter.register.domain.errors.ValidationFailed(errors) =>
-              errors.exists(e => e.field == "depth" && 
-                e.code == com.risquanter.register.domain.errors.ValidationErrorCode.INVALID_RANGE)
-            case _ => false
-          }
-        }.provide(serviceLayer)
-      }
-    ),
-
-    suite("nTrials override")(
-      test("query parameter overrides default nTrials") {
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
-          name = "Test Tree",
-          nTrials = 1000,
-          root = RiskLeaf.create(
-            id = "test-risk",
-            name = "Test Risk",
-            distributionType = "lognormal",
-            probability = 0.5,
-            minLoss = Some(1000L),
-            maxLoss = Some(10000L)
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
-        )
-
-        val program = for {
-          tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, Some(TenThousand), One, Zero, includeProvenance = false))
-        } yield result
-
-        program.assert { result =>
-          // Verify quantiles are computed (different nTrials might give slightly different results)
-          result.quantiles.nonEmpty && result.vegaLiteSpec.isDefined
         }.provide(serviceLayer)
       }
     ),

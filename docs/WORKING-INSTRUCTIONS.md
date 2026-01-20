@@ -357,6 +357,19 @@ User will confirm at these points:
 
 ---
 
+## CRITICAL STOP POINTS
+
+Before ANY of these actions, STOP and ask for explicit approval:
+- [ ] Deleting files
+- [ ] Removing methods/functions
+- [ ] Changing service interfaces
+- [ ] Modifying layer wiring
+- [ ] Removing tests
+
+Format: "I propose to [ACTION]. Approve? (Y/N)"
+
+---
+
 *Document created: 2026-01-17*  
 *Last updated: 2026-01-17*  
 *Status: Awaiting user approval*

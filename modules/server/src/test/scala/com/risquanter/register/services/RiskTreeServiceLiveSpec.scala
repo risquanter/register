@@ -7,8 +7,7 @@ import io.github.iltotore.iron.constraint.numeric.*
 
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{SafeName, PositiveInt, NonNegativeInt, NonNegativeLong, IronConstants}
-import IronConstants.{One, Zero, NNOne, NNTen}
+import com.risquanter.register.domain.data.iron.{SafeName, NonNegativeLong}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -77,19 +76,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             result.name == SafeName.SafeName("Test Risk Tree".refineUnsafe) &&
             result.nTrials == 1000 &&
             result.root.isInstanceOf[RiskLeaf]
-        }
-      },
-
-      test("computeLEC executes simulation and returns LEC data") {
-        val program = for {
-          created <- service(_.create(validRequest))
-          lec <- service(_.computeLEC(created.id, None, One, Zero, includeProvenance = false))
-        } yield (created, lec)
-
-        program.assert { case (created, lec) =>
-          lec.riskTree.id == created.id &&
-            lec.riskTree.name == created.name &&
-            lec.quantiles.nonEmpty
         }
       },
 
@@ -185,135 +171,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = service(_.getById(999L.refineUnsafe))
 
         program.assert(_ == None)
-      },
-
-      test("computeLEC with depth=0 returns only root") {
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
-          name = "Depth Test Tree",
-          nTrials = 1000,
-          root = RiskPortfolio.create(
-            id = "root",
-            name = "Root Portfolio",
-            children = Array(
-              RiskLeaf.create(
-                id = "child1",
-                name = "Child 1",
-                distributionType = "lognormal",
-                probability = 0.5,
-                minLoss = Some(1000L),
-                maxLoss = Some(10000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child1")),
-              RiskLeaf.create(
-                id = "child2",
-                name = "Child 2",
-                distributionType = "lognormal",
-                probability = 0.6,
-                minLoss = Some(2000L),
-                maxLoss = Some(15000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child2"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data: root portfolio"))
-        )
-
-        val program = for {
-          tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, One, Zero, includeProvenance = false))
-        } yield result
-
-        program.assert { result =>
-          result.vegaLiteSpec match {
-            case Some(spec) =>
-              spec.contains("\"risk\": \"root\"") &&
-                !spec.contains("\"risk\": \"child1\"") &&
-                !spec.contains("\"risk\": \"child2\"")
-            case None => false
-          }
-        }
-      },
-
-      test("computeLEC with depth=1 includes childIds for navigation") {
-        // Post ADR-004a/005 redesign: LEC response is flat with childIds
-        // Children's curves are fetched separately via node-specific endpoints
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
-          name = "Depth 1 Test Tree",
-          nTrials = 1000,
-          root = RiskPortfolio.create(
-            id = "root",
-            name = "Root Portfolio",
-            children = Array(
-              RiskLeaf.create(
-                id = "child1",
-                name = "Child 1",
-                distributionType = "lognormal",
-                probability = 0.5,
-                minLoss = Some(1000L),
-                maxLoss = Some(10000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child1")),
-              RiskLeaf.create(
-                id = "child2",
-                name = "Child 2",
-                distributionType = "lognormal",
-                probability = 0.6,
-                minLoss = Some(2000L),
-                maxLoss = Some(15000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: child2"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data: root portfolio"))
-        )
-
-        val program = for {
-          tree <- service(_.create(hierarchicalRequest))
-          result <- service(_.computeLEC(tree.id, None, One, NNOne, includeProvenance = false))
-        } yield result
-
-        program.assert { result =>
-          // Verify flat structure with childIds
-          result.lecCurve match {
-            case Some(lec) =>
-              lec.id == "root" &&
-                lec.childIds.contains(List("child1", "child2"))
-            case None => false
-          }
-        }
-      },
-
-      test("computeLEC rejects depth exceeding maximum") {
-        val program = for {
-          tree <- service(_.create(validRequest))
-          result <- service(_.computeLEC(tree.id, None, One, 99.refineUnsafe[GreaterEqual[0]], includeProvenance = false).flip)
-        } yield result
-
-        program.assert { error =>
-          error match {
-            case ValidationFailed(errors) =>
-              errors.exists(e => e.field == "depth" && e.code == ValidationErrorCode.INVALID_RANGE)
-            case _ => false
-          }
-        }
-      },
-
-      // Note: depth=-1 test removed - NonNegativeInt type prevents negative values at compile time
-      // This is the desired behavior per ADR-001: "correct by construction"
-
-      test("computeLEC generates valid Vega-Lite spec") {
-        val program = for {
-          tree <- service(_.create(validRequest))
-          result <- service(_.computeLEC(tree.id, None, One, Zero, includeProvenance = false))
-        } yield result
-
-        program.assert { result =>
-          result.vegaLiteSpec match {
-            case Some(spec) =>
-              spec.contains("\"$schema\"") &&
-                spec.contains("vega-lite") &&
-                spec.contains("\"encoding\"") &&
-                spec.contains("\"mark\"") &&
-                spec.contains("\"data\"") &&
-                spec.contains("\"loss\"") &&
-                spec.contains("\"exceedance\"")
-            case None => false
-          }
-        }
       },
 
       // ========================================
@@ -532,7 +389,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       }
     ).provide(
       RiskTreeServiceLive.layer,
-      SimulationExecutionService.live,
       stubRepoLayer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
       com.risquanter.register.services.cache.RiskResultResolverLive.layer,

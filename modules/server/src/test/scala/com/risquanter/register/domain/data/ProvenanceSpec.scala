@@ -1,19 +1,24 @@
 package com.risquanter.register.domain.data
 
 import com.risquanter.register.BuildInfo
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong}
+import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.configs.TestConfigs
+import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, TreeCacheManager}
+import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import zio.json.*
 import java.time.Instant
-import io.github.iltotore.iron.autoRefine
+import io.github.iltotore.iron.*
 
 /**
  * Tests for Provenance metadata structures.
  * 
  * Verifies:
  * - JSON serialization/deserialization
- * - Provenance capture during simulation
+ * - Provenance capture during simulation via RiskResultResolver
  * - Reproduction from provenance metadata
  */
 object ProvenanceSpec extends ZIOSpecDefault {
@@ -22,6 +27,16 @@ object ProvenanceSpec extends ZIOSpecDefault {
   private def safeId(s: String): SafeId.SafeId = 
     SafeId.fromString(s).getOrElse(
       throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
+    )
+
+  // Test layer with all dependencies for provenance tests
+  val testLayer: ZLayer[Any, Throwable, RiskResultResolver & TreeCacheManager] = 
+    ZLayer.make[RiskResultResolver & TreeCacheManager](
+      TreeCacheManager.layer,
+      ZLayer.succeed(TestConfigs.simulation),
+      TestConfigs.telemetryLayer >>> TracingLive.console,
+      TestConfigs.telemetryLayer >>> MetricsLive.console,
+      RiskResultResolverLive.layer
     )
   
   def spec = suite("ProvenanceSpec")(
@@ -145,9 +160,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     ),
     
     suite("Provenance Capture")(
-      test("simulateTree with includeProvenance=true captures metadata") {
-        import com.risquanter.register.services.helper.Simulator
-        
+      test("ensureCached with includeProvenance=true captures metadata") {
         val leaf = RiskLeaf.unsafeApply(
           id = "test-risk",
           name = "Test Risk",
@@ -157,20 +170,24 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
+        val testTree = RiskTree(
+          id = 1L,
+          name = SafeName.SafeName("Test Tree".refineUnsafe),
+          nTrials = 100,
+          root = leaf,
+          index = TreeIndex.fromTree(leaf)
+        )
+        
         for {
-          resultWithProv <- Simulator.simulateTree(leaf, nTrials = 100, parallelism = 1, includeProvenance = true)
-          (result, provenance) = resultWithProv
+          resolver <- ZIO.service[RiskResultResolver]
+          result <- resolver.ensureCached(testTree, safeId("test-risk"), includeProvenance = true)
         } yield {
-          assertTrue(provenance.isDefined) &&
-          assertTrue(provenance.get.nodeProvenances.contains(safeId("test-risk"))) &&
-          assertTrue(provenance.get.nTrials == 100) &&
-          assertTrue(provenance.get.parallelism == 1)
+          assertTrue(result.provenances.nonEmpty) &&
+          assertTrue(result.provenances.exists(_.riskId == safeId("test-risk")))
         }
       },
       
-      test("simulateTree with includeProvenance=false returns None") {
-        import com.risquanter.register.services.helper.Simulator
-        
+      test("ensureCached with includeProvenance=false returns empty provenances") {
         val leaf = RiskLeaf.unsafeApply(
           id = "test-risk",
           name = "Test Risk",
@@ -180,15 +197,21 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
+        val testTree = RiskTree(
+          id = 2L,
+          name = SafeName.SafeName("Test Tree 2".refineUnsafe),
+          nTrials = 100,
+          root = leaf,
+          index = TreeIndex.fromTree(leaf)
+        )
+        
         for {
-          resultWithProv <- Simulator.simulateTree(leaf, nTrials = 100, parallelism = 1, includeProvenance = false)
-          (result, provenance) = resultWithProv
-        } yield assertTrue(provenance.isEmpty)
+          resolver <- ZIO.service[RiskResultResolver]
+          result <- resolver.ensureCached(testTree, safeId("test-risk"), includeProvenance = false)
+        } yield assertTrue(result.provenances.isEmpty)
       },
       
       test("provenance captures correct entityId from riskId hash") {
-        import com.risquanter.register.services.helper.Simulator
-        
         val riskIdStr = "cyber-attack"
         val expectedEntityId = riskIdStr.hashCode.toLong
         
@@ -201,11 +224,19 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(50000L)
         )
         
+        val testTree = RiskTree(
+          id = 3L,
+          name = SafeName.SafeName("Test Tree 3".refineUnsafe),
+          nTrials = 100,
+          root = leaf,
+          index = TreeIndex.fromTree(leaf)
+        )
+        
         for {
-          resultWithProv <- Simulator.simulateTree(leaf, nTrials = 100, parallelism = 1, includeProvenance = true)
-          (_, provenance) = resultWithProv
+          resolver <- ZIO.service[RiskResultResolver]
+          result <- resolver.ensureCached(testTree, safeId(riskIdStr), includeProvenance = true)
         } yield {
-          val nodeProv = provenance.get.nodeProvenances(safeId(riskIdStr))
+          val nodeProv = result.provenances.find(_.riskId == safeId(riskIdStr)).get
           assertTrue(nodeProv.entityId == expectedEntityId) &&
           assertTrue(nodeProv.occurrenceVarId == expectedEntityId.hashCode + 1000L) &&
           assertTrue(nodeProv.lossVarId == expectedEntityId.hashCode + 2000L)
@@ -213,8 +244,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance captures distribution parameters for lognormal") {
-        import com.risquanter.register.services.helper.Simulator
-        
         val leaf = RiskLeaf.unsafeApply(
           id = "lognormal-risk",
           name = "Lognormal Risk",
@@ -224,11 +253,19 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
+        val testTree = RiskTree(
+          id = 4L,
+          name = SafeName.SafeName("Test Tree 4".refineUnsafe),
+          nTrials = 100,
+          root = leaf,
+          index = TreeIndex.fromTree(leaf)
+        )
+        
         for {
-          resultWithProv <- Simulator.simulateTree(leaf, nTrials = 100, parallelism = 1, includeProvenance = true)
-          (_, provenance) = resultWithProv
+          resolver <- ZIO.service[RiskResultResolver]
+          result <- resolver.ensureCached(testTree, safeId("lognormal-risk"), includeProvenance = true)
         } yield {
-          val nodeProv = provenance.get.nodeProvenances(safeId("lognormal-risk"))
+          val nodeProv = result.provenances.find(_.riskId == safeId("lognormal-risk")).get
           assertTrue(nodeProv.distributionType == "lognormal") &&
           assertTrue(nodeProv.distributionParams.isInstanceOf[LognormalDistributionParams]) &&
           assertTrue(
@@ -241,8 +278,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance aggregates multiple node provenances in portfolio") {
-        import com.risquanter.register.services.helper.Simulator
-        
         val risk1 = RiskLeaf.unsafeApply(
           id = "risk1",
           name = "Risk 1",
@@ -267,22 +302,29 @@ object ProvenanceSpec extends ZIOSpecDefault {
           children = Array(risk1, risk2)
         )
         
+        val testTree = RiskTree(
+          id = 5L,
+          name = SafeName.SafeName("Test Tree 5".refineUnsafe),
+          nTrials = 200,
+          root = portfolio,
+          index = TreeIndex.fromTree(portfolio)
+        )
+        
         for {
-          resultWithProv <- Simulator.simulateTree(portfolio, nTrials = 200, parallelism = 2, includeProvenance = true)
-          (_, provenance) = resultWithProv
+          resolver <- ZIO.service[RiskResultResolver]
+          // Simulate portfolio (which aggregates children)
+          result <- resolver.ensureCached(testTree, safeId("portfolio"), includeProvenance = true)
         } yield {
-          assertTrue(provenance.isDefined) &&
-          assertTrue(provenance.get.nodeProvenances.size == 2) &&
-          assertTrue(provenance.get.nodeProvenances.contains(safeId("risk1"))) &&
-          assertTrue(provenance.get.nodeProvenances.contains(safeId("risk2")))
+          // Portfolio result should contain provenances from both leaves
+          assertTrue(result.provenances.size == 2) &&
+          assertTrue(result.provenances.exists(_.riskId == safeId("risk1"))) &&
+          assertTrue(result.provenances.exists(_.riskId == safeId("risk2")))
         }
       }
-    ),
+    ).provideLayerShared(testLayer),
     
     suite("Reproduction Validation")(
       test("same provenance seeds produce identical results") {
-        import com.risquanter.register.services.helper.Simulator
-        
         val leaf = RiskLeaf.unsafeApply(
           id = "deterministic-risk",
           name = "Deterministic Risk",
@@ -292,23 +334,36 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(20000L)
         )
         
+        // Use different tree IDs to avoid cache hits
+        val testTree1 = RiskTree(
+          id = 6L,
+          name = SafeName.SafeName("Test Tree 6".refineUnsafe),
+          nTrials = 500,
+          root = leaf,
+          index = TreeIndex.fromTree(leaf)
+        )
+        
+        val testTree2 = RiskTree(
+          id = 7L,
+          name = SafeName.SafeName("Test Tree 7".refineUnsafe),
+          nTrials = 500,
+          root = leaf,
+          index = TreeIndex.fromTree(leaf)
+        )
+        
         for {
+          resolver <- ZIO.service[RiskResultResolver]
           // First simulation with provenance
-          firstRun <- Simulator.simulateTree(leaf, nTrials = 500, parallelism = 1, includeProvenance = true)
-          (firstResult, _) = firstRun
-          
-          // Second simulation with same parameters
-          secondRun <- Simulator.simulateTree(leaf, nTrials = 500, parallelism = 1, includeProvenance = true)
-          (secondResult, _) = secondRun
+          firstResult <- resolver.ensureCached(testTree1, safeId("deterministic-risk"), includeProvenance = true)
+          // Second simulation with same parameters (different tree to avoid cache)
+          secondResult <- resolver.ensureCached(testTree2, safeId("deterministic-risk"), includeProvenance = true)
         } yield {
-          // Same inputs should produce identical outcomes
-          assertTrue(firstResult.result.outcomes == secondResult.result.outcomes)
+          // Same inputs should produce identical outcomes (HDR determinism)
+          assertTrue(firstResult.outcomes == secondResult.outcomes)
         }
       },
       
       test("provenance contains all information for reconstruction") {
-        import com.risquanter.register.services.helper.Simulator
-        
         val leaf = RiskLeaf.unsafeApply(
           id = "test-reconstruction",
           name = "Test Reconstruction",
@@ -318,11 +373,19 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(15000L)
         )
         
+        val testTree = RiskTree(
+          id = 8L,
+          name = SafeName.SafeName("Test Tree 8".refineUnsafe),
+          nTrials = 300,
+          root = leaf,
+          index = TreeIndex.fromTree(leaf)
+        )
+        
         for {
-          resultWithProv <- Simulator.simulateTree(leaf, nTrials = 300, parallelism = 1, includeProvenance = true)
-          (result, provenance) = resultWithProv
+          resolver <- ZIO.service[RiskResultResolver]
+          result <- resolver.ensureCached(testTree, safeId("test-reconstruction"), includeProvenance = true)
         } yield {
-          val nodeProv = provenance.get.nodeProvenances(safeId("test-reconstruction"))
+          val nodeProv = result.provenances.find(_.riskId == safeId("test-reconstruction")).get
           
           // Verify all essential information is captured
           assertTrue(nodeProv.riskId == safeId("test-reconstruction")) &&
@@ -334,11 +397,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
           assertTrue(nodeProv.distributionType == "lognormal") &&
           assertTrue(nodeProv.distributionParams != null) &&
           assertTrue(nodeProv.timestamp != null) &&
-          assertTrue(nodeProv.simulationUtilVersion.nonEmpty) &&
-          assertTrue(provenance.get.nTrials == 300) &&
-          assertTrue(provenance.get.parallelism == 1)
+          assertTrue(nodeProv.simulationUtilVersion.nonEmpty)
         }
       }
-    )
+    ).provideLayerShared(testLayer)
   )
 }

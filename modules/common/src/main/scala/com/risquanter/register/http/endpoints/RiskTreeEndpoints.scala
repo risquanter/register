@@ -56,21 +56,6 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .get
       .out(jsonBody[Option[SimulationResponse]])
 
-  val computeLECEndpoint =
-    baseEndpoint
-      .tag("risk-trees")
-      .name("computeLEC")
-      .description("Compute LEC for an existing risk tree")
-      .in("risk-trees" / path[NonNegativeLong]("id") / "lec")
-      .in(query[Option[PositiveInt]]("nTrials").description("Override number of trials (must be > 0)"))
-      .in(query[Option[PositiveInt]]("parallelism").description("Parallelism level (must be > 0, uses server default if omitted)"))
-      .in(query[NonNegativeInt]("depth").default(Zero).description("Depth of hierarchy to include (0=root only, max 5)"))
-      .in(query[Boolean]("includeProvenance").default(false).description("Include provenance metadata for reproducibility"))
-      .in(query[Option[Long]]("seed3").description("Global seed 3 for reproducibility (default: 0)"))
-      .in(query[Option[Long]]("seed4").description("Global seed 4 for reproducibility (default: 0)"))
-      .get
-      .out(jsonBody[SimulationResponse])
-
   /** Manual cache invalidation endpoint for testing SSE pipeline.
     * Triggers cache invalidation for a specific node and broadcasts SSE event.
     * 

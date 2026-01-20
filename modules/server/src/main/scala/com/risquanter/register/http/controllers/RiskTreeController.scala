@@ -34,23 +34,6 @@ class RiskTreeController private (
     riskTreeService.create(req).map(SimulationResponse.fromRiskTree).either
   }
 
-  val computeLEC: ServerEndpoint[Any, Task] = computeLECEndpoint.serverLogic {
-    case (id, nTrialsOverride, parallelismOpt, depth, includeProvenance, seed3Opt, seed4Opt) =>
-      // Iron types already validated by Tapir codecs—controller just wires
-      val parallelism = parallelismOpt.getOrElse(DefaultParallelism)
-      val seed3 = seed3Opt.getOrElse(0L)
-      val seed4 = seed4Opt.getOrElse(0L)
-      val program = riskTreeService.computeLEC(id, nTrialsOverride, parallelism, depth, includeProvenance, seed3, seed4)
-        .map { result =>
-          SimulationResponse.withLEC(
-            result.riskTree,
-            result.quantiles,
-            result.vegaLiteSpec
-          )
-        }
-      program.either
-  }
-
   val getAll: ServerEndpoint[Any, Task] = getAllEndpoint.serverLogicSuccess { _ =>
     riskTreeService.getAll.map(_.map(SimulationResponse.fromRiskTree))
   }
@@ -68,7 +51,7 @@ class RiskTreeController private (
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(health, create, getAll, computeLEC, getById, invalidateCache)
+    List(health, create, getAll, getById, invalidateCache)
 }
 
 object RiskTreeController {

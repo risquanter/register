@@ -9,13 +9,13 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.domain.data.{RiskTree, TreeProvenance, RiskTreeWithLEC, RiskNode, RiskLeaf, RiskPortfolio, RiskTreeResult, LECCurveResponse, LECPoint}
-import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, PositiveInt, NonNegativeInt, Probability, DistributionType, NonNegativeLong}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint}
+import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.tree.{NodeId, TreeIndex}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, SimulationError}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.simulation.{LECGenerator, VegaLiteBuilder}
+import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.services.cache.RiskResultResolver
 /**
  * Live implementation of RiskTreeService with telemetry instrumentation.
@@ -28,7 +28,6 @@ import com.risquanter.register.services.cache.RiskResultResolver
  */
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
-  executionService: SimulationExecutionService,
   config: SimulationConfig,
   resolver: RiskResultResolver,
   tracing: Tracing,
@@ -363,217 +362,6 @@ class RiskTreeServiceLive private (
       _ => recordOperation("getLECCurvesMulti", success = true)
     )
   }
-  
-  // ========================================
-  // DEPRECATED: Old computeLEC implementation
-  // ========================================
-  
-  @deprecated("Use getLECCurve(nodeId) instead", "0.2.0")
-  override def computeLEC(
-    id: NonNegativeLong,
-    nTrialsOverride: Option[PositiveInt],
-    parallelism: PositiveInt,
-    depth: NonNegativeInt,
-    includeProvenance: Boolean,
-    seed3: Long = 0L,
-    seed4: Long = 0L
-  ): Task[RiskTreeWithLEC] = {
-    val operation = tracing.span("computeLEC", SpanKind.INTERNAL) {
-      for {
-        _ <- tracing.setAttribute("risk_tree.id", (id: Long))
-        _ <- tracing.setAttribute("risk_tree.depth", (depth: Int).toLong)
-        _ <- tracing.setAttribute("risk_tree.parallelism", (parallelism: Int).toLong)
-        _ <- tracing.setAttribute("risk_tree.include_provenance", includeProvenance)
-        _ <- tracing.setAttribute("risk_tree.seed3", seed3)
-        _ <- tracing.setAttribute("risk_tree.seed4", seed4)
-        _ <- nTrialsOverride.fold(ZIO.unit)(n => tracing.setAttribute("risk_tree.n_trials_override", (n: Int).toLong))
-        
-        result <- computeLECInternal(id, nTrialsOverride, parallelism, depth, includeProvenance, seed3, seed4)
-      } yield result
-    }
-    
-    operation.tapBoth(
-      error => logIfUnexpected("computeLEC")(error) *> recordOperation("computeLEC", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("computeLEC", success = true)
-    )
-  }
-  
-  // Internal implementation without tracing (for cleaner separation)
-  // Uses Iron-refined types to enforce invariants at the type level (DDD principle:
-  // make illegal states unrepresentable). The public API validates and refines raw
-  // inputs; internal methods can then trust their parameters.
-  private def computeLECInternal(
-    id: NonNegativeLong,
-    nTrialsOverride: Option[PositiveInt],
-    parallelism: PositiveInt,
-    depth: NonNegativeInt,
-    includeProvenance: Boolean,
-    seed3: Long,
-    seed4: Long
-  ): Task[RiskTreeWithLEC] = {
-    for {
-      // Enforce hard limits first (reject if exceeded)
-      _ <- validateHardLimits(nTrialsOverride, parallelism, depth)
-      
-      // Load tree from repository
-      treeOpt <- repo.getById(id)
-      tree <- ZIO.fromOption(treeOpt).orElseFail(
-        ValidationFailed(List(ValidationError(
-          field = "id",
-          code = ValidationErrorCode.REQUIRED_FIELD,
-          message = s"RiskTree with id=$id not found"
-        )))
-      )
-      
-      // Add tree name to span for better observability
-      _ <- tracing.setAttribute("risk_tree.name", tree.name.value)
-      _ <- tracing.setAttribute("risk_tree.effective_trials", tree.nTrials.toLong)
-      
-      // Determine trials (use override or tree config or default)
-      // nTrialsOverride is already PositiveInt; tree.nTrials is Long (convert via refineUnsafe since stored values are validated)
-      nTrials: PositiveInt = nTrialsOverride.getOrElse(tree.nTrials.toInt.refineUnsafe[Greater[0]])
-      
-      // Execute simulation with nested span and record metrics
-      startTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
-      resultAndProv <- semaphore.withPermit {
-        tracing.span("runTreeSimulation", SpanKind.INTERNAL) {
-          for {
-            _ <- tracing.setAttribute("simulation.id", s"tree-${tree.id}")
-            _ <- tracing.setAttribute("simulation.n_trials", (nTrials: Int).toLong)
-            _ <- tracing.setAttribute("simulation.parallelism", (parallelism: Int).toLong)
-            _ <- tracing.addEvent("simulation_started")
-            
-            result <- executionService.runTreeSimulation(
-              simulationId = s"tree-${tree.id}",
-              root = tree.root,
-              nTrials = nTrials,
-              parallelism = parallelism,
-              includeProvenance = includeProvenance,
-              seed3 = seed3,
-              seed4 = seed4
-            )
-            
-            _ <- tracing.addEvent("simulation_completed")
-          } yield result
-        }
-      }
-      endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
-      
-      // Record simulation metrics (convert PositiveInt to Int for metrics)
-      _ <- recordSimulationMetrics(tree.name.value, nTrials: Int, endTime - startTime)
-      
-      (result, provenance) = resultAndProv
-      
-      // Set tree ID in provenance if present
-      finalProvenance = provenance.map(_.copy(treeId = tree.id))
-      
-      // Convert result to LEC data with validated depth
-      // (validation already rejected values > maxTreeDepth, natural recursion stops at actual tree depth)
-      lec <- convertResultToLEC(tree, result, depth, finalProvenance)
-    } yield lec
-  }
-  
-  /** Validate request parameters against hard limits.
-    * 
-    * Rejects requests that exceed configured maximum values to prevent
-    * resource exhaustion and protect system stability.
-    * 
-    * Parameters are Iron-refined types, guaranteeing they are already valid
-    * (positive/non-negative). This method only checks against config maximums.
-    * 
-    * @param nTrialsOpt Optional trials override (if None, uses tree's nTrials)
-    * @param parallelism Requested parallelism level (already refined as PositiveInt)
-    * @param depth Requested tree depth (already refined as NonNegativeInt)
-    * @return Effect that fails with ValidationFailed if limits exceeded
-    */
-  private def validateHardLimits(
-    nTrialsOpt: Option[PositiveInt],
-    parallelism: PositiveInt,
-    depth: NonNegativeInt
-  ): IO[ValidationFailed, Unit] = {
-    val errors = List(
-      nTrialsOpt.flatMap { nTrials =>
-        Option.when((nTrials: Int) > config.maxNTrials)(
-          ValidationError(
-            "nTrials",
-            ValidationErrorCode.INVALID_RANGE,
-            s"nTrials ($nTrials) exceeds maximum (${config.maxNTrials})"
-          )
-        )
-      },
-      Option.when((parallelism: Int) > config.maxParallelism)(
-        ValidationError(
-          "parallelism",
-          ValidationErrorCode.INVALID_RANGE,
-          s"parallelism ($parallelism) exceeds maximum (${config.maxParallelism})"
-        )
-      ),
-      Option.when((depth: Int) > config.maxTreeDepth)(
-        ValidationError(
-          "depth",
-          ValidationErrorCode.INVALID_RANGE,
-          s"depth ($depth) exceeds maximum (${config.maxTreeDepth})"
-        )
-      )
-    ).flatten
-    
-    ZIO.when(errors.nonEmpty)(ZIO.fail(ValidationFailed(errors))).unit
-  }
-  
-  // Helper: Convert TreeResult to RiskTreeWithLEC
-  private def convertResultToLEC(
-    tree: RiskTree,
-    result: RiskTreeResult,
-    depth: NonNegativeInt,
-    provenance: Option[TreeProvenance] = None
-  ): Task[RiskTreeWithLEC] = {    
-    
-    // Build flat LEC curve for a single node (no recursive children)
-    def buildLECCurve(treeResult: RiskTreeResult): LECCurveResponse = {
-      val riskResult = treeResult.result
-      
-      // Generate curve points
-      val curvePoints = LECGenerator.generateCurvePoints(riskResult, nEntries = 100)
-      val lecPoints = curvePoints.map { case (loss, prob) => LECPoint(loss, prob) }
-      
-      // Calculate quantiles
-      val quantiles = LECGenerator.calculateQuantiles(riskResult)
-      
-      // Extract child IDs (flat reference, not embedded data)
-      val childIds: Option[List[String]] = treeResult match {
-        case RiskTreeResult.Branch(_, _, childResults) if childResults.nonEmpty =>
-          Some(childResults.map(_.id).toList)
-        case _ => None
-      }
-      
-      // LECCurveResponse uses String for wire format
-      LECCurveResponse(
-        id = treeResult.id,
-        name = riskResult.name.value.toString,
-        curve = lecPoints,
-        quantiles = quantiles,
-        childIds = childIds
-      )
-    }
-    
-    // Build root LEC curve (flat)
-    val lecCurve = buildLECCurve(result)
-    
-    // Generate Vega-Lite spec for root node only
-    // Multi-curve charts will be generated via separate endpoint
-    val vegaLiteSpec = VegaLiteBuilder.generateSpec(lecCurve)
-    
-    // Aggregated quantiles from root node
-    val rootQuantiles = lecCurve.quantiles
-    
-    ZIO.succeed(RiskTreeWithLEC(
-      riskTree = tree,
-      quantiles = rootQuantiles,
-      vegaLiteSpec = Some(vegaLiteSpec),
-      lecCurve = Some(lecCurve),
-      provenance = provenance
-    ))
-  }
 }
 
 object RiskTreeServiceLive {
@@ -607,10 +395,9 @@ object RiskTreeServiceLive {
     val trialsDesc = "Total number of simulation trials executed"
   }
   
-  val layer: ZLayer[RiskTreeRepository & SimulationExecutionService & SimulationConfig & RiskResultResolver & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationConfig & RiskResultResolver & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
-      execService <- ZIO.service[SimulationExecutionService]
       config <- ZIO.service[SimulationConfig]
       resolver <- ZIO.service[RiskResultResolver]
       tracing <- ZIO.service[Tracing]
@@ -633,6 +420,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.trialsUnit),
         Some(MetricNames.trialsDesc)
       )
-    } yield new RiskTreeServiceLive(repo, execService, config, resolver, tracing, semaphore, opsCounter, simDuration, trials)
+    } yield new RiskTreeServiceLive(repo, config, resolver, tracing, semaphore, opsCounter, simDuration, trials)
   }
 }
