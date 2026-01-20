@@ -18,8 +18,11 @@ import io.github.iltotore.iron.*
   * 1. **Expert Opinion**: `distributionType="expert"`, provide `percentiles` + `quantiles`
   * 2. **Lognormal (BCG)**: `distributionType="lognormal"`, provide `minLoss` + `maxLoss` (80% CI bounds)
   * 
+  * **Note:** Simulation parameters (nTrials, parallelism, seeds) come from
+  * SimulationConfig, not the request. The nTrials field is deprecated and ignored.
+  * 
   * @param name Risk tree name (plain String, validated by toDomain())
-  * @param nTrials Number of Monte Carlo trials (default: 10,000)
+  * @param nTrials DEPRECATED: Ignored, simulation uses SimulationConfig.defaultNTrials
   * @param root Hierarchical risk tree structure
   */
 final case class RiskTreeDefinitionRequest(

@@ -10,7 +10,9 @@ object TestConfigs {
     defaultParallelism = 8,
     maxConcurrentSimulations = 4,
     maxNTrials = 1000000,
-    maxParallelism = 16
+    maxParallelism = 16,
+    defaultSeed3 = 0L,
+    defaultSeed4 = 0L
   )
   
   val simulationLayer: ULayer[SimulationConfig] = ZLayer.succeed(simulation)

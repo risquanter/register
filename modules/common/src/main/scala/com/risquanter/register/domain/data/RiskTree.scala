@@ -10,9 +10,12 @@ import io.github.iltotore.iron.*
   * Stores the risk tree structure (RiskNode) AND its index for efficient operations.
   * LEC data is computed on-demand via GET /risk-trees/:id/lec
   * 
+  * **Note:** Simulation parameters (nTrials, parallelism, seeds) come from
+  * SimulationConfig, not the RiskTree itself. This enables service-wide
+  * reproducibility control via configuration.
+  * 
   * @param id Unique risk tree identifier (assigned by repository)
   * @param name Human-readable risk tree name
-  * @param nTrials Number of Monte Carlo trials for execution (default: 10,000)
   * @param root Root node of the risk tree (can be RiskPortfolio or single RiskLeaf)
   * @param index Tree index for O(1) node lookup and O(depth) ancestor path (built from root)
   */

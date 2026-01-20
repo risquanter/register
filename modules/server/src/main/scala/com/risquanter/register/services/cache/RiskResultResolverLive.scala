@@ -43,9 +43,9 @@ final case class RiskResultResolverLive(
   // Read from config at construction time
   private val nTrials: PositiveInt = config.defaultNTrials.refineUnsafe
   private val parallelism: PositiveInt = config.defaultParallelism.refineUnsafe
-  // TODO: Add seeds to SimulationConfig when reproducibility API is defined
-  private val seed3: Long = 0L
-  private val seed4: Long = 0L
+  // HDR seeds for reproducible simulations (ADR-003)
+  private val seed3: Long = config.defaultSeed3
+  private val seed4: Long = config.defaultSeed4
 
   override def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): Task[RiskResult] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {

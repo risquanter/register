@@ -8,6 +8,8 @@ package com.risquanter.register.configs
   * @param maxConcurrentSimulations Maximum concurrent simulations (semaphore permits)
   * @param maxNTrials Hard limit on trials per simulation (reject if exceeded)
   * @param maxParallelism Hard limit on parallelism per simulation (reject if exceeded)
+  * @param defaultSeed3 Global seed 3 for HDR random number generation (reproducibility)
+  * @param defaultSeed4 Global seed 4 for HDR random number generation (reproducibility)
   */
 final case class SimulationConfig(
   defaultNTrials: Int,
@@ -15,5 +17,7 @@ final case class SimulationConfig(
   defaultParallelism: Int,
   maxConcurrentSimulations: Int,
   maxNTrials: Int,
-  maxParallelism: Int
+  maxParallelism: Int,
+  defaultSeed3: Long,
+  defaultSeed4: Long
 )
