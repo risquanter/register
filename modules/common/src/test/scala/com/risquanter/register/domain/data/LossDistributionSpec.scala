@@ -5,12 +5,9 @@ import zio.test.Assertion.*
 import zio.prelude.*
 import zio.prelude.Identity
 import com.risquanter.register.domain.data.iron.SafeId
-import io.github.iltotore.iron.refineUnsafe
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 object LossDistributionSpec extends ZIOSpecDefault {
-  
-  // Helper for test SafeIds
-  private def safeId(s: String): SafeId.SafeId = SafeId.SafeId(s.refineUnsafe)
   
   def spec = suite("LossDistributionSpec")(
     suite("RiskResult - basic functionality")(

@@ -41,7 +41,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         percentiles = None,
         quantiles = None
       )
-      val riskTree = RiskTree.singleNode(
+      val riskTree = RiskTree.singleNodeUnsafe(
         id = 1L,
         name = SafeName.SafeName("Risk Assessment".refineUnsafe),
         root = root
@@ -68,7 +68,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         percentiles = None,
         quantiles = None
       )
-      val riskTree = RiskTree.singleNode(
+      val riskTree = RiskTree.singleNodeUnsafe(
         id = 3L,
         name = SafeName.SafeName("Test".refineUnsafe),
         root = root
@@ -109,7 +109,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         percentiles = None,
         quantiles = None
       )
-      val riskTree = RiskTree.singleNode(
+      val riskTree = RiskTree.singleNodeUnsafe(
         id = 5L,
         name = SafeName.SafeName("Round Trip".refineUnsafe),
         root = root

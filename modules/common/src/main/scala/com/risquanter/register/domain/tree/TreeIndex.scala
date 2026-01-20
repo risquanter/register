@@ -2,6 +2,8 @@ package com.risquanter.register.domain.tree
 
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import zio.prelude.Validation
 
 /** Type alias for node ID - uses Iron-refined SafeId throughout */
 type NodeId = SafeId.SafeId
@@ -123,10 +125,16 @@ object TreeIndex {
     * Each node carries its own parentId field and portfolios carry childIds.
     * This is the primary constructor for the new flat node model.
     *
+    * Validates consistency between parentId and childIds:
+    * - If a node has parentId=Some(pid), the parent must list it as a child
+    * - If a portfolio lists a childId, that child must have parentId pointing back
+    *
+    * Returns accumulated validation errors per ADR-010 (errors as values).
+    *
     * @param nodes Map from node ID to RiskNode (all nodes in tree)
-    * @return TreeIndex with parent/child maps derived from node fields
+    * @return Validation with accumulated errors or TreeIndex
     */
-  def fromNodes(nodes: Map[NodeId, RiskNode]): TreeIndex = {
+  def fromNodes(nodes: Map[NodeId, RiskNode]): Validation[ValidationError, TreeIndex] = {
     // Parents map: directly from each node's parentId field
     val parents: Map[NodeId, NodeId] = nodes.collect {
       case (nodeId, node) if node.parentId.isDefined =>
@@ -139,7 +147,60 @@ object TreeIndex {
         nodeId -> portfolio.childIds.toList
     }
 
-    TreeIndex(nodes, parents, children)
+    // Collect all consistency errors
+    val childToParentErrors: List[ValidationError] = children.toList.flatMap { case (parentId, childIds) =>
+      childIds.flatMap { childId =>
+        nodes.get(childId) match {
+          case Some(child) if !child.parentId.contains(parentId) =>
+            Some(ValidationError(
+              field = s"nodes[${childId.value}].parentId",
+              code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+              message = s"Node '${childId.value}' is listed as child of '${parentId.value}' but has parentId=${child.parentId.map(_.value).getOrElse("None")}"
+            ))
+          case None =>
+            Some(ValidationError(
+              field = s"nodes[${parentId.value}].childIds",
+              code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+              message = s"Child '${childId.value}' referenced by '${parentId.value}' does not exist in nodes"
+            ))
+          case _ => None
+        }
+      }
+    }
+
+    val parentToChildErrors: List[ValidationError] = parents.toList.flatMap { case (nodeId, parentId) =>
+      nodes.get(parentId) match {
+        case Some(parent: RiskPortfolio) if !parent.childIds.contains(nodeId) =>
+          Some(ValidationError(
+            field = s"nodes[${nodeId.value}].parentId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but parent doesn't list it as child"
+          ))
+        case Some(_: RiskLeaf) =>
+          Some(ValidationError(
+            field = s"nodes[${nodeId.value}].parentId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but that node is a leaf, not a portfolio"
+          ))
+        case None =>
+          Some(ValidationError(
+            field = s"nodes[${nodeId.value}].parentId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but parent doesn't exist in nodes"
+          ))
+        case _ => None
+      }
+    }
+
+    val allErrors = childToParentErrors ++ parentToChildErrors
+
+    if (allErrors.isEmpty) {
+      Validation.succeed(TreeIndex(nodes, parents, children))
+    } else {
+      // Return all accumulated errors using NonEmptyChunk
+      import zio.NonEmptyChunk
+      Validation.failNonEmptyChunk(NonEmptyChunk.fromIterable(allErrors.head, allErrors.tail))
+    }
   }
 
   /**
@@ -148,11 +209,31 @@ object TreeIndex {
     * Convenience method that converts to Map first.
     *
     * @param nodes Sequence of RiskNodes
-    * @return TreeIndex with all nodes indexed
+    * @return Validation with accumulated errors or TreeIndex
     */
-  def fromNodeSeq(nodes: Seq[RiskNode]): TreeIndex = {
+  def fromNodeSeq(nodes: Seq[RiskNode]): Validation[ValidationError, TreeIndex] = {
     val nodeMap = nodes.map(n => extractSafeId(n) -> n).toMap
     fromNodes(nodeMap)
+  }
+
+  /**
+    * Unsafe version for internal use where consistency is guaranteed.
+    * 
+    * Use only when nodes come from trusted sources (e.g., already validated).
+    * Throws IllegalArgumentException if validation fails.
+    *
+    * @param nodes Map from node ID to RiskNode
+    * @return TreeIndex
+    * @throws IllegalArgumentException if parent-child relationships are inconsistent
+    */
+  def fromNodesUnsafe(nodes: Map[NodeId, RiskNode]): TreeIndex = {
+    fromNodes(nodes).toEither match {
+      case Right(index) => index
+      case Left(errors) => 
+        throw new IllegalArgumentException(
+          s"TreeIndex invariant violated: ${errors.map(_.message).mkString("; ")}"
+        )
+    }
   }
 
   /**

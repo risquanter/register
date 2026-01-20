@@ -1,6 +1,5 @@
 package com.risquanter.register.testutil
 
-import io.github.iltotore.iron.refineUnsafe
 import com.risquanter.register.domain.data.iron.SafeId
 
 /**
@@ -21,14 +20,11 @@ import com.risquanter.register.domain.data.iron.SafeId
   * }
   * }}}
   *
-  * == Quality Check Note ==
-  *
-  * This pattern was identified as duplicated across:
-  * - LECCacheSpec.scala
-  * - TreeIndexSpec.scala
-  * - CurveBundleSpec.scala
-  *
-  * Consider consolidating these in a future cleanup pass.
+  * Or import directly:
+  * {{{
+  * import com.risquanter.register.testutil.TestHelpers.safeId
+  * val nodeId = safeId("cyber")
+  * }}}
   *
   * @see ADR-001 for SafeId type design
   */
@@ -37,7 +33,7 @@ trait TestHelpers {
   /**
     * Create a SafeId.SafeId from a String.
     *
-    * Uses refineUnsafe for test convenience - will throw at runtime
+    * Uses SafeId.fromString for validation - will throw at runtime
     * if the string doesn't meet SafeId constraints (MinLength[3]).
     *
     * @param s String value (must be at least 3 characters)
@@ -45,7 +41,9 @@ trait TestHelpers {
     * @throws IllegalArgumentException if refinement fails
     */
   def safeId(s: String): SafeId.SafeId =
-    SafeId.SafeId(s.refineUnsafe)
+    SafeId.fromString(s).getOrElse(
+      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
+    )
 }
 
 /**

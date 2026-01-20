@@ -6,6 +6,7 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, TreeCacheManager}
+import com.risquanter.register.testutil.TestHelpers.safeId
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
@@ -22,12 +23,6 @@ import io.github.iltotore.iron.*
  * - Reproduction from provenance metadata
  */
 object ProvenanceSpec extends ZIOSpecDefault {
-  
-  // Helper to create SafeId from string literal
-  private def safeId(s: String): SafeId.SafeId = 
-    SafeId.fromString(s).getOrElse(
-      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
-    )
 
   // Test layer with all dependencies for provenance tests
   val testLayer: ZLayer[Any, Throwable, RiskResultResolver & TreeCacheManager] = 
@@ -170,7 +165,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
-        val testTree = RiskTree.singleNode(
+        val testTree = RiskTree.singleNodeUnsafe(
           id = 1L,
           name = SafeName.SafeName("Test Tree".refineUnsafe),
           root = leaf
@@ -198,7 +193,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
-        val testTree = RiskTree.singleNode(
+        val testTree = RiskTree.singleNodeUnsafe(
           id = 2L,
           name = SafeName.SafeName("Test Tree 2".refineUnsafe),
           root = leaf
@@ -225,7 +220,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(50000L)
         )
         
-        val testTree = RiskTree.singleNode(
+        val testTree = RiskTree.singleNodeUnsafe(
           id = 3L,
           name = SafeName.SafeName("Test Tree 3".refineUnsafe),
           root = leaf
@@ -252,7 +247,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
-        val testTree = RiskTree.singleNode(
+        val testTree = RiskTree.singleNodeUnsafe(
           id = 4L,
           name = SafeName.SafeName("Test Tree 4".refineUnsafe),
           root = leaf
@@ -302,7 +297,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           parentId = None
         )
         
-        val testTree = RiskTree.fromNodes(
+        val testTree = RiskTree.fromNodesUnsafe(
           id = 5L,
           name = SafeName.SafeName("Test Tree 5".refineUnsafe),
           nodes = Seq(portfolio, risk1, risk2),
@@ -334,13 +329,13 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         // Use different tree IDs to avoid cache hits
-        val testTree1 = RiskTree.singleNode(
+        val testTree1 = RiskTree.singleNodeUnsafe(
           id = 6L,
           name = SafeName.SafeName("Test Tree 6".refineUnsafe),
           root = leaf
         )
         
-        val testTree2 = RiskTree.singleNode(
+        val testTree2 = RiskTree.singleNodeUnsafe(
           id = 7L,
           name = SafeName.SafeName("Test Tree 7".refineUnsafe),
           root = leaf
@@ -368,7 +363,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(15000L)
         )
         
-        val testTree = RiskTree.singleNode(
+        val testTree = RiskTree.singleNodeUnsafe(
           id = 8L,
           name = SafeName.SafeName("Test Tree 8".refineUnsafe),
           root = leaf

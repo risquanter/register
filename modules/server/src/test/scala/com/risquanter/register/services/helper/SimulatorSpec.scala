@@ -5,17 +5,12 @@ import zio.test.Assertion.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution}
 import com.risquanter.register.domain.data.iron.Probability
 import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.testutil.TestHelpers.safeId
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.autoRefine
 
 object SimulatorSpec extends ZIOSpecDefault {
-  
-  // Helper to create SafeId from string literal
-  private def safeId(s: String): SafeId.SafeId = 
-    SafeId.fromString(s).getOrElse(
-      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
-    )
   
   // Helper to create Probability values
   private def prob(value: Double): Probability =
@@ -39,7 +34,9 @@ object SimulatorSpec extends ZIOSpecDefault {
           entityId = 1L,
           riskId = safeId("RISK-LOW-PROB"),
           occurrenceProb = prob(0.01), // 1% occurrence
-          lossDistribution = metalog
+          lossDistribution = metalog,
+          seed3 = 0L,
+          seed4 = 0L
         )
         
         val sparseMap = Simulator.performTrialsSync(sampler, nTrials = 10000)
@@ -59,7 +56,9 @@ object SimulatorSpec extends ZIOSpecDefault {
           entityId = 2L,
           riskId = safeId("RISK-SAMPLED"),
           occurrenceProb = prob(0.5),
-          lossDistribution = metalog
+          lossDistribution = metalog,
+          seed3 = 0L,
+          seed4 = 0L
         )
         
         val trials = Simulator.performTrialsSync(sampler, nTrials = 1000)
@@ -78,7 +77,9 @@ object SimulatorSpec extends ZIOSpecDefault {
           entityId = 3L,
           riskId = safeId("RISK-RANGE"),
           occurrenceProb = prob(0.3),
-          lossDistribution = metalog
+          lossDistribution = metalog,
+          seed3 = 0L,
+          seed4 = 0L
         )
         
         val nTrials = 500
@@ -117,9 +118,9 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("simulate produces identical results with same samplers") {
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
-          RiskSampler.fromDistribution(entityId = 101L, riskId = safeId("RISK-A"), occurrenceProb = prob(0.1), lossDistribution = metalog, seed3 = 111L),
-          RiskSampler.fromDistribution(entityId = 102L, riskId = safeId("RISK-B"), occurrenceProb = prob(0.2), lossDistribution = metalog, seed3 = 222L),
-          RiskSampler.fromDistribution(entityId = 103L, riskId = safeId("RISK-C"), occurrenceProb = prob(0.3), lossDistribution = metalog, seed3 = 333L)
+          RiskSampler.fromDistribution(entityId = 101L, riskId = safeId("RISK-A"), occurrenceProb = prob(0.1), lossDistribution = metalog, seed3 = 111L, seed4 = 0L),
+          RiskSampler.fromDistribution(entityId = 102L, riskId = safeId("RISK-B"), occurrenceProb = prob(0.2), lossDistribution = metalog, seed3 = 222L, seed4 = 0L),
+          RiskSampler.fromDistribution(entityId = 103L, riskId = safeId("RISK-C"), occurrenceProb = prob(0.3), lossDistribution = metalog, seed3 = 333L, seed4 = 0L)
         )
         
         for {
@@ -136,8 +137,8 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("sequential vs parallel produce identical results") {
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
-          RiskSampler.fromDistribution(entityId = 201L, riskId = safeId("RISK-SEQ-1"), occurrenceProb = prob(0.15), lossDistribution = metalog, seed3 = 1001L),
-          RiskSampler.fromDistribution(entityId = 202L, riskId = safeId("RISK-SEQ-2"), occurrenceProb = prob(0.25), lossDistribution = metalog, seed3 = 2002L)
+          RiskSampler.fromDistribution(entityId = 201L, riskId = safeId("RISK-SEQ-1"), occurrenceProb = prob(0.15), lossDistribution = metalog, seed3 = 1001L, seed4 = 0L),
+          RiskSampler.fromDistribution(entityId = 202L, riskId = safeId("RISK-SEQ-2"), occurrenceProb = prob(0.25), lossDistribution = metalog, seed3 = 2002L, seed4 = 0L)
         )
         
         for {
@@ -154,9 +155,9 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("simulates all risks successfully") {
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
-          RiskSampler.fromDistribution(entityId = 301L, riskId = safeId("RISK-MULTI-1"), occurrenceProb = prob(0.1), lossDistribution = metalog),
-          RiskSampler.fromDistribution(entityId = 302L, riskId = safeId("RISK-MULTI-2"), occurrenceProb = prob(0.2), lossDistribution = metalog),
-          RiskSampler.fromDistribution(entityId = 303L, riskId = safeId("RISK-MULTI-3"), occurrenceProb = prob(0.3), lossDistribution = metalog)
+          RiskSampler.fromDistribution(entityId = 301L, riskId = safeId("RISK-MULTI-1"), occurrenceProb = prob(0.1), lossDistribution = metalog, seed3 = 0L, seed4 = 0L),
+          RiskSampler.fromDistribution(entityId = 302L, riskId = safeId("RISK-MULTI-2"), occurrenceProb = prob(0.2), lossDistribution = metalog, seed3 = 0L, seed4 = 0L),
+          RiskSampler.fromDistribution(entityId = 303L, riskId = safeId("RISK-MULTI-3"), occurrenceProb = prob(0.3), lossDistribution = metalog, seed3 = 0L, seed4 = 0L)
         )
         
         for {
@@ -171,8 +172,8 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("each risk has independent outcomes") {
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
-          RiskSampler.fromDistribution(entityId = 401L, riskId = safeId("RISK-IND-1"), occurrenceProb = prob(0.5), lossDistribution = metalog, seed3 = 4001L),
-          RiskSampler.fromDistribution(entityId = 402L, riskId = safeId("RISK-IND-2"), occurrenceProb = prob(0.5), lossDistribution = metalog, seed3 = 4002L)
+          RiskSampler.fromDistribution(entityId = 401L, riskId = safeId("RISK-IND-1"), occurrenceProb = prob(0.5), lossDistribution = metalog, seed3 = 4001L, seed4 = 0L),
+          RiskSampler.fromDistribution(entityId = 402L, riskId = safeId("RISK-IND-2"), occurrenceProb = prob(0.5), lossDistribution = metalog, seed3 = 4002L, seed4 = 0L)
         )
         
         for {
@@ -194,7 +195,7 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("single sampler works correctly") {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
-          entityId = 501L, riskId = safeId("RISK-SINGLE"), occurrenceProb = prob(0.4), lossDistribution = metalog
+          entityId = 501L, riskId = safeId("RISK-SINGLE"), occurrenceProb = prob(0.4), lossDistribution = metalog, seed3 = 0L, seed4 = 0L
         )
         
         for {
@@ -216,7 +217,9 @@ object SimulatorSpec extends ZIOSpecDefault {
             entityId = 600L + i,
             riskId = safeId(s"RISK-PAR-$i"),
             occurrenceProb = prob(0.1),
-            lossDistribution = metalog
+            lossDistribution = metalog,
+            seed3 = 0L,
+            seed4 = 0L
           )
         }.toVector
         
@@ -231,8 +234,8 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("parallelism=1 equivalent to sequential") {
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
-          RiskSampler.fromDistribution(entityId = 701L, riskId = safeId("RISK-P1-1"), occurrenceProb = prob(0.2), lossDistribution = metalog, seed3 = 7001L),
-          RiskSampler.fromDistribution(entityId = 702L, riskId = safeId("RISK-P1-2"), occurrenceProb = prob(0.3), lossDistribution = metalog, seed3 = 7002L)
+          RiskSampler.fromDistribution(entityId = 701L, riskId = safeId("RISK-P1-1"), occurrenceProb = prob(0.2), lossDistribution = metalog, seed3 = 7001L, seed4 = 0L),
+          RiskSampler.fromDistribution(entityId = 702L, riskId = safeId("RISK-P1-2"), occurrenceProb = prob(0.3), lossDistribution = metalog, seed3 = 7002L, seed4 = 0L)
         )
         
         for {
@@ -252,7 +255,9 @@ object SimulatorSpec extends ZIOSpecDefault {
           entityId = 801L,
           riskId = safeId("RISK-ZERO-PROB"),
           occurrenceProb = prob(0.0001), // Very low probability
-          lossDistribution = metalog
+          lossDistribution = metalog,
+          seed3 = 0L,
+          seed4 = 0L
         )
         
         for {
@@ -273,7 +278,9 @@ object SimulatorSpec extends ZIOSpecDefault {
           entityId = 802L,
           riskId = safeId("RISK-HIGH-PROB"),
           occurrenceProb = prob(0.9999),
-          lossDistribution = metalog
+          lossDistribution = metalog,
+          seed3 = 0L,
+          seed4 = 0L
         )
         
         val nTrials = 500
@@ -292,7 +299,7 @@ object SimulatorSpec extends ZIOSpecDefault {
       test("handles single trial simulation") {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
-          entityId = 803L, riskId = safeId("RISK-ONE-TRIAL"), occurrenceProb = prob(0.5), lossDistribution = metalog
+          entityId = 803L, riskId = safeId("RISK-ONE-TRIAL"), occurrenceProb = prob(0.5), lossDistribution = metalog, seed3 = 0L, seed4 = 0L
         )
         
         for {

@@ -9,6 +9,7 @@ import com.risquanter.register.domain.data.RiskResult
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 import com.risquanter.register.domain.data.iron.*
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 /**
  * Tests for RiskResultCache and TreeCacheManager (ADR-014).
@@ -18,12 +19,6 @@ import com.risquanter.register.domain.data.iron.*
  * - TreeCacheManager: Manages per-tree caches, handles invalidation
  */
 object RiskResultCacheSpec extends ZIOSpecDefault {
-
-  // Helper to create SafeId from string literal (safe for tests with known-valid values)
-  def safeId(s: String): SafeId.SafeId = 
-    SafeId.fromString(s).getOrElse(
-      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
-    )
 
   // Helper to create NonNegativeLong from Long (runtime check)
   def nnLong(n: Long): NonNegativeLong = 
@@ -79,7 +74,9 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
 
   // All nodes in flat list
   val allNodes = Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, softwareLeaf)
-  val treeIndex = TreeIndex.fromNodeSeq(allNodes)
+  val treeIndex = TreeIndex.fromNodeSeq(allNodes).toEither.getOrElse(
+    throw new AssertionError("Test fixture has invalid tree structure")
+  )
   
   // Create RiskTree for TreeCacheManager tests
   val testTreeId: NonNegativeLong = 1L
@@ -88,6 +85,8 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     name = SafeName.SafeName("Test Tree".refineUnsafe),
     nodes = allNodes,
     rootId = safeId("ops-risk")
+  ).toEither.getOrElse(
+    throw new AssertionError("Test fixture has invalid RiskTree")
   )
 
   // SafeId values for tests

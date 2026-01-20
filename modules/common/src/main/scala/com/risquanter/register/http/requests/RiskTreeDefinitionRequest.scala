@@ -74,14 +74,8 @@ object RiskTreeDefinitionRequest {
         Validation.succeed(req.nodes)
       }
     
-    // Combine basic validations
+    // Combine basic validations (cross-field validation done in validate())
     Validation.validateWith(nameV, rootIdV, nodesV) { (name, rootId, nodes) =>
-      // Additional check: rootId must exist in nodes
-      val nodeIds = nodes.map(_.id).toSet
-      if (!nodeIds.contains(rootId)) {
-        // This is a cross-field validation, return as failure
-        throw new IllegalArgumentException(s"rootId '$rootId' not found in nodes list")
-      }
       (name, nodes, rootId)
     }
   }

@@ -4,14 +4,9 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.RiskResult
 import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 object LECGeneratorSpec extends ZIOSpecDefault {
-
-  // Helper to create SafeId from string literal
-  private def safeId(s: String): SafeId.SafeId = 
-    SafeId.fromString(s).getOrElse(
-      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
-    )
 
   // Test fixtures - simulation outcomes
   val cyberResult = RiskResult(

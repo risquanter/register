@@ -6,7 +6,7 @@ import zio.test.Assertion.*
 import zio.prelude.Identity
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
-import io.github.iltotore.iron.refineUnsafe
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 /**
  * Property-based tests for RiskTransform Identity laws and mitigation strategies.
@@ -17,9 +17,6 @@ import io.github.iltotore.iron.refineUnsafe
  * - Composition correctness: order matters for non-commutative operations
  */
 object RiskTransformSpec extends ZIOSpecDefault {
-  
-  // Helper for test SafeIds
-  private def safeId(s: String): SafeId.SafeId = SafeId.SafeId(s.refineUnsafe)
   
   // ══════════════════════════════════════════════════════════════════
   // Generators

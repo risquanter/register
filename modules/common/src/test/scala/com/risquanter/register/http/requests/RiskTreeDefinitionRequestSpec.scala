@@ -5,14 +5,9 @@ import zio.json.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
-
-  // Helper to create SafeId from string literal
-  private def safeId(s: String): SafeId.SafeId = 
-    SafeId.fromString(s).getOrElse(
-      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
-    )
 
   def spec = suite("RiskTreeDefinitionRequest")(
     test("has JsonCodec for serialization - flat format") {

@@ -128,7 +128,7 @@ lazy val server = (project in file("modules/server"))
     ),
     nativeImageOutput := target.value / "register-server"
   )
-  .dependsOn(common.jvm)
+  .dependsOn(common.jvm % "compile->compile;test->test")
 
 // Server integration tests (separate subproject)
 lazy val serverIt = (project in file("modules/server-it"))

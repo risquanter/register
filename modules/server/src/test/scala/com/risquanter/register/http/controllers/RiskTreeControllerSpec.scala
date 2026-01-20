@@ -10,6 +10,7 @@ import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeId}
+import com.risquanter.register.testutil.TestHelpers.safeId
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
 
@@ -17,12 +18,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
   // Service accessor pattern
   private def service = ZIO.serviceWithZIO[RiskTreeService]
-  
-  // Helper to create SafeId from string literal
-  private def safeId(s: String): SafeId.SafeId = 
-    SafeId.fromString(s).getOrElse(
-      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
-    )
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo() = new RiskTreeRepository {

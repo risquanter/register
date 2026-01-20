@@ -2,7 +2,9 @@ package com.risquanter.register.domain.data
 
 import com.risquanter.register.domain.data.iron.{SafeName, NonNegativeLong}
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
+import zio.prelude.Validation
 import io.github.iltotore.iron.*
 
 /** Domain model for a risk tree configuration.
@@ -78,27 +80,71 @@ object RiskTree {
         RiskTreeJson(tree.id, tree.name, tree.nodes, tree.rootId)
       },
       // Decoder: Deserialize and rebuild index from nodes
-      JsonDecoder[RiskTreeJson].map { json =>
-        RiskTree(
-          id = json.id,
-          name = json.name,
-          nodes = json.nodes,
-          rootId = json.rootId,
-          index = TreeIndex.fromNodeSeq(json.nodes)
-        )
+      JsonDecoder[RiskTreeJson].mapOrFail { json =>
+        // Validate and build TreeIndex
+        TreeIndex.fromNodeSeq(json.nodes).toEither match {
+          case Left(errors) =>
+            Left(s"Invalid tree structure: ${errors.map(_.message).mkString("; ")}")
+          case Right(index) =>
+            // Check rootId exists
+            if (!index.nodes.contains(json.rootId)) {
+              Left(s"rootId '${json.rootId.value}' not found in nodes")
+            } else {
+              Right(RiskTree(
+                id = json.id,
+                name = json.name,
+                nodes = json.nodes,
+                rootId = json.rootId,
+                index = index
+              ))
+            }
+        }
       }
     )
   }
   
-  /** Create a RiskTree from a flat list of nodes */
+  /** Create a RiskTree from a flat list of nodes.
+    * 
+    * Returns accumulated validation errors per ADR-010.
+    */
   def fromNodes(
     id: NonNegativeLong,
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
     rootId: NodeId
+  ): Validation[ValidationError, RiskTree] = {
+    TreeIndex.fromNodeSeq(nodes).flatMap { index =>
+      if (!index.nodes.contains(rootId)) {
+        Validation.fail(ValidationError(
+          field = "rootId",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = s"rootId '${rootId.value}' not found in nodes"
+        ))
+      } else {
+        Validation.succeed(RiskTree(id, name, nodes, rootId, index))
+      }
+    }
+  }
+  
+  /** Unsafe version for internal use where validity is guaranteed.
+    * 
+    * Use only when nodes come from trusted sources (e.g., already validated).
+    * 
+    * @throws IllegalArgumentException if validation fails
+    */
+  def fromNodesUnsafe(
+    id: NonNegativeLong,
+    name: SafeName.SafeName,
+    nodes: Seq[RiskNode],
+    rootId: NodeId
   ): RiskTree = {
-    val index = TreeIndex.fromNodeSeq(nodes)
-    RiskTree(id, name, nodes, rootId, index)
+    fromNodes(id, name, nodes, rootId).toEither match {
+      case Right(tree) => tree
+      case Left(errors) =>
+        throw new IllegalArgumentException(
+          s"RiskTree invariant violated: ${errors.map(_.message).mkString("; ")}"
+        )
+    }
   }
   
   /** Create a RiskTree with a single root node (convenience for tests and simple cases) */
@@ -106,7 +152,19 @@ object RiskTree {
     id: NonNegativeLong,
     name: SafeName.SafeName,
     root: RiskNode
-  ): RiskTree = {
+  ): Validation[ValidationError, RiskTree] = {
     fromNodes(id, name, Seq(root), root.id)
+  }
+  
+  /** Unsafe version of singleNode for tests where validity is guaranteed.
+    * 
+    * @throws IllegalArgumentException if validation fails
+    */
+  def singleNodeUnsafe(
+    id: NonNegativeLong,
+    name: SafeName.SafeName,
+    root: RiskNode
+  ): RiskTree = {
+    fromNodesUnsafe(id, name, Seq(root), root.id)
   }
 }

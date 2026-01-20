@@ -4,12 +4,9 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.tree.NodeId
-import io.github.iltotore.iron.refineUnsafe
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 object RiskPortfolioSpec extends ZIOSpecDefault {
-
-  // Helper for test SafeIds
-  private def safeId(s: String): SafeId.SafeId = SafeId.SafeId(s.refineUnsafe)
 
   def spec = suite("RiskPortfolio Smart Constructor")(
     

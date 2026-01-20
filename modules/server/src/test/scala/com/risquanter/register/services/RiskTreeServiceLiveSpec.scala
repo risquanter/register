@@ -13,18 +13,13 @@ import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.*
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 
 object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
   // Concise service accessor pattern
   private val service = ZIO.serviceWithZIO[RiskTreeService]
-  
-  // Helper to create SafeId from string literal
-  private def safeId(s: String): SafeId.SafeId = 
-    SafeId.fromString(s).getOrElse(
-      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
-    )
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo = new RiskTreeRepository {
