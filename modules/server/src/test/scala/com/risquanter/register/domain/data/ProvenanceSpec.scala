@@ -173,7 +173,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val testTree = RiskTree(
           id = 1L,
           name = SafeName.SafeName("Test Tree".refineUnsafe),
-          nTrials = 100,
           root = leaf,
           index = TreeIndex.fromTree(leaf)
         )
@@ -200,7 +199,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val testTree = RiskTree(
           id = 2L,
           name = SafeName.SafeName("Test Tree 2".refineUnsafe),
-          nTrials = 100,
           root = leaf,
           index = TreeIndex.fromTree(leaf)
         )
@@ -227,7 +225,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val testTree = RiskTree(
           id = 3L,
           name = SafeName.SafeName("Test Tree 3".refineUnsafe),
-          nTrials = 100,
           root = leaf,
           index = TreeIndex.fromTree(leaf)
         )
@@ -256,7 +253,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val testTree = RiskTree(
           id = 4L,
           name = SafeName.SafeName("Test Tree 4".refineUnsafe),
-          nTrials = 100,
           root = leaf,
           index = TreeIndex.fromTree(leaf)
         )
@@ -305,7 +301,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val testTree = RiskTree(
           id = 5L,
           name = SafeName.SafeName("Test Tree 5".refineUnsafe),
-          nTrials = 200,
           root = portfolio,
           index = TreeIndex.fromTree(portfolio)
         )
@@ -338,7 +333,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val testTree1 = RiskTree(
           id = 6L,
           name = SafeName.SafeName("Test Tree 6".refineUnsafe),
-          nTrials = 500,
           root = leaf,
           index = TreeIndex.fromTree(leaf)
         )
@@ -346,7 +340,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val testTree2 = RiskTree(
           id = 7L,
           name = SafeName.SafeName("Test Tree 7".refineUnsafe),
-          nTrials = 500,
           root = leaf,
           index = TreeIndex.fromTree(leaf)
         )
@@ -376,7 +369,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val testTree = RiskTree(
           id = 8L,
           name = SafeName.SafeName("Test Tree 8".refineUnsafe),
-          nTrials = 300,
           root = leaf,
           index = TreeIndex.fromTree(leaf)
         )

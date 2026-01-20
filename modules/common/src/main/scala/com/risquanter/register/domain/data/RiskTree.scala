@@ -19,7 +19,6 @@ import io.github.iltotore.iron.*
 final case class RiskTree(
   id: NonNegativeLong,
   name: SafeName.SafeName,
-  nTrials: Int,
   root: RiskNode,
   index: TreeIndex
 )
@@ -51,7 +50,6 @@ object RiskTree {
     case class RiskTreeJson(
       id: NonNegativeLong,
       name: SafeName.SafeName,
-      nTrials: Int,
       root: RiskNode
     )
     
@@ -60,14 +58,13 @@ object RiskTree {
     JsonCodec(
       // Encoder: Serialize without index
       JsonEncoder[RiskTreeJson].contramap[RiskTree] { tree =>
-        RiskTreeJson(tree.id, tree.name, tree.nTrials, tree.root)
+        RiskTreeJson(tree.id, tree.name, tree.root)
       },
       // Decoder: Deserialize and rebuild index from root
       JsonDecoder[RiskTreeJson].map { json =>
         RiskTree(
           id = json.id,
           name = json.name,
-          nTrials = json.nTrials,
           root = json.root,
           index = TreeIndex.fromTree(json.root)
         )

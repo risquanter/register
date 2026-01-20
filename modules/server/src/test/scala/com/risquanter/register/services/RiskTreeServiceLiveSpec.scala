@@ -74,7 +74,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         program.assert { result =>
           result.id > 0 &&
             result.name == SafeName.SafeName("Test Risk Tree".refineUnsafe) &&
-            result.nTrials == 1000 &&
             result.root.isInstanceOf[RiskLeaf]
         }
       },

@@ -187,7 +187,6 @@ class RiskTreeServiceLive private (
       riskTree = RiskTree(
         id = 0L.refineUnsafe, // repo will assign
         name = safeName,
-        nTrials = nTrials,
         root = rootNode,
         index = TreeIndex.fromTree(rootNode)
       )
@@ -215,7 +214,6 @@ class RiskTreeServiceLive private (
       
       updated <- repo.update(id, tree => tree.copy(
         name = safeName,
-        nTrials = nTrials,
         root = rootNode
       ))
     } yield updated

@@ -61,7 +61,6 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
   val testTree = RiskTree(
     id = testTreeId,
     name = SafeName.SafeName("Test Tree".refineUnsafe),
-    nTrials = 1000,
     root = rootNode,
     index = testIndex
   )
