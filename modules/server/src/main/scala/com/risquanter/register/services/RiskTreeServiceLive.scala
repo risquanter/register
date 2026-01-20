@@ -181,7 +181,7 @@ class RiskTreeServiceLive private (
           .toEither
           .left.map(errors => ValidationFailed(errors.toList))
       )
-      (safeName, nTrials, rootNode) = validated
+      (safeName, rootNode) = validated
       
       // Create RiskTree entity (id will be assigned by repo)
       riskTree = RiskTree(
@@ -210,7 +210,7 @@ class RiskTreeServiceLive private (
           .toEither
           .left.map(errors => ValidationFailed(errors.toList))
       )
-      (safeName, nTrials, rootNode) = validated
+      (safeName, rootNode) = validated
       
       updated <- repo.update(id, tree => tree.copy(
         name = safeName,
@@ -246,16 +246,17 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def getLECCurve(nodeId: NodeId): Task[LECCurveResponse] = {
+  override def getLECCurve(nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] = {
     val operation = tracing.span("getLECCurve", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value)
+        _ <- tracing.setAttribute("include_provenance", includeProvenance)
         
         // Find tree containing this node
         tree <- findTreeContainingNode(nodeId)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
-        result <- resolver.ensureCached(tree, nodeId)
+        result <- resolver.ensureCached(tree, nodeId, includeProvenance)
         _ <- tracing.setAttribute("cache_resolved", true)
         
         // Get node from tree index for metadata
@@ -286,7 +287,8 @@ class RiskTreeServiceLive private (
           name = node.name,  // Use node.name (display name), not result.name (which is the ID)
           curve = lecPoints,
           quantiles = quantiles,
-          childIds = childIds
+          childIds = childIds,
+          provenances = if (includeProvenance) result.provenances else Nil  // Filter provenance on output
         )
       } yield response
     }
@@ -297,17 +299,18 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def probOfExceedance(nodeId: NodeId, threshold: Long): Task[BigDecimal] = {
+  override def probOfExceedance(nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal] = {
     val operation = tracing.span("probOfExceedance", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("threshold", threshold)
+        _ <- tracing.setAttribute("include_provenance", includeProvenance)
         
         // Find tree containing this node
         tree <- findTreeContainingNode(nodeId)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
-        result <- resolver.ensureCached(tree, nodeId)
+        result <- resolver.ensureCached(tree, nodeId, includeProvenance)
         _ <- tracing.setAttribute("cache_resolved", true)
         
         // Compute exceedance probability from cached result
@@ -322,11 +325,12 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def getLECCurvesMulti(nodeIds: Set[NodeId]): Task[Map[NodeId, Vector[LECPoint]]] = {
+  override def getLECCurvesMulti(nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]] = {
     val operation = tracing.span("getLECCurvesMulti", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
         _ <- tracing.setAttribute("node_ids", nodeIds.map(_.value).mkString(","))
+        _ <- tracing.setAttribute("include_provenance", includeProvenance)
         
         // Find tree containing the first node (assuming all nodes from same tree)
         tree <- if (nodeIds.isEmpty) {
@@ -340,7 +344,7 @@ class RiskTreeServiceLive private (
         }
         
         // Batch cache-aside: ensure all results are cached
-        results <- resolver.ensureCachedAll(tree, nodeIds)
+        results <- resolver.ensureCachedAll(tree, nodeIds, includeProvenance)
         _ <- tracing.setAttribute("results_resolved", results.size.toLong)
         
         // Generate curves with shared tick domain (ADR-014 render-time strategy)

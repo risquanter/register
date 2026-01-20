@@ -27,7 +27,6 @@ import io.github.iltotore.iron.*
   */
 final case class RiskTreeDefinitionRequest(
   name: String,
-  nTrials: Int = 10000,
   root: RiskNode
 )
 
@@ -43,17 +42,15 @@ object RiskTreeDefinitionRequest {
    * 
    * @return Validation with accumulated errors for name/nTrials, or validated tuple
    */
-  def toDomain(req: RiskTreeDefinitionRequest): Validation[ValidationError, (SafeName.SafeName, Int, RiskNode)] = {
+  def toDomain(req: RiskTreeDefinitionRequest): Validation[ValidationError, (SafeName.SafeName, RiskNode)] = {
     import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
     
     // Validate request-level fields (RiskNode already validated during JSON parsing)
     val nameV = toValidation(ValidationUtil.refineName(req.name, "request.name"))
-    val trialsV = toValidation(ValidationUtil.refinePositiveInt(req.nTrials, "request.nTrials"))
-      .map(_ => req.nTrials)
-    
+   
     // Combine validations - accumulates name/nTrials errors
-    Validation.validateWith(nameV, trialsV, Validation.succeed(req.root)) { (name, trials, root) =>
-      (name, trials, root)
+    Validation.validateWith(nameV, Validation.succeed(req.root)) { (name, root) =>
+      (name, root)
     }
   }
 }

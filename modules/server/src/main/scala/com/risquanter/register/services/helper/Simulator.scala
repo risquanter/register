@@ -172,10 +172,9 @@ object Simulator {
    */
   private[services] def createSamplerFromLeaf(
     leaf: RiskLeaf,
-    includeProvenance: Boolean = false,
     seed3: Long = 0L,
     seed4: Long = 0L
-  ): Task[(RiskSampler, Option[NodeProvenance])] = {
+  ): Task[(RiskSampler, NodeProvenance)] = {
     for {
       // Create distribution based on mode
       distAndParams <- createDistributionWithParams(leaf)
@@ -193,8 +192,8 @@ object Simulator {
       )
       
       // Capture provenance if requested
-      provenance = if (includeProvenance) {
-        Some(NodeProvenance(
+      provenance = 
+        NodeProvenance(
           riskId = leaf.id,
           entityId = entityId,
           occurrenceVarId = entityId.hashCode + 1000L,
@@ -205,8 +204,8 @@ object Simulator {
           distributionParams = distParams,
           timestamp = Instant.now(),
           simulationUtilVersion = BuildInfo.simulationUtilVersion
-        ))
-      } else None
+        )
+      
     } yield (sampler, provenance)
   }
   

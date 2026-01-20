@@ -6,7 +6,10 @@ import com.risquanter.register.http.endpoints.RiskTreeEndpoints
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.http.responses.SimulationResponse
-import com.risquanter.register.domain.data.iron.{PositiveInt, IronConstants}
+import com.risquanter.register.domain.data.{LECPoint, LECCurveResponse}
+import com.risquanter.register.domain.data.iron.{PositiveInt, IronConstants, SafeId, SafeIdStr}
+import com.risquanter.register.domain.tree.NodeId
+import io.github.iltotore.iron.refineUnsafe
 import IronConstants.Four
 
 /** Controller for RiskTree HTTP endpoints.
@@ -49,9 +52,33 @@ class RiskTreeController private (
       invalidationHandler.handleNodeChange(treeId, nodeId)
         .map(count => Map("invalidatedCount" -> count))
   }
+  
+  // ========================================
+  // LEC Query Endpoints
+  // ========================================
+  
+  /** Get LEC curve for a single node. */
+  val getLECCurve: ServerEndpoint[Any, Task] = getLECCurveEndpoint.serverLogicSuccess {
+    case (treeId, nodeIdSafe, includeProvenance) =>
+      riskTreeService.getLECCurve(nodeIdSafe, includeProvenance)
+  }
+  
+  /** Get probability of exceeding a loss threshold. */
+  val probOfExceedance: ServerEndpoint[Any, Task] = probOfExceedanceEndpoint.serverLogicSuccess {
+    case (treeId, nodeIdSafe, threshold, includeProvenance) =>
+      riskTreeService.probOfExceedance(nodeIdSafe, threshold, includeProvenance)
+  }
+  
+  /** Get LEC curves for multiple nodes with shared tick domain. */
+  val getLECCurvesMulti: ServerEndpoint[Any, Task] = getLECCurvesMultiEndpoint.serverLogicSuccess {
+    case (treeId, includeProvenance, nodeIds) =>
+      // nodeIds already validated as List[SafeId.SafeId] by JsonDecoder
+      riskTreeService.getLECCurvesMulti(nodeIds.toSet, includeProvenance)
+        .map(_.map { case (nodeId, curve) => (nodeId.value, curve) })
+  }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(health, create, getAll, getById, invalidateCache)
+    List(health, create, getAll, getById, invalidateCache, getLECCurve, probOfExceedance, getLECCurvesMulti)
 }
 
 object RiskTreeController {

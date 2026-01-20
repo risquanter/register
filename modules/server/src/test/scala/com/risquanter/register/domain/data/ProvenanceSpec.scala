@@ -186,7 +186,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
         }
       },
       
-      test("ensureCached with includeProvenance=false returns empty provenances") {
+      // Resolver always captures provenance for cache consistency.
+      // Filtering (based on includeProvenance flag) happens at the service layer.
+      // This ensures cache keys remain simple (nodeId only) and avoids cache fragmentation.
+      test("resolver always captures provenance regardless of includeProvenance flag") {
         val leaf = RiskLeaf.unsafeApply(
           id = "test-risk",
           name = "Test Risk",
@@ -205,8 +208,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
         
         for {
           resolver <- ZIO.service[RiskResultResolver]
+          // Even with includeProvenance=false, resolver returns provenance
+          // (service layer filters before returning to HTTP clients)
           result <- resolver.ensureCached(testTree, safeId("test-risk"), includeProvenance = false)
-        } yield assertTrue(result.provenances.isEmpty)
+        } yield assertTrue(result.provenances.nonEmpty)
       },
       
       test("provenance captures correct entityId from riskId hash") {

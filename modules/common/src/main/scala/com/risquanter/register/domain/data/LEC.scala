@@ -35,13 +35,15 @@ object LECPoint {
   * @param curve Loss exceedance curve points (loss → P(Loss >= loss))
   * @param quantiles Key percentiles (p50, p90, p95, p99) for quick reference
   * @param childIds IDs of child nodes (for navigation, not embedded data)
+  * @param provenances Opt-in provenance metadata for reproducibility (via ?includeProvenance=true)
   */
 final case class LECCurveResponse(
   id: String,
   name: String,
   curve: Vector[LECPoint],
   quantiles: Map[String, Double],
-  childIds: Option[List[String]] = None
+  childIds: Option[List[String]] = None,
+  provenances: List[NodeProvenance] = Nil
 )
 
 object LECCurveResponse {

@@ -70,4 +70,14 @@ object IronTapirCodecs {
         DecodeResult.Value(_)
       )
     )(_.value.toString)
+
+  /** Schema for SafeId.SafeId for JSON body parameters.
+    * 
+    * Tapir's jsonBody[T] requires both JsonCodec (for serialization) and Schema 
+    * (for OpenAPI documentation). Path/query params derive Schema from Codec,
+    * but JSON bodies need explicit Schema for Iron types.
+    * 
+    * @see ADR-001 Section "JSON Bodies with Iron Types"
+    */
+  given Schema[SafeId.SafeId] = Schema.string
 }

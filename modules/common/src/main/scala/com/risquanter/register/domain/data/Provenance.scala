@@ -140,6 +140,8 @@ object DistributionParams {
 }
 
 object NodeProvenance {
+  import sttp.tapir.Schema
+  
   // SafeId encodes as String in JSON wire format
   private given safeIdEncoder: JsonEncoder[SafeId.SafeId] = JsonEncoder.string.contramap(_.value.toString)
   private given safeIdDecoder: JsonDecoder[SafeId.SafeId] = JsonDecoder.string.mapOrFail(s =>
@@ -147,6 +149,9 @@ object NodeProvenance {
   )
   
   given codec: JsonCodec[NodeProvenance] = DeriveJsonCodec.gen[NodeProvenance]
+  
+  // Tapir Schema for HTTP endpoint serialization
+  given schema: Schema[NodeProvenance] = Schema.any[NodeProvenance]
 }
 
 object TreeProvenance {

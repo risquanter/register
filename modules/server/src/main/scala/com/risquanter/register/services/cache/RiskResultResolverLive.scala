@@ -136,10 +136,12 @@ final case class RiskResultResolverLive(
 
   private def simulateLeaf(cache: RiskResultCache, leaf: RiskLeaf, includeProvenance: Boolean): Task[RiskResult] =
     for
-      samplerAndProv <- Simulator.createSamplerFromLeaf(leaf, includeProvenance, seed3, seed4)
-      (sampler, provenanceOpt) = samplerAndProv
+      // Always capture provenance (filter at service layer)
+      // Rationale: Maintain chain of truth - provenance always in cache
+      samplerAndProv <- Simulator.createSamplerFromLeaf(leaf, seed3, seed4)
+      (sampler, provenance) = samplerAndProv
       trials <- Simulator.performTrials(sampler, nTrials, parallelism)
-      result = RiskResult(leaf.id, trials, nTrials, provenanceOpt.toList)
+      result = RiskResult(leaf.id, trials, nTrials, List(provenance))
       _ <- cache.put(leaf.id, result)
     yield result
 }

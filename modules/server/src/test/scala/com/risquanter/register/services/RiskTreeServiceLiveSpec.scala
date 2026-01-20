@@ -55,7 +55,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   // Valid request with hierarchical structure
   private val validRequest = RiskTreeDefinitionRequest(
     name = "Test Risk Tree",
-    nTrials = 1000,
     root = RiskLeaf.create(
       id = "test-risk",
       name = "Test Risk",
@@ -81,7 +80,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("create accepts hierarchical RiskNode structure") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Hierarchical Tree",
-          nTrials = 1000,
           root = RiskPortfolio.create(
             id = "ops-risk",
             name = "Operational Risk",
@@ -201,7 +199,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurve returns curve with childIds for portfolio node") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Portfolio Test",
-          nTrials = 1000,
           root = RiskPortfolio.create(
             id = "portfolio-root",
             name = "Portfolio",
@@ -288,10 +285,53 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
+      // ========================================
+      // Provenance Filtering (Service Layer)
+      // ========================================
+
+      // Service layer filters provenance based on includeProvenance flag.
+      // Resolver always captures provenance (for cache consistency),
+      // service layer omits it from response when not requested.
+      test("getLECCurve with includeProvenance=true returns provenances") {
+        val program = for {
+          _ <- service(_.create(validRequest))
+          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          response <- service(_.getLECCurve(rootId, includeProvenance = true))
+        } yield response
+
+        program.assert { response =>
+          response.provenances.nonEmpty &&
+            response.provenances.exists(_.riskId.value.toString == "test-risk")
+        }
+      },
+
+      test("getLECCurve with includeProvenance=false returns empty provenances") {
+        val program = for {
+          _ <- service(_.create(validRequest))
+          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          response <- service(_.getLECCurve(rootId, includeProvenance = false))
+        } yield response
+
+        program.assert { response =>
+          response.provenances.isEmpty
+        }
+      },
+
+      test("getLECCurve defaults to no provenance") {
+        val program = for {
+          _ <- service(_.create(validRequest))
+          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          response <- service(_.getLECCurve(rootId))  // No includeProvenance arg
+        } yield response
+
+        program.assert { response =>
+          response.provenances.isEmpty  // Default is false
+        }
+      },
+
       test("getLECCurvesMulti returns curves for multiple nodes") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Multi-Node Test",
-          nTrials = 1000,
           root = RiskPortfolio.create(
             id = "multi-root",
             name = "Multi Root",
@@ -335,7 +375,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurvesMulti uses shared tick domain") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Shared Domain Test",
-          nTrials = 1000,
           root = RiskPortfolio.create(
             id = "shared-root",
             name = "Shared Root",

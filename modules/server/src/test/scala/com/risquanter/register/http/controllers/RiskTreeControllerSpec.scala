@@ -86,7 +86,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       test("POST with RiskPortfolio discriminator creates tree") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Ops Risk Portfolio",
-          nTrials = 1000,
           root = RiskPortfolio.create(
             id = "root",
             name = "Total Operational Risk",
@@ -123,7 +122,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       test("returns tree metadata when exists") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Test Tree",
-          nTrials = 1000,
           root = RiskLeaf.create(
             id = "test-risk",
             name = "Test Risk",

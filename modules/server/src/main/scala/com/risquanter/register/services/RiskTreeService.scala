@@ -63,17 +63,19 @@ trait RiskTreeService {
     * otherwise simulates and caches before returning.
     * 
     * @param nodeId Node identifier (SafeId)
+    * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @return LEC curve response with quantiles, curve points, and childIds for navigation
     */
-  def getLECCurve(nodeId: NodeId): Task[LECCurveResponse]
+  def getLECCurve(nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse]
   
   /** Get exceedance probability at a threshold for a node.
     * 
     * @param nodeId Node identifier
     * @param threshold Loss threshold to compute P(Loss >= threshold)
+    * @param includeProvenance Whether to include provenance metadata (currently unused for this endpoint)
     * @return Probability as BigDecimal
     */
-  def probOfExceedance(nodeId: NodeId, threshold: Long): Task[BigDecimal]
+  def probOfExceedance(nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal]
   
   /** Get LEC curves for multiple nodes with shared tick domain.
     * 
@@ -81,7 +83,8 @@ trait RiskTreeService {
     * All curves share the same loss ticks for aligned rendering.
     * 
     * @param nodeIds Set of node identifiers
+    * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @return Map from nodeId to curve points
     */
-  def getLECCurvesMulti(nodeIds: Set[NodeId]): Task[Map[NodeId, Vector[LECPoint]]]
+  def getLECCurvesMulti(nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]]
 }
