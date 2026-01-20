@@ -26,14 +26,15 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
       throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
     )
 
-  // Test fixture: Simple risk tree for testing
+  // Test fixture: Simple risk tree for testing (flat node format)
   val risk1Leaf = RiskLeaf.unsafeApply(
     id = "risk1",
     name = "Risk 1",
     distributionType = "lognormal",
     probability = 0.1,
     minLoss = Some(10000L),
-    maxLoss = Some(50000L)
+    maxLoss = Some(50000L),
+    parentId = Some(safeId("root"))
   )
 
   val risk2Leaf = RiskLeaf.unsafeApply(
@@ -42,27 +43,30 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
     distributionType = "lognormal",
     probability = 0.2,
     minLoss = Some(5000L),
-    maxLoss = Some(20000L)
+    maxLoss = Some(20000L),
+    parentId = Some(safeId("root"))
   )
 
-  val rootNode: RiskNode = RiskPortfolio.unsafeApply(
+  val rootNode: RiskNode = RiskPortfolio.unsafeFromStrings(
     id = "root",
     name = "Root Portfolio",
-    children = Array(risk1Leaf, risk2Leaf)
+    childIds = Array("risk1", "risk2"),
+    parentId = None
   )
 
-  val testIndex: TreeIndex = TreeIndex.fromTree(rootNode)
+  val allNodes = Seq(rootNode, risk1Leaf, risk2Leaf)
+  val testIndex: TreeIndex = TreeIndex.fromNodeSeq(allNodes)
   val rootId = safeId("root")
   val risk1Id = safeId("risk1")
   val risk2Id = safeId("risk2")
 
   // Create test RiskTree
   val testTreeId: NonNegativeLong = 1L
-  val testTree = RiskTree(
+  val testTree = RiskTree.fromNodes(
     id = testTreeId,
     name = SafeName.SafeName("Test Tree".refineUnsafe),
-    root = rootNode,
-    index = testIndex
+    nodes = allNodes,
+    rootId = rootId
   )
 
   // Test layer with all dependencies

@@ -170,11 +170,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
-        val testTree = RiskTree(
+        val testTree = RiskTree.singleNode(
           id = 1L,
           name = SafeName.SafeName("Test Tree".refineUnsafe),
-          root = leaf,
-          index = TreeIndex.fromTree(leaf)
+          root = leaf
         )
         
         for {
@@ -199,11 +198,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
-        val testTree = RiskTree(
+        val testTree = RiskTree.singleNode(
           id = 2L,
           name = SafeName.SafeName("Test Tree 2".refineUnsafe),
-          root = leaf,
-          index = TreeIndex.fromTree(leaf)
+          root = leaf
         )
         
         for {
@@ -227,11 +225,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(50000L)
         )
         
-        val testTree = RiskTree(
+        val testTree = RiskTree.singleNode(
           id = 3L,
           name = SafeName.SafeName("Test Tree 3".refineUnsafe),
-          root = leaf,
-          index = TreeIndex.fromTree(leaf)
+          root = leaf
         )
         
         for {
@@ -255,11 +252,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(10000L)
         )
         
-        val testTree = RiskTree(
+        val testTree = RiskTree.singleNode(
           id = 4L,
           name = SafeName.SafeName("Test Tree 4".refineUnsafe),
-          root = leaf,
-          index = TreeIndex.fromTree(leaf)
+          root = leaf
         )
         
         for {
@@ -285,7 +281,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(1000L),
-          maxLoss = Some(5000L)
+          maxLoss = Some(5000L),
+          parentId = Some(safeId("portfolio"))
         )
         
         val risk2 = RiskLeaf.unsafeApply(
@@ -294,20 +291,22 @@ object ProvenanceSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(2000L),
-          maxLoss = Some(8000L)
+          maxLoss = Some(8000L),
+          parentId = Some(safeId("portfolio"))
         )
         
-        val portfolio = RiskPortfolio.unsafeApply(
+        val portfolio = RiskPortfolio.unsafeFromStrings(
           id = "portfolio",
           name = "Test Portfolio",
-          children = Array(risk1, risk2)
+          childIds = Array("risk1", "risk2"),
+          parentId = None
         )
         
-        val testTree = RiskTree(
+        val testTree = RiskTree.fromNodes(
           id = 5L,
           name = SafeName.SafeName("Test Tree 5".refineUnsafe),
-          root = portfolio,
-          index = TreeIndex.fromTree(portfolio)
+          nodes = Seq(portfolio, risk1, risk2),
+          rootId = safeId("portfolio")
         )
         
         for {
@@ -335,18 +334,16 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         // Use different tree IDs to avoid cache hits
-        val testTree1 = RiskTree(
+        val testTree1 = RiskTree.singleNode(
           id = 6L,
           name = SafeName.SafeName("Test Tree 6".refineUnsafe),
-          root = leaf,
-          index = TreeIndex.fromTree(leaf)
+          root = leaf
         )
         
-        val testTree2 = RiskTree(
+        val testTree2 = RiskTree.singleNode(
           id = 7L,
           name = SafeName.SafeName("Test Tree 7".refineUnsafe),
-          root = leaf,
-          index = TreeIndex.fromTree(leaf)
+          root = leaf
         )
         
         for {
@@ -371,11 +368,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(15000L)
         )
         
-        val testTree = RiskTree(
+        val testTree = RiskTree.singleNode(
           id = 8L,
           name = SafeName.SafeName("Test Tree 8".refineUnsafe),
-          root = leaf,
-          index = TreeIndex.fromTree(leaf)
+          root = leaf
         )
         
         for {

@@ -7,7 +7,8 @@ import io.github.iltotore.iron.constraint.numeric.*
 
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{SafeName, NonNegativeLong}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong}
+import com.risquanter.register.domain.tree.NodeId
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -18,6 +19,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
   // Concise service accessor pattern
   private val service = ZIO.serviceWithZIO[RiskTreeService]
+  
+  // Helper to create SafeId from string literal
+  private def safeId(s: String): SafeId.SafeId = 
+    SafeId.fromString(s).getOrElse(
+      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
+    )
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo = new RiskTreeRepository {
@@ -52,17 +59,21 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   
   private val stubRepoLayer = ZLayer.fromFunction(() => makeStubRepo)
 
-  // Valid request with hierarchical structure
+  // Valid request with single leaf node (flat format)
+  private val validLeafNode = RiskLeaf.create(
+    id = "test-risk",
+    name = "Test Risk",
+    distributionType = "lognormal",
+    probability = 0.75,
+    minLoss = Some(1000L),
+    maxLoss = Some(50000L),
+    parentId = None
+  ).toEither.getOrElse(throw new RuntimeException("Invalid test data: validRequest"))
+  
   private val validRequest = RiskTreeDefinitionRequest(
     name = "Test Risk Tree",
-    root = RiskLeaf.create(
-      id = "test-risk",
-      name = "Test Risk",
-      distributionType = "lognormal",
-      probability = 0.75,
-      minLoss = Some(1000L),
-      maxLoss = Some(50000L)
-    ).toEither.getOrElse(throw new RuntimeException("Invalid test data: validRequest"))
+    nodes = Seq(validLeafNode),
+    rootId = "test-risk"
   )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
@@ -78,30 +89,36 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("create accepts hierarchical RiskNode structure") {
+        // Create nodes with flat structure (childIds + parentId)
+        val cyberLeaf = RiskLeaf.unsafeApply(
+          id = "cyber",
+          name = "Cyber Attack",
+          distributionType = "lognormal",
+          probability = 0.25,
+          minLoss = Some(1000L),
+          maxLoss = Some(50000L),
+          parentId = Some(safeId("ops-risk"))
+        )
+        val fraudLeaf = RiskLeaf.unsafeApply(
+          id = "fraud",
+          name = "Fraud",
+          distributionType = "lognormal",
+          probability = 0.15,
+          minLoss = Some(500L),
+          maxLoss = Some(10000L),
+          parentId = Some(safeId("ops-risk"))
+        )
+        val portfolioNode = RiskPortfolio.unsafeFromStrings(
+          id = "ops-risk",
+          name = "Operational Risk",
+          childIds = Array("cyber", "fraud"),
+          parentId = None
+        )
+        
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Hierarchical Tree",
-          root = RiskPortfolio.create(
-            id = "ops-risk",
-            name = "Operational Risk",
-            children = Array(
-              RiskLeaf.create(
-                id = "cyber",
-                name = "Cyber Attack",
-                distributionType = "lognormal",
-                probability = 0.25,
-                minLoss = Some(1000L),
-                maxLoss = Some(50000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: cyber")),
-              RiskLeaf.create(
-                id = "fraud",
-                name = "Fraud",
-                distributionType = "lognormal",
-                probability = 0.15,
-                minLoss = Some(500L),
-                maxLoss = Some(10000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: fraud"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data: portfolio"))
+          nodes = Seq(portfolioNode, cyberLeaf, fraudLeaf),
+          rootId = "ops-risk"
         )
         
         val program = service(_.create(hierarchicalRequest))
@@ -109,7 +126,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         program.assert { result =>
           result.id > 0 &&
             result.root.isInstanceOf[RiskPortfolio] &&
-            result.root.asInstanceOf[RiskPortfolio].children.length == 2
+            result.root.asInstanceOf[RiskPortfolio].childIds.length == 2
         }
       },
 
@@ -177,8 +194,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurve returns curve for leaf node") {
         val program = for {
           tree <- service(_.create(validRequest))
-          // Build TreeIndex from created tree
-          index = com.risquanter.register.domain.tree.TreeIndex.fromTree(tree.root)
+          // RiskTree now has flat nodes with index already built
           rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
           
           // Call new getLECCurve API
@@ -197,30 +213,36 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("getLECCurve returns curve with childIds for portfolio node") {
+        // Create nodes with flat structure (childIds + parentId)
+        val childA = RiskLeaf.unsafeApply(
+          id = "child-a",
+          name = "Child A",
+          distributionType = "lognormal",
+          probability = 0.3,
+          minLoss = Some(1000L),
+          maxLoss = Some(20000L),
+          parentId = Some(safeId("portfolio-root"))
+        )
+        val childB = RiskLeaf.unsafeApply(
+          id = "child-b",
+          name = "Child B",
+          distributionType = "lognormal",
+          probability = 0.2,
+          minLoss = Some(500L),
+          maxLoss = Some(10000L),
+          parentId = Some(safeId("portfolio-root"))
+        )
+        val portfolioRoot = RiskPortfolio.unsafeFromStrings(
+          id = "portfolio-root",
+          name = "Portfolio",
+          childIds = Array("child-a", "child-b"),
+          parentId = None
+        )
+        
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Portfolio Test",
-          root = RiskPortfolio.create(
-            id = "portfolio-root",
-            name = "Portfolio",
-            children = Array(
-              RiskLeaf.create(
-                id = "child-a",
-                name = "Child A",
-                distributionType = "lognormal",
-                probability = 0.3,
-                minLoss = Some(1000L),
-                maxLoss = Some(20000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data")),
-              RiskLeaf.create(
-                id = "child-b",
-                name = "Child B",
-                distributionType = "lognormal",
-                probability = 0.2,
-                minLoss = Some(500L),
-                maxLoss = Some(10000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+          nodes = Seq(portfolioRoot, childA, childB),
+          rootId = "portfolio-root"
         )
 
         val program = for {
@@ -330,30 +352,36 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("getLECCurvesMulti returns curves for multiple nodes") {
+        // Create nodes with flat structure
+        val leaf1 = RiskLeaf.unsafeApply(
+          id = "leaf-1",
+          name = "Leaf 1",
+          distributionType = "lognormal",
+          probability = 0.3,
+          minLoss = Some(1000L),
+          maxLoss = Some(30000L),
+          parentId = Some(safeId("multi-root"))
+        )
+        val leaf2 = RiskLeaf.unsafeApply(
+          id = "leaf-2",
+          name = "Leaf 2",
+          distributionType = "lognormal",
+          probability = 0.2,
+          minLoss = Some(2000L),
+          maxLoss = Some(40000L),
+          parentId = Some(safeId("multi-root"))
+        )
+        val multiRoot = RiskPortfolio.unsafeFromStrings(
+          id = "multi-root",
+          name = "Multi Root",
+          childIds = Array("leaf-1", "leaf-2"),
+          parentId = None
+        )
+        
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Multi-Node Test",
-          root = RiskPortfolio.create(
-            id = "multi-root",
-            name = "Multi Root",
-            children = Array(
-              RiskLeaf.create(
-                id = "leaf-1",
-                name = "Leaf 1",
-                distributionType = "lognormal",
-                probability = 0.3,
-                minLoss = Some(1000L),
-                maxLoss = Some(30000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data")),
-              RiskLeaf.create(
-                id = "leaf-2",
-                name = "Leaf 2",
-                distributionType = "lognormal",
-                probability = 0.2,
-                minLoss = Some(2000L),
-                maxLoss = Some(40000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+          nodes = Seq(multiRoot, leaf1, leaf2),
+          rootId = "multi-root"
         )
 
         val program = for {
@@ -373,30 +401,36 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("getLECCurvesMulti uses shared tick domain") {
+        // Create nodes with flat structure
+        val nodeA = RiskLeaf.unsafeApply(
+          id = "node-a",
+          name = "Node A",
+          distributionType = "lognormal",
+          probability = 0.3,
+          minLoss = Some(5000L),
+          maxLoss = Some(15000L),
+          parentId = Some(safeId("shared-root"))
+        )
+        val nodeB = RiskLeaf.unsafeApply(
+          id = "node-b",
+          name = "Node B",
+          distributionType = "lognormal",
+          probability = 0.2,
+          minLoss = Some(10000L),
+          maxLoss = Some(50000L),
+          parentId = Some(safeId("shared-root"))
+        )
+        val sharedRoot = RiskPortfolio.unsafeFromStrings(
+          id = "shared-root",
+          name = "Shared Root",
+          childIds = Array("node-a", "node-b"),
+          parentId = None
+        )
+        
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Shared Domain Test",
-          root = RiskPortfolio.create(
-            id = "shared-root",
-            name = "Shared Root",
-            children = Array(
-              RiskLeaf.create(
-                id = "node-a",
-                name = "Node A",
-                distributionType = "lognormal",
-                probability = 0.3,
-                minLoss = Some(5000L),
-                maxLoss = Some(15000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data")),
-              RiskLeaf.create(
-                id = "node-b",
-                name = "Node B",
-                distributionType = "lognormal",
-                probability = 0.2,
-                minLoss = Some(10000L),
-                maxLoss = Some(50000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+          nodes = Seq(sharedRoot, nodeA, nodeB),
+          rootId = "shared-root"
         )
 
         val program = for {

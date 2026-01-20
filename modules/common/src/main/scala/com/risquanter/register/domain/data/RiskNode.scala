@@ -3,6 +3,7 @@ package com.risquanter.register.domain.data
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
 import sttp.tapir.Schema
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, NonNegativeLong}
+import com.risquanter.register.domain.tree.NodeId
 
 /** Recursive ADT representing a risk hierarchy tree.
   * 
@@ -36,6 +37,7 @@ import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionT
 sealed trait RiskNode {
   def id: SafeId.SafeId
   def name: String
+  def parentId: Option[NodeId]
 }
 
 object RiskNode {
@@ -72,6 +74,7 @@ object RiskNode {
 final case class RiskLeaf private (
   @jsonField("id") safeId: SafeId.SafeId,
   @jsonField("name") safeName: SafeName.SafeName,
+  parentId: Option[NodeId],
   distributionType: DistributionType,
   probability: Probability,
   percentiles: Option[Array[Double]],
@@ -132,10 +135,11 @@ object RiskLeaf {
     percentiles: Option[Array[Double]] = None,
     quantiles: Option[Array[Double]] = None,
     minLoss: Option[Long] = None,
-    maxLoss: Option[Long] = None
+    maxLoss: Option[Long] = None,
+    parentId: Option[NodeId] = None
   ): RiskLeaf = {
     // Unsafe: Assumes valid input (for backward compatibility only)
-    create(id, name, distributionType, probability, percentiles, quantiles, minLoss, maxLoss)
+    create(id, name, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, parentId = parentId)
       .toEither
       .fold(
         errors => throw new IllegalArgumentException(s"Invalid RiskLeaf: $errors"),
@@ -165,6 +169,7 @@ object RiskLeaf {
     quantiles: Option[Array[Double]] = None,
     minLoss: Option[Long] = None,
     maxLoss: Option[Long] = None,
+    parentId: Option[NodeId] = None,
     fieldPrefix: String = "root"
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskLeaf] = {
     
@@ -193,6 +198,7 @@ object RiskLeaf {
         new RiskLeaf(
           safeId = validId,
           safeName = validName,
+          parentId = parentId,
           distributionType = validDistType,
           probability = validProb,
           percentiles = percentiles,
@@ -326,6 +332,7 @@ object RiskLeaf {
   private case class RiskLeafRaw(
     id: String,
     name: String,
+    parentId: Option[String],
     distributionType: String,
     probability: Double,
     percentiles: Option[Array[Double]],
@@ -339,11 +346,19 @@ object RiskLeaf {
   
   /** Custom decoder that uses smart constructor for cross-field validation */
   given decoder: JsonDecoder[RiskLeaf] = RiskLeafRaw.rawCodec.decoder.mapOrFail { raw =>
-    create(
-      raw.id, raw.name, raw.distributionType, raw.probability,
-      raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss,
-      fieldPrefix = s"riskLeaf[id=${raw.id}]"
-    ).toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
+    // Convert parentId string to NodeId if present
+    val parentIdOpt: Either[String, Option[NodeId]] = raw.parentId match {
+      case None => Right(None)
+      case Some(pid) => SafeId.fromString(pid).map(Some(_)).left.map(_.mkString(", "))
+    }
+    parentIdOpt.flatMap { validParentId =>
+      create(
+        raw.id, raw.name, raw.distributionType, raw.probability,
+        raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss,
+        parentId = validParentId,
+        fieldPrefix = s"riskLeaf[id=${raw.id}]"
+      ).toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
+    }
   }
   
   /** Encoder: Extract primitives from Iron types for wire format */
@@ -351,6 +366,7 @@ object RiskLeaf {
     RiskLeafRaw(
       id = leaf.id.value.toString,
       name = leaf.name,
+      parentId = leaf.parentId.map(_.value.toString),
       distributionType = leaf.distributionType.toString,
       probability = leaf.probability,
       percentiles = leaf.percentiles,
@@ -374,19 +390,21 @@ object RiskLeaf {
   * Domain Model: Uses Iron refined types for type safety
   * - safeId: SafeId (3-30 alphanumeric chars + hyphen/underscore)
   * - safeName: SafeName (non-blank, max 50 chars)
-  * - children: Array[RiskNode] (must be non-empty)
+  * - childIds: Array[NodeId] (references to child nodes, must be non-empty)
   * 
   * @param safeId Unique identifier (Iron refined type)
   * @param safeName Human-readable portfolio name (Iron refined type)
-  * @param children Array of child nodes (RiskLeaf or RiskPortfolio)
+  * @param parentId Optional parent node ID (None for root)
+  * @param childIds Array of child node IDs (references, not embedded objects)
   */
 final case class RiskPortfolio private (
   @jsonField("id") safeId: SafeId.SafeId,
   @jsonField("name") safeName: SafeName.SafeName,
-  children: Array[RiskNode]
+  parentId: Option[NodeId],
+  childIds: Array[NodeId]
 ) extends RiskNode {
   // Defense in depth: invariant check as safety net
-  require(children != null && children.nonEmpty, "RiskPortfolio invariant violated: children must be non-empty")
+  require(childIds != null && childIds.nonEmpty, "RiskPortfolio invariant violated: childIds must be non-empty")
   
   // Public API: Extract values from Iron types
   override def id: SafeId.SafeId = safeId
@@ -402,7 +420,7 @@ object RiskPortfolio {
     * Validation Rules:
     * 1. ID must be valid SafeId (3-30 chars, alphanumeric + hyphen/underscore)
     * 2. Name must be valid SafeName (non-blank, max 50 chars)
-    * 3. Children array must be non-empty
+    * 3. childIds array must be non-empty
     * 
     * Returns:
     * - Validation.succeed(RiskPortfolio) if all validations pass
@@ -411,7 +429,8 @@ object RiskPortfolio {
   def create(
     id: String,
     name: String,
-    children: Array[RiskNode],
+    childIds: Array[NodeId],
+    parentId: Option[NodeId] = None,
     fieldPrefix: String = "root"
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
     
@@ -426,30 +445,64 @@ object RiskPortfolio {
     val nameValidation: Validation[ValidationError, SafeName.SafeName] =
       toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
     
-    // Step 3: Validate children array (business rule)
-    val childrenValidation: Validation[ValidationError, Array[RiskNode]] =
-      if (children == null || children.isEmpty) {
+    // Step 3: Validate childIds array (business rule)
+    val childIdsValidation: Validation[ValidationError, Array[NodeId]] =
+      if (childIds == null || childIds.isEmpty) {
         Validation.fail(ValidationError(
-          field = s"$fieldPrefix.children",
+          field = s"$fieldPrefix.childIds",
           code = ValidationErrorCode.REQUIRED_FIELD,
-          message = "Children array must not be empty"
+          message = "childIds array must not be empty"
         ))
       } else {
-        Validation.succeed(children)
+        Validation.succeed(childIds)
       }
     
     // Step 4: Combine all validations (parallel error accumulation)
     Validation.validateWith(
       idValidation,
       nameValidation,
-      childrenValidation
-    ) { case (validId, validName, validChildren) =>
+      childIdsValidation
+    ) { case (validId, validName, validChildIds) =>
       // All validations passed - construct with private constructor using Iron types
       new RiskPortfolio(
         safeId = validId,
         safeName = validName,
-        children = validChildren
+        parentId = parentId,
+        childIds = validChildIds
       )
+    }
+  }
+  
+  /** Alternative constructor from string child IDs (for API convenience) */
+  def createFromStrings(
+    id: String,
+    name: String,
+    childIds: Array[String],
+    parentId: Option[NodeId] = None,
+    fieldPrefix: String = "root"
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskPortfolio] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    
+    // Convert string childIds to NodeIds
+    val childIdResults = childIds.zipWithIndex.map { case (cid, idx) =>
+      SafeId.fromString(cid).left.map { errors =>
+        ValidationError(
+          field = s"$fieldPrefix.childIds[$idx]",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = errors.mkString(", ")
+        )
+      }
+    }
+    
+    val errors = childIdResults.collect { case Left(e) => e }
+    if (errors.nonEmpty) {
+      // Accumulate all errors using NonEmptyChunk
+      import zio.prelude.Validation
+      val nonEmpty = zio.NonEmptyChunk.fromIterable(errors.head, errors.tail)
+      Validation.failNonEmptyChunk(nonEmpty)
+    } else {
+      val validChildIds = childIdResults.collect { case Right(id) => id }
+      create(id, name, validChildIds, parentId, fieldPrefix)
     }
   }
   
@@ -461,17 +514,24 @@ object RiskPortfolio {
   private case class RiskPortfolioRaw(
     id: String,
     name: String,
-    children: Array[RiskNode]
+    parentId: Option[String],
+    childIds: Array[String]
   )
   private object RiskPortfolioRaw {
-    // Note: This needs the RiskNode codec to handle recursive children
     given rawCodec: JsonCodec[RiskPortfolioRaw] = DeriveJsonCodec.gen[RiskPortfolioRaw]
   }
   
   /** Custom decoder that uses smart constructor for cross-field validation */
   given decoder: JsonDecoder[RiskPortfolio] = RiskPortfolioRaw.rawCodec.decoder.mapOrFail { raw =>
-    create(raw.id, raw.name, raw.children, fieldPrefix = s"riskPortfolio[id=${raw.id}]")
-      .toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
+    // Convert parentId string to NodeId if present
+    val parentIdOpt: Either[String, Option[NodeId]] = raw.parentId match {
+      case None => Right(None)
+      case Some(pid) => SafeId.fromString(pid).map(Some(_)).left.map(_.mkString(", "))
+    }
+    parentIdOpt.flatMap { validParentId =>
+      createFromStrings(raw.id, raw.name, raw.childIds, parentId = validParentId, fieldPrefix = s"riskPortfolio[id=${raw.id}]")
+        .toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
+    }
   }
   
   /** Encoder: Extract primitives from Iron types for wire format */
@@ -479,7 +539,8 @@ object RiskPortfolio {
     RiskPortfolioRaw(
       id = portfolio.id.value.toString,
       name = portfolio.name,
-      children = portfolio.children
+      parentId = portfolio.parentId.map(_.value.toString),
+      childIds = portfolio.childIds.map(_.value.toString)
     )
   }
   
@@ -493,7 +554,8 @@ object RiskPortfolio {
   def unsafeApply(
     id: String,
     name: String,
-    children: Array[RiskNode]
+    childIds: Array[NodeId],
+    parentId: Option[NodeId] = None
   ): RiskPortfolio = {
     // Force refinement (throws on failure)
     val validId = SafeId.fromString(id).getOrElse(
@@ -502,10 +564,21 @@ object RiskPortfolio {
     val validName = SafeName.fromString(name).getOrElse(
       throw new IllegalArgumentException(s"Invalid name: $name")
     )
-    new RiskPortfolio(safeId = validId, safeName = validName, children)
+    new RiskPortfolio(safeId = validId, safeName = validName, parentId = parentId, childIds = childIds)
   }
   
-  /** Helper: Create a flat portfolio from legacy risk array */
-  def fromFlatRisks(id: String, name: String, risks: Array[RiskNode]): RiskPortfolio =
-    unsafeApply(id, name, risks)
+  /** Helper: Create portfolio from string child IDs (for test convenience) */
+  def unsafeFromStrings(
+    id: String,
+    name: String,
+    childIds: Array[String],
+    parentId: Option[NodeId] = None
+  ): RiskPortfolio = {
+    val validChildIds = childIds.map { cid =>
+      SafeId.fromString(cid).getOrElse(
+        throw new IllegalArgumentException(s"Invalid child ID: $cid")
+      )
+    }
+    unsafeApply(id, name, validChildIds, parentId)
+  }
 }

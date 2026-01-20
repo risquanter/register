@@ -32,13 +32,15 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     )
 
   // Test fixtures - tree structure for parent lookup
+  // Using flat node format with childIds and parentId
   val cyberLeaf = RiskLeaf.unsafeApply(
     id = "cyber",
     name = "Cyber Attack",
     distributionType = "lognormal",
     probability = 0.25,
     minLoss = Some(1000L),
-    maxLoss = Some(50000L)
+    maxLoss = Some(50000L),
+    parentId = Some(safeId("ops-risk"))
   )
 
   val hardwareLeaf = RiskLeaf.unsafeApply(
@@ -47,7 +49,8 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     distributionType = "lognormal",
     probability = 0.1,
     minLoss = Some(500L),
-    maxLoss = Some(10000L)
+    maxLoss = Some(10000L),
+    parentId = Some(safeId("it-risk"))
   )
 
   val softwareLeaf = RiskLeaf.unsafeApply(
@@ -56,30 +59,35 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     distributionType = "lognormal",
     probability = 0.3,
     minLoss = Some(100L),
-    maxLoss = Some(5000L)
+    maxLoss = Some(5000L),
+    parentId = Some(safeId("it-risk"))
   )
 
-  val itPortfolio = RiskPortfolio.unsafeApply(
+  val itPortfolio = RiskPortfolio.unsafeFromStrings(
     id = "it-risk",
     name = "IT Risk",
-    children = Array(hardwareLeaf, softwareLeaf)
+    childIds = Array("hardware", "software"),
+    parentId = Some(safeId("ops-risk"))
   )
 
-  val rootPortfolio = RiskPortfolio.unsafeApply(
+  val rootPortfolio = RiskPortfolio.unsafeFromStrings(
     id = "ops-risk",
     name = "Operational Risk",
-    children = Array(cyberLeaf, itPortfolio)
+    childIds = Array("cyber", "it-risk"),
+    parentId = None
   )
 
-  val treeIndex = TreeIndex.fromTree(rootPortfolio)
+  // All nodes in flat list
+  val allNodes = Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, softwareLeaf)
+  val treeIndex = TreeIndex.fromNodeSeq(allNodes)
   
   // Create RiskTree for TreeCacheManager tests
   val testTreeId: NonNegativeLong = 1L
-  val testTree = RiskTree(
+  val testTree = RiskTree.fromNodes(
     id = testTreeId,
     name = SafeName.SafeName("Test Tree".refineUnsafe),
-    root = rootPortfolio,
-    index = treeIndex
+    nodes = allNodes,
+    rootId = safeId("ops-risk")
   )
 
   // SafeId values for tests

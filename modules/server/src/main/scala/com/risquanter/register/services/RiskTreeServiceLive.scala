@@ -175,20 +175,19 @@ class RiskTreeServiceLive private (
   // Config CRUD - only persist, no execution
   override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     val operation = for {
-      // Use DTO toDomain method for comprehensive validation
+      // Use DTO validate method for comprehensive validation including cross-field checks
       validated <- ZIO.fromEither(
-        RiskTreeDefinitionRequest.toDomain(req)
-          .toEither
-          .left.map(errors => ValidationFailed(errors.toList))
+        RiskTreeDefinitionRequest.validate(req)
+          .left.map(errors => ValidationFailed(errors))
       )
-      (safeName, rootNode) = validated
+      (safeName, nodes, rootId) = validated
       
-      // Create RiskTree entity (id will be assigned by repo)
-      riskTree = RiskTree(
+      // Create RiskTree entity using flat node format (id will be assigned by repo)
+      riskTree = RiskTree.fromNodes(
         id = 0L.refineUnsafe, // repo will assign
         name = safeName,
-        root = rootNode,
-        index = TreeIndex.fromTree(rootNode)
+        nodes = nodes,
+        rootId = rootId
       )
       
       // Persist
@@ -204,17 +203,18 @@ class RiskTreeServiceLive private (
   
   override def update(id: NonNegativeLong, req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     val operation = for {
-      // Use DTO toDomain method for comprehensive validation
+      // Use DTO validate method for comprehensive validation including cross-field checks
       validated <- ZIO.fromEither(
-        RiskTreeDefinitionRequest.toDomain(req)
-          .toEither
-          .left.map(errors => ValidationFailed(errors.toList))
+        RiskTreeDefinitionRequest.validate(req)
+          .left.map(errors => ValidationFailed(errors))
       )
-      (safeName, rootNode) = validated
+      (safeName, nodes, rootId) = validated
       
       updated <- repo.update(id, tree => tree.copy(
         name = safeName,
-        root = rootNode
+        nodes = nodes,
+        rootId = rootId,
+        index = TreeIndex.fromNodeSeq(nodes)
       ))
     } yield updated
     
@@ -276,7 +276,7 @@ class RiskTreeServiceLive private (
         
         // Get child IDs if portfolio node
         childIds = node match {
-          case portfolio: RiskPortfolio => Some(portfolio.children.map(_.id.value).toList)
+          case portfolio: RiskPortfolio => Some(portfolio.childIds.map(_.value.toString).toList)
           case _: RiskLeaf => None
         }
         

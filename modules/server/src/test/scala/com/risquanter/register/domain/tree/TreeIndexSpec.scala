@@ -14,14 +14,15 @@ object TreeIndexSpec extends ZIOSpecDefault {
       throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
     )
 
-  // Test fixtures
+  // Test fixtures - flat node format with parentId and childIds
   val cyberLeaf = RiskLeaf.unsafeApply(
     id = "cyber",
     name = "Cyber Attack",
     distributionType = "lognormal",
     probability = 0.25,
     minLoss = Some(1000L),
-    maxLoss = Some(50000L)
+    maxLoss = Some(50000L),
+    parentId = Some(safeId("ops-risk"))
   )
 
   val hardwareLeaf = RiskLeaf.unsafeApply(
@@ -30,7 +31,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
     distributionType = "lognormal",
     probability = 0.1,
     minLoss = Some(500L),
-    maxLoss = Some(10000L)
+    maxLoss = Some(10000L),
+    parentId = Some(safeId("it-risk"))
   )
 
   val softwareLeaf = RiskLeaf.unsafeApply(
@@ -39,20 +41,26 @@ object TreeIndexSpec extends ZIOSpecDefault {
     distributionType = "lognormal",
     probability = 0.3,
     minLoss = Some(100L),
-    maxLoss = Some(5000L)
+    maxLoss = Some(5000L),
+    parentId = Some(safeId("it-risk"))
   )
 
-  val itPortfolio = RiskPortfolio.unsafeApply(
+  val itPortfolio = RiskPortfolio.unsafeFromStrings(
     id = "it-risk",
     name = "IT Risk",
-    children = Array(hardwareLeaf, softwareLeaf)
+    childIds = Array("hardware", "software"),
+    parentId = Some(safeId("ops-risk"))
   )
 
-  val rootPortfolio = RiskPortfolio.unsafeApply(
+  val rootPortfolio = RiskPortfolio.unsafeFromStrings(
     id = "ops-risk",
     name = "Operational Risk",
-    children = Array(cyberLeaf, itPortfolio)
+    childIds = Array("cyber", "it-risk"),
+    parentId = None
   )
+  
+  // All nodes as flat list for TreeIndex.fromNodeSeq
+  val allNodes: Seq[RiskNode] = Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, softwareLeaf)
 
   // SafeId values for assertions
   val opsRiskId   = safeId("ops-risk")
@@ -62,8 +70,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
   val softwareId  = safeId("software")
 
   def spec = suite("TreeIndexSpec")(
-    test("fromTree builds correct index structure") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+    test("fromNodeSeq builds correct index structure") {
+      val index = TreeIndex.fromNodeSeq(allNodes)
 
       assertTrue(
         index.nodes.size == 5,
@@ -75,7 +83,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("parent pointers are correct") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+      val index = TreeIndex.fromNodeSeq(allNodes)
 
       assertTrue(
         index.parents.get(cyberId) == Some(opsRiskId),
@@ -86,7 +94,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("children maps are correct") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+      val index = TreeIndex.fromNodeSeq(allNodes)
 
       assertTrue(
         index.children.get(opsRiskId).map(_.toSet) == Some(Set(cyberId, itRiskId)),
@@ -97,7 +105,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("ancestorPath returns correct path for leaf node") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+      val index = TreeIndex.fromNodeSeq(allNodes)
       val path  = index.ancestorPath(hardwareId)
 
       assertTrue(
@@ -105,7 +113,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("ancestorPath returns correct path for intermediate node") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+      val index = TreeIndex.fromNodeSeq(allNodes)
       val path  = index.ancestorPath(itRiskId)
 
       assertTrue(
@@ -113,7 +121,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("ancestorPath returns single element for root") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+      val index = TreeIndex.fromNodeSeq(allNodes)
       val path  = index.ancestorPath(opsRiskId)
 
       assertTrue(
@@ -121,14 +129,14 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("ancestorPath returns empty list for non-existent node") {
-      val index       = TreeIndex.fromTree(rootPortfolio)
+      val index       = TreeIndex.fromNodeSeq(allNodes)
       val nonExistent = safeId("non-existent")
       val path        = index.ancestorPath(nonExistent)
 
       assertTrue(path.isEmpty)
     },
     test("descendants returns all subtree nodes") {
-      val index       = TreeIndex.fromTree(rootPortfolio)
+      val index       = TreeIndex.fromNodeSeq(allNodes)
       val descendants = index.descendants(itRiskId)
 
       assertTrue(
@@ -136,7 +144,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("descendants returns only self for leaf") {
-      val index       = TreeIndex.fromTree(rootPortfolio)
+      val index       = TreeIndex.fromNodeSeq(allNodes)
       val descendants = index.descendants(cyberId)
 
       assertTrue(
@@ -144,7 +152,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("descendants returns all nodes for root") {
-      val index       = TreeIndex.fromTree(rootPortfolio)
+      val index       = TreeIndex.fromNodeSeq(allNodes)
       val descendants = index.descendants(opsRiskId)
 
       assertTrue(
@@ -157,7 +165,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("isAncestor correctly identifies ancestor relationships") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+      val index = TreeIndex.fromNodeSeq(allNodes)
 
       assertTrue(
         index.isAncestor(opsRiskId, hardwareId),
@@ -167,14 +175,14 @@ object TreeIndexSpec extends ZIOSpecDefault {
       )
     },
     test("rootId returns correct root") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+      val index = TreeIndex.fromNodeSeq(allNodes)
 
       assertTrue(
         index.rootId == Some(opsRiskId)
       )
     },
     test("leafIds returns all leaf nodes") {
-      val index = TreeIndex.fromTree(rootPortfolio)
+      val index = TreeIndex.fromNodeSeq(allNodes)
       val leafs = index.leafIds
 
       assertTrue(

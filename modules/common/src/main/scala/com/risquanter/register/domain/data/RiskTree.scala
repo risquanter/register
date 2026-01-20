@@ -1,13 +1,14 @@
 package com.risquanter.register.domain.data
 
 import com.risquanter.register.domain.data.iron.{SafeName, NonNegativeLong}
-import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import io.github.iltotore.iron.*
 
 /** Domain model for a risk tree configuration.
   * 
-  * Stores the risk tree structure (RiskNode) AND its index for efficient operations.
+  * Stores risk nodes as a flat collection with references (childIds, parentId).
+  * The TreeIndex provides O(1) node lookup and O(depth) ancestor path.
   * LEC data is computed on-demand via GET /risk-trees/:id/lec
   * 
   * **Note:** Simulation parameters (nTrials, parallelism, seeds) come from
@@ -16,18 +17,24 @@ import io.github.iltotore.iron.*
   * 
   * @param id Unique risk tree identifier (assigned by repository)
   * @param name Human-readable risk tree name
-  * @param root Root node of the risk tree (can be RiskPortfolio or single RiskLeaf)
-  * @param index Tree index for O(1) node lookup and O(depth) ancestor path (built from root)
+  * @param nodes Flat collection of all nodes in the tree
+  * @param rootId ID of the root node
+  * @param index Tree index for O(1) node lookup and O(depth) ancestor path (built from nodes)
   */
 final case class RiskTree(
   id: NonNegativeLong,
   name: SafeName.SafeName,
-  root: RiskNode,
+  nodes: Seq[RiskNode],
+  rootId: NodeId,
   index: TreeIndex
-)
+) {
+  /** Get the root node */
+  def root: RiskNode = index.nodes(rootId)
+}
 
 object RiskTree {
   import sttp.tapir.Schema
+  import com.risquanter.register.domain.data.iron.SafeId
   
   // Tapir schema: Use Schema.any to avoid recursive derivation issues with Iron types
   // TODO: Phase D - Replace with proper Schema derivation once Iron type schemas are implemented
@@ -46,14 +53,21 @@ object RiskTree {
   given safeNameDecoder: JsonDecoder[SafeName.SafeName] = 
     JsonDecoder[String].mapOrFail(s => SafeName.fromString(s).left.map(_.mkString(", ")))
   
-  // TreeIndex is NOT serialized (reconstructed from root on load)
-  // Custom codec that omits index field and rebuilds it from root on deserialization
+  given nodeIdEncoder: JsonEncoder[NodeId] =
+    JsonEncoder[String].contramap(_.value.toString)
+  
+  given nodeIdDecoder: JsonDecoder[NodeId] =
+    JsonDecoder[String].mapOrFail(s => SafeId.fromString(s).left.map(_.mkString(", ")))
+  
+  // TreeIndex is NOT serialized (reconstructed from nodes on load)
+  // Custom codec that omits index field and rebuilds it from nodes on deserialization
   given codec: JsonCodec[RiskTree] = {
     // Create temporary struct without index for serialization
     case class RiskTreeJson(
       id: NonNegativeLong,
       name: SafeName.SafeName,
-      root: RiskNode
+      nodes: Seq[RiskNode],
+      rootId: NodeId
     )
     
     given jsonCodec: JsonCodec[RiskTreeJson] = DeriveJsonCodec.gen[RiskTreeJson]
@@ -61,17 +75,38 @@ object RiskTree {
     JsonCodec(
       // Encoder: Serialize without index
       JsonEncoder[RiskTreeJson].contramap[RiskTree] { tree =>
-        RiskTreeJson(tree.id, tree.name, tree.root)
+        RiskTreeJson(tree.id, tree.name, tree.nodes, tree.rootId)
       },
-      // Decoder: Deserialize and rebuild index from root
+      // Decoder: Deserialize and rebuild index from nodes
       JsonDecoder[RiskTreeJson].map { json =>
         RiskTree(
           id = json.id,
           name = json.name,
-          root = json.root,
-          index = TreeIndex.fromTree(json.root)
+          nodes = json.nodes,
+          rootId = json.rootId,
+          index = TreeIndex.fromNodeSeq(json.nodes)
         )
       }
     )
+  }
+  
+  /** Create a RiskTree from a flat list of nodes */
+  def fromNodes(
+    id: NonNegativeLong,
+    name: SafeName.SafeName,
+    nodes: Seq[RiskNode],
+    rootId: NodeId
+  ): RiskTree = {
+    val index = TreeIndex.fromNodeSeq(nodes)
+    RiskTree(id, name, nodes, rootId, index)
+  }
+  
+  /** Create a RiskTree with a single root node (convenience for tests and simple cases) */
+  def singleNode(
+    id: NonNegativeLong,
+    name: SafeName.SafeName,
+    root: RiskNode
+  ): RiskTree = {
+    fromNodes(id, name, Seq(root), root.id)
   }
 }

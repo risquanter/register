@@ -118,43 +118,41 @@ final case class TreeIndex(
 object TreeIndex {
 
   /**
-    * Build index from a RiskNode tree.
+    * Build index from a flat collection of nodes.
+    * 
+    * Each node carries its own parentId field and portfolios carry childIds.
+    * This is the primary constructor for the new flat node model.
     *
-    * Traverses the tree and constructs parent/child maps using SafeId.SafeId.
-    *
-    * @param root Root node of the tree
-    * @return TreeIndex with all nodes indexed
+    * @param nodes Map from node ID to RiskNode (all nodes in tree)
+    * @return TreeIndex with parent/child maps derived from node fields
     */
-  def fromTree(root: RiskNode): TreeIndex = {
-    val nodesBuilder    = Map.newBuilder[NodeId, RiskNode]
-    val parentsBuilder  = Map.newBuilder[NodeId, NodeId]
-    val childrenBuilder = Map.newBuilder[NodeId, List[NodeId]]
-
-    def traverse(node: RiskNode, parentId: Option[NodeId]): Unit = {
-      val nodeId = extractSafeId(node)
-      nodesBuilder.addOne(nodeId -> node)
-
-      parentId.foreach { pid =>
-        parentsBuilder.addOne(nodeId -> pid)
-      }
-
-      node match {
-        case portfolio: RiskPortfolio =>
-          val childIds = portfolio.children.map(extractSafeId).toList
-          childrenBuilder.addOne(nodeId -> childIds)
-          portfolio.children.foreach(child => traverse(child, Some(nodeId)))
-        case _: RiskLeaf =>
-        // Leaf node - no children to process
-      }
+  def fromNodes(nodes: Map[NodeId, RiskNode]): TreeIndex = {
+    // Parents map: directly from each node's parentId field
+    val parents: Map[NodeId, NodeId] = nodes.collect {
+      case (nodeId, node) if node.parentId.isDefined =>
+        nodeId -> node.parentId.get
     }
 
-    traverse(root, None)
+    // Children map: directly from each portfolio's childIds field
+    val children: Map[NodeId, List[NodeId]] = nodes.collect {
+      case (nodeId, portfolio: RiskPortfolio) =>
+        nodeId -> portfolio.childIds.toList
+    }
 
-    TreeIndex(
-      nodes = nodesBuilder.result(),
-      parents = parentsBuilder.result(),
-      children = childrenBuilder.result()
-    )
+    TreeIndex(nodes, parents, children)
+  }
+
+  /**
+    * Build index from a sequence of nodes.
+    * 
+    * Convenience method that converts to Map first.
+    *
+    * @param nodes Sequence of RiskNodes
+    * @return TreeIndex with all nodes indexed
+    */
+  def fromNodeSeq(nodes: Seq[RiskNode]): TreeIndex = {
+    val nodeMap = nodes.map(n => extractSafeId(n) -> n).toMap
+    fromNodes(nodeMap)
   }
 
   /**

@@ -114,16 +114,25 @@ final case class RiskResultResolverLive(
 
       case portfolio: RiskPortfolio =>
         for
-          childResults <- ZIO.foreach(portfolio.children.toList) { child =>
-            cache.get(child.id).flatMap {
+          childResults <- ZIO.foreach(portfolio.childIds.toList) { childId =>
+            // Look up child node from index, then check cache or simulate
+            cache.get(childId).flatMap {
               case Some(cached) => ZIO.succeed(cached)
-              case None         => simulateNode(tree, cache, child, includeProvenance)
+              case None         => 
+                // Look up child node from tree index
+                ZIO.fromOption(tree.index.nodes.get(childId))
+                  .orElseFail(ValidationFailed(List(ValidationError(
+                    field = s"riskPortfolio.${portfolio.id}.childIds",
+                    code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+                    message = s"Child node not found in tree index: $childId"
+                  ))))
+                  .flatMap(childNode => simulateNode(tree, cache, childNode, includeProvenance))
             }
           }
           combined <- ZIO.attempt {
             if childResults.isEmpty then
               throw ValidationFailed(List(ValidationError(
-                field = s"riskPortfolio.${portfolio.id}.children",
+                field = s"riskPortfolio.${portfolio.id}.childIds",
                 code = ValidationErrorCode.EMPTY_COLLECTION,
                 message = s"RiskPortfolio '${portfolio.id}' has no children"
               )))

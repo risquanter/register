@@ -9,7 +9,7 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeId}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
 
@@ -17,6 +17,12 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
   // Service accessor pattern
   private def service = ZIO.serviceWithZIO[RiskTreeService]
+  
+  // Helper to create SafeId from string literal
+  private def safeId(s: String): SafeId.SafeId = 
+    SafeId.fromString(s).getOrElse(
+      throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
+    )
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo() = new RiskTreeRepository {
@@ -84,30 +90,36 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Hierarchical tree creation with discriminators")(
       test("POST with RiskPortfolio discriminator creates tree") {
+        // Create nodes with flat structure (childIds + parentId)
+        val cyberLeaf = RiskLeaf.unsafeApply(
+          id = "cyber",
+          name = "Cyber Attack",
+          distributionType = "lognormal",
+          probability = 0.25,
+          minLoss = Some(1000L),
+          maxLoss = Some(50000L),
+          parentId = Some(safeId("root"))
+        )
+        val breachLeaf = RiskLeaf.unsafeApply(
+          id = "breach",
+          name = "Data Breach",
+          distributionType = "lognormal",
+          probability = 0.15,
+          minLoss = Some(500L),
+          maxLoss = Some(25000L),
+          parentId = Some(safeId("root"))
+        )
+        val rootPortfolio = RiskPortfolio.unsafeFromStrings(
+          id = "root",
+          name = "Total Operational Risk",
+          childIds = Array("cyber", "breach"),
+          parentId = None
+        )
+        
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Ops Risk Portfolio",
-          root = RiskPortfolio.create(
-            id = "root",
-            name = "Total Operational Risk",
-            children = Array(
-              RiskLeaf.create(
-                id = "cyber",
-                name = "Cyber Attack",
-                distributionType = "lognormal",
-                probability = 0.25,
-                minLoss = Some(1000L),
-                maxLoss = Some(50000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: cyber")),
-              RiskLeaf.create(
-                id = "breach",
-                name = "Data Breach",
-                distributionType = "lognormal",
-                probability = 0.15,
-                minLoss = Some(500L),
-                maxLoss = Some(25000L)
-              ).toEither.getOrElse(throw new RuntimeException("Invalid test data: breach"))
-            )
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+          nodes = Seq(rootPortfolio, cyberLeaf, breachLeaf),
+          rootId = "root"
         )
 
         val program = service(_.create(hierarchicalRequest))
@@ -120,16 +132,20 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Get by ID")(
       test("returns tree metadata when exists") {
+        val leafNode = RiskLeaf.unsafeApply(
+          id = "test-risk",
+          name = "Test Risk",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(1000L),
+          maxLoss = Some(10000L),
+          parentId = None
+        )
+        
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Test Tree",
-          root = RiskLeaf.create(
-            id = "test-risk",
-            name = "Test Risk",
-            distributionType = "lognormal",
-            probability = 0.5,
-            minLoss = Some(1000L),
-            maxLoss = Some(10000L)
-          ).toEither.getOrElse(throw new RuntimeException("Invalid test data"))
+          nodes = Seq(leafNode),
+          rootId = "test-risk"
         )
 
         val program = for {
