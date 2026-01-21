@@ -1,5 +1,6 @@
 package com.risquanter.register.testutil
 
+import zio.test.Gen
 import com.risquanter.register.domain.data.iron.SafeId
 
 /**
@@ -44,6 +45,24 @@ trait TestHelpers {
     SafeId.fromString(s).getOrElse(
       throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
     )
+    
+  /**
+    * ZIO Test generator for valid SafeId values.
+    *
+    * Generates alphanumeric strings between 3-30 characters,
+    * satisfying SafeId constraints (MinLength[3], MaxLength[30]).
+    *
+    * Usage:
+    * {{{
+    * import com.risquanter.register.testutil.TestHelpers.genSafeId
+    * 
+    * check(genSafeId) { id =>
+    *   assertTrue(id.value.length >= 3)
+    * }
+    * }}}
+    */
+  val genSafeId: Gen[Any, SafeId.SafeId] =
+    Gen.alphaNumericStringBounded(3, 30).map(safeId)
 }
 
 /**

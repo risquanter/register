@@ -6,7 +6,7 @@ import zio.prelude.Ord
 import com.risquanter.register.domain.data.{RiskResult, RiskResultGroup, Loss}
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.PreludeInstances.given
-import io.github.iltotore.iron.refineUnsafe
+import com.risquanter.register.testutil.TestHelpers.safeId
 
 /**
  * Tests for Ord[Loss] usage in TreeMap operations.
@@ -23,38 +23,38 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
     
     suite("RiskResult - Ord[Loss] with TreeMap")(
       test("maxLoss uses Ord[Loss] - single loss") {
-        val result = RiskResult(SafeId.SafeId("test".refineUnsafe), Map(1 -> 5000L), 10)
+        val result = RiskResult(safeId("test-risk"), Map(1 -> 5000L), 10)
         
         assertTrue(result.maxLoss == 5000L)
       },
       
       test("maxLoss uses Ord[Loss] - multiple losses") {
-        val result = RiskResult(SafeId.SafeId("test".refineUnsafe), Map(1 -> 1000L, 2 -> 5000L, 3 -> 2000L), 10)
+        val result = RiskResult(safeId("test-risk"), Map(1 -> 1000L, 2 -> 5000L, 3 -> 2000L), 10)
         
         assertTrue(result.maxLoss == 5000L)
       },
       
       test("minLoss uses Ord[Loss] - single loss") {
-        val result = RiskResult(SafeId.SafeId("test".refineUnsafe), Map(1 -> 5000L), 10)
+        val result = RiskResult(safeId("test-risk"), Map(1 -> 5000L), 10)
         
         assertTrue(result.minLoss == 5000L)
       },
       
       test("minLoss uses Ord[Loss] - multiple losses") {
-        val result = RiskResult(SafeId.SafeId("test".refineUnsafe), Map(1 -> 1000L, 2 -> 5000L, 3 -> 2000L), 10)
+        val result = RiskResult(safeId("test-risk"), Map(1 -> 1000L, 2 -> 5000L, 3 -> 2000L), 10)
         
         assertTrue(result.minLoss == 1000L)
       },
       
       test("empty result has zero max/min") {
-        val result = RiskResult(SafeId.SafeId("empty".refineUnsafe), Map.empty, 10)
+        val result = RiskResult(safeId("empty-risk"), Map.empty, 10)
         
         assertTrue(result.maxLoss == 0L) &&
         assertTrue(result.minLoss == 0L)
       },
       
       test("outcomeCount is sorted by Loss (ascending)") {
-        val result = RiskResult(SafeId.SafeId("test".refineUnsafe), Map(
+        val result = RiskResult(safeId("test-risk"), Map(
           1 -> 3000L,
           2 -> 1000L,
           3 -> 5000L,
@@ -69,7 +69,7 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
       },
       
       test("outcomeCount aggregates duplicate losses") {
-        val result = RiskResult(SafeId.SafeId("test".refineUnsafe), Map(
+        val result = RiskResult(safeId("test-risk"), Map(
           1 -> 1000L,
           2 -> 2000L,
           3 -> 1000L,  // Duplicate
@@ -84,7 +84,7 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
       },
       
       test("rangeFrom uses Ord[Loss] for threshold queries") {
-        val result = RiskResult(SafeId.SafeId("test".refineUnsafe), Map(
+        val result = RiskResult(safeId("test-risk"), Map(
           1 -> 1000L,
           2 -> 2000L,
           3 -> 3000L,
@@ -101,10 +101,10 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
     
     suite("RiskResultGroup - Ord[Loss] with TreeMap")(
       test("maxLoss uses Ord[Loss] for aggregated results") {
-        val child1 = RiskResult(SafeId.SafeId("r1".refineUnsafe), Map(1 -> 1000L, 2 -> 2000L), 10)
-        val child2 = RiskResult(SafeId.SafeId("r2".refineUnsafe), Map(1 -> 3000L, 2 -> 4000L), 10)
+        val child1 = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), 10)
+        val child2 = RiskResult(safeId("risk-002"), Map(1 -> 3000L, 2 -> 4000L), 10)
         
-        val group = RiskResultGroup(SafeId.SafeId("total".refineUnsafe), 10, child1, child2)
+        val group = RiskResultGroup(safeId("total-risk"), 10, child1, child2)
         
         // Trial 1: 1000 + 3000 = 4000
         // Trial 2: 2000 + 4000 = 6000 <- Max
@@ -112,10 +112,10 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
       },
       
       test("minLoss uses Ord[Loss] for aggregated results") {
-        val child1 = RiskResult(SafeId.SafeId("r1".refineUnsafe), Map(1 -> 1000L, 2 -> 2000L), 10)
-        val child2 = RiskResult(SafeId.SafeId("r2".refineUnsafe), Map(1 -> 3000L, 2 -> 4000L), 10)
+        val child1 = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), 10)
+        val child2 = RiskResult(safeId("risk-002"), Map(1 -> 3000L, 2 -> 4000L), 10)
         
-        val group = RiskResultGroup(SafeId.SafeId("total".refineUnsafe), 10, child1, child2)
+        val group = RiskResultGroup(safeId("total-risk"), 10, child1, child2)
         
         // Trial 1: 1000 + 3000 = 4000 <- Min
         // Trial 2: 2000 + 4000 = 6000
@@ -123,10 +123,10 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
       },
       
       test("outcomeCount sorted with aggregated losses") {
-        val child1 = RiskResult(SafeId.SafeId("r1".refineUnsafe), Map(1 -> 1000L, 2 -> 2000L), 10)
-        val child2 = RiskResult(SafeId.SafeId("r2".refineUnsafe), Map(1 -> 500L, 2 -> 3000L), 10)
+        val child1 = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), 10)
+        val child2 = RiskResult(safeId("risk-002"), Map(1 -> 500L, 2 -> 3000L), 10)
         
-        val group = RiskResultGroup(SafeId.SafeId("total".refineUnsafe), 10, child1, child2)
+        val group = RiskResultGroup(safeId("total-risk"), 10, child1, child2)
         
         val losses = group.outcomeCount.keys.toVector
         
@@ -136,7 +136,7 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
       },
       
       test("empty group has zero max/min") {
-        val group = RiskResultGroup(SafeId.SafeId("empty".refineUnsafe), 10)
+        val group = RiskResultGroup(safeId("empty-risk"), 10)
         
         assertTrue(group.maxLoss == 0L) &&
         assertTrue(group.minLoss == 0L)

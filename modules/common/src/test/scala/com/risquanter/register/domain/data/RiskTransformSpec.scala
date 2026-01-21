@@ -6,7 +6,7 @@ import zio.test.Assertion.*
 import zio.prelude.Identity
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, genSafeId}
 
 /**
  * Property-based tests for RiskTransform Identity laws and mitigation strategies.
@@ -24,12 +24,12 @@ object RiskTransformSpec extends ZIOSpecDefault {
   
   /** Generate RiskResult for testing transformations */
   val genRiskResult: Gen[Any, RiskResult] = for {
-    name <- Gen.alphaNumericString.map(s => if (s.isEmpty) "risk" else s)
+    name <- genSafeId
     nTrials <- Gen.int(100, 1000)
     numTrials <- Gen.int(5, 20)  // Smaller for readable test output
     trialIds <- Gen.listOfN(numTrials)(Gen.int(0, nTrials - 1))
     losses <- Gen.listOfN(numTrials)(Gen.long(1000L, 100000L))
-  } yield RiskResult(safeId(name), trialIds.zip(losses).toMap, nTrials)
+  } yield RiskResult(name, trialIds.zip(losses).toMap, nTrials)
   
   /** Generate positive Loss values */
   val genLoss: Gen[Any, Loss] = Gen.long(100L, 50000L)

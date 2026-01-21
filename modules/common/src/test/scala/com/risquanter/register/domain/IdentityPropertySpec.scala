@@ -6,7 +6,7 @@ import zio.prelude.Identity
 import com.risquanter.register.domain.data.{RiskResult, Loss, TrialId}
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.PreludeInstances.given
-import io.github.iltotore.iron.refineUnsafe
+import com.risquanter.register.testutil.TestHelpers.{safeId, genSafeId}
 
 /**
  * Property-based tests for Identity (Monoid) laws using ZIO Test generators.
@@ -38,7 +38,7 @@ object IdentityPropertySpec extends ZIOSpecDefault {
   
   /** Generate random RiskResult with consistent nTrials */
   val genRiskResult: Gen[Any, RiskResult] = for {
-    name      <- Gen.alphaNumericString.map(s => SafeId.SafeId((if (s.isEmpty) "risk" else s).refineUnsafe))
+    name      <- genSafeId
     nTrials   <- Gen.int(100, 1000)
     outcomes  <- genOutcomes(nTrials)
   } yield RiskResult(name, outcomes, nTrials)
@@ -108,9 +108,9 @@ object IdentityPropertySpec extends ZIOSpecDefault {
             outcomes3 <- genOutcomes(nTrials)
           } yield (nTrials, outcomes1, outcomes2, outcomes3)
         }) { case (nTrials, outcomes1, outcomes2, outcomes3) =>
-          val a = RiskResult(SafeId.SafeId("a".refineUnsafe), outcomes1.filter(_._1 < nTrials), nTrials)
-          val b = RiskResult(SafeId.SafeId("b".refineUnsafe), outcomes2.filter(_._1 < nTrials), nTrials)
-          val c = RiskResult(SafeId.SafeId("c".refineUnsafe), outcomes3.filter(_._1 < nTrials), nTrials)
+          val a = RiskResult(safeId("risk-a"), outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult(safeId("risk-b"), outcomes2.filter(_._1 < nTrials), nTrials)
+          val c = RiskResult(safeId("risk-c"), outcomes3.filter(_._1 < nTrials), nTrials)
           
           val left  = Identity[RiskResult].combine(Identity[RiskResult].combine(a, b), c)
           val right = Identity[RiskResult].combine(a, Identity[RiskResult].combine(b, c))
@@ -147,8 +147,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
             outcomes2 <- genOutcomes(nTrials)
           } yield (nTrials, outcomes1, outcomes2)
         }) { case (nTrials, outcomes1, outcomes2) =>
-          val a = RiskResult(SafeId.SafeId("a".refineUnsafe), outcomes1.filter(_._1 < nTrials), nTrials)
-          val b = RiskResult(SafeId.SafeId("b".refineUnsafe), outcomes2.filter(_._1 < nTrials), nTrials)
+          val a = RiskResult(safeId("risk-a"), outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult(safeId("risk-b"), outcomes2.filter(_._1 < nTrials), nTrials)
           
           val ab = Identity[RiskResult].combine(a, b)
           val ba = Identity[RiskResult].combine(b, a)
@@ -164,8 +164,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
             outcomes2 <- genOutcomes(nTrials)
           } yield (nTrials, outcomes1, outcomes2)
         }) { case (nTrials, outcomes1, outcomes2) =>
-          val a = RiskResult(SafeId.SafeId("a".refineUnsafe), outcomes1.filter(_._1 < nTrials), nTrials)
-          val b = RiskResult(SafeId.SafeId("b".refineUnsafe), outcomes2.filter(_._1 < nTrials), nTrials)
+          val a = RiskResult(safeId("risk-a"), outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult(safeId("risk-b"), outcomes2.filter(_._1 < nTrials), nTrials)
           
           val combined = Identity[RiskResult].combine(a, b)
           val expectedTrials = a.trialIds() ++ b.trialIds()
@@ -181,8 +181,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
             outcomes2 <- genOutcomes(nTrials)
           } yield (nTrials, outcomes1, outcomes2)
         }) { case (nTrials, outcomes1, outcomes2) =>
-          val a = RiskResult(SafeId.SafeId("a".refineUnsafe), outcomes1.filter(_._1 < nTrials), nTrials)
-          val b = RiskResult(SafeId.SafeId("b".refineUnsafe), outcomes2.filter(_._1 < nTrials), nTrials)
+          val a = RiskResult(safeId("risk-a"), outcomes1.filter(_._1 < nTrials), nTrials)
+          val b = RiskResult(safeId("risk-b"), outcomes2.filter(_._1 < nTrials), nTrials)
           
           val combined = Identity[RiskResult].combine(a, b)
           
@@ -199,7 +199,7 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       
       test("combining with empty result is identity") {
         check(genRiskResult) { a =>
-          val empty = RiskResult.empty(SafeId.SafeId("empty".refineUnsafe), a.nTrials)
+          val empty = RiskResult.empty(safeId("empty-risk"), a.nTrials)
           val combined = Identity[RiskResult].combine(a, empty)
           
           assertTrue(combined.outcomes == a.outcomes)
@@ -227,9 +227,9 @@ object IdentityPropertySpec extends ZIOSpecDefault {
     suite("Edge Case Properties")(
       test("combining multiple empty results remains empty") {
         check(Gen.int(100, 1000)) { nTrials =>
-          val empty1 = RiskResult.empty(SafeId.SafeId("e1".refineUnsafe), nTrials)
-          val empty2 = RiskResult.empty(SafeId.SafeId("e2".refineUnsafe), nTrials)
-          val empty3 = RiskResult.empty(SafeId.SafeId("e3".refineUnsafe), nTrials)
+          val empty1 = RiskResult.empty(safeId("empty-1"), nTrials)
+          val empty2 = RiskResult.empty(safeId("empty-2"), nTrials)
+          val empty3 = RiskResult.empty(safeId("empty-3"), nTrials)
           
           val combined = Identity[RiskResult].combine(
             Identity[RiskResult].combine(empty1, empty2),
@@ -243,8 +243,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       test("large loss values don't overflow with reasonable aggregation") {
         // Test with losses near but not exceeding safe limits
         val largeLoss = Long.MaxValue / 100  // Safe to combine ~100 of these
-        val r1 = RiskResult(SafeId.SafeId("r1".refineUnsafe), Map(1 -> largeLoss), 100)
-        val r2 = RiskResult(SafeId.SafeId("r2".refineUnsafe), Map(1 -> largeLoss), 100)
+        val r1 = RiskResult(safeId("risk-001"), Map(1 -> largeLoss), 100)
+        val r2 = RiskResult(safeId("risk-002"), Map(1 -> largeLoss), 100)
         
         val combined = Identity[RiskResult].combine(r1, r2)
         
@@ -255,8 +255,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       },
       
       test("zero losses are preserved (not filtered out)") {
-        val withZero = RiskResult(SafeId.SafeId("test".refineUnsafe), Map(1 -> 0L, 2 -> 1000L), 100)
-        val empty = RiskResult.empty(SafeId.SafeId("empty".refineUnsafe), 100)
+        val withZero = RiskResult(safeId("test-zero"), Map(1 -> 0L, 2 -> 1000L), 100)
+        val empty = RiskResult.empty(safeId("empty-risk"), 100)
         
         val combined = Identity[RiskResult].combine(withZero, empty)
         
