@@ -1,5 +1,7 @@
 package com.risquanter.register.configs
 
+import zio.config.magnolia.{DeriveConfig, deriveConfig}
+
 /** Simulation execution configuration.
   *
   * @param defaultNTrials Default number of Monte Carlo trials per simulation
@@ -21,3 +23,7 @@ final case class SimulationConfig(
   defaultSeed3: Long,
   defaultSeed4: Long
 )
+
+object SimulationConfig {
+  given DeriveConfig[SimulationConfig] = DeriveConfig.derived
+}

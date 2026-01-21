@@ -182,14 +182,12 @@ class RiskTreeServiceLive private (
       
       // Create RiskTree entity using flat node format (id will be assigned by repo)
       // TreeIndex consistency is also validated here
-      riskTree <- ZIO.fromEither(
-        RiskTree.fromNodes(
-          id = 0L.refineUnsafe, // repo will assign
-          name = safeName,
-          nodes = nodes,
-          rootId = rootId
-        ).toEither.left.map(errors => ValidationFailed(errors.toList))
-      )
+      riskTree <- RiskTree.fromNodes(
+        id = 0L.refineUnsafe, // repo will assign
+        name = safeName,
+        nodes = nodes,
+        rootId = rootId
+      ).toZIOValidation
       
       // Persist
       persisted <- repo.create(riskTree)
@@ -209,9 +207,7 @@ class RiskTreeServiceLive private (
       (safeName, nodes, rootId) = validated
       
       // Validate TreeIndex consistency
-      index <- ZIO.fromEither(
-        TreeIndex.fromNodeSeq(nodes).toEither.left.map(errors => ValidationFailed(errors.toList))
-      )
+      index <- TreeIndex.fromNodeSeq(nodes).toZIOValidation
       
       updated <- repo.update(id, tree => tree.copy(
         name = safeName,

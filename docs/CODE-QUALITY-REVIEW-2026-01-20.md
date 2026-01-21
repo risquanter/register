@@ -2,7 +2,7 @@
 
 **Scope:** TreeIndex/RiskTree validation refactoring  
 **Reviewer:** AI Assistant  
-**Status:** Partial completion — Issue 1 open; Issues 2 & 5 resolved; Issue 3 pending service adoption (Issue 4 & 6 deferred)
+**Status:** Partial completion — Issues 1, 2, 3 & 5 resolved; Issues 4 & 6 deferred
 
 ---
 
@@ -70,6 +70,7 @@ private def validateParentToChild(...): Validation[ValidationError, Unit] = ...
 
 **Priority:** Medium  
 **Effort:** 1 hour
+**Status:** ✅ Implemented (2026-01-21). `fromNodes` now uses applicative validation via per-edge validators combined with `Validation.validateWith`.
 
 ---
 
@@ -147,7 +148,7 @@ Then usage becomes:
 riskTree <- RiskTree.fromNodes(id, name, nodes, rootId).toZIOValidation
 ```
 
-**Status:** 🚧 Partially applied. Extension `ValidationExtensions.toZIOValidation` exists, but `RiskTreeServiceLive` still uses `ZIO.fromEither(...ValidationFailed(errors.toList))` in create/update (L184-216). Adoption pending.
+**Status:** ✅ Implemented (2026-01-21). `RiskTreeServiceLive` now uses `toZIOValidation` for create/update.
 
 **Priority:** Low  
 **Effort:** 20 minutes
@@ -272,9 +273,9 @@ val treeIndex = TreeIndex.fromNodeSeq(allNodes) match {
 
 ## Action Items
 
-- [ ] Issue 1: Refactor TreeIndex.fromNodes to use traverse/applicative (Medium)
-- [ ] Issue 3: Adopt `toZIOValidation` in `RiskTreeServiceLive` (Low)
+- [x] Issue 1: Refactor TreeIndex.fromNodes to use traverse/applicative (Medium) — Implemented 2026-01-21
 - [x] Issue 2: Unify RiskTreeDefinitionRequest.validate to return Validation (Low) — Implemented 2026-01-21
+- [x] Issue 3: Adopt `toZIOValidation` in `RiskTreeServiceLive` (Low) — Implemented 2026-01-21
 - [x] Issue 5: Use fromPredicateWith in RiskTree.fromNodes (Low) — Implemented 2026-01-21
 
 **Deferred:** Issue 4 (intentional design per ADR-009), Issue 6 (acceptable for tests unless hardened)

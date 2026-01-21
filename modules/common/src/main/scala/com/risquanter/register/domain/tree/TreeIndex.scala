@@ -147,60 +147,24 @@ object TreeIndex {
         nodeId -> portfolio.childIds.toList
     }
 
-    // Collect all consistency errors
-    val childToParentErrors: List[ValidationError] = children.toList.flatMap { case (parentId, childIds) =>
-      childIds.flatMap { childId =>
-        nodes.get(childId) match {
-          case Some(child) if !child.parentId.contains(parentId) =>
-            Some(ValidationError(
-              field = s"nodes[${childId.value}].parentId",
-              code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-              message = s"Node '${childId.value}' is listed as child of '${parentId.value}' but has parentId=${child.parentId.map(_.value).getOrElse("None")}"
-            ))
-          case None =>
-            Some(ValidationError(
-              field = s"nodes[${parentId.value}].childIds",
-              code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-              message = s"Child '${childId.value}' referenced by '${parentId.value}' does not exist in nodes"
-            ))
-          case _ => None
-        }
+    def combineValidations(validations: List[Validation[ValidationError, Unit]]): Validation[ValidationError, Unit] =
+      validations.foldLeft[Validation[ValidationError, Unit]](Validation.succeed(())) { (acc, v) =>
+        Validation.validateWith(acc, v)((_, _) => ())
       }
-    }
 
-    val parentToChildErrors: List[ValidationError] = parents.toList.flatMap { case (nodeId, parentId) =>
-      nodes.get(parentId) match {
-        case Some(parent: RiskPortfolio) if !parent.childIds.contains(nodeId) =>
-          Some(ValidationError(
-            field = s"nodes[${nodeId.value}].parentId",
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but parent doesn't list it as child"
-          ))
-        case Some(_: RiskLeaf) =>
-          Some(ValidationError(
-            field = s"nodes[${nodeId.value}].parentId",
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but that node is a leaf, not a portfolio"
-          ))
-        case None =>
-          Some(ValidationError(
-            field = s"nodes[${nodeId.value}].parentId",
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but parent doesn't exist in nodes"
-          ))
-        case _ => None
+    val childToParentV: Validation[ValidationError, Unit] = combineValidations(
+      children.toList.flatMap { case (parentId, childIds) =>
+        childIds.map(childId => validateChildToParent(nodes, parentId, childId))
       }
-    }
+    )
 
-    val allErrors = childToParentErrors ++ parentToChildErrors
+    val parentToChildV: Validation[ValidationError, Unit] = combineValidations(
+      parents.toList.map { case (nodeId, parentId) =>
+        validateParentToChild(nodes, nodeId, parentId)
+      }
+    )
 
-    if (allErrors.isEmpty) {
-      Validation.succeed(TreeIndex(nodes, parents, children))
-    } else {
-      // Return all accumulated errors using NonEmptyChunk
-      import zio.NonEmptyChunk
-      Validation.failNonEmptyChunk(NonEmptyChunk.fromIterable(allErrors.head, allErrors.tail))
-    }
+    Validation.validateWith(childToParentV, parentToChildV)((_, _) => TreeIndex(nodes, parents, children))
   }
 
   /**
@@ -245,6 +209,64 @@ object TreeIndex {
     node match
       case leaf: RiskLeaf         => leaf.safeId
       case portfolio: RiskPortfolio => portfolio.safeId
+
+  private def validateChildToParent(
+      nodes: Map[NodeId, RiskNode],
+      parentId: NodeId,
+      childId: NodeId
+  ): Validation[ValidationError, Unit] =
+    nodes.get(childId) match {
+      case Some(child) if !child.parentId.contains(parentId) =>
+        Validation.fail(
+          ValidationError(
+            field = s"nodes[${childId.value}].parentId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Node '${childId.value}' is listed as child of '${parentId.value}' but has parentId=${child.parentId.map(_.value).getOrElse("None")}"
+          )
+        )
+      case None =>
+        Validation.fail(
+          ValidationError(
+            field = s"nodes[${parentId.value}].childIds",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Child '${childId.value}' referenced by '${parentId.value}' does not exist in nodes"
+          )
+        )
+      case _ => Validation.succeed(())
+    }
+
+  private def validateParentToChild(
+      nodes: Map[NodeId, RiskNode],
+      nodeId: NodeId,
+      parentId: NodeId
+  ): Validation[ValidationError, Unit] =
+    nodes.get(parentId) match {
+      case Some(parent: RiskPortfolio) if !parent.childIds.contains(nodeId) =>
+        Validation.fail(
+          ValidationError(
+            field = s"nodes[${nodeId.value}].parentId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but parent doesn't list it as child"
+          )
+        )
+      case Some(_: RiskLeaf) =>
+        Validation.fail(
+          ValidationError(
+            field = s"nodes[${nodeId.value}].parentId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but that node is a leaf, not a portfolio"
+          )
+        )
+      case None =>
+        Validation.fail(
+          ValidationError(
+            field = s"nodes[${nodeId.value}].parentId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Node '${nodeId.value}' has parentId='${parentId.value}' but parent doesn't exist in nodes"
+          )
+        )
+      case _ => Validation.succeed(())
+    }
 
   /**
     * Empty tree index.
