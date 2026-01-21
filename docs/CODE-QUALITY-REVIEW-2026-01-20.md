@@ -2,7 +2,7 @@
 
 **Scope:** TreeIndex/RiskTree validation refactoring  
 **Reviewer:** AI Assistant  
-**Status:** Partial completion — Issue 1 open; Issues 2, 3 & 5 resolved (Issue 4 & 6 deferred)
+**Status:** Partial completion — Issue 1 open; Issues 2 & 5 resolved; Issue 3 pending service adoption (Issue 4 & 6 deferred)
 
 ---
 
@@ -110,7 +110,7 @@ def validate(req: RiskTreeDefinitionRequest): Validation[ValidationError, (SafeN
 **Priority:** Low  
 **Effort:** 30 minutes
 
-**Status:** ✅ Implemented (2026-01-21). `RiskTreeDefinitionRequest.validate` now returns `Validation`; `RiskTreeServiceLive` consumes it via `toZIOValidation`; specs updated accordingly.
+**Status:** ✅ Implemented (2026-01-21). `RiskTreeDefinitionRequest.validate` now returns `Validation`; service/controller paths consume it.
 
 ---
 
@@ -147,7 +147,7 @@ Then usage becomes:
 riskTree <- RiskTree.fromNodes(id, name, nodes, rootId).toZIOValidation
 ```
 
-**Status:** ✅ Implemented (2026-01-21). Added `ValidationExtensions.toZIOValidation`; service adoption will follow Issue 2 (return type unification).
+**Status:** 🚧 Partially applied. Extension `ValidationExtensions.toZIOValidation` exists, but `RiskTreeServiceLive` still uses `ZIO.fromEither(...ValidationFailed(errors.toList))` in create/update (L184-216). Adoption pending.
 
 **Priority:** Low  
 **Effort:** 20 minutes
@@ -228,10 +228,12 @@ for {
 **Files:**  
 - [RiskResultCacheSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultCacheSpec.scala) Lines 80-88
 - [RiskResultResolverSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultResolverSpec.scala) Lines 53-69
+- [RiskTreeControllerSpec.scala](../modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala) Line 63
+- [RiskTreeServiceLiveSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala) Line 66
 
 **Violation:** Tests use `.toEither.getOrElse(throw ...)` which hides validation errors.
 
-**Current Code (example from L80-88):**
+**Current Code (examples):**
 ```scala
 val treeIndex = TreeIndex.fromNodeSeq(allNodes).toEither.getOrElse(
   throw new AssertionError("Test fixture has invalid tree structure")
@@ -271,8 +273,8 @@ val treeIndex = TreeIndex.fromNodeSeq(allNodes) match {
 ## Action Items
 
 - [ ] Issue 1: Refactor TreeIndex.fromNodes to use traverse/applicative (Medium)
-- [ ] Issue 2: Unify RiskTreeDefinitionRequest.validate to return Validation (Low)
-- [x] Issue 3: Add Validation → ZIO extension method (Low) — Implemented 2026-01-21 (`ValidationExtensions.toZIOValidation`)
+- [ ] Issue 3: Adopt `toZIOValidation` in `RiskTreeServiceLive` (Low)
+- [x] Issue 2: Unify RiskTreeDefinitionRequest.validate to return Validation (Low) — Implemented 2026-01-21
 - [x] Issue 5: Use fromPredicateWith in RiskTree.fromNodes (Low) — Implemented 2026-01-21
 
-**Deferred:** Issue 4 (intentional design per ADR-009), Issue 6 (acceptable for tests)
+**Deferred:** Issue 4 (intentional design per ADR-009), Issue 6 (acceptable for tests unless hardened)
