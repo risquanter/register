@@ -71,6 +71,14 @@ trait IrminClient:
     */
   def healthCheck: Task[Boolean]
 
+  /**
+    * List immediate child paths under the given prefix.
+    *
+    * @param prefix Path prefix to list (e.g., "risk-trees" or "risk-trees/1/nodes")
+    * @return Child paths relative to the prefix
+    */
+  def list(prefix: IrminPath): Task[List[IrminPath]]
+
 object IrminClient:
   // Accessor methods for ZIO service pattern
 
@@ -91,3 +99,6 @@ object IrminClient:
 
   def healthCheck: ZIO[IrminClient, Throwable, Boolean] =
     ZIO.serviceWithZIO[IrminClient](_.healthCheck)
+
+  def list(prefix: IrminPath): ZIO[IrminClient, Throwable, List[IrminPath]] =
+    ZIO.serviceWithZIO[IrminClient](_.list(prefix))

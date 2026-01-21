@@ -186,10 +186,10 @@ Leverage Irmin branches for what-if analysis:
 │                     ZIO Application                         │
 ├─────────────────────────────────────────────────────────────┤
 │  IrminClient (trait)                                        │
-│    ├── get(path): Task[Option[String]]                      │
-│    ├── set(path, value, message): Task[IrminCommit]         │
-│    ├── remove(path, message): Task[IrminCommit]             │
-│    └── branches: Task[List[String]]                         │
+│    ├── get(path): IO[IrminError, Option[String]]            │
+│    ├── set(path, value, message): IO[IrminError, IrminCommit]│
+│    ├── remove(path, message): IO[IrminError, IrminCommit]   │
+│    └── branches: IO[IrminError, List[String]]               │
 ├─────────────────────────────────────────────────────────────┤
 │  IrminClientLive (implementation)                           │
 │    └── sttp HTTP client → GraphQL POST requests             │
@@ -207,16 +207,35 @@ Leverage Irmin branches for what-if analysis:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Error Mapping
+### Error Mapping (typed channel)
 
-Network/Irmin errors are mapped to our `SimulationError` hierarchy:
+ADR-010 favors typed error channels. Irmin operations use `IO[IrminError, A]` for composable, typed failures. At the repository/service boundary, `IrminError` is mapped onto existing domain errors (e.g., `RepositoryFailure`, `ValidationFailed`) so downstream code can stay on the current `Task`/`SimulationError` path. HTTP encoding remains the same envelope (`ErrorResponse` → `JsonHttpError` → `ErrorDetail[]`) with domain set to "irmin" and code `DEPENDENCY_FAILED`.
 
-| Error Condition | Scala Type | HTTP Status |
-|-----------------|------------|-------------|
-| Connection refused | `IrminUnavailable` | 503 |
-| Request timeout | `NetworkTimeout` | 504 |
-| Version conflict | `VersionConflict` | 409 |
-| Merge conflict | `MergeConflict` | 409 |
+Example JSON for an Irmin GraphQL failure:
+
+```json
+{
+  "error": {
+    "code": 502,
+    "message": "Irmin GraphQL error",
+    "errors": [
+      {
+        "domain": "irmin",
+        "field": "main.tree.get",
+        "code": "DEPENDENCY_FAILED",
+        "message": "Path not found: risk-trees/123/meta; Authorization failed",
+        "requestId": null
+      }
+    ]
+  }
+}
+```
+
+Planned `IrminError` → HTTP mappings (serialized through `ErrorResponse.encode`):
+- `IrminUnavailable(reason)` → 503, domain "irmin", field "service", code `DEPENDENCY_FAILED`, message `Service unavailable: <reason>`.
+- `IrminHttpError(status, body)` → status (e.g., 502/503/500), domain "irmin", field "http", code `DEPENDENCY_FAILED`, message `HTTP <status>: <body>`.
+- `IrminGraphQLError(messages, path)` → 502, domain "irmin", field `path.mkString(".")` or "graphql", code `DEPENDENCY_FAILED`, message `messages.mkString("; ")`.
+- `NetworkTimeout(op, dur)` → 504, domain "irmin", field "network", code `DEPENDENCY_FAILED`, message `Network timeout after <ms> during: <op>`.
 
 ---
 
@@ -327,16 +346,16 @@ yield ()
 
 **Location:** `infra/irmin/IrminClient.scala`
 
-ZIO service interface for Irmin operations. All methods return `Task` (ZIO with Throwable error channel).
+ZIO service interface for Irmin operations. All methods use a typed error channel `IO[IrminError, A]` (per ADR-010 preference); `IrminError` is mapped to existing domain/HTTP errors at the repository/service boundary.
 
 ```scala
 trait IrminClient:
-  def get(path: IrminPath): Task[Option[String]]
-  def set(path: IrminPath, value: String, message: String): Task[IrminCommit]
-  def remove(path: IrminPath, message: String): Task[IrminCommit]
-  def branches: Task[List[String]]
-  def mainBranch: Task[Option[IrminBranch]]
-  def healthCheck: Task[Boolean]
+  def get(path: IrminPath): IO[IrminError, Option[String]]
+  def set(path: IrminPath, value: String, message: String): IO[IrminError, IrminCommit]
+  def remove(path: IrminPath, message: String): IO[IrminError, IrminCommit]
+  def branches: IO[IrminError, List[String]]
+  def mainBranch: IO[IrminError, Option[IrminBranch]]
+  def healthCheck: IO[IrminError, Boolean]
 ```
 
 **Irmin context:**
@@ -372,7 +391,7 @@ val layerWithConfig: ZLayer[Any, Throwable, IrminClient]
 **Key implementation details:**
 
 1. **GraphQL over HTTP**: Sends POST requests to `/graphql` endpoint
-2. **Error mapping**: Network errors → `IrminUnavailable` / `NetworkTimeout`
+2. **Typed error channel**: Produces `IrminError` on the error channel; downstream maps to `RepositoryFailure`/HTTP `ErrorResponse` (domain "irmin", code `DEPENDENCY_FAILED`).
 3. **No retry logic**: Delegated to service mesh (per ADR-012)
 4. **Scoped backend**: HTTP client lifecycle managed by ZIO
 

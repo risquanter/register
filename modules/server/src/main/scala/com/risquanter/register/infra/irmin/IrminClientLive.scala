@@ -9,6 +9,7 @@ import sttp.model.{Uri, StatusCode}
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.errors.*
 import com.risquanter.register.infra.irmin.model.*
+import com.risquanter.register.infra.irmin.model.ListTreeResponse
 
 import java.net.ConnectException
 import java.util.concurrent.TimeoutException as JTimeoutException
@@ -91,6 +92,14 @@ final class IrminClientLive private (
       .as(true)
       .catchAll(_ => ZIO.succeed(false))
 
+  override def list(prefix: IrminPath): Task[List[IrminPath]] =
+    for
+      _        <- ZIO.logDebug(s"Irmin LIST: ${prefix.value}")
+      response <- executeQuery[ListTreeResponse](IrminQueries.listTree(prefix))
+      paths    <- extractList(prefix, response)
+      _        <- ZIO.logDebug(s"Irmin LIST result (${paths.size}): ${paths.map(_.value).mkString(", ")}")
+    yield paths
+
   // ============================================================================
   // Private helpers
   // ============================================================================
@@ -142,6 +151,14 @@ final class IrminClientLive private (
       case Some(c) => commitFromData(c)
       case None    => failWithError(response.errors)
 
+  private def extractList(prefix: IrminPath, response: ListTreeResponse): Task[List[IrminPath]] =
+    response.data.flatMap(_.main).map(_.tree.list) match
+      case Some(nodes) =>
+        val base = if prefix.value.isEmpty then "" else s"${prefix.value}/"
+        val childNames = nodes.map(_.path.stripPrefix(base)).filter(_.nonEmpty)
+        ZIO.foreach(childNames)(name => ZIO.fromEither(IrminPath.from(name).left.map(IrminUnavailable(_))))
+      case None => failWithListError(response.errors)
+
   private def commitFromData(c: CommitData): Task[IrminCommit] =
     ZIO.succeed(IrminCommit(
       hash = c.hash,
@@ -159,6 +176,12 @@ final class IrminClientLive private (
       .map(_.map(_.message).mkString("; "))
       .getOrElse("Unknown error")
     ZIO.fail(IrminUnavailable(s"Mutation failed: $errorMsg"))
+
+  private def failWithListError(errors: Option[List[GraphQLError]]): Task[List[IrminPath]] =
+    val errorMsg = errors
+      .map(_.map(_.message).mkString("; "))
+      .getOrElse("Unknown error")
+    ZIO.fail(IrminUnavailable(s"List failed: $errorMsg"))
 
 // Response type for main branch query
 private final case class MainBranchResponse(

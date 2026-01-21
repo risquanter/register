@@ -4,6 +4,7 @@ import zio.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.errors.RepositoryFailure
 
 /** In-memory implementation of RiskTreeRepository for testing and development
   * Uses a mutable map to store risk trees
@@ -35,8 +36,8 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
   override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
     ZIO.succeed(db.get(id))
 
-  override def getAll: Task[List[RiskTree]] =
-    ZIO.succeed(db.values.toList)
+  override def getAll: Task[List[Either[RepositoryFailure, RiskTree]]] =
+    ZIO.succeed(db.values.toList.map(Right(_)))
 }
 
 object RiskTreeRepositoryInMemory {

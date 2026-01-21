@@ -50,7 +50,7 @@ class RiskTreeServiceLive private (
     */
   private def findTreeContainingNode(nodeId: NodeId): Task[RiskTree] =
     for {
-      allTrees <- repo.getAll
+      allTrees <- collectAllTrees
       tree <- ZIO.fromOption(allTrees.find(t => t.index.nodes.contains(nodeId)))
         .orElseFail(ValidationFailed(List(ValidationError(
           field = "nodeId",
@@ -58,6 +58,18 @@ class RiskTreeServiceLive private (
           message = s"Node ${nodeId.value} not found in any tree"
         ))))
     } yield tree
+
+  private def collectAllTrees: Task[List[RiskTree]] =
+    repo.getAll.flatMap { results =>
+      val (errs, trees) = results.foldLeft((List.empty[RepositoryFailure], List.empty[RiskTree])) {
+        case ((es, ts), Left(err))  => (err :: es, ts)
+        case ((es, ts), Right(t))   => (es, t :: ts)
+      }
+      if errs.nonEmpty then
+        ZIO.fail(RepositoryFailure(errs.reverse.map(_.reason).mkString("; ")))
+      else
+        ZIO.succeed(trees.reverse)
+    }
   
   /** Record operation metric with optional error context
     * 
@@ -230,7 +242,7 @@ class RiskTreeServiceLive private (
     )
   
   override def getAll: Task[List[RiskTree]] =
-    repo.getAll.tapBoth(
+    collectAllTrees.tapBoth(
       error => logIfUnexpected("getAll")(error) *> recordOperation("getAll", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getAll", success = true)
     )

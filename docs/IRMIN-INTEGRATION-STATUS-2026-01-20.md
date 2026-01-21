@@ -115,6 +115,13 @@ The "Full Refactoring Walkthrough: childIds + parentId" is **complete**:
 | Consistency validation (parent↔child bidirectional) | ✅ Implemented ([TreeIndex.scala](../modules/common/src/main/scala/com/risquanter/register/domain/tree/TreeIndex.scala) L156-200) |
 | `RiskResultResolverLive.simulateNode` uses `childIds` + index lookup | ✅ Implemented ([RiskResultResolverLive.scala](../modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolverLive.scala) L117-132) |
 
+### ✅ Preference Locked: Typed Irmin Error Channel
+
+- Approved to keep Irmin client methods on `IO[IrminError, A]` (ADR-010-aligned) and map `IrminError` to existing domain/HTTP errors at the repository/service boundary.
+- HTTP serialization stays the same `ErrorResponse` envelope (domain "irmin", code `DEPENDENCY_FAILED`, errors list), including GraphQL-path-aware `field` values when available.
+- Example envelope for GraphQL error:
+  - `code`: 502, `domain`: "irmin", `field`: "main.tree.get", `errorCode`: `DEPENDENCY_FAILED`, message carries combined GraphQL messages (e.g., "Path not found: risk-trees/123/meta; Authorization failed").
+
 ---
 
 ## 4. Current Code State
@@ -193,24 +200,19 @@ Cache management + invalidation tests.
 
 ### Immediate Action Required
 
-**Approve creation of `RiskTreeRepositoryIrmin.scala`?**
-
-This file will:
-1. Implement `RiskTreeRepository` using `IrminClient`
-2. Follow per-node storage at `risk-trees/{treeId}/nodes/{nodeId}`
-3. Store tree metadata at `risk-trees/{treeId}/meta`
-4. Use `TreeIndex.fromNodes()` for reconstruction with validation
-
-**Estimated effort:** 2-3 hours
+- **Approved**: Move `IrminClient` to `IO[IrminError, A]`, add `IrminError` sealed trait, update `IrminClientLive`, map to `RepositoryFailure`/HTTP `ErrorResponse` (domain "irmin", code `DEPENDENCY_FAILED`).
+- **Pending approval**: Create `RiskTreeRepositoryIrmin.scala` implementing per-node storage, writing meta, and reconstructing trees via `TreeIndex.fromNodes()`.
+- **Estimated effort for repository:** 2-3 hours
 
 ### Sequence
 
 1. ✅ Flat node model refactoring (DONE)
-2. ⏳ Create `RiskTreeRepositoryIrmin` (NEXT)
-3. ⏳ Create test server infrastructure
-4. ⏳ Create `RiskTreeApiIntegrationSpec`
-5. ⏳ Create `CacheApiIntegrationSpec`
-6. ⏳ Wire Irmin into Application (optional, for non-test use)
+2. ⏳ Implement `IrminError` typed channel + HTTP mapping (NEXT)
+3. ⏳ Create `RiskTreeRepositoryIrmin`
+4. ⏳ Create test server infrastructure
+5. ⏳ Create `RiskTreeApiIntegrationSpec`
+6. ⏳ Create `CacheApiIntegrationSpec`
+7. ⏳ Wire Irmin into Application (optional, for non-test use)
 
 ---
 
