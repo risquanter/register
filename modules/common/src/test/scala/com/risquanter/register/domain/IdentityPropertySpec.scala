@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.RiskResultIdentityInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.testutil.TestHelpers.{safeId, genSafeId}
-import com.risquanter.register.testutil.RiskResultTestSupport.withCfg
+import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /**
  * Property-based tests for Identity (Monoid) laws using ZIO Test generators.

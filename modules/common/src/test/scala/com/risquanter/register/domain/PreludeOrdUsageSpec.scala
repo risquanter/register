@@ -8,7 +8,7 @@ import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.testutil.TestHelpers.safeId
-import com.risquanter.register.testutil.RiskResultTestSupport.withCfg
+import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /**
  * Tests for Ord[Loss] usage in TreeMap operations.

@@ -6,9 +6,22 @@ import com.typesafe.config.ConfigFactory
 import java.io.File
 
 /**
- * Test helper that loads SimulationConfig from the canonical application.conf.
- * Falls back to the repo copy under modules/server/src/main/resources to keep
- * a single source of truth when running common-module tests.
+ * Test configuration management - single source of truth for SimulationConfig in tests.
+ * 
+ * Responsibilities:
+ * - Load SimulationConfig from application.conf (with fallback to repo copy)
+ * - Provide scoped config creation via withCfg for tests with varying nTrials
+ * 
+ * Usage:
+ * {{{
+ *   import com.risquanter.register.testutil.ConfigTestLoader.withCfg
+ *   
+ *   val result = withCfg(100) {
+ *     RiskResult(safeId("test"), outcomes, Nil)
+ *   }
+ * }}}
+ * 
+ * Note: For domain-specific test fixtures, see RiskResultTestSupport.
  */
 object ConfigTestLoader {
   private def load(): SimulationConfig = {
