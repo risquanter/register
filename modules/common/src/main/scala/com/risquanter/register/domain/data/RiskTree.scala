@@ -114,15 +114,15 @@ object RiskTree {
     rootId: NodeId
   ): Validation[ValidationError, RiskTree] = {
     TreeIndex.fromNodeSeq(nodes).flatMap { index =>
-      if (!index.nodes.contains(rootId)) {
-        Validation.fail(ValidationError(
-          field = "rootId",
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = s"rootId '${rootId.value}' not found in nodes"
-        ))
-      } else {
-        Validation.succeed(RiskTree(id, name, nodes, rootId, index))
-      }
+      Validation
+        .fromPredicateWith[ValidationError, TreeIndex](
+          ValidationError(
+            field = "rootId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"rootId '${rootId.value}' not found in nodes"
+          )
+        )(index)((idx: TreeIndex) => idx.nodes.contains(rootId))
+        .as(RiskTree(id, name, nodes, rootId, index))
     }
   }
   
