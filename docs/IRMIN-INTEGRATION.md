@@ -134,12 +134,12 @@ What's implemented now:
 **Path Convention (Planned):**
 Irmin paths will encode `treeId` to enable tree-scoped operations:
 ```
-/trees/{treeId}/nodes/{nodeId}
+/risk-trees/{treeId}/nodes/{nodeId}
 
 Example:
-/trees/1/nodes/cyber-risk      ← treeId=1, nodeId="cyber-risk"
-/trees/1/nodes/ops-risk        ← treeId=1, nodeId="ops-risk"  
-/trees/2/nodes/cyber-risk      ← treeId=2 (different tree!)
+/risk-trees/1/nodes/cyber-risk      ← treeId=1, nodeId="cyber-risk"
+/risk-trees/1/nodes/ops-risk        ← treeId=1, nodeId="ops-risk"  
+/risk-trees/2/nodes/cyber-risk      ← treeId=2 (different tree!)
 ```
 
 This ensures:

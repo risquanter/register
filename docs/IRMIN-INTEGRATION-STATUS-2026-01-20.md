@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-20  
 **Scope:** API Integration Tests with Irmin Persistence  
-**Status:** 🔴 **NOT STARTED** - Blocked at Decision Point
+**Status:** 🟡 **IN PROGRESS** — Irmin client integration tests exist; repository + HTTP integration still pending (requires running Irmin container)
 
 ---
 
@@ -77,7 +77,7 @@ modules/server-it/src/test/scala/com/risquanter/register/
 
 - **Option A - Per-Node Storage** (matches ADR-004a):
   ```
-  trees/{treeId}/nodes/{nodeId}
+  risk-trees/{treeId}/nodes/{nodeId}
   ```
   - Fine-grained Irmin watch notifications
   - Multiple Irmin operations per tree CRUD
@@ -85,8 +85,8 @@ modules/server-it/src/test/scala/com/risquanter/register/
 
 - **Option B - Per-Tree Storage** (simpler):
   ```
-  trees/{treeId}/definition  → entire RiskTree JSON
-  trees/{treeId}/meta        → tree metadata
+  risk-trees/{treeId}/definition  → entire RiskTree JSON
+  risk-trees/{treeId}/meta        → tree metadata
   ```
   - Simpler CRUD
   - Coarser watch notifications
@@ -94,10 +94,10 @@ modules/server-it/src/test/scala/com/risquanter/register/
 **User Answer:** ✅ **Option A with bidirectional references**
 
 This means:
-- Each node stored at path `trees/{treeId}/nodes/{nodeId}`
+- Each node stored at path `risk-trees/{treeId}/nodes/{nodeId}`
 - RiskNode has `parentId: Option[NodeId]` field
 - RiskPortfolio has `childIds: Array[NodeId]` (references, not embedded objects)
-- Tree reconstruction by querying all nodes under `trees/{treeId}/nodes/*`
+- Tree reconstruction by querying all nodes under `risk-trees/{treeId}/nodes/*`
 
 ---
 
@@ -160,17 +160,17 @@ RiskTreeRepositoryInMemory.layer,  // ← Currently in-memory only
 2. Use `IrminClient` for storage operations
 3. Follow per-node storage model:
    ```
-   trees/{treeId}/nodes/{nodeId} → JSON of RiskLeaf | RiskPortfolio
-   trees/{treeId}/meta           → { name, rootId }
+  risk-trees/{treeId}/nodes/{nodeId} → JSON of RiskLeaf | RiskPortfolio
+  risk-trees/{treeId}/meta           → { name, rootId }
    ```
 4. Reconstruct `RiskTree` from flat nodes + `TreeIndex.fromNodes()`
 
 **Key operations:**
-- `create(RiskTree)`: Write each node to `trees/{id}/nodes/{nodeId}`, write meta
-- `getById(id)`: Read all nodes from `trees/{id}/nodes/*`, reconstruct tree
+- `create(RiskTree)`: Write each node to `risk-trees/{id}/nodes/{nodeId}`, write meta
+- `getById(id)`: Read all nodes from `risk-trees/{id}/nodes/*`, reconstruct tree
 - `update(id, op)`: Read tree, apply op, diff nodes, write changes
-- `delete(id)`: Remove all nodes under `trees/{id}/`
-- `getAll`: List `trees/*/meta`, reconstruct each tree
+- `delete(id)`: Remove all nodes under `risk-trees/{id}/`
+- `getAll`: List `risk-trees/*/meta`, reconstruct each tree
 
 ### Phase 2: Test Server Infrastructure
 
@@ -197,8 +197,8 @@ Cache management + invalidation tests.
 
 This file will:
 1. Implement `RiskTreeRepository` using `IrminClient`
-2. Follow per-node storage at `trees/{treeId}/nodes/{nodeId}`
-3. Store tree metadata at `trees/{treeId}/meta`
+2. Follow per-node storage at `risk-trees/{treeId}/nodes/{nodeId}`
+3. Store tree metadata at `risk-trees/{treeId}/meta`
 4. Use `TreeIndex.fromNodes()` for reconstruction with validation
 
 **Estimated effort:** 2-3 hours
