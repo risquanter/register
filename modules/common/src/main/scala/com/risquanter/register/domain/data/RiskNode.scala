@@ -219,14 +219,15 @@ object RiskLeaf {
     
     (percentiles, quantiles) match {
       case (Some(p), Some(q)) if p.nonEmpty && q.nonEmpty =>
-        if (p.length != q.length)
-          Validation.fail(ValidationError(
-            field = s"$fieldPrefix.distributionType",
-            code = ValidationErrorCode.INVALID_COMBINATION,
-            message = s"Expert mode: percentiles and quantiles must have same length (got ${p.length} vs ${q.length})"
-          ))
-        else
-          Validation.succeed((None, None))
+        Validation
+          .fromPredicateWith[ValidationError, (Array[Double], Array[Double])](
+            ValidationError(
+              field = s"$fieldPrefix.distributionType",
+              code = ValidationErrorCode.INVALID_COMBINATION,
+              message = s"Expert mode: percentiles and quantiles must have same length (got ${p.length} vs ${q.length})"
+            )
+          )((p, q)) { case (pArr, qArr) => pArr.length == qArr.length }
+          .as((None, None))
       
       case (None, None) =>
         Validation.fail(ValidationError(
@@ -274,14 +275,15 @@ object RiskLeaf {
         
         // Validate both, then check cross-field constraint
         Validation.validateWith(minV, maxV) { (validMin, validMax) =>
-          if (validMin >= validMax)
-            Validation.fail(ValidationError(
-              field = s"$fieldPrefix.minLoss",
-              code = ValidationErrorCode.INVALID_RANGE,
-              message = s"minLoss ($validMin) must be less than maxLoss ($validMax)"
-            ))
-          else
-            Validation.succeed((Some(validMin), Some(validMax)))
+          Validation
+            .fromPredicateWith[ValidationError, (NonNegativeLong, NonNegativeLong)](
+              ValidationError(
+                field = s"$fieldPrefix.minLoss",
+                code = ValidationErrorCode.INVALID_RANGE,
+                message = s"minLoss ($validMin) must be less than maxLoss ($validMax)"
+              )
+            )((validMin, validMax)) { case (minVal, maxVal) => minVal < maxVal }
+            .map { case (minVal, maxVal) => (Some(minVal), Some(maxVal)) }
         }.flatten
       
       case (None, None) =>
@@ -447,15 +449,14 @@ object RiskPortfolio {
     
     // Step 3: Validate childIds array (business rule)
     val childIdsValidation: Validation[ValidationError, Array[NodeId]] =
-      if (childIds == null || childIds.isEmpty) {
-        Validation.fail(ValidationError(
-          field = s"$fieldPrefix.childIds",
-          code = ValidationErrorCode.REQUIRED_FIELD,
-          message = "childIds array must not be empty"
-        ))
-      } else {
-        Validation.succeed(childIds)
-      }
+      Validation
+        .fromPredicateWith[ValidationError, Array[NodeId]](
+          ValidationError(
+            field = s"$fieldPrefix.childIds",
+            code = ValidationErrorCode.REQUIRED_FIELD,
+            message = "childIds array must not be empty"
+          )
+        )(Option(childIds).getOrElse(Array.empty[NodeId]))(_.nonEmpty)
     
     // Step 4: Combine all validations (parallel error accumulation)
     Validation.validateWith(

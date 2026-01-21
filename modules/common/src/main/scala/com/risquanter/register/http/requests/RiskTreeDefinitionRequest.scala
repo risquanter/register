@@ -64,15 +64,14 @@ object RiskTreeDefinitionRequest {
     
     // Validate nodes is non-empty
     val nodesV: Validation[ValidationError, Seq[RiskNode]] = 
-      if (req.nodes.isEmpty) {
-        Validation.fail(ValidationError(
-          field = "request.nodes",
-          code = ValidationErrorCode.REQUIRED_FIELD,
-          message = "nodes array must not be empty"
-        ))
-      } else {
-        Validation.succeed(req.nodes)
-      }
+      Validation
+        .fromPredicateWith[ValidationError, Seq[RiskNode]](
+          ValidationError(
+            field = "request.nodes",
+            code = ValidationErrorCode.REQUIRED_FIELD,
+            message = "nodes array must not be empty"
+          )
+        )(req.nodes)(_.nonEmpty)
     
     // Combine basic validations (cross-field validation done in validate())
     Validation.validateWith(nameV, rootIdV, nodesV) { (name, rootId, nodes) =>
