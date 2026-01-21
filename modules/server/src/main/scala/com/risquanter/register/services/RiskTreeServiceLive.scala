@@ -13,6 +13,7 @@ import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPo
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.tree.{NodeId, TreeIndex}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, SimulationError}
+import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.LECGenerator
@@ -176,10 +177,7 @@ class RiskTreeServiceLive private (
   override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     val operation = for {
       // Use DTO validate method for comprehensive validation including cross-field checks
-      validated <- ZIO.fromEither(
-        RiskTreeDefinitionRequest.validate(req)
-          .left.map(errors => ValidationFailed(errors))
-      )
+      validated <- RiskTreeDefinitionRequest.validate(req).toZIOValidation
       (safeName, nodes, rootId) = validated
       
       // Create RiskTree entity using flat node format (id will be assigned by repo)
@@ -207,10 +205,7 @@ class RiskTreeServiceLive private (
   override def update(id: NonNegativeLong, req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     val operation = for {
       // Use DTO validate method for comprehensive validation including cross-field checks
-      validated <- ZIO.fromEither(
-        RiskTreeDefinitionRequest.validate(req)
-          .left.map(errors => ValidationFailed(errors))
-      )
+      validated <- RiskTreeDefinitionRequest.validate(req).toZIOValidation
       (safeName, nodes, rootId) = validated
       
       // Validate TreeIndex consistency

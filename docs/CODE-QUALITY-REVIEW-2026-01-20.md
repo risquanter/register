@@ -2,7 +2,7 @@
 
 **Scope:** TreeIndex/RiskTree validation refactoring  
 **Reviewer:** AI Assistant  
-**Status:** Issues documented for future iteration
+**Status:** Partial completion — Issue 1 open; Issues 2, 3 & 5 resolved (Issue 4 & 6 deferred)
 
 ---
 
@@ -110,6 +110,8 @@ def validate(req: RiskTreeDefinitionRequest): Validation[ValidationError, (SafeN
 **Priority:** Low  
 **Effort:** 30 minutes
 
+**Status:** ✅ Implemented (2026-01-21). `RiskTreeDefinitionRequest.validate` now returns `Validation`; `RiskTreeServiceLive` consumes it via `toZIOValidation`; specs updated accordingly.
+
 ---
 
 ### Issue 3: Verbose ZIO.fromEither Conversion
@@ -144,6 +146,8 @@ Then usage becomes:
 ```scala
 riskTree <- RiskTree.fromNodes(id, name, nodes, rootId).toZIOValidation
 ```
+
+**Status:** ✅ Implemented (2026-01-21). Added `ValidationExtensions.toZIOValidation`; service adoption will follow Issue 2 (return type unification).
 
 **Priority:** Low  
 **Effort:** 20 minutes
@@ -212,6 +216,8 @@ for {
 } yield RiskTree(id, name, nodes, rootId, index)
 ```
 
+**Status:** ✅ Implemented (2026-01-21). `RiskTree.fromNodes` now uses `Validation.fromPredicateWith`; related predicate refactors applied to RiskNode validations and the nodes non-empty check in `RiskTreeDefinitionRequest`.
+
 **Priority:** Low  
 **Effort:** 10 minutes
 
@@ -266,7 +272,7 @@ val treeIndex = TreeIndex.fromNodeSeq(allNodes) match {
 
 - [ ] Issue 1: Refactor TreeIndex.fromNodes to use traverse/applicative (Medium)
 - [ ] Issue 2: Unify RiskTreeDefinitionRequest.validate to return Validation (Low)
-- [ ] Issue 3: Add Validation → ZIO extension method (Low)
-- [ ] Issue 5: Use fromPredicateWith in RiskTree.fromNodes (Low)
+- [x] Issue 3: Add Validation → ZIO extension method (Low) — Implemented 2026-01-21 (`ValidationExtensions.toZIOValidation`)
+- [x] Issue 5: Use fromPredicateWith in RiskTree.fromNodes (Low) — Implemented 2026-01-21
 
 **Deferred:** Issue 4 (intentional design per ADR-009), Issue 6 (acceptable for tests)

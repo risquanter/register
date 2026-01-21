@@ -81,23 +81,18 @@ object RiskTreeDefinitionRequest {
   
   /** 
    * Validate with comprehensive cross-field checking.
-   * Returns Either for easier error handling in service layer.
    */
-  def validate(req: RiskTreeDefinitionRequest): Either[List[ValidationError], (SafeName.SafeName, Seq[RiskNode], NodeId)] = {
-    val basicValidation = toDomain(req)
-    
-    basicValidation.toEither.left.map(_.toList).flatMap { case (name, nodes, rootId) =>
-      // Cross-field validation: rootId must exist in nodes
+  def validate(req: RiskTreeDefinitionRequest): Validation[ValidationError, (SafeName.SafeName, Seq[RiskNode], NodeId)] = {
+    toDomain(req).flatMap { case (name, nodes, rootId) =>
       val nodeIds = nodes.map(_.id).toSet
-      if (!nodeIds.contains(rootId)) {
-        Left(List(ValidationError(
-          field = "request.rootId",
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = s"rootId '${rootId.value}' not found in nodes list. Available: ${nodeIds.map(_.value).mkString(", ")}"
-        )))
-      } else {
-        Right((name, nodes, rootId))
-      }
+      Validation
+        .fromPredicateWith[ValidationError, (SafeName.SafeName, Seq[RiskNode], NodeId)](
+          ValidationError(
+            field = "request.rootId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"rootId '${rootId.value}' not found in nodes list. Available: ${nodeIds.map(_.value).mkString(", ")}"
+          )
+        )((name, nodes, rootId)) { case (_, _, rid) => nodeIds.contains(rid) }
     }
   }
 }

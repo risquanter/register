@@ -95,8 +95,8 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
       val result = RiskTreeDefinitionRequest.validate(request)
       
       assertTrue(
-        result.isLeft,
-        result.swap.exists(_.exists(_.field.contains("name")))
+        result.toEither.isLeft,
+        result.toEither.left.exists(_.exists(_.field.contains("name")))
       )
     },
     
@@ -110,8 +110,8 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
       val result = RiskTreeDefinitionRequest.validate(request)
       
       assertTrue(
-        result.isLeft,
-        result.swap.exists(_.exists(_.field.contains("nodes")))
+        result.toEither.isLeft,
+        result.toEither.left.exists(_.exists(_.field.contains("nodes")))
       )
     },
     
@@ -135,8 +135,8 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
       val result = RiskTreeDefinitionRequest.validate(request)
       
       assertTrue(
-        result.isLeft,
-        result.swap.exists(_.exists(_.message.contains("not found in nodes")))
+        result.toEither.isLeft,
+        result.toEither.left.exists(_.exists(_.message.contains("not found in nodes")))
       )
     },
     
@@ -175,10 +175,10 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
       val result = RiskTreeDefinitionRequest.validate(request)
       
       assertTrue(
-        result.isRight,
-        result.exists(_._1.value == "Valid Tree"),
-        result.exists(_._2.size == 3),
-        result.exists(_._3.value.toString == "root")
+        result.toEither.isRight,
+        result.toEither.exists(_._1.value == "Valid Tree"),
+        result.toEither.exists(_._2.size == 3),
+        result.toEither.exists(_._3.value.toString == "root")
       )
     }
   )
