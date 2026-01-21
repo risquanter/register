@@ -1,6 +1,6 @@
 package com.risquanter.register.domain.data
 
-import zio.prelude.{Equal, Debug, Ord}
+import zio.prelude.{Associative, Commutative, Debug, Equal, Ord}
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
@@ -125,6 +125,14 @@ object RiskResult {
   given Equal[RiskResult] = Equal.make { (a, b) =>
     a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.name == b.name && a.provenances == b.provenances
   }
+
+  /** Associative combine for RiskResult (trial-aligned summation) */
+  given Associative[RiskResult] with
+    override def combine(a: => RiskResult, b: => RiskResult): RiskResult = RiskResult.combine(a, b)
+
+  /** Commutative combine inherits associative semantics */
+  given Commutative[RiskResult] with
+    override def combine(a: => RiskResult, b: => RiskResult): RiskResult = RiskResult.combine(a, b)
   
   /** Human-readable representation */
   given Debug[RiskResult] = Debug.make { r =>

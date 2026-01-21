@@ -3,11 +3,14 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.*
+import com.risquanter.register.configs.SimulationConfig
+import com.risquanter.register.domain.data.RiskResultIdentityInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.testutil.TestHelpers.safeId
-import com.risquanter.register.testutil.RiskResultTestSupport.identityFor
+import com.risquanter.register.testutil.ConfigTestLoader
 
 object LossDistributionSpec extends ZIOSpecDefault {
+  given SimulationConfig = ConfigTestLoader.simulation
   
   def spec = suite("LossDistributionSpec")(
     suite("RiskResult - basic functionality")(
@@ -135,22 +138,26 @@ object LossDistributionSpec extends ZIOSpecDefault {
     suite("RiskResult combine - laws")(
       test("identity law: combine(identity, a) == a") {
         val a = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
-        val identity = identityFor(100)
+        val nTrials = summon[SimulationConfig].defaultNTrials
+        val identity = Identity[RiskResult].identity
         
-        val combined = RiskResult.combine(identity, a)
+        val adjusted = a.copy(nTrials = nTrials)
+        val combined = RiskResult.combine(identity, adjusted)
         
-        assertTrue(combined.outcomes == a.outcomes) &&
-        assertTrue(combined.nTrials == a.nTrials)
+        assertTrue(combined.outcomes == adjusted.outcomes) &&
+        assertTrue(combined.nTrials == adjusted.nTrials)
       },
       
       test("identity law: combine(a, identity) == a") {
         val a = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
-        val identity = identityFor(100)
+        val nTrials = summon[SimulationConfig].defaultNTrials
+        val identity = Identity[RiskResult].identity
         
-        val combined = RiskResult.combine(a, identity)
+        val adjusted = a.copy(nTrials = nTrials)
+        val combined = RiskResult.combine(adjusted, identity)
         
-        assertTrue(combined.outcomes == a.outcomes) &&
-        assertTrue(combined.nTrials == a.nTrials)
+        assertTrue(combined.outcomes == adjusted.outcomes) &&
+        assertTrue(combined.nTrials == adjusted.nTrials)
       },
       
       test("associativity: combine(a, combine(b, c)) == combine(combine(a, b), c)") {

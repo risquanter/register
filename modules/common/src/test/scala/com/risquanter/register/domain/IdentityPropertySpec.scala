@@ -3,11 +3,12 @@ package com.risquanter.register.domain
 import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.Identity
+import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.{RiskResult, Loss, TrialId}
+import com.risquanter.register.domain.data.RiskResultIdentityInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.testutil.TestHelpers.{safeId, genSafeId}
-import com.risquanter.register.testutil.RiskResultTestSupport.identityFor
 
 /**
  * Property-based tests for Identity (Monoid) laws using ZIO Test generators.
@@ -22,6 +23,17 @@ import com.risquanter.register.testutil.RiskResultTestSupport.identityFor
  * providing much stronger confidence than manual test cases.
  */
 object IdentityPropertySpec extends ZIOSpecDefault {
+  private def simulationConfig(nTrials: Int): SimulationConfig =
+    SimulationConfig(
+      defaultNTrials = nTrials,
+      maxTreeDepth = 5,
+      defaultParallelism = 8,
+      maxConcurrentSimulations = 4,
+      maxNTrials = 1000000,
+      maxParallelism = 16,
+      defaultSeed3 = 0L,
+      defaultSeed4 = 0L
+    )
   
   // ══════════════════════════════════════════════════════════════════
   // ZIO Test Generators
@@ -123,8 +135,9 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       
       test("left identity property: ∅ ⊕ a = a") {
         check(genRiskResult) { a =>
-          val id = identityFor(a.nTrials)
-          val combined = RiskResult.combine(id, a)
+          given SimulationConfig = simulationConfig(a.nTrials)
+          val id = Identity[RiskResult].identity
+          val combined = Identity[RiskResult].combine(id, a)
           
           assertTrue(combined.outcomes == a.outcomes) &&
           assertTrue(combined.nTrials == a.nTrials)
@@ -133,8 +146,9 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       
       test("right identity property: a ⊕ ∅ = a") {
         check(genRiskResult) { a =>
-          val id = identityFor(a.nTrials)
-          val combined = RiskResult.combine(a, id)
+          given SimulationConfig = simulationConfig(a.nTrials)
+          val id = Identity[RiskResult].identity
+          val combined = Identity[RiskResult].combine(a, id)
           
           assertTrue(combined.outcomes == a.outcomes) &&
           assertTrue(combined.nTrials == a.nTrials)
@@ -232,8 +246,9 @@ object IdentityPropertySpec extends ZIOSpecDefault {
           val empty2 = RiskResult.empty(safeId("empty-2"), nTrials)
           val empty3 = RiskResult.empty(safeId("empty-3"), nTrials)
           
-          val combined = RiskResult.combine(
-            RiskResult.combine(empty1, empty2),
+          given SimulationConfig = simulationConfig(nTrials)
+          val combined = Identity[RiskResult].combine(
+            Identity[RiskResult].combine(empty1, empty2),
             empty3
           )
           
