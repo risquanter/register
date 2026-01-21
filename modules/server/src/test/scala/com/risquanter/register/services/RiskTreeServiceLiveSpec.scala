@@ -63,7 +63,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     minLoss = Some(1000L),
     maxLoss = Some(50000L),
     parentId = None
-  ).toEither.getOrElse(throw new RuntimeException("Invalid test data: validRequest"))
+  ).toEither.fold(errs => throw new AssertionError(s"Invalid test data: validRequest: ${errs.map(_.message).mkString("; ")}"), identity)
   
   private val validRequest = RiskTreeDefinitionRequest(
     name = "Test Risk Tree",

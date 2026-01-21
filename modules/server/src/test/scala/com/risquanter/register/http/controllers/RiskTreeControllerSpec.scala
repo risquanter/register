@@ -53,14 +53,14 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
   // Layer factory - creates fresh layer with isolated repository per test
   private def serviceLayer = {
     // Default TreeIndex - empty for controller tests that use create endpoint
-    val defaultRoot = RiskLeaf.create(
+  val defaultRoot = RiskLeaf.create(
       id = "test-root", 
       name = "Test Root", 
       distributionType = "lognormal", 
       probability = 0.1, 
       minLoss = Some(1000L), 
       maxLoss = Some(10000L)
-    ).toEither.getOrElse(throw new RuntimeException("Invalid default root"))
+  ).toEither.fold(errs => throw new AssertionError(s"Invalid default root: ${errs.map(_.message).mkString("; ")}"), identity)
     
     ZLayer.make[RiskTreeService](
       RiskTreeServiceLive.layer,

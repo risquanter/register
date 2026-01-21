@@ -9,7 +9,7 @@ import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, NonNegativeLong}
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.*
 
 /**
  * Tests for RiskResultResolverLive (ADR-015).
@@ -50,22 +50,21 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
   )
 
   val allNodes = Seq(rootNode, risk1Leaf, risk2Leaf)
-  val testIndex: TreeIndex = TreeIndex.fromNodeSeq(allNodes).toEither.getOrElse(
-    throw new AssertionError("Test fixture has invalid tree structure")
-  )
+  val testIndex: TreeIndex = unsafeGet(TreeIndex.fromNodeSeq(allNodes), "Test fixture has invalid tree structure")
   val rootId = safeId("root")
   val risk1Id = safeId("risk1")
   val risk2Id = safeId("risk2")
 
   // Create test RiskTree
   val testTreeId: NonNegativeLong = 1L
-  val testTree = RiskTree.fromNodes(
-    id = testTreeId,
-    name = SafeName.SafeName("Test Tree".refineUnsafe),
-    nodes = allNodes,
-    rootId = rootId
-  ).toEither.getOrElse(
-    throw new AssertionError("Test fixture has invalid RiskTree")
+  val testTree = unsafeGet(
+    RiskTree.fromNodes(
+      id = testTreeId,
+      name = SafeName.SafeName("Test Tree".refineUnsafe),
+      nodes = allNodes,
+      rootId = rootId
+    ),
+    "Test fixture has invalid RiskTree"
   )
 
   // Test layer with all dependencies

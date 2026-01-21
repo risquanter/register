@@ -2,7 +2,7 @@
 
 **Scope:** TreeIndex/RiskTree validation refactoring  
 **Reviewer:** AI Assistant  
-**Status:** Partial completion — Issues 1, 2, 3 & 5 resolved; Issues 4 & 6 deferred
+**Status:** Partial completion — Issues 1, 2, 3, 5 & 6 resolved; Issue 4 deferred
 
 ---
 
@@ -227,30 +227,12 @@ for {
 ### Issue 6: Unsafe Pattern in Test Fixtures
 
 **Files:**  
-- [RiskResultCacheSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultCacheSpec.scala) Lines 80-88
-- [RiskResultResolverSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultResolverSpec.scala) Lines 53-69
-- [RiskTreeControllerSpec.scala](../modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala) Line 63
-- [RiskTreeServiceLiveSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala) Line 66
+- [RiskResultCacheSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultCacheSpec.scala)
+- [RiskResultResolverSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultResolverSpec.scala)
+- [RiskTreeControllerSpec.scala](../modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala)
+- [RiskTreeServiceLiveSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala)
 
-**Violation:** Tests use `.toEither.getOrElse(throw ...)` which hides validation errors.
-
-**Current Code (examples):**
-```scala
-val treeIndex = TreeIndex.fromNodeSeq(allNodes).toEither.getOrElse(
-  throw new AssertionError("Test fixture has invalid tree structure")
-)
-```
-
-**Note:** This is acceptable per ADR-010 for test fixtures where validity is guaranteed.
-
-**Suggested Treatment (optional improvement):**
-```scala
-val treeIndex = TreeIndex.fromNodeSeq(allNodes) match {
-  case Validation.Success(_, idx) => idx
-  case Validation.Failure(_, errors) => 
-    fail(s"Test fixture invalid: ${errors.map(_.message).mkString("; ")}")
-}
-```
+**Status:** ✅ Implemented (2026-01-21). Shared helper `TestHelpers.unsafeGet` now extracts `Validation` results with aggregated messages; specs updated to use it.
 
 **Priority:** Low  
 **Effort:** 15 minutes
@@ -277,5 +259,6 @@ val treeIndex = TreeIndex.fromNodeSeq(allNodes) match {
 - [x] Issue 2: Unify RiskTreeDefinitionRequest.validate to return Validation (Low) — Implemented 2026-01-21
 - [x] Issue 3: Adopt `toZIOValidation` in `RiskTreeServiceLive` (Low) — Implemented 2026-01-21
 - [x] Issue 5: Use fromPredicateWith in RiskTree.fromNodes (Low) — Implemented 2026-01-21
+- [x] Issue 6: Harden test fixtures with shared helper (Low) — Implemented 2026-01-21
 
-**Deferred:** Issue 4 (intentional design per ADR-009), Issue 6 (acceptable for tests unless hardened)
+**Deferred:** Issue 4 (intentional design per ADR-009)

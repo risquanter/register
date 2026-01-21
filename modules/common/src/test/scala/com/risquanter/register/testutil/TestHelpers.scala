@@ -1,6 +1,8 @@
 package com.risquanter.register.testutil
 
 import zio.test.Gen
+import zio.prelude.Validation
+import com.risquanter.register.domain.errors.ValidationError
 import com.risquanter.register.domain.data.iron.SafeId
 
 /**
@@ -63,6 +65,16 @@ trait TestHelpers {
     */
   val genSafeId: Gen[Any, SafeId.SafeId] =
     Gen.alphaNumericStringBounded(3, 30).map(safeId)
+
+  /**
+    * Extract validated value or throw AssertionError with accumulated messages.
+    * Intended for deterministic test fixture construction.
+    */
+  def unsafeGet[A](v: Validation[ValidationError, A], label: String): A =
+    v.toEither.fold(
+      errs => throw new AssertionError(s"$label: ${errs.map(_.message).mkString("; ")}"),
+      identity
+    )
 }
 
 /**
