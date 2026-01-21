@@ -2,7 +2,7 @@
 
 **Scope:** TreeIndex/RiskTree validation refactoring  
 **Reviewer:** AI Assistant  
-**Status:** Partial completion — Issues 1, 2, 3, 5 & 6 resolved; Issue 4 deferred
+**Status:** All issues implemented except Issue 4 (deferred by design)
 
 ---
 
@@ -232,7 +232,7 @@ for {
 - [RiskTreeControllerSpec.scala](../modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala)
 - [RiskTreeServiceLiveSpec.scala](../modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala)
 
-**Status:** ✅ Implemented (2026-01-21). Shared helper `TestHelpers.unsafeGet` now extracts `Validation` results with aggregated messages; specs updated to use it.
+**Status:** ✅ Implemented (2026-01-21). Shared helper `TestHelpers.unsafeGet` now extracts `Validation` results with aggregated messages; specs updated to use it. `withCfg` is consolidated in `ConfigTestLoader` to provide scoped `SimulationConfig` in tests.
 
 **Priority:** Low  
 **Effort:** 15 minutes
@@ -262,3 +262,7 @@ for {
 - [x] Issue 6: Harden test fixtures with shared helper (Low) — Implemented 2026-01-21
 
 **Deferred:** Issue 4 (intentional design per ADR-009)
+
+## Open / Deferred Items (as of 2026-01-21)
+- Issue 4 remains deferred by design (ADR-009 tradeoff on `RiskResult` combine precondition).
+- Integration tests in `server-it` require a running Irmin instance at http://localhost:9080; they will fail when the service is unavailable.
