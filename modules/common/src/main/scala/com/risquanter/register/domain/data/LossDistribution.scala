@@ -1,6 +1,6 @@
 package com.risquanter.register.domain.data
 
-import zio.prelude.{Associative, Identity, Equal, Debug, Ord}
+import zio.prelude.{Equal, Debug, Ord}
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
@@ -39,8 +39,7 @@ trait LECCurve {
  * It provides both the raw loss data and the derived LEC function.
  * 
  * Mathematical structure:
- * - Identity instance: Combines distributions via trial-wise loss summation
- * - Associative: (a + b) + c = a + (b + c) for distribution aggregation
+ * - Explicit combine operation for aggregation (trial-wise loss summation)
  * - LECCurve: Provides Loss → Probability function via probOfExceedance
  * 
  * Storage:
@@ -106,38 +105,20 @@ object RiskResult {
   /** Empty result (no losses occurred) */
   def empty(name: SafeId.SafeId, nTrials: Int): RiskResult = 
     RiskResult(name, Map.empty, nTrials, Nil)
-  
+
   /**
-   * ZIO Prelude Identity instance for RiskResult (combines Associative + Identity).
-   * 
-   * Combines loss distributions using outer join semantics:
-   * - Identity: Empty distribution with no losses
-   * - Combine: Union of trial IDs, sum losses per trial
-   * - Associativity: (a ⊕ b) ⊕ c = a ⊕ (b ⊕ c)
-   * 
-   * Mathematical interpretation:
-   * This models the aggregation of independent risks by summing their
-   * losses in each trial, creating a composite loss distribution.
+   * Total combine operation for RiskResult.
+   * Enforces trial-count alignment and aggregates outcomes/provenance.
    */
-  given identity: Identity[RiskResult] with {
-    // Empty identity uses a placeholder SafeId
-    private val emptyId: SafeId.SafeId = SafeId.fromString("empty").getOrElse(
-      throw new IllegalStateException("Invalid empty SafeId - should never happen")
+  def combine(a: RiskResult, b: RiskResult): RiskResult = {
+    require(a.nTrials == b.nTrials, s"Cannot merge results with different trial counts: ${a.nTrials} vs ${b.nTrials}")
+    val combinedName = a.name
+    RiskResult(
+      combinedName,
+      LossDistribution.merge(a, b),
+      a.nTrials,
+      a.provenances ++ b.provenances
     )
-    
-    def identity: RiskResult = RiskResult(emptyId, Map.empty, 0, Nil)
-    
-    def combine(a: => RiskResult, b: => RiskResult): RiskResult = {
-      require(a.nTrials == b.nTrials, s"Cannot merge results with different trial counts: ${a.nTrials} vs ${b.nTrials}")
-      // Prefer non-empty name (non-empty means not the identity element)
-      val combinedName = if (a.name.value.toString != "empty") a.name else b.name
-      RiskResult(
-        combinedName,
-        LossDistribution.merge(a, b),
-        a.nTrials,
-        a.provenances ++ b.provenances  // Accumulate provenances from children
-      )
-    }
   }
   
   /** Value equality for RiskResult */
@@ -219,10 +200,10 @@ object LossDistribution {
   /**
    * Outer join merge operation for loss distributions.
    * 
-   * This is the associative combine operation for the Identity instance:
-   * - Takes union of all trial IDs across distributions
-   * - Sums losses for each trial (missing trials treated as 0 loss)
-   * - Preserves trial alignment for portfolio aggregation
+  * Combine operation for aggregating loss distributions:
+  * - Takes union of all trial IDs across distributions
+  * - Sums losses for each trial (missing trials treated as 0 loss)
+  * - Preserves trial alignment for portfolio aggregation
    * 
    * Mathematical properties:
    * - Associative: merge(a, merge(b, c)) == merge(merge(a, b), c)

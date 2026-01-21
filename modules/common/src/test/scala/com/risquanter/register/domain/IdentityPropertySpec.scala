@@ -7,6 +7,7 @@ import com.risquanter.register.domain.data.{RiskResult, Loss, TrialId}
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.testutil.TestHelpers.{safeId, genSafeId}
+import com.risquanter.register.testutil.RiskResultTestSupport.identityFor
 
 /**
  * Property-based tests for Identity (Monoid) laws using ZIO Test generators.
@@ -112,8 +113,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
           val b = RiskResult(safeId("risk-b"), outcomes2.filter(_._1 < nTrials), nTrials)
           val c = RiskResult(safeId("risk-c"), outcomes3.filter(_._1 < nTrials), nTrials)
           
-          val left  = Identity[RiskResult].combine(Identity[RiskResult].combine(a, b), c)
-          val right = Identity[RiskResult].combine(a, Identity[RiskResult].combine(b, c))
+          val left  = RiskResult.combine(RiskResult.combine(a, b), c)
+          val right = RiskResult.combine(a, RiskResult.combine(b, c))
           
           // Compare outcomes (ignore name differences from merging)
           assertTrue(left.outcomes == right.outcomes)
@@ -122,8 +123,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       
       test("left identity property: ∅ ⊕ a = a") {
         check(genRiskResult) { a =>
-          val identity = Identity[RiskResult].identity.copy(nTrials = a.nTrials)
-          val combined = Identity[RiskResult].combine(identity, a)
+          val id = identityFor(a.nTrials)
+          val combined = RiskResult.combine(id, a)
           
           assertTrue(combined.outcomes == a.outcomes) &&
           assertTrue(combined.nTrials == a.nTrials)
@@ -132,8 +133,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       
       test("right identity property: a ⊕ ∅ = a") {
         check(genRiskResult) { a =>
-          val identity = Identity[RiskResult].identity.copy(nTrials = a.nTrials)
-          val combined = Identity[RiskResult].combine(a, identity)
+          val id = identityFor(a.nTrials)
+          val combined = RiskResult.combine(a, id)
           
           assertTrue(combined.outcomes == a.outcomes) &&
           assertTrue(combined.nTrials == a.nTrials)
@@ -150,8 +151,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
           val a = RiskResult(safeId("risk-a"), outcomes1.filter(_._1 < nTrials), nTrials)
           val b = RiskResult(safeId("risk-b"), outcomes2.filter(_._1 < nTrials), nTrials)
           
-          val ab = Identity[RiskResult].combine(a, b)
-          val ba = Identity[RiskResult].combine(b, a)
+          val ab = RiskResult.combine(a, b)
+          val ba = RiskResult.combine(b, a)
           
           assertTrue(ab.outcomes == ba.outcomes)
         }
@@ -167,7 +168,7 @@ object IdentityPropertySpec extends ZIOSpecDefault {
           val a = RiskResult(safeId("risk-a"), outcomes1.filter(_._1 < nTrials), nTrials)
           val b = RiskResult(safeId("risk-b"), outcomes2.filter(_._1 < nTrials), nTrials)
           
-          val combined = Identity[RiskResult].combine(a, b)
+          val combined = RiskResult.combine(a, b)
           val expectedTrials = a.trialIds() ++ b.trialIds()
           
           assertTrue(combined.trialIds() == expectedTrials)
@@ -184,7 +185,7 @@ object IdentityPropertySpec extends ZIOSpecDefault {
           val a = RiskResult(safeId("risk-a"), outcomes1.filter(_._1 < nTrials), nTrials)
           val b = RiskResult(safeId("risk-b"), outcomes2.filter(_._1 < nTrials), nTrials)
           
-          val combined = Identity[RiskResult].combine(a, b)
+          val combined = RiskResult.combine(a, b)
           
           // Verify each trial's loss is sum of individual losses
           val allTrials = a.trialIds() ++ b.trialIds()
@@ -200,7 +201,7 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       test("combining with empty result is identity") {
         check(genRiskResult) { a =>
           val empty = RiskResult.empty(safeId("empty-risk"), a.nTrials)
-          val combined = Identity[RiskResult].combine(a, empty)
+          val combined = RiskResult.combine(a, empty)
           
           assertTrue(combined.outcomes == a.outcomes)
         }
@@ -208,7 +209,7 @@ object IdentityPropertySpec extends ZIOSpecDefault {
       
       test("combining result with itself doubles all losses") {
         check(genRiskResult) { a =>
-          val combined = Identity[RiskResult].combine(a, a)
+          val combined = RiskResult.combine(a, a)
           
           // All trial losses should be doubled
           val allDoubled = a.trialIds().forall { trial =>
@@ -231,8 +232,8 @@ object IdentityPropertySpec extends ZIOSpecDefault {
           val empty2 = RiskResult.empty(safeId("empty-2"), nTrials)
           val empty3 = RiskResult.empty(safeId("empty-3"), nTrials)
           
-          val combined = Identity[RiskResult].combine(
-            Identity[RiskResult].combine(empty1, empty2),
+          val combined = RiskResult.combine(
+            RiskResult.combine(empty1, empty2),
             empty3
           )
           
@@ -246,7 +247,7 @@ object IdentityPropertySpec extends ZIOSpecDefault {
         val r1 = RiskResult(safeId("risk-001"), Map(1 -> largeLoss), 100)
         val r2 = RiskResult(safeId("risk-002"), Map(1 -> largeLoss), 100)
         
-        val combined = Identity[RiskResult].combine(r1, r2)
+        val combined = RiskResult.combine(r1, r2)
         
         assertTrue(
           combined.outcomeOf(1) == largeLoss * 2,
@@ -258,7 +259,7 @@ object IdentityPropertySpec extends ZIOSpecDefault {
         val withZero = RiskResult(safeId("test-zero"), Map(1 -> 0L, 2 -> 1000L), 100)
         val empty = RiskResult.empty(safeId("empty-risk"), 100)
         
-        val combined = Identity[RiskResult].combine(withZero, empty)
+        val combined = RiskResult.combine(withZero, empty)
         
         // Zero losses should be preserved in sparse representation
         assertTrue(combined.outcomeOf(1) == 0L)

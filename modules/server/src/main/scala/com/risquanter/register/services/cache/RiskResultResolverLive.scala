@@ -12,7 +12,6 @@ import com.risquanter.register.domain.data.iron.PositiveInt
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
-import zio.prelude.Identity
 
 /**
   * Live implementation of RiskResultResolver (ADR-015).
@@ -136,7 +135,7 @@ final case class RiskResultResolverLive(
                 code = ValidationErrorCode.EMPTY_COLLECTION,
                 message = s"RiskPortfolio '${portfolio.id}' has no children"
               )))
-            childResults.reduce[RiskResult]((a, b) => Identity[RiskResult].combine(a, b))
+            childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b))
               .copy(name = portfolio.id)
           }
           _ <- cache.put(portfolio.id, combined)

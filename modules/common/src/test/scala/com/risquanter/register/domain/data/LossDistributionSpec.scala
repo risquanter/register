@@ -3,9 +3,9 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.*
-import zio.prelude.Identity
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.RiskResultTestSupport.identityFor
 
 object LossDistributionSpec extends ZIOSpecDefault {
   
@@ -132,12 +132,12 @@ object LossDistributionSpec extends ZIOSpecDefault {
       }
     ),
     
-    suite("Identity[RiskResult] - laws")(
+    suite("RiskResult combine - laws")(
       test("identity law: combine(identity, a) == a") {
         val a = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
-        val identity = Identity[RiskResult].identity
+        val identity = identityFor(100)
         
-        val combined = Identity[RiskResult].combine(identity.copy(nTrials = 100), a)
+        val combined = RiskResult.combine(identity, a)
         
         assertTrue(combined.outcomes == a.outcomes) &&
         assertTrue(combined.nTrials == a.nTrials)
@@ -145,9 +145,9 @@ object LossDistributionSpec extends ZIOSpecDefault {
       
       test("identity law: combine(a, identity) == a") {
         val a = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
-        val identity = Identity[RiskResult].identity
+        val identity = identityFor(100)
         
-        val combined = Identity[RiskResult].combine(a, identity.copy(nTrials = 100))
+        val combined = RiskResult.combine(a, identity)
         
         assertTrue(combined.outcomes == a.outcomes) &&
         assertTrue(combined.nTrials == a.nTrials)
@@ -158,8 +158,8 @@ object LossDistributionSpec extends ZIOSpecDefault {
         val b = RiskResult(safeId("risk-002"), Map(1 -> 2000L, 2 -> 500L), nTrials = 100)
         val c = RiskResult(safeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L), nTrials = 100)
         
-        val left = Identity[RiskResult].combine(a, Identity[RiskResult].combine(b, c))
-        val right = Identity[RiskResult].combine(Identity[RiskResult].combine(a, b), c)
+        val left = RiskResult.combine(a, RiskResult.combine(b, c))
+        val right = RiskResult.combine(RiskResult.combine(a, b), c)
         
         assertTrue(left.outcomes == right.outcomes)
       },
@@ -168,8 +168,8 @@ object LossDistributionSpec extends ZIOSpecDefault {
         val a = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), nTrials = 100)
         val b = RiskResult(safeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), nTrials = 100)
         
-        val ab = Identity[RiskResult].combine(a, b)
-        val ba = Identity[RiskResult].combine(b, a)
+        val ab = RiskResult.combine(a, b)
+        val ba = RiskResult.combine(b, a)
         
         assertTrue(ab.outcomes == ba.outcomes)
       },
@@ -180,7 +180,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         
         assertTrue(
           try {
-            Identity[RiskResult].combine(a, b)
+            RiskResult.combine(a, b)
             false
           } catch {
             case _: IllegalArgumentException => true
