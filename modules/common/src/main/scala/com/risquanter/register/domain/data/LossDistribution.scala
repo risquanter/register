@@ -1,6 +1,7 @@
 package com.risquanter.register.domain.data
 
 import zio.prelude.{Associative, Commutative, Debug, Equal, Ord}
+import com.risquanter.register.configs.SimulationConfig
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
@@ -77,7 +78,7 @@ sealed abstract class LossDistribution(
  * Represents the empirical loss distribution from simulating one risk
  * across multiple Monte Carlo trials.
  */
-case class RiskResult(
+case class RiskResult private (
   override val name: SafeId.SafeId,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int,
@@ -98,13 +99,29 @@ case class RiskResult(
     BigDecimal(exceedingCount) / BigDecimal(nTrials)
   }
   
+  /** Create a new result with updated outcomes while preserving metadata. */
+  def withOutcomes(updatedOutcomes: Map[TrialId, Loss]): RiskResult =
+    copy(outcomes = updatedOutcomes)
+
+  def withId(updatedName: SafeId.SafeId): RiskResult =
+    copy(name = updatedName)
+
+
   override def flatten: Vector[LossDistribution] = Vector(this)
 }
 
 object RiskResult {
-  /** Empty result (no losses occurred) */
-  def empty(name: SafeId.SafeId, nTrials: Int): RiskResult = 
-    RiskResult(name, Map.empty, nTrials, Nil)
+  /** Config-driven constructor; uses SimulationConfig.defaultNTrials */
+  def apply(
+    name: SafeId.SafeId,
+    outcomes: Map[TrialId, Loss],
+    provenances: List[NodeProvenance]
+  )(using cfg: SimulationConfig): RiskResult =
+    RiskResult(name, outcomes, cfg.defaultNTrials, provenances)
+
+  /** Empty result (no losses occurred); uses SimulationConfig.defaultNTrials */
+  def empty(name: SafeId.SafeId)(using cfg: SimulationConfig): RiskResult =
+    RiskResult(name, Map.empty, cfg.defaultNTrials, Nil)
 
   /**
    * Total combine operation for RiskResult.
@@ -147,7 +164,7 @@ object RiskResult {
  * children for drill-down analysis. The aggregate distribution models the
  * total loss from a portfolio of risks.
  */
-case class RiskResultGroup(
+case class RiskResultGroup private (
   children: List[RiskResult],
   override val name: SafeId.SafeId,
   override val outcomes: Map[TrialId, Loss],
@@ -177,30 +194,22 @@ object RiskResultGroup {
    * Create aggregated loss distribution from multiple risks.
    * 
    * @param name Name for the aggregate distribution
-   * @param nTrials Number of trials (must match all children)
    * @param results Individual risk loss distributions to aggregate
    */
   def apply(
     name: SafeId.SafeId,
-    nTrials: Int,
     results: RiskResult*
-  ): RiskResultGroup = {
-    if (results.isEmpty) {
+  )(using cfg: SimulationConfig): RiskResultGroup = {
+    val nTrials = cfg.defaultNTrials
+    if results.isEmpty then
       RiskResultGroup(List.empty, name, Map.empty, nTrials)
-    } else {
-      // Verify all children have same trial count
-      require(
-        results.forall(_.nTrials == nTrials),
-        s"All results must have nTrials=$nTrials"
-      )
-      
+    else
       RiskResultGroup(
         results.toList,
         name,
         LossDistribution.merge(results*),
         nTrials
       )
-    }
   }
 }
 

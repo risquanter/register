@@ -5,33 +5,43 @@ import zio.test.Assertion.*
 import com.risquanter.register.domain.data.RiskResult
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.ConfigTestLoader.withCfg
+import com.risquanter.register.configs.SimulationConfig
 
 object LECGeneratorSpec extends ZIOSpecDefault {
 
-  // Test fixtures - simulation outcomes
-  val cyberResult = RiskResult(
-    name = safeId("cyber"),
-    outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
-    nTrials = 5
-  )
+  // Test fixtures - simulation outcomes (scoped with withCfg)
+  val cyberResult = withCfg(5) {
+    RiskResult(
+      name = safeId("cyber"),
+      outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
+      provenances = Nil
+    )
+  }
   
-  val hardwareResult = RiskResult(
-    name = safeId("hardware"),
-    outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
-    nTrials = 5
-  )
+  val hardwareResult = withCfg(5) {
+    RiskResult(
+      name = safeId("hardware"),
+      outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
+      provenances = Nil
+    )
+  }
   
-  val wideRangeResult = RiskResult(
-    name = safeId("wide"),
-    outcomes = Map(1 -> 1000L, 2 -> 100000L, 3 -> 50000L),
-    nTrials = 3
-  )
+  val wideRangeResult = withCfg(3) {
+    RiskResult(
+      name = safeId("wide"),
+      outcomes = Map(1 -> 1000L, 2 -> 100000L, 3 -> 50000L),
+      provenances = Nil
+    )
+  }
   
-  val emptyResult = RiskResult(
-    name = safeId("empty"),
-    outcomes = Map.empty,
-    nTrials = 5
-  )
+  val emptyResult = withCfg(5) {
+    RiskResult(
+      name = safeId("empty"),
+      outcomes = Map.empty,
+      provenances = Nil
+    )
+  }
 
   def spec = suite("LECGeneratorSpec")(
     suite("getTicks")(

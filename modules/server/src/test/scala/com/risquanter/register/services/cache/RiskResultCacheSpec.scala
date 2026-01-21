@@ -10,6 +10,7 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.testutil.TestHelpers.*
+import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /**
  * Tests for RiskResultCache and TreeCacheManager (ADR-014).
@@ -94,30 +95,38 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
   val itRiskId   = safeId("it-risk")
   val hardwareId = safeId("hardware")
 
-  // Sample RiskResult data (simulation outcomes)
-  val cyberResult = RiskResult(
-    name = safeId("cyber"),
-    outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
-    nTrials = 5
-  )
+  // Sample RiskResult data (simulation outcomes) - scoped with withCfg
+  val cyberResult = withCfg(5) {
+    RiskResult(
+      name = safeId("cyber"),
+      outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
+      provenances = Nil
+    )
+  }
   
-  val hardwareResult = RiskResult(
-    name = safeId("hardware"),
-    outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
-    nTrials = 5
-  )
+  val hardwareResult = withCfg(5) {
+    RiskResult(
+      name = safeId("hardware"),
+      outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
+      provenances = Nil
+    )
+  }
 
-  val opsRiskResult = RiskResult(
-    name = safeId("ops-risk"),
-    outcomes = Map(1 -> 15000L, 2 -> 25000L, 3 -> 8000L, 4 -> 15000L, 5 -> 3000L),
-    nTrials = 5
-  )
+  val opsRiskResult = withCfg(5) {
+    RiskResult(
+      name = safeId("ops-risk"),
+      outcomes = Map(1 -> 15000L, 2 -> 25000L, 3 -> 8000L, 4 -> 15000L, 5 -> 3000L),
+      provenances = Nil
+    )
+  }
 
-  val itRiskResult = RiskResult(
-    name = safeId("it-risk"),
-    outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
-    nTrials = 5
-  )
+  val itRiskResult = withCfg(5) {
+    RiskResult(
+      name = safeId("it-risk"),
+      outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
+      provenances = Nil
+    )
+  }
 
   // Layer for TreeCacheManager tests
   val cacheManagerLayer = TreeCacheManager.layer

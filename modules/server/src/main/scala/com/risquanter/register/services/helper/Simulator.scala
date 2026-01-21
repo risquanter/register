@@ -6,15 +6,18 @@ import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode,
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.iron.{PositiveInt, Probability, SafeId}
 import io.github.iltotore.iron.refineUnsafe
-import io.github.iltotore.iron.constraint.numeric.Greater
+import io.github.iltotore.iron.constraint.numeric.{Greater, given}
 import zio.prelude.Identity
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
 import zio.{ZIO, Task, Chunk}
 import java.time.Instant
+import com.risquanter.register.configs.SimulationConfig
+import com.risquanter.register.domain.data.iron._
 
 // Default parallelism for trial-level computation within a single risk
-private val DefaultTrialParallelism: Int = Runtime.getRuntime.availableProcessors()
+private val DefaultTrialParallelism: PositiveInt =
+  math.max(1, Runtime.getRuntime.availableProcessors()).refineUnsafe
 
 /**
  * Monte Carlo simulation engine with sparse storage optimization.
@@ -57,7 +60,7 @@ object Simulator {
   def performTrials(
     sampler: RiskSampler,
     nTrials: PositiveInt,
-    parallelism: Int = DefaultTrialParallelism
+    parallelism: PositiveInt = DefaultTrialParallelism
   ): Task[Map[TrialId, Loss]] = {
     ZIO.attempt {
       // Filter phase: identify successful trials (pure, sequential is fine)
@@ -113,25 +116,27 @@ object Simulator {
    * - No race conditions: No shared mutable state between fibers
    * - Determinism: Same seeds produce identical results regardless of parallelism
    * 
+   * Two levels of parallelism:
+   * - Risk-level: cfg.maxConcurrentSimulations controls how many risks run concurrently
+   * - Trial-level: cfg.defaultTrialParallelism controls parallelism within each risk's trials
+   * 
    * @param samplers Vector of risk samplers to simulate
-   * @param nTrials Number of trials per risk (must be positive)
-   * @param parallelism Maximum concurrent fibers (must be positive, default: 8)
    * @return Task of RiskResult for each risk
    */
   def simulate(
-    samplers: Vector[RiskSampler],
-    nTrials: PositiveInt,
-    parallelism: PositiveInt = 8.refineUnsafe
-  ): Task[Vector[RiskResult]] = {
-    val n: Int = nTrials
-    val p: Int = parallelism
+    samplers: Vector[RiskSampler]
+  )(using cfg: SimulationConfig): Task[Vector[RiskResult]] = {
+    val nTrials: PositiveInt = cfg.defaultNTrials
+    val trialParallelism: PositiveInt = cfg.defaultTrialParallelism
+    val riskParallelism: PositiveInt = cfg.maxConcurrentSimulations
+
     val trialSets = samplers.map { sampler =>
-      performTrials(sampler, nTrials, p).map { trials =>
-        RiskResult(sampler.id, trials, n)
+      performTrials(sampler, nTrials, trialParallelism).map { trials =>
+        RiskResult(sampler.id, trials, Nil)
       }
     }
-    
-    ZIO.collectAllPar(trialSets).withParallelism(parallelism)
+
+    ZIO.collectAllPar(trialSets).withParallelism(riskParallelism)
   }
   
   /**
@@ -143,15 +148,17 @@ object Simulator {
    * @return Task of RiskResult for each risk
    */
   def simulateSequential(
-    samplers: Vector[RiskSampler],
-    nTrials: PositiveInt
-  ): Task[Vector[RiskResult]] = {
-    val n: Int = nTrials
+    samplers: Vector[RiskSampler]
+  )(using cfg: SimulationConfig): Task[Vector[RiskResult]] = {
+    val nTrials: PositiveInt = cfg.defaultNTrials.refineUnsafe
+    val effectivePar: Int = if cfg.defaultTrialParallelism > 0 then cfg.defaultTrialParallelism else DefaultTrialParallelism
+    val _ = effectivePar // keep a consistent read even though sequential ignores it currently
+
     ZIO.foreach(samplers) { sampler =>
       // Use sync version for sequential simulation (no parallelism overhead)
       ZIO.attempt {
         val trials = performTrialsSync(sampler, nTrials)
-        RiskResult(sampler.id, trials, n)
+        RiskResult(sampler.id, trials, Nil)
       }
     }
   }

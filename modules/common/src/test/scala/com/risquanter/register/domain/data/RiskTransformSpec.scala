@@ -4,9 +4,11 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.Identity
+import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.PreludeInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.testutil.TestHelpers.{safeId, genSafeId}
+import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /**
  * Property-based tests for RiskTransform Identity laws and mitigation strategies.
@@ -17,6 +19,7 @@ import com.risquanter.register.testutil.TestHelpers.{safeId, genSafeId}
  * - Composition correctness: order matters for non-commutative operations
  */
 object RiskTransformSpec extends ZIOSpecDefault {
+ 
   
   // ══════════════════════════════════════════════════════════════════
   // Generators
@@ -29,7 +32,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
     numTrials <- Gen.int(5, 20)  // Smaller for readable test output
     trialIds <- Gen.listOfN(numTrials)(Gen.int(0, nTrials - 1))
     losses <- Gen.listOfN(numTrials)(Gen.long(1000L, 100000L))
-  } yield RiskResult(name, trialIds.zip(losses).toMap, nTrials)
+  } yield withCfg(nTrials) { RiskResult(name, trialIds.zip(losses).toMap, Nil) }
   
   /** Generate positive Loss values */
   val genLoss: Gen[Any, Loss] = Gen.long(100L, 50000L)
@@ -118,11 +121,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
     
     suite("Deductible Transformation")(
       test("applyDeductible reduces losses by deductible amount") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 50000L, 2 -> 10000L, 3 -> 5000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 50000L, 2 -> 10000L, 3 -> 5000L),
+            Nil
+          )
+        }
         val transform = RiskTransform.applyDeductible(10000L)
         val mitigated = transform.run(result)
         
@@ -134,11 +139,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
       },
       
       test("deductible removes trials below threshold (sparse)") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 50000L, 2 -> 8000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 50000L, 2 -> 8000L),
+            Nil
+          )
+        }
         val transform = RiskTransform.applyDeductible(10000L)
         val mitigated = transform.run(result)
         
@@ -161,11 +168,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
     
     suite("Cap Transformation")(
       test("capLosses limits each trial to maximum") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 5000000L, 2 -> 500000L, 3 -> 100000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 5000000L, 2 -> 500000L, 3 -> 100000L),
+            Nil
+          )
+        }
         val transform = RiskTransform.capLosses(1000000L)
         val capped = transform.run(result)
         
@@ -177,11 +186,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
       },
       
       test("cap preserves all trials (even if modified)") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 2000000L, 2 -> 500000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 2000000L, 2 -> 500000L),
+            Nil
+          )
+        }
         val transform = RiskTransform.capLosses(1000000L)
         val capped = transform.run(result)
         
@@ -202,11 +213,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
     
     suite("Scale Transformation")(
       test("scaleLosses multiplies each loss by factor") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 100000L, 2 -> 50000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 100000L, 2 -> 50000L),
+            Nil
+          )
+        }
         val transform = RiskTransform.scaleLosses(0.8)
         val scaled = transform.run(result)
         
@@ -235,11 +248,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
       },
       
       test("scale removes trials that round to zero") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 100L, 2 -> 50000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 100L, 2 -> 50000L),
+            Nil
+          )
+        }
         val transform = RiskTransform.scaleLosses(0.001)  // 0.1%
         val scaled = transform.run(result)
         
@@ -254,11 +269,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
     
     suite("Insurance Policy (Combined)")(
       test("insurancePolicy applies deductible then cap") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 2000000L, 2 -> 50000L, 3 -> 5000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 2000000L, 2 -> 50000L, 3 -> 5000L),
+            Nil
+          )
+        }
         val transform = RiskTransform.insurancePolicy(
           deductible = 10000L,
           cap = 1000000L
@@ -304,11 +321,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
     
     suite("Composition Tests")(
       test("andThen applies transformations in sequence") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 100000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 100000L),
+            Nil
+          )
+        }
         
         val deductible = RiskTransform.applyDeductible(10000L)
         val scale = RiskTransform.scaleLosses(0.5)
@@ -321,11 +340,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
       },
       
       test("compose applies transformations in reverse") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 100000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 100000L),
+            Nil
+          )
+        }
         
         val deductible = RiskTransform.applyDeductible(10000L)
         val scale = RiskTransform.scaleLosses(0.5)
@@ -338,11 +359,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
       },
       
       test("order matters for non-commutative operations") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 100000L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 100000L),
+            Nil
+          )
+        }
         
         val deductible = RiskTransform.applyDeductible(10000L)
         val scale = RiskTransform.scaleLosses(0.5)
@@ -365,7 +388,9 @@ object RiskTransformSpec extends ZIOSpecDefault {
     
     suite("Edge Cases")(
       test("transform on empty result is no-op") {
-        val empty = RiskResult(safeId("empty"), Map.empty, 100)
+        val empty = withCfg(100) {
+          RiskResult(safeId("empty"), Map.empty, Nil)
+        }
         val transform = RiskTransform.applyDeductible(10000L)
         val transformed = transform.run(empty)
         
@@ -373,11 +398,13 @@ object RiskTransformSpec extends ZIOSpecDefault {
       },
       
       test("filterBelowThreshold removes small losses") {
-        val result = RiskResult(
-          safeId("test"),
-          Map(1 -> 100000L, 2 -> 500L, 3 -> 50000L, 4 -> 200L),
-          100
-        )
+        val result = withCfg(100) {
+          RiskResult(
+            safeId("test"),
+            Map(1 -> 100000L, 2 -> 500L, 3 -> 50000L, 4 -> 200L),
+            Nil
+          )
+        }
         val transform = RiskTransform.filterBelowThreshold(1000L)
         val filtered = transform.run(result)
         

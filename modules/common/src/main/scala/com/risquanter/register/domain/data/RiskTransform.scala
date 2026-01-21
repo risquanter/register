@@ -112,7 +112,7 @@ object RiskTransform {
       trial -> Math.max(0L, loss - deductible)
     }.filter(_._2 > 0)  // Remove zero losses (sparse storage)
     
-    result.copy(outcomes = mitigated)
+    result.withOutcomes(mitigated)
   }
   
   /**
@@ -134,7 +134,7 @@ object RiskTransform {
       trial -> Math.min(loss, cap)
     }
     
-    result.copy(outcomes = capped)
+    result.withOutcomes(capped)
   }
   
   /**
@@ -157,7 +157,7 @@ object RiskTransform {
       trial -> (loss * factor).toLong
     }.filter(_._2 > 0)  // Remove zero losses
     
-    result.copy(outcomes = scaled)
+    result.withOutcomes(scaled)
   }
   
   /**
@@ -187,6 +187,6 @@ object RiskTransform {
    */
   def filterBelowThreshold(threshold: Loss): RiskTransform = RiskTransform { result =>
     val filtered = result.outcomes.filter { case (_, loss) => loss >= threshold }
-    result.copy(outcomes = filtered)
+    result.withOutcomes(filtered)
   }
 }

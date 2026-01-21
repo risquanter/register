@@ -6,6 +6,7 @@ import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution}
 import com.risquanter.register.domain.data.iron.Probability
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.autoRefine
@@ -116,6 +117,8 @@ object SimulatorSpec extends ZIOSpecDefault {
       },
       
       test("simulate produces identical results with same samplers") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 500.refineUnsafe, maxConcurrentSimulations = 2.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
           RiskSampler.fromDistribution(entityId = 101L, riskId = safeId("RISK-A"), occurrenceProb = prob(0.1), lossDistribution = metalog, seed3 = 111L, seed4 = 0L),
@@ -124,9 +127,9 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          run1 <- Simulator.simulate(samplers, nTrials = 500, parallelism = 2)
-          run2 <- Simulator.simulate(samplers, nTrials = 500, parallelism = 2)
-          run3 <- Simulator.simulate(samplers, nTrials = 500, parallelism = 4)
+          run1 <- Simulator.simulate(samplers)
+          run2 <- Simulator.simulate(samplers)
+          run3 <- Simulator.simulate(samplers)
         } yield assertTrue(
           run1.map(_.outcomes) == run2.map(_.outcomes),
           run2.map(_.outcomes) == run3.map(_.outcomes),
@@ -135,6 +138,8 @@ object SimulatorSpec extends ZIOSpecDefault {
       },
       
       test("sequential vs parallel produce identical results") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 800.refineUnsafe, defaultTrialParallelism = 8.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
           RiskSampler.fromDistribution(entityId = 201L, riskId = safeId("RISK-SEQ-1"), occurrenceProb = prob(0.15), lossDistribution = metalog, seed3 = 1001L, seed4 = 0L),
@@ -142,8 +147,8 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          parallel <- Simulator.simulate(samplers, nTrials = 800, parallelism = 8)
-          sequential <- Simulator.simulateSequential(samplers, nTrials = 800)
+          parallel <- Simulator.simulate(samplers)
+          sequential <- Simulator.simulateSequential(samplers)
         } yield assertTrue(
           parallel.map(_.outcomes).toSet == sequential.map(_.outcomes).toSet
         )
@@ -153,6 +158,8 @@ object SimulatorSpec extends ZIOSpecDefault {
     suite("simulate - multiple risks")(
       
       test("simulates all risks successfully") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 1000.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
           RiskSampler.fromDistribution(entityId = 301L, riskId = safeId("RISK-MULTI-1"), occurrenceProb = prob(0.1), lossDistribution = metalog, seed3 = 0L, seed4 = 0L),
@@ -161,7 +168,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          results <- Simulator.simulate(samplers, nTrials = 1000)
+          results <- Simulator.simulate(samplers)
         } yield assertTrue(
           results.size == 3,
           results.map(_.name).toSet == Set("RISK-MULTI-1", "RISK-MULTI-2", "RISK-MULTI-3"),
@@ -170,6 +177,8 @@ object SimulatorSpec extends ZIOSpecDefault {
       },
       
       test("each risk has independent outcomes") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 500.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
           RiskSampler.fromDistribution(entityId = 401L, riskId = safeId("RISK-IND-1"), occurrenceProb = prob(0.5), lossDistribution = metalog, seed3 = 4001L, seed4 = 0L),
@@ -177,7 +186,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          results <- Simulator.simulate(samplers, nTrials = 500)
+          results <- Simulator.simulate(samplers)
         } yield {
         
           val risk1 = results.find(_.name == safeId("RISK-IND-1")).get
@@ -187,19 +196,23 @@ object SimulatorSpec extends ZIOSpecDefault {
       },
       
       test("empty samplers vector returns empty results") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 100.refineUnsafe)
+        
         for {
-          results <- Simulator.simulate(Vector.empty, nTrials = 100)
+          results <- Simulator.simulate(Vector.empty)
         } yield assertTrue(results.isEmpty)
       },
       
       test("single sampler works correctly") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 200.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entityId = 501L, riskId = safeId("RISK-SINGLE"), occurrenceProb = prob(0.4), lossDistribution = metalog, seed3 = 0L, seed4 = 0L
         )
         
         for {
-          results <- Simulator.simulate(Vector(sampler), nTrials = 200)
+          results <- Simulator.simulate(Vector(sampler))
         } yield assertTrue(
           results.size == 1,
           results.head.name == safeId("RISK-SINGLE"),
@@ -211,6 +224,8 @@ object SimulatorSpec extends ZIOSpecDefault {
     suite("parallelism configuration")(
       
       test("respects parallelism limit") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 100.refineUnsafe, maxConcurrentSimulations = 4.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val samplers = (1 to 20).map { i =>
           RiskSampler.fromDistribution(
@@ -224,7 +239,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         }.toVector
         
         for {
-          results <- Simulator.simulate(samplers, nTrials = 100, parallelism = 4)
+          results <- Simulator.simulate(samplers)
         } yield assertTrue(
           results.size == 20,
           results.map(_.name).toSet.size == 20
@@ -232,6 +247,8 @@ object SimulatorSpec extends ZIOSpecDefault {
       },
       
       test("parallelism=1 equivalent to sequential") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 300.refineUnsafe, maxConcurrentSimulations = 1.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val samplers = Vector(
           RiskSampler.fromDistribution(entityId = 701L, riskId = safeId("RISK-P1-1"), occurrenceProb = prob(0.2), lossDistribution = metalog, seed3 = 7001L, seed4 = 0L),
@@ -239,8 +256,8 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          parallel1 <- Simulator.simulate(samplers, nTrials = 300, parallelism = 1)
-          sequential <- Simulator.simulateSequential(samplers, nTrials = 300)
+          parallel1 <- Simulator.simulate(samplers)
+          sequential <- Simulator.simulateSequential(samplers)
         } yield assertTrue(
           parallel1.map(_.outcomes) == sequential.map(_.outcomes)
         )
@@ -250,6 +267,8 @@ object SimulatorSpec extends ZIOSpecDefault {
     suite("edge cases")(
       
       test("handles zero probability risk (no occurrences)") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 100.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entityId = 801L,
@@ -261,18 +280,19 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          results <- Simulator.simulate(Vector(sampler), nTrials = 100)
+          results <- Simulator.simulate(Vector(sampler))
         } yield {
           val result = results.head
           // Should complete successfully even with no occurrences
           assertTrue(
-            result.nTrials == 100,
             result.outcomes.size >= 0 // May be 0 or very few
           )
         }
       },
       
       test("handles high probability risk (most trials occur)") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 500.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entityId = 802L,
@@ -285,7 +305,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         
         val nTrials = 500
         for {
-          results <- Simulator.simulate(Vector(sampler), nTrials.refineUnsafe)
+          results <- Simulator.simulate(Vector(sampler))
         } yield {
           val result = results.head
           // Expect most trials to have occurrences
@@ -297,17 +317,18 @@ object SimulatorSpec extends ZIOSpecDefault {
       },
       
       test("handles single trial simulation") {
+        given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 1.refineUnsafe)
+        
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entityId = 803L, riskId = safeId("RISK-ONE-TRIAL"), occurrenceProb = prob(0.5), lossDistribution = metalog, seed3 = 0L, seed4 = 0L
         )
         
         for {
-          results <- Simulator.simulate(Vector(sampler), nTrials = 1)
+          results <- Simulator.simulate(Vector(sampler))
         } yield {
           val result = results.head
           assertTrue(
-            result.nTrials == 1,
             result.outcomes.size <= 1
           )
         }

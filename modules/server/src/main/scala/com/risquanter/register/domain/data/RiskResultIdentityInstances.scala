@@ -16,7 +16,7 @@ object RiskResultIdentityInstances {
       throw new IllegalStateException("Invalid identity SafeId")
     )
 
-    def identity: RiskResult = RiskResult(emptyId, Map.empty, cfg.defaultNTrials, Nil)
+    def identity: RiskResult = RiskResult(emptyId, Map.empty, Nil)
 
     def combine(a: => RiskResult, b: => RiskResult): RiskResult =
       RiskResult.combine(a, b)

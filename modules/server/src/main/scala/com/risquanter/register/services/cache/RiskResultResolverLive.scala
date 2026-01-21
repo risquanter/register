@@ -39,9 +39,11 @@ final case class RiskResultResolverLive(
     trialsCounter: Counter[Long]
 ) extends RiskResultResolver {
 
+  private given SimulationConfig = config
+
   // Read from config at construction time
   private val nTrials: PositiveInt = config.defaultNTrials.refineUnsafe
-  private val parallelism: PositiveInt = config.defaultParallelism.refineUnsafe
+  private val parallelism: PositiveInt = config.defaultTrialParallelism.refineUnsafe
   // HDR seeds for reproducible simulations (ADR-003)
   private val seed3: Long = config.defaultSeed3
   private val seed4: Long = config.defaultSeed4
@@ -136,7 +138,7 @@ final case class RiskResultResolverLive(
                 message = s"RiskPortfolio '${portfolio.id}' has no children"
               )))
             childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b))
-              .copy(name = portfolio.id)
+              .withId(updatedName = portfolio.id)
           }
           _ <- cache.put(portfolio.id, combined)
         yield combined
@@ -149,7 +151,7 @@ final case class RiskResultResolverLive(
       samplerAndProv <- Simulator.createSamplerFromLeaf(leaf, seed3, seed4)
       (sampler, provenance) = samplerAndProv
       trials <- Simulator.performTrials(sampler, nTrials, parallelism)
-      result = RiskResult(leaf.id, trials, nTrials, List(provenance))
+      result = RiskResult(leaf.id, trials, List(provenance))
       _ <- cache.put(leaf.id, result)
     yield result
 }

@@ -20,17 +20,24 @@ object ConfigTestLoader {
 
     val c = merged.getConfig("register.simulation")
 
+    import io.github.iltotore.iron.refineUnsafe
     SimulationConfig(
-      defaultNTrials = c.getInt("defaultNTrials"),
-      maxTreeDepth = c.getInt("maxTreeDepth"),
-      defaultParallelism = c.getInt("defaultParallelism"),
-      maxConcurrentSimulations = c.getInt("maxConcurrentSimulations"),
-      maxNTrials = c.getInt("maxNTrials"),
-      maxParallelism = c.getInt("maxParallelism"),
+      defaultNTrials = c.getInt("defaultNTrials").refineUnsafe,
+      maxTreeDepth = c.getInt("maxTreeDepth").refineUnsafe,
+      defaultTrialParallelism = c.getInt("defaultTrialParallelism").refineUnsafe,
+      maxConcurrentSimulations = c.getInt("maxConcurrentSimulations").refineUnsafe,
+      maxNTrials = c.getInt("maxNTrials").refineUnsafe,
+      maxParallelism = c.getInt("maxParallelism").refineUnsafe,
       defaultSeed3 = c.getLong("defaultSeed3"),
       defaultSeed4 = c.getLong("defaultSeed4")
     )
   }
 
   lazy val simulation: SimulationConfig = load()
+
+  def withCfg[A](nTrials: Int)(f: SimulationConfig ?=> A): A = {
+    import io.github.iltotore.iron.refineUnsafe
+    given SimulationConfig = ConfigTestLoader.simulation.copy(defaultNTrials = nTrials.refineUnsafe)
+    f
+  }
 }
