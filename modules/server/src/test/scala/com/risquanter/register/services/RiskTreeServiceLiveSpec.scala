@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPo
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong}
 import com.risquanter.register.domain.tree.NodeId
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.*
 import com.risquanter.register.testutil.TestHelpers.safeId
@@ -48,8 +48,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
       ZIO.succeed(db.get(id))
     
-    override def getAll: Task[List[RiskTree]] =
-      ZIO.succeed(db.values.toList)
+    override def getAll: Task[List[Either[RepositoryFailure, RiskTree]]] =
+      ZIO.succeed(db.values.toList.map(Right(_)))
   }
   
   private val stubRepoLayer = ZLayer.fromFunction(() => makeStubRepo)

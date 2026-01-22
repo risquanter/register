@@ -21,7 +21,7 @@ object ErrorResponse {
     * All error logging should happen at the service layer using tapErrorCause
     * before errors reach this boundary. See ADR-002 Decision 5.
     * 
-    * Uses typed pattern matching on SimulationError hierarchy - no string matching.
+    * Uses typed pattern matching on AppError hierarchy - no string matching.
     */
   def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
     // Domain errors - typed hierarchy
@@ -30,8 +30,7 @@ object ErrorResponse {
     case SimulationFailure(id, cause) => makeSimulationFailureResponse(id)
     case DataConflict(reason)         => makeDataConflictResponse(reason)
     // Infrastructure errors (ADR-008)
-    case IrminUnavailable(reason)              => makeServiceUnavailableResponse(reason)
-    case NetworkTimeout(operation, duration)   => makeNetworkTimeoutResponse(operation, duration)
+    case e: IrminError                         => makeIrminErrorResponse(e)
     case VersionConflict(nodeId, expected, actual) => makeVersionConflictResponse(nodeId, expected, actual)
     case MergeConflict(branch, details)        => makeMergeConflictResponse(branch, details)
     // Unexpected errors - already logged at service layer (ADR-002 Decision 5)
@@ -108,12 +107,12 @@ object ErrorResponse {
   // Infrastructure Error Responses (ADR-008)
   // ============================================================================
 
-  def makeServiceUnavailableResponse(reason: String, domain: String = "infrastructure", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeServiceUnavailableResponse(reason: String, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = s"Service unavailable: $reason"
     val statusCode = StatusCode.ServiceUnavailable  // 503
     val errors = List(ErrorDetail(
       domain = domain,
-      field = "irmin",
+      field = "service",
       code = ValidationErrorCode.DEPENDENCY_FAILED,
       message = message,
       requestId = requestId
@@ -121,7 +120,7 @@ object ErrorResponse {
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
   }
 
-  def makeNetworkTimeoutResponse(operation: String, duration: Duration, domain: String = "infrastructure", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+  def makeNetworkTimeoutResponse(operation: String, duration: Duration, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = s"Network timeout after ${duration.toMillis}ms during: $operation"
     val statusCode = StatusCode.GatewayTimeout  // 504
     val errors = List(ErrorDetail(
@@ -133,6 +132,38 @@ object ErrorResponse {
     ))
     (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
   }
+
+  def makeIrminHttpErrorResponse(status: StatusCode, body: String, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+    val message = s"HTTP ${status.code}: $body"
+    val errors = List(ErrorDetail(
+      domain = domain,
+      field = "http",
+      code = ValidationErrorCode.DEPENDENCY_FAILED,
+      message = message,
+      requestId = requestId
+    ))
+    (status, ErrorResponse(JsonHttpError(status.code, message, errors)))
+  }
+
+  def makeIrminGraphQlErrorResponse(messages: List[String], path: Option[List[String]], domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
+    val message = messages.mkString("; ")
+    val field = path.filter(_.nonEmpty).map(_.mkString(".")).getOrElse("graphql")
+    val statusCode = StatusCode.BadGateway // 502
+    val errors = List(ErrorDetail(
+      domain = domain,
+      field = field,
+      code = ValidationErrorCode.DEPENDENCY_FAILED,
+      message = message,
+      requestId = requestId
+    ))
+    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
+  }
+
+  private def makeIrminErrorResponse(error: IrminError): (StatusCode, ErrorResponse) = error match
+    case IrminUnavailable(reason)            => makeServiceUnavailableResponse(reason)
+    case NetworkTimeout(operation, duration) => makeNetworkTimeoutResponse(operation, duration)
+    case IrminHttpError(status, body)        => makeIrminHttpErrorResponse(status, body)
+    case IrminGraphQLError(messages, path)   => makeIrminGraphQlErrorResponse(messages, path)
 
   def makeVersionConflictResponse(nodeId: String, expected: String, actual: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
     val message = s"Version conflict on node $nodeId: expected $expected, found $actual"

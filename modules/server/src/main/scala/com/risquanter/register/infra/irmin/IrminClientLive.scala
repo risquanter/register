@@ -19,7 +19,7 @@ import scala.concurrent.duration.Duration as ScalaDuration
   * Live implementation of IrminClient using sttp HTTP client.
   *
   * Uses ZIO's HTTP client backend for async requests.
-  * Maps network errors to SimulationError hierarchy per ADR-010.
+  * Maps network errors to AppError/IrminError hierarchy per ADR-010.
   *
   * No retry logic - delegated to service mesh per ADR-012.
   */
@@ -30,7 +30,7 @@ final class IrminClientLive private (
 
   private val defaultAuthor = "zio-client"
 
-  override def get(path: IrminPath): Task[Option[String]] =
+  override def get(path: IrminPath): IO[IrminError, Option[String]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET: ${path.value}")
       response <- executeQuery[GetValueResponse](IrminQueries.getValue(path))
@@ -38,7 +38,7 @@ final class IrminClientLive private (
       _        <- ZIO.logDebug(s"Irmin GET result: ${value.map(_.take(50))}")
     yield value
 
-  override def set(path: IrminPath, value: String, message: String): Task[IrminCommit] =
+  override def set(path: IrminPath, value: String, message: String): IO[IrminError, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin SET: ${path.value} (${value.length} bytes)")
       query     = IrminQueries.setValue(path, value, message, defaultAuthor)
@@ -47,7 +47,7 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin SET committed: ${commit.hash.take(12)}")
     yield commit
 
-  override def remove(path: IrminPath, message: String): Task[IrminCommit] =
+  override def remove(path: IrminPath, message: String): IO[IrminError, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin REMOVE: ${path.value}")
       query     = IrminQueries.removeValue(path, message, defaultAuthor)
@@ -56,7 +56,7 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin REMOVE committed: ${commit.hash.take(12)}")
     yield commit
 
-  override def branches: Task[List[String]] =
+  override def branches: IO[IrminError, List[String]] =
     for
       _        <- ZIO.logDebug("Irmin LIST BRANCHES")
       response <- executeQuery[BranchesResponse](IrminQueries.listBranches)
@@ -64,7 +64,7 @@ final class IrminClientLive private (
       _        <- ZIO.logDebug(s"Irmin branches: ${names.mkString(", ")}")
     yield names
 
-  override def mainBranch: Task[Option[IrminBranch]] =
+  override def mainBranch: IO[IrminError, Option[IrminBranch]] =
     for
       _        <- ZIO.logDebug("Irmin GET MAIN BRANCH")
       response <- executeQuery[MainBranchResponse](IrminQueries.getMainBranch)
@@ -87,12 +87,12 @@ final class IrminClientLive private (
                   )
     yield branch
 
-  override def healthCheck: Task[Boolean] =
+  override def healthCheck: IO[IrminError, Boolean] =
     executeQuery[BranchesResponse](IrminQueries.listBranches)
       .as(true)
       .catchAll(_ => ZIO.succeed(false))
 
-  override def list(prefix: IrminPath): Task[List[IrminPath]] =
+  override def list(prefix: IrminPath): IO[IrminError, List[IrminPath]] =
     for
       _        <- ZIO.logDebug(s"Irmin LIST: ${prefix.value}")
       response <- executeQuery[ListTreeResponse](IrminQueries.listTree(prefix))
@@ -104,7 +104,7 @@ final class IrminClientLive private (
   // Private helpers
   // ============================================================================
 
-  private def executeQuery[R: JsonDecoder](query: String): Task[R] =
+  private def executeQuery[R: JsonDecoder](query: String): IO[IrminError, R] =
     val request = GraphQLRequest(query)
     val requestJson = request.toJson
     val uri = Uri.unsafeParse(config.graphqlUrl)
@@ -123,35 +123,34 @@ final class IrminClientLive private (
       }
       .mapError(mapNetworkError)
 
-  private def parseError(error: ResponseException[String, String], status: StatusCode): Throwable =
+  private def parseError(error: ResponseException[String, String], status: StatusCode): IrminError =
     error match
       case HttpError(body, _) if status == StatusCode.ServiceUnavailable =>
         IrminUnavailable(s"Service returned 503: $body")
       case HttpError(body, _) =>
-        IrminUnavailable(s"HTTP ${status.code}: $body")
-      case DeserializationException(body, jsonError) =>
-        IrminUnavailable(s"Invalid response: $jsonError")
+        IrminHttpError(status, body)
+      case DeserializationException(_, jsonError) =>
+        IrminHttpError(StatusCode.InternalServerError, s"Invalid response: $jsonError")
 
-  private def mapNetworkError(error: Throwable): Throwable = error match
-    case e: IrminUnavailable   => e
-    case e: NetworkTimeout     => e
-    case e: ConnectException   => IrminUnavailable(s"Connection refused: ${e.getMessage}")
-    case e: JTimeoutException  => NetworkTimeout("GraphQL request", ScalaDuration.fromNanos(config.timeout.toNanos))
+  private def mapNetworkError(error: Throwable): IrminError = error match
+    case e: IrminError        => e
+    case _: ConnectException  => IrminUnavailable("Connection refused")
+    case _: JTimeoutException => NetworkTimeout("GraphQL request", ScalaDuration.fromNanos(config.timeout.toNanos))
     case e: java.io.IOException if e.getMessage != null && e.getMessage.contains("timeout") =>
       NetworkTimeout("GraphQL request", ScalaDuration.fromNanos(config.timeout.toNanos))
     case e => IrminUnavailable(s"Network error: ${e.getMessage}")
 
-  private def extractCommit(response: SetValueResponse): Task[IrminCommit] =
+  private def extractCommit(response: SetValueResponse): IO[IrminError, IrminCommit] =
     response.data.flatMap(_.set) match
       case Some(c) => commitFromData(c)
       case None    => failWithError(response.errors)
 
-  private def extractRemoveCommit(response: RemoveValueResponse): Task[IrminCommit] =
+  private def extractRemoveCommit(response: RemoveValueResponse): IO[IrminError, IrminCommit] =
     response.data.flatMap(_.remove) match
       case Some(c) => commitFromData(c)
       case None    => failWithError(response.errors)
 
-  private def extractList(prefix: IrminPath, response: ListTreeResponse): Task[List[IrminPath]] =
+  private def extractList(prefix: IrminPath, response: ListTreeResponse): IO[IrminError, List[IrminPath]] =
     response.data.flatMap(_.main).map(_.tree.list) match
       case Some(nodes) =>
         val base = if prefix.value.isEmpty then "" else s"${prefix.value}/"
@@ -159,7 +158,7 @@ final class IrminClientLive private (
         ZIO.foreach(childNames)(name => ZIO.fromEither(IrminPath.from(name).left.map(IrminUnavailable(_))))
       case None => failWithListError(response.errors)
 
-  private def commitFromData(c: CommitData): Task[IrminCommit] =
+  private def commitFromData(c: CommitData): IO[IrminError, IrminCommit] =
     ZIO.succeed(IrminCommit(
       hash = c.hash,
       key = c.key,
@@ -171,17 +170,18 @@ final class IrminClientLive private (
       )
     ))
 
-  private def failWithError(errors: Option[List[GraphQLError]]): Task[IrminCommit] =
-    val errorMsg = errors
-      .map(_.map(_.message).mkString("; "))
-      .getOrElse("Unknown error")
-    ZIO.fail(IrminUnavailable(s"Mutation failed: $errorMsg"))
+  private def failWithError(errors: Option[List[GraphQLError]]): IO[IrminError, IrminCommit] =
+    val (messages, path) = collectGraphQl(errors)
+    ZIO.fail(IrminGraphQLError(messages, path))
 
-  private def failWithListError(errors: Option[List[GraphQLError]]): Task[List[IrminPath]] =
-    val errorMsg = errors
-      .map(_.map(_.message).mkString("; "))
-      .getOrElse("Unknown error")
-    ZIO.fail(IrminUnavailable(s"List failed: $errorMsg"))
+  private def failWithListError(errors: Option[List[GraphQLError]]): IO[IrminError, List[IrminPath]] =
+    val (messages, path) = collectGraphQl(errors)
+    ZIO.fail(IrminGraphQLError(messages, path))
+
+  private def collectGraphQl(errors: Option[List[GraphQLError]]): (List[String], Option[List[String]]) =
+    val msgs = errors.map(_.map(_.message)).getOrElse(List("Unknown error"))
+    val path = errors.flatMap(_.flatMap(_.path).headOption)
+    (msgs, path)
 
 // Response type for main branch query
 private final case class MainBranchResponse(

@@ -11,7 +11,7 @@ import com.risquanter.register.domain.data.RiskTree.{safeNameEncoder, safeNameDe
 import com.risquanter.register.domain.tree.{NodeId, TreeIndex}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminPath
-import com.risquanter.register.domain.errors.{RepositoryFailure, SimulationError}
+import com.risquanter.register.domain.errors.{RepositoryFailure, AppError, IrminError}
 
 /** Irmin-backed implementation of RiskTreeRepository using per-node storage.
   *
@@ -48,7 +48,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
     val basePath = s"risk-trees/$id"
     for
-      maybeMetaJson  <- irmin.get(IrminPath.unsafeFrom(s"$basePath/meta"))
+      maybeMetaJson  <- handleIrmin(irmin.get(IrminPath.unsafeFrom(s"$basePath/meta")))
       meta           <- ZIO.foreach(maybeMetaJson)(decodeMeta)
       result <- meta match
         case None => ZIO.succeed(None)
@@ -61,7 +61,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
 
   override def getAll: Task[List[Either[RepositoryFailure, RiskTree]]] =
     val root = IrminPath.unsafeFrom("risk-trees")
-    irmin.list(root).flatMap { treeIds =>
+    handleIrmin(irmin.list(root)).flatMap { treeIds =>
       ZIO.foreach(treeIds)(treeIdPath =>
         for
           treeId   <- parseTreeId(treeIdPath.value)
@@ -70,7 +70,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
           case Right(Some(tree)) => Right(tree)
           case Right(None)       => Left(RepositoryFailure(s"Tree ${treeIdPath.value} not found (missing meta)"))
           case Left(err: RepositoryFailure) => Left(err)
-          case Left(err: SimulationError)   => Left(RepositoryFailure(err.getMessage))
+          case Left(err: AppError)          => Left(RepositoryFailure(err.getMessage))
           case Left(err)                    => Left(RepositoryFailure(err.getMessage))
       )
     }
@@ -81,19 +81,19 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
 
   private def writeMeta(basePath: String, riskTree: RiskTree): Task[Unit] =
     val metaJson = Meta(name = riskTree.name, rootId = riskTree.rootId).toJson
-    irmin.set(IrminPath.unsafeFrom(s"$basePath/meta"), metaJson, s"create tree ${riskTree.id}").unit
+    handleIrmin(irmin.set(IrminPath.unsafeFrom(s"$basePath/meta"), metaJson, s"create tree ${riskTree.id}")).unit
 
   private def writeNode(basePath: String, node: RiskNode): Task[Unit] =
     val json = node match
       case leaf: RiskLeaf           => leaf.toJson
       case portfolio: RiskPortfolio => portfolio.toJson
-    irmin.set(IrminPath.unsafeFrom(s"$basePath/nodes/${node.id.value}"), json, s"upsert node ${node.id.value}").unit
+    handleIrmin(irmin.set(IrminPath.unsafeFrom(s"$basePath/nodes/${node.id.value}"), json, s"upsert node ${node.id.value}")).unit
 
   private def removeNode(basePath: String, nodeId: NodeId): Task[Unit] =
-    irmin.remove(IrminPath.unsafeFrom(s"$basePath/nodes/${nodeId.value}"), s"delete node ${nodeId.value}").unit
+    handleIrmin(irmin.remove(IrminPath.unsafeFrom(s"$basePath/nodes/${nodeId.value}"), s"delete node ${nodeId.value}")).unit
 
   private def removeMeta(basePath: String): Task[Unit] =
-    irmin.remove(IrminPath.unsafeFrom(s"$basePath/meta"), s"delete tree meta").unit
+    handleIrmin(irmin.remove(IrminPath.unsafeFrom(s"$basePath/meta"), s"delete tree meta")).unit
 
   private def decodeMeta(json: String): Task[(SafeName.SafeName, NodeId)] =
     ZIO.fromEither(json.fromJson[Meta].left.map(err => RepositoryFailure(s"Decode meta failed: $err"))).map(meta => (meta.name, meta.rootId))
@@ -101,10 +101,10 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   private def readNodes(basePath: String): Task[Seq[RiskNode]] =
     val nodePrefix = IrminPath.unsafeFrom(s"$basePath/nodes")
     for
-      childNames <- irmin.list(nodePrefix)
+      childNames <- handleIrmin(irmin.list(nodePrefix))
       nodes      <- ZIO.foreach(childNames) { child =>
                       val fullPath = IrminPath.unsafeFrom(s"${nodePrefix.value}/${child.value}")
-                      irmin.get(fullPath).flatMap {
+                      handleIrmin(irmin.get(fullPath)).flatMap {
                         case Some(json) =>
                           ZIO.fromEither(json.fromJson[RiskNode].left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err")))
                         case None =>
@@ -132,6 +132,9 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       asLong <- ZIO.fromOption(raw.toLongOption).orElseFail(RepositoryFailure(s"Invalid tree id '$raw'"))
       refined <- ZIO.fromEither(asLong.refineEither[constraint.numeric.GreaterEqual[0L]].left.map(err => RepositoryFailure(s"Invalid tree id '$raw': $err")))
     yield refined
+
+  private def handleIrmin[A](effect: IO[IrminError, A]): Task[A] =
+    effect.mapError { err => RepositoryFailure(err.getMessage) }
 
 private final case class Meta(name: SafeName.SafeName, rootId: NodeId)
 object Meta:

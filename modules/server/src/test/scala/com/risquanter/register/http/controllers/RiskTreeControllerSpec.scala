@@ -5,6 +5,7 @@ import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -46,8 +47,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
     override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
       ZIO.succeed(db.get(id))
     
-    override def getAll: Task[List[RiskTree]] =
-      ZIO.succeed(db.values.toList)
+    override def getAll: Task[List[Either[RepositoryFailure, RiskTree]]] =
+      ZIO.succeed(db.values.toList.map(Right(_)))
   }
 
   // Layer factory - creates fresh layer with isolated repository per test

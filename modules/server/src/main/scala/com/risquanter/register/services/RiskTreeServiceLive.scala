@@ -12,7 +12,7 @@ import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint}
 import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.tree.{NodeId, TreeIndex}
-import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, SimulationError}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
@@ -161,11 +161,11 @@ class RiskTreeServiceLive private (
   
   /** Log unexpected errors (ADR-002 Decision 5).
     * 
-    * Domain errors (SimulationError hierarchy) are expected - each has its own logging point.
+    * Domain errors (AppError hierarchy) are expected - each has its own logging point.
     * Other errors are truly unexpected and logged with full stack trace.
     */
   private def logIfUnexpected(operation: String)(error: Throwable): UIO[Unit] = error match {
-    case _: SimulationError => ZIO.unit  // Domain errors: logged at origin or expected
+    case _: AppError => ZIO.unit  // Domain errors: logged at origin or expected
     case _ => ZIO.logErrorCause(s"Unexpected error in $operation", Cause.fail(error))
   }
   
