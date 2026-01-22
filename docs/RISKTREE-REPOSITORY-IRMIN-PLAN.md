@@ -367,7 +367,7 @@ trait IrminClient:
 **Current state:** Metadata is modeled inline as a private `Meta` case class inside the implemented repository ([RiskTreeRepositoryIrmin.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala)); it captures `name` and `rootId` and is encoded/decoded with `zio-json`. No standalone `TreeMetadata` file exists yet—introduce one only if other components need to share the type.
 
 **Deliverables:**
-- [ ] Create `TreeMetadata` case class with JSON codec
+- [x] Create `TreeMetadata` case class with JSON codec
 - [ ] Add `IrminPath` utilities for tree paths
 
 ---

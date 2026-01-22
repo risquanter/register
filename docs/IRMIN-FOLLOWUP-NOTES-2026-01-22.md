@@ -8,26 +8,24 @@
 
 ## Current State (code)
 - `RiskTreeRepositoryIrmin` (per-node storage) lives in modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala
-- Meta stored at `risk-trees/{treeId}/meta` (fields: name, rootId); nodes stored under `risk-trees/{treeId}/nodes/{nodeId}`
+- Meta stored at `risk-trees/{treeId}/meta` with `TreeMetadata` (id, name, rootId, schemaVersion, createdAt, updatedAt) using wall-clock millis; nodes stored under `risk-trees/{treeId}/nodes/{nodeId}`
 - Irmin client has `list` and uses typed `IrminError`; repository maps to `RepositoryFailure`
-- `update` deletes then rewrites (potentially leaves partial state if mid-sequence failure)
+- `update` now overwrites nodes + meta first, then prunes obsolete nodes; preflight ensures root exists in node set
 
 ## Planned Improvements (ordered)
-1) **Safer update ordering (ADR-004a/010/012 compliant)**
+1) **Safer update ordering (ADR-004a/010/012 compliant)** — ✅ DONE
    - Overwrite new/updated nodes + meta first, then prune obsolete nodes.
-   - If any write fails, leave previous commit state intact (no partial new state).
-   - Standardize commit messages/tags: `risk-tree:{id}:update:{txnId}` to correlate history for diffs/time-travel.
+   - Standardized commit messages/tags: `risk-tree:{id}:update:{txnId}`.
 
-2) **Metadata hardening**
-   - Extend meta payload with `id`, `createdAt`, `updatedAt` (persisted alongside `name`, `rootId`). Derive timestamps from commit clock or wall-clock; store explicitly for API use without extra Irmin lookups.
-   - Fail fast if `rootId` is not present in the node set before writing (preflight validation).
-   - Optionally add schema/version field for forward migrations.
+2) **Metadata hardening** — ✅ DONE
+   - Meta now includes `id`, `createdAt`, `updatedAt`, `schemaVersion` (wall-clock millis persisted alongside `name`, `rootId`).
+   - Preflight root-in-node-set validation before writes.
 
-3) **Shared type (when needed)**
-   - Promote private `Meta` to public `TreeMetadata` only if other layers (DTOs/tests) need to read/write meta. Keep `zio-json` codec co-located.
+3) **Shared type (when needed)** — ✅ DONE
+   - Public `TreeMetadata` with `zio-json` codec.
 
-4) **Error clarity**
-   - Distinguish “meta missing” vs “tree absent” vs “node decode failure” in repository errors to aid diagnostics.
+4) **Error clarity** — ✅ PARTIAL
+   - Distinguish meta-missing with existing nodes (fail fast) vs absent tree; node decode failures surfaced per-node.
 
 5) **Testing & wiring**
    - Add `RiskTreeRepositoryIrminSpec` under server-it (requires Irmin container):

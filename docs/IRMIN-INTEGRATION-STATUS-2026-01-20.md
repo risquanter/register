@@ -167,7 +167,8 @@ RiskTreeRepositoryInMemory.layer,  // ← Currently in-memory only
 - Implemented in [RiskTreeRepositoryIrmin.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala) using per-node storage (`risk-trees/{treeId}/nodes/{nodeId}` + `meta`).
 - Irmin interactions use typed `IO[IrminError, *]` and are mapped to `RepositoryFailure` inside the repository helper `handleIrmin`.
 - `list` is consumed to load node children under a prefix before reconstruction via `TreeIndex.fromNodeSeq`.
-- Remaining work: add repository-level integration specs in `server-it` and ensure future diffs are incremental (today `update` rewrites the tree via delete + recreate).
+- Updates now write new nodes + meta first, then prune obsolete nodes; commit messages tagged per tree/txn. Meta includes `id`, `schemaVersion`, `createdAt`, `updatedAt` (wall clock) with public `TreeMetadata`.
+- Remaining work: add repository-level integration specs in `server-it`.
 
 ### Phase 2: Test Server Infrastructure
 
