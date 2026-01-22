@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-20  
 **Scope:** API Integration Tests with Irmin Persistence  
-**Status:** 🟡 **IN PROGRESS** — Irmin client integration tests exist; repository + HTTP integration still pending (requires running Irmin container)
+**Status:** 🟡 **IN PROGRESS** — Irmin client integration tests exist; Irmin-backed repository implemented; HTTP integration tests and Application wiring still pending (Irmin container required)
 
 ---
 
@@ -132,16 +132,20 @@ The "Full Refactoring Walkthrough: childIds + parentId" is **complete**:
 |-----------|------|--------|
 | `RiskTreeRepository` trait | [RiskTreeRepository.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala) | ✅ Exists |
 | `RiskTreeRepositoryInMemory` | [RiskTreeRepositoryInMemory.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala) | ✅ Exists |
+| `RiskTreeRepositoryIrmin` | [RiskTreeRepositoryIrmin.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala) | ✅ Implemented (per-node storage, maps `IO[IrminError, *]` to `Task`) |
 | `IrminClient` trait | [IrminClient.scala](../modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala) | ✅ Exists |
 | `IrminClientLive` | [IrminClientLive.scala](../modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala) | ✅ Exists |
 | `IrminPath` | `infra/irmin/model/IrminPath.scala` | ✅ Exists |
 | `IrminClientIntegrationSpec` | [IrminClientIntegrationSpec.scala](../modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminClientIntegrationSpec.scala) | ✅ Exists (8 tests, require Irmin container) |
 
+**How to run existing Irmin client tests**
+- Start Irmin: `docker compose --profile persistence up -d`
+- Run: `sbt "serverIt/testOnly *IrminClientIntegrationSpec"`
+
 ### Missing Infrastructure
 
 | Component | Status | Description |
 |-----------|--------|-------------|
-| `RiskTreeRepositoryIrmin` | 🔴 **NOT CREATED** | Irmin-backed implementation of `RiskTreeRepository` |
 | `RiskTreeApiIntegrationSpec` | 🔴 **NOT CREATED** | HTTP CRUD + LEC endpoint tests |
 | `CacheApiIntegrationSpec` | 🔴 **NOT CREATED** | Cache management tests |
 | Test server infrastructure | 🔴 **NOT CREATED** | Real HTTP server for integration tests |
@@ -158,26 +162,12 @@ RiskTreeRepositoryInMemory.layer,  // ← Currently in-memory only
 
 ## 5. What's Left To Do
 
-### Phase 1: RiskTreeRepositoryIrmin (Blocked Here)
+### Phase 1: RiskTreeRepositoryIrmin (Implemented)
 
-**File to create:** `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala`
-
-**Requirements:**
-1. Implement `RiskTreeRepository` trait
-2. Use `IrminClient` for storage operations
-3. Follow per-node storage model:
-   ```
-  risk-trees/{treeId}/nodes/{nodeId} → JSON of RiskLeaf | RiskPortfolio
-  risk-trees/{treeId}/meta           → { name, rootId }
-   ```
-4. Reconstruct `RiskTree` from flat nodes + `TreeIndex.fromNodes()`
-
-**Key operations:**
-- `create(RiskTree)`: Write each node to `risk-trees/{id}/nodes/{nodeId}`, write meta
-- `getById(id)`: Read all nodes from `risk-trees/{id}/nodes/*`, reconstruct tree
-- `update(id, op)`: Read tree, apply op, diff nodes, write changes
-- `delete(id)`: Remove all nodes under `risk-trees/{id}/`
-- `getAll`: List `risk-trees/*/meta`, reconstruct each tree
+- Implemented in [RiskTreeRepositoryIrmin.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala) using per-node storage (`risk-trees/{treeId}/nodes/{nodeId}` + `meta`).
+- Irmin interactions use typed `IO[IrminError, *]` and are mapped to `RepositoryFailure` inside the repository helper `handleIrmin`.
+- `list` is consumed to load node children under a prefix before reconstruction via `TreeIndex.fromNodeSeq`.
+- Remaining work: add repository-level integration specs in `server-it` and ensure future diffs are incremental (today `update` rewrites the tree via delete + recreate).
 
 ### Phase 2: Test Server Infrastructure
 
@@ -200,19 +190,19 @@ Cache management + invalidation tests.
 
 ### Immediate Action Required
 
-- **Approved**: Move `IrminClient` to `IO[IrminError, A]`, add `IrminError` sealed trait, update `IrminClientLive`, map to `RepositoryFailure`/HTTP `ErrorResponse` (domain "irmin", code `DEPENDENCY_FAILED`).
-- **Pending approval**: Create `RiskTreeRepositoryIrmin.scala` implementing per-node storage, writing meta, and reconstructing trees via `TreeIndex.fromNodes()`.
-- **Estimated effort for repository:** 2-3 hours
+- Wire `Application.scala` to allow Irmin-backed repository via config flag (keep in-memory as default fallback).
+- Add `RiskTreeRepositoryIrminSpec` in `server-it` exercising CRUD roundtrips against the Irmin container.
+- Extend HTTP integration suite (`RiskTreeApiIntegrationSpec`, `CacheApiIntegrationSpec`) to run with Irmin wiring.
 
 ### Sequence
 
 1. ✅ Flat node model refactoring (DONE)
-2. ⏳ Implement `IrminError` typed channel + HTTP mapping (NEXT)
-3. ⏳ Create `RiskTreeRepositoryIrmin`
+2. ✅ Irmin client uses typed error channel + `list` operation implemented
+3. ✅ `RiskTreeRepositoryIrmin` implemented (per-node model)
 4. ⏳ Create test server infrastructure
 5. ⏳ Create `RiskTreeApiIntegrationSpec`
 6. ⏳ Create `CacheApiIntegrationSpec`
-7. ⏳ Wire Irmin into Application (optional, for non-test use)
+7. ⏳ Wire Irmin into Application (configurable)
 
 ---
 

@@ -1,7 +1,7 @@
 # RiskTreeRepositoryIrmin Implementation Plan
 
 **Date:** 2026-01-20  
-**Status:** Planning  
+**Status:** Implemented (per-node); integration tests + wiring pending  
 **Related:** [CODE-QUALITY-REVIEW-2026-01-20.md](CODE-QUALITY-REVIEW-2026-01-20.md), [IRMIN-INTEGRATION.md](IRMIN-INTEGRATION.md), [ADR-004a-proposal.md](ADR-004a-proposal.md)
 
 ---
@@ -30,7 +30,9 @@ trait RiskTreeRepository {
 }
 ```
 
-Currently there is **only one implementation**: `RiskTreeRepositoryInMemory` (stores in a `TrieMap`).
+Currently there are two implementations:
+- `RiskTreeRepositoryInMemory` (stores in a `TrieMap`, used by Application wiring today)
+- `RiskTreeRepositoryIrmin` (per-node Irmin storage; see `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala`)
 
 ---
 
@@ -210,9 +212,10 @@ With Per-Tree Storage (Option B):
 | Question | Answer |
 |----------|--------|
 | **What is it?** | An implementation of `RiskTreeRepository` that uses `IrminClient` to persist trees |
-| **Why is it missing?** | It hasn't been created yet - we stopped at the approval point |
+| **What is implemented?** | `RiskTreeRepositoryIrmin` exists (per-node storage) and maps `IO[IrminError, *]` to repository `Task`s |
+| **What remains?** | Application wiring still points at `RiskTreeRepositoryInMemory`; repository and HTTP integration tests are missing |
 | **What does it enable?** | Persistent storage, version history, and fine-grained change notifications |
-| **What happens without it?** | Data stored only in memory, lost on restart, no audit trail, integration tests cannot verify Irmin persistence |
+| **What happens without wiring/tests?** | Runtime still uses in-memory storage; Irmin path remains unexercised in integration suites |
 
 ---
 
@@ -346,35 +349,22 @@ trait IrminClient:
   // ... existing methods ...
   
   /** List all paths under a prefix (for loading all nodes of a tree) */
-  def list(prefix: IrminPath): Task[List[IrminPath]]
+  def list(prefix: IrminPath): IO[IrminError, List[IrminPath]]
 ```
 
 **Deliverables:**
-- [ ] Add `list` method to `IrminClient` trait
-- [ ] Implement in `IrminClientLive`
-- [ ] Add GraphQL query in `IrminQueries`
-- [ ] Add unit test for `list` operation
+- [x] Add `list` method to `IrminClient` trait (`IO[IrminError, List[IrminPath]]`)
+- [x] Implement in `IrminClientLive` (uses GraphQL `listTree` query)
+- [x] Add GraphQL query in `IrminQueries`
+- [x] Add integration coverage in `IrminClientIntegrationSpec` for list (container-backed)
 
 ---
 
 ### Step 2: Tree Metadata Model
 
-**Goal:** Define the metadata structure stored at `trees/{treeId}/meta`.
+**Goal:** Represent metadata stored at `risk-trees/{treeId}/meta`.
 
-**File:** `modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala`
-
-```scala
-final case class TreeMetadata(
-  id: NonNegativeLong,
-  name: SafeName.SafeName,
-  rootId: NodeId,
-  createdAt: Instant,
-  updatedAt: Instant
-)
-object TreeMetadata {
-  given JsonCodec[TreeMetadata] = DeriveJsonCodec.gen
-}
-```
+**Current state:** Metadata is modeled inline as a private `Meta` case class inside the implemented repository ([RiskTreeRepositoryIrmin.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala)); it captures `name` and `rootId` and is encoded/decoded with `zio-json`. No standalone `TreeMetadata` file exists yet—introduce one only if other components need to share the type.
 
 **Deliverables:**
 - [ ] Create `TreeMetadata` case class with JSON codec
@@ -549,32 +539,32 @@ object IntegrationTestSupport {
 
 ```
 Step 0: Resolve CODE-QUALITY-REVIEW-2026-01-20.md issues
-    │
-    ▼
-Step 1: IrminClient enhancements (list operation)
-    │
-    ▼
-Step 2: TreeMetadata model
-    │
-    ▼
-Step 3: RiskTreeRepositoryIrmin implementation
-    │
-    ▼
+  │
+  ▼
+Step 1: IrminClient enhancements (list operation) — DONE
+  │
+  ▼
+Step 2: TreeMetadata model (inlined Meta; external model optional)
+  │
+  ▼
+Step 3: RiskTreeRepositoryIrmin implementation — DONE
+  │
+  ▼
 Step 4: Repository integration tests (RiskTreeRepositoryIrminSpec)
-    │
-    ▼
+  │
+  ▼
 Step 5: Integration test infrastructure (IntegrationTestSupport)
-    │
-    ▼
+  │
+  ▼
 Step 6: RiskTreeApiIntegrationSpec (CRUD)
-    │
-    ▼
+  │
+  ▼
 Step 7: LECApiIntegrationSpec (LEC endpoints)
-    │
-    ▼
+  │
+  ▼
 Step 8: CacheApiIntegrationSpec (cache management)
-    │
-    ▼
+  │
+  ▼
 Step 9: Documentation and optional production wiring
 ```
 
