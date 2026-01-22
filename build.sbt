@@ -143,7 +143,10 @@ lazy val serverIt = (project in file("modules/server-it"))
     Test / fork := true,
     Test / parallelExecution := false
   )
-  .dependsOn(server % "compile->compile;test->test")
+  .dependsOn(
+    server % "compile->compile;test->test",
+    common.jvm % "compile->compile;test->test"
+  )
 
 // App module (ScalaJS frontend with Laminar)
 lazy val app = (project in file("modules/app"))

@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data.iron
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
-import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
+import io.github.iltotore.iron.constraint.string.Match
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
 // Base refined type alias used for most short strings:
@@ -15,12 +15,14 @@ type SafeExtraShortStr = String :| (Not[Blank] & MaxLength[20])
 // Email with format validation (single @, max 50 chars)
 type ValidEmail = String :| (Not[Blank] & MaxLength[50] & Match["[^@]+@[^@]+"])
 
-// URL with Iron's built-in ValidURL constraint (max 200 chars for longer URLs)
-type ValidUrl = String :| (Not[Blank] & MaxLength[200] & ValidURL)
+// URL constraints for service/internal calls (http/https with hostname, IPv4, or IPv6, optional port/path)
+type UrlConstraint = Not[Blank] & MaxLength[200] & Match["^(?i)https?://(?:\\[[0-9a-fA-F:]+\\]|[^/:#?\\s]+)(?::\\d+)?(?:/[^\\s]*)?$"]
 
 // Service URL (absolute http/https with host, optional port)
-// TODO: add targeted tests for the SafeUrl regex and double-check if Iron provides a built-in URL constraint suitable for this use.
-type SafeUrl = String :| (Not[Blank] & Match["^(?i)https?://[^/:#?\\s]+(?::\\d+)?(?:/.*)?$"])
+type SafeUrl = String :| UrlConstraint
+
+// General URL alias (kept for API parity; same constraint set as SafeUrl)
+type ValidUrl = String :| UrlConstraint
 
 // Non-negative long values (IDs, counts, amounts)
 type NonNegativeLong = Long :| GreaterEqual[0L]
@@ -143,7 +145,7 @@ object SafeUrl:
   def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], SafeUrl] =
     val sanitized = if s == null then "" else s.trim
     sanitized
-      .refineEither[Not[Blank] & Match["^(?i)https?://[^/:#?\\s]+(?::\\d+)?(?:/.*)?$"]]
+      .refineEither[UrlConstraint]
       .left
       .map(err =>
         List(

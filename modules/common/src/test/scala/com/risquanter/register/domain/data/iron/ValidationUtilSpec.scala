@@ -109,10 +109,10 @@ object ValidationUtilSpec extends ZIOSpecDefault {
     
     suite("refineUrl")(
       test("accepts valid url with domain") {
-        val result = ValidationUtil.refineUrl("example.com")
+        val result = ValidationUtil.refineUrl("http://example.com")
         assertTrue(
           result.isRight &&
-          result.map(_.value).contains("example.com")
+          result.map(_.value).contains("http://example.com")
         )
       },
       
@@ -130,10 +130,10 @@ object ValidationUtilSpec extends ZIOSpecDefault {
       },
       
       test("trims whitespace") {
-        val result = ValidationUtil.refineUrl("  test.org  ")
+        val result = ValidationUtil.refineUrl("  http://test.org  ")
         assertTrue(
           result.isRight &&
-          result.map(_.value).contains("test.org")
+          result.map(_.value).contains("http://test.org")
         )
       },
       

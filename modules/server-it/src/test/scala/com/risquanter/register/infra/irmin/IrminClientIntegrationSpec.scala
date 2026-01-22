@@ -27,10 +27,14 @@ import com.risquanter.register.domain.errors.IrminUnavailable
 object IrminClientIntegrationSpec extends ZIOSpecDefault:
 
   // Test configuration pointing to local Irmin container
+  private val testUrl = com.risquanter.register.domain.data.iron.SafeUrl.fromString("http://localhost:9080").toOption.get
+
   val testConfig = IrminConfig(
-    endpoint = "http://localhost:9080",
+    url = testUrl,
     branch = "main",
-    timeoutSeconds = 10
+    timeoutSeconds = 10,
+    healthCheckTimeoutMillis = 5000,
+    healthCheckRetries = 2
   )
 
   val testLayer: ZLayer[Any, Throwable, IrminClient] =

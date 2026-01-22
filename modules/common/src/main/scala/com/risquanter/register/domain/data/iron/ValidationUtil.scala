@@ -58,11 +58,11 @@ object ValidationUtil {
       )))
   }
 
-  // Refinement for URL using Iron's built-in ValidURL constraint
+  // Refinement for URL using shared service URL regex (allows localhost/IP/IPv6)
   def refineUrl(value: String, fieldPath: String = "url"): Either[List[ValidationError], Url.Url] = {
     val sanitized = nonEmpty(value)
     sanitized
-      .refineEither[Not[Blank] & MaxLength[200] & ValidURL]
+      .refineEither[UrlConstraint]
       .map(Url.Url(_))
       .left
       .map(err => List(ValidationError(

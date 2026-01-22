@@ -172,25 +172,25 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
     
     suite("Url opaque type")(
       test("can be created from SafeShortStr") {
-        val url: Url.Url = Url.Url("example.com".refineUnsafe)
-        assertTrue(url.value == "example.com")
+        val url: Url.Url = Url.Url("http://example.com".refineUnsafe)
+        assertTrue(url.value == "http://example.com")
       },
       
       test("unapply works for Url") {
-        val url: Url.Url = Url.Url("test.org".refineUnsafe)
+        val url: Url.Url = Url.Url("https://test.org".refineUnsafe)
         
         val result = url match {
           case Url.Url(value) => value
         }
         
-        assertTrue(result == "test.org")
+        assertTrue(result == "https://test.org")
       },
       
       test("fromString accepts valid url") {
-        val result = Url.fromString("test.org")
+        val result = Url.fromString("https://test.org")
         assertTrue(
           result.isRight &&
-          result.map(_.value).contains("test.org")
+          result.map(_.value).contains("https://test.org")
         )
       },
       
