@@ -47,60 +47,60 @@ object IrminCompose:
     }
 
   private def start: Task[Started] =
-    ZIO.attemptBlocking {
-      val composeFile = findComposeFile()
-      val projectName = s"register_it_${UUID.randomUUID().toString.take(8)}"
-      val composeDir = composeFile.getParentFile
+    for
+      composeFile <- ZIO.attempt(findComposeFile())
+      projectName <- ZIO.attempt(s"register_it_${UUID.randomUUID().toString.take(8)}")
+      composeDir   = composeFile.getParentFile
+      _           <- ZIO.logInfo(s"[IrminCompose] Starting docker compose project=$projectName from ${composeFile.getAbsolutePath}")
 
-      println(s"[IrminCompose] Starting docker compose with project=$projectName from ${composeFile.getAbsolutePath}")
+      // Defensive: remove any left-over named container from previous runs (compose uses container_name irmin-graphql)
+      _ <- ZIO.attemptBlocking(Process(Seq("docker", "rm", "-f", "irmin-graphql"), composeDir).!).ignore
 
-      // Start only the irmin service (not register-server which would conflict with existing containers)
-      val startCmd = Seq(
-        "docker", "compose",
-        "-f", composeFile.getAbsolutePath,
-        "-p", projectName,
-        "--profile", "persistence",
-        "up", "-d", "--build", "--wait",
-        "irmin"  // Only start the irmin service
-      )
-      
-      val startResult = Process(startCmd, composeDir).!
-      if (startResult != 0) {
-        throw new RuntimeException(s"docker compose up failed with exit code $startResult")
+      startResult <- ZIO.attemptBlocking {
+        // Start only the irmin service (not register-server which would conflict with existing containers)
+        val startCmd = Seq(
+          "docker", "compose",
+          "-f", composeFile.getAbsolutePath,
+          "-p", projectName,
+          "--profile", "persistence",
+          "up", "-d", "--build", "--wait",
+          "irmin"  // Only start the irmin service
+        )
+
+        Process(startCmd, composeDir).!
       }
+      _ <- ZIO.fail(new RuntimeException(s"docker compose up failed with exit code $startResult")).when(startResult != 0)
 
-      // Get the mapped port for irmin service
-      val portCmd = Seq(
-        "docker", "compose",
-        "-f", composeFile.getAbsolutePath,
-        "-p", projectName,
-        "port", "irmin", "8080"
-      )
-      
-      val portOutput = Process(portCmd, composeDir).!!.trim
+      portOutput <- ZIO.attemptBlocking {
+        // Get the mapped port for irmin service
+        val portCmd = Seq(
+          "docker", "compose",
+          "-f", composeFile.getAbsolutePath,
+          "-p", projectName,
+          "port", "irmin", "8080"
+        )
+
+        Process(portCmd, composeDir).!!.trim
+      }
       // Output format is like "0.0.0.0:32768" or "[::]:32768"
-      val port = portOutput.split(":").last.toInt
-      val irminUrl = s"http://localhost:$port"
-      
-      println(s"[IrminCompose] Irmin running at $irminUrl")
-
-      Started(irminUrl, projectName, composeFile)
-    }
+      port     <- ZIO.attempt(portOutput.split(":").last.toInt)
+      irminUrl  = s"http://localhost:$port"
+      _        <- ZIO.logInfo(s"[IrminCompose] Irmin running at $irminUrl")
+    yield Started(irminUrl, projectName, composeFile)
 
   private def stop(projectName: String, composeFile: File): Task[Unit] =
-    ZIO.attemptBlocking {
-      println(s"[IrminCompose] Stopping docker compose project=$projectName")
-      
-      val stopCmd = Seq(
-        "docker", "compose",
-        "-f", composeFile.getAbsolutePath,
-        "-p", projectName,
-        "down", "-v", "--remove-orphans"
-      )
-      
-      val composeDir = composeFile.getParentFile
-      Process(stopCmd, composeDir).!
-      ()
-    }
+    ZIO.logInfo(s"[IrminCompose] Stopping docker compose project=$projectName") *>
+      ZIO.attemptBlocking {
+        val stopCmd = Seq(
+          "docker", "compose",
+          "-f", composeFile.getAbsolutePath,
+          "-p", projectName,
+          "down", "-v", "--remove-orphans"
+        )
+
+        val composeDir = composeFile.getParentFile
+        Process(stopCmd, composeDir).!
+        ()
+      }
 
 end IrminCompose
