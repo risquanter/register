@@ -4,11 +4,21 @@ This subproject contains integration tests for the register server that require 
 
 ## Prerequisites
 
-Integration tests require running services from docker-compose:
+Integration tests now auto-start Irmin via `docker compose` (no manual start needed). If you want to run Irmin yourself:
 
 ```bash
-# Start Irmin (required for Irmin client tests)
-docker compose --profile persistence up -d
+# Start Irmin only
+docker compose --profile persistence up -d irmin
+
+# Start backend wired to Irmin (option A: .env.irmin)
+docker compose --profile persistence --env-file .env.irmin up -d register-server irmin
+
+# Start backend wired to Irmin (option B: inline env)
+docker compose --profile persistence \
+  up -d \
+  -e REGISTER_REPOSITORY_TYPE=irmin \
+  -e IRMIN_URL=http://irmin:8080 \
+  register-server irmin
 
 # Stop services when done
 docker compose --profile persistence down

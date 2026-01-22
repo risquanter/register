@@ -16,14 +16,24 @@ This guide covers containerization, deployment, and development environment setu
 
 ## Quick Start
 
-### Start All Services
+### Start / Run Modes
 
 ```bash
-# Start Risk Register server only
-docker compose up -d
+# In-memory backend (default)
+docker compose up -d register-server
 
-# Start with Irmin persistence layer
-docker compose --profile persistence up -d
+# Irmin backend (app + Irmin) — option A: .env.irmin
+docker compose --profile persistence --env-file .env.irmin up -d register-server irmin
+
+# Irmin backend (app + Irmin) — option B: inline overrides
+docker compose --profile persistence \
+  up -d \
+  -e REGISTER_REPOSITORY_TYPE=irmin \
+  -e IRMIN_URL=http://irmin:8080 \
+  register-server irmin
+
+# Irmin only (useful for Irmin client tests/tools)
+docker compose --profile persistence up -d irmin
 
 # View logs
 docker compose logs -f
@@ -132,7 +142,7 @@ docker compose stop irmin
 
 ### Environment Variables
 
-Configure via `docker-compose.yml` or `.env` file:
+Configure via `docker-compose.yml`, `.env`, or CLI overrides:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -147,30 +157,40 @@ Configure via `docker-compose.yml` or `.env` file:
 | `REGISTER_CORS_ORIGINS` | See config | Allowed CORS origins |
 | `OTEL_SERVICE_NAME` | `risk-register` | OpenTelemetry service name |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP endpoint |
+| `REGISTER_REPOSITORY_TYPE` | `in-memory` | Set to `irmin` to enable Irmin backend |
+| `IRMIN_URL` | `http://localhost:9080` | Irmin GraphQL URL (use `http://irmin:8080` inside compose) |
 
 ### Custom Configuration
 
-Edit `docker-compose.yml`:
-
-```yaml
-services:
-  register-server:
-    environment:
-      REGISTER_DEFAULT_NTRIALS: "50000"
-      REGISTER_PARALLELISM: "16"
-```
-
-Or use `.env` file:
+**Option A: .env for Irmin mode**
 
 ```bash
-# Create .env file
-cat > .env <<EOF
-REGISTER_DEFAULT_NTRIALS=50000
-OTEL_EXPORTER_OTLP_ENDPOINT=https://prod-otlp:4317
+cat > .env.irmin <<'EOF'
+REGISTER_REPOSITORY_TYPE=irmin
+IRMIN_URL=http://irmin:8080
 EOF
 
-# Start with env file
-docker compose --env-file .env up -d
+docker compose --profile persistence --env-file .env.irmin up -d register-server irmin
+```
+
+**Option B: .env for in-memory mode**
+
+```bash
+cat > .env.inmemory <<'EOF'
+REGISTER_REPOSITORY_TYPE=in-memory
+EOF
+
+docker compose --env-file .env.inmemory up -d register-server
+```
+
+**Option C: Inline overrides**
+
+```bash
+docker compose --profile persistence \
+  up -d \
+  -e REGISTER_REPOSITORY_TYPE=irmin \
+  -e IRMIN_URL=http://irmin:8080 \
+  register-server irmin
 ```
 
 ---
@@ -207,8 +227,11 @@ docker volume rm register_irmin-data
 ### Local Development
 
 ```bash
-# Start full stack
-docker compose --profile persistence up -d
+# Start with Irmin backend (using .env.irmin from above)
+docker compose --profile persistence --env-file .env.irmin up -d register-server irmin
+
+# Start with in-memory backend only
+docker compose --env-file .env.inmemory up -d register-server
 
 # Check status
 docker compose ps

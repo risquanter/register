@@ -31,7 +31,8 @@ object Application extends ZIOAppDefault {
       for {
         cfg    <- ZIO.service[IrminConfig]
         client <- ZIO.service[IrminClient]
-        retry   = Schedule.recurs(cfg.healthCheckRetries)
+        // Health check retries are bounded and default to zero per ADR-012 fail-fast guidance
+        retry   = Schedule.recurs(math.max(0, cfg.healthCheckRetries))
         _ <- client.healthCheck
                .flatMap(ok => if ok then ZIO.unit else ZIO.fail(new RuntimeException("Irmin health check returned false")))
                .mapError(err => new RuntimeException(s"Irmin health check failed: $err"))

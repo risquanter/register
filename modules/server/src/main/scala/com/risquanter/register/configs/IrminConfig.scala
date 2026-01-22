@@ -16,14 +16,14 @@ import io.github.iltotore.iron.refineEither
   * @param branch Default branch name for operations (defaults to "main")
   * @param timeoutSeconds Request timeout in seconds
   * @param healthCheckTimeoutMillis Max duration for startup health check
-  * @param healthCheckRetries Number of retries for startup health check
+  * @param healthCheckRetries Number of retries for startup health check (default 0; bounded to non-negative)
   */
 final case class IrminConfig(
   url: SafeUrl,
     branch: String = "main",
     timeoutSeconds: Int = 30,
     healthCheckTimeoutMillis: Int = 5000,
-    healthCheckRetries: Int = 2
+    healthCheckRetries: Int = 0
 ) {
   /** Full GraphQL endpoint URL */
   def graphqlUrl: String = s"$url/graphql"
