@@ -3,61 +3,47 @@
 This document is self-contained for picking up Irmin wiring and test work. It supersedes status items in `docs/IRMIN-INTEGRATION-STATUS-2026-01-20.md` where noted.
 
 ## Goals
-- Config-selectable repository: `irmin` or `in-memory`.
-- Fail-fast Irmin wiring with startup health check (retry + timeout, configurable, with defaults).
-- Add repository-level integration spec against real Irmin.
-- Add HTTP-level integration specs against a real server wired to Irmin.
+- Config-selectable repository: `irmin` or `in-memory`. **(Implemented in Application.scala)**
+- Fail-fast Irmin wiring with startup health check (retry + timeout, configurable). **(Implemented: SafeUrl-based IrminConfig + bounded health check)**
+- Add repository-level integration spec against real Irmin. **(Pending)**
+- Add HTTP-level integration specs against a real server wired to Irmin. **(Pending)**
 
-## Configuration (new/updated)
-- `register.repository.type`: `"irmin" | "in-memory"` (default: `"in-memory"`). Any other value falls back to `in-memory` with a warning.
-- `register.irmin.url`: required when `type = "irmin"`; validated as an Iron `IrminUrl` (absolute http/https URI with host, optional port).
-- `register.irmin.healthCheck.timeoutMillis`: default `5000` (fail-fast total timeout for startup health check).
-- `register.irmin.healthCheck.retries`: default `2` (number of additional attempts; combined with retry schedule below).
-- Suggested retry schedule: exponential/backoff or spaced (e.g., 200ms, 400ms) capped by `timeoutMillis`.
+## Configuration (as implemented)
+- `register.repository.repositoryType`: `"irmin" | "in-memory"` (default: `"in-memory"`). Any other value falls back to in-memory with a warning.
+- `register.irmin.url`: SafeUrl-validated (http/https, internal hosts allowed).
+- `register.irmin.healthCheckTimeoutMillis`: default `5000`.
+- `register.irmin.healthCheckRetries`: default `2` (simple recurs schedule).
+- `register.irmin.timeoutSeconds`, `branch` still available.
 
-## Wiring Changes (Application.scala)
-- Layers:
+## Wiring (current state in Application.scala)
+- Layers already present:
   - `inMemoryRepo = RiskTreeRepositoryInMemory.layer`
-  - `irminRepo = IrminConfig.layer >>> IrminClientLive.layer >>> RiskTreeRepositoryIrmin.layer`
-- Selection helper `chooseRepo: ZLayer[Any, Throwable, RiskTreeRepository]`:
-  1. Read `register.repository.type`.
-  2. If `"irmin"` and `register.irmin.url` present:
-     - Validate URL via Iron `IrminUrl` smart constructor (fail config load if invalid).
-     - Run startup health check: `IrminClient.healthCheck.retry(retrySchedule).timeout(timeoutMillis)`.
-     - On success: log selected repo + URL; provide `irminRepo`.
-     - On failure/timeout: **fail the layer** (fail-fast). Log clear error.
-  3. Otherwise: log warning (reason: missing/invalid type or URL) and provide `inMemoryRepo`.
-- Startup logs must state which repo is used and whether a fallback occurred.
+  - `irminRepo = IrminConfig.layer >>> IrminClientLive.layer >>> irminHealthCheck >>> RiskTreeRepositoryIrmin.layer`
+- Selection helper `chooseRepo` reads `register.repository.repositoryType`; if `"irmin"`, runs bounded health check (retries = `healthCheckRetries`, timeout = `healthCheckTimeoutMillis`) and selects Irmin. Otherwise logs a warning and selects in-memory.
+- Health check logs success/failure; failure fails the layer (fail-fast).
 
-## Health Check Design (Fail-Fast)
-- Implement inside a scoped layer after `IrminClientLive` creation.
-- Use configurable retry + timeout; defaults above cap total wait at ~5s.
-- Failure path: raise layer error → application startup fails. (Preferred policy per request.)
-- Rationale: hard dependency in prod/docker; early signal over latent runtime failures.
+## Health Check Design (implemented)
+- Scoped ZLayer after `IrminClientLive` creation.
+- Retries: `healthCheckRetries` recurs schedule; Timeout: `healthCheckTimeoutMillis`.
+- Failure path fails the layer (startup fails); success logs selected repo/URL.
 
-## Iron Type for URL
-- Add `IrminUrl` opaque type refined via Iron:
-  - Validates absolute `http|https` URI, non-empty host, optional port.
-  - Smart constructor `IrminUrl.fromString: Either[ValidationError, IrminUrl]`.
-  - Used in `IrminConfig`; config load fails on invalid URL (mirrors existing NonNegativeInt patterns).
+## URL Validation
+- `IrminConfig.url` currently uses `SafeUrl` (relaxed internal http/https regex). No separate `IrminUrl` added yet.
 
-## Tests to Add
+## Tests to Add (still pending)
 - **Repo integration spec** (server-it): `RiskTreeRepositoryIrminSpec`
   - Env/config: requires Irmin container (`docker compose --profile persistence up -d`); reuse `register.irmin.url` or `IRMIN_URL`.
   - Cases: create tree; read back; update with node deletions (prune); list trees; delete; meta roundtrip (`createdAt/updatedAt`, `schemaVersion`).
 - **HTTP integration specs** (server-it): real server wired to Irmin
   - `RiskTreeApiIntegrationSpec`: POST/GET trees, GET node LEC, POST multi LEC, GET prob-of-exceedance.
   - `CacheApiIntegrationSpec`: cache stats/list, invalidate node, clear tree cache.
-  - Harness: start server on random port with `repository.type=irmin` and `register.irmin.url` pointing to container; sttp client to call endpoints.
+  - Harness: start server on random port with `repositoryType=irmin` and `register.irmin.url` pointing to container; sttp client to call endpoints.
 
-## Execution Steps
-1. Implement `IrminUrl` Iron type and integrate into `IrminConfig` (defaults + validation).
-2. Add config defaults for repo type (`in-memory`) and health check (timeout 5000ms, retries 2).
-3. Implement `chooseRepo` wiring and replace direct `RiskTreeRepositoryInMemory.layer` in `Application.scala` with the selector.
-4. Add startup health check in the Irmin path (fail-fast as described).
-5. Add repo integration spec (Irmin container required).
-6. Add HTTP integration specs (Irmin-backed server) and document how to run.
-7. Update `docs/IRMIN-INTEGRATION-STATUS-2026-01-20.md` to reflect new wiring and tests once merged; ensure `modules/server-it/README.md` mentions new tests and config.
+## Execution Steps (updated)
+1. Add repo integration spec (Irmin container required).
+2. Add HTTP integration specs (Irmin-backed server) and document how to run.
+3. Optionally tighten URL type (IrminUrl) if we want stricter-than-SafeUrl validation.
+4. Update `docs/IRMIN-INTEGRATION-STATUS-2026-01-20.md` after tests land; ensure `modules/server-it/README.md` mentions new tests and config.
 
 ## References
 - Status baseline: `docs/IRMIN-INTEGRATION-STATUS-2026-01-20.md` (update after completing steps).

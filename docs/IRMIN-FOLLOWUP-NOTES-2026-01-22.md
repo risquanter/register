@@ -27,11 +27,34 @@
 4) **Error clarity** — ✅ PARTIAL
    - Distinguish meta-missing with existing nodes (fail fast) vs absent tree; node decode failures surfaced per-node.
 
-5) **Testing & wiring**
-   - Add `RiskTreeRepositoryIrminSpec` under server-it (requires Irmin container):
-     - CRUD roundtrips, partial failure scenarios, meta presence, root-in-node-set preflight, commit message/tag expectations.
-   - Wire Application to allow opting into Irmin repository via config flag (keep in-memory default).
-   - Extend HTTP integration specs to run with Irmin wiring once repository spec is green.
+5) **Testing**
+    - Add `RiskTreeRepositoryIrminSpec` under server-it (requires Irmin container):
+       - CRUD roundtrips, partial failure scenarios, meta presence, root-in-node-set preflight, commit message/tag expectations.
+    - Extend HTTP integration specs to run with Irmin wiring once repository spec is green.
+
+## Wiring Status
+- Application already supports config-selectable repository (`repositoryType`) with bounded Irmin health check (timeout/retries) using SafeUrl-based `IrminConfig.url`. In-memory remains the default fallback.
+
+## Upcoming Integration Tests (plan)
+- **Shared harness (server-it):**
+   - Spin up HTTP server on random port with layered config (override `register.repository.repositoryType` and `IRMIN_URL` via system props/env).
+   - Provide sttp backend + helper client for REST calls; ensure clean startup/shutdown per suite.
+   - Default run: in-memory repo (no container required); optional Irmin run when `IRMIN_URL` is set and container is up.
+
+- **RiskTreeRepositoryIrminSpec (server-it):**
+   - CRUD roundtrips against real Irmin; meta roundtrip (`createdAt/updatedAt`, `schemaVersion`); update pruning; list trees; root-in-node-set preflight; commit message/tag expectations.
+
+- **RiskTreeApiIntegrationSpec (server-it/http):**
+   - POST /risk-trees (create), GET /risk-trees (list), GET /risk-trees/{id} (by id).
+   - GET /risk-trees/{treeId}/nodes/{nodeId}/lec (single), POST /risk-trees/{treeId}/nodes/lec-multi (multi), GET /risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance.
+   - Run on in-memory by default; allow Irmin-backed run when container available.
+
+- **CacheApiIntegrationSpec (server-it/http):**
+   - GET /risk-trees/{treeId}/cache/stats, GET /risk-trees/{treeId}/cache/nodes, POST /risk-trees/{treeId}/invalidate/{nodeId}, DELETE /risk-trees/{treeId}/cache.
+   - Validate cache effects in combination with computations.
+
+- **SSE coverage (optional later):**
+   - Verify SSE wiring broadcasts after mutations/invalidations when Irmin or cache invalidation triggers updates.
 
 ## Run References
 - Start Irmin: `docker compose --profile persistence up -d`

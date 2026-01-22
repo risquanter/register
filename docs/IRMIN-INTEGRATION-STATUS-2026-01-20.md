@@ -2,7 +2,7 @@
 
 **Date:** 2026-01-20  
 **Scope:** API Integration Tests with Irmin Persistence  
-**Status:** 🟡 **IN PROGRESS** — Irmin client integration tests exist; Irmin-backed repository implemented; HTTP integration tests and Application wiring still pending (Irmin container required)
+**Status:** 🟡 **IN PROGRESS** — Irmin client integration tests exist; Irmin-backed repository implemented; Application wiring is already config-selectable with fail-fast health check; HTTP/Repo integration tests still pending (Irmin container required)
 
 ---
 
@@ -148,15 +148,15 @@ The "Full Refactoring Walkthrough: childIds + parentId" is **complete**:
 |-----------|--------|-------------|
 | `RiskTreeApiIntegrationSpec` | 🔴 **NOT CREATED** | HTTP CRUD + LEC endpoint tests |
 | `CacheApiIntegrationSpec` | 🔴 **NOT CREATED** | Cache management tests |
-| Test server infrastructure | 🔴 **NOT CREATED** | Real HTTP server for integration tests |
-| Application wiring for Irmin | 🔴 **NOT DONE** | Currently uses `RiskTreeRepositoryInMemory.layer` |
+| Repo integration spec | 🔴 **NOT CREATED** | Irmin CRUD roundtrips against container |
+| Test server harness | 🔴 **NOT CREATED** | Reusable HTTP server + sttp client for integration tests |
 
-### Application.scala Current Wiring
+### Application.scala Wiring (current)
 
-```scala
-// Line 53 in Application.scala
-RiskTreeRepositoryInMemory.layer,  // ← Currently in-memory only
-```
+- Config-driven repo selection already implemented:
+  - `repositoryType` (default: in-memory) selects between in-memory and Irmin.
+  - Irmin path: `IrminConfig.layer` (SafeUrl) → `IrminClientLive.layer` → bounded health check (`healthCheckRetries`, `healthCheckTimeoutMillis`) → `RiskTreeRepositoryIrmin.layer`.
+  - Non-"irmin" values warn and fall back to in-memory.
 
 ---
 
@@ -187,15 +187,16 @@ Cache management + invalidation tests.
 
 ---
 
-## 6. Next Steps
+### Next Steps
 
-### Immediate Action Required
-
-- Wire `Application.scala` to allow Irmin-backed repository via config flag (keep in-memory as default fallback).
-- Add `RiskTreeRepositoryIrminSpec` in `server-it` exercising CRUD roundtrips against the Irmin container.
-- Extend HTTP integration suite (`RiskTreeApiIntegrationSpec`, `CacheApiIntegrationSpec`) to run with Irmin wiring.
-
-### Sequence
+1. ✅ Flat node model refactoring (DONE)
+2. ✅ Irmin client uses typed error channel + `list` operation implemented
+3. ✅ `RiskTreeRepositoryIrmin` implemented (per-node model)
+4. ✅ Wire Irmin into Application (configurable with health check)
+5. ⏳ Create test server harness (HTTP server + sttp client)
+6. ⏳ Create `RiskTreeApiIntegrationSpec`
+7. ⏳ Create `CacheApiIntegrationSpec`
+8. ⏳ Add `RiskTreeRepositoryIrminSpec` (Irmin container)
 
 1. ✅ Flat node model refactoring (DONE)
 2. ✅ Irmin client uses typed error channel + `list` operation implemented
