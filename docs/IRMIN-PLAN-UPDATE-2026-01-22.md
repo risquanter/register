@@ -45,6 +45,18 @@ This document is self-contained for picking up Irmin wiring and test work. It su
 3. Optionally tighten URL type (IrminUrl) if we want stricter-than-SafeUrl validation.
 4. Update `docs/IRMIN-INTEGRATION-STATUS-2026-01-20.md` after tests land; ensure `modules/server-it/README.md` mentions new tests and config.
 
+## Testcontainers-first plan (Option B — approved 2026-01-22)
+- Goal: get a clean Irmin state per test run by using Testcontainers to spin up the existing `docker-compose.yml` (persistence profile) instead of relying on a manually started container with unknown state.
+- Dependency (pending user approval already granted for Option B): add `testcontainers-scala-docker-compose` (and core) for Scala 3 in the `server-it` test scope; keep versions aligned with Scala 3.6.x and Testcontainers 1.19.x+.
+- Container setup: use `DockerComposeContainer` pointing at the repo root `docker-compose.yml`, enable profile `persistence`, set a unique `COMPOSE_PROJECT_NAME` per suite/run to isolate volumes/networks, and expose the Irmin GraphQL endpoint (port 9080) as `IRMIN_URL` for tests.
+- Test isolation: prefer unique Irmin branches or tree-id prefixes per suite; add teardown cleanup (delete branch or paths) to avoid state bleed if compose reuse ever occurs.
+- Guardrails: detect missing Docker/Testcontainers support and mark suites as pending with a clear message rather than failing hard.
+- Impact on phases:
+  - Phase 1 (repo integration spec) will consume the Testcontainers-managed `IRMIN_URL` and can assume a clean store per run.
+  - Phase 2 (live HTTP harness) will start the real server after the compose container is up; inject `repositoryType=irmin` and the provided URL.
+  - Phase 3 (HTTP integration specs) will run on top of the harness; state isolation comes from fresh compose per run.
+- Until Testcontainers wiring is implemented and green, Phase 1–3 code additions remain on hold.
+
 ## References
 - Status baseline: `docs/IRMIN-INTEGRATION-STATUS-2026-01-20.md` (update after completing steps).
 - Existing Irmin client tests: `modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminClientIntegrationSpec.scala`.

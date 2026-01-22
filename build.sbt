@@ -25,7 +25,9 @@ val zioConfigVersion  = "4.0.2"
 val quillVersion      = "4.8.6"
 val ironVersion       = "3.2.2"
 val zioTelemetryVersion = "3.1.13"
-val openTelemetryVersion = "1.57.0"// Common dependencies (shared between JVM and JS)
+val openTelemetryVersion = "1.57.0"
+
+// Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(
   "com.softwaremill.sttp.tapir"   %% "tapir-sttp-client"       % tapirVersion,
   "com.softwaremill.sttp.tapir"   %% "tapir-json-zio"          % tapirVersion,
@@ -138,10 +140,13 @@ lazy val serverIt = (project in file("modules/server-it"))
       "dev.zio" %% "zio-test"          % zioVersion % Test,
       "dev.zio" %% "zio-test-sbt"      % zioVersion % Test,
       "dev.zio" %% "zio-test-magnolia" % zioVersion % Test
+      // Note: We use docker compose CLI directly (not Testcontainers) due to Docker API version issues
     ),
     publish / skip := true,
     Test / fork := true,
-    Test / parallelExecution := false
+    Test / parallelExecution := false,
+    // Docker compose CLI is invoked directly by IrminCompose.scala
+    // No special env vars needed - just ensure `docker compose` is available on PATH
   )
   .dependsOn(
     server % "compile->compile;test->test",

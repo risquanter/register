@@ -3,42 +3,22 @@ package com.risquanter.register.infra.irmin
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
-import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.domain.errors.IrminUnavailable
+import com.risquanter.register.testcontainers.IrminCompose
 
 /**
   * Integration tests for IrminClient.
   *
-  * PREREQUISITES:
-  *   These tests require a running Irmin container on port 9080.
-  *   Start with: docker compose --profile persistence up -d
-  *   Stop with:  docker compose --profile persistence down
-  *
-  * TO RUN:
-  *   sbt "serverIt/test"                              # Run all integration tests
-  *   sbt "serverIt/testOnly *IrminClient*"            # Run only Irmin tests
-  *   sbt "test"                                       # Run unit tests (excludes integration tests)
-  *
-  * NOTE: Tests use unique paths with timestamps to avoid conflicts from
-  * Irmin's content-addressed storage returning cached commits for identical
-  * values at the same path.
+  * Startup: Uses docker compose CLI to launch docker-compose.yml with the `persistence` profile.
+  * Requires: Docker + docker compose CLI available locally. Compose project name is randomized per run for isolation.
+  * Run: sbt "serverIt/testOnly *IrminClientIntegrationSpec" (builds/starts compose automatically).
+  * Note: Tests use unique paths with timestamps to avoid collisions from content-addressed storage.
   */
 object IrminClientIntegrationSpec extends ZIOSpecDefault:
 
-  // Test configuration pointing to local Irmin container
-  private val testUrl = com.risquanter.register.domain.data.iron.SafeUrl.fromString("http://localhost:9080").toOption.get
-
-  val testConfig = IrminConfig(
-    url = testUrl,
-    branch = "main",
-    timeoutSeconds = 10,
-    healthCheckTimeoutMillis = 5000,
-    healthCheckRetries = 2
-  )
-
-  val testLayer: ZLayer[Any, Throwable, IrminClient] =
-    ZLayer.succeed(testConfig) >>> IrminClientLive.layer
+  private val testLayer: ZLayer[Any, Throwable, IrminClient] =
+    IrminCompose.irminConfigLayer >>> IrminClientLive.layer
 
   /** Generate unique path with timestamp to avoid content-addressing collisions */
   private def uniquePath(base: String): ZIO[Any, Nothing, IrminPath] =
@@ -54,8 +34,11 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       yield assertTrue(healthy)
     },
 
-    test("branches returns at least main branch") {
+    test("branches returns main branch after first commit") {
       for
+        // Irmin doesn't list 'main' in branches until it has at least one commit
+        testPath   <- uniquePath("branches-test")
+        _          <- IrminClient.set(testPath, "init", "Initialize for branches test")
         branchList <- IrminClient.branches
       yield assertTrue(branchList.contains("main"))
     },
