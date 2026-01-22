@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
-import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
 // Base refined type alias used for most short strings:
 type SafeShortStr = String :| (Not[Blank] & MaxLength[50])
@@ -17,6 +17,10 @@ type ValidEmail = String :| (Not[Blank] & MaxLength[50] & Match["[^@]+@[^@]+"])
 
 // URL with Iron's built-in ValidURL constraint (max 200 chars for longer URLs)
 type ValidUrl = String :| (Not[Blank] & MaxLength[200] & ValidURL)
+
+// Service URL (absolute http/https with host, optional port)
+// TODO: add targeted tests for the SafeUrl regex and double-check if Iron provides a built-in URL constraint suitable for this use.
+type SafeUrl = String :| (Not[Blank] & Match["^(?i)https?://[^/:#?\\s]+(?::\\d+)?(?:/.*)?$"])
 
 // Non-negative long values (IDs, counts, amounts)
 type NonNegativeLong = Long :| GreaterEqual[0L]
@@ -127,6 +131,29 @@ object Url:
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[ValidationError], Url] = 
     ValidationUtil.refineUrl(s)
+
+// Opaque type for service URLs
+object SafeUrl:
+  def apply(s: SafeUrl): SafeUrl = s
+  def unapply(u: SafeUrl): Option[SafeUrl] = Some(u)
+
+  extension (u: SafeUrl)
+    def value: SafeUrl = u
+
+  def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], SafeUrl] =
+    val sanitized = if s == null then "" else s.trim
+    sanitized
+      .refineEither[Not[Blank] & Match["^(?i)https?://[^/:#?\\s]+(?::\\d+)?(?:/.*)?$"]]
+      .left
+      .map(err =>
+        List(
+          ValidationError(
+            field = fieldPath,
+            code = ValidationErrorCode.INVALID_FORMAT,
+            message = s"URL '$sanitized' is invalid: $err"
+          )
+        )
+      )
 
 // SafeId: Alphanumeric + hyphen/underscore, 3-30 chars (risk/portfolio identifiers)
 // Valid examples: "cyber-attack", "ops_risk_001", "IT-RISK"

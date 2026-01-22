@@ -7,7 +7,7 @@ import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import zio.http.{Middleware, Header}
 import zio.http.Header.{AccessControlAllowHeaders, AccessControlAllowOrigin, AccessControlExposeHeaders, Origin}
 
-import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig}
+import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig}
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.controllers.{RiskTreeController, HealthController}
 import com.risquanter.register.http.sse.SSEController
@@ -16,13 +16,56 @@ import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.cache.{TreeCacheManager, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
+import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
+import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 
 /** Main application entry point
   * Sets up HTTP server with configuration management, dependency injection, and routing
   */
 object Application extends ZIOAppDefault {
+
+  // Repo selection helper (config-driven) with Irmin fail-fast health check
+  private val irminHealthCheck: ZLayer[IrminClient & IrminConfig, Throwable, IrminClient] =
+    ZLayer.fromZIO {
+      for {
+        cfg    <- ZIO.service[IrminConfig]
+        client <- ZIO.service[IrminClient]
+        retry   = Schedule.recurs(cfg.healthCheckRetries)
+        _ <- client.healthCheck
+               .flatMap(ok => if ok then ZIO.unit else ZIO.fail(new RuntimeException("Irmin health check returned false")))
+               .mapError(err => new RuntimeException(s"Irmin health check failed: $err"))
+               .retry(retry)
+               .timeoutFail(new RuntimeException(s"Irmin health check timed out after ${cfg.healthCheckTimeout.toMillis} ms"))(cfg.healthCheckTimeout)
+               .tapError(e => ZIO.logError(s"Irmin health check failed: ${e.getMessage}"))
+               .tap(_ => ZIO.logInfo(s"Irmin repository selected at ${cfg.url}"))
+      } yield client
+    }
+
+  private val irminRepoLayer: ZLayer[Any, Throwable, RiskTreeRepository] =
+    ZLayer.make[RiskTreeRepository](
+      IrminConfig.layer,
+      IrminClientLive.layer >>> irminHealthCheck,
+      RiskTreeRepositoryIrmin.layer
+    )
+
+  private val inMemoryRepoLayer: ZLayer[Any, Nothing, RiskTreeRepository] =
+    RiskTreeRepositoryInMemory.layer
+
+  private val chooseRepo: ZLayer[RepositoryConfig, Throwable, RiskTreeRepository] =
+    ZLayer.fromZIO {
+      for {
+        repoCfg <- ZIO.service[RepositoryConfig]
+        repo <- repoCfg.normalizedType match {
+          case "irmin" =>
+            ZIO.logInfo("repository.type=irmin; attempting Irmin wiring with fail-fast health check") *>
+              ZIO.scoped(irminRepoLayer.build.map(_.get[RiskTreeRepository]))
+          case other =>
+            ZIO.logWarning(s"repository.type='$other' not 'irmin'; defaulting to in-memory repository") *>
+              ZIO.scoped(inMemoryRepoLayer.build.map(_.get[RiskTreeRepository]))
+        }
+      } yield repo
+    }
 
   // Bootstrap: Configure TypesafeConfigProvider to load from application.conf
   override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
@@ -54,7 +97,7 @@ object Application extends ZIOAppDefault {
       MetricsLive.console,
       // Concurrency control - limits concurrent simulations (requires SimulationConfig)
       com.risquanter.register.services.SimulationSemaphore.layer,
-      RiskTreeRepositoryInMemory.layer,
+      RepositoryConfig.layer >>> chooseRepo,
       RiskTreeServiceLive.layer,  // Requires SimulationConfig + Tracing + SimulationSemaphore + Meter
       // Per-tree cache management (ADR-014)
       TreeCacheManager.layer,
