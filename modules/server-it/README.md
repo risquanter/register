@@ -39,6 +39,7 @@ sbt "server/test"
 # Run all tests (unit + integration)
 sbt "test"  # from root project
 ```
+- HTTP-level specs (e.g., HttpApiIntegrationSpec) start the real HTTP server on a random port backed by an Irmin instance launched via docker compose. Non-integration modules keep using the in-memory repository by default.
 
 ## Project Structure
 

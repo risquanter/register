@@ -10,6 +10,7 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.domain.data.RiskPortfolio
 import com.risquanter.register.domain.data.RiskLeaf
+import com.risquanter.register.testcontainers.IrminCompose
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.GreaterEqual
 
@@ -88,14 +89,11 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     )
 
   private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository] =
-    ZLayer.scoped {
-      for
-        urlStr <- ZIO.fromOption(sys.env.get("IRMIN_URL")).mapError(_ => new RuntimeException("IRMIN_URL not set; skip Irmin repo tests"))
-        url    <- ZIO.fromEither(SafeUrl.fromString(urlStr).left.map(errs => new RuntimeException(errs.map(_.message).mkString("; "))))
-        cfg     = IrminConfig(url = url, branch = "main", timeoutSeconds = 10, healthCheckTimeoutMillis = 5000, healthCheckRetries = 2)
-        repo   <- (ZLayer.succeed(cfg) >>> IrminClientLive.layer >>> RiskTreeRepositoryIrmin.layer).build.map(_.get[RiskTreeRepository])
-      yield repo
-    }
+    ZLayer.make[RiskTreeRepository](
+      IrminCompose.irminConfigLayer,
+      IrminClientLive.layer,
+      RiskTreeRepositoryIrmin.layer
+    )
 
   override def spec =
     suite("RiskTreeRepositoryIrminSpec")(
@@ -137,4 +135,4 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           res  <- repo.getById(tree.id)
         yield assertTrue(res.isEmpty)
       }
-    ).provideLayerShared(irminLayer) @@ TestAspect.ifEnvSet("IRMIN_URL") @@ TestAspect.sequential
+    ).provideLayerShared(irminLayer) @@ TestAspect.sequential
