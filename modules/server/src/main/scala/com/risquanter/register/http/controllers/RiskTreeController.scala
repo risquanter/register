@@ -60,20 +60,20 @@ class RiskTreeController private (
   /** Get LEC curve for a single node. */
   val getLECCurve: ServerEndpoint[Any, Task] = getLECCurveEndpoint.serverLogicSuccess {
     case (treeId, nodeIdSafe, includeProvenance) =>
-      riskTreeService.getLECCurve(nodeIdSafe, includeProvenance)
+      riskTreeService.getLECCurve(treeId, nodeIdSafe, includeProvenance)
   }
   
   /** Get probability of exceeding a loss threshold. */
   val probOfExceedance: ServerEndpoint[Any, Task] = probOfExceedanceEndpoint.serverLogicSuccess {
     case (treeId, nodeIdSafe, threshold, includeProvenance) =>
-      riskTreeService.probOfExceedance(nodeIdSafe, threshold, includeProvenance)
+      riskTreeService.probOfExceedance(treeId, nodeIdSafe, threshold, includeProvenance)
   }
   
   /** Get LEC curves for multiple nodes with shared tick domain. */
   val getLECCurvesMulti: ServerEndpoint[Any, Task] = getLECCurvesMultiEndpoint.serverLogicSuccess {
     case (treeId, includeProvenance, nodeIds) =>
       // nodeIds already validated as List[SafeId.SafeId] by JsonDecoder
-      riskTreeService.getLECCurvesMulti(nodeIds.toSet, includeProvenance)
+      riskTreeService.getLECCurvesMulti(treeId, nodeIds.toSet, includeProvenance)
         .map(_.map { case (nodeId, curve) => (nodeId.value, curve) })
   }
 

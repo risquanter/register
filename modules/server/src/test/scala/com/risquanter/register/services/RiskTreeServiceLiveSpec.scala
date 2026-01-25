@@ -193,7 +193,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
           
           // Call new getLECCurve API
-          response <- service(_.getLECCurve(rootId))
+          response <- service(_.getLECCurve(tree.id, rootId))
         } yield response
 
         program.assert { response =>
@@ -243,7 +243,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
           rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("portfolio-root".refineUnsafe)
-          response <- service(_.getLECCurve(rootId))
+          response <- service(_.getLECCurve(tree.id, rootId))
         } yield response
 
         program.assert { response =>
@@ -255,9 +255,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurve fails for nonexistent node") {
         val program = for {
-          _ <- service(_.create(validRequest))
+          tree <- service(_.create(validRequest))
           invalidId = com.risquanter.register.domain.data.iron.SafeId.SafeId("nonexistent".refineUnsafe)
-          result <- service(_.getLECCurve(invalidId).flip)
+          result <- service(_.getLECCurve(tree.id, invalidId).flip)
         } yield result
 
         program.assert {
@@ -272,9 +272,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
           
           // Test at multiple thresholds
-          prob1 <- service(_.probOfExceedance(rootId, 1000L))   // Low threshold
-          prob2 <- service(_.probOfExceedance(rootId, 25000L))  // Mid threshold
-          prob3 <- service(_.probOfExceedance(rootId, 50000L))  // High threshold
+          prob1 <- service(_.probOfExceedance(tree.id, rootId, 1000L))   // Low threshold
+          prob2 <- service(_.probOfExceedance(tree.id, rootId, 25000L))  // Mid threshold
+          prob3 <- service(_.probOfExceedance(tree.id, rootId, 50000L))  // High threshold
         } yield (prob1, prob2, prob3)
 
         program.assert { case (prob1, prob2, prob3) =>
@@ -293,8 +293,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
           
           // Call twice with same threshold
-          prob1 <- service(_.probOfExceedance(rootId, 10000L))
-          prob2 <- service(_.probOfExceedance(rootId, 10000L))
+          prob1 <- service(_.probOfExceedance(tree.id, rootId, 10000L))
+          prob2 <- service(_.probOfExceedance(tree.id, rootId, 10000L))
         } yield (prob1, prob2)
 
         program.assert { case (prob1, prob2) =>
@@ -311,9 +311,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       // service layer omits it from response when not requested.
       test("getLECCurve with includeProvenance=true returns provenances") {
         val program = for {
-          _ <- service(_.create(validRequest))
+          tree <- service(_.create(validRequest))
           rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
-          response <- service(_.getLECCurve(rootId, includeProvenance = true))
+          response <- service(_.getLECCurve(tree.id, rootId, includeProvenance = true))
         } yield response
 
         program.assert { response =>
@@ -324,9 +324,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurve with includeProvenance=false returns empty provenances") {
         val program = for {
-          _ <- service(_.create(validRequest))
+          tree <- service(_.create(validRequest))
           rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
-          response <- service(_.getLECCurve(rootId, includeProvenance = false))
+          response <- service(_.getLECCurve(tree.id, rootId, includeProvenance = false))
         } yield response
 
         program.assert { response =>
@@ -336,9 +336,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurve defaults to no provenance") {
         val program = for {
-          _ <- service(_.create(validRequest))
+          tree <- service(_.create(validRequest))
           rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
-          response <- service(_.getLECCurve(rootId))  // No includeProvenance arg
+          response <- service(_.getLECCurve(tree.id, rootId))  // No includeProvenance arg
         } yield response
 
         program.assert { response =>
@@ -384,7 +384,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           leaf1Id = com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-1".refineUnsafe)
           leaf2Id = com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-2".refineUnsafe)
           
-          curves <- service(_.getLECCurvesMulti(Set(leaf1Id, leaf2Id)))
+          curves <- service(_.getLECCurvesMulti(tree.id, Set(leaf1Id, leaf2Id)))
         } yield curves
 
         program.assert { curves =>
@@ -433,7 +433,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           nodeAId = com.risquanter.register.domain.data.iron.SafeId.SafeId("node-a".refineUnsafe)
           nodeBId = com.risquanter.register.domain.data.iron.SafeId.SafeId("node-b".refineUnsafe)
           
-          curves <- service(_.getLECCurvesMulti(Set(nodeAId, nodeBId)))
+          curves <- service(_.getLECCurvesMulti(tree.id, Set(nodeAId, nodeBId)))
         } yield curves
 
         program.assert { curves =>
@@ -449,7 +449,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurvesMulti rejects empty set") {
         for {
-          exit <- service(_.getLECCurvesMulti(Set.empty)).exit
+          tree <- service(_.create(validRequest))
+          exit <- service(_.getLECCurvesMulti(tree.id, Set.empty)).exit
         } yield assertTrue(
           exit.isFailure
         )

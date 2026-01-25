@@ -58,12 +58,13 @@ object IrminCompose:
 
       startResult <- ZIO.attemptBlocking {
         // Start only the irmin service (not register-server which would conflict with existing containers)
+        // Assumes image local/irmin:3.11 is prebuilt (see docker-compose.yml)
         val startCmd = Seq(
           "docker", "compose",
           "-f", composeFile.getAbsolutePath,
           "-p", projectName,
           "--profile", "persistence",
-          "up", "-d", "--build", "--wait",
+          "up", "-d", "--wait",
           "irmin"  // Only start the irmin service
         )
 

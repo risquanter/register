@@ -41,23 +41,41 @@ class RiskTreeServiceLive private (
   
   import RiskTreeServiceLive.ErrorContext
   
-  /** Find which tree contains a given node.
-    * 
-    * Scans all trees in repository to find the one with the node in its index.
-    * 
-    * @param nodeId Node to search for
-    * @return RiskTree containing the node, or ValidationFailed if not found
-    */
-  private def findTreeContainingNode(nodeId: NodeId): Task[RiskTree] =
-    for {
-      allTrees <- collectAllTrees
-      tree <- ZIO.fromOption(allTrees.find(t => t.index.nodes.contains(nodeId)))
-        .orElseFail(ValidationFailed(List(ValidationError(
-          field = "nodeId",
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = s"Node ${nodeId.value} not found in any tree"
+  /** Fetch tree by id or fail with ValidationFailed. */
+  private def getTreeOrFail(treeId: NonNegativeLong): Task[RiskTree] =
+    repo.getById(treeId).flatMap {
+      case Some(tree) => ZIO.succeed(tree)
+      case None =>
+        ZIO.fail(ValidationFailed(List(ValidationError(
+          field = "treeId",
+          code = ValidationErrorCode.REQUIRED_FIELD,
+          message = s"Tree not found: $treeId"
         ))))
-    } yield tree
+    }
+    
+  /** Fetch tree and node together or fail with ValidationFailed. */
+  private def lookupNodeInTree(treeId: NonNegativeLong, nodeId: NodeId): Task[(RiskTree, RiskNode)] =
+    for
+      tree <- getTreeOrFail(treeId)
+      node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
+        field = "nodeId",
+        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"Node ${nodeId.value} not found in tree ${tree.id}"
+      ))))
+    yield (tree, node)
+
+  /** Fetch tree and all requested nodes; fail with aggregated validation errors when any node is missing. */
+  private def lookupNodesInTree(treeId: NonNegativeLong, nodeIds: Set[NodeId]): Task[(RiskTree, Map[NodeId, RiskNode])] =
+    for
+      tree <- getTreeOrFail(treeId)
+      missing = nodeIds.filterNot(tree.index.nodes.contains)
+      _ <- if missing.isEmpty then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
+        field = "nodeIds",
+        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"Node ${id.value} not found in tree ${tree.id}"
+      ))))
+      nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
+    yield (tree, nodes)
 
   private def collectAllTrees: Task[List[RiskTree]] =
     repo.getAll.flatMap { results =>
@@ -257,26 +275,19 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def getLECCurve(nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] = {
+  override def getLECCurve(treeId: NonNegativeLong, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] = {
     val operation = tracing.span("getLECCurve", SpanKind.INTERNAL) {
       for {
+        _ <- tracing.setAttribute("tree_id", treeId)
         _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
         
-        // Find tree containing this node
-        tree <- findTreeContainingNode(nodeId)
+        // Fetch requested tree and node
+        (tree, node) <- lookupNodeInTree(treeId, nodeId)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
         result <- resolver.ensureCached(tree, nodeId, includeProvenance)
         _ <- tracing.setAttribute("cache_resolved", true)
-        
-        // Get node from tree index for metadata
-        node <- ZIO.fromOption(tree.index.nodes.get(nodeId))
-          .orElseFail(ValidationFailed(List(ValidationError(
-            field = "nodeId",
-            code = ValidationErrorCode.REQUIRED_FIELD,
-            message = s"Node not found: $nodeId"
-          ))))
         
         // Generate LEC curve points from cached result
         curvePoints = LECGenerator.generateCurvePoints(result)
@@ -310,15 +321,16 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def probOfExceedance(nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal] = {
+  override def probOfExceedance(treeId: NonNegativeLong, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal] = {
     val operation = tracing.span("probOfExceedance", SpanKind.INTERNAL) {
       for {
+        _ <- tracing.setAttribute("tree_id", treeId)
         _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("threshold", threshold)
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
         
-        // Find tree containing this node
-        tree <- findTreeContainingNode(nodeId)
+        // Fetch requested tree and ensure node exists within it
+        (tree, _) <- lookupNodeInTree(treeId, nodeId)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
         result <- resolver.ensureCached(tree, nodeId, includeProvenance)
@@ -336,23 +348,25 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def getLECCurvesMulti(nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]] = {
+  override def getLECCurvesMulti(treeId: NonNegativeLong, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]] = {
     val operation = tracing.span("getLECCurvesMulti", SpanKind.INTERNAL) {
       for {
+        _ <- tracing.setAttribute("tree_id", treeId)
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
         _ <- tracing.setAttribute("node_ids", nodeIds.map(_.value).mkString(","))
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
         
-        // Find tree containing the first node (assuming all nodes from same tree)
-        tree <- if (nodeIds.isEmpty) {
+        // Validate inputs and fetch requested tree + nodes
+        treeWithNodes <- if (nodeIds.isEmpty) {
           ZIO.fail(ValidationFailed(List(ValidationError(
             field = "nodeIds",
             code = ValidationErrorCode.EMPTY_COLLECTION,
             message = "nodeIds set is empty"
           ))))
         } else {
-          findTreeContainingNode(nodeIds.head)
+          lookupNodesInTree(treeId, nodeIds)
         }
+        (tree, _) = treeWithNodes
         
         // Batch cache-aside: ensure all results are cached
         results <- resolver.ensureCachedAll(tree, nodeIds, includeProvenance)

@@ -3,9 +3,7 @@ services:
   # Irmin GraphQL Server (Persistence Layer)
   # ============================================================================
   irmin:
-    build:
-      context: ./dev
-      dockerfile: Dockerfile.irmin
+    image: local/irmin:3.11  # prebuilt from dev/Dockerfile.irmin
     container_name: irmin-graphql
     ports:
       - "9080:8080"  # Expose on 9080 to avoid conflict with register-server
