@@ -1,6 +1,9 @@
 package com.risquanter.register.http
 
 import java.net.ServerSocket
+import java.net.http.{HttpClient, HttpRequest, HttpResponse}
+import java.net.URI
+import java.time.Duration
 
 import zio.*
 import zio.http.*
@@ -87,7 +90,9 @@ object HttpTestHarness:
 
         serverFiber <- Server.serve(httpApp).provideEnvironment(env).forkScoped
         _           <- ZIO.addFinalizer(serverFiber.interrupt)
-      yield RunningServer(baseUrl = s"http://127.0.0.1:$port", port = port)
+        baseUrl = s"http://127.0.0.1:$port"
+        _ <- waitForHealth(baseUrl)
+      yield RunningServer(baseUrl = baseUrl, port = port)
     }
 
   private def randomPort: Task[Int] =
@@ -127,6 +132,25 @@ object HttpTestHarness:
       HealthController.live
     )
 
+  private def waitForHealth(baseUrl: String): Task[Unit] =
+    val client = HttpClient.newHttpClient()
+    val request = HttpRequest.newBuilder()
+      .uri(URI.create(s"$baseUrl/api/health"))
+      .timeout(Duration.ofSeconds(2))
+      .GET()
+      .build()
+
+    val probe = ZIO.attempt {
+      val response = client.send(request, HttpResponse.BodyHandlers.ofString())
+      response.statusCode() == 200
+    }.mapError(e => new RuntimeException(s"health probe failed: ${e.getMessage}", e))
+      .flatMap {
+        case true  => ZIO.unit
+        case false => ZIO.fail(new RuntimeException("health probe returned non-200"))
+      }
+
+    probe.retry(Schedule.recurs(10) && Schedule.spaced(200.millis))
+
   private def irminRepoLayer(
       irminConfigLayer: ZLayer[Any, Throwable, IrminConfig]
   ): ZLayer[Any, Throwable, RiskTreeRepository] =
@@ -142,13 +166,14 @@ object HttpTestHarness:
         cfg    <- ZIO.service[IrminConfig]
         client <- ZIO.service[IrminClient]
         retry   = Schedule.recurs(math.max(0, cfg.healthCheckRetries))
-        _ <- client.healthCheck
-               .flatMap(ok => if ok then ZIO.unit else ZIO.fail(new RuntimeException("Irmin health check returned false")))
-               .mapError(err => new RuntimeException(s"Irmin health check failed: $err"))
-               .retry(retry)
-               .timeoutFail(new RuntimeException(s"Irmin health check timed out after ${cfg.healthCheckTimeout.toMillis} ms"))(cfg.healthCheckTimeout)
-               .tapError(e => ZIO.logError(s"Irmin health check failed: ${e.getMessage}"))
-               .tap(_ => ZIO.logInfo(s"Irmin repository selected at ${cfg.url}"))
+           _ <- client.healthCheck
+             .flatMap(ok => if ok then ZIO.unit else ZIO.fail(new RuntimeException("Irmin health check returned false")))
+             .mapError(err => new RuntimeException(s"Irmin health check failed: $err"))
+             .retry(retry)
+             .timeoutFail(new RuntimeException(s"Irmin health check timed out after ${cfg.healthCheckTimeout.toMillis} ms"))(cfg.healthCheckTimeout)
+                 .provideSomeLayer[IrminClient & IrminConfig](ZLayer.succeed(Clock.ClockLive))
+             .tapError(e => ZIO.logError(s"Irmin health check failed: ${e.getMessage}"))
+             .tap(_ => ZIO.logInfo(s"Irmin repository selected at ${cfg.url}"))
       yield client
     }
 

@@ -140,7 +140,10 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
                       val fullPath = IrminPath.unsafeFrom(s"${nodePrefix.value}/${child.value}")
                       handleIrmin(irmin.get(fullPath)).flatMap {
                         case Some(json) =>
-                          ZIO.fromEither(json.fromJson[RiskNode].left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err")))
+                          val decoded: Either[String, RiskNode] =
+                            json.fromJson[RiskLeaf].map(node => node: RiskNode)
+                              .orElse(json.fromJson[RiskPortfolio].map(node => node: RiskNode))
+                          ZIO.fromEither(decoded.left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err")))
                         case None =>
                           ZIO.fail(RepositoryFailure(s"Missing node value at ${fullPath.value}"))
                       }
@@ -228,7 +231,10 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     s"risk-tree:$treeId:delete:meta"
 
   private def handleIrmin[A](effect: IO[IrminError, A]): Task[A] =
-    effect.mapError { err => RepositoryFailure(err.getMessage) }
+    effect.mapError { err =>
+      val reason = Option(err.getMessage).filter(_.nonEmpty).getOrElse(err.toString)
+      RepositoryFailure(reason)
+    }
 
 private final case class Meta(name: SafeName.SafeName, rootId: NodeId)
 object Meta:

@@ -51,11 +51,15 @@ final case class ListTreeData(
 )
 
 final case class ListTreeMainData(
-    tree: ListTreeTreeData
+  tree: ListTreeTreeData
 )
 
 final case class ListTreeTreeData(
-    list: List[TreeNode]
+  get_tree: Option[ListTreeGetTree]
+)
+
+final case class ListTreeGetTree(
+  list: List[TreeNode]
 )
 
 /**
@@ -70,6 +74,7 @@ final case class TreeNode(
 
 object ListTreeResponse:
   given JsonCodec[TreeNode] = DeriveJsonCodec.gen[TreeNode]
+  given JsonCodec[ListTreeGetTree] = DeriveJsonCodec.gen[ListTreeGetTree]
   given JsonCodec[ListTreeTreeData] = DeriveJsonCodec.gen[ListTreeTreeData]
   given JsonCodec[ListTreeMainData] = DeriveJsonCodec.gen[ListTreeMainData]
   given JsonCodec[ListTreeData] = DeriveJsonCodec.gen[ListTreeData]

@@ -95,5 +95,5 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           assertTrue(listed.exists(_.id == created.id)) &&
           assertTrue(fetched.exists(_.id == created.id))
       }
-    ).provideLayerShared(harnessLayer) @@ TestAspect.sequential
+    ).provideLayerShared(harnessLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock
 

@@ -119,7 +119,13 @@ final class IrminClientLive private (
       .flatMap { response =>
         response.body match
           case Right(value) => ZIO.succeed(value)
-          case Left(error)  => ZIO.fail(parseError(error, response.code))
+          case Left(error)  =>
+            val status = response.code
+            val detail = error match
+              case HttpError(body, _)                 => s"HttpError status=${status.code} body=$body"
+              case DeserializationException(orig, msg) => s"Deserialization error: $msg; original=$orig"
+              case other                               => other.toString
+            ZIO.logError(s"Irmin executeQuery failed: $detail") *> ZIO.fail(parseError(error, status))
       }
       .mapError(mapNetworkError)
 
@@ -151,10 +157,11 @@ final class IrminClientLive private (
       case None    => failWithError(response.errors)
 
   private def extractList(prefix: IrminPath, response: ListTreeResponse): IO[IrminError, List[IrminPath]] =
-    response.data.flatMap(_.main).map(_.tree.list) match
+    response.data.flatMap(_.main).flatMap(_.tree.get_tree).map(_.list) match
       case Some(nodes) =>
         val base = if prefix.value.isEmpty then "" else s"${prefix.value}/"
-        val childNames = nodes.map(_.path.stripPrefix(base)).filter(_.nonEmpty)
+        val cleanedPaths = nodes.map(_.path.stripPrefix("/"))
+        val childNames = cleanedPaths.map(_.stripPrefix(base)).filter(_.nonEmpty)
         ZIO.foreach(childNames)(name => ZIO.fromEither(IrminPath.from(name).left.map(IrminUnavailable(_))))
       case None => failWithListError(response.errors)
 
