@@ -1,7 +1,7 @@
 # RiskTreeRepositoryIrmin Implementation Plan
 
 **Date:** 2026-01-20  
-**Status:** Implemented (per-node); integration tests + wiring pending  
+**Status:** Implemented (per-node); repository integration tests passing; HTTP coverage partial; config wiring selectable  
 **Related:** [CODE-QUALITY-REVIEW-2026-01-20.md](CODE-QUALITY-REVIEW-2026-01-20.md), [IRMIN-INTEGRATION.md](IRMIN-INTEGRATION.md), [ADR-004a-proposal.md](ADR-004a-proposal.md)
 
 ---
@@ -26,7 +26,7 @@ trait RiskTreeRepository {
   def update(id: NonNegativeLong, op: RiskTree => RiskTree): Task[RiskTree]
   def delete(id: NonNegativeLong): Task[RiskTree]
   def getById(id: NonNegativeLong): Task[Option[RiskTree]]
-  def getAll: Task[List[RiskTree]]
+  def getAll: Task[List[Either[RepositoryFailure, RiskTree]]]
 }
 ```
 
@@ -59,20 +59,20 @@ Currently there are two implementations:
 │ 3. RiskTreeServiceLive.create                                               │
 │    - Validates request (Iron types, business rules)                         │
 │    - Builds RiskTree domain object                                          │
-│    - Calls repository.create(riskTree)  ◀─────────── HERE IS THE GAP        │
+│    - Calls repository.create(riskTree) (config selects repo implementation) │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ 4. RiskTreeRepository.create (abstraction)                                  │
 │                                                                             │
-│    CURRENT: RiskTreeRepositoryInMemory                                      │
+│    DEFAULT: RiskTreeRepositoryInMemory (unless `repository.type=irmin`)     │
 │    - Stores in TrieMap                                                      │
 │    - Data lost on restart ❌                                                │
 │    - No audit trail ❌                                                      │
 │    - No versioning ❌                                                       │
 │                                                                             │
-│    NEEDED: RiskTreeRepositoryIrmin                                          │
+│    AVAILABLE: RiskTreeRepositoryIrmin                                       │
 │    - Stores in Irmin via GraphQL                                            │
 │    - Data persisted ✅                                                      │
 │    - Full commit history ✅                                                 │
@@ -82,6 +82,9 @@ Currently there are two implementations:
 
 ---
 
+
+Step 0: Resolve CODE-QUALITY-REVIEW-2026-01-20.md issues
+  │
 ### What RiskTreeRepositoryIrmin Does
 
 For the `create` operation:
@@ -95,16 +98,16 @@ RiskTreeRepositoryIrmin.create(riskTree)
 │                                                                             │
 │ For each node in riskTree.nodes:                                            │
 │   irminClient.set(                                                          │
-│     path = "trees/1/nodes/cyber-root",                                      │
+│     path = "risk-trees/1/nodes/cyber-root",                                │
 │     value = """{"id":"cyber-root","name":"Cyber Risk",                      │
 │                 "parentId":null,"childIds":["phishing","malware"]}""",      │
 │     message = "Create node cyber-root"                                      │
 │   )                                                                         │
 │                                                                             │
 │   irminClient.set(                                                          │
-│     path = "trees/1/nodes/phishing",                                        │
+│     path = "risk-trees/1/nodes/phishing",                                  │
 │     value = """{"id":"phishing","name":"Phishing Attack",                   │
-│                 "parentId":"cyber-root","distributionType":"lognormal"...}""│
+│                 "parentId":"cyber-root","distributionType":"lognormal"...}"""│
 │     message = "Create node phishing"                                        │
 │   )                                                                         │
 │                                                                             │
@@ -112,7 +115,7 @@ RiskTreeRepositoryIrmin.create(riskTree)
 │                                                                             │
 │ Then store metadata:                                                        │
 │   irminClient.set(                                                          │
-│     path = "trees/1/meta",                                                  │
+│     path = "risk-trees/1/meta",                                            │
 │     value = """{"name":"Cyber Risk","rootId":"cyber-root"}""",              │
 │     message = "Create tree 1 metadata"                                      │
 │   )                                                                         │
@@ -122,7 +125,7 @@ RiskTreeRepositoryIrmin.create(riskTree)
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │ Irmin Storage (Content-Addressed)                                           │
 │                                                                             │
-│ trees/                                                                      │
+│ risk-trees/                                                                 │
 │   1/                                                                        │
 │     meta           → {"name":"Cyber Risk","rootId":"cyber-root"}            │
 │     nodes/                                                                  │
@@ -144,16 +147,16 @@ When a user later **updates a single node** (e.g., changes phishing probability)
 With Per-Node Storage (Option A):
 ─────────────────────────────────
 1. User updates phishing node
-2. Repository writes ONLY trees/1/nodes/phishing
-3. Irmin watch fires: "path trees/1/nodes/phishing changed"
+2. Repository writes ONLY risk-trees/1/nodes/phishing
+3. Irmin watch fires: "path risk-trees/1/nodes/phishing changed"
 4. Cache invalidation: invalidate phishing + ancestors (cyber-root)
 5. Only affected LECs recomputed
 
 With Per-Tree Storage (Option B):
 ─────────────────────────────────
 1. User updates phishing node  
-2. Repository writes entire tree at trees/1/definition
-3. Irmin watch fires: "path trees/1/definition changed"
+2. Repository writes entire tree at risk-trees/1/definition
+3. Irmin watch fires: "path risk-trees/1/definition changed"
 4. Cache invalidation: ??? which node changed? Must diff entire tree
 5. Coarse invalidation = more recomputation
 ```
@@ -205,6 +208,8 @@ With Per-Tree Storage (Option B):
                                              audit trail, watch events)
 ```
 
+                                        **Config note:** Runtime wiring is selected via `register.repository.repositoryType`; default is `in-memory`, and `irmin` enables the health-checked Irmin path used by the integration harness.
+
 ---
 
 ### Summary Table
@@ -212,10 +217,10 @@ With Per-Tree Storage (Option B):
 | Question | Answer |
 |----------|--------|
 | **What is it?** | An implementation of `RiskTreeRepository` that uses `IrminClient` to persist trees |
-| **What is implemented?** | `RiskTreeRepositoryIrmin` exists (per-node storage) and maps `IO[IrminError, *]` to repository `Task`s |
-| **What remains?** | Application wiring still points at `RiskTreeRepositoryInMemory`; repository and HTTP integration tests are missing |
+| **What is implemented?** | `RiskTreeRepositoryIrmin` (per-node) with metadata schema, `IrminClient.list`/health check support, selectable repo wiring, and container-backed repo integration spec |
+| **What remains?** | Default config still uses in-memory; HTTP integration spec only covers health + create/list/get; LEC/probability and cache HTTP specs pending; optional Testcontainers isolation and SSE coverage not yet done |
 | **What does it enable?** | Persistent storage, version history, and fine-grained change notifications |
-| **What happens without wiring/tests?** | Runtime still uses in-memory storage; Irmin path remains unexercised in integration suites |
+| **What happens without wiring/tests?** | Runtime stays in-memory unless `repository.type=irmin`; HTTP path lacks coverage for update/delete/LEC/cache |
 
 ---
 
@@ -226,8 +231,8 @@ With Per-Tree Storage (Option B):
 | ID | Goal | Description |
 |----|------|-------------|
 | G1 | Create `RiskTreeRepositoryIrmin` | Implement `RiskTreeRepository` trait using `IrminClient` |
-| G2 | Per-node storage model | Store each node at `trees/{treeId}/nodes/{nodeId}` |
-| G3 | Tree metadata storage | Store tree metadata at `trees/{treeId}/meta` |
+| G2 | Per-node storage model | Store each node at `risk-trees/{treeId}/nodes/{nodeId}` |
+| G3 | Tree metadata storage | Store tree metadata at `risk-trees/{treeId}/meta` |
 | G4 | Validation on load | Use `TreeIndex.fromNodes()` with `Validation` when reconstructing trees |
 | G5 | Proper error mapping | Map Irmin errors to domain error types |
 
@@ -266,7 +271,7 @@ sbt "serverIt/testOnly *RiskTreeRepositoryIrminSpec"
 
 ### 2.3 HTTP API Integration Tests
 
-Full end-to-end tests that verify the complete stack with real HTTP requests.
+Full end-to-end tests that verify the complete stack with real HTTP requests. **Status:** Partial via `HttpApiIntegrationSpec` (health + create/list/get); LEC and cache suites not started.
 
 | ID | Goal | Description |
 |----|------|-------------|
@@ -301,13 +306,12 @@ Full end-to-end tests that verify the complete stack with real HTTP requests.
 
 **Test File Locations:**
 ```
-modules/server-it/src/test/scala/com/risquanter/register/
-  http/
-    RiskTreeApiIntegrationSpec.scala
-    LECApiIntegrationSpec.scala
-    CacheApiIntegrationSpec.scala
-  support/
-    IntegrationTestSupport.scala    # Shared test infrastructure
+modules/server-it/src/test/scala/com/risquanter/register/http/
+  HttpApiIntegrationSpec.scala      # health + create/list/get (Irmin-backed harness)
+  LECApiIntegrationSpec.scala       # TODO
+  CacheApiIntegrationSpec.scala     # TODO
+modules/server-it/src/test/scala/com/risquanter/register/http/support/
+  HttpTestHarness.scala             # Stub backend wiring
 ```
 
 ### 2.4 Docker-Compose Integration
@@ -321,6 +325,12 @@ modules/server-it/src/test/scala/com/risquanter/register/
 ---
 
 ## 3. Implementation Plan
+
+### Outstanding Tasks (consolidated)
+- Expand HTTP integration to cover LEC/probability endpoints (build out `RiskTreeApiIntegrationSpec` or extend `HttpApiIntegrationSpec`).
+- Add cache-focused HTTP integration (`CacheApiIntegrationSpec`): stats/list/invalidate/clear scenarios.
+- (Optional) Add Testcontainers-based Irmin isolation instead of shared docker-compose volumes.
+- (Optional) Add SSE integration coverage after cache/LEC specs.
 
 ### Step 0: Resolve Technical Debt
 
@@ -364,7 +374,7 @@ trait IrminClient:
 
 **Goal:** Represent metadata stored at `risk-trees/{treeId}/meta`.
 
-**Current state:** Metadata is modeled inline as a private `Meta` case class inside the implemented repository ([RiskTreeRepositoryIrmin.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala)); it captures `name` and `rootId` and is encoded/decoded with `zio-json`. No standalone `TreeMetadata` file exists yet—introduce one only if other components need to share the type.
+**Current state:** Metadata is modeled as `TreeMetadata` ([modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala](../modules/server/src/main/scala/com/risquanter/register/repositories/model/TreeMetadata.scala)) with schema version + timestamps; legacy inline `Meta` decoder remains in `RiskTreeRepositoryIrmin` for backward compatibility.
 
 **Deliverables:**
 - [x] Create `TreeMetadata` case class with JSON codec
@@ -382,17 +392,17 @@ trait IrminClient:
 
 | Method | Implementation |
 |--------|----------------|
-| `create` | Write each node to `trees/{id}/nodes/{nodeId}`, write metadata to `trees/{id}/meta` |
-| `getById` | Read metadata, list nodes under `trees/{id}/nodes/*`, deserialize, reconstruct with `TreeIndex.fromNodes` |
+| `create` | Write each node to `risk-trees/{id}/nodes/{nodeId}`, write metadata to `risk-trees/{id}/meta` |
+| `getById` | Read metadata, list nodes under `risk-trees/{id}/nodes/*`, deserialize, reconstruct with `TreeIndex.fromNodes` |
 | `update` | Read tree, apply operation, diff nodes, write changed nodes only |
-| `delete` | Remove all paths under `trees/{id}/` |
-| `getAll` | List `trees/*/meta`, load each tree |
+| `delete` | Remove all paths under `risk-trees/{id}/` |
+| `getAll` | List `risk-trees/*/meta`, load each tree |
 
 **Deliverables:**
-- [ ] Implement `RiskTreeRepositoryIrmin` class
-- [ ] Create `ZLayer` for dependency injection
-- [ ] Handle ID generation (use metadata to track next ID)
-- [ ] Proper error mapping (Irmin errors → domain errors)
+- [x] Implement `RiskTreeRepositoryIrmin` class (per-node paths under `risk-trees/*`)
+- [x] Create `ZLayer` for dependency injection
+- [ ] Handle ID generation (use metadata to track next ID) — currently expects provided IDs
+- [x] Proper error mapping (Irmin errors → domain errors)
 
 ---
 
@@ -405,22 +415,18 @@ trait IrminClient:
 **Test Cases:**
 ```scala
 suite("RiskTreeRepositoryIrminSpec")(
-  test("create stores tree and returns with assigned ID"),
-  test("getById returns None for non-existent tree"),
-  test("getById reconstructs tree with valid TreeIndex"),
-  test("update modifies specific nodes"),
-  test("delete removes all tree data"),
-  test("getAll returns all stored trees"),
-  test("create with invalid nodes fails validation"),
-  test("concurrent creates get unique IDs"),
-  test("update preserves nodes not modified"),
-  test("Irmin commits are created for each operation")
+  test("create and get roundtrip with metadata"),
+  test("update prunes removed nodes"),
+  test("list returns created trees"),
+  test("delete removes tree")
 )
 ```
 
+Pending coverage: validation failures, concurrent create, and commit history assertions.
+
 **Deliverables:**
-- [ ] Create `RiskTreeRepositoryIrminSpec`
-- [ ] All tests pass with Irmin container running
+- [x] Create `RiskTreeRepositoryIrminSpec` (container-backed) in `server-it`
+- [x] Tests pass with Irmin container running (see `docker compose --profile persistence` prereq)
 - [ ] Update `server-it/README.md` with new test instructions
 
 ---
@@ -429,33 +435,13 @@ suite("RiskTreeRepositoryIrminSpec")(
 
 **Goal:** Create shared test support for HTTP integration tests.
 
-**File:** `modules/server-it/src/test/scala/com/risquanter/register/support/IntegrationTestSupport.scala`
-
-**Contents:**
-```scala
-object IntegrationTestSupport {
-  /** Layer that starts real HTTP server on random port */
-  def testServerLayer: ZLayer[Any, Throwable, TestServer]
-  
-  /** Layer with Irmin-backed repository */
-  def irminRepositoryLayer: ZLayer[IrminClient, Throwable, RiskTreeRepository]
-  
-  /** Combined layer for full integration tests */
-  def fullTestLayer: ZLayer[Any, Throwable, TestServer & IrminClient]
-  
-  /** sttp client for making HTTP requests */
-  def httpClient: SttpBackend[Task, Any]
-  
-  /** Generate unique test identifiers */
-  def uniqueId: UIO[String]
-}
-```
+**Status:** Implemented as `HttpTestHarness` (random-port ZIO HTTP server) and `http/support/HttpTestHarness` (Tapir stub backend). Server wiring supports Irmin or in-memory repositories; Irmin path includes health check retries and readiness probe.
 
 **Deliverables:**
-- [ ] Create `IntegrationTestSupport` object
-- [ ] Test server binds to random port
-- [ ] Server uses `RiskTreeRepositoryIrmin`
-- [ ] HTTP client configured for tests
+- [x] Test server binds to random port (`HttpTestHarness.irminServer`/`inMemoryServer`)
+- [x] Server uses `RiskTreeRepositoryIrmin` when repository type is Irmin
+- [x] HTTP client fixture available via `SttpClientFixture`
+- [ ] Consolidate into shared `IntegrationTestSupport` if desired (current naming differs)
 
 ---
 
@@ -463,7 +449,9 @@ object IntegrationTestSupport {
 
 **Goal:** Test CRUD endpoints via real HTTP.
 
-**File:** `modules/server-it/src/test/scala/com/risquanter/register/http/RiskTreeApiIntegrationSpec.scala`
+**Status:** Partial via `HttpApiIntegrationSpec` (health + create/list/get); expand to full CRUD and rename/replace with `RiskTreeApiIntegrationSpec`.
+
+**File:** `modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala`
 
 **Test Cases:**
 - POST /risk-trees returns 201 with created tree
@@ -474,10 +462,10 @@ object IntegrationTestSupport {
 - PUT /risk-trees/{id} updates tree
 - DELETE /risk-trees/{id} removes tree
 
-**Deliverables:**
-- [ ] Create `RiskTreeApiIntegrationSpec`
-- [ ] All CRUD endpoints tested
-- [ ] Error responses verified
+  **Deliverables:**
+  - [x] Base HTTP integration spec (`HttpApiIntegrationSpec`) with health + create/list/get
+  - [ ] Expand to full CRUD coverage (update/DELETE + error cases) plus LEC/probability endpoints
+  - [ ] Error responses verified
 
 ---
 
@@ -518,7 +506,7 @@ object IntegrationTestSupport {
 
 **Deliverables:**
 - [ ] Create `CacheApiIntegrationSpec`
-- [ ] Cache behavior fully tested
+- [ ] Cache behavior fully tested (stats/list/invalidate/clear)
 - [ ] Invalidation propagation verified
 
 ---
@@ -528,10 +516,10 @@ object IntegrationTestSupport {
 **Goal:** Complete documentation and optional production wiring.
 
 **Deliverables:**
-- [ ] Update `IRMIN-INTEGRATION.md` with repository usage
-- [ ] Update `server-it/README.md` with all test categories
-- [ ] (Optional) Add config flag to switch `Application.scala` to Irmin repository
-- [ ] Update `IRMIN-INTEGRATION-STATUS-2026-01-20.md` to reflect completion
+- [x] Update `IRMIN-INTEGRATION.md` with repository usage
+- [x] Update `server-it/README.md` with all test categories
+- [x] (Optional) Add config flag to switch `Application.scala` to Irmin repository (via `register.repository.repositoryType`)
+- [x] Update `IRMIN-INTEGRATION-STATUS-2026-01-20.md` to reflect completion
 
 ---
 
@@ -553,10 +541,10 @@ Step 3: RiskTreeRepositoryIrmin implementation — DONE
 Step 4: Repository integration tests (RiskTreeRepositoryIrminSpec)
   │
   ▼
-Step 5: Integration test infrastructure (IntegrationTestSupport)
+Step 5: Integration test infrastructure (HttpTestHarness) — DONE
   │
   ▼
-Step 6: RiskTreeApiIntegrationSpec (CRUD)
+Step 6: HTTP integration spec (expand to full CRUD)
   │
   ▼
 Step 7: LECApiIntegrationSpec (LEC endpoints)
@@ -565,7 +553,7 @@ Step 7: LECApiIntegrationSpec (LEC endpoints)
 Step 8: CacheApiIntegrationSpec (cache management)
   │
   ▼
-Step 9: Documentation and optional production wiring
+Step 9: Documentation and optional production wiring (server-it README pending)
 ```
 
 **Estimated Total Effort:** 12-16 hours

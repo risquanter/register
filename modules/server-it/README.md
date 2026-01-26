@@ -4,34 +4,27 @@ This subproject contains integration tests for the register server that require 
 
 ## Prerequisites
 
-Integration tests now auto-start Irmin via `docker compose` (no manual start needed). If you want to run Irmin yourself:
+Integration tests auto-start Irmin via the `IrminCompose` helper (scoped Docker Compose) — just run the tests and the Irmin container is started/stopped for you. Requirements: Docker + docker-compose on PATH, and the `irmin` image from the repo's `docker-compose.yml` (build it first with `docker compose build irmin` if missing).
+
+If you prefer to run Irmin yourself (optional):
 
 ```bash
-# Start Irmin only
+# Start Irmin only (manual)
 docker compose --profile persistence up -d irmin
 
-# Start backend wired to Irmin (option A: .env.irmin)
-docker compose --profile persistence --env-file .env.irmin up -d register-server irmin
-
-# Start backend wired to Irmin (option B: inline env)
-docker compose --profile persistence \
-  up -d \
-  -e REGISTER_REPOSITORY_TYPE=irmin \
-  -e IRMIN_URL=http://irmin:8080 \
-  register-server irmin
-
-# Stop services when done
+# Stop when done
 docker compose --profile persistence down
 ```
 
 ## Running Tests
 
 ```bash
-# Run all integration tests
+# Run all integration tests (Irmin auto-starts via IrminCompose)
 sbt "serverIt/test"
 
-# Run specific integration test
-sbt "serverIt/testOnly *IrminClientIntegrationSpec"
+# Run specific integration test (Irmin auto-starts)
+sbt "serverIt/testOnly *RiskTreeRepositoryIrminSpec"
+sbt "serverIt/testOnly *HttpApiIntegrationSpec"
 
 # Run only unit tests (excludes integration tests)
 sbt "server/test"
@@ -39,19 +32,25 @@ sbt "server/test"
 # Run all tests (unit + integration)
 sbt "test"  # from root project
 ```
-- HTTP-level specs (e.g., HttpApiIntegrationSpec) start the real HTTP server on a random port backed by an Irmin instance launched via docker compose. Non-integration modules keep using the in-memory repository by default.
+
+- Repository-level specs (e.g., RiskTreeRepositoryIrminSpec) use `IrminCompose.irminConfigLayer` to start a compose-scoped Irmin and stop it when tests finish.
+- HTTP-level specs (HttpApiIntegrationSpec) use `HttpTestHarness.irminServer` to start a real HTTP server on a random port wired to the Irmin-backed repository; the STTP client is provided by `SttpClientFixture.layer`.
+- Ad-hoc harness recipe for new suites:
+  - Server layer: `HttpTestHarness.irminServer(IrminCompose.irminConfigLayer)`
+  - Client layer: `SttpClientFixture.layer` (provides STTP backend + baseUrl)
+  - Combine with your test layer via `provideLayerShared`
 
 ## Project Structure
 
 ```
 modules/server-it/
-  src/
-    test/
-      scala/
-        com/risquanter/register/
-          infra/
-            irmin/
-              IrminClientIntegrationSpec.scala
+  src/test/scala/com/risquanter/register/
+    infra/irmin/IrminClientIntegrationSpec.scala
+    repositories/RiskTreeRepositoryIrminSpec.scala
+    http/HttpApiIntegrationSpec.scala
+    http/support/HttpTestHarness.scala
+    http/support/SttpClientFixture.scala
+    testcontainers/IrminCompose.scala
 ```
 
 ## Adding New Integration Tests

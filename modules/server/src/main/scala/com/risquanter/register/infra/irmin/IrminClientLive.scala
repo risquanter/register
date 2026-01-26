@@ -124,7 +124,6 @@ final class IrminClientLive private (
             val detail = error match
               case HttpError(body, _)                 => s"HttpError status=${status.code} body=$body"
               case DeserializationException(orig, msg) => s"Deserialization error: $msg; original=$orig"
-              case other                               => other.toString
             ZIO.logError(s"Irmin executeQuery failed: $detail") *> ZIO.fail(parseError(error, status))
       }
       .mapError(mapNetworkError)

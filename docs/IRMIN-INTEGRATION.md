@@ -245,25 +245,28 @@ Planned `IrminError` → HTTP mappings (serialized through `ErrorResponse.encode
 
 **Location:** `configs/IrminConfig.scala`
 
-Configuration for connecting to Irmin. Loaded from `application.conf`.
+Configuration for connecting to Irmin. Loaded from `application.conf` under `register.irmin`.
 
 ```scala
 final case class IrminConfig(
-    endpoint: String,        // e.g., "http://localhost:9080"
-    branch: String = "main", // Default branch
-    timeoutSeconds: Int = 30
-)
+  url: SafeUrl,                 // e.g., "http://localhost:9080"
+  branch: String = "main",     // default branch
+  timeoutSeconds: Int = 30,     // request timeout
+  healthCheckTimeoutMillis: Int = 5000,
+  healthCheckRetries: Int = 0
+) {
+  def graphqlUrl: String = s"$url/graphql"
+  def timeout: Duration = timeoutSeconds.seconds
+  def healthCheckTimeout: Duration = healthCheckTimeoutMillis.millis
+}
 ```
 
-**Irmin context:** The `endpoint` points to the `irmin-graphql` server. The `branch` specifies which named branch to use for operations (Irmin supports multiple branches like Git).
+**Irmin context:** `url` is validated via `SafeUrl` and is used to build the `/graphql` endpoint. Health check bounds (timeout/retries) are applied during startup wiring.
 
 **Usage:**
 ```scala
-// Layer from application.conf
-val layer = IrminConfig.layer
-
-// Or provide directly in tests
-val testConfig = IrminConfig("http://localhost:9080")
+val layer = IrminConfig.layer                       // from application.conf
+val program = logic.provide(ZLayer.succeed(cfg) >>> IrminClientLive.layer)
 ```
 
 ---
