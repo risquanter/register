@@ -1,7 +1,7 @@
 # RiskTreeRepositoryIrmin Implementation Plan
 
 **Date:** 2026-01-20  
-**Status:** Implemented (per-node); repository integration tests passing; HTTP coverage partial; config wiring selectable  
+**Status:** Implemented (per-node); node IDs now ULID; repository integration tests passing; HTTP coverage still partial; config wiring selectable  
 **Related:** [CODE-QUALITY-REVIEW-2026-01-20.md](CODE-QUALITY-REVIEW-2026-01-20.md), [IRMIN-INTEGRATION.md](IRMIN-INTEGRATION.md), [ADR-004a-proposal.md](ADR-004a-proposal.md)
 
 ---
@@ -38,7 +38,7 @@ Currently there are two implementations:
 
 ### Service Call Chain: Create Risk Tree
 
-**User action:** POST a new risk tree via HTTP
+**User action:** POST a new risk tree via HTTP (node IDs are ULIDs; tree IDs remain numeric for now)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -98,17 +98,17 @@ RiskTreeRepositoryIrmin.create(riskTree)
 │                                                                             │
 │ For each node in riskTree.nodes:                                            │
 │   irminClient.set(                                                          │
-│     path = "risk-trees/1/nodes/cyber-root",                                │
-│     value = """{"id":"cyber-root","name":"Cyber Risk",                      │
-│                 "parentId":null,"childIds":["phishing","malware"]}""",      │
-│     message = "Create node cyber-root"                                      │
+│     path = "risk-trees/1/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAV",                                │
+│     value = """{"id":"01ARZ3NDEKTSV4RRFFQ69G5FAV","name":"Cyber Risk",                      │
+│                 "parentId":null,"childIds":["01ARZ3NDEKTSV4RRFFQ69G5FAW","01ARZ3NDEKTSV4RRFFQ69G5FAX"]}""",      │
+│     message = "Create node 01ARZ3NDEKTSV4RRFFQ69G5FAV"                                      │
 │   )                                                                         │
 │                                                                             │
 │   irminClient.set(                                                          │
-│     path = "risk-trees/1/nodes/phishing",                                  │
-│     value = """{"id":"phishing","name":"Phishing Attack",                   │
-│                 "parentId":"cyber-root","distributionType":"lognormal"...}"""│
-│     message = "Create node phishing"                                        │
+│     path = "risk-trees/1/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAW",                                  │
+│     value = """{"id":"01ARZ3NDEKTSV4RRFFQ69G5FAW","name":"Phishing Attack",                   │
+│                 "parentId":"01ARZ3NDEKTSV4RRFFQ69G5FAV","distributionType":"lognormal"...}"""│
+│     message = "Create node 01ARZ3NDEKTSV4RRFFQ69G5FAW"                                        │
 │   )                                                                         │
 │                                                                             │
 │   ... repeat for each node ...                                              │
@@ -116,7 +116,7 @@ RiskTreeRepositoryIrmin.create(riskTree)
 │ Then store metadata:                                                        │
 │   irminClient.set(                                                          │
 │     path = "risk-trees/1/meta",                                            │
-│     value = """{"name":"Cyber Risk","rootId":"cyber-root"}""",              │
+│     value = """{"name":"Cyber Risk","rootId":"01ARZ3NDEKTSV4RRFFQ69G5FAV"}""",              │
 │     message = "Create tree 1 metadata"                                      │
 │   )                                                                         │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -217,8 +217,8 @@ With Per-Tree Storage (Option B):
 | Question | Answer |
 |----------|--------|
 | **What is it?** | An implementation of `RiskTreeRepository` that uses `IrminClient` to persist trees |
-| **What is implemented?** | `RiskTreeRepositoryIrmin` (per-node) with metadata schema, `IrminClient.list`/health check support, selectable repo wiring, and container-backed repo integration spec |
-| **What remains?** | Default config still uses in-memory; HTTP integration spec only covers health + create/list/get; LEC/probability and cache HTTP specs pending; optional Testcontainers isolation and SSE coverage not yet done |
+| **What is implemented?** | `RiskTreeRepositoryIrmin` (per-node, ULID node IDs) with metadata schema, `IrminClient.list`/health check support, selectable repo wiring, and container-backed repo integration spec |
+| **What remains?** | Default config still uses in-memory; HTTP integration spec only covers health + create/list/get; LEC/probability and cache HTTP specs pending; optional Testcontainers isolation and SSE coverage not yet done; tree IDs still numeric |
 | **What does it enable?** | Persistent storage, version history, and fine-grained change notifications |
 | **What happens without wiring/tests?** | Runtime stays in-memory unless `repository.type=irmin`; HTTP path lacks coverage for update/delete/LEC/cache |
 

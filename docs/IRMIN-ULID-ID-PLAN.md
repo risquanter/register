@@ -2,7 +2,7 @@
 
 **Purpose:** Introduce ULIDs (via `com.bilal-fazlani` %% `zio-ulid` % `1.3.1`) for risk tree IDs and node IDs, with a rollout that is safe for multiple service instances sharing the same Irmin backend.
 
-**Status:** Planning
+**Status:** In progress — node IDs now ULID (`SafeId`); tree IDs will migrate to ULID (decision made). Validation + tests already cover ULID nodes; tree-ID migration, server-side generation, and duplicate protections are next.
 
 ## ADR Compliance (planning phase)
 - ADR-001 (Iron types): ensure ULIDs are validated/normalized before use.
@@ -19,48 +19,53 @@
 
 ## TODOs (sequenced)
 1) Dependencies & wiring
-   - Add `libraryDependencies += "com.bilal-fazlani" %% "zio-ulid" % "1.3.1"` to `server` and `server-it` where generation/validation is needed.
-   - Provide a small ULID service wrapper (pure, no global state) for generation and parsing.
+   - ✅ Add `zio-ulid` dependency to common/server/server-it.
+   - ✅ Provide a ULID service wrapper for node IDs; extend it to tree IDs during migration.
 
 2) Domain types
-   - Introduce ULID-refined types for tree IDs and node IDs (Iron-compatible). Decide whether to replace `NonNegativeLong` tree IDs or support dual mode during migration.
-   - Ensure casing/format normalization (e.g., uppercase Crockford) to avoid duplicate representations.
+   - ✅ Node IDs: `SafeId` now ULID with canonical uppercase constraint.
+   - 🔜 Tree IDs: migrate from `NonNegativeLong` to ULID (new refined type, canonical uppercase). No dual-mode period planned unless blockers arise.
 
 3) Validation & DTOs
-   - Update `RiskTreeDefinitionRequest` (and any request/response DTOs) to accept/emit ULIDs for node IDs; ensure clear validation errors.
-   - Document ID format in API docs (if present) and error messages.
+   - ✅ `ValidationUtil.refineId` enforces ULID; `SafeId` spec covers canonical/normalization.
+   - ✅ DTO tests updated to use deterministic ULIDs (`safeId`/`idStr`).
+   - 🔜 Public API must reject client-supplied IDs on create (trees/nodes) and generate ULIDs server-side after payload validation; document the contract and error responses.
 
 4) Repository & path conventions
-   - Update Irmin paths to use ULID strings for tree IDs and node IDs (`risk-trees/{ulid}/nodes/{ulid}`).
-   - Adjust parsing/validation where tree IDs were numeric (`NonNegativeLong`).
-   - Keep per-node storage model intact (ADR-004a alignment).
+   - ✅ Node paths use ULID strings (`risk-trees/{treeId}/nodes/{ulid}`).
+   - 🔜 Tree IDs become ULID: paths shift to `risk-trees/{treeUlid}/nodes/{nodeUlid}`; repository parsing/generation to be updated accordingly.
 
 5) Service & business logic
-   - Propagate ULID types through service signatures (creation returns ULID tree ID; node references use ULIDs).
-   - Preserve existing semantics (no retries added; honor ADR-012).
+   - ✅ Services/tests consume ULID node IDs via helpers; provenance/cache specs updated accordingly.
+   - 🔜 TreeId ULID generation/wiring: introduce server-side ULID generation for trees; API create endpoints accept missing IDs and must ignore/reject client-supplied IDs to avoid bypassing duplicate checks; generation happens after payload validation.
+   - 🔜 Duplicate checks on all create paths (tree and node): enforce uniqueness at the repository/service layer and surface clear 4xx errors when duplicates are attempted.
 
 6) Concurrency & multi-instance safety
-   - Generation is client-side; ULID randomness + timestamp reduce collision risk—no central coordinator required.
-   - Add repository-level duplicate protection (fail fast on existing IDs) to guard concurrent writes.
-   - Consider idempotent create semantics in HTTP layer (optional) to mitigate retried requests.
-      - Add integration test covering Irmin GraphQL `test_and_set` create-if-absent to ensure duplicate writes are rejected without OCaml changes.
+   - ✅ Client-side ULID generation for nodes; deterministic helper for tests/fixtures.
+   - ⏳ Duplicate protection test (`test_and_set`) not written yet.
 
 7) Migration strategy
-   - Decide on cutover: numeric → ULID for tree IDs (breaking) or dual-mode period (support both, mark numeric deprecated).
-   - Backfill existing Irmin data if needed (optional: map old IDs to ULIDs via migration tool and redirect map).
+   - 🔜 Clean cutover for tree IDs to ULID (no dual-mode). No operational data to migrate (only tests), but update fixtures and test data.
+   - 🔜 Communication/versioning plan for the breaking API change (tree IDs become ULID, client-supplied IDs on create are rejected).
 
 8) Observability & testing
-   - Add structured logging for generated IDs (non-sensitive).
-   - Tests: unit tests for ULID validation/normalization; integration tests for repo paths and HTTP roundtrips; integration test for GraphQL `test_and_set` duplicate-prevention path; multi-instance simulation (two repos writing to same Irmin) to assert no collisions and proper duplicate detection.
+   - ✅ SafeId unit/opaque type specs cover canonicalization and invalid formats.
+   - ✅ Integration tests updated to ULID node IDs (server-it repository/API happy path).
+   - 🔜 Add GraphQL `test_and_set` duplicate-prevention IT; multi-instance collision test still open.
+   - 🔜 Add tests for server-generated tree ULIDs and REST create-without-ID contract (client-provided IDs rejected).
+   - 🔜 Add duplicate-check coverage on all POST create paths (tree/node).
 
 9) Documentation
-   - Update `RISKTREE-REPOSITORY-IRMIN-PLAN.md` outstanding tasks with ULID adoption link.
-   - Note API contract change (breaking if tree IDs shift to ULID) and versioning/communication strategy.
+   - ✅ This plan reflects ULID node rollout status.
+   - ⏳ Update public API docs once tree ID decision is made.
 
 ## Open questions
-- Do we need a dual-ID migration window or a clean cutover for tree IDs?
 - Should we expose idempotency keys at HTTP create to aid clients, or rely on ULID uniqueness + duplicate checks?
 - Any downstream systems (reports/exports) that assume numeric tree IDs?
+
+## Notes on error handling and versioning
+- Error handling: when a client supplies an ID on create, return a clear 400 with a domain-specific code (e.g., INVALID_INPUT / ID_NOT_ALLOWED_ON_CREATE). When duplicates are detected by the repository/service, return 409 or domain error signaling duplicate resource. Keep ULID format errors as INVALID_FORMAT.
+- Versioning: API change is breaking (tree IDs become ULID, and create forbids client IDs). Communicate via release notes and, if needed, bump API version or provide a migration window with a separate endpoint.
 
 ## Next step (pending approval)
 - Align on migration approach (dual-mode vs cutover) and update plan accordingly before implementation.

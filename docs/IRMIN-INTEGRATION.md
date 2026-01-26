@@ -127,25 +127,23 @@ What's implemented now:
 
 ### Phase 3: Tree Index & Cache
 
-*Coming next* — Internal cache structure that uses Irmin as source of truth:
-- Parent-pointer index for O(depth) invalidation
-- LEC (Loss Exceedance Curve) cache keyed by path
+*Current state:* Per-node Irmin storage is wired; node IDs are ULIDs (uppercase, Crockford base32) validated via `SafeId`, with deterministic fixtures (`safeId`/`idStr`). Ancestor-path invalidation is implemented (TreeCacheManager walks the TreeIndex and clears only the affected node and its ancestors). LEC curve caching was intentionally rejected; we cache `RiskResult` outcomes only and render curves on demand to avoid tick-domain staleness.
 
-**Path Convention (Planned):**
-Irmin paths will encode `treeId` to enable tree-scoped operations:
+**Path Convention (Current):**
+Irmin paths encode `treeId` (still `NonNegativeLong`) and ULID node IDs:
 ```
-/risk-trees/{treeId}/nodes/{nodeId}
+/risk-trees/{treeId}/nodes/{nodeUlid}
 
 Example:
-/risk-trees/1/nodes/cyber-risk      ← treeId=1, nodeId="cyber-risk"
-/risk-trees/1/nodes/ops-risk        ← treeId=1, nodeId="ops-risk"  
-/risk-trees/2/nodes/cyber-risk      ← treeId=2 (different tree!)
+/risk-trees/1/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAV      ← treeId=1, nodeId ULID
+/risk-trees/1/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAW      ← treeId=1, different node
+/risk-trees/2/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAV      ← same node label, different tree
 ```
 
 This ensures:
 - Irmin watch notifications include treeId (parseable from path)
-- Cache invalidation targets the correct tree's cache
-- Node IDs (SafeId) only need to be unique within a tree, not globally
+- Cache invalidation targets the correct tree's cache via ancestor walk
+- Node IDs are globally valid ULIDs; uniqueness is required per tree
 
 **Note:** Irmin branches are reserved for scenario/what-if analysis (Phase 7), not for tree isolation.
 
