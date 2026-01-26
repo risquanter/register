@@ -329,6 +329,7 @@ modules/server-it/src/test/scala/com/risquanter/register/http/support/
 ### Outstanding Tasks (consolidated)
 - Expand HTTP integration to cover LEC/probability endpoints (build out `RiskTreeApiIntegrationSpec` or extend `HttpApiIntegrationSpec`).
 - Add cache-focused HTTP integration (`CacheApiIntegrationSpec`): stats/list/invalidate/clear scenarios.
+- Plan ULID adoption for tree/node IDs (see `docs/IRMIN-ULID-ID-PLAN.md`).
 - (Optional) Add Testcontainers-based Irmin isolation instead of shared docker-compose volumes.
 - (Optional) Add SSE integration coverage after cache/LEC specs.
 
