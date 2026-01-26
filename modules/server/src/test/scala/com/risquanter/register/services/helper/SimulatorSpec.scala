@@ -171,7 +171,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           results <- Simulator.simulate(samplers)
         } yield assertTrue(
           results.size == 3,
-          results.map(_.name).toSet == Set("RISK-MULTI-1", "RISK-MULTI-2", "RISK-MULTI-3"),
+            results.map(_.name).toSet == Set(safeId("RISK-MULTI-1"), safeId("RISK-MULTI-2"), safeId("RISK-MULTI-3")),
           results.forall(_.nTrials == 1000)
         )
       },

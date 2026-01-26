@@ -4,6 +4,9 @@ import zio.test.Gen
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.ValidationError
 import com.risquanter.register.domain.data.iron.SafeId
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+import scala.annotation.tailrec
 
 /**
   * Shared test utilities for creating Iron-refined types in tests.
@@ -36,23 +39,45 @@ trait TestHelpers {
   /**
     * Create a SafeId.SafeId from a String.
     *
-    * Uses SafeId.fromString for validation - will throw at runtime
-    * if the string doesn't meet SafeId constraints (MinLength[3]).
+    * First tries SafeId.fromString; if validation fails, falls back to a
+    * deterministic ULID derived from the label. This keeps fixtures stable
+    * while avoiding repeated literal ULIDs. Use safeIdStrict when you want
+    * failures for invalid inputs.
     *
-    * @param s String value (must be at least 3 characters)
+    * @param s String value (any label; non-ULID labels hash to a ULID)
     * @return SafeId.SafeId refined type
-    * @throws IllegalArgumentException if refinement fails
+    * @throws IllegalArgumentException if deterministic fallback somehow fails
     */
   def safeId(s: String): SafeId.SafeId =
     SafeId.fromString(s).getOrElse(
+      deterministicUlidFromLabel(s)
+    )
+
+  /**
+    * Strict SafeId constructor: fails if the input is not a valid ULID.
+    */
+  def safeIdStrict(s: String): SafeId.SafeId =
+    SafeId.fromString(s).getOrElse(
       throw new IllegalArgumentException(s"Invalid SafeId in test: $s")
     )
+
+  /**
+    * Deterministically derive a SafeId from a human-readable label.
+    * Provided as an explicit helper to avoid masking mistakes when desired.
+    */
+  def ulidFromLabel(label: String): SafeId.SafeId = deterministicUlidFromLabel(label)
+
+  /**
+    * Deterministic ULID string from a human-readable label, derived via safeId(label).value.
+    * Use in fixtures that need a String id but must conform to SafeId/ULID constraints.
+    */
+  def idStr(label: String): String = safeId(label).value
     
   /**
     * ZIO Test generator for valid SafeId values.
     *
-    * Generates alphanumeric strings between 3-30 characters,
-    * satisfying SafeId constraints (MinLength[3], MaxLength[30]).
+    * Generates alpha-numeric labels (1-32 chars) and hashes them to ULIDs,
+    * matching safeId/safeIdStrict expectations.
     *
     * Usage:
     * {{{
@@ -64,7 +89,7 @@ trait TestHelpers {
     * }}}
     */
   val genSafeId: Gen[Any, SafeId.SafeId] =
-    Gen.alphaNumericStringBounded(3, 30).map(safeId)
+    Gen.alphaNumericStringBounded(1, 32).map(label => deterministicUlidFromLabel(label))
 
   /**
     * Extract validated value or throw AssertionError with accumulated messages.
@@ -75,6 +100,33 @@ trait TestHelpers {
       errs => throw new AssertionError(s"$label: ${errs.map(_.message).mkString("; ")}"),
       identity
     )
+
+  /** Deterministically derive a ULID from a human-readable label (for fixtures/tests).
+    * Uses SHA-256(label) -> first 16 bytes -> Crockford base32 encoding.
+    */
+  private def deterministicUlidFromLabel(label: String): SafeId.SafeId =
+    val bytes = MessageDigest.getInstance("SHA-256").digest(label.getBytes(StandardCharsets.UTF_8)).take(16)
+    val ulidString = encodeBase32(bytes)
+    SafeId.fromString(ulidString).getOrElse(
+      throw new IllegalStateException(s"Deterministic ULID generation failed for label: $label")
+    )
+
+  private val crockfordAlphabet: Array[Char] = "0123456789ABCDEFGHJKMNPQRSTVWXYZ".toCharArray
+
+  private def encodeBase32(bytes: Array[Byte]): String =
+    // Convert 128-bit value to 26 Crockford base32 characters
+    val totalBits = bytes.length * 8
+    require(totalBits == 128, s"ULID encoding expects 16 bytes, got ${bytes.length}")
+
+    @tailrec
+    def toBase32(value: BigInt, remaining: Int, acc: List[Char]): List[Char] =
+      if remaining == 0 then acc
+      else
+        val (quot, rem) = value /% 32
+        toBase32(quot, remaining - 1, crockfordAlphabet(rem.toInt) :: acc)
+
+    val bi = BigInt(1, bytes)
+    toBase32(bi, 26, Nil).mkString
 }
 
 /**

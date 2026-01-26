@@ -6,7 +6,7 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, TreeCacheManager}
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, idStr}
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
@@ -157,7 +157,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     suite("Provenance Capture")(
       test("ensureCached with includeProvenance=true captures metadata") {
         val leaf = RiskLeaf.unsafeApply(
-          id = "test-risk",
+          id = idStr("test-risk"),
           name = "Test Risk",
           distributionType = "lognormal",
           probability = 0.5,
@@ -185,7 +185,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       // This ensures cache keys remain simple (nodeId only) and avoids cache fragmentation.
       test("resolver always captures provenance regardless of includeProvenance flag") {
         val leaf = RiskLeaf.unsafeApply(
-          id = "test-risk",
+          id = idStr("test-risk"),
           name = "Test Risk",
           distributionType = "lognormal",
           probability = 0.5,
@@ -208,11 +208,12 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance captures correct entityId from riskId hash") {
-        val riskIdStr = "cyber-attack"
-        val expectedEntityId = riskIdStr.hashCode.toLong
+        val riskIdLabel = "cyber-attack"
+        val riskId = safeId(riskIdLabel)
+        val expectedEntityId = riskId.value.hashCode.toLong
         
         val leaf = RiskLeaf.unsafeApply(
-          id = riskIdStr,
+          id = riskId.value,
           name = "Cyber Attack",
           distributionType = "lognormal",
           probability = 0.25,
@@ -228,9 +229,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          result <- resolver.ensureCached(testTree, safeId(riskIdStr), includeProvenance = true)
+          result <- resolver.ensureCached(testTree, riskId, includeProvenance = true)
         } yield {
-          val nodeProv = result.provenances.find(_.riskId == safeId(riskIdStr)).get
+          val nodeProv = result.provenances.find(_.riskId == riskId).get
           assertTrue(nodeProv.entityId == expectedEntityId) &&
           assertTrue(nodeProv.occurrenceVarId == expectedEntityId.hashCode + 1000L) &&
           assertTrue(nodeProv.lossVarId == expectedEntityId.hashCode + 2000L)
@@ -239,7 +240,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       
       test("provenance captures distribution parameters for lognormal") {
         val leaf = RiskLeaf.unsafeApply(
-          id = "lognormal-risk",
+          id = idStr("lognormal-risk"),
           name = "Lognormal Risk",
           distributionType = "lognormal",
           probability = 0.5,
@@ -271,7 +272,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       
       test("provenance aggregates multiple node provenances in portfolio") {
         val risk1 = RiskLeaf.unsafeApply(
-          id = "risk1",
+          id = idStr("risk1"),
           name = "Risk 1",
           distributionType = "lognormal",
           probability = 0.5,
@@ -281,7 +282,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         val risk2 = RiskLeaf.unsafeApply(
-          id = "risk2",
+          id = idStr("risk2"),
           name = "Risk 2",
           distributionType = "lognormal",
           probability = 0.5,
@@ -291,9 +292,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         val portfolio = RiskPortfolio.unsafeFromStrings(
-          id = "portfolio",
+          id = idStr("portfolio"),
           name = "Test Portfolio",
-          childIds = Array("risk1", "risk2"),
+          childIds = Array(idStr("risk1"), idStr("risk2")),
           parentId = None
         )
         
@@ -320,7 +321,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     suite("Reproduction Validation")(
       test("same provenance seeds produce identical results") {
         val leaf = RiskLeaf.unsafeApply(
-          id = "deterministic-risk",
+          id = idStr("deterministic-risk"),
           name = "Deterministic Risk",
           distributionType = "lognormal",
           probability = 0.5,
@@ -355,7 +356,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       
       test("provenance contains all information for reconstruction") {
         val leaf = RiskLeaf.unsafeApply(
-          id = "test-reconstruction",
+          id = idStr("test-reconstruction"),
           name = "Test Reconstruction",
           distributionType = "lognormal",
           probability = 0.3,

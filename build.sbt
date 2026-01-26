@@ -16,6 +16,7 @@ ThisBuild / libraryDependencySchemes ++= Seq(
 
 ThisBuild / testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework")
 
+
 // Dependency versions
 val sttpVersion       = "3.10.1"
 val zioVersion        = "2.1.24"
@@ -24,6 +25,7 @@ val zioLoggingVersion = "2.5.2"
 val zioConfigVersion  = "4.0.2"
 val quillVersion      = "4.8.6"
 val ironVersion       = "3.2.2"
+val zioUlidVersion    = "1.3.1"
 val zioTelemetryVersion = "3.1.13"
 val openTelemetryVersion = "1.57.0"
 
@@ -36,6 +38,7 @@ val commonDependencies = Seq(
   "dev.zio"                       %% "zio"                     % zioVersion,
   "dev.zio"                       %% "zio-json"                % "0.8.0",
   "dev.zio"                       %% "zio-prelude"             % "1.0.0-RC44",
+  "com.bilal-fazlani"             %% "zio-ulid"                % zioUlidVersion,
   "dev.zio"                       %% "zio-config"              % zioConfigVersion,
   "dev.zio"                       %% "zio-config-magnolia"     % zioConfigVersion,
   "dev.zio"                       %% "zio-config-typesafe"     % zioConfigVersion,
@@ -71,7 +74,8 @@ val serverDependencies = Seq(
   "org.scala-lang.modules"        %% "scala-parallel-collections"        % "1.0.4",
   "com.risquanter"                 % "simulation.util"                   % "0.8.0",
   // STTP zio-json integration for Irmin GraphQL client
-  "com.softwaremill.sttp.client3" %% "zio-json"                          % sttpVersion
+  "com.softwaremill.sttp.client3" %% "zio-json"                          % sttpVersion,
+  "com.bilal-fazlani"             %% "zio-ulid"                          % zioUlidVersion
 )
 
 // Common module (cross-compiled for JVM and JS)

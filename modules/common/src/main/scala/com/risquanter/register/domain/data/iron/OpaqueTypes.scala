@@ -157,11 +157,11 @@ object SafeUrl:
         )
       )
 
-// SafeId: Alphanumeric + hyphen/underscore, 3-30 chars (risk/portfolio identifiers)
-// Valid examples: "cyber-attack", "ops_risk_001", "IT-RISK"
-type SafeIdStr = String :| (Not[Blank] & MinLength[3] & MaxLength[30] & Match["^[a-zA-Z0-9_-]+$"])
+// SafeId: Canonical ULID (Crockford base32, 26 chars, uppercase)
+// Accepts input case-insensitively, normalizes to uppercase canonical string.
+type SafeIdStr = String :| Match["^[0-9A-HJKMNP-TV-Z]{26}$"]
 
-// Opaque type for risk/portfolio IDs
+// Opaque type for risk/portfolio IDs (ULID)
 object SafeId:
   opaque type SafeId = SafeIdStr
   
@@ -172,6 +172,6 @@ object SafeId:
   extension (id: SafeId)
     def value: SafeIdStr = id
   
-  // Convenience constructor from plain String
+  // Convenience constructor from plain String (case-insensitive)
   def fromString(s: String): Either[List[ValidationError], SafeId] =
     ValidationUtil.refineId(s)

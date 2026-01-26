@@ -22,8 +22,12 @@ import com.risquanter.register.testutil.TestHelpers.*
 object RiskResultResolverSpec extends ZIOSpecDefault {
 
   // Test fixture: Simple risk tree for testing (flat node format)
+  private val rootIdStr  = safeId("root").value.toString
+  private val risk1IdStr = safeId("risk1").value.toString
+  private val risk2IdStr = safeId("risk2").value.toString
+
   val risk1Leaf = RiskLeaf.unsafeApply(
-    id = "risk1",
+    id = risk1IdStr,
     name = "Risk 1",
     distributionType = "lognormal",
     probability = 0.1,
@@ -33,7 +37,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
   )
 
   val risk2Leaf = RiskLeaf.unsafeApply(
-    id = "risk2",
+    id = risk2IdStr,
     name = "Risk 2",
     distributionType = "lognormal",
     probability = 0.2,
@@ -43,9 +47,9 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
   )
 
   val rootNode: RiskNode = RiskPortfolio.unsafeFromStrings(
-    id = "root",
+    id = rootIdStr,
     name = "Root Portfolio",
-    childIds = Array("risk1", "risk2"),
+    childIds = Array(risk1IdStr, risk2IdStr),
     parentId = None
   )
 
@@ -137,7 +141,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           
         } yield assertTrue(
           // Verify root aggregates child risks
-          rootResult.name.value == "root",
+          rootResult.name == rootId,
           // Root should have outcomes (aggregated from children)
           rootResult.outcomes.size >= 0
         )

@@ -12,6 +12,7 @@ import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
+import com.risquanter.register.testutil.TestHelpers.safeId
 import io.github.iltotore.iron.*
 
 object HttpApiIntegrationSpec extends ZIOSpecDefault:
@@ -23,13 +24,16 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
     )
 
   private def sampleRequest: RiskTreeDefinitionRequest =
-    val rootId  = "root"
-    val leaf1Id = "leaf-1"
-    val leaf2Id = "leaf-2"
+    val rootId   = safeId("root").value.toString
+    val leaf1Id  = safeId("leaf-1").value.toString
+    val leaf2Id  = safeId("leaf-2").value.toString
+    val rootName = "Root"
+    val leaf1Name = "Leaf 1"
+    val leaf2Name = "Leaf 2"
 
     val portfolio = RiskPortfolio.create(
       id = rootId,
-      name = "Root",
+      name = rootName,
       childIds = Array(
         SafeId.fromString(leaf1Id).toOption.get,
         SafeId.fromString(leaf2Id).toOption.get
@@ -39,7 +43,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
 
     val leaf1 = RiskLeaf.create(
       id = leaf1Id,
-      name = "Leaf 1",
+      name = leaf1Name,
       distributionType = "lognormal",
       probability = 0.1,
       minLoss = Some(1000L),
@@ -49,7 +53,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
 
     val leaf2 = RiskLeaf.create(
       id = leaf2Id,
-      name = "Leaf 2",
+      name = leaf2Name,
       distributionType = "lognormal",
       probability = 0.2,
       minLoss = Some(1500L),

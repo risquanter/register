@@ -5,6 +5,7 @@ import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
 import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId}
+import com.bilalfazlani.zioUlid.ULID
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
 import zio.NonEmptyChunk
@@ -132,18 +133,36 @@ object ValidationUtil {
       )))
   }
 
-  // Refinement for risk/portfolio IDs (alphanumeric + hyphen/underscore, 3-30 chars)
+  // Refinement for risk/portfolio IDs (ULID, canonical uppercase Crockford base32, 26 chars)
   def refineId(value: String, fieldPath: String = "id"): Either[List[ValidationError], SafeId.SafeId] = {
-    val sanitized = nonEmpty(value)
-    sanitized
-      .refineEither[Not[Blank] & MinLength[3] & MaxLength[30] & Match["^[a-zA-Z0-9_-]+$"]]
-      .map(SafeId.SafeId(_))
-      .left
-      .map(err => List(ValidationError(
-        field = fieldPath,
-        code = if err.contains("MinLength") || err.contains("MaxLength") then ValidationErrorCode.INVALID_LENGTH else ValidationErrorCode.INVALID_PATTERN,
-        message = s"ID '$sanitized' must be 3-30 alphanumeric characters (with _ or -): $err"
-      )))
+    val sanitized = Option(value).map(_.trim).getOrElse("")
+    val normalized = sanitized.toUpperCase
+    ULID(normalized) match {
+      case Right(parsed) =>
+        // Use library-rendered canonical form to avoid variant casing/format
+        val canonical = parsed.toString
+        canonical
+          .refineEither[Match["^[0-9A-HJKMNP-TV-Z]{26}$"]]
+          .map(SafeId.SafeId(_))
+          .left
+          .map(err => List(
+            ValidationError(
+              field = fieldPath,
+              code = ValidationErrorCode.INVALID_FORMAT,
+              message = s"ID '$sanitized' is not a valid ULID: $err"
+            )
+          ))
+      case Left(err) =>
+        Left(
+          List(
+            ValidationError(
+              field = fieldPath,
+              code = ValidationErrorCode.INVALID_FORMAT,
+              message = s"ID '$sanitized' is not a valid ULID: ${err.getMessage}"
+            )
+          )
+        )
+    }
   }
 
   // Refinement for optional short text (max 20 chars)

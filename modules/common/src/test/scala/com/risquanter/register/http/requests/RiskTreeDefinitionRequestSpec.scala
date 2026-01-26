@@ -5,14 +5,14 @@ import zio.json.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.SafeId
 import com.risquanter.register.domain.tree.NodeId
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, idStr}
 
 object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
 
   def spec = suite("RiskTreeDefinitionRequest")(
     test("has JsonCodec for serialization - flat format") {
       val leaf = RiskLeaf.unsafeApply(
-        id = "risk1",
+        id = idStr("risk1"),
         name = "Risk1",
         distributionType = "lognormal",
         probability = 0.5,
@@ -24,7 +24,7 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
       val request = RiskTreeDefinitionRequest(
         name = "Risk Assessment",
         nodes = Seq(leaf),
-        rootId = "risk1"
+        rootId = idStr("risk1")
       )
       
       val json = request.toJson
@@ -34,12 +34,13 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
         decoded.isRight,
         decoded.map(_.name).contains("Risk Assessment"),
         decoded.map(_.nodes.size).contains(1),
-        decoded.map(_.rootId).contains("risk1")
+        decoded.map(_.rootId).contains(idStr("risk1"))
       )
     },
     
     test("can deserialize from JSON string - flat format") {
-      val json = """{"name":"Test","nodes":[{"RiskLeaf":{"id":"single-risk","name":"SingleRisk","distributionType":"lognormal","probability":0.5,"minLoss":100,"maxLoss":1000}}],"rootId":"single-risk"}"""
+      val single = idStr("single-risk")
+      val json = s"""{"name":"Test","nodes":[{"RiskLeaf":{"id":"$single","name":"SingleRisk","distributionType":"lognormal","probability":0.5,"minLoss":100,"maxLoss":1000}}],"rootId":"$single"}"""
       val result = json.fromJson[RiskTreeDefinitionRequest]
       
       assertTrue(
@@ -51,7 +52,7 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
     
     test("serializes to JSON correctly") {
       val leaf = RiskLeaf.unsafeApply(
-        id = "risk1",
+        id = idStr("risk1"),
         name = "Risk1",
         distributionType = "lognormal",
         probability = 0.25,
@@ -63,7 +64,7 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
       val request = RiskTreeDefinitionRequest(
         name = "Test Sim",
         nodes = Seq(leaf),
-        rootId = "risk1"
+        rootId = idStr("risk1")
       )
       
       val json = request.toJson
@@ -71,13 +72,13 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
       assertTrue(
         json.contains("\"name\":\"Test Sim\""),
         json.contains("\"nodes\":"),
-        json.contains("\"rootId\":\"risk1\"")
+        json.contains(s"\"rootId\":\"${idStr("risk1")}\"")
       )
     },
     
     test("validate rejects empty name") {
       val leaf = RiskLeaf.unsafeApply(
-        id = "risk1",
+        id = idStr("risk1"),
         name = "Risk1",
         distributionType = "lognormal",
         probability = 0.5,
@@ -89,7 +90,7 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
       val request = RiskTreeDefinitionRequest(
         name = "",
         nodes = Seq(leaf),
-        rootId = "risk1"
+        rootId = idStr("risk1")
       )
       
       val result = RiskTreeDefinitionRequest.validate(request)
@@ -117,7 +118,7 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
     
     test("validate rejects rootId not in nodes") {
       val leaf = RiskLeaf.unsafeApply(
-        id = "risk1",
+        id = idStr("risk1"),
         name = "Risk1",
         distributionType = "lognormal",
         probability = 0.5,
@@ -142,7 +143,7 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
     
     test("validate accepts valid request with portfolio") {
       val childA = RiskLeaf.unsafeApply(
-        id = "child-a",
+        id = idStr("child-a"),
         name = "Child A",
         distributionType = "lognormal",
         probability = 0.3,
@@ -151,7 +152,7 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
         parentId = Some(safeId("root"))
       )
       val childB = RiskLeaf.unsafeApply(
-        id = "child-b",
+        id = idStr("child-b"),
         name = "Child B",
         distributionType = "lognormal",
         probability = 0.2,
@@ -160,16 +161,16 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
         parentId = Some(safeId("root"))
       )
       val root = RiskPortfolio.unsafeFromStrings(
-        id = "root",
+        id = idStr("root"),
         name = "Root",
-        childIds = Array("child-a", "child-b"),
+        childIds = Array(idStr("child-a"), idStr("child-b")),
         parentId = None
       )
       
       val request = RiskTreeDefinitionRequest(
         name = "Valid Tree",
         nodes = Seq(root, childA, childB),
-        rootId = "root"
+        rootId = idStr("root")
       )
       
       val result = RiskTreeDefinitionRequest.validate(request)
@@ -178,7 +179,7 @@ object RiskTreeDefinitionRequestSpec extends ZIOSpecDefault {
         result.toEither.isRight,
         result.toEither.exists(_._1.value == "Valid Tree"),
         result.toEither.exists(_._2.size == 3),
-        result.toEither.exists(_._3.value.toString == "root")
+        result.toEither.exists(_._3.value.toString == idStr("root"))
       )
     }
   )

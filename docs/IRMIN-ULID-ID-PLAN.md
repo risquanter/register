@@ -43,6 +43,7 @@
    - Generation is client-side; ULID randomness + timestamp reduce collision risk—no central coordinator required.
    - Add repository-level duplicate protection (fail fast on existing IDs) to guard concurrent writes.
    - Consider idempotent create semantics in HTTP layer (optional) to mitigate retried requests.
+      - Add integration test covering Irmin GraphQL `test_and_set` create-if-absent to ensure duplicate writes are rejected without OCaml changes.
 
 7) Migration strategy
    - Decide on cutover: numeric → ULID for tree IDs (breaking) or dual-mode period (support both, mark numeric deprecated).
@@ -50,7 +51,7 @@
 
 8) Observability & testing
    - Add structured logging for generated IDs (non-sensitive).
-   - Tests: unit tests for ULID validation/normalization; integration tests for repo paths and HTTP roundtrips; multi-instance simulation (two repos writing to same Irmin) to assert no collisions and proper duplicate detection.
+   - Tests: unit tests for ULID validation/normalization; integration tests for repo paths and HTTP roundtrips; integration test for GraphQL `test_and_set` duplicate-prevention path; multi-instance simulation (two repos writing to same Irmin) to assert no collisions and proper duplicate detection.
 
 9) Documentation
    - Update `RISKTREE-REPOSITORY-IRMIN-PLAN.md` outstanding tasks with ULID adoption link.

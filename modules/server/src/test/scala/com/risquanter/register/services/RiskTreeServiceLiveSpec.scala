@@ -18,6 +18,8 @@ import com.risquanter.register.testutil.TestHelpers.safeId
 
 object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
+  private val idStr: String => String = s => safeId(s).value
+
   // Concise service accessor pattern
   private val service = ZIO.serviceWithZIO[RiskTreeService]
 
@@ -56,7 +58,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
   // Valid request with single leaf node (flat format)
   private val validLeafNode = RiskLeaf.create(
-    id = "test-risk",
+    id = idStr("test-risk"),
     name = "Test Risk",
     distributionType = "lognormal",
     probability = 0.75,
@@ -68,7 +70,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private val validRequest = RiskTreeDefinitionRequest(
     name = "Test Risk Tree",
     nodes = Seq(validLeafNode),
-    rootId = "test-risk"
+    rootId = idStr("test-risk")
   )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
@@ -86,7 +88,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("create accepts hierarchical RiskNode structure") {
         // Create nodes with flat structure (childIds + parentId)
         val cyberLeaf = RiskLeaf.unsafeApply(
-          id = "cyber",
+          id = idStr("cyber"),
           name = "Cyber Attack",
           distributionType = "lognormal",
           probability = 0.25,
@@ -95,7 +97,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           parentId = Some(safeId("ops-risk"))
         )
         val fraudLeaf = RiskLeaf.unsafeApply(
-          id = "fraud",
+          id = idStr("fraud"),
           name = "Fraud",
           distributionType = "lognormal",
           probability = 0.15,
@@ -104,16 +106,16 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           parentId = Some(safeId("ops-risk"))
         )
         val portfolioNode = RiskPortfolio.unsafeFromStrings(
-          id = "ops-risk",
+          id = idStr("ops-risk"),
           name = "Operational Risk",
-          childIds = Array("cyber", "fraud"),
+          childIds = Array(idStr("cyber"), idStr("fraud")),
           parentId = None
         )
         
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Hierarchical Tree",
           nodes = Seq(portfolioNode, cyberLeaf, fraudLeaf),
-          rootId = "ops-risk"
+          rootId = idStr("ops-risk")
         )
         
         val program = service(_.create(hierarchicalRequest))
@@ -137,7 +139,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("create fails with invalid probability") {
         val invalidRoot = RiskLeaf.create(
-          id = "test-risk",
+          id = idStr("test-risk"),
           name = "Test Risk",
           distributionType = "lognormal",
           probability = 1.5,  // Invalid: > 1.0
@@ -190,14 +192,14 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = for {
           tree <- service(_.create(validRequest))
           // RiskTree now has flat nodes with index already built
-          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          rootId = safeId("test-risk")
           
           // Call new getLECCurve API
           response <- service(_.getLECCurve(tree.id, rootId))
         } yield response
 
         program.assert { response =>
-          response.id == "test-risk" &&
+          response.id == idStr("test-risk") &&
             response.name == "Test Risk" &&
             response.curve.nonEmpty &&
             response.quantiles.nonEmpty &&
@@ -210,7 +212,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurve returns curve with childIds for portfolio node") {
         // Create nodes with flat structure (childIds + parentId)
         val childA = RiskLeaf.unsafeApply(
-          id = "child-a",
+          id = idStr("child-a"),
           name = "Child A",
           distributionType = "lognormal",
           probability = 0.3,
@@ -219,7 +221,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           parentId = Some(safeId("portfolio-root"))
         )
         val childB = RiskLeaf.unsafeApply(
-          id = "child-b",
+          id = idStr("child-b"),
           name = "Child B",
           distributionType = "lognormal",
           probability = 0.2,
@@ -228,35 +230,35 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           parentId = Some(safeId("portfolio-root"))
         )
         val portfolioRoot = RiskPortfolio.unsafeFromStrings(
-          id = "portfolio-root",
+          id = idStr("portfolio-root"),
           name = "Portfolio",
-          childIds = Array("child-a", "child-b"),
+          childIds = Array(idStr("child-a"), idStr("child-b")),
           parentId = None
         )
         
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Portfolio Test",
           nodes = Seq(portfolioRoot, childA, childB),
-          rootId = "portfolio-root"
+          rootId = idStr("portfolio-root")
         )
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("portfolio-root".refineUnsafe)
+          rootId = safeId("portfolio-root")
           response <- service(_.getLECCurve(tree.id, rootId))
         } yield response
 
         program.assert { response =>
-          response.id == "portfolio-root" &&
+          response.id == idStr("portfolio-root") &&
             response.childIds.isDefined &&
-            response.childIds.get.toSet == Set("child-a", "child-b")
+            response.childIds.get.toSet == Set(idStr("child-a"), idStr("child-b"))
         }
       },
 
       test("getLECCurve fails for nonexistent node") {
         val program = for {
           tree <- service(_.create(validRequest))
-          invalidId = com.risquanter.register.domain.data.iron.SafeId.SafeId("nonexistent".refineUnsafe)
+          invalidId = safeId("nonexistent")
           result <- service(_.getLECCurve(tree.id, invalidId).flip)
         } yield result
 
@@ -269,7 +271,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("probOfExceedance returns probability for given threshold") {
         val program = for {
           tree <- service(_.create(validRequest))
-          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          rootId = safeId("test-risk")
           
           // Test at multiple thresholds
           prob1 <- service(_.probOfExceedance(tree.id, rootId, 1000L))   // Low threshold
@@ -290,7 +292,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("probOfExceedance returns deterministic results") {
         val program = for {
           tree <- service(_.create(validRequest))
-          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          rootId = safeId("test-risk")
           
           // Call twice with same threshold
           prob1 <- service(_.probOfExceedance(tree.id, rootId, 10000L))
@@ -312,20 +314,20 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurve with includeProvenance=true returns provenances") {
         val program = for {
           tree <- service(_.create(validRequest))
-          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          rootId = safeId("test-risk")
           response <- service(_.getLECCurve(tree.id, rootId, includeProvenance = true))
         } yield response
 
         program.assert { response =>
           response.provenances.nonEmpty &&
-            response.provenances.exists(_.riskId.value.toString == "test-risk")
+            response.provenances.exists(_.riskId.value.toString == idStr("test-risk"))
         }
       },
 
       test("getLECCurve with includeProvenance=false returns empty provenances") {
         val program = for {
           tree <- service(_.create(validRequest))
-          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          rootId = safeId("test-risk")
           response <- service(_.getLECCurve(tree.id, rootId, includeProvenance = false))
         } yield response
 
@@ -337,7 +339,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurve defaults to no provenance") {
         val program = for {
           tree <- service(_.create(validRequest))
-          rootId = com.risquanter.register.domain.data.iron.SafeId.SafeId("test-risk".refineUnsafe)
+          rootId = safeId("test-risk")
           response <- service(_.getLECCurve(tree.id, rootId))  // No includeProvenance arg
         } yield response
 
@@ -349,7 +351,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurvesMulti returns curves for multiple nodes") {
         // Create nodes with flat structure
         val leaf1 = RiskLeaf.unsafeApply(
-          id = "leaf-1",
+          id = idStr("leaf-1"),
           name = "Leaf 1",
           distributionType = "lognormal",
           probability = 0.3,
@@ -358,7 +360,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           parentId = Some(safeId("multi-root"))
         )
         val leaf2 = RiskLeaf.unsafeApply(
-          id = "leaf-2",
+          id = idStr("leaf-2"),
           name = "Leaf 2",
           distributionType = "lognormal",
           probability = 0.2,
@@ -367,30 +369,30 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           parentId = Some(safeId("multi-root"))
         )
         val multiRoot = RiskPortfolio.unsafeFromStrings(
-          id = "multi-root",
+          id = idStr("multi-root"),
           name = "Multi Root",
-          childIds = Array("leaf-1", "leaf-2"),
+          childIds = Array(idStr("leaf-1"), idStr("leaf-2")),
           parentId = None
         )
         
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Multi-Node Test",
           nodes = Seq(multiRoot, leaf1, leaf2),
-          rootId = "multi-root"
+          rootId = idStr("multi-root")
         )
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          leaf1Id = com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-1".refineUnsafe)
-          leaf2Id = com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-2".refineUnsafe)
+          leaf1Id = safeId("leaf-1")
+          leaf2Id = safeId("leaf-2")
           
           curves <- service(_.getLECCurvesMulti(tree.id, Set(leaf1Id, leaf2Id)))
         } yield curves
 
         program.assert { curves =>
           curves.size == 2 &&
-            curves.contains(com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-1".refineUnsafe)) &&
-            curves.contains(com.risquanter.register.domain.data.iron.SafeId.SafeId("leaf-2".refineUnsafe)) &&
+            curves.contains(safeId("leaf-1")) &&
+            curves.contains(safeId("leaf-2")) &&
             curves.values.forall(_.nonEmpty)  // All curves have points
         }
       },
@@ -398,7 +400,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurvesMulti uses shared tick domain") {
         // Create nodes with flat structure
         val nodeA = RiskLeaf.unsafeApply(
-          id = "node-a",
+          id = idStr("node-a"),
           name = "Node A",
           distributionType = "lognormal",
           probability = 0.3,
@@ -407,7 +409,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           parentId = Some(safeId("shared-root"))
         )
         val nodeB = RiskLeaf.unsafeApply(
-          id = "node-b",
+          id = idStr("node-b"),
           name = "Node B",
           distributionType = "lognormal",
           probability = 0.2,
@@ -416,29 +418,29 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           parentId = Some(safeId("shared-root"))
         )
         val sharedRoot = RiskPortfolio.unsafeFromStrings(
-          id = "shared-root",
+          id = idStr("shared-root"),
           name = "Shared Root",
-          childIds = Array("node-a", "node-b"),
+          childIds = Array(idStr("node-a"), idStr("node-b")),
           parentId = None
         )
         
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Shared Domain Test",
           nodes = Seq(sharedRoot, nodeA, nodeB),
-          rootId = "shared-root"
+          rootId = idStr("shared-root")
         )
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          nodeAId = com.risquanter.register.domain.data.iron.SafeId.SafeId("node-a".refineUnsafe)
-          nodeBId = com.risquanter.register.domain.data.iron.SafeId.SafeId("node-b".refineUnsafe)
+          nodeAId = safeId("node-a")
+          nodeBId = safeId("node-b")
           
           curves <- service(_.getLECCurvesMulti(tree.id, Set(nodeAId, nodeBId)))
         } yield curves
 
         program.assert { curves =>
-          val curveA = curves(com.risquanter.register.domain.data.iron.SafeId.SafeId("node-a".refineUnsafe))
-          val curveB = curves(com.risquanter.register.domain.data.iron.SafeId.SafeId("node-b".refineUnsafe))
+          val curveA = curves(safeId("node-a"))
+          val curveB = curves(safeId("node-b"))
           
           // Both curves should have same number of points (shared tick domain)
           curveA.size == curveB.size &&

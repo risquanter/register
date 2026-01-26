@@ -7,6 +7,7 @@ import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf}
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.testutil.TestHelpers.idStr
 
 object SimulationResponseSpec extends ZIOSpecDefault {
 
@@ -32,7 +33,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
     
     test("fromRiskTree converts domain model to response (metadata only)") {
       val root = RiskLeaf.unsafeApply(
-        id = "test-risk",
+        id = idStr("test-risk"),
         name = "TestRisk",
         distributionType = "lognormal",
         probability = 0.5,
@@ -59,7 +60,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
     
     test("fromRiskTree extracts .value from opaque types") {
       val root = RiskLeaf.unsafeApply(
-        id = "risk1",
+        id = idStr("risk1"),
         name = "Risk1",
         distributionType = "lognormal",
         probability = 0.3,
@@ -100,7 +101,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
     
     test("round-trip: domain -> response -> JSON -> response") {
       val root = RiskLeaf.unsafeApply(
-        id = "risk1",
+        id = idStr("risk1"),
         name = "Risk1",
         distributionType = "lognormal",
         probability = 0.8,

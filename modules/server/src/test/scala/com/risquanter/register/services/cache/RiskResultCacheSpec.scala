@@ -27,10 +27,12 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
       throw new IllegalArgumentException(s"Invalid NonNegativeLong: $n")
     )
 
+  private val idStr: String => String = s => safeId(s).value
+
   // Test fixtures - tree structure for parent lookup
   // Using flat node format with childIds and parentId
   val cyberLeaf = RiskLeaf.unsafeApply(
-    id = "cyber",
+    id = idStr("cyber"),
     name = "Cyber Attack",
     distributionType = "lognormal",
     probability = 0.25,
@@ -40,7 +42,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
   )
 
   val hardwareLeaf = RiskLeaf.unsafeApply(
-    id = "hardware",
+    id = idStr("hardware"),
     name = "Hardware Failure",
     distributionType = "lognormal",
     probability = 0.1,
@@ -50,7 +52,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
   )
 
   val softwareLeaf = RiskLeaf.unsafeApply(
-    id = "software",
+    id = idStr("software"),
     name = "Software Bug",
     distributionType = "lognormal",
     probability = 0.3,
@@ -60,16 +62,16 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
   )
 
   val itPortfolio = RiskPortfolio.unsafeFromStrings(
-    id = "it-risk",
+    id = idStr("it-risk"),
     name = "IT Risk",
-    childIds = Array("hardware", "software"),
+    childIds = Array(idStr("hardware"), idStr("software")),
     parentId = Some(safeId("ops-risk"))
   )
 
   val rootPortfolio = RiskPortfolio.unsafeFromStrings(
-    id = "ops-risk",
+    id = idStr("ops-risk"),
     name = "Operational Risk",
-    childIds = Array("cyber", "it-risk"),
+    childIds = Array(idStr("cyber"), idStr("it-risk")),
     parentId = None
   )
 

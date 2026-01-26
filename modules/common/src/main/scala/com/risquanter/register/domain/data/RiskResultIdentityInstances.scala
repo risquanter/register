@@ -12,7 +12,7 @@ import zio.prelude.Identity
  */
 object RiskResultIdentityInstances {
   given identity(using cfg: SimulationConfig): Identity[RiskResult] with
-    private val emptyId: SafeId.SafeId = SafeId.fromString("identity").getOrElse(
+    private val emptyId: SafeId.SafeId = SafeId.fromString("00000000000000000000000000").getOrElse(
       throw new IllegalStateException("Invalid identity SafeId")
     )
 

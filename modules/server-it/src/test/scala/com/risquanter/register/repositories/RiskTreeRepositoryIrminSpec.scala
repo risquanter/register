@@ -11,6 +11,7 @@ import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.domain.data.RiskPortfolio
 import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.testcontainers.IrminCompose
+import com.risquanter.register.testutil.TestHelpers.safeId
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.GreaterEqual
 
@@ -25,9 +26,9 @@ import io.github.iltotore.iron.constraint.numeric.GreaterEqual
 object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
 
   private def sampleTree(treeId: Long, treeName: String): RiskTree =
-    val rootId  = SafeId.fromString("root").toOption.get
-    val leaf1Id = SafeId.fromString("leaf-1").toOption.get
-    val leaf2Id = SafeId.fromString("leaf-2").toOption.get
+    val rootId  = safeId("root")
+    val leaf1Id = safeId("leaf-1")
+    val leaf2Id = safeId("leaf-2")
 
     val portfolio = RiskPortfolio.create(
       id = rootId.value.toString,
@@ -70,7 +71,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
 
   private def updatedTree(original: RiskTree): RiskTree =
     val rootId  = original.rootId
-    val leaf1Id = SafeId.fromString("leaf-1").toOption.get
+    val leaf1Id = safeId("leaf-1")
     val root    = original.index.nodes(rootId).asInstanceOf[RiskPortfolio]
     val leaf1   = original.index.nodes(leaf1Id)
     val newRoot = RiskPortfolio.create(
@@ -113,7 +114,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           _    <- repo.create(tree)
           _    <- repo.update(tree.id, _ => updatedTree(tree))
           got  <- repo.getById(tree.id)
-          leaf2Id = SafeId.fromString("leaf-2").toOption.get
+          leaf2Id = safeId("leaf-2")
         yield assertTrue(got.exists(!_.index.nodes.contains(leaf2Id)))
       },
 
