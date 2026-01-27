@@ -26,6 +26,9 @@ enum ValidationErrorCode(val code: String, val description: String):
   case INVALID_EXPERT_PARAMS extends ValidationErrorCode("INVALID_EXPERT_PARAMS", "Expert opinion parameters invalid")
   case INVALID_LOGNORMAL_PARAMS extends ValidationErrorCode("INVALID_LOGNORMAL_PARAMS", "Lognormal parameters invalid")
   case UNSUPPORTED_DISTRIBUTION_TYPE extends ValidationErrorCode("UNSUPPORTED_DISTRIBUTION_TYPE", "Distribution type not supported")
+  case ID_NOT_ALLOWED_ON_CREATE extends ValidationErrorCode("ID_NOT_ALLOWED_ON_CREATE", "IDs must not be supplied when creating a resource")
+  case MISSING_REFERENCE extends ValidationErrorCode("MISSING_REFERENCE", "Referenced entity not found in request scope")
+  case AMBIGUOUS_REFERENCE extends ValidationErrorCode("AMBIGUOUS_REFERENCE", "Reference matched multiple entities; must be unique")
 
 object ValidationErrorCode:
   given encoder: JsonEncoder[ValidationErrorCode] = 
