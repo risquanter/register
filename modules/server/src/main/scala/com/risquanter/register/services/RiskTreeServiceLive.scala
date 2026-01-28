@@ -262,7 +262,7 @@ class RiskTreeServiceLive private (
   override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     val operation = for {
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
-      resolved <- RiskTreeRequests.resolveCreate(req, idGeneratorFrom(ids)).toZIOValidation
+      resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafDistributions, resolved.rootName)
       riskTree <- RiskTree.fromNodes(
         id = 0L.refineUnsafe, // repo assigns
@@ -282,7 +282,7 @@ class RiskTreeServiceLive private (
   override def update(id: NonNegativeLong, req: RiskTreeUpdateRequest): Task[RiskTree] = {
     val operation = for {
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
-      resolved <- RiskTreeRequests.resolveUpdate(req, idGeneratorFrom(ids)).toZIOValidation
+      resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       allNodes = resolved.existing ++ resolved.added
       allLeafDistributions = resolved.existingLeafDistributions ++ resolved.addedLeafDistributions
       (nodes, rootId) <- buildNodes(allNodes, allLeafDistributions, resolved.rootName)
