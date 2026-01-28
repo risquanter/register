@@ -125,40 +125,21 @@ object RiskTreeRequests {
     else Validation.succeed(allNames.toSet)
   }
 
-  // Guard: pick exactly one root (prefer portfolio; allow lone leaf when no portfolios).
-  private[requests] def requireSingleRootCreate(
+  // Guard: pick exactly one root (prefer a portfolio root when any portfolios exist; otherwise allow lone leaf tree).
+  private[requests] def requireSingleRoot(
     portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
-  ): Validation[ValidationError, SafeName.SafeName] = {
-    val rootCandidates =
-      if portfolios.nonEmpty then portfolios.collect { case (name, None) => name }
-      else leaves.collect { case (name, None) => name }
-
-    rootCandidates match {
-      case Seq(root) => Validation.succeed(root)
-      case Seq() => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.REQUIRED_FIELD, "Exactly one root is required"))
-      case _ => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple roots found"))
-    }
-  }
-
-  // Guard: pick exactly one root in the combined (existing + new) topology.
-  private[requests] def requireSingleRootUpdate(
-    portfolios: Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])],
     leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    newPortfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    newLeaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
+    labelPrefix: String
   ): Validation[ValidationError, SafeName.SafeName] = {
-    val portNames = portfolios.map(_._2) ++ newPortfolios.map(_._1)
-    val leafNames = leaves.map(_._1) ++ newLeaves.map(_._1)
+    val portfolioRoots = portfolios.collect { case (name, None) => name }
+    val leafRoots = leaves.collect { case (name, None) => name }
 
-    val rootCandidates =
-      if portNames.nonEmpty then (portfolios.map(_._3) ++ newPortfolios.map(_._2)).zip(portNames).collect { case (None, name) => name }
-      else (leaves.map(_._2) ++ newLeaves.map(_._2)).zip(leafNames).collect { case (None, name) => name }
+    val roots =  portfolioRoots ++leafRoots
 
-    rootCandidates match {
+    roots match {
+      case Seq() => Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.REQUIRED_FIELD, "Exactly one root is required"))
       case Seq(root) => Validation.succeed(root)
-      case Seq() => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.REQUIRED_FIELD, "Exactly one root is required"))
-      case _ => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple roots found"))
+      case _ => Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple roots found"))
     }
   }
 
@@ -206,7 +187,7 @@ object RiskTreeRequests {
 
     for {
       allNameSet <- requireUniqueNames(allNames)
-      root <- requireSingleRootCreate(portfolios, leaves)
+      root <- requireSingleRoot(portfolios, leaves, "request.portfolios")
       _ <- requireLeafParents(leaves, portfolioNames, allNameSet, totalNodes, "request.leaves")
       _ <- requirePortfolioParents(portfolios, portfolioNames, "request.portfolios", _._2)
       _ <- requireNoCycles(portfolios ++ leaves, "request")
@@ -235,7 +216,11 @@ object RiskTreeRequests {
 
     for {
       allNameSet <- requireUniqueNames(allNames)
-      root <- requireSingleRootUpdate(portfolios, leaves, newPortfolios, newLeaves)
+      root <- requireSingleRoot(
+        portfolios = portfolios.map(p => p._2 -> p._3) ++ newPortfolios.map(p => p._1 -> p._2),
+        leaves = leaves.map(l => l._1 -> l._2) ++ newLeaves.map(l => l._1 -> l._2),
+        labelPrefix = "request.portfolios"
+      )
       _ <- requireLeafParents(leaves, portfolioNames, allNameSet, totalNodes, "request.leaves")
       _ <- requireLeafParents(newLeaves, portfolioNames, allNameSet, totalNodes, "request.newLeaves")
       _ <- requirePortfolioParents(portfolios, portfolioNames, "request.portfolios", _._3)
