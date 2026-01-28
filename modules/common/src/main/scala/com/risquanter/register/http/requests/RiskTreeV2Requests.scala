@@ -2,6 +2,7 @@ package com.risquanter.register.http.requests
 
 import zio.json.{DeriveJsonCodec, JsonCodec}
 import zio.prelude.Validation
+import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
@@ -90,15 +91,6 @@ object RiskTreeV2Requests {
     case Leaf
   }
 
-  private[requests] final case class LeafPayload(
-    distributionType: String,
-    probability: Double,
-    minLoss: Option[Long],
-    maxLoss: Option[Long],
-    percentiles: Option[Array[Double]],
-    quantiles: Option[Array[Double]]
-  )
-
   private[requests] final case class ResolvedNode(
     id: SafeId.SafeId,
     name: SafeName.SafeName,
@@ -106,27 +98,27 @@ object RiskTreeV2Requests {
     kind: NodeKind
   )
 
-  // Result of resolving a create request: all names refined, ids generated, topology validated.
-  // `nodes` is keyed by name for easy parent resolution in the service layer; `leafPayloads` carry raw distribution params.
+  // Result of resolving a create request: all names refined, ids generated, topology validated, distributions validated.
+  // `nodes` is keyed by name for easy parent resolution in the service layer; `leafDistributions` carry domain-validated params.
   private[requests] final case class ResolvedCreate(
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],
-    leafPayloads: Map[SafeName.SafeName, LeafPayload],
+    leafDistributions: Map[SafeName.SafeName, Distribution],
     rootName: SafeName.SafeName
   )
 
   // Result of resolving an update request: existing nodes keep caller ids, new nodes get generated ids.
-  // Payload maps let the service build validated Distributions per leaf after topology is confirmed.
+  // Distributions are validated here so the service does not repeat cross-field checks.
   private[requests] final case class ResolvedUpdate(
     treeName: SafeName.SafeName,
     existing: Map[SafeName.SafeName, ResolvedNode],
     added: Map[SafeName.SafeName, ResolvedNode],
-    existingLeafPayloads: Map[SafeName.SafeName, LeafPayload],
-    addedLeafPayloads: Map[SafeName.SafeName, LeafPayload],
+    existingLeafDistributions: Map[SafeName.SafeName, Distribution],
+    addedLeafDistributions: Map[SafeName.SafeName, Distribution],
     rootName: SafeName.SafeName
   )
 
-  // Resolve a create request: refine names, generate ids, validate topology, and pass through leaf payloads unvalidated.
+  // Resolve a create request: refine names, validate distributions, generate ids, and validate topology.
   def resolveCreate(req: RiskTreeDefinitionRequestV2, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] = {
     val treeNameV = refineNameField(req.name, "request.name")
     val portfoliosV = refinePortfolioDefs(req.portfolios, "request.portfolios")
@@ -142,8 +134,8 @@ object RiskTreeV2Requests {
           name -> ResolvedNode(newId(), name, parent, NodeKind.Leaf)
         }
         val nodes = (portfolioNodes ++ leafNodes).toMap
-        val leafPayloads = leaves.map { case (name, _, payload) => name -> payload }.toMap
-        ResolvedCreate(treeName, nodes, leafPayloads, rootName)
+        val leafDistributions = leaves.map { case (name, _, dist) => name -> dist }.toMap
+        ResolvedCreate(treeName, nodes, leafDistributions, rootName)
       }
     }.flatMap(identity)
   }
@@ -173,57 +165,31 @@ object RiskTreeV2Requests {
             name -> ResolvedNode(newId(), name, parent, NodeKind.Leaf)
           }
 
-          val existingLeafPayloads = leaves.collect { case (_, name, _, payload) => name -> payload }.toMap
-          val addedLeafPayloads = newLeaves.map { case (name, _, payload) => name -> payload }.toMap
+          val existingLeafDistributions = leaves.collect { case (_, name, _, dist) => name -> dist }.toMap
+          val addedLeafDistributions = newLeaves.map { case (name, _, dist) => name -> dist }.toMap
 
           ResolvedUpdate(
             treeName = treeName,
             existing = (existingPortfolioNodes ++ existingLeafNodes).toMap,
             added = (addedPortfolioNodes ++ addedLeafNodes).toMap,
-            existingLeafPayloads = existingLeafPayloads,
-            addedLeafPayloads = addedLeafPayloads,
+            existingLeafDistributions = existingLeafDistributions,
+            addedLeafDistributions = addedLeafDistributions,
             rootName = rootName
           )
         }
     }.flatMap(identity)
   }
 
-  def validateDistributionUpdate(req: DistributionUpdateRequestV2): Validation[ValidationError, DistributionUpdateRequestV2] = {
-    val base = "request"
-    val distTypeV = toValidation(ValidationUtil.refineDistributionType(req.distributionType, s"$base.distributionType"))
-    val probV = toValidation(ValidationUtil.refineProbability(req.probability, s"$base.probability"))
-    val minV = req.minLoss match {
-      case Some(v) => toValidation(ValidationUtil.refineNonNegativeLong(v, s"$base.minLoss")).map(Some(_))
-      case None    => Validation.succeed(None)
-    }
-    val maxV = req.maxLoss match {
-      case Some(v) => toValidation(ValidationUtil.refineNonNegativeLong(v, s"$base.maxLoss")).map(Some(_))
-      case None    => Validation.succeed(None)
-    }
-
-    val crossV: Validation[ValidationError, Unit] = distTypeV.map(_.toString).flatMap {
-      case "expert" =>
-        (req.percentiles, req.quantiles) match {
-          case (Some(pct), Some(q)) if pct.nonEmpty && q.nonEmpty && pct.length == q.length => Validation.succeed(())
-          case (Some(_), Some(q)) if q.isEmpty => Validation.fail(ValidationError(s"$base.quantiles", ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires quantiles"))
-          case (Some(pct), Some(q)) if pct.length != q.length =>
-            Validation.fail(ValidationError(s"$base.distributionType", ValidationErrorCode.INVALID_COMBINATION, s"percentiles and quantiles length mismatch (${pct.length} vs ${q.length})"))
-          case (None, _) => Validation.fail(ValidationError(s"$base.percentiles", ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires percentiles"))
-          case (_, None) => Validation.fail(ValidationError(s"$base.quantiles", ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires quantiles"))
-          case _ => Validation.fail(ValidationError(s"$base.distributionType", ValidationErrorCode.INVALID_COMBINATION, "Expert mode requires percentiles and quantiles"))
-        }
-      case "lognormal" =>
-        (minV, maxV) match {
-          case (Validation.Success(_, Some(minv)), Validation.Success(_, Some(maxv))) if minv < maxv => Validation.succeed(())
-          case (Validation.Success(_, Some(_)), Validation.Success(_, Some(_))) =>
-            Validation.fail(ValidationError(s"$base.minLoss", ValidationErrorCode.INVALID_LOGNORMAL_PARAMS, "minLoss must be < maxLoss"))
-          case _ => Validation.fail(ValidationError(s"$base.distributionType", ValidationErrorCode.REQUIRED_FIELD, "Lognormal mode requires minLoss and maxLoss"))
-        }
-      case other => Validation.fail(ValidationError(s"$base.distributionType", ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE, s"Unsupported distribution type: $other"))
-    }
-
-    Validation.validateWith(distTypeV, probV, minV, maxV, crossV)((_, _, _, _, _) => req)
-  }
+  def validateDistributionUpdate(req: DistributionUpdateRequestV2): Validation[ValidationError, Distribution] =
+    Distribution.create(
+      distributionType = req.distributionType,
+      probability = req.probability,
+      minLoss = req.minLoss,
+      maxLoss = req.maxLoss,
+      percentiles = req.percentiles,
+      quantiles = req.quantiles,
+      fieldPrefix = "request"
+    )
 
   def validateRename(req: NodeRenameRequestV2): Validation[ValidationError, SafeName.SafeName] =
     toValidation(ValidationUtil.refineName(req.name, "request.name"))
@@ -253,13 +219,14 @@ object RiskTreeV2Requests {
   private def refineLeafDefs(
     leaves: Seq[RiskLeafDefinitionRequestV2],
     baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], LeafPayload)]] =
+  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], Distribution)]] =
     collectAllWithIndex(leaves) { (l, idx) =>
       val base = s"$baseLabel[$idx]"
       Validation.validateWith(
         refineNameField(l.name, s"$base.name"),
-        refineParentName(l.parentName, s"$base.parentName")
-      )((name, parent) => (name, parent, LeafPayload(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles)))
+        refineParentName(l.parentName, s"$base.parentName"),
+        Distribution.create(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base)
+      )((name, parent, dist) => (name, parent, dist))
     }
 
   private def refineExistingPortfolios(
@@ -278,70 +245,171 @@ object RiskTreeV2Requests {
   private def refineExistingLeaves(
     leaves: Seq[RiskLeafUpdateRequestV2],
     baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName], LeafPayload)]] =
+  ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName], Distribution)]] =
     collectAllWithIndex(leaves) { (l, idx) =>
       val base = s"$baseLabel[$idx]"
       Validation.validateWith(
         toValidation(ValidationUtil.refineId(l.id, s"$base.id")),
         refineNameField(l.name, s"$base.name"),
-        refineParentName(l.parentName, s"$base.parentName")
-      )((id, name, parent) => (id, name, parent, LeafPayload(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles)))
+        refineParentName(l.parentName, s"$base.parentName"),
+        Distribution.create(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base)
+      )((id, name, parent, dist) => (id, name, parent, dist))
     }
+
+  // Guard: ensure names are unique across all nodes so parent references are unambiguous; returns the deduped set.
+  private def requireUniqueNames(allNames: Seq[SafeName.SafeName]): Validation[ValidationError, Set[SafeName.SafeName]] = {
+    val duplicates = allNames.groupBy(identity).collect { case (n, xs) if xs.size > 1 => n }
+    if duplicates.nonEmpty then
+      Validation.fail(ValidationError("request.names", ValidationErrorCode.AMBIGUOUS_REFERENCE, s"Duplicate names: ${duplicates.map(_.value).mkString(", ")}"))
+    else Validation.succeed(allNames.toSet)
+  }
+
+  // Guard: pick exactly one root (prefer portfolio; allow lone leaf when no portfolios).
+  private def requireSingleRootCreate(
+    portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
+  ): Validation[ValidationError, SafeName.SafeName] = {
+    val rootCandidates =
+      if portfolios.nonEmpty then portfolios.collect { case (name, None) => name }
+      else leaves.collect { case (name, None) => name }
+
+    rootCandidates match {
+      case Seq(root) => Validation.succeed(root)
+      case Seq() => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.REQUIRED_FIELD, "Exactly one root is required"))
+      case _ => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple roots found"))
+    }
+  }
+
+  // Guard: pick exactly one root in the combined (existing + new) topology.
+  private def requireSingleRootUpdate(
+    portfolios: Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])],
+    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    newPortfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    newLeaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
+  ): Validation[ValidationError, SafeName.SafeName] = {
+    val portNames = portfolios.map(_._2) ++ newPortfolios.map(_._1)
+    val leafNames = leaves.map(_._1) ++ newLeaves.map(_._1)
+
+    val rootCandidates =
+      if portNames.nonEmpty then (portfolios.map(_._3) ++ newPortfolios.map(_._2)).zip(portNames).collect { case (None, name) => name }
+      else (leaves.map(_._2) ++ newLeaves.map(_._2)).zip(leafNames).collect { case (None, name) => name }
+
+    rootCandidates match {
+      case Seq(root) => Validation.succeed(root)
+      case Seq() => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.REQUIRED_FIELD, "Exactly one root is required"))
+      case _ => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple roots found"))
+    }
+  }
+
+  // Guard: leaves in create must point to portfolios as parents (unless lone leaf tree) and must exist.
+  private def requireLeafParentsCreate(
+    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    portfolioNames: Set[SafeName.SafeName],
+    allNameSet: Set[SafeName.SafeName],
+    totalNodes: Int
+  ): Validation[ValidationError, Unit] =
+    collectAllWithIndex(leaves) { (l, idx) =>
+      l._2 match {
+        case Some(parentName) if portfolioNames.contains(parentName) => Validation.succeed(())
+        case Some(parentName) if allNameSet.contains(parentName) => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.INVALID_NODE_TYPE, s"parentName '${parentName.value}' refers to a leaf; must reference a portfolio"))
+        case Some(parentName) => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parentName.value}' not found in portfolios"))
+        case None if portfolioNames.isEmpty && totalNodes == 1 => Validation.succeed(())
+        case None => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.REQUIRED_FIELD, "leaf must have a parent portfolio"))
+      }
+    }.map(_ => ())
+
+  // Guard: existing leaves must keep valid portfolio parents after update topology.
+  private def requireLeafParentsExisting(
+    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    portfolioNames: Set[SafeName.SafeName],
+    allNameSet: Set[SafeName.SafeName],
+    totalNodes: Int,
+    labelPrefix: String
+  ): Validation[ValidationError, Unit] =
+    collectAllWithIndex(leaves) { (l, idx) =>
+      l._2 match {
+        case Some(p) if portfolioNames.contains(p) => Validation.succeed(())
+        case Some(p) if allNameSet.contains(p) => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.INVALID_NODE_TYPE, s"parentName '${p.value}' refers to a leaf; must reference a portfolio"))
+        case Some(p) => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${p.value}' not found in portfolios"))
+        case None if portfolioNames.isEmpty && totalNodes == 1 => Validation.succeed(())
+        case None => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.REQUIRED_FIELD, "leaf must have a parent portfolio"))
+      }
+    }.map(_ => ())
+
+  // Guard: new leaves must point to portfolios in the combined name set.
+  private def requireLeafParentsNew(
+    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    portfolioNames: Set[SafeName.SafeName],
+    allNameSet: Set[SafeName.SafeName],
+    totalNodes: Int,
+    labelPrefix: String
+  ): Validation[ValidationError, Unit] =
+    collectAllWithIndex(leaves) { (l, idx) =>
+      l._2 match {
+        case Some(p) if portfolioNames.contains(p) => Validation.succeed(())
+        case Some(p) if allNameSet.contains(p) => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.INVALID_NODE_TYPE, s"parentName '${p.value}' refers to a leaf; must reference a portfolio"))
+        case Some(p) => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${p.value}' not found in portfolios"))
+        case None if portfolioNames.isEmpty && totalNodes == 1 => Validation.succeed(())
+        case None => Validation.fail(ValidationError(s"$labelPrefix[$idx].parentName", ValidationErrorCode.REQUIRED_FIELD, "leaf must have a parent portfolio"))
+      }
+    }.map(_ => ())
+
+  // Guard: portfolios in create can only parent other portfolios (or be root).
+  private def requirePortfolioParentsCreate(
+    portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    portfolioNames: Set[SafeName.SafeName]
+  ): Validation[ValidationError, Unit] =
+    collectAllWithIndex(portfolios) { (p, idx) =>
+      p._2 match {
+        case Some(parent) if portfolioNames.contains(parent) => Validation.succeed(())
+        case Some(parent) => Validation.fail(ValidationError(s"request.portfolios[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parent.value}' not found in portfolios"))
+        case None => Validation.succeed(())
+      }
+    }.map(_ => ())
+
+  // Guard: existing portfolios must keep valid portfolio parents after update topology.
+  private def requirePortfolioParentsExisting(
+    portfolios: Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])],
+    portfolioNames: Set[SafeName.SafeName]
+  ): Validation[ValidationError, Unit] =
+    collectAllWithIndex(portfolios) { (p, idx) =>
+      p._3 match {
+        case Some(parent) if portfolioNames.contains(parent) => Validation.succeed(())
+        case Some(parent) => Validation.fail(ValidationError(s"request.portfolios[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parent.value}' not found in portfolios"))
+        case None => Validation.succeed(())
+      }
+    }.map(_ => ())
+
+  // Guard: new portfolios must point to portfolios in the combined set.
+  private def requirePortfolioParentsNew(
+    portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    portfolioNames: Set[SafeName.SafeName]
+  ): Validation[ValidationError, Unit] =
+    collectAllWithIndex(portfolios) { (p, idx) =>
+      p._2 match {
+        case Some(parent) if portfolioNames.contains(parent) => Validation.succeed(())
+        case Some(parent) => Validation.fail(ValidationError(s"request.newPortfolios[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parent.value}' not found in portfolios"))
+        case None => Validation.succeed(())
+      }
+    }.map(_ => ())
 
   private def validateTopologyCreate(
     treeName: SafeName.SafeName,
     portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
     leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
   ): Validation[ValidationError, SafeName.SafeName] = {
-    // Enforce name uniqueness across all nodes so parent references are unambiguous.
     val allNames = portfolios.map(_._1) ++ leaves.map(_._1)
-    val duplicates = allNames.groupBy(identity).collect { case (n, xs) if xs.size > 1 => n }
-    val dupV = if duplicates.nonEmpty then
-      Validation.fail(ValidationError("request.names", ValidationErrorCode.AMBIGUOUS_REFERENCE, s"Duplicate names: ${duplicates.map(_.value).mkString(", ")}"))
-    else Validation.succeed(())
-
-    // Decide the single root: prefer a portfolio root; allow a lone leaf tree when no portfolios exist.
-    val rootCandidates =
-      if portfolios.nonEmpty then portfolios.collect { case (name, None) => name }
-      else leaves.collect { case (name, None) => name }
-
-    val rootV = rootCandidates match {
-      case Seq(root) => Validation.succeed(root)
-      case Seq() => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.REQUIRED_FIELD, "Exactly one root is required"))
-      case _ => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple roots found"))
-    }
-
-    // Fast membership checks used by parent validations.
     val portfolioNames = portfolios.map(_._1).toSet
-    val allNameSet = allNames.toSet
-
     val totalNodes = portfolios.size + leaves.size
 
-    // Leaf parents must point to portfolios; a lone leaf with no portfolios is allowed to be root.
-    val parentLeafV = collectAllWithIndex(leaves) { (l, idx) =>
-      l._2 match {
-        case Some(p) if portfolioNames.contains(p) => Validation.succeed(())
-        case Some(p) if allNameSet.contains(p) => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.INVALID_NODE_TYPE, s"parentName '${p.value}' refers to a leaf; must reference a portfolio"))
-        case Some(p) => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${p.value}' not found in portfolios"))
-        case None if portfolios.isEmpty && totalNodes == 1 => Validation.succeed(())
-        case None => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.REQUIRED_FIELD, "leaf must have a parent portfolio"))
-      }
-    }
-
-    // Portfolio parents must point to other portfolios (or be root).
-    val parentPortV = collectAllWithIndex(portfolios) { (p, idx) =>
-      p._2 match {
-        case Some(parent) if portfolioNames.contains(parent) => Validation.succeed(())
-        case Some(parent) => Validation.fail(ValidationError(s"request.portfolios[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parent.value}' not found in portfolios"))
-        case None => Validation.succeed(())
-      }
-    }
-
-    // Guard against cycles and empty portfolios (no children) when the tree has more than one node.
-    val cycleV = detectCycles(portfolios, leaves)
-    val nonEmptyV = validateNonEmptyPortfolios(portfolios, leaves)
-
-    Validation.validateWith(dupV, rootV, parentLeafV, parentPortV, cycleV, nonEmptyV)((_, root, _, _, _, _) => root)
+    for {
+      allNameSet <- requireUniqueNames(allNames)
+      root <- requireSingleRootCreate(portfolios, leaves)
+      _ <- requireLeafParentsCreate(leaves, portfolioNames, allNameSet, totalNodes)
+      _ <- requirePortfolioParentsCreate(portfolios, portfolioNames)
+      _ <- requireNoCyclesCreate(portfolios, leaves)
+      _ <- requireNonEmptyPortfoliosCreate(portfolios, leaves)
+    } yield root
   }
 
   private def validateTopologyUpdate(
@@ -351,81 +419,26 @@ object RiskTreeV2Requests {
     newPortfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
     newLeaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
   ): Validation[ValidationError, SafeName.SafeName] = {
-    // Enforce name uniqueness across existing and newly added nodes.
     val portNames = portfolios.map(_._2) ++ newPortfolios.map(_._1)
     val leafNames = leaves.map(_._1) ++ newLeaves.map(_._1)
     val allNames = portNames ++ leafNames
-
-    val duplicates = allNames.groupBy(identity).collect { case (n, xs) if xs.size > 1 => n }
-    val dupV = if duplicates.nonEmpty then
-      Validation.fail(ValidationError("request.names", ValidationErrorCode.AMBIGUOUS_REFERENCE, s"Duplicate names: ${duplicates.map(_.value).mkString(", ")}"))
-    else Validation.succeed(())
-
-    // Single root: prefer any portfolio roots if portfolios exist; otherwise allow a single leaf root.
-    val rootCandidates =
-      if portNames.nonEmpty then (portfolios.map(_._3) ++ newPortfolios.map(_._2)).zip(portNames).collect { case (None, name) => name }
-      else (leaves.map(_._2) ++ newLeaves.map(_._2)).zip(leafNames).collect { case (None, name) => name }
-
-    val rootV = rootCandidates match {
-      case Seq(root) => Validation.succeed(root)
-      case Seq() => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.REQUIRED_FIELD, "Exactly one root is required"))
-      case _ => Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple roots found"))
-    }
-
-    // Fast membership sets for parent validation.
     val portfolioNames = portNames.toSet
-    val allNameSet = allNames.toSet
-
     val totalNodes = portfolios.size + newPortfolios.size + leaves.size + newLeaves.size
 
-    // Existing leaves: parent must be a portfolio; allow lone leaf root only when no portfolios and single node.
-    val parentLeafV = collectAllWithIndex(leaves) { (l, idx) =>
-      l._2 match {
-        case Some(p) if portfolioNames.contains(p) => Validation.succeed(())
-        case Some(p) if allNameSet.contains(p) => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.INVALID_NODE_TYPE, s"parentName '${p.value}' refers to a leaf; must reference a portfolio"))
-        case Some(p) => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${p.value}' not found in portfolios"))
-        case None if portfolioNames.isEmpty && totalNodes == 1 => Validation.succeed(())
-        case None => Validation.fail(ValidationError(s"request.leaves[$idx].parentName", ValidationErrorCode.REQUIRED_FIELD, "leaf must have a parent portfolio"))
-      }
-    }
-
-    // New leaves: same constraints as existing leaves.
-    val parentLeafNewV = collectAllWithIndex(newLeaves) { (l, idx) =>
-      l._2 match {
-        case Some(p) if portfolioNames.contains(p) => Validation.succeed(())
-        case Some(p) if allNameSet.contains(p) => Validation.fail(ValidationError(s"request.newLeaves[$idx].parentName", ValidationErrorCode.INVALID_NODE_TYPE, s"parentName '${p.value}' refers to a leaf; must reference a portfolio"))
-        case Some(p) => Validation.fail(ValidationError(s"request.newLeaves[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${p.value}' not found in portfolios"))
-        case None if portfolioNames.isEmpty && totalNodes == 1 => Validation.succeed(())
-        case None => Validation.fail(ValidationError(s"request.newLeaves[$idx].parentName", ValidationErrorCode.REQUIRED_FIELD, "leaf must have a parent portfolio"))
-      }
-    }
-
-    // Existing portfolios: parent must be a portfolio or root.
-    val parentPortExistingV = collectAllWithIndex(portfolios) { (p, idx) =>
-      p._3 match {
-        case Some(parent) if portfolioNames.contains(parent) => Validation.succeed(())
-        case Some(parent) => Validation.fail(ValidationError(s"request.portfolios[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parent.value}' not found in portfolios"))
-        case None => Validation.succeed(())
-      }
-    }
-
-    // New portfolios: same constraint as existing portfolios.
-    val parentPortNewV = collectAllWithIndex(newPortfolios) { (p, idx) =>
-      p._2 match {
-        case Some(parent) if portfolioNames.contains(parent) => Validation.succeed(())
-        case Some(parent) => Validation.fail(ValidationError(s"request.newPortfolios[$idx].parentName", ValidationErrorCode.MISSING_REFERENCE, s"parentName '${parent.value}' not found in portfolios"))
-        case None => Validation.succeed(())
-      }
-    }
-
-    // Guard against cycles and empty portfolios after applying updates.
-    val cycleV = detectCyclesUpdate(portfolios, leaves, newPortfolios, newLeaves)
-    val nonEmptyV = validateNonEmptyPortfoliosUpdate(portfolios, leaves, newPortfolios, newLeaves)
-
-    Validation.validateWith(dupV, rootV, parentLeafV, parentLeafNewV, parentPortExistingV, parentPortNewV, cycleV, nonEmptyV)((_, root, _, _, _, _, _, _) => root)
+    for {
+      allNameSet <- requireUniqueNames(allNames)
+      root <- requireSingleRootUpdate(portfolios, leaves, newPortfolios, newLeaves)
+      _ <- requireLeafParentsExisting(leaves, portfolioNames, allNameSet, totalNodes, "request.leaves")
+      _ <- requireLeafParentsNew(newLeaves, portfolioNames, allNameSet, totalNodes, "request.newLeaves")
+      _ <- requirePortfolioParentsExisting(portfolios, portfolioNames)
+      _ <- requirePortfolioParentsNew(newPortfolios, portfolioNames)
+      _ <- requireNoCyclesUpdate(portfolios, leaves, newPortfolios, newLeaves)
+      _ <- requireNonEmptyPortfoliosUpdate(portfolios, leaves, newPortfolios, newLeaves)
+    } yield root
   }
 
-  private def detectCycles(
+  // Guard: prevent cycles in the proposed create topology.
+  private def requireNoCyclesCreate(
     portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
     leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
   ): Validation[ValidationError, Unit] = {
@@ -443,7 +456,8 @@ object RiskTreeV2Requests {
     }
   }
 
-  private def detectCyclesUpdate(
+  // Guard: prevent cycles when combining existing and new nodes.
+  private def requireNoCyclesUpdate(
     portfolios: Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])],
     leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
     newPortfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
@@ -465,7 +479,8 @@ object RiskTreeV2Requests {
     }
   }
 
-  private def validateNonEmptyPortfolios(
+  // Guard: portfolios must not be left without children (unless single-node tree).
+  private def requireNonEmptyPortfoliosCreate(
     portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
     leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
   ): Validation[ValidationError, Unit] = {
@@ -481,7 +496,8 @@ object RiskTreeV2Requests {
     else Validation.succeed(())
   }
 
-  private def validateNonEmptyPortfoliosUpdate(
+  // Guard: after update, portfolios must not be empty (unless single-node tree).
+  private def requireNonEmptyPortfoliosUpdate(
     portfolios: Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])],
     leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
     newPortfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
