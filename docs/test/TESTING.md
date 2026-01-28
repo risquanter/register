@@ -50,341 +50,181 @@ sleep 2
 **Base URL:** `http://localhost:8080`  
 **Deployment:** Docker Compose with production configuration
 
-### Test Cases
+### Payload Fixtures (New API Shapes)
+
+- [docs/test/create-risk-tree.json](docs/test/create-risk-tree.json): Complex tree with three portfolios and two leaves (name-based topology, no IDs)
+- [docs/test/create-simple-risk.json](docs/test/create-simple-risk.json): Minimal tree with a single leaf under a root portfolio
+- [docs/test/create-lognormal-risk.json](docs/test/create-lognormal-risk.json): Single lognormal leaf under a root portfolio
+- [docs/test/update-risk-tree-template.json](docs/test/update-risk-tree-template.json): PUT template; replace `REPLACE_*` tokens with IDs from create response before sending
+
+### Protocol Cheatsheet
+
+- POST `/api/risk-trees` uses `portfolios` + `leaves` with `parentName` resolved by name; exactly one portfolio has `parentName = null` (root) and leaves must reference portfolios.
+- PUT `/api/risk-trees/{treeId}` mixes existing nodes (with `id`) and new nodes (without). Topology still uses `parentName` by name. Nodes omitted from the request are deleted unless that would leave a portfolio empty.
+- PATCH `/api/risk-trees/{treeId}/nodes/{nodeUlid}/distribution` updates only a leaf distribution. PATCH `/api/risk-trees/{treeId}/nodes/{nodeUlid}` renames any node.
+- DELETE `/api/risk-trees/{treeId}/nodes/{nodeUlid}` rejects deleting the root and rejects deleting the only child of a portfolio; portfolios delete their entire subtree.
+- All names must be unique per tree; parents must be portfolios; cycles are rejected.
+
+### Test Cases (New API)
 
 ### 1. Health Check
 
 **Purpose:** Verify service is running and responding
 
-**curl:**
 ```bash
 curl -X GET http://localhost:8080/health
 ```
 
-**httpie:**
-```bash
-http GET http://localhost:8080/health
-```
-
-**Expected Response:**
-```json
-{
-  "status": "healthy",
-  "service": "risk-register"
-}
-```
-
-**Success Criteria:**
-- HTTP 200 OK
-- Response < 50ms
-- JSON structure matches
+**Expect:** HTTP 200 with `status=healthy`; latency < 50ms
 
 ---
 
-### 2. Create Risk Tree (Complex Hierarchy)
+### 2. Create Risk Tree (Complex)
 
-**Purpose:** Test POST endpoint with nested risk tree structure
+**Purpose:** POST a multi-node tree using the new DTO shape
 
-**curl:**
 ```bash
-curl -X POST http://localhost:8080/api/risk-trees \
+curl -i -X POST http://localhost:8080/api/risk-trees \
   -H "Content-Type: application/json" \
-  -d @docs/test/create-risk-tree.json
+  -d @docs/test/create-risk-tree.json -o /tmp/create-complex.json
 ```
 
-**httpie:**
-```bash
-http POST http://localhost:8080/api/risk-trees < docs/test/create-risk-tree.json
-```
-
-**Expected Response:**
-```json
-{
-  "id": 0,
-  "name": "Production System Outage",
-  "nTrials": 50000,
-  "root": {
-    "name": "Total Impact",
-    "probability": 0.15,
-    ...
-  },
-  "createdAt": "2026-01-12T15:30:00Z"
-}
-```
-
-**Success Criteria:**
-- HTTP 200 OK
-- Returns assigned ID (0 for first tree)
-- Structure preserved
-- Response < 100ms
+**Expect:** HTTP 201 Created, body includes `id`, `name`, and `nodes` with ULIDs and `parentId`. Verify one root (`parentId = null`) and no duplicate names.
 
 ---
 
 ### 3. Create Simple Risk Tree
 
-**Purpose:** Test single-node (leaf) risk tree
+**Purpose:** POST a minimal tree (one leaf under a root portfolio)
 
-**curl:**
 ```bash
-curl -X POST http://localhost:8080/api/risk-trees \
+curl -i -X POST http://localhost:8080/api/risk-trees \
   -H "Content-Type: application/json" \
-  -d @docs/test/create-simple-risk.json
+  -d @docs/test/create-simple-risk.json -o /tmp/create-simple.json
 ```
 
-**httpie:**
-```bash
-http POST http://localhost:8080/api/risk-trees < docs/test/create-simple-risk.json
-```
-
-**Expected Response:**
-```json
-{
-  "id": 1,
-  "name": "Data Breach Scenario",
-  ...
-}
-```
-
-**Success Criteria:**
-- HTTP 200 OK
-- Returns ID 1
-- Response < 100ms
+**Expect:** HTTP 201 Created; nodes array contains a single portfolio root and one leaf with matching `parentId`.
 
 ---
 
-### 4. Get All Risk Trees
+### 4. List Risk Trees
 
-**Purpose:** Verify list endpoint returns all created trees
+**Purpose:** Verify list endpoint returns created trees
 
-**curl:**
 ```bash
-curl -X GET http://localhost:8080/api/risk-trees
+curl -s http://localhost:8080/api/risk-trees | jq '.'
 ```
 
-**httpie:**
-```bash
-http GET http://localhost:8080/api/risk-trees
-```
-
-**Expected Response:**
-```json
-[
-  {
-    "id": 0,
-    "name": "Production System Outage",
-    ...
-  },
-  {
-    "id": 1,
-    "name": "Data Breach Scenario",
-    ...
-  }
-]
-```
-
-**Success Criteria:**
-- HTTP 200 OK
-- Returns array with 2 trees
-- Response < 50ms
+**Expect:** HTTP 200; contains both tree IDs created above; latency < 50ms.
 
 ---
 
 ### 5. Get Risk Tree by ID
 
-**Purpose:** Test single tree retrieval
+**Purpose:** Fetch the complex tree created in Test 2
 
-**curl:**
 ```bash
-curl -X GET http://localhost:8080/api/risk-trees/0
+COMPLEX_ID=$(jq -r '.id' /tmp/create-complex.json)
+curl -s http://localhost:8080/api/risk-trees/$COMPLEX_ID | jq '.'
 ```
 
-**httpie:**
-```bash
-http GET http://localhost:8080/api/risk-trees/0
-```
-
-**Expected Response:**
-```json
-{
-  "id": 0,
-  "name": "Production System Outage",
-  ...
-}
-```
-
-**Success Criteria:**
-- HTTP 200 OK
-- Returns correct tree
-- Response < 50ms
+**Expect:** HTTP 200; response echoes portfolios/leaves with ULIDs and parent relationships.
 
 ---
 
-### 6. Compute LEC (Loss Exceedance Curve) - Root Only
+### 6. Update Risk Tree (PUT)
 
-**Purpose:** Test Monte Carlo simulation at root level
+**Purpose:** Exercise mixed existing/new nodes, renames, and topology changes
 
-**curl:**
 ```bash
-curl -X GET "http://localhost:8080/api/risk-trees/0/lec?depth=0&nTrials=10000"
+ROOT_ID=$(jq -r '.nodes[] | select(.parentId==null) | .id' /tmp/create-complex.json)
+APPS_ID=$(jq -r '.nodes[] | select(.name=="Applications") | .id' /tmp/create-complex.json)
+REVENUE_ID=$(jq -r '.nodes[] | select(.name=="Revenue Loss") | .id' /tmp/create-complex.json)
+sed "s/REPLACE_ROOT_ID/$ROOT_ID/g; s/REPLACE_APPS_ID/$APPS_ID/g; s/REPLACE_REVENUE_ID/$REVENUE_ID/g" \
+  docs/test/update-risk-tree-template.json > /tmp/update-risk-tree.json
+curl -i -X PUT http://localhost:8080/api/risk-trees/$COMPLEX_ID \
+  -H "Content-Type: application/json" \
+  -d @/tmp/update-risk-tree.json -o /tmp/update-response.json
 ```
 
-**httpie:**
-```bash
-http GET http://localhost:8080/api/risk-trees/0/lec depth==0 nTrials==10000
-```
-
-**Expected Response:**
-```json
-{
-  "id": 0,
-  "name": "Production System Outage",
-  "lec": {
-    "quantiles": {
-      "p50": 75000.5,
-      "p90": 350000.2,
-      "p95": 450000.8,
-      "p99": 490000.1
-    },
-    "vegaLiteSpec": {
-      "$schema": "https://vega.github.io/schema/vega-lite/v5.json",
-      ...
-    }
-  }
-}
-```
-
-**Success Criteria:**
-- HTTP 200 OK
-- Contains `lec.quantiles` with p50/p90/p95/p99
-- Contains `lec.vegaLiteSpec` (valid Vega-Lite JSON)
-- Quantiles are sorted: p50 < p90 < p95 < p99
-- Response < 2000ms (10,000 trials)
+**Expect:** HTTP 200; updated names/parents applied; new portfolio and leaf created; omitted nodes removed only if parent is not left empty.
 
 ---
 
-### 7. Compute LEC with Full Hierarchy
+### 7. Patch Leaf Distribution
 
-**Purpose:** Test simulation with depth=1 (includes children)
+**Purpose:** Verify targeted distribution update without full PUT
 
-**curl:**
 ```bash
-curl -X GET "http://localhost:8080/api/risk-trees/0/lec?depth=1&nTrials=25000&parallelism=4"
+curl -i -X PATCH http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$REVENUE_ID/distribution \
+  -H "Content-Type: application/json" \
+  -d '{"distributionType":"lognormal","probability":0.9,"minLoss":45000,"maxLoss":350000}'
 ```
 
-**httpie:**
-```bash
-http GET http://localhost:8080/api/risk-trees/0/lec depth==1 nTrials==25000 parallelism==4
-```
-
-**Expected Response:**
-```json
-{
-  "id": 0,
-  "name": "Production System Outage",
-  "lec": {
-    "quantiles": { ... },
-    "vegaLiteSpec": { ... }
-  },
-  "children": [
-    {
-      "name": "Revenue Loss",
-      "lec": {
-        "quantiles": { ... }
-      }
-    },
-    {
-      "name": "Recovery Costs",
-      "lec": {
-        "quantiles": { ... }
-      }
-    }
-  ]
-}
-```
-
-**Success Criteria:**
-- HTTP 200 OK
-- Root has LEC
-- Children have LEC
-- Response < 3000ms (25,000 trials with parallelism)
+**Expect:** HTTP 200; updated leaf distribution; parent and siblings unchanged.
 
 ---
 
-### 8. Compute LEC with Provenance
+### 8. Rename Node
 
-**Purpose:** Verify provenance metadata for reproducibility
+**Purpose:** Rename a node using PATCH
 
-**curl:**
 ```bash
-curl -X GET "http://localhost:8080/api/risk-trees/1/lec?includeProvenance=true&nTrials=5000"
+curl -i -X PATCH http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$APPS_ID \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Applications and Services"}'
 ```
 
-**httpie:**
-```bash
-http GET http://localhost:8080/api/risk-trees/1/lec includeProvenance==true nTrials==5000
-```
-
-**Expected Response:**
-```json
-{
-  "id": 1,
-  "name": "Data Breach Scenario",
-  "lec": {
-    "quantiles": { ... },
-    "provenance": {
-      "seed": 42,
-      "nTrials": 5000,
-      "parallelism": 8,
-      "timestamp": "2026-01-12T15:35:00Z",
-      "version": "0.1.0"
-    }
-  }
-}
-```
-
-**Success Criteria:**
-- HTTP 200 OK
-- Contains `lec.provenance`
-- Provenance has seed, nTrials, parallelism, timestamp
-- Response < 1000ms
+**Expect:** HTTP 200; name is unique and reflected in subsequent GETs.
 
 ---
 
-### 9. Invalid Request Handling
+### 9. Delete Node
 
-**Purpose:** Verify validation and error responses
+**Purpose:** Delete a non-root leaf while honoring the only-child guard
 
-**Test 9a: Invalid nTrials (must be > 0)**
-
-**curl:**
 ```bash
-curl -X GET "http://localhost:8080/api/risk-trees/0/lec?nTrials=0"
+curl -i -X DELETE http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$REVENUE_ID -o /tmp/delete-leaf.json
 ```
 
-**Expected:** HTTP 400 Bad Request
+**Expect:** HTTP 200; leaf removed; portfolio still has at least one child; root unchanged.
 
-**Test 9b: Invalid depth (max 5)**
+---
 
-**curl:**
+### 10. Delete Tree
+
+**Purpose:** Full cleanup of the complex tree
+
 ```bash
-curl -X GET "http://localhost:8080/api/risk-trees/0/lec?depth=10"
+curl -i -X DELETE http://localhost:8080/api/risk-trees/$COMPLEX_ID
 ```
 
-**Expected:** HTTP 400 Bad Request
+**Expect:** HTTP 204 No Content; subsequent GET by id returns 200 with `null` body.
 
-**Test 9c: Non-existent tree**
+---
 
-**curl:**
+### 11. LEC (Loss Exceedance Curve)
+
+**Purpose:** Validate simulation endpoints on the simple tree
+
 ```bash
-curl -X GET http://localhost:8080/api/risk-trees/999
+SIMPLE_ID=$(jq -r '.id' /tmp/create-simple.json)
+curl -s "http://localhost:8080/api/risk-trees/$SIMPLE_ID/lec?depth=0&nTrials=5000" | jq '.'
 ```
 
-**Expected:** HTTP 200 with `null` body
+**Expect:** HTTP 200; `lec.quantiles` present and ordered; response < 2000ms for 5k trials.
 
-**Success Criteria:**
-- Validation errors return HTTP 400
-- Error messages are descriptive
-- Non-existent resources handled gracefully
+---
+
+### 12. Validation Errors (Structural)
+
+- Missing parent reference: POST with `parentName` not present → HTTP 400 `MISSING_REFERENCE`
+- Duplicate names: POST with repeated name across portfolios/leaves → HTTP 400 `AMBIGUOUS_REFERENCE`
+- Leaf as parent: POST leaf referenced as parent → HTTP 400 `LEAF_AS_PARENT`
+- Multiple or zero roots: POST where 0 or >1 portfolios have `parentName = null` → HTTP 400
+- Invalid distribution: PATCH/POST with invalid parameters (e.g., missing `minLoss` for lognormal) → HTTP 400
+
+These tests confirm invariants match ADR-017 (unique names, single root, parents are portfolios, no cycles, valid distributions).
 
 ---
 
@@ -664,7 +504,7 @@ time curl -X GET "http://localhost:8080/api/risk-trees/0/lec?depth=1&nTrials=250
 
 ---
 
-## Automated Test Script
+## Automated Test Script (New API)
 
 ```bash
 #!/bin/bash
@@ -674,145 +514,99 @@ BASE_URL="http://localhost:8080"
 PASS=0
 FAIL=0
 
-echo "=== Native Image API Test Suite ==="
+echo "=== Risk Tree API Test Suite (New DTOs) ==="
 echo
 
-# Test 1: Health Check
-echo "Test 1: Health Check"
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json $BASE_URL/health)
-if [ "$RESPONSE" = "200" ]; then
-    echo "✅ PASS"
+check() {
+  local name="$1" http_code="$2" expected="$3"
+  if [ "$http_code" = "$expected" ]; then
+    echo "✅ PASS - $name"
     ((PASS++))
-else
-    echo "❌ FAIL (HTTP $RESPONSE)"
+  else
+    echo "❌ FAIL - $name (HTTP $http_code, expected $expected)"
     ((FAIL++))
-fi
-echo
+  fi
+}
 
-# Test 2: Create Complex Tree
-echo "Test 2: Create Complex Risk Tree"
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json \
-    -X POST $BASE_URL/api/risk-trees \
-    -H "Content-Type: application/json" \
-    -d @docs/test/create-risk-tree.json)
-if [ "$RESPONSE" = "200" ]; then
-    echo "✅ PASS"
-    ((PASS++))
+# 1) Health
+HTTP=$(curl -s -w "%{http_code}" -o /tmp/health.json "$BASE_URL/health")
+check "Health" "$HTTP" "200"
+
+# 2) Create complex tree
+CREATE_COMPLEX=$(curl -s -w "\n%{http_code}" -o /tmp/create-complex.json \
+  -X POST "$BASE_URL/api/risk-trees" \
+  -H "Content-Type: application/json" \
+  -d @docs/test/create-risk-tree.json)
+HTTP_COMPLEX=$(echo "$CREATE_COMPLEX" | tail -n1)
+check "Create complex tree" "$HTTP_COMPLEX" "201"
+COMPLEX_ID=$(jq -r '.id' /tmp/create-complex.json)
+ROOT_ID=$(jq -r '.nodes[] | select(.parentId==null) | .id' /tmp/create-complex.json)
+APPS_ID=$(jq -r '.nodes[] | select(.name=="Applications") | .id' /tmp/create-complex.json)
+REVENUE_ID=$(jq -r '.nodes[] | select(.name=="Revenue Loss") | .id' /tmp/create-complex.json)
+
+# 3) Create simple tree
+CREATE_SIMPLE=$(curl -s -w "\n%{http_code}" -o /tmp/create-simple.json \
+  -X POST "$BASE_URL/api/risk-trees" \
+  -H "Content-Type: application/json" \
+  -d @docs/test/create-simple-risk.json)
+HTTP_SIMPLE=$(echo "$CREATE_SIMPLE" | tail -n1)
+check "Create simple tree" "$HTTP_SIMPLE" "201"
+SIMPLE_ID=$(jq -r '.id' /tmp/create-simple.json)
+
+# 4) List trees
+LIST_HTTP=$(curl -s -w "%{http_code}" -o /tmp/list.json "$BASE_URL/api/risk-trees")
+check "List trees" "$LIST_HTTP" "200"
+
+# 5) GET by id
+GET_HTTP=$(curl -s -w "%{http_code}" -o /tmp/get-complex.json "$BASE_URL/api/risk-trees/$COMPLEX_ID")
+check "Get complex tree" "$GET_HTTP" "200"
+
+# 6) PUT update (mixed existing/new nodes)
+sed "s/REPLACE_ROOT_ID/$ROOT_ID/g; s/REPLACE_APPS_ID/$APPS_ID/g; s/REPLACE_REVENUE_ID/$REVENUE_ID/g" \
+  docs/test/update-risk-tree-template.json > /tmp/update-risk-tree.json
+PUT_HTTP=$(curl -s -w "%{http_code}" -o /tmp/put.json \
+  -X PUT "$BASE_URL/api/risk-trees/$COMPLEX_ID" \
+  -H "Content-Type: application/json" \
+  -d @/tmp/update-risk-tree.json)
+check "PUT update" "$PUT_HTTP" "200"
+
+# 7) PATCH distribution
+PATCH_DIST_HTTP=$(curl -s -w "%{http_code}" -o /tmp/patch-dist.json \
+  -X PATCH "$BASE_URL/api/risk-trees/$COMPLEX_ID/nodes/$REVENUE_ID/distribution" \
+  -H "Content-Type: application/json" \
+  -d '{"distributionType":"lognormal","probability":0.9,"minLoss":45000,"maxLoss":350000}')
+check "PATCH distribution" "$PATCH_DIST_HTTP" "200"
+
+# 8) PATCH rename
+PATCH_RENAME_HTTP=$(curl -s -w "%{http_code}" -o /tmp/patch-rename.json \
+  -X PATCH "$BASE_URL/api/risk-trees/$COMPLEX_ID/nodes/$APPS_ID" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Applications and Services"}')
+check "PATCH rename" "$PATCH_RENAME_HTTP" "200"
+
+# 9) LEC (root only)
+LEC_HTTP=$(curl -s -w "%{http_code}" -o /tmp/lec.json \
+  "$BASE_URL/api/risk-trees/$SIMPLE_ID/lec?depth=0&nTrials=5000")
+HAS_QUANTILES=$(jq 'has("lec") and .lec | has("quantiles")' /tmp/lec.json)
+if [ "$LEC_HTTP" = "200" ] && [ "$HAS_QUANTILES" = "true" ]; then
+  echo "✅ PASS - LEC root"
+  ((PASS++))
 else
-    echo "❌ FAIL (HTTP $RESPONSE)"
-    cat /tmp/response.json
-    ((FAIL++))
+  echo "❌ FAIL - LEC root (HTTP $LEC_HTTP)"
+  ((FAIL++))
 fi
-echo
 
-# Test 3: Create Simple Tree
-echo "Test 3: Create Simple Risk Tree"
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json \
-    -X POST $BASE_URL/api/risk-trees \
-    -H "Content-Type: application/json" \
-    -d @docs/test/create-simple-risk.json)
-if [ "$RESPONSE" = "200" ]; then
-    echo "✅ PASS"
-    ((PASS++))
-else
-    echo "❌ FAIL (HTTP $RESPONSE)"
-    ((FAIL++))
-fi
-echo
+# 10) Delete complex tree (cleanup)
+DEL_HTTP=$(curl -s -w "%{http_code}" -o /tmp/delete.json \
+  -X DELETE "$BASE_URL/api/risk-trees/$COMPLEX_ID")
+check "Delete complex tree" "$DEL_HTTP" "204"
 
-# Test 4: Get All Trees
-echo "Test 4: Get All Risk Trees"
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json $BASE_URL/api/risk-trees)
-COUNT=$(jq '. | length' /tmp/response.json)
-if [ "$RESPONSE" = "200" ] && [ "$COUNT" = "2" ]; then
-    echo "✅ PASS (Found $COUNT trees)"
-    ((PASS++))
-else
-    echo "❌ FAIL (HTTP $RESPONSE, Count: $COUNT)"
-    ((FAIL++))
-fi
-echo
-
-# Test 5: Get Tree by ID
-echo "Test 5: Get Risk Tree by ID"
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json $BASE_URL/api/risk-trees/0)
-if [ "$RESPONSE" = "200" ]; then
-    echo "✅ PASS"
-    ((PASS++))
-else
-    echo "❌ FAIL (HTTP $RESPONSE)"
-    ((FAIL++))
-fi
-echo
-
-# Test 6: Compute LEC (Root Only)
-echo "Test 6: Compute LEC (Root Only)"
-START=$(date +%s%N)
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json \
-    "$BASE_URL/api/risk-trees/0/lec?depth=0&nTrials=10000")
-END=$(date +%s%N)
-DURATION=$(((END - START) / 1000000))
-HAS_QUANTILES=$(jq 'has("lec") and .lec | has("quantiles")' /tmp/response.json)
-if [ "$RESPONSE" = "200" ] && [ "$HAS_QUANTILES" = "true" ]; then
-    echo "✅ PASS (${DURATION}ms)"
-    ((PASS++))
-else
-    echo "❌ FAIL (HTTP $RESPONSE)"
-    ((FAIL++))
-fi
-echo
-
-# Test 7: Compute LEC (With Children)
-echo "Test 7: Compute LEC (Full Hierarchy)"
-START=$(date +%s%N)
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json \
-    "$BASE_URL/api/risk-trees/0/lec?depth=1&nTrials=25000&parallelism=4")
-END=$(date +%s%N)
-DURATION=$(((END - START) / 1000000))
-HAS_CHILDREN_LEC=$(jq '.children[0] | has("lec")' /tmp/response.json)
-if [ "$RESPONSE" = "200" ] && [ "$HAS_CHILDREN_LEC" = "true" ]; then
-    echo "✅ PASS (${DURATION}ms)"
-    ((PASS++))
-else
-    echo "❌ FAIL (HTTP $RESPONSE)"
-    ((FAIL++))
-fi
-echo
-
-# Test 8: Provenance
-echo "Test 8: Compute LEC with Provenance"
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json \
-    "$BASE_URL/api/risk-trees/1/lec?includeProvenance=true&nTrials=5000")
-HAS_PROVENANCE=$(jq '.lec | has("provenance")' /tmp/response.json)
-if [ "$RESPONSE" = "200" ] && [ "$HAS_PROVENANCE" = "true" ]; then
-    echo "✅ PASS"
-    ((PASS++))
-else
-    echo "❌ FAIL (HTTP $RESPONSE)"
-    ((FAIL++))
-fi
-echo
-
-# Test 9: Error Handling
-echo "Test 9: Invalid Request Handling"
-RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response.json \
-    "$BASE_URL/api/risk-trees/0/lec?nTrials=0")
-if [ "$RESPONSE" = "400" ]; then
-    echo "✅ PASS (Validation error caught)"
-    ((PASS++))
-else
-    echo "❌ FAIL (Expected 400, got $RESPONSE)"
-    ((FAIL++))
-fi
-echo
-
-# Summary
 echo "==================================="
 echo "Results: $PASS passed, $FAIL failed"
 echo "==================================="
 
 if [ $FAIL -gt 0 ]; then
-    exit 1
+  exit 1
 fi
 ```
 

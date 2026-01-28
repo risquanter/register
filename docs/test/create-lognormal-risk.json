@@ -1,14 +1,16 @@
 {
   "name": "Simple Lognormal Test",
-  "nTrials": 5000,
-  "root": {
-    "RiskLeaf": {
-      "id": "lognormal-test",
+  "portfolios": [
+    { "name": "Root", "parentName": null }
+  ],
+  "leaves": [
+    {
       "name": "Lognormal Risk",
-      "probability": 0.5,
+      "parentName": "Root",
       "distributionType": "lognormal",
+      "probability": 0.5,
       "minLoss": 10000,
       "maxLoss": 100000
     }
-  }
+  ]
 }

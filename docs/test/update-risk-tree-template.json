@@ -1,0 +1,31 @@
+{
+  "name": "Production System Outage v2",
+  "portfolios": [
+    { "id": "REPLACE_ROOT_ID", "name": "Total Impact" },
+    { "id": "REPLACE_APPS_ID", "name": "Applications", "parentName": "Total Impact" }
+  ],
+  "leaves": [
+    {
+      "id": "REPLACE_REVENUE_ID",
+      "name": "Revenue Loss",
+      "parentName": "Applications",
+      "distributionType": "lognormal",
+      "probability": 0.82,
+      "minLoss": 40000,
+      "maxLoss": 320000
+    }
+  ],
+  "newPortfolios": [
+    { "name": "Compliance", "parentName": "Total Impact" }
+  ],
+  "newLeaves": [
+    {
+      "name": "Regulatory Fine",
+      "parentName": "Compliance",
+      "distributionType": "lognormal",
+      "probability": 0.12,
+      "minLoss": 15000,
+      "maxLoss": 600000
+    }
+  ]
+}

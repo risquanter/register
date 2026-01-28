@@ -730,43 +730,43 @@ type TreeProgram[A] = Free[TreeOp, A]
 ### Phase 1: Core CRUD (This Sprint)
 
 1. **DTOs**
-   - [ ] `RiskTreeDefinitionRequest` with portfolios/leaves
-   - [ ] `RiskPortfolioDefinitionRequest`, `RiskLeafDefinitionRequest`
-   - [ ] `RiskTreeUpdateRequest` with existing + new node lists
-   - [ ] `RiskPortfolioUpdateRequest`, `RiskLeafUpdateRequest`
-   - [ ] `DistributionUpdateRequest`, `NodeRenameRequest`
-   - [ ] JSON codecs for all DTOs
+  - [x] `RiskTreeDefinitionRequest` with portfolios/leaves
+  - [x] `RiskPortfolioDefinitionRequest`, `RiskLeafDefinitionRequest`
+  - [x] `RiskTreeUpdateRequest` with existing + new node lists
+  - [x] `RiskPortfolioUpdateRequest`, `RiskLeafUpdateRequest`
+  - [x] `DistributionUpdateRequest`, `NodeRenameRequest`
+  - [x] JSON codecs for all DTOs
 
 2. **Validation**
-   - [ ] Create validation: names unique, single root, parent refs valid, parents are portfolios
-   - [ ] Update validation: ULIDs exist, no cycles, same structural rules
-   - [ ] Distribution validation per type
+  - [x] Create validation: names unique, single root, parent refs valid, parents are portfolios
+  - [x] Update validation: ULIDs exist, no cycles, same structural rules
+  - [x] Distribution validation per type
 
 3. **Service Layer**
-   - [ ] `create(req: RiskTreeDefinitionRequest): Task[RiskTree]`
-   - [ ] `update(id: NonNegativeLong, req: RiskTreeUpdateRequest): Task[RiskTree]`
-   - [ ] `updateDistribution(treeId, nodeId, req): Task[RiskTree]`
-   - [ ] `renameNode(treeId, nodeId, req): Task[RiskTree]`
-   - [ ] `deleteNode(treeId, nodeId): Task[RiskTree]`
+  - [x] `create(req: RiskTreeDefinitionRequest): Task[RiskTree]`
+  - [x] `update(id: NonNegativeLong, req: RiskTreeUpdateRequest): Task[RiskTree]`
+  - [x] `updateDistribution(treeId, nodeId, req): Task[RiskTree]`
+  - [x] `renameNode(treeId, nodeId, req): Task[RiskTree]`
+  - [x] `deleteNode(treeId, nodeId): Task[RiskTree]`
 
 4. **Endpoints**
-   - [ ] Wire new DTOs to existing endpoints
-   - [ ] Add PATCH endpoints for distribution/rename
-   - [ ] Add DELETE endpoint for nodes
+  - [x] Wire new DTOs to existing endpoints
+  - [x] Add PATCH endpoints for distribution/rename
+  - [x] Add DELETE endpoint for nodes
 
 5. **Tests**
-   - [ ] DTO serialization/deserialization
-   - [ ] Validation rules (happy path + error cases)
-   - [ ] Service integration tests
-   - [ ] Delete cascade behavior
+  - [x] DTO serialization/deserialization
+  - [x] Validation rules (happy path + error cases)
+  - [x] Service integration tests
+  - [x] Delete cascade behavior
 
 ### Phase 2: Batch Operations (Future)
 
-1. Define `TreeOp` ADT
-2. Implement batch endpoint
-3. Operation interpreter with precondition checks
-4. Transactional execution
-5. Zipper-based tree manipulation (optional optimization)
+1. Define `TreeOp` ADT (pending)
+2. Implement batch endpoint (pending)
+3. Operation interpreter with precondition checks (pending)
+4. Transactional execution (pending)
+5. Zipper-based tree manipulation (optional optimization) (pending)
 
 ---
 
@@ -784,10 +784,10 @@ The new DTO structure differs from the current `RiskTreeDefinitionRequest`:
 
 ### Migration Path
 
-1. Deploy new endpoints alongside existing
-2. Update clients to use new format
-3. Deprecate old endpoints
-4. Remove old DTOs after migration period
+1. Deploy new endpoints alongside existing (done)
+2. Update clients to use new format (in progress)
+3. Deprecate old endpoints (planned)
+4. Remove old DTOs after migration period (planned)
 
 ---
 
@@ -867,6 +867,16 @@ PATCH /risk-trees/42/nodes/01HY7Q.../distribution
   "percentiles": [0.1, 0.5, 0.9],
   "quantiles": [1000, 5000, 25000]
 }
+
+### E. Delete only child (expected failure)
+
+```
+DELETE /risk-trees/42/nodes/01HY7Q...
+
+→ 400 Bad Request { "code": "CANNOT_DELETE_ONLY_CHILD" }
+```
+
+Use full PUT restructure instead: delete the parent or add a sibling in the same request to avoid empty portfolios.
 ```
 
 ---
