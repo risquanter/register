@@ -1,97 +1,21 @@
 package com.risquanter.register.http.requests
 
-import zio.json.{DeriveJsonCodec, JsonCodec}
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
-/**
-  * ADR-017 DTOs (V2) with separated portfolios/leaves and ULID-based updates.
-  * These coexist with the legacy flat-node DTOs until the service layer is migrated.
-  */
-final case class RiskTreeDefinitionRequestV2(
-  name: String,
-  portfolios: Seq[RiskPortfolioDefinitionRequestV2],
-  leaves: Seq[RiskLeafDefinitionRequestV2]
-)
-
-final case class RiskPortfolioDefinitionRequestV2(
-  name: String,
-  parentName: Option[String]
-)
-
-final case class RiskLeafDefinitionRequestV2(
-  name: String,
-  parentName: Option[String],
-  distributionType: String,
-  probability: Double,
-  minLoss: Option[Long],
-  maxLoss: Option[Long],
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]]
-)
-
-final case class RiskTreeUpdateRequestV2(
-  name: String,
-  portfolios: Seq[RiskPortfolioUpdateRequestV2],
-  leaves: Seq[RiskLeafUpdateRequestV2],
-  newPortfolios: Seq[RiskPortfolioDefinitionRequestV2],
-  newLeaves: Seq[RiskLeafDefinitionRequestV2]
-)
-
-final case class RiskPortfolioUpdateRequestV2(
-  id: String,
-  name: String,
-  parentName: Option[String]
-)
-
-final case class RiskLeafUpdateRequestV2(
-  id: String,
-  name: String,
-  parentName: Option[String],
-  distributionType: String,
-  probability: Double,
-  minLoss: Option[Long],
-  maxLoss: Option[Long],
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]]
-)
-
-final case class DistributionUpdateRequestV2(
-  distributionType: String,
-  probability: Double,
-  minLoss: Option[Long],
-  maxLoss: Option[Long],
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]]
-)
-
-final case class NodeRenameRequestV2(
-  name: String
-)
-
-object RiskTreeV2Requests {
-  given riskTreeDefinitionCodec: JsonCodec[RiskTreeDefinitionRequestV2] = DeriveJsonCodec.gen
-  given riskPortfolioDefinitionCodec: JsonCodec[RiskPortfolioDefinitionRequestV2] = DeriveJsonCodec.gen
-  given riskLeafDefinitionCodec: JsonCodec[RiskLeafDefinitionRequestV2] = DeriveJsonCodec.gen
-
-  given riskTreeUpdateCodec: JsonCodec[RiskTreeUpdateRequestV2] = DeriveJsonCodec.gen
-  given riskPortfolioUpdateCodec: JsonCodec[RiskPortfolioUpdateRequestV2] = DeriveJsonCodec.gen
-  given riskLeafUpdateCodec: JsonCodec[RiskLeafUpdateRequestV2] = DeriveJsonCodec.gen
-
-  given distributionUpdateCodec: JsonCodec[DistributionUpdateRequestV2] = DeriveJsonCodec.gen
-  given nodeRenameCodec: JsonCodec[NodeRenameRequestV2] = DeriveJsonCodec.gen
-
+/** ADR-017 DTO validators for hierarchical risk tree operations. */
+object RiskTreeRequests {
   type IdGenerator = () => SafeId.SafeId
 
-  private[requests] enum NodeKind {
+  enum NodeKind {
     case Portfolio
     case Leaf
   }
 
-  private[requests] final case class ResolvedNode(
+  final case class ResolvedNode(
     id: SafeId.SafeId,
     name: SafeName.SafeName,
     parentName: Option[SafeName.SafeName],
@@ -100,7 +24,7 @@ object RiskTreeV2Requests {
 
   // Result of resolving a create request: all names refined, ids generated, topology validated, distributions validated.
   // `nodes` is keyed by name for easy parent resolution in the service layer; `leafDistributions` carry domain-validated params.
-  private[requests] final case class ResolvedCreate(
+  final case class ResolvedCreate(
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],
     leafDistributions: Map[SafeName.SafeName, Distribution],
@@ -109,7 +33,7 @@ object RiskTreeV2Requests {
 
   // Result of resolving an update request: existing nodes keep caller ids, new nodes get generated ids.
   // Distributions are validated here so the service does not repeat cross-field checks.
-  private[requests] final case class ResolvedUpdate(
+  final case class ResolvedUpdate(
     treeName: SafeName.SafeName,
     existing: Map[SafeName.SafeName, ResolvedNode],
     added: Map[SafeName.SafeName, ResolvedNode],
@@ -119,7 +43,7 @@ object RiskTreeV2Requests {
   )
 
   // Resolve a create request: refine names, validate distributions, generate ids, and validate topology.
-  def resolveCreate(req: RiskTreeDefinitionRequestV2, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] = {
+  def resolveCreate(req: RiskTreeDefinitionRequest, newId: IdGenerator): Validation[ValidationError, ResolvedCreate] = {
     val treeNameV = refineNameField(req.name, "request.name")
     val portfoliosV = refinePortfolioDefs(req.portfolios, "request.portfolios")
     val leavesV = refineLeafDefs(req.leaves, "request.leaves")
@@ -141,7 +65,7 @@ object RiskTreeV2Requests {
   }
 
   // Resolve an update request: refine names/ids, generate ids for new nodes, validate combined topology, carry leaf payloads.
-  def resolveUpdate(req: RiskTreeUpdateRequestV2, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] = {
+  def resolveUpdate(req: RiskTreeUpdateRequest, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] = {
     val treeNameV = refineNameField(req.name, "request.name")
     val portfoliosV = refineExistingPortfolios(req.portfolios, "request.portfolios")
     val leavesV = refineExistingLeaves(req.leaves, "request.leaves")
@@ -180,7 +104,7 @@ object RiskTreeV2Requests {
     }.flatMap(identity)
   }
 
-  def validateDistributionUpdate(req: DistributionUpdateRequestV2): Validation[ValidationError, Distribution] =
+  def validateDistributionUpdate(req: DistributionUpdateRequest): Validation[ValidationError, Distribution] =
     Distribution.create(
       distributionType = req.distributionType,
       probability = req.probability,
@@ -191,7 +115,7 @@ object RiskTreeV2Requests {
       fieldPrefix = "request"
     )
 
-  def validateRename(req: NodeRenameRequestV2): Validation[ValidationError, SafeName.SafeName] =
+  def validateRename(req: NodeRenameRequest): Validation[ValidationError, SafeName.SafeName] =
     toValidation(ValidationUtil.refineName(req.name, "request.name"))
 
   private def refineParentName(raw: Option[String], field: String): Validation[ValidationError, Option[SafeName.SafeName]] = {
@@ -205,7 +129,7 @@ object RiskTreeV2Requests {
     toValidation(ValidationUtil.refineName(value, field))
 
   private def refinePortfolioDefs(
-    portfolios: Seq[RiskPortfolioDefinitionRequestV2],
+    portfolios: Seq[RiskPortfolioDefinitionRequest],
     baseLabel: String
   ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName])]] =
     collectAllWithIndex(portfolios) { (p, idx) =>
@@ -217,7 +141,7 @@ object RiskTreeV2Requests {
     }
 
   private def refineLeafDefs(
-    leaves: Seq[RiskLeafDefinitionRequestV2],
+    leaves: Seq[RiskLeafDefinitionRequest],
     baseLabel: String
   ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], Distribution)]] =
     collectAllWithIndex(leaves) { (l, idx) =>
@@ -230,7 +154,7 @@ object RiskTreeV2Requests {
     }
 
   private def refineExistingPortfolios(
-    portfolios: Seq[RiskPortfolioUpdateRequestV2],
+    portfolios: Seq[RiskPortfolioUpdateRequest],
     baseLabel: String
   ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])]] =
     collectAllWithIndex(portfolios) { (p, idx) =>
@@ -243,7 +167,7 @@ object RiskTreeV2Requests {
     }
 
   private def refineExistingLeaves(
-    leaves: Seq[RiskLeafUpdateRequestV2],
+    leaves: Seq[RiskLeafUpdateRequest],
     baseLabel: String
   ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName], Distribution)]] =
     collectAllWithIndex(leaves) { (l, idx) =>

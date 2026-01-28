@@ -5,14 +5,10 @@ import zio.test.*
 import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.domain.data.RiskLeaf
-import com.risquanter.register.domain.data.RiskPortfolio
-import com.risquanter.register.domain.data.iron.SafeId
-import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
-import com.risquanter.register.testutil.TestHelpers.safeId
 import io.github.iltotore.iron.*
 
 object HttpApiIntegrationSpec extends ZIOSpecDefault:
@@ -24,47 +20,33 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
     )
 
   private def sampleRequest: RiskTreeDefinitionRequest =
-    val rootId   = safeId("root").value.toString
-    val leaf1Id  = safeId("leaf-1").value.toString
-    val leaf2Id  = safeId("leaf-2").value.toString
-    val rootName = "Root"
-    val leaf1Name = "Leaf 1"
-    val leaf2Name = "Leaf 2"
-
-    val portfolio = RiskPortfolio.create(
-      id = rootId,
-      name = rootName,
-      childIds = Array(
-        SafeId.fromString(leaf1Id).toOption.get,
-        SafeId.fromString(leaf2Id).toOption.get
-      ),
-      parentId = None
-    ).toEither.toOption.get
-
-    val leaf1 = RiskLeaf.create(
-      id = leaf1Id,
-      name = leaf1Name,
-      distributionType = "lognormal",
-      probability = 0.1,
-      minLoss = Some(1000L),
-      maxLoss = Some(2000L),
-      parentId = Some(SafeId.fromString(rootId).toOption.get)
-    ).toEither.toOption.get
-
-    val leaf2 = RiskLeaf.create(
-      id = leaf2Id,
-      name = leaf2Name,
-      distributionType = "lognormal",
-      probability = 0.2,
-      minLoss = Some(1500L),
-      maxLoss = Some(3000L),
-      parentId = Some(SafeId.fromString(rootId).toOption.get)
-    ).toEither.toOption.get
-
     RiskTreeDefinitionRequest(
       name = "Tree One",
-      nodes = Seq(portfolio, leaf1, leaf2),
-      rootId = rootId
+      portfolios = Seq(
+        RiskPortfolioDefinitionRequest(name = "Root", parentName = None)
+      ),
+      leaves = Seq(
+        RiskLeafDefinitionRequest(
+          name = "Leaf 1",
+          parentName = Some("Root"),
+          distributionType = "lognormal",
+          probability = 0.1,
+          minLoss = Some(1000L),
+          maxLoss = Some(2000L),
+          percentiles = None,
+          quantiles = None
+        ),
+        RiskLeafDefinitionRequest(
+          name = "Leaf 2",
+          parentName = Some("Root"),
+          distributionType = "lognormal",
+          probability = 0.2,
+          minLoss = Some(1500L),
+          maxLoss = Some(3000L),
+          percentiles = None,
+          quantiles = None
+        )
+      )
     )
 
   override def spec =

@@ -3,13 +3,13 @@ package com.risquanter.register.http.requests
 import zio.test.*
 import zio.prelude.Validation
 import com.risquanter.register.testutil.TestHelpers.safeId
-import com.risquanter.register.http.requests.RiskTreeV2Requests.*
+import com.risquanter.register.http.requests.RiskTreeRequests.*
 import com.risquanter.register.domain.data.Distribution
 
-object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
+object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
   private def validLeafDef(name: String, parent: Option[String]) =
-    RiskLeafDefinitionRequestV2(
+    RiskLeafDefinitionRequest(
       name = name,
       parentName = parent,
       distributionType = "lognormal",
@@ -21,7 +21,7 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     )
 
   private def validLeafUpdate(id: String, name: String, parent: Option[String]) =
-    RiskLeafUpdateRequestV2(
+    RiskLeafUpdateRequest(
       id = id,
       name = name,
       parentName = parent,
@@ -33,13 +33,13 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
       quantiles = None
     )
 
-  def spec = suite("RiskTreeV2Requests")(
+  def spec = suite("RiskTreeRequests")(
     test("resolveCreate fails when distribution is invalid") {
-      val req = RiskTreeDefinitionRequestV2(
+      val req = RiskTreeDefinitionRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioDefinitionRequestV2(name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
         leaves = Seq(
-          RiskLeafDefinitionRequestV2(
+          RiskLeafDefinitionRequest(
             name = "Leaf",
             parentName = Some("Root"),
             distributionType = "lognormal",
@@ -65,9 +65,9 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveCreate returns validated distributions for leaves") {
-      val req = RiskTreeDefinitionRequestV2(
+      val req = RiskTreeDefinitionRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioDefinitionRequestV2(name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
         leaves = Seq(validLeafDef("Leaf", Some("Root")))
       )
 
@@ -89,9 +89,9 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveCreate fails when names are duplicated across nodes") {
-      val req = RiskTreeDefinitionRequestV2(
+      val req = RiskTreeDefinitionRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioDefinitionRequestV2(name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
         leaves = Seq(validLeafDef("Root", Some("Root"))) // duplicate name with portfolio
       )
 
@@ -106,9 +106,9 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveCreate fails when leaf parent points to a leaf") {
-      val req = RiskTreeDefinitionRequestV2(
+      val req = RiskTreeDefinitionRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioDefinitionRequestV2(name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
         leaves = Seq(
           validLeafDef("Leaf1", Some("Root")),
           validLeafDef("Leaf2", Some("Leaf1")) // parent is a leaf
@@ -126,9 +126,9 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveCreate fails when leaf parent is missing") {
-      val req = RiskTreeDefinitionRequestV2(
+      val req = RiskTreeDefinitionRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioDefinitionRequestV2(name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
         leaves = Seq(validLeafDef("Leaf", Some("Missing")))
       )
 
@@ -143,11 +143,11 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveCreate fails when multiple roots are provided") {
-      val req = RiskTreeDefinitionRequestV2(
+      val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(
-          RiskPortfolioDefinitionRequestV2(name = "Root", parentName = None),
-          RiskPortfolioDefinitionRequestV2(name = "AnotherRoot", parentName = None)
+          RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
+          RiskPortfolioDefinitionRequest(name = "AnotherRoot", parentName = None)
         ),
         leaves = Seq.empty
       )
@@ -163,12 +163,12 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveCreate fails when a cycle exists") {
-      val req = RiskTreeDefinitionRequestV2(
+      val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(
-          RiskPortfolioDefinitionRequestV2(name = "Root", parentName = None),
-          RiskPortfolioDefinitionRequestV2(name = "A", parentName = Some("B")),
-          RiskPortfolioDefinitionRequestV2(name = "B", parentName = Some("A"))
+          RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
+          RiskPortfolioDefinitionRequest(name = "A", parentName = Some("B")),
+          RiskPortfolioDefinitionRequest(name = "B", parentName = Some("A"))
         ),
         leaves = Seq.empty
       )
@@ -184,11 +184,11 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveCreate fails when a portfolio is left empty") {
-      val req = RiskTreeDefinitionRequestV2(
+      val req = RiskTreeDefinitionRequest(
         name = "Tree",
         portfolios = Seq(
-          RiskPortfolioDefinitionRequestV2(name = "Root", parentName = None),
-          RiskPortfolioDefinitionRequestV2(name = "Child", parentName = Some("Root"))
+          RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
+          RiskPortfolioDefinitionRequest(name = "Child", parentName = Some("Root"))
         ),
         leaves = Seq.empty
       )
@@ -204,9 +204,9 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveUpdate fails when names conflict between existing and new nodes") {
-      val req = RiskTreeUpdateRequestV2(
+      val req = RiskTreeUpdateRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioUpdateRequestV2(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
         leaves = Seq.empty,
         newPortfolios = Seq.empty,
         newLeaves = Seq(validLeafDef("Root", Some("Root"))) // duplicates existing portfolio name
@@ -223,9 +223,9 @@ object RiskTreeV2RequestsSpec extends ZIOSpecDefault {
     },
 
     test("resolveUpdate fails when new leaf parent is a leaf") {
-      val req = RiskTreeUpdateRequestV2(
+      val req = RiskTreeUpdateRequest(
         name = "Tree",
-        portfolios = Seq(RiskPortfolioUpdateRequestV2(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
         leaves = Seq(validLeafUpdate("01H0R8Z3F5J2N4R8Z3F5J2N4R9", "Leaf1", Some("Root"))),
         newPortfolios = Seq.empty,
         newLeaves = Seq(validLeafDef("Leaf2", Some("Leaf1"))) // parent is a leaf

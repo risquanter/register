@@ -1,7 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
-import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint}
 import com.risquanter.register.domain.data.iron.NonNegativeLong
 import com.risquanter.register.domain.tree.NodeId
@@ -34,7 +34,7 @@ trait RiskTreeService {
     * @param req Updated tree definition
     * @return Updated risk tree metadata
     */
-  def update(id: NonNegativeLong, req: RiskTreeDefinitionRequest): Task[RiskTree]
+  def update(id: NonNegativeLong, req: RiskTreeUpdateRequest): Task[RiskTree]
   
   /** Delete risk tree configuration
     * @param id Risk tree ID

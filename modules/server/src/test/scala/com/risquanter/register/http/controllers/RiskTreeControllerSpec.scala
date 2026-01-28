@@ -4,21 +4,21 @@ import zio.*
 import zio.test.*
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.errors.RepositoryFailure
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
-import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeId}
-import com.risquanter.register.testutil.TestHelpers.{safeId, idStr}
+import com.risquanter.register.domain.data.iron.NonNegativeLong
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
 
 object RiskTreeControllerSpec extends ZIOSpecDefault {
 
   // Service accessor pattern
-  private def service = ZIO.serviceWithZIO[RiskTreeService]
+  private def service[A](f: RiskTreeService => ZIO[Any, Throwable, A]): ZIO[RiskTreeService, Throwable, A] =
+    ZIO.serviceWithZIO[RiskTreeService](f)
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo() = new RiskTreeRepository {
@@ -53,16 +53,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
   // Layer factory - creates fresh layer with isolated repository per test
   private def serviceLayer = {
-    // Default TreeIndex - empty for controller tests that use create endpoint
-    val defaultRoot = RiskLeaf.create(
-      id = idStr("test-root"), 
-      name = "Test Root", 
-      distributionType = "lognormal", 
-      probability = 0.1, 
-      minLoss = Some(1000L), 
-      maxLoss = Some(10000L)
-  ).toEither.fold(errs => throw new AssertionError(s"Invalid default root: ${errs.map(_.message).mkString("; ")}"), identity)
-    
     ZLayer.make[RiskTreeService](
       RiskTreeServiceLive.layer,
       ZLayer.succeed(makeStubRepo()),
@@ -86,36 +76,31 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Hierarchical tree creation with discriminators")(
       test("POST with RiskPortfolio discriminator creates tree") {
-        // Create nodes with flat structure (childIds + parentId)
-        val cyberLeaf = RiskLeaf.unsafeApply(
-          id = idStr("cyber"),
-          name = "Cyber Attack",
-          distributionType = "lognormal",
-          probability = 0.25,
-          minLoss = Some(1000L),
-          maxLoss = Some(50000L),
-          parentId = Some(safeId("root"))
-        )
-        val breachLeaf = RiskLeaf.unsafeApply(
-          id = idStr("breach"),
-          name = "Data Breach",
-          distributionType = "lognormal",
-          probability = 0.15,
-          minLoss = Some(500L),
-          maxLoss = Some(25000L),
-          parentId = Some(safeId("root"))
-        )
-        val rootPortfolio = RiskPortfolio.unsafeFromStrings(
-          id = idStr("root"),
-          name = "Total Operational Risk",
-          childIds = Array(idStr("cyber"), idStr("breach")),
-          parentId = None
-        )
-        
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Ops Risk Portfolio",
-          nodes = Seq(rootPortfolio, cyberLeaf, breachLeaf),
-          rootId = idStr("root")
+          portfolios = Seq(RiskPortfolioDefinitionRequest("Total Operational Risk", None)),
+          leaves = Seq(
+            RiskLeafDefinitionRequest(
+              name = "Cyber Attack",
+              parentName = Some("Total Operational Risk"),
+              distributionType = "lognormal",
+              probability = 0.25,
+              minLoss = Some(1000L),
+              maxLoss = Some(50000L),
+              percentiles = None,
+              quantiles = None
+            ),
+            RiskLeafDefinitionRequest(
+              name = "Data Breach",
+              parentName = Some("Total Operational Risk"),
+              distributionType = "lognormal",
+              probability = 0.15,
+              minLoss = Some(500L),
+              maxLoss = Some(25000L),
+              percentiles = None,
+              quantiles = None
+            )
+          )
         )
 
         val program = service(_.create(hierarchicalRequest))
@@ -128,20 +113,21 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Get by ID")(
       test("returns tree metadata when exists") {
-        val leafNode = RiskLeaf.unsafeApply(
-          id = idStr("test-risk"),
-          name = "Test Risk",
-          distributionType = "lognormal",
-          probability = 0.5,
-          minLoss = Some(1000L),
-          maxLoss = Some(10000L),
-          parentId = None
-        )
-        
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Test Tree",
-          nodes = Seq(leafNode),
-          rootId = idStr("test-risk")
+          portfolios = Seq.empty,
+          leaves = Seq(
+            RiskLeafDefinitionRequest(
+              name = "Test Risk",
+              parentName = None,
+              distributionType = "lognormal",
+              probability = 0.5,
+              minLoss = Some(1000L),
+              maxLoss = Some(10000L),
+              percentiles = None,
+              quantiles = None
+            )
+          )
         )
 
         val program = for {
@@ -215,5 +201,5 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         }
       }
     )
-  )
+  ) @@ TestAspect.sequential
 }

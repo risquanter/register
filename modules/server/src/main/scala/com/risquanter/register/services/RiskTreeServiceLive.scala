@@ -8,9 +8,9 @@ import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
-import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint}
-import com.risquanter.register.domain.data.iron.{SafeName, ValidationUtil, Probability, DistributionType, NonNegativeLong}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint, Distribution}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, Probability, DistributionType, NonNegativeLong}
 import com.risquanter.register.domain.tree.{NodeId, TreeIndex}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
@@ -18,6 +18,7 @@ import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.services.cache.RiskResultResolver
+import com.risquanter.register.util.IdGenerators
 /**
  * Live implementation of RiskTreeService with telemetry instrumentation.
  * 
@@ -202,49 +203,96 @@ class RiskTreeServiceLive private (
     simulationDuration.record(durationMs.toDouble, attrs) *>
       trialsCounter.add(nTrials.toLong, attrs)
   }
+
+  /** Allocate a fixed pool of SafeIds for request resolution. */
+  private def allocateIds(count: Int): Task[List[SafeId.SafeId]] =
+    IdGenerators.batch(count)
+
+  /** Deterministic generator for RiskTreeRequests based on a pre-allocated pool. */
+  private def idGeneratorFrom(ids: List[SafeId.SafeId]): RiskTreeRequests.IdGenerator = {
+    val iter = ids.iterator
+    () => if iter.hasNext then iter.next() else throw new IllegalStateException("ID pool exhausted while resolving request")
+  }
+
+  /** Build domain nodes and rootId from a resolved V2 request. */
+  private def buildNodes(
+    nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
+    leafDistributions: Map[SafeName.SafeName, Distribution],
+    rootName: SafeName.SafeName
+  ): Task[(Seq[RiskNode], NodeId)] = ZIO.attempt {
+    val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(_.id).toMap
+    val childrenByParent: Map[Option[SafeName.SafeName], List[SafeName.SafeName]] =
+      nodesByName.values.groupBy(_.parentName).view.mapValues(_.toList.map(_.name)).toMap
+
+    def parentIdFor(node: RiskTreeRequests.ResolvedNode): Option[NodeId] =
+      node.parentName.flatMap(nameToId.get)
+
+    val domainNodes: Seq[RiskNode] = nodesByName.values.toSeq.map { node =>
+      node.kind match {
+        case RiskTreeRequests.NodeKind.Leaf =>
+          val dist = leafDistributions(node.name)
+          RiskLeaf.unsafeApply(
+            id = node.id.value.toString,
+            name = node.name.value.toString,
+            distributionType = dist.distributionType.toString,
+            probability = dist.probability,
+            percentiles = dist.percentiles,
+            quantiles = dist.quantiles,
+            minLoss = dist.minLoss.map(_.toLong),
+            maxLoss = dist.maxLoss.map(_.toLong),
+            parentId = parentIdFor(node)
+          )
+
+        case RiskTreeRequests.NodeKind.Portfolio =>
+          val childIds: Array[NodeId] = childrenByParent.get(Some(node.name)).toList.flatten.flatMap(nameToId.get).toArray
+          RiskPortfolio.unsafeApply(
+            id = node.id.value.toString,
+            name = node.name.value.toString,
+            childIds = childIds,
+            parentId = parentIdFor(node)
+          )
+      }
+    }
+
+    val rootId = nameToId.getOrElse(rootName, throw new IllegalArgumentException(s"Root name '${rootName.value}' not found in resolved nodes"))
+    (domainNodes, rootId)
+  }
   
   // Config CRUD - only persist, no execution
   override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     val operation = for {
-      // Use DTO validate method for comprehensive validation including cross-field checks
-      validated <- RiskTreeDefinitionRequest.validate(req).toZIOValidation
-      (safeName, nodes, rootId) = validated
-      
-      // Create RiskTree entity using flat node format (id will be assigned by repo)
-      // TreeIndex consistency is also validated here
+      ids <- allocateIds(req.portfolios.size + req.leaves.size)
+      resolved <- RiskTreeRequests.resolveCreate(req, idGeneratorFrom(ids)).toZIOValidation
+      (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafDistributions, resolved.rootName)
       riskTree <- RiskTree.fromNodes(
-        id = 0L.refineUnsafe, // repo will assign
-        name = safeName,
+        id = 0L.refineUnsafe, // repo assigns
+        name = resolved.treeName,
         nodes = nodes,
         rootId = rootId
       ).toZIOValidation
-      
-      // Persist
       persisted <- repo.create(riskTree)
     } yield persisted
-    
-    // Record metrics and log unexpected errors (ADR-002 Decision 5)
+
     operation.tapBoth(
       error => logIfUnexpected("create")(error) *> recordOperation("create", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("create", success = true)
     )
   }
-  
-  override def update(id: NonNegativeLong, req: RiskTreeDefinitionRequest): Task[RiskTree] = {
+
+  override def update(id: NonNegativeLong, req: RiskTreeUpdateRequest): Task[RiskTree] = {
     val operation = for {
-      // Use DTO validate method for comprehensive validation including cross-field checks
-      validated <- RiskTreeDefinitionRequest.validate(req).toZIOValidation
-      (safeName, nodes, rootId) = validated
-      
-      // Validate TreeIndex consistency
-      index <- TreeIndex.fromNodeSeq(nodes).toZIOValidation
-      
-      updated <- repo.update(id, tree => tree.copy(
-        name = safeName,
+      ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
+      resolved <- RiskTreeRequests.resolveUpdate(req, idGeneratorFrom(ids)).toZIOValidation
+      allNodes = resolved.existing ++ resolved.added
+      allLeafDistributions = resolved.existingLeafDistributions ++ resolved.addedLeafDistributions
+      (nodes, rootId) <- buildNodes(allNodes, allLeafDistributions, resolved.rootName)
+      riskTree <- RiskTree.fromNodes(
+        id = id,
+        name = resolved.treeName,
         nodes = nodes,
-        rootId = rootId,
-        index = index
-      ))
+        rootId = rootId
+      ).toZIOValidation
+      updated <- repo.update(id, _ => riskTree)
     } yield updated
     
     operation.tapBoth(
