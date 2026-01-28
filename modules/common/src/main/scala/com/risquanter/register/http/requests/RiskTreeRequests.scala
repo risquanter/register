@@ -209,7 +209,7 @@ object RiskTreeRequests {
       root <- requireSingleRootCreate(portfolios, leaves)
       _ <- requireLeafParents(leaves, portfolioNames, allNameSet, totalNodes, "request.leaves")
       _ <- requirePortfolioParents(portfolios, portfolioNames, "request.portfolios", _._2)
-      _ <- requireNoCyclesCreate(portfolios, leaves)
+      _ <- requireNoCycles(portfolios ++ leaves, "request")
       _ <- requireNonEmptyPortfolios(
         portfolioNames = portfolios.map(_._1),
         portfolioParents = portfolios.map(_._2),
@@ -240,7 +240,10 @@ object RiskTreeRequests {
       _ <- requireLeafParents(newLeaves, portfolioNames, allNameSet, totalNodes, "request.newLeaves")
       _ <- requirePortfolioParents(portfolios, portfolioNames, "request.portfolios", _._3)
       _ <- requirePortfolioParents(newPortfolios, portfolioNames, "request.newPortfolios", _._2)
-      _ <- requireNoCyclesUpdate(portfolios, leaves, newPortfolios, newLeaves)
+      _ <- requireNoCycles(
+        parents = (portfolios.map(p => p._2 -> p._3) ++ leaves.map(l => l._1 -> l._2) ++ newPortfolios.map(p => p._1 -> p._2) ++ newLeaves.map(l => l._1 -> l._2)),
+        labelPrefix = "request"
+      )
       _ <- requireNonEmptyPortfolios(
         portfolioNames = portNames,
         portfolioParents = portfolios.map(_._3) ++ newPortfolios.map(_._2),
@@ -251,44 +254,21 @@ object RiskTreeRequests {
     } yield root
   }
 
-  // Guard: prevent cycles in the proposed create topology.
-  private[requests] def requireNoCyclesCreate(
-    portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
+  // Guard: prevent cycles in a topology described by name -> parent pairs.
+  private[requests] def requireNoCycles(
+    parents: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
+    labelPrefix: String
   ): Validation[ValidationError, Unit] = {
-    val parents = (portfolios ++ leaves).flatMap { case (name, parent) => parent.map(name -> _) }.toMap
+    val parentMap = parents.flatMap { case (name, parent) => parent.map(name -> _) }.toMap
 
-    def isCycle(name: SafeName.SafeName, seen: Set[SafeName.SafeName]): Boolean = parents.get(name) match {
+    def isCycle(name: SafeName.SafeName, seen: Set[SafeName.SafeName]): Boolean = parentMap.get(name) match {
       case Some(p) if seen.contains(p) => true
       case Some(p) => isCycle(p, seen + p)
       case None => false
     }
 
-    parents.keys.find(n => isCycle(n, Set(n))) match {
-      case Some(cycle) => Validation.fail(ValidationError("request", ValidationErrorCode.CONSTRAINT_VIOLATION, s"Cycle detected at node '${cycle.value}'"))
-      case None => Validation.succeed(())
-    }
-  }
-
-  // Guard: prevent cycles when combining existing and new nodes.
-  private[requests] def requireNoCyclesUpdate(
-    portfolios: Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])],
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    newPortfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    newLeaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
-  ): Validation[ValidationError, Unit] = {
-    val existing = portfolios.map(p => p._2 -> p._3) ++ leaves.map(l => l._1 -> l._2)
-    val added = newPortfolios.map(p => p._1 -> p._2) ++ newLeaves.map(l => l._1 -> l._2)
-    val parents = (existing ++ added).flatMap { case (name, parent) => parent.map(name -> _) }.toMap
-
-    def isCycle(name: SafeName.SafeName, seen: Set[SafeName.SafeName]): Boolean = parents.get(name) match {
-      case Some(p) if seen.contains(p) => true
-      case Some(p) => isCycle(p, seen + p)
-      case None => false
-    }
-
-    parents.keys.find(n => isCycle(n, Set(n))) match {
-      case Some(cycle) => Validation.fail(ValidationError("request", ValidationErrorCode.CONSTRAINT_VIOLATION, s"Cycle detected at node '${cycle.value}'"))
+    parentMap.keys.find(n => isCycle(n, Set(n))) match {
+      case Some(cycle) => Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.CONSTRAINT_VIOLATION, s"Cycle detected at node '${cycle.value}'"))
       case None => Validation.succeed(())
     }
   }
