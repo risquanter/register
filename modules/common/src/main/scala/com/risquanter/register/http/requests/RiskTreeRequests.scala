@@ -210,7 +210,13 @@ object RiskTreeRequests {
       _ <- requireLeafParents(leaves, portfolioNames, allNameSet, totalNodes, "request.leaves")
       _ <- requirePortfolioParents(portfolios, portfolioNames, "request.portfolios", _._2)
       _ <- requireNoCyclesCreate(portfolios, leaves)
-      _ <- requireNonEmptyPortfoliosCreate(portfolios, leaves)
+      _ <- requireNonEmptyPortfolios(
+        portfolioNames = portfolios.map(_._1),
+        portfolioParents = portfolios.map(_._2),
+        leafParents = leaves.map(_._2),
+        totalNodes = totalNodes,
+        labelPrefix = "request.portfolios"
+      )
     } yield root
   }
 
@@ -235,7 +241,13 @@ object RiskTreeRequests {
       _ <- requirePortfolioParents(portfolios, portfolioNames, "request.portfolios", _._3)
       _ <- requirePortfolioParents(newPortfolios, portfolioNames, "request.newPortfolios", _._2)
       _ <- requireNoCyclesUpdate(portfolios, leaves, newPortfolios, newLeaves)
-      _ <- requireNonEmptyPortfoliosUpdate(portfolios, leaves, newPortfolios, newLeaves)
+      _ <- requireNonEmptyPortfolios(
+        portfolioNames = portNames,
+        portfolioParents = portfolios.map(_._3) ++ newPortfolios.map(_._2),
+        leafParents = leaves.map(_._2) ++ newLeaves.map(_._2),
+        totalNodes = totalNodes,
+        labelPrefix = "request.portfolios"
+      )
     } yield root
   }
 
@@ -282,42 +294,23 @@ object RiskTreeRequests {
   }
 
   // Guard: portfolios must not be left without children (unless single-node tree).
-  private[requests] def requireNonEmptyPortfoliosCreate(
-    portfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
+  private[requests] def requireNonEmptyPortfolios(
+    portfolioNames: Seq[SafeName.SafeName],
+    portfolioParents: Seq[Option[SafeName.SafeName]],
+    leafParents: Seq[Option[SafeName.SafeName]],
+    totalNodes: Int,
+    labelPrefix: String
   ): Validation[ValidationError, Unit] = {
     val childrenByParent = scala.collection.mutable.Map.empty[SafeName.SafeName, Int].withDefaultValue(0)
-    leaves.foreach { case (_, parent) => parent.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)) }
-    portfolios.foreach { case (_, parent) => parent.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)) }
+    leafParents.foreach(_.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)))
+    portfolioParents.foreach(_.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)))
 
-    val totalNodes = portfolios.size + leaves.size
-    val emptyParents = portfolios.collect { case (name, _) if childrenByParent(name) == 0 && !(totalNodes == 1) => name }
-
-    if emptyParents.nonEmpty then
-      Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.CONSTRAINT_VIOLATION, s"Portfolios cannot be left empty: ${emptyParents.map(_.value).mkString(", ")}"))
-    else Validation.succeed(())
-  }
-
-  // Guard: after update, portfolios must not be empty (unless single-node tree).
-  private[requests] def requireNonEmptyPortfoliosUpdate(
-    portfolios: Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName])],
-    leaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    newPortfolios: Seq[(SafeName.SafeName, Option[SafeName.SafeName])],
-    newLeaves: Seq[(SafeName.SafeName, Option[SafeName.SafeName])]
-  ): Validation[ValidationError, Unit] = {
-    val childrenByParent = scala.collection.mutable.Map.empty[SafeName.SafeName, Int].withDefaultValue(0)
-    leaves.foreach { case (_, parent) => parent.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)) }
-    newLeaves.foreach { case (_, parent) => parent.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)) }
-    portfolios.foreach { case (_, _, parent) => parent.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)) }
-    newPortfolios.foreach { case (_, parent) => parent.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)) }
-
-    val totalNodes = portfolios.size + newPortfolios.size + leaves.size + newLeaves.size
-    val emptyParents = (portfolios.map(_._2) ++ newPortfolios.map(_._1)).collect {
+    val emptyParents = portfolioNames.collect {
       case name if childrenByParent(name) == 0 && !(totalNodes == 1) => name
     }
 
     if emptyParents.nonEmpty then
-      Validation.fail(ValidationError("request.portfolios", ValidationErrorCode.CONSTRAINT_VIOLATION, s"Portfolios cannot be left empty: ${emptyParents.map(_.value).mkString(", ")}"))
+      Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.CONSTRAINT_VIOLATION, s"Portfolios cannot be left empty: ${emptyParents.map(_.value).mkString(", ")}"))
     else Validation.succeed(())
   }
 
