@@ -202,5 +202,5 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         }
       }
     )
-  ) @@ TestAspect.sequential
+  ) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.withLiveRandom
 }

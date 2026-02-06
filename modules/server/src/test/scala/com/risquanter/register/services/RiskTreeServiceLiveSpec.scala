@@ -445,5 +445,5 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       // Telemetry layers require TelemetryConfig
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
-    ) @@ TestAspect.sequential
+    ) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.withLiveRandom
 }

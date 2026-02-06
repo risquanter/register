@@ -1,58 +1,40 @@
 package com.risquanter.register.util
 
-import com.bilalfazlani.zioUlid.ULID
+import com.bilalfazlani.zioUlid.{ULIDGen, ULID}
 import com.risquanter.register.domain.data.iron.{SafeId, TreeId, NodeId}
-import zio.ZIO
-
-import java.security.SecureRandom
-import java.util.concurrent.atomic.AtomicReference
+import zio.{Clock, Random, ZIO, ZLayer}
 
 
 /**
   * Server-side ULID generators.
+  * - Uses zio-ulid `nextULID` to obtain canonical ULIDs.
+  * - Wraps them in `SafeId` for downstream domain use.
   *
-  * Generates ULIDs using the JVM wall-clock and SecureRandom directly,
-  * bypassing ZIO Clock / Random services.  This avoids a subtle pitfall
-  * where ZIO Test's TestClock (time = 0) and TestRandom (deterministic)
-  * cause every freshly-provisioned `ULIDGen.live` to produce the same
-  * first ULID, leading to ID collisions in test suites.
-  *
-  * Uses zio-ulid's `ULID(timestamp, randomBytes)` factory and maintains
-  * a monotonic state via `AtomicReference` to guarantee lexicographic
-  * ordering within the same millisecond.
+  * IMPORTANT: `ULIDGen.live` internally calls `ZIO.clockWith` / `ZIO.randomWith`,
+  * which resolve to the **fiber's default services**, not to any layer-provided
+  * Clock/Random instances.  In ZIO Test the fiber defaults are TestClock (time = 0)
+  * and TestRandom (deterministic), so every freshly-provisioned `ULIDGen` emits
+  * the same first ULID.  Test specs that exercise `IdGenerators` therefore need
+  * `@@ TestAspect.withLiveClock @@ TestAspect.withLiveRandom` to obtain unique IDs.
   */
 object IdGenerators {
 
-  private val rng = new SecureRandom()
+  // Build ULIDGen with live Clock/Random layer wiring
+  private val liveIdEnv =
+    (ZLayer.succeed(Clock.ClockLive) ++ ZLayer.succeed(Random.RandomLive)) >>>
+      ULIDGen.live
 
-  // State: (lastTimestamp, lastHigh, lastLow) for monotonic increment
-  // If consecutive ULIDs fall in the same millisecond, we increment the
-  // random component instead of generating new random bytes.
-  private case class UlidState(timestamp: Long, high: Long, low: Long)
-  private val state = new AtomicReference(UlidState(0L, 0L, 0L))
-
-  private def nextUlid(): ULID = {
-    val now = System.currentTimeMillis()
-    val bytes = new Array[Byte](10)
-    rng.nextBytes(bytes)
-    // zio-ulid factory: ULID(timestamp, Chunk[Byte])
-    ULID(now, zio.Chunk.fromArray(bytes)) match {
-      case Right(ulid) => ulid
-      case Left(err)   => throw new RuntimeException(s"ULID generation failed: $err")
-    }
-  }
-
-  private def generate: zio.Task[SafeId.SafeId] =
-    ZIO.attempt {
-      val ulid = nextUlid()
-      SafeId.fromString(ulid.toString) match {
-        case Right(safe) => safe
-        case Left(errs)  =>
-          throw new RuntimeException(s"Generated ULID failed SafeId validation: ${errs.map(_.message).mkString("; ")}")
+  // Core generator that relies on an injected ULIDGen
+  private val generate: ZIO[ULIDGen, Throwable, SafeId.SafeId] =
+    for {
+      ulid <- ULIDGen.nextULID
+      safe <- ZIO.fromEither(SafeId.fromString(ulid.toString)).mapError { errs =>
+        new RuntimeException(s"Generated ULID failed SafeId validation: ${errs.map(_.message).mkString("; ")}")
       }
-    }
+    } yield safe
 
-  def nextId: zio.Task[SafeId.SafeId] = generate
+  def nextId: zio.Task[SafeId.SafeId] =
+    generate.provideSomeLayer(liveIdEnv)
 
   /** Effectful TreeId generator for server-assigned tree identifiers.
     * Delegates to nextId and wraps in TreeId case class.
@@ -68,7 +50,8 @@ object IdGenerators {
   def nextNodeId: zio.Task[NodeId] =
     nextId.map(NodeId(_))
 
-  /** Generate `count` SafeIds in one batch. */
+  /** Generate `count` SafeIds using a single ULIDGen instance (monotonic within batch). */
   def batch(count: Int): zio.Task[List[SafeId.SafeId]] =
     ZIO.foreach(List.fill(count)(()))(_ => generate)
+      .provideSomeLayer(liveIdEnv)
 }
