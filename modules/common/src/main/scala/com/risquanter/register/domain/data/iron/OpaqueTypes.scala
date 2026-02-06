@@ -175,3 +175,21 @@ object SafeId:
   // Convenience constructor from plain String (case-insensitive)
   def fromString(s: String): Either[List[ValidationError], SafeId] =
     ValidationUtil.refineId(s)
+
+// TreeId: Canonical ULID (Crockford base32, 26 chars, uppercase)
+type TreeIdStr = String :| Match["^[0-9A-HJKMNP-TV-Z]{26}$"]
+
+// Opaque type for tree identifiers (ULID)
+object TreeId:
+  opaque type TreeId = TreeIdStr
+
+  object TreeId:
+    def apply(s: TreeIdStr): TreeId = s
+    def unapply(id: TreeId): Option[TreeIdStr] = Some(id)
+
+  extension (id: TreeId)
+    def value: TreeIdStr = id
+
+  // Convenience constructor from plain String (case-insensitive)
+  def fromString(s: String): Either[List[ValidationError], TreeId] =
+    ValidationUtil.refineTreeId(s)

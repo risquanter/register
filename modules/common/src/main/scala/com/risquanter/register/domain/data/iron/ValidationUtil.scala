@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
-import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId}
+import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId}
 import com.bilalfazlani.zioUlid.ULID
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
@@ -135,34 +135,12 @@ object ValidationUtil {
 
   // Refinement for risk/portfolio IDs (ULID, canonical uppercase Crockford base32, 26 chars)
   def refineId(value: String, fieldPath: String = "id"): Either[List[ValidationError], SafeId.SafeId] = {
-    val sanitized = Option(value).map(_.trim).getOrElse("")
-    val normalized = sanitized.toUpperCase
-    ULID(normalized) match {
-      case Right(parsed) =>
-        // Use library-rendered canonical form to avoid variant casing/format
-        val canonical = parsed.toString
-        canonical
-          .refineEither[Match["^[0-9A-HJKMNP-TV-Z]{26}$"]]
-          .map(SafeId.SafeId(_))
-          .left
-          .map(err => List(
-            ValidationError(
-              field = fieldPath,
-              code = ValidationErrorCode.INVALID_FORMAT,
-              message = s"ID '$sanitized' is not a valid ULID: $err"
-            )
-          ))
-      case Left(err) =>
-        Left(
-          List(
-            ValidationError(
-              field = fieldPath,
-              code = ValidationErrorCode.INVALID_FORMAT,
-              message = s"ID '$sanitized' is not a valid ULID: ${err.getMessage}"
-            )
-          )
-        )
-    }
+    refineUlid(value, fieldPath, "ID", SafeId.SafeId(_))
+  }
+
+  // Refinement for tree IDs (ULID, canonical uppercase Crockford base32, 26 chars)
+  def refineTreeId(value: String, fieldPath: String = "treeId"): Either[List[ValidationError], TreeId.TreeId] = {
+    refineUlid(value, fieldPath, "Tree ID", TreeId.TreeId(_))
   }
 
   // Refinement for optional short text (max 20 chars)
@@ -193,5 +171,46 @@ object ValidationUtil {
           )
           .map(refined => Some(refined))
       }
+  }
+
+  // Shared canonical ULID string refinement
+  private type UlidCanonical = String :| Match["^[0-9A-HJKMNP-TV-Z]{26}$"]
+
+  // Shared ULID refinement for ID-like types with custom labels and field paths
+  private def refineUlid[A](
+      value: String,
+      fieldPath: String,
+      label: String,
+      wrap: UlidCanonical => A
+  ): Either[List[ValidationError], A] = {
+    val sanitized = Option(value).map(_.trim).getOrElse("")
+    val normalized = sanitized.toUpperCase
+    ULID(normalized) match {
+      case Right(parsed) =>
+        val canonical = parsed.toString
+        canonical
+          .refineEither[Match["^[0-9A-HJKMNP-TV-Z]{26}$"]]
+          .map(wrap)
+          .left
+          .map(err =>
+            List(
+              ValidationError(
+                field = fieldPath,
+                code = ValidationErrorCode.INVALID_FORMAT,
+                message = s"$label '$sanitized' is not a valid ULID: $err"
+              )
+            )
+          )
+      case Left(err) =>
+        Left(
+          List(
+            ValidationError(
+              field = fieldPath,
+              code = ValidationErrorCode.INVALID_FORMAT,
+              message = s"$label '$sanitized' is not a valid ULID: ${err.getMessage}"
+            )
+          )
+        )
+    }
   }
 }

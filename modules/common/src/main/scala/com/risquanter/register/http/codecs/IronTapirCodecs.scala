@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, TreeId, ValidationUtil}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -66,6 +66,15 @@ object IronTapirCodecs {
   given Codec[String, SafeId.SafeId, CodecFormat.TextPlain] =
     Codec.string.mapDecode[SafeId.SafeId](raw =>
       SafeId.fromString(raw).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.value.toString)
+
+  /** Codec for TreeId (ULID, canonical uppercase). */
+  given Codec[String, TreeId.TreeId, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[TreeId.TreeId](raw =>
+      TreeId.fromString(raw).fold(
         errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
         DecodeResult.Value(_)
       )
