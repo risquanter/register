@@ -5,8 +5,7 @@ import com.risquanter.register.services.cache.TreeCacheManager
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.http.sse.SSEEvent
-import com.risquanter.register.domain.tree.NodeId
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /**
   * Handles cache invalidation and SSE notification when nodes change.
@@ -42,7 +41,7 @@ trait InvalidationHandler {
     * @param nodeId Changed node identifier
     * @return Number of SSE subscribers notified
     */
-  def handleNodeChange(treeId: NonNegativeLong, nodeId: NodeId): UIO[Int]
+  def handleNodeChange(treeId: TreeId, nodeId: NodeId): UIO[Int]
 }
 
 object InvalidationHandler {
@@ -54,7 +53,7 @@ object InvalidationHandler {
     ZLayer.fromFunction(InvalidationHandlerLive(_, _, _))
 
   // Accessor methods for ZIO service pattern
-  def handleNodeChange(treeId: NonNegativeLong, nodeId: NodeId): URIO[InvalidationHandler, Int] =
+  def handleNodeChange(treeId: TreeId, nodeId: NodeId): URIO[InvalidationHandler, Int] =
     ZIO.serviceWithZIO[InvalidationHandler](_.handleNodeChange(treeId, nodeId))
 }
 
@@ -67,7 +66,7 @@ final case class InvalidationHandlerLive(
     hub: SSEHub
 ) extends InvalidationHandler {
 
-  override def handleNodeChange(treeId: NonNegativeLong, nodeId: NodeId): UIO[Int] =
+  override def handleNodeChange(treeId: TreeId, nodeId: NodeId): UIO[Int] =
     for {
       // Step 1: Look up tree to get current index
       treeOpt <- treeService.getById(treeId).catchAll(_ => ZIO.succeed(None))
@@ -88,7 +87,7 @@ final case class InvalidationHandlerLive(
             // Step 4: Broadcast SSE event to subscribers
             event = SSEEvent.CacheInvalidated(
               nodeIds = invalidated.map(_.value),
-              treeId = treeId: Long  // Extract Long from NonNegativeLong
+              treeId = treeId
             )
             subscriberCount <- hub.publish(treeId, event)
             

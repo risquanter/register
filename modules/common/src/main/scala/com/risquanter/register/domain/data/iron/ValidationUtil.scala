@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
-import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId}
+import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId, NodeId}
 import com.bilalfazlani.zioUlid.ULID
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
@@ -138,10 +138,15 @@ object ValidationUtil {
     refineUlid(value, fieldPath, "ID", SafeId.SafeId(_))
   }
 
-  // Refinement for tree IDs (ULID, canonical uppercase Crockford base32, 26 chars)
-  def refineTreeId(value: String, fieldPath: String = "treeId"): Either[List[ValidationError], TreeId.TreeId] = {
-    refineUlid(value, fieldPath, "Tree ID", TreeId.TreeId(_))
-  }
+  // Refinement for tree IDs — delegates to refineId and wraps in TreeId case class.
+  // @see ADR-018 for nominal wrapper pattern
+  def refineTreeId(value: String, fieldPath: String = "treeId"): Either[List[ValidationError], TreeId] =
+    refineId(value, fieldPath).map(TreeId(_))
+
+  // Refinement for node IDs — delegates to refineId and wraps in NodeId case class.
+  // @see ADR-018 for nominal wrapper pattern
+  def refineNodeId(value: String, fieldPath: String = "nodeId"): Either[List[ValidationError], NodeId] =
+    refineId(value, fieldPath).map(NodeId(_))
 
   // Refinement for optional short text (max 20 chars)
   def refineShortOptText(

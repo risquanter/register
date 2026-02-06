@@ -5,29 +5,28 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import zio.stream.*
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.numeric.*
 
 import com.risquanter.register.http.sse.SSEEvent
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.testutil.TestHelpers.*
 
 object SSEHubSpec extends ZIOSpecDefault {
 
-  // Helper to create NonNegativeLong for tests
-  private def treeId(n: Long): NonNegativeLong = n.refineUnsafe[GreaterEqual[0L]]
+  // Helper to create TreeId for tests
+  private def tid(label: String): TreeId = treeId(label)
 
   /** 
    * Wait for subscriber count to reach expected value.
    * Uses polling with exponential backoff to avoid flaky tests.
    */
-  private def awaitSubscribers(hub: SSEHub, tree: NonNegativeLong, expected: Int): ZIO[Any, Nothing, Unit] =
+  private def awaitSubscribers(hub: SSEHub, tree: TreeId, expected: Int): ZIO[Any, Nothing, Unit] =
     hub.subscriberCount(tree).repeatUntil(_ >= expected).unit
 
   def spec = suite("SSEHubSpec")(
     test("subscribe returns stream") {
       for
         hub    <- ZIO.service[SSEHub]
-        stream <- hub.subscribe(treeId(1L))
+        stream <- hub.subscribe(tid("tree-1"))
       yield assertTrue(stream != null)
     },
 
@@ -37,13 +36,13 @@ object SSEHubSpec extends ZIOSpecDefault {
       // predicts how many consumers will receive a published event.
       for
         hub         <- ZIO.service[SSEHub]
-        countBefore <- hub.subscriberCount(treeId(500L))
-        stream      <- hub.subscribe(treeId(500L))
-        countAfter  <- hub.subscriberCount(treeId(500L))  // Still 0 - stream not consumed yet
+        countBefore <- hub.subscriberCount(tid("tree-500"))
+        stream      <- hub.subscribe(tid("tree-500"))
+        countAfter  <- hub.subscriberCount(tid("tree-500"))  // Still 0 - stream not consumed yet
         queue       <- Queue.unbounded[SSEEvent]
         fiber       <- stream.foreach(queue.offer).fork
-        _           <- awaitSubscribers(hub, treeId(500L), 1)  // Now count is 1
-        countActive <- hub.subscriberCount(treeId(500L))
+        _           <- awaitSubscribers(hub, tid("tree-500"), 1)  // Now count is 1
+        countActive <- hub.subscriberCount(tid("tree-500"))
         _           <- fiber.interrupt
       yield assertTrue(
         countBefore == 0,
@@ -56,22 +55,22 @@ object SSEHubSpec extends ZIOSpecDefault {
       for
         hub   <- ZIO.service[SSEHub]
         event  = SSEEvent.ConnectionStatus("test", None)
-        count <- hub.publish(treeId(999L), event)
+        count <- hub.publish(tid("tree-999"), event)
       yield assertTrue(count == 0)
     },
 
     test("subscriber receives published event") {
       for
         hub    <- ZIO.service[SSEHub]
-        stream <- hub.subscribe(treeId(1L))
-        event   = SSEEvent.LECUpdated("node-1", 1L, Map("p50" -> 1000.0))
+        stream <- hub.subscribe(tid("tree-1"))
+        event   = SSEEvent.LECUpdated("node-1", tid("tree-1"), Map("p50" -> 1000.0))
         // Use Queue to collect results
         queue  <- Queue.unbounded[SSEEvent]
         // Start consuming in background
         fiber  <- stream.foreach(queue.offer).fork
         // Wait for subscriber to be registered (avoids flaky timing)
-        _      <- awaitSubscribers(hub, treeId(1L), 1)
-        _      <- hub.publish(treeId(1L), event)
+        _      <- awaitSubscribers(hub, tid("tree-1"), 1)
+        _      <- hub.publish(tid("tree-1"), event)
         result <- queue.take.timeout(5.seconds)
         _      <- fiber.interrupt
       yield assertTrue(
@@ -83,15 +82,15 @@ object SSEHubSpec extends ZIOSpecDefault {
     test("multiple subscribers receive same event") {
       for
         hub      <- ZIO.service[SSEHub]
-        stream1  <- hub.subscribe(treeId(2L))
-        stream2  <- hub.subscribe(treeId(2L))
-        event     = SSEEvent.NodeChanged("node-2", 2L, "updated")
+        stream1  <- hub.subscribe(tid("tree-2"))
+        stream2  <- hub.subscribe(tid("tree-2"))
+        event     = SSEEvent.NodeChanged("node-2", tid("tree-2"), "updated")
         queue1   <- Queue.unbounded[SSEEvent]
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork
         fiber2   <- stream2.foreach(queue2.offer).fork
-        _        <- awaitSubscribers(hub, treeId(2L), 2)
-        _        <- hub.publish(treeId(2L), event)
+        _        <- awaitSubscribers(hub, tid("tree-2"), 2)
+        _        <- hub.publish(tid("tree-2"), event)
         result1  <- queue1.take.timeout(5.seconds)
         result2  <- queue2.take.timeout(5.seconds)
         _        <- fiber1.interrupt *> fiber2.interrupt
@@ -105,12 +104,12 @@ object SSEHubSpec extends ZIOSpecDefault {
     test("subscriberCount reflects active subscribers") {
       for
         hub    <- ZIO.service[SSEHub]
-        count0 <- hub.subscriberCount(treeId(3L))
-        stream <- hub.subscribe(treeId(3L))
+        count0 <- hub.subscriberCount(tid("tree-3"))
+        stream <- hub.subscribe(tid("tree-3"))
         queue  <- Queue.unbounded[SSEEvent]
         fiber  <- stream.foreach(queue.offer).fork
-        _      <- awaitSubscribers(hub, treeId(3L), 1)
-        count1 <- hub.subscriberCount(treeId(3L))
+        _      <- awaitSubscribers(hub, tid("tree-3"), 1)
+        count1 <- hub.subscriberCount(tid("tree-3"))
         _      <- fiber.interrupt
       yield assertTrue(
         count0 == 0,
@@ -121,37 +120,37 @@ object SSEHubSpec extends ZIOSpecDefault {
     test("events for different trees are isolated") {
       for
         hub      <- ZIO.service[SSEHub]
-        stream1  <- hub.subscribe(treeId(10L))
-        stream2  <- hub.subscribe(treeId(20L))
-        event1    = SSEEvent.LECUpdated("node-10", 10L, Map.empty)
-        event2    = SSEEvent.LECUpdated("node-20", 20L, Map.empty)
+        stream1  <- hub.subscribe(tid("tree-10"))
+        stream2  <- hub.subscribe(tid("tree-20"))
+        event1    = SSEEvent.LECUpdated("node-10", tid("tree-10"), Map.empty)
+        event2    = SSEEvent.LECUpdated("node-20", tid("tree-20"), Map.empty)
         queue1   <- Queue.unbounded[SSEEvent]
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork
         fiber2   <- stream2.foreach(queue2.offer).fork
-        _        <- awaitSubscribers(hub, treeId(10L), 1) *> awaitSubscribers(hub, treeId(20L), 1)
-        _        <- hub.publish(treeId(10L), event1)
-        _        <- hub.publish(treeId(20L), event2)
+        _        <- awaitSubscribers(hub, tid("tree-10"), 1) *> awaitSubscribers(hub, tid("tree-20"), 1)
+        _        <- hub.publish(tid("tree-10"), event1)
+        _        <- hub.publish(tid("tree-20"), event2)
         result1  <- queue1.take.timeout(5.seconds)
         result2  <- queue2.take.timeout(5.seconds)
         _        <- fiber1.interrupt *> fiber2.interrupt
       yield assertTrue(
-        result1.get.asInstanceOf[SSEEvent.LECUpdated].treeId == 10L,
-        result2.get.asInstanceOf[SSEEvent.LECUpdated].treeId == 20L
+        result1.get.asInstanceOf[SSEEvent.LECUpdated].treeId == tid("tree-10"),
+        result2.get.asInstanceOf[SSEEvent.LECUpdated].treeId == tid("tree-20")
       )
     } @@ TestAspect.withLiveClock,
 
     test("broadcastAll reaches all trees") {
       for
         hub      <- ZIO.service[SSEHub]
-        stream1  <- hub.subscribe(treeId(100L))
-        stream2  <- hub.subscribe(treeId(200L))
+        stream1  <- hub.subscribe(tid("tree-100"))
+        stream2  <- hub.subscribe(tid("tree-200"))
         event     = SSEEvent.ConnectionStatus("broadcast", Some("system message"))
         queue1   <- Queue.unbounded[SSEEvent]
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork
         fiber2   <- stream2.foreach(queue2.offer).fork
-        _        <- awaitSubscribers(hub, treeId(100L), 1) *> awaitSubscribers(hub, treeId(200L), 1)
+        _        <- awaitSubscribers(hub, tid("tree-100"), 1) *> awaitSubscribers(hub, tid("tree-200"), 1)
         total    <- hub.broadcastAll(event)
         result1  <- queue1.take.timeout(5.seconds)
         result2  <- queue2.take.timeout(5.seconds)

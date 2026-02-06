@@ -2,8 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
 import sttp.tapir.Schema
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, NonNegativeLong}
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, NonNegativeLong, NodeId}
 
 /** Recursive ADT representing a risk hierarchy tree.
   * 
@@ -102,28 +101,10 @@ object RiskLeaf {
   import zio.prelude.Validation
   import com.risquanter.register.domain.data.iron._
   
-  // JSON encoders/decoders for Iron types (encode as underlying primitives)
-  given JsonEncoder[SafeId.SafeId] = JsonEncoder[String].contramap(_.value.toString)
-  given JsonEncoder[SafeName.SafeName] = JsonEncoder[String].contramap(_.value.toString)
-  given JsonEncoder[DistributionType] = JsonEncoder[String].contramap(_.toString)
-  given JsonEncoder[Probability] = JsonEncoder[Double].contramap(identity)
-  given JsonEncoder[NonNegativeLong] = JsonEncoder[Long].contramap(identity)
-  
-  given JsonDecoder[SafeId.SafeId] = JsonDecoder[String].mapOrFail(s => 
-    SafeId.fromString(s).left.map(_.mkString(", "))
-  )
-  given JsonDecoder[SafeName.SafeName] = JsonDecoder[String].mapOrFail(s =>
-    SafeName.fromString(s).left.map(_.mkString(", "))
-  )
-  given JsonDecoder[DistributionType] = JsonDecoder[String].mapOrFail(s =>
-    ValidationUtil.refineDistributionType(s).left.map(_.mkString(", "))
-  )
-  given JsonDecoder[Probability] = JsonDecoder[Double].mapOrFail(d =>
-    ValidationUtil.refineProbability(d).left.map(_.mkString(", "))
-  )
-  given JsonDecoder[NonNegativeLong] = JsonDecoder[Long].mapOrFail(l =>
-    ValidationUtil.refineNonNegativeLong(l, "value").left.map(_.mkString(", "))
-  )
+  // Note: Iron type JSON codecs for SafeId, SafeName, etc. are NOT needed here.
+  // RiskLeaf uses a custom Raw-based codec (RiskLeafRaw) that serializes via
+  // primitives, bypassing direct Iron type encoding/decoding entirely.
+  // TreeId/NodeId codecs live in their companion objects (OpaqueTypes.scala).
   
   // Temporary: Unsafe constructor for backward compatibility during migration
   // TODO: Remove this in Step 3 when service is refactored
@@ -351,7 +332,7 @@ object RiskLeaf {
     // Convert parentId string to NodeId if present
     val parentIdOpt: Either[String, Option[NodeId]] = raw.parentId match {
       case None => Right(None)
-      case Some(pid) => SafeId.fromString(pid).map(Some(_)).left.map(_.mkString(", "))
+      case Some(pid) => SafeId.fromString(pid).map(sid => Some(NodeId(sid))).left.map(_.mkString(", "))
     }
     parentIdOpt.flatMap { validParentId =>
       create(
@@ -502,7 +483,7 @@ object RiskPortfolio {
       val nonEmpty = zio.NonEmptyChunk.fromIterable(errors.head, errors.tail)
       Validation.failNonEmptyChunk(nonEmpty)
     } else {
-      val validChildIds = childIdResults.collect { case Right(id) => id }
+      val validChildIds = childIdResults.collect { case Right(id) => NodeId(id) }
       create(id, name, validChildIds, parentId, fieldPrefix)
     }
   }
@@ -527,7 +508,7 @@ object RiskPortfolio {
     // Convert parentId string to NodeId if present
     val parentIdOpt: Either[String, Option[NodeId]] = raw.parentId match {
       case None => Right(None)
-      case Some(pid) => SafeId.fromString(pid).map(Some(_)).left.map(_.mkString(", "))
+      case Some(pid) => SafeId.fromString(pid).map(sid => Some(NodeId(sid))).left.map(_.mkString(", "))
     }
     parentIdOpt.flatMap { validParentId =>
       createFromStrings(raw.id, raw.name, raw.childIds, parentId = validParentId, fieldPrefix = s"riskPortfolio[id=${raw.id}]")
@@ -576,9 +557,9 @@ object RiskPortfolio {
     parentId: Option[NodeId] = None
   ): RiskPortfolio = {
     val validChildIds = childIds.map { cid =>
-      SafeId.fromString(cid).getOrElse(
+      NodeId(SafeId.fromString(cid).getOrElse(
         throw new IllegalArgumentException(s"Invalid child ID: $cid")
-      )
+      ))
     }
     unsafeApply(id, name, validChildIds, parentId)
   }

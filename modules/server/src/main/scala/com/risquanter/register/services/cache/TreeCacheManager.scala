@@ -2,8 +2,7 @@ package com.risquanter.register.services.cache
 
 import zio.*
 import com.risquanter.register.domain.data.{RiskResult, RiskTree}
-import com.risquanter.register.domain.data.iron.NonNegativeLong
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /**
   * Manages per-tree RiskResultCache instances.
@@ -51,7 +50,7 @@ trait TreeCacheManager {
     * @param treeId Tree identifier
     * @return RiskResultCache for this tree
     */
-  def cacheFor(treeId: NonNegativeLong): UIO[RiskResultCache]
+  def cacheFor(treeId: TreeId): UIO[RiskResultCache]
 
   /**
     * Invalidate cache for a node and all its ancestors.
@@ -75,7 +74,7 @@ trait TreeCacheManager {
     * @param treeId Tree identifier
     * @return Number of entries cleared
     */
-  def onTreeStructureChanged(treeId: NonNegativeLong): UIO[Int]
+  def onTreeStructureChanged(treeId: TreeId): UIO[Int]
 
   /**
     * Delete cache for a tree.
@@ -84,7 +83,7 @@ trait TreeCacheManager {
     *
     * @param treeId Tree identifier
     */
-  def deleteTree(treeId: NonNegativeLong): UIO[Unit]
+  def deleteTree(treeId: TreeId): UIO[Unit]
 
   /**
     * Get number of cached trees.
@@ -108,21 +107,21 @@ object TreeCacheManager {
     */
   val layer: ZLayer[Any, Nothing, TreeCacheManager] =
     ZLayer.fromZIO {
-      Ref.make(Map.empty[NonNegativeLong, RiskResultCache])
+      Ref.make(Map.empty[TreeId, RiskResultCache])
         .map(TreeCacheManagerLive(_))
     }
 
   // Accessor methods for ZIO service pattern
-  def cacheFor(treeId: NonNegativeLong): URIO[TreeCacheManager, RiskResultCache] =
+  def cacheFor(treeId: TreeId): URIO[TreeCacheManager, RiskResultCache] =
     ZIO.serviceWithZIO[TreeCacheManager](_.cacheFor(treeId))
 
   def invalidate(tree: RiskTree, nodeId: NodeId): URIO[TreeCacheManager, List[NodeId]] =
     ZIO.serviceWithZIO[TreeCacheManager](_.invalidate(tree, nodeId))
 
-  def onTreeStructureChanged(treeId: NonNegativeLong): URIO[TreeCacheManager, Int] =
+  def onTreeStructureChanged(treeId: TreeId): URIO[TreeCacheManager, Int] =
     ZIO.serviceWithZIO[TreeCacheManager](_.onTreeStructureChanged(treeId))
 
-  def deleteTree(treeId: NonNegativeLong): URIO[TreeCacheManager, Unit] =
+  def deleteTree(treeId: TreeId): URIO[TreeCacheManager, Unit] =
     ZIO.serviceWithZIO[TreeCacheManager](_.deleteTree(treeId))
 
   def treeCount: URIO[TreeCacheManager, Int] =
@@ -138,10 +137,10 @@ object TreeCacheManager {
   * @param caches Map from tree ID to its RiskResultCache
   */
 final case class TreeCacheManagerLive(
-    caches: Ref[Map[NonNegativeLong, RiskResultCache]]
+    caches: Ref[Map[TreeId, RiskResultCache]]
 ) extends TreeCacheManager {
 
-  override def cacheFor(treeId: NonNegativeLong): UIO[RiskResultCache] =
+  override def cacheFor(treeId: TreeId): UIO[RiskResultCache] =
     caches.get.flatMap(_.get(treeId) match {
       case Some(cache) => ZIO.succeed(cache)
       case None =>
@@ -160,14 +159,14 @@ final case class TreeCacheManagerLive(
       _     <- ZIO.logInfo(s"TreeCacheManager invalidated tree=${tree.id}: ${path.map(_.value).mkString(" → ")}")
     yield path
 
-  override def onTreeStructureChanged(treeId: NonNegativeLong): UIO[Int] =
+  override def onTreeStructureChanged(treeId: TreeId): UIO[Int] =
     for
       cache   <- cacheFor(treeId)
       cleared <- cache.clearAndGetSize
       _       <- ZIO.logInfo(s"TreeCacheManager: tree $treeId structure changed, cleared $cleared entries")
     yield cleared
 
-  override def deleteTree(treeId: NonNegativeLong): UIO[Unit] =
+  override def deleteTree(treeId: TreeId): UIO[Unit] =
     for
       _ <- caches.update(_ - treeId)
       _ <- ZIO.logDebug(s"TreeCacheManager: deleted cache for tree $treeId")

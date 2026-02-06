@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, TreeId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, TreeId, NodeId, ValidationUtil}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -71,15 +71,6 @@ object IronTapirCodecs {
       )
     )(_.value.toString)
 
-  /** Codec for TreeId (ULID, canonical uppercase). */
-  given Codec[String, TreeId.TreeId, CodecFormat.TextPlain] =
-    Codec.string.mapDecode[TreeId.TreeId](raw =>
-      TreeId.fromString(raw).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
-        DecodeResult.Value(_)
-      )
-    )(_.value.toString)
-
   /** Schema for SafeId.SafeId for JSON body parameters.
     * 
     * Tapir's jsonBody[T] requires both JsonCodec (for serialization) and Schema 
@@ -89,4 +80,36 @@ object IronTapirCodecs {
     * @see ADR-001 Section "JSON Bodies with Iron Types"
     */
   given Schema[SafeId.SafeId] = Schema.string
+
+  /** Codec for TreeId (case class wrapping SafeId.SafeId).
+    * Used for tree-level identifiers in risk tree endpoints.
+    * Delegates validation to SafeId.fromString, then wraps in TreeId.
+    * 
+    * @see ADR-018 for nominal wrapper pattern
+    */
+  given Codec[String, TreeId, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[TreeId](raw =>
+      TreeId.fromString(raw).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.value)
+
+  given Schema[TreeId] = Schema.string
+
+  /** Codec for NodeId (case class wrapping SafeId.SafeId).
+    * Used for node-level identifiers in risk tree endpoints.
+    * Delegates validation to SafeId.fromString, then wraps in NodeId.
+    * 
+    * @see ADR-018 for nominal wrapper pattern
+    */
+  given Codec[String, NodeId, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[NodeId](raw =>
+      NodeId.fromString(raw).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.value)
+
+  given Schema[NodeId] = Schema.string
 }

@@ -3,7 +3,7 @@ package com.risquanter.register.testutil
 import zio.test.Gen
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.ValidationError
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.{SafeId, NodeId, TreeId}
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import scala.annotation.tailrec
@@ -72,6 +72,18 @@ trait TestHelpers {
     * Use in fixtures that need a String id but must conform to SafeId/ULID constraints.
     */
   def idStr(label: String): String = safeId(label).value
+
+  /**
+    * Create a NodeId from a label (wraps safeId in NodeId case class).
+    * @see ADR-018 for nominal wrapper pattern
+    */
+  def nodeId(s: String): NodeId = NodeId(safeId(s))
+
+  /**
+    * Create a TreeId from a label (wraps safeId in TreeId case class).
+    * @see ADR-018 for nominal wrapper pattern
+    */
+  def treeId(s: String): TreeId = TreeId(safeId(s))
     
   /**
     * ZIO Test generator for valid SafeId values.

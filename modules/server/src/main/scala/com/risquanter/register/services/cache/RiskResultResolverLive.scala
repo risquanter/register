@@ -7,8 +7,8 @@ import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
-import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
-import com.risquanter.register.domain.data.iron.PositiveInt
+import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
@@ -140,7 +140,7 @@ final case class RiskResultResolverLive(
             childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b))
               .withId(updatedName = portfolio.id)
           }
-          _ <- cache.put(portfolio.id, combined)
+          _ <- cache.put(NodeId(portfolio.id), combined)
         yield combined
     }
 
@@ -152,7 +152,7 @@ final case class RiskResultResolverLive(
       (sampler, provenance) = samplerAndProv
       trials <- Simulator.performTrials(sampler, nTrials, parallelism)
       result = RiskResult(leaf.id, trials, List(provenance))
-      _ <- cache.put(leaf.id, result)
+      _ <- cache.put(NodeId(leaf.id), result)
     yield result
 }
 

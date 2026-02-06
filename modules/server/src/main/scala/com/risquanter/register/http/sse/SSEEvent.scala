@@ -1,7 +1,8 @@
 package com.risquanter.register.http.sse
 
 import zio.json.*
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
+import com.risquanter.register.domain.data.TreeIdCodecs.given
 
 /**
   * Server-Sent Events for real-time updates to browser clients.
@@ -30,7 +31,7 @@ object SSEEvent {
     */
   final case class LECUpdated(
       nodeId: String,
-      treeId: Long,
+      treeId: TreeId,
       quantiles: Map[String, Double]
   ) extends SSEEvent {
     override def eventType: String = "lec_updated"
@@ -45,7 +46,7 @@ object SSEEvent {
     */
   final case class NodeChanged(
       nodeId: String,
-      treeId: Long,
+      treeId: TreeId,
       changeType: String
   ) extends SSEEvent {
     override def eventType: String = "node_changed"
@@ -59,7 +60,7 @@ object SSEEvent {
     */
   final case class CacheInvalidated(
       nodeIds: List[String],
-      treeId: Long
+      treeId: TreeId
   ) extends SSEEvent {
     override def eventType: String = "cache_invalidated"
   }

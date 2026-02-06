@@ -8,7 +8,7 @@ import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.domain.data.{LECCurveResponse, LECPoint, RiskLeaf}
 import com.risquanter.register.domain.data.RiskLeaf.given // JsonCodecs for SafeId.SafeId
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, IronConstants}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, SafeId, TreeId, NodeId, IronConstants}
 import IronConstants.Zero
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
@@ -54,7 +54,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .tag("risk-trees")
       .name("getById")
       .description("Get a risk tree by ID")
-      .in("risk-trees" / path[NonNegativeLong]("id"))
+      .in("risk-trees" / path[TreeId]("id"))
       .get
       .out(jsonBody[Option[SimulationResponse]])
 
@@ -68,7 +68,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .tag("risk-trees")
       .name("invalidateCache")
       .description("Manually invalidate cache for a node (triggers SSE notification)")
-      .in("risk-trees" / path[NonNegativeLong]("id") / "invalidate" / path[SafeId.SafeId]("nodeId"))
+      .in("risk-trees" / path[TreeId]("id") / "invalidate" / path[NodeId]("nodeId"))
       .post
       .out(jsonBody[Map[String, Int]])
   
@@ -86,7 +86,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .tag("risk-trees")
       .name("getLECCurve")
       .description("Get LEC curve for a node (with optional provenance)")
-      .in("risk-trees" / path[NonNegativeLong]("treeId") / "nodes" / path[SafeId.SafeId]("nodeId") / "lec")
+      .in("risk-trees" / path[TreeId]("treeId") / "nodes" / path[NodeId]("nodeId") / "lec")
       .get
       .in(query[Boolean]("includeProvenance").default(false))
       .out(jsonBody[LECCurveResponse])
@@ -100,7 +100,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .tag("risk-trees")
       .name("probOfExceedance")
       .description("Get probability of exceeding a loss threshold")
-      .in("risk-trees" / path[NonNegativeLong]("treeId") / "nodes" / path[SafeId.SafeId]("nodeId") / "prob-of-exceedance")
+      .in("risk-trees" / path[TreeId]("treeId") / "nodes" / path[NodeId]("nodeId") / "prob-of-exceedance")
       .get
       .in(query[Long]("threshold"))
       .in(query[Boolean]("includeProvenance").default(false))
@@ -117,9 +117,9 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .tag("risk-trees")
       .name("getLECCurvesMulti")
       .description("Get LEC curves for multiple nodes (shared tick domain)")
-      .in("risk-trees" / path[NonNegativeLong]("treeId") / "nodes" / "lec-multi")
+      .in("risk-trees" / path[TreeId]("treeId") / "nodes" / "lec-multi")
       .post
       .in(query[Boolean]("includeProvenance").default(false))
-      .in(jsonBody[List[SafeId.SafeId]].description("Array of node IDs"))
+      .in(jsonBody[List[NodeId]].description("Array of node IDs"))
       .out(jsonBody[Map[String, Vector[LECPoint]]])
 }

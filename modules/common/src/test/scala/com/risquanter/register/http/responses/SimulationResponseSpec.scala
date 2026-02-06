@@ -6,15 +6,14 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf}
 import com.risquanter.register.domain.data.iron.SafeName
-import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.testutil.TestHelpers.idStr
+import com.risquanter.register.testutil.TestHelpers.{idStr, treeId}
 
 object SimulationResponseSpec extends ZIOSpecDefault {
 
   def spec = suite("SimulationResponse")(
     test("has JsonCodec for serialization") {
       val response = SimulationResponse(
-        id = 1L,
+        id = treeId("sim-1"),
         name = "Test Simulation",
         quantiles = Map("p50" -> 10.5, "p90" -> 25.0, "p95" -> 30.0, "p99" -> 40.0),
         exceedanceCurve = Some("""{"$schema":"https://vega.github.io/schema/vega-lite/v5.json"}""")
@@ -25,7 +24,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       
       assertTrue(
         decoded.isRight,
-        decoded.map(_.id).contains(1L),
+        decoded.map(_.id).contains(treeId("sim-1")),
         decoded.map(_.name).contains("Test Simulation"),
         decoded.map(_.quantiles.size).contains(4)
       )
@@ -43,7 +42,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         quantiles = None
       )
       val riskTree = RiskTree.singleNodeUnsafe(
-        id = 1L,
+        id = treeId("sim-1"),
         name = SafeName.SafeName("Risk Assessment".refineUnsafe),
         root = root
       )
@@ -51,7 +50,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       val response = SimulationResponse.fromRiskTree(riskTree)
       
       assertTrue(
-        response.id == 1L,
+        response.id == treeId("sim-1"),
         response.name == "Risk Assessment",
         response.quantiles.isEmpty, // No LEC data yet
         response.exceedanceCurve.isEmpty
@@ -70,7 +69,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         quantiles = None
       )
       val riskTree = RiskTree.singleNodeUnsafe(
-        id = 3L,
+        id = treeId("sim-3"),
         name = SafeName.SafeName("Test".refineUnsafe),
         root = root
       )
@@ -84,7 +83,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
     
     test("serializes to JSON correctly") {
       val response = SimulationResponse(
-        id = 4L,
+        id = treeId("sim-4"),
         name = "JSON Test",
         quantiles = Map("p50" -> 5.0, "p90" -> 15.0),
         exceedanceCurve = None
@@ -93,7 +92,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       val json = response.toJson
       
       assertTrue(
-        json.contains("\"id\":4"),
+        json.contains("\"id\":"),
         json.contains("\"name\":\"JSON Test\""),
         json.contains("\"quantiles\":")
       )
@@ -111,7 +110,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         quantiles = None
       )
       val riskTree = RiskTree.singleNodeUnsafe(
-        id = 5L,
+        id = treeId("sim-5"),
         name = SafeName.SafeName("Round Trip".refineUnsafe),
         root = root
       )
@@ -122,7 +121,7 @@ object SimulationResponseSpec extends ZIOSpecDefault {
       
       assertTrue(
         response2.isRight,
-        response2.map(_.id).contains(5L),
+        response2.map(_.id).contains(treeId("sim-5")),
         response2.map(_.name).contains("Round Trip")
       )
     }

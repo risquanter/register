@@ -162,7 +162,12 @@ final class IrminClientLive private (
         val cleanedPaths = nodes.map(_.path.stripPrefix("/"))
         val childNames = cleanedPaths.map(_.stripPrefix(base)).filter(_.nonEmpty)
         ZIO.foreach(childNames)(name => ZIO.fromEither(IrminPath.from(name).left.map(IrminUnavailable(_))))
-      case None => failWithListError(response.errors)
+      case None =>
+        // get_tree returns null when the path doesn't exist yet (e.g. empty store).
+        // Treat as empty list unless Irmin reported actual errors.
+        response.errors match
+          case Some(errs) if errs.nonEmpty => failWithListError(response.errors)
+          case _                          => ZIO.succeed(List.empty)
 
   private def commitFromData(c: CommitData): IO[IrminError, IrminCommit] =
     ZIO.succeed(IrminCommit(

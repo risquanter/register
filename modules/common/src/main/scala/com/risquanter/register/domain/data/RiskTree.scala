@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
-import com.risquanter.register.domain.data.iron.{SafeName, NonNegativeLong}
-import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
+import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId}
+import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import zio.prelude.Validation
@@ -24,7 +24,7 @@ import io.github.iltotore.iron.*
   * @param index Tree index for O(1) node lookup and O(depth) ancestor path (built from nodes)
   */
 final case class RiskTree(
-  id: NonNegativeLong,
+  id: TreeId,
   name: SafeName.SafeName,
   nodes: Seq[RiskNode],
   rootId: NodeId,
@@ -43,11 +43,7 @@ object RiskTree {
   given schema: Schema[RiskTree] = Schema.any[RiskTree]
   
   // JSON codecs for Iron refined types
-  given nonNegativeLongEncoder: JsonEncoder[NonNegativeLong] = 
-    JsonEncoder[Long].contramap(identity)
-  
-  given nonNegativeLongDecoder: JsonDecoder[NonNegativeLong] = 
-    JsonDecoder[Long].mapOrFail(l => l.refineEither[constraint.numeric.GreaterEqual[0L]].left.map(_.toString))
+  // TreeId and NodeId codecs are in their companion objects (OpaqueTypes.scala)
   
   given safeNameEncoder: JsonEncoder[SafeName.SafeName] = 
     JsonEncoder[String].contramap(_.value)
@@ -55,18 +51,12 @@ object RiskTree {
   given safeNameDecoder: JsonDecoder[SafeName.SafeName] = 
     JsonDecoder[String].mapOrFail(s => SafeName.fromString(s).left.map(_.mkString(", ")))
   
-  given nodeIdEncoder: JsonEncoder[NodeId] =
-    JsonEncoder[String].contramap(_.value.toString)
-  
-  given nodeIdDecoder: JsonDecoder[NodeId] =
-    JsonDecoder[String].mapOrFail(s => SafeId.fromString(s).left.map(_.mkString(", ")))
-  
   // TreeIndex is NOT serialized (reconstructed from nodes on load)
   // Custom codec that omits index field and rebuilds it from nodes on deserialization
   given codec: JsonCodec[RiskTree] = {
     // Create temporary struct without index for serialization
     case class RiskTreeJson(
-      id: NonNegativeLong,
+      id: TreeId,
       name: SafeName.SafeName,
       nodes: Seq[RiskNode],
       rootId: NodeId
@@ -108,7 +98,7 @@ object RiskTree {
     * Returns accumulated validation errors per ADR-010.
     */
   def fromNodes(
-    id: NonNegativeLong,
+    id: TreeId,
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
     rootId: NodeId
@@ -133,7 +123,7 @@ object RiskTree {
     * @throws IllegalArgumentException if validation fails
     */
   def fromNodesUnsafe(
-    id: NonNegativeLong,
+    id: TreeId,
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
     rootId: NodeId
@@ -149,11 +139,11 @@ object RiskTree {
   
   /** Create a RiskTree with a single root node (convenience for tests and simple cases) */
   def singleNode(
-    id: NonNegativeLong,
+    id: TreeId,
     name: SafeName.SafeName,
     root: RiskNode
   ): Validation[ValidationError, RiskTree] = {
-    fromNodes(id, name, Seq(root), root.id)
+    fromNodes(id, name, Seq(root), NodeId(root.id))
   }
   
   /** Unsafe version of singleNode for tests where validity is guaranteed.
@@ -161,10 +151,10 @@ object RiskTree {
     * @throws IllegalArgumentException if validation fails
     */
   def singleNodeUnsafe(
-    id: NonNegativeLong,
+    id: TreeId,
     name: SafeName.SafeName,
     root: RiskNode
   ): RiskTree = {
-    fromNodesUnsafe(id, name, Seq(root), root.id)
+    fromNodesUnsafe(id, name, Seq(root), NodeId(root.id))
   }
 }

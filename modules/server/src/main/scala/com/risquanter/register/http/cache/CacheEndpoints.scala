@@ -7,7 +7,8 @@ import zio.json.*
 
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.domain.data.TreeIdCodecs.given
 
 /**
   * Cache management endpoint definitions.
@@ -65,7 +66,7 @@ trait CacheEndpoints extends BaseEndpoint {
       .name("cacheStats")
       .summary("Get LEC cache statistics for a tree")
       .description("Returns cache size and metadata for the specified tree. Admin-only endpoint.")
-      .in("risk-trees" / path[NonNegativeLong]("treeId") / "cache" / "stats")
+      .in("risk-trees" / path[TreeId]("treeId") / "cache" / "stats")
       .get
       .out(jsonBody[CacheStatsResponse])
 
@@ -83,7 +84,7 @@ trait CacheEndpoints extends BaseEndpoint {
       .name("cacheNodes")
       .summary("List cached node IDs for a tree")
       .description("Returns all node IDs currently cached for the specified tree. Admin-only endpoint.")
-      .in("risk-trees" / path[NonNegativeLong]("treeId") / "cache" / "nodes")
+      .in("risk-trees" / path[TreeId]("treeId") / "cache" / "nodes")
       .get
       .out(jsonBody[CacheNodesResponse])
 
@@ -101,7 +102,7 @@ trait CacheEndpoints extends BaseEndpoint {
       .name("cacheClear")
       .summary("Clear LEC cache for a tree")
       .description("Removes all cache entries for the specified tree. Admin-only endpoint.")
-      .in("risk-trees" / path[NonNegativeLong]("treeId") / "cache")
+      .in("risk-trees" / path[TreeId]("treeId") / "cache")
       .delete
       .out(jsonBody[CacheClearResponse])
 
@@ -132,7 +133,7 @@ trait CacheEndpoints extends BaseEndpoint {
   * @param capacityNote Note about cache capacity (unbounded in current impl)
   */
 final case class CacheStatsResponse(
-  treeId: Long,
+  treeId: TreeId,
   size: Int,
   capacityNote: String
 )
@@ -149,7 +150,7 @@ object CacheStatsResponse {
   * @param count Total count
   */
 final case class CacheNodesResponse(
-  treeId: Long,
+  treeId: TreeId,
   nodeIds: List[String],
   count: Int
 )
@@ -166,7 +167,7 @@ object CacheNodesResponse {
   * @param message Confirmation message
   */
 final case class CacheClearResponse(
-  treeId: Long,
+  treeId: TreeId,
   cleared: Int,
   message: String
 )

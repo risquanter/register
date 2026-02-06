@@ -3,7 +3,7 @@ package com.risquanter.register.services.sse
 import zio.*
 import zio.stream.*
 import com.risquanter.register.http.sse.SSEEvent
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.TreeId
 
 /**
   * SSE Hub for managing real-time event streams to browser clients.
@@ -39,7 +39,7 @@ trait SSEHub {
     * @param treeId Tree to subscribe to
     * @return Stream of SSE events (terminates on client disconnect)
     */
-  def subscribe(treeId: NonNegativeLong): UIO[ZStream[Any, Nothing, SSEEvent]]
+  def subscribe(treeId: TreeId): UIO[ZStream[Any, Nothing, SSEEvent]]
 
   /**
     * Publish an event to all subscribers of a tree.
@@ -48,7 +48,7 @@ trait SSEHub {
     * @param event Event to publish
     * @return Number of subscribers that received the event
     */
-  def publish(treeId: NonNegativeLong, event: SSEEvent): UIO[Int]
+  def publish(treeId: TreeId, event: SSEEvent): UIO[Int]
 
   /**
     * Get current subscriber count for a tree.
@@ -56,7 +56,7 @@ trait SSEHub {
     * @param treeId Tree to check
     * @return Number of active subscribers
     */
-  def subscriberCount(treeId: NonNegativeLong): UIO[Int]
+  def subscriberCount(treeId: TreeId): UIO[Int]
 
   /**
     * Broadcast event to ALL trees (e.g., system-wide notifications).
@@ -77,8 +77,8 @@ object SSEHub {
   def layer(capacity: Int = 16): ZLayer[Any, Nothing, SSEHub] =
     ZLayer.fromZIO {
       for
-        hubs        <- Ref.make(Map.empty[NonNegativeLong, Hub[SSEEvent]])
-        subscribers <- Ref.make(Map.empty[NonNegativeLong, Int])
+        hubs        <- Ref.make(Map.empty[TreeId, Hub[SSEEvent]])
+        subscribers <- Ref.make(Map.empty[TreeId, Int])
       yield SSEHubLive(hubs, subscribers, capacity)
     }
 
@@ -86,13 +86,13 @@ object SSEHub {
   val live: ZLayer[Any, Nothing, SSEHub] = layer()
 
   // Accessor methods for ZIO service pattern
-  def subscribe(treeId: NonNegativeLong): URIO[SSEHub, ZStream[Any, Nothing, SSEEvent]] =
+  def subscribe(treeId: TreeId): URIO[SSEHub, ZStream[Any, Nothing, SSEEvent]] =
     ZIO.serviceWithZIO[SSEHub](_.subscribe(treeId))
 
-  def publish(treeId: NonNegativeLong, event: SSEEvent): URIO[SSEHub, Int] =
+  def publish(treeId: TreeId, event: SSEEvent): URIO[SSEHub, Int] =
     ZIO.serviceWithZIO[SSEHub](_.publish(treeId, event))
 
-  def subscriberCount(treeId: NonNegativeLong): URIO[SSEHub, Int] =
+  def subscriberCount(treeId: TreeId): URIO[SSEHub, Int] =
     ZIO.serviceWithZIO[SSEHub](_.subscriberCount(treeId))
 
   def broadcastAll(event: SSEEvent): URIO[SSEHub, Int] =
@@ -113,12 +113,12 @@ object SSEHub {
   * @param capacity Buffer capacity for each hub
   */
 final class SSEHubLive(
-    hubsRef: Ref[Map[NonNegativeLong, Hub[SSEEvent]]],
-    subscribersRef: Ref[Map[NonNegativeLong, Int]],
+    hubsRef: Ref[Map[TreeId, Hub[SSEEvent]]],
+    subscribersRef: Ref[Map[TreeId, Int]],
     capacity: Int
 ) extends SSEHub {
 
-  override def subscribe(treeId: NonNegativeLong): UIO[ZStream[Any, Nothing, SSEEvent]] =
+  override def subscribe(treeId: TreeId): UIO[ZStream[Any, Nothing, SSEEvent]] =
     for
       hub <- getOrCreateHub(treeId)
     yield ZStream.unwrapScoped(
@@ -134,7 +134,7 @@ final class SSEHubLive(
       yield ZStream.fromQueue(dequeue)
     )
 
-  override def publish(treeId: NonNegativeLong, event: SSEEvent): UIO[Int] =
+  override def publish(treeId: TreeId, event: SSEEvent): UIO[Int] =
     for
       hubs  <- hubsRef.get
       subs  <- subscribersRef.get
@@ -148,7 +148,7 @@ final class SSEHubLive(
                }
     yield count
 
-  override def subscriberCount(treeId: NonNegativeLong): UIO[Int] =
+  override def subscriberCount(treeId: TreeId): UIO[Int] =
     subscribersRef.get.map(_.getOrElse(treeId, 0))
 
   override def broadcastAll(event: SSEEvent): UIO[Int] =
@@ -166,7 +166,7 @@ final class SSEHubLive(
   /**
     * Get existing hub or create new one for tree.
     */
-  private def getOrCreateHub(treeId: NonNegativeLong): UIO[Hub[SSEEvent]] =
+  private def getOrCreateHub(treeId: TreeId): UIO[Hub[SSEEvent]] =
     hubsRef.get.flatMap { hubs =>
       hubs.get(treeId) match {
         case Some(hub) => ZIO.succeed(hub)

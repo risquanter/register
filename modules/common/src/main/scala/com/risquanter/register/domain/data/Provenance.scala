@@ -2,7 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder, JsonFieldEncoder, JsonFieldDecoder}
 import java.time.Instant
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.{SafeId, TreeId}
+import com.risquanter.register.domain.data.TreeIdCodecs.given
 
 /**
  * Per-node provenance metadata for reproducible Monte Carlo simulations.
@@ -66,7 +67,7 @@ case class NodeProvenance(
  * @param nodeProvenances Map from riskId to NodeProvenance for each risk in tree
  */
 case class TreeProvenance(
-  treeId: Long,
+  treeId: TreeId,
   globalSeeds: (Long, Long),
   nTrials: Int,
   parallelism: Int,

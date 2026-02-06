@@ -7,8 +7,7 @@ import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.domain.data.{LECPoint, LECCurveResponse}
-import com.risquanter.register.domain.data.iron.{PositiveInt, IronConstants, SafeId, SafeIdStr}
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.domain.data.iron.{PositiveInt, IronConstants, SafeId, SafeIdStr, NodeId}
 import io.github.iltotore.iron.refineUnsafe
 import IronConstants.Four
 

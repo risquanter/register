@@ -3,17 +3,16 @@ package com.risquanter.register.services
 import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.numeric.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong}
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.*
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
+import com.risquanter.register.util.IdGenerators
 
 
 object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
@@ -24,29 +23,27 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo = new RiskTreeRepository {
-    private val db = collection.mutable.Map[NonNegativeLong, RiskTree]()
+    private val db = collection.mutable.Map[TreeId, RiskTree]()
     
-    override def create(riskTree: RiskTree): Task[RiskTree] = ZIO.attempt {
-      val nextId: NonNegativeLong = (db.keys.map(k => (k: Long)).maxOption.getOrElse(0L) + 1L).refineUnsafe
-      val newRiskTree = riskTree.copy(id = nextId)
-      db += (nextId -> newRiskTree)
-      newRiskTree
+    override def create(riskTree: RiskTree): Task[RiskTree] = ZIO.succeed {
+      db += (riskTree.id -> riskTree)
+      riskTree
     }
     
-    override def update(id: NonNegativeLong, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
+    override def update(id: TreeId, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
       val riskTree = db(id)
       val updated = op(riskTree)
       db += (id -> updated)
       updated
     }
     
-    override def delete(id: NonNegativeLong): Task[RiskTree] = ZIO.attempt {
+    override def delete(id: TreeId): Task[RiskTree] = ZIO.attempt {
       val riskTree = db(id)
       db -= id
       riskTree
     }
     
-    override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
+    override def getById(id: TreeId): Task[Option[RiskTree]] =
       ZIO.succeed(db.get(id))
     
     override def getAll: Task[List[Either[RepositoryFailure, RiskTree]]] =
@@ -79,7 +76,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val program = service(_.create(validRequest))
 
         program.assert { result =>
-          result.id > 0 &&
+          result.id.value.nonEmpty &&
             result.name == SafeName.SafeName("Test Risk Tree".refineUnsafe) &&
             result.root.isInstanceOf[RiskLeaf]
         }
@@ -119,9 +116,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         program.assert { result =>
           val root = result.root.asInstanceOf[RiskPortfolio]
-          result.id > 0 &&
+          result.id.value.nonEmpty &&
             root.childIds.length == 2 &&
-            result.index.descendants(root.id).size == 3
+            result.index.descendants(result.rootId).size == 3
         }
       },
 
@@ -175,7 +172,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("getById returns None when not exists") {
-        val program = service(_.getById(999L.refineUnsafe))
+        val program = service(_.getById(treeId("nonexistent")))
 
         program.assert(_ == None)
       },
@@ -249,7 +246,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurve fails for nonexistent node") {
         val program = for {
           tree <- service(_.create(validRequest))
-          invalidId = safeId("nonexistent")
+          invalidId = nodeId("nonexistent")
           result <- service(_.getLECCurve(tree.id, invalidId)).flip
         } yield result
 
@@ -369,7 +366,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          idsByName = tree.index.nodes.values.map(n => n.name -> n.id).toMap
+          idsByName = tree.index.nodes.map((nid, n) => n.name -> nid).toMap
           leaf1Id = idsByName("Leaf 1")
           leaf2Id = idsByName("Leaf 2")
           curves <- service(_.getLECCurvesMulti(tree.id, Set(leaf1Id, leaf2Id)))
@@ -411,7 +408,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(hierarchicalRequest))
-          idsByName = tree.index.nodes.values.map(n => n.name -> n.id).toMap
+          idsByName = tree.index.nodes.map((nid, n) => n.name -> nid).toMap
           nodeAId = idsByName("Node A")
           nodeBId = idsByName("Node B")
           

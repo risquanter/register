@@ -1,11 +1,7 @@
 package com.risquanter.register.domain.data
 
-import com.risquanter.register.domain.data.iron.{TreeId, ValidationUtil}
-import zio.json.{JsonEncoder, JsonDecoder}
-
-/** JSON codecs for TreeId (ULID). */
-object TreeIdCodecs:
-  given JsonEncoder[TreeId.TreeId] = JsonEncoder[String].contramap(_.value.toString)
-
-  given JsonDecoder[TreeId.TreeId] =
-    JsonDecoder[String].mapOrFail(s => ValidationUtil.refineTreeId(s).left.map(_.mkString(", ")))
+/** JSON codecs for TreeId and NodeId are now in their companion objects
+  * (OpaqueTypes.scala) for automatic implicit scope resolution.
+  * This object is kept empty for backward-compatible imports.
+  */
+object TreeIdCodecs

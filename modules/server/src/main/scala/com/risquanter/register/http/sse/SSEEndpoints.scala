@@ -9,7 +9,7 @@ import zio.stream.*
 
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.TreeId
 
 /**
   * SSE endpoint definitions for real-time updates.
@@ -32,7 +32,7 @@ trait SSEEndpoints extends BaseEndpoint {
     *
     * Response format: text/event-stream with newline-delimited JSON events
     */
-  val treeEventsEndpoint: PublicEndpoint[NonNegativeLong, Unit, Stream[Throwable, Byte], ZioStreams] =
+  val treeEventsEndpoint: PublicEndpoint[TreeId, Unit, Stream[Throwable, Byte], ZioStreams] =
     endpoint
       .tag("events")
       .name("treeEvents")
@@ -54,7 +54,7 @@ trait SSEEndpoints extends BaseEndpoint {
           |```
           |""".stripMargin
       )
-      .in("events" / "tree" / path[NonNegativeLong]("treeId"))
+      .in("events" / "tree" / path[TreeId]("treeId"))
       .get
       .out(
         streamBody(ZioStreams)(

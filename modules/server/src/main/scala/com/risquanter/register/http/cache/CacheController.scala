@@ -6,7 +6,7 @@ import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.http.controllers.BaseController
 import com.risquanter.register.services.cache.TreeCacheManager
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.TreeId
 
 /**
   * Controller for cache management endpoints.
@@ -45,7 +45,7 @@ class CacheController private (cacheManager: TreeCacheManager)
         cache <- cacheManager.cacheFor(treeId)
         size  <- cache.size
       yield CacheStatsResponse(
-        treeId = treeId: Long,
+        treeId = treeId,
         size = size,
         capacityNote = "Unbounded cache (entries persist until invalidation)"
       )
@@ -60,7 +60,7 @@ class CacheController private (cacheManager: TreeCacheManager)
         cache <- cacheManager.cacheFor(treeId)
         ids   <- cache.keys
       yield CacheNodesResponse(
-        treeId = treeId: Long,
+        treeId = treeId,
         nodeIds = ids.map(_.value),
         count = ids.size
       )
@@ -74,7 +74,7 @@ class CacheController private (cacheManager: TreeCacheManager)
       for
         size <- cacheManager.onTreeStructureChanged(treeId)
       yield CacheClearResponse(
-        treeId = treeId: Long,
+        treeId = treeId,
         cleared = size,
         message = s"Cleared $size cache entries for tree $treeId"
       )

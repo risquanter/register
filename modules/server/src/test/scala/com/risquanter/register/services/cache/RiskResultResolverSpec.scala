@@ -8,7 +8,7 @@ import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, NonNegativeLong}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, TreeId, NodeId}
 import com.risquanter.register.testutil.TestHelpers.*
 
 /**
@@ -33,7 +33,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
     probability = 0.1,
     minLoss = Some(10000L),
     maxLoss = Some(50000L),
-    parentId = Some(safeId("root"))
+    parentId = Some(nodeId("root"))
   )
 
   val risk2Leaf = RiskLeaf.unsafeApply(
@@ -43,7 +43,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
     probability = 0.2,
     minLoss = Some(5000L),
     maxLoss = Some(20000L),
-    parentId = Some(safeId("root"))
+    parentId = Some(nodeId("root"))
   )
 
   val rootNode: RiskNode = RiskPortfolio.unsafeFromStrings(
@@ -55,12 +55,12 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
 
   val allNodes = Seq(rootNode, risk1Leaf, risk2Leaf)
   val testIndex: TreeIndex = unsafeGet(TreeIndex.fromNodeSeq(allNodes), "Test fixture has invalid tree structure")
-  val rootId = safeId("root")
-  val risk1Id = safeId("risk1")
-  val risk2Id = safeId("risk2")
+  val rootId = nodeId("root")
+  val risk1Id = nodeId("risk1")
+  val risk2Id = nodeId("risk2")
 
   // Create test RiskTree
-  val testTreeId: NonNegativeLong = 1L
+  val testTreeId: TreeId = treeId("test-tree")
   val testTree = unsafeGet(
     RiskTree.fromNodes(
       id = testTreeId,
@@ -141,7 +141,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           
         } yield assertTrue(
           // Verify root aggregates child risks
-          rootResult.name == rootId,
+          rootResult.name == rootId.toSafeId,
           // Root should have outcomes (aggregated from children)
           rootResult.outcomes.size >= 0
         )
@@ -201,7 +201,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
     suite("error handling")(
       
       test("fails when node not found in tree") {
-        val invalidId = safeId("nonexistent")
+        val invalidId = nodeId("nonexistent")
         
         for {
           resolver <- ZIO.service[RiskResultResolver]

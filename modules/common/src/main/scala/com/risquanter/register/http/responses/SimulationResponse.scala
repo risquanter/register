@@ -2,6 +2,8 @@ package com.risquanter.register.http.responses
 
 import zio.json.{JsonCodec, DeriveJsonCodec}
 import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.domain.data.TreeIdCodecs.given
 
 /** Response DTO for simulation data with Loss Exceedance Curve
   * 
@@ -14,7 +16,7 @@ import com.risquanter.register.domain.data.RiskTree
   * @param exceedanceCurve Optional Vega-Lite JSON for aggregated LEC visualization
   */
 final case class SimulationResponse(
-  id: Long,
+  id: TreeId,
   name: String,
   quantiles: Map[String, Double],
   exceedanceCurve: Option[String] // Vega-Lite JSON as string

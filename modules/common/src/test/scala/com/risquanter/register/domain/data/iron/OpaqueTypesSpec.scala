@@ -32,25 +32,6 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
         assertTrue(refined == "Valid Name")
       }
     ),
-
-    suite("TreeId opaque type")(
-      test("accepts valid ULID") {
-        val ulid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
-        val result = TreeId.fromString(ulid)
-        assertTrue(result.isRight && result.map(_.value).contains(ulid))
-      },
-
-      test("normalizes lowercase ULID to uppercase canonical form") {
-        val lower = "01arz3ndektsv4rrffq69g5fav"
-        val result = TreeId.fromString(lower)
-        assertTrue(result.isRight && result.map(_.value).contains("01ARZ3NDEKTSV4RRFFQ69G5FAV"))
-      },
-
-      test("rejects invalid ULID") {
-        val result = TreeId.fromString("not-a-ulid")
-        assertTrue(result.isLeft)
-      }
-    ),
     
     suite("SafeExtraShortStr type alias")(
       test("accepts string under 20 chars") {

@@ -3,8 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint}
-import com.risquanter.register.domain.data.iron.NonNegativeLong
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /** Service layer for RiskTree business logic.
   * 
@@ -34,13 +33,13 @@ trait RiskTreeService {
     * @param req Updated tree definition
     * @return Updated risk tree metadata
     */
-  def update(id: NonNegativeLong, req: RiskTreeUpdateRequest): Task[RiskTree]
+  def update(id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]
   
   /** Delete risk tree configuration
     * @param id Risk tree ID
     * @return Deleted risk tree metadata
     */
-  def delete(id: NonNegativeLong): Task[RiskTree]
+  def delete(id: TreeId): Task[RiskTree]
   
   /** Retrieve all persisted risk tree configurations (no LEC data)
     * @return List of all risk trees
@@ -51,7 +50,7 @@ trait RiskTreeService {
     * @param id Risk tree ID
     * @return Optional risk tree metadata
     */
-  def getById(id: NonNegativeLong): Task[Option[RiskTree]]
+  def getById(id: TreeId): Task[Option[RiskTree]]
   
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)
@@ -66,7 +65,7 @@ trait RiskTreeService {
     * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @return LEC curve response with quantiles, curve points, and childIds for navigation
     */
-  def getLECCurve(treeId: NonNegativeLong, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse]
+  def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse]
   
   /** Get exceedance probability at a threshold for a node.
     * 
@@ -75,7 +74,7 @@ trait RiskTreeService {
     * @param includeProvenance Whether to include provenance metadata (currently unused for this endpoint)
     * @return Probability as BigDecimal
     */
-  def probOfExceedance(treeId: NonNegativeLong, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal]
+  def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal]
   
   /** Get LEC curves for multiple nodes with shared tick domain.
     * 
@@ -86,5 +85,5 @@ trait RiskTreeService {
     * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @return Map from nodeId to curve points
     */
-  def getLECCurvesMulti(treeId: NonNegativeLong, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]]
+  def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]]
 }

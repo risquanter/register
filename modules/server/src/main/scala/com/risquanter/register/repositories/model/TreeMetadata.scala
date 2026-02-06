@@ -2,14 +2,12 @@ package com.risquanter.register.repositories.model
 
 import java.time.Instant
 import zio.json.*
-import com.risquanter.register.domain.data.iron.NonNegativeLong
-import com.risquanter.register.domain.tree.NodeId
-import com.risquanter.register.domain.data.RiskTree.{safeNameDecoder, safeNameEncoder, nodeIdDecoder, nodeIdEncoder, nonNegativeLongEncoder, nonNegativeLongDecoder}
-import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, SafeName}
+import com.risquanter.register.domain.data.RiskTree.{safeNameDecoder, safeNameEncoder}
 
 /** Metadata persisted for each risk tree under risk-trees/{treeId}/meta. */
 final case class TreeMetadata(
-  id: NonNegativeLong,
+  id: TreeId,
   name: SafeName.SafeName,
   rootId: NodeId,
   schemaVersion: Int,

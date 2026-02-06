@@ -5,6 +5,7 @@ import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.Match
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import zio.json.{JsonEncoder, JsonDecoder}
 
 // Base refined type alias used for most short strings:
 type SafeShortStr = String :| (Not[Blank] & MaxLength[50])
@@ -176,20 +177,34 @@ object SafeId:
   def fromString(s: String): Either[List[ValidationError], SafeId] =
     ValidationUtil.refineId(s)
 
-// TreeId: Canonical ULID (Crockford base32, 26 chars, uppercase)
-type TreeIdStr = String :| Match["^[0-9A-HJKMNP-TV-Z]{26}$"]
+// TreeId: Nominal case class wrapper over SafeId for tree identity (ADR-018).
+// Compiler-distinct from NodeId and raw SafeId. All validation delegates to SafeId.
+case class TreeId(toSafeId: SafeId.SafeId):
+  /** Extract the canonical ULID string. */
+  def value: String = toSafeId.value.toString
 
-// Opaque type for tree identifiers (ULID)
 object TreeId:
-  opaque type TreeId = TreeIdStr
-
-  object TreeId:
-    def apply(s: TreeIdStr): TreeId = s
-    def unapply(id: TreeId): Option[TreeIdStr] = Some(id)
-
-  extension (id: TreeId)
-    def value: TreeIdStr = id
-
-  // Convenience constructor from plain String (case-insensitive)
+  /** Smart constructor: delegates validation to SafeId.fromString, wraps result. */
   def fromString(s: String): Either[List[ValidationError], TreeId] =
-    ValidationUtil.refineTreeId(s)
+    SafeId.fromString(s).map(TreeId(_))
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[TreeId] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[TreeId] = JsonDecoder[String].mapOrFail(s =>
+    TreeId.fromString(s).left.map(_.mkString(", ")))
+
+// NodeId: Nominal case class wrapper over SafeId for node identity (ADR-018).
+// Compiler-distinct from TreeId and raw SafeId. All validation delegates to SafeId.
+case class NodeId(toSafeId: SafeId.SafeId):
+  /** Extract the canonical ULID string. */
+  def value: String = toSafeId.value.toString
+
+object NodeId:
+  /** Smart constructor: delegates validation to SafeId.fromString, wraps result. */
+  def fromString(s: String): Either[List[ValidationError], NodeId] =
+    SafeId.fromString(s).map(NodeId(_))
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[NodeId] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[NodeId] = JsonDecoder[String].mapOrFail(s =>
+    NodeId.fromString(s).left.map(_.mkString(", ")))

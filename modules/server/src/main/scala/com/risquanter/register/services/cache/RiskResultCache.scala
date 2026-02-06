@@ -2,7 +2,7 @@ package com.risquanter.register.services.cache
 
 import zio.*
 import com.risquanter.register.domain.data.RiskResult
-import com.risquanter.register.domain.tree.NodeId
+import com.risquanter.register.domain.data.iron.NodeId
 
 /**
   * RiskResult cache service (ADR-014).

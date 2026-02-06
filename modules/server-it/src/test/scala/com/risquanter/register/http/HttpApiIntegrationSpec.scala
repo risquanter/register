@@ -73,7 +73,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
             .send(client.backend)
           listed <- ZIO.fromEither(listResp.body)
           getResp <- basicRequest
-            .get(uri"${client.baseUrl}/risk-trees/${created.id}")
+            .get(uri"${client.baseUrl}/risk-trees/${created.id.value}")
             .response(asJson[Option[SimulationResponse]])
             .send(client.backend)
           fetched <- ZIO.fromEither(getResp.body)

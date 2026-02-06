@@ -10,7 +10,8 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPor
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, TreeId}
+import com.risquanter.register.util.IdGenerators
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
 
@@ -22,29 +23,29 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo() = new RiskTreeRepository {
-    private val db = collection.mutable.Map[NonNegativeLong, RiskTree]()
+    private val db = collection.mutable.Map[TreeId, RiskTree]()
     
-    override def create(riskTree: RiskTree): Task[RiskTree] = ZIO.attempt {
-      val nextId: NonNegativeLong = (db.keys.map(k => (k: Long)).maxOption.getOrElse(0L) + 1L).refineUnsafe
-      val newRiskTree = riskTree.copy(id = nextId)
-      db += (nextId -> newRiskTree)
-      newRiskTree
-    }
+    override def create(riskTree: RiskTree): Task[RiskTree] = 
+      IdGenerators.nextTreeId.map { nextId =>
+        val newRiskTree = riskTree.copy(id = nextId)
+        db += (nextId -> newRiskTree)
+        newRiskTree
+      }
     
-    override def update(id: NonNegativeLong, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
+    override def update(id: TreeId, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
       val riskTree = db(id)
       val updated = op(riskTree)
       db += (id -> updated)
       updated
     }
     
-    override def delete(id: NonNegativeLong): Task[RiskTree] = ZIO.attempt {
+    override def delete(id: TreeId): Task[RiskTree] = ZIO.attempt {
       val riskTree = db(id)
       db -= id
       riskTree
     }
     
-    override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
+    override def getById(id: TreeId): Task[Option[RiskTree]] =
       ZIO.succeed(db.get(id))
     
     override def getAll: Task[List[Either[RepositoryFailure, RiskTree]]] =
@@ -106,7 +107,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val program = service(_.create(hierarchicalRequest))
 
         program.assert { tree =>
-          tree.name.value == "Ops Risk Portfolio" && tree.id > 0
+          tree.name.value == "Ops Risk Portfolio" && tree.id.value.nonEmpty
         }.provide(serviceLayer)
       }
     ),

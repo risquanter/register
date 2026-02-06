@@ -1,12 +1,9 @@
 package com.risquanter.register.domain.tree
 
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.{SafeId, NodeId}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
-
-/** Type alias for node ID - uses Iron-refined SafeId throughout */
-type NodeId = SafeId.SafeId
 
 /**
   * Parent-pointer index for O(depth) cache invalidation.
@@ -201,14 +198,14 @@ object TreeIndex {
   }
 
   /**
-    * Extract SafeId from a RiskNode.
+    * Extract NodeId from a RiskNode.
     *
-    * Both RiskLeaf and RiskPortfolio store safeId as SafeId.SafeId.
+    * Wraps the raw SafeId.SafeId in NodeId for type-safe indexing.
     */
   private def extractSafeId(node: RiskNode): NodeId =
     node match
-      case leaf: RiskLeaf         => leaf.safeId
-      case portfolio: RiskPortfolio => portfolio.safeId
+      case leaf: RiskLeaf         => NodeId(leaf.safeId)
+      case portfolio: RiskPortfolio => NodeId(portfolio.safeId)
 
   private def validateChildToParent(
       nodes: Map[NodeId, RiskNode],

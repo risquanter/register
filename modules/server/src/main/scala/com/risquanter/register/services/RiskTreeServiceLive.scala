@@ -10,8 +10,8 @@ import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint, Distribution}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, Probability, DistributionType, NonNegativeLong}
-import com.risquanter.register.domain.tree.{NodeId, TreeIndex}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, Probability, DistributionType, TreeId, NodeId}
+import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -43,7 +43,7 @@ class RiskTreeServiceLive private (
   import RiskTreeServiceLive.ErrorContext
   
   /** Fetch tree by id or fail with ValidationFailed. */
-  private def getTreeOrFail(treeId: NonNegativeLong): Task[RiskTree] =
+  private def getTreeOrFail(treeId: TreeId): Task[RiskTree] =
     repo.getById(treeId).flatMap {
       case Some(tree) => ZIO.succeed(tree)
       case None =>
@@ -55,7 +55,7 @@ class RiskTreeServiceLive private (
     }
     
   /** Fetch tree and node together or fail with ValidationFailed. */
-  private def lookupNodeInTree(treeId: NonNegativeLong, nodeId: NodeId): Task[(RiskTree, RiskNode)] =
+  private def lookupNodeInTree(treeId: TreeId, nodeId: NodeId): Task[(RiskTree, RiskNode)] =
     for
       tree <- getTreeOrFail(treeId)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
@@ -66,7 +66,7 @@ class RiskTreeServiceLive private (
     yield (tree, node)
 
   /** Fetch tree and all requested nodes; fail with aggregated validation errors when any node is missing. */
-  private def lookupNodesInTree(treeId: NonNegativeLong, nodeIds: Set[NodeId]): Task[(RiskTree, Map[NodeId, RiskNode])] =
+  private def lookupNodesInTree(treeId: TreeId, nodeIds: Set[NodeId]): Task[(RiskTree, Map[NodeId, RiskNode])] =
     for
       tree <- getTreeOrFail(treeId)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
@@ -77,6 +77,30 @@ class RiskTreeServiceLive private (
       ))))
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
     yield (tree, nodes)
+
+  private def ensureUniqueTree(treeId: TreeId, treeName: SafeName.SafeName, excludeId: Option[TreeId] = None): Task[Unit] =
+    collectAllTrees.flatMap { trees =>
+      val candidates = trees.filterNot(t => excludeId.contains(t.id))
+
+      val errors = List(
+        Option.when(candidates.exists(_.id == treeId))(
+          ValidationError(
+            field = "id",
+            code = ValidationErrorCode.DUPLICATE_VALUE,
+            message = s"Tree ID '${treeId.value}' already exists"
+          )
+        ),
+        Option.when(candidates.exists(_.name == treeName))(
+          ValidationError(
+            field = "name",
+            code = ValidationErrorCode.DUPLICATE_VALUE,
+            message = s"Tree name '${treeName.value}' already exists"
+          )
+        )
+      ).flatten
+
+      if errors.nonEmpty then ZIO.fail(ValidationFailed(errors)) else ZIO.unit
+    }
 
   private def collectAllTrees: Task[List[RiskTree]] =
     repo.getAll.flatMap { results =>
@@ -220,7 +244,7 @@ class RiskTreeServiceLive private (
     leafDistributions: Map[SafeName.SafeName, Distribution],
     rootName: SafeName.SafeName
   ): Task[(Seq[RiskNode], NodeId)] = ZIO.attempt {
-    val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(_.id).toMap
+    val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(n => NodeId(n.id)).toMap
     val childrenByParent: Map[Option[SafeName.SafeName], List[SafeName.SafeName]] =
       nodesByName.values.groupBy(_.parentName).view.mapValues(_.toList.map(_.name)).toMap
 
@@ -261,11 +285,13 @@ class RiskTreeServiceLive private (
   // Config CRUD - only persist, no execution
   override def create(req: RiskTreeDefinitionRequest): Task[RiskTree] = {
     val operation = for {
+      treeId <- IdGenerators.nextTreeId
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
       resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
+      _ <- ensureUniqueTree(treeId, resolved.treeName)
       (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafDistributions, resolved.rootName)
       riskTree <- RiskTree.fromNodes(
-        id = 0L.refineUnsafe, // repo assigns
+        id = treeId,
         name = resolved.treeName,
         nodes = nodes,
         rootId = rootId
@@ -279,10 +305,11 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def update(id: NonNegativeLong, req: RiskTreeUpdateRequest): Task[RiskTree] = {
+  override def update(id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree] = {
     val operation = for {
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
       resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
+      _ <- ensureUniqueTree(id, resolved.treeName, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
       allLeafDistributions = resolved.existingLeafDistributions ++ resolved.addedLeafDistributions
       (nodes, rootId) <- buildNodes(allNodes, allLeafDistributions, resolved.rootName)
@@ -301,7 +328,7 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def delete(id: NonNegativeLong): Task[RiskTree] =
+  override def delete(id: TreeId): Task[RiskTree] =
     repo.delete(id).tapBoth(
       error => logIfUnexpected("delete")(error) *> recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
@@ -313,7 +340,7 @@ class RiskTreeServiceLive private (
       _ => recordOperation("getAll", success = true)
     )
   
-  override def getById(id: NonNegativeLong): Task[Option[RiskTree]] =
+  override def getById(id: TreeId): Task[Option[RiskTree]] =
     repo.getById(id).tapBoth(
       error => logIfUnexpected("getById")(error) *> recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
@@ -323,10 +350,10 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def getLECCurve(treeId: NonNegativeLong, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] = {
+  override def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] = {
     val operation = tracing.span("getLECCurve", SpanKind.INTERNAL) {
       for {
-        _ <- tracing.setAttribute("tree_id", treeId)
+        _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
         
@@ -369,10 +396,10 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def probOfExceedance(treeId: NonNegativeLong, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal] = {
+  override def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal] = {
     val operation = tracing.span("probOfExceedance", SpanKind.INTERNAL) {
       for {
-        _ <- tracing.setAttribute("tree_id", treeId)
+        _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("threshold", threshold)
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
@@ -396,10 +423,10 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def getLECCurvesMulti(treeId: NonNegativeLong, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]] = {
+  override def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]] = {
     val operation = tracing.span("getLECCurvesMulti", SpanKind.INTERNAL) {
       for {
-        _ <- tracing.setAttribute("tree_id", treeId)
+        _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
         _ <- tracing.setAttribute("node_ids", nodeIds.map(_.value).mkString(","))
         _ <- tracing.setAttribute("include_provenance", includeProvenance)

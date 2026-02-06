@@ -4,10 +4,9 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.numeric.*
 import com.risquanter.register.domain.data.RiskResult
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
-import com.risquanter.register.domain.tree.{TreeIndex, NodeId}
+import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.testutil.TestHelpers.*
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -21,12 +20,6 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
  */
 object RiskResultCacheSpec extends ZIOSpecDefault {
 
-  // Helper to create NonNegativeLong from Long (runtime check)
-  def nnLong(n: Long): NonNegativeLong = 
-    n.refineEither[GreaterEqual[0L]].getOrElse(
-      throw new IllegalArgumentException(s"Invalid NonNegativeLong: $n")
-    )
-
   private val idStr: String => String = s => safeId(s).value
 
   // Test fixtures - tree structure for parent lookup
@@ -38,7 +31,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     probability = 0.25,
     minLoss = Some(1000L),
     maxLoss = Some(50000L),
-    parentId = Some(safeId("ops-risk"))
+    parentId = Some(nodeId("ops-risk"))
   )
 
   val hardwareLeaf = RiskLeaf.unsafeApply(
@@ -48,7 +41,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     probability = 0.1,
     minLoss = Some(500L),
     maxLoss = Some(10000L),
-    parentId = Some(safeId("it-risk"))
+    parentId = Some(nodeId("it-risk"))
   )
 
   val softwareLeaf = RiskLeaf.unsafeApply(
@@ -58,14 +51,14 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     probability = 0.3,
     minLoss = Some(100L),
     maxLoss = Some(5000L),
-    parentId = Some(safeId("it-risk"))
+    parentId = Some(nodeId("it-risk"))
   )
 
   val itPortfolio = RiskPortfolio.unsafeFromStrings(
     id = idStr("it-risk"),
     name = "IT Risk",
     childIds = Array(idStr("hardware"), idStr("software")),
-    parentId = Some(safeId("ops-risk"))
+    parentId = Some(nodeId("ops-risk"))
   )
 
   val rootPortfolio = RiskPortfolio.unsafeFromStrings(
@@ -80,22 +73,22 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
   val treeIndex = unsafeGet(TreeIndex.fromNodeSeq(allNodes), "Invalid tree structure")
   
   // Create RiskTree for TreeCacheManager tests
-  val testTreeId: NonNegativeLong = 1L
+  val testTreeId: TreeId = treeId("test-tree")
   val testTree = unsafeGet(
     RiskTree.fromNodes(
       id = testTreeId,
       name = SafeName.SafeName("Test Tree".refineUnsafe),
       nodes = allNodes,
-      rootId = safeId("ops-risk")
+      rootId = nodeId("ops-risk")
     ),
     "Test fixture has invalid RiskTree"
   )
 
   // SafeId values for tests
-  val opsRiskId  = safeId("ops-risk")
-  val cyberId    = safeId("cyber")
-  val itRiskId   = safeId("it-risk")
-  val hardwareId = safeId("hardware")
+  val opsRiskId  = nodeId("ops-risk")
+  val cyberId    = nodeId("cyber")
+  val itRiskId   = nodeId("it-risk")
+  val hardwareId = nodeId("hardware")
 
   // Sample RiskResult data (simulation outcomes) - scoped with withCfg
   val cyberResult = withCfg(5) {
@@ -151,7 +144,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
           result <- cache.get(cyberId)
         yield assertTrue(
           result.isDefined,
-          result.get.name == cyberId,
+          result.get.name == cyberId.toSafeId,
           result.get.nTrials == 5,
           result.get.outcomes.size == 5
         )
@@ -301,8 +294,8 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
       test("different trees have isolated caches") {
         for
           manager <- ZIO.service[TreeCacheManager]
-          cache1  <- manager.cacheFor(nnLong(1L))
-          cache2  <- manager.cacheFor(nnLong(2L))
+          cache1  <- manager.cacheFor(treeId("tree-1"))
+          cache2  <- manager.cacheFor(treeId("tree-2"))
           _       <- cache1.put(cyberId, cyberResult)
           result1 <- cache1.get(cyberId)
           result2 <- cache2.get(cyberId)
@@ -367,8 +360,8 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
       test("clearAll clears all tree caches") {
         for
           manager <- ZIO.service[TreeCacheManager]
-          cache1  <- manager.cacheFor(nnLong(1L))
-          cache2  <- manager.cacheFor(nnLong(2L))
+          cache1  <- manager.cacheFor(treeId("tree-1"))
+          cache2  <- manager.cacheFor(treeId("tree-2"))
           _       <- cache1.put(cyberId, cyberResult)
           _       <- cache2.put(hardwareId, hardwareResult)
           (trees, entries) <- manager.clearAll
@@ -386,11 +379,11 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
         for
           manager <- ZIO.service[TreeCacheManager]
           count0  <- manager.treeCount
-          _       <- manager.cacheFor(nnLong(1L))
+          _       <- manager.cacheFor(treeId("tree-1"))
           count1  <- manager.treeCount
-          _       <- manager.cacheFor(nnLong(2L))
+          _       <- manager.cacheFor(treeId("tree-2"))
           count2  <- manager.treeCount
-          _       <- manager.cacheFor(nnLong(3L))
+          _       <- manager.cacheFor(treeId("tree-3"))
           count3  <- manager.treeCount
         yield assertTrue(
           count0 == 0,

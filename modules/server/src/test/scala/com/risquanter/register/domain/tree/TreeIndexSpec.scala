@@ -5,7 +5,7 @@ import zio.test.Assertion.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.domain.errors.ValidationErrorCode
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId}
 
 object TreeIndexSpec extends ZIOSpecDefault {
 
@@ -32,7 +32,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
     probability = 0.25,
     minLoss = Some(1000L),
     maxLoss = Some(50000L),
-    parentId = Some(safeId("ops-risk"))
+    parentId = Some(nodeId("ops-risk"))
   )
 
   val hardwareLeaf = RiskLeaf.unsafeApply(
@@ -42,7 +42,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
     probability = 0.1,
     minLoss = Some(500L),
     maxLoss = Some(10000L),
-    parentId = Some(safeId("it-risk"))
+    parentId = Some(nodeId("it-risk"))
   )
 
   val softwareLeaf = RiskLeaf.unsafeApply(
@@ -52,14 +52,14 @@ object TreeIndexSpec extends ZIOSpecDefault {
     probability = 0.3,
     minLoss = Some(100L),
     maxLoss = Some(5000L),
-    parentId = Some(safeId("it-risk"))
+    parentId = Some(nodeId("it-risk"))
   )
 
   val itPortfolio = RiskPortfolio.unsafeFromStrings(
     id = itRiskIdStr,
     name = "IT Risk",
     childIds = Array(hardwareIdStr, softwareIdStr),
-    parentId = Some(safeId("ops-risk"))
+    parentId = Some(nodeId("ops-risk"))
   )
 
   val rootPortfolio = RiskPortfolio.unsafeFromStrings(
@@ -73,11 +73,11 @@ object TreeIndexSpec extends ZIOSpecDefault {
   val allNodes: Seq[RiskNode] = Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, softwareLeaf)
 
   // SafeId values for assertions
-  val opsRiskId   = safeId("ops-risk")
-  val cyberId     = safeId("cyber")
-  val itRiskId    = safeId("it-risk")
-  val hardwareId  = safeId("hardware")
-  val softwareId  = safeId("software")
+  val opsRiskId   = nodeId("ops-risk")
+  val cyberId     = nodeId("cyber")
+  val itRiskId    = nodeId("it-risk")
+  val hardwareId  = nodeId("hardware")
+  val softwareId  = nodeId("software")
 
   def spec = suite("TreeIndexSpec")(
     suite("valid tree construction")(
@@ -141,7 +141,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       },
       test("ancestorPath returns empty list for non-existent node") {
         val index       = getIndex(allNodes)
-        val nonExistent = safeId("non-existent")
+        val nonExistent = nodeId("non-existent")
         val path        = index.ancestorPath(nonExistent)
 
         assertTrue(path.isEmpty)
@@ -221,7 +221,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(safeId("wrong-parent"))  // Points to non-existent parent
+          parentId = Some(nodeId("wrong-parent"))  // Points to non-existent parent
         )
         
         val root = RiskPortfolio.unsafeFromStrings(
@@ -274,7 +274,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(safeId("root"))  // Claims root as parent
+          parentId = Some(nodeId("root"))  // Claims root as parent
         )
         
         val otherChild = RiskLeaf.unsafeApply(
@@ -284,7 +284,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(safeId("root"))  // Correctly claims root
+          parentId = Some(nodeId("root"))  // Correctly claims root
         )
         
         val root = RiskPortfolio.unsafeFromStrings(
@@ -325,7 +325,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(safeId("parent-leaf"))  // Points to leaf, not portfolio
+          parentId = Some(nodeId("parent-leaf"))  // Points to leaf, not portfolio
         )
         
         val result = TreeIndex.fromNodeSeq(Seq(parent, child))
@@ -349,7 +349,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(safeId("non-existent"))  // Points to missing parent
+          parentId = Some(nodeId("non-existent"))  // Points to missing parent
         )
         
         val result = TreeIndex.fromNodeSeq(Seq(orphan))
@@ -374,7 +374,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(safeId("missing1"))
+          parentId = Some(nodeId("missing1"))
         )
         
         val orphan2 = RiskLeaf.unsafeApply(
@@ -384,7 +384,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(safeId("missing2"))
+          parentId = Some(nodeId("missing2"))
         )
         
         val result = TreeIndex.fromNodeSeq(Seq(orphan1, orphan2))
@@ -404,7 +404,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(safeId("valid-parent"))
+          parentId = Some(nodeId("valid-parent"))
         )
         
         val parent = RiskPortfolio.unsafeFromStrings(

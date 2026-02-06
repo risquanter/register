@@ -8,7 +8,7 @@ import zio.json.*
 
 import com.risquanter.register.http.controllers.BaseController
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.domain.data.iron.NonNegativeLong
+import com.risquanter.register.domain.data.iron.TreeId
 
 /**
   * Controller for SSE endpoints.
@@ -69,8 +69,8 @@ class SSEController private (sseHub: SSEHub)
   /**
     * Initial connection event.
     */
-  private def connectedEvent(treeId: NonNegativeLong): String =
-    formatAsSSE(SSEEvent.ConnectionStatus("connected", Some(s"Subscribed to tree $treeId")))
+  private def connectedEvent(treeId: TreeId): String =
+    formatAsSSE(SSEEvent.ConnectionStatus("connected", Some(s"Subscribed to tree ${treeId.value}")))
 
   /**
     * Periodic heartbeat to keep SSE connection alive.
