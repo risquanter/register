@@ -81,8 +81,8 @@ object RiskSampler {
    * }}}
    */
   def fromDistribution(
-    entityId: Long,
-    riskId: SafeId.SafeId,
+    entitySeed: Long,
+    riskSeed: SafeId.SafeId,
     occurrenceProb: Probability,
     lossDistribution: Distribution,
     seed3: Long = 0L,
@@ -90,16 +90,16 @@ object RiskSampler {
   ): RiskSampler = {
     
     // Hash risk ID and offset for occurrence vs loss sampling
-    val riskHash = riskId.value.toString.hashCode.toLong
+    val riskHash = riskSeed.value.toString.hashCode.toLong
     val occurrenceVarId = riskHash + 1000L
     val lossVarId = riskHash + 2000L
     
     // Create curried generators
-    val occurrenceRng = HDRWrapper.createGenerator(entityId, occurrenceVarId, seed3, seed4)
-    val lossRng = HDRWrapper.createGenerator(entityId, lossVarId, seed3, seed4)
+    val occurrenceRng = HDRWrapper.createGenerator(entitySeed, occurrenceVarId, seed3, seed4)
+    val lossRng = HDRWrapper.createGenerator(entitySeed, lossVarId, seed3, seed4)
     
     new RiskSampler {
-      val id: SafeId.SafeId = riskId
+      val id: SafeId.SafeId = riskSeed
       
       def sampleOccurrence(trial: Long): Boolean = {
         val uniform = occurrenceRng(trial)

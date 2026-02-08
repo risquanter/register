@@ -188,10 +188,13 @@ object Simulator {
       (distribution, distParams) = distAndParams
       
       // Build sampler (using entityId = hash of leaf.id for determinism)
-      entityId = leaf.id.value.toString.hashCode.toLong
+      // Entity ID derived from leaf ID ensures unique random streams per risk
+      // Entity ID is a seed of the random number generator, so it must be consistent for the same leaf ID
+      //  
+      entitySeed = leaf.id.value.toString.hashCode.toLong
       sampler = RiskSampler.fromDistribution(
-        entityId = entityId,
-        riskId = leaf.id,
+        entitySeed = entitySeed,
+        riskSeed = leaf.id,
         occurrenceProb = leaf.probability, // Already Probability type from domain model
         lossDistribution = distribution,
         seed3 = seed3,
@@ -202,9 +205,9 @@ object Simulator {
       provenance = 
         NodeProvenance(
           riskId = leaf.id,
-          entityId = entityId,
-          occurrenceVarId = entityId.hashCode + 1000L,
-          lossVarId = entityId.hashCode + 2000L,
+          entityId = entitySeed,
+          occurrenceVarId = entitySeed.hashCode + 1000L,
+          lossVarId = entitySeed.hashCode + 2000L,
           globalSeed3 = seed3,
           globalSeed4 = seed4,
           distributionType = leaf.distributionType,
