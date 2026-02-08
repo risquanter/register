@@ -373,7 +373,7 @@ class RiskTreeServiceLive private (
         
         // Get child IDs if portfolio node
         childIds = node match {
-          case portfolio: RiskPortfolio => Some(portfolio.childIds.map(_.value.toString).toList)
+          case portfolio: RiskPortfolio => Some(portfolio.childIds.map(_.value).toList)
           case _: RiskLeaf => None
         }
         
@@ -381,7 +381,7 @@ class RiskTreeServiceLive private (
         lecPoints = curvePoints.map { case (loss, prob) => LECPoint(loss, prob) }
         response = LECCurveResponse(
           id = nodeId.value,
-          name = node.name,  // Use node.name (display name), not result.name (which is the ID)
+          name = node.name,  // Use node.name (display name), not result.nodeId (which is the node ID)
           curve = lecPoints,
           quantiles = quantiles,
           childIds = childIds,

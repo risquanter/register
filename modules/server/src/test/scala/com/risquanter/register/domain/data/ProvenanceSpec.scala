@@ -39,7 +39,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     suite("JSON Serialization")(
       test("NodeProvenance serializes and deserializes correctly") {
         val provenance = NodeProvenance(
-          riskId = safeId("cyber-attack"),
+          riskId = nodeId("cyber-attack"),
           entityId = 42L,
           occurrenceVarId = 1042L,
           lossVarId = 2042L,
@@ -59,7 +59,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val decoded = json.fromJson[NodeProvenance]
         
         assertTrue(decoded.isRight) &&
-        assertTrue(decoded.toOption.get.riskId == safeId("cyber-attack")) &&
+        assertTrue(decoded.toOption.get.riskId == nodeId("cyber-attack")) &&
         assertTrue(decoded.toOption.get.entityId == 42L) &&
         assertTrue(decoded.toOption.get.distributionType == "lognormal")
       },
@@ -98,7 +98,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       
       test("TreeProvenance serializes with node provenances") {
         val nodeProvenance = NodeProvenance(
-          riskId = safeId("risk1"),
+          riskId = nodeId("risk1"),
           entityId = 123L,
           occurrenceVarId = 1123L,
           lossVarId = 2123L,
@@ -119,7 +119,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           globalSeeds = (0L, 0L),
           nTrials = 10000,
           parallelism = 4,
-          nodeProvenances = Map(safeId("risk1") -> nodeProvenance)
+          nodeProvenances = Map(nodeId("risk1") -> nodeProvenance)
         )
         
         val json = treeProvenance.toJson
@@ -129,7 +129,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         assertTrue(decoded.toOption.get.treeId == treeId("tree-42")) &&
         assertTrue(decoded.toOption.get.nTrials == 10000) &&
         assertTrue(decoded.toOption.get.nodeProvenances.size == 1) &&
-        assertTrue(decoded.toOption.get.nodeProvenances.contains(safeId("risk1")))
+        assertTrue(decoded.toOption.get.nodeProvenances.contains(nodeId("risk1")))
       },
       
       test("DistributionParams sealed trait handles both subtypes") {
@@ -176,7 +176,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           result <- resolver.ensureCached(testTree, nodeId("test-risk"), includeProvenance = true)
         } yield {
           assertTrue(result.provenances.nonEmpty) &&
-          assertTrue(result.provenances.exists(_.riskId == safeId("test-risk")))
+          assertTrue(result.provenances.exists(_.riskId == nodeId("test-risk")))
         }
       },
       
@@ -207,7 +207,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       
       test("provenance captures correct entityId from riskId hash") {
         val riskIdLabel = "cyber-attack"
-        val riskId = safeId(riskIdLabel)
+        val riskId = nodeId(riskIdLabel)
         val expectedEntityId = riskId.value.hashCode.toLong
         
         val leaf = RiskLeaf.unsafeApply(
@@ -256,7 +256,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("lognormal-risk"), includeProvenance = true)
         } yield {
-          val nodeProv = result.provenances.find(_.riskId == safeId("lognormal-risk")).get
+          val nodeProv = result.provenances.find(_.riskId == nodeId("lognormal-risk")).get
           assertTrue(nodeProv.distributionType == "lognormal") &&
           assertTrue(nodeProv.distributionParams.isInstanceOf[LognormalDistributionParams]) &&
           assertTrue(
@@ -310,8 +310,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
         } yield {
           // Portfolio result should contain provenances from both leaves
           assertTrue(result.provenances.size == 2) &&
-          assertTrue(result.provenances.exists(_.riskId == safeId("risk1"))) &&
-          assertTrue(result.provenances.exists(_.riskId == safeId("risk2")))
+          assertTrue(result.provenances.exists(_.riskId == nodeId("risk1"))) &&
+          assertTrue(result.provenances.exists(_.riskId == nodeId("risk2")))
         }
       }
     ).provideLayerShared(testLayer),
@@ -372,10 +372,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("test-reconstruction"), includeProvenance = true)
         } yield {
-          val nodeProv = result.provenances.find(_.riskId == safeId("test-reconstruction")).get
+          val nodeProv = result.provenances.find(_.riskId == nodeId("test-reconstruction")).get
           
           // Verify all essential information is captured
-          assertTrue(nodeProv.riskId == safeId("test-reconstruction")) &&
+          assertTrue(nodeProv.riskId == nodeId("test-reconstruction")) &&
           assertTrue(nodeProv.entityId != 0L) &&
           assertTrue(nodeProv.occurrenceVarId != 0L) &&
           assertTrue(nodeProv.lossVarId != 0L) &&

@@ -51,8 +51,8 @@ final case class RiskResultResolverLive(
   override def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): Task[RiskResult] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
-        _         <- tracing.setAttribute("tree_id", tree.id.toString)
-        _         <- tracing.setAttribute("node_id", nodeId.value.toString)
+        _         <- tracing.setAttribute("tree_id", tree.id.value)
+        _         <- tracing.setAttribute("node_id", nodeId.value)
         _         <- tracing.setAttribute("include_provenance", includeProvenance)
         cache     <- cacheManager.cacheFor(tree.id)
         resultOpt <- cache.get(nodeId)
@@ -75,7 +75,7 @@ final case class RiskResultResolverLive(
   private def simulateSubtree(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean): Task[RiskResult] =
     tracing.span("simulateSubtree", SpanKind.INTERNAL) {
       for {
-        _ <- tracing.setAttribute("node_id", nodeId.value.toString)
+        _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("n_trials", nTrials.toLong)
         _ <- tracing.setAttribute("parallelism", parallelism.toLong)
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
@@ -97,7 +97,7 @@ final case class RiskResultResolverLive(
         durationMs = endTime - startTime
         
         _ <- tracing.addEvent("simulation_completed")
-        _ <- recordSimulationMetrics(nodeId.value.toString, nTrials, durationMs)
+        _ <- recordSimulationMetrics(nodeId.value, nTrials, durationMs)
       } yield result
     }
   
@@ -138,9 +138,9 @@ final case class RiskResultResolverLive(
                 message = s"RiskPortfolio '${portfolio.id}' has no children"
               )))
             childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b))
-              .withId(updatedNodeId = portfolio.id)
+              .withNodeId(updatedNodeId = portfolio.id)
           }
-          _ <- cache.put(NodeId(portfolio.id), combined)
+          _ <- cache.put(portfolio.id, combined)
         yield combined
     }
 
@@ -151,7 +151,7 @@ final case class RiskResultResolverLive(
       (sampler, provenance)  <- Simulator.createSamplerFromLeaf(leaf, seed3, seed4)
       trials <- Simulator.performTrials(sampler, nTrials, parallelism)
       result = RiskResult(leaf.id, trials, List(provenance))
-      _ <- cache.put(NodeId(leaf.id), result)
+      _ <- cache.put(leaf.id, result)
     yield result
 }
 

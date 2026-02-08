@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.iron.{Probability, SafeId}
+import com.risquanter.register.domain.data.iron.{Probability, SafeId, NodeId}
 
 /**
  * Samples risk events combining occurrence probability and loss distribution.
@@ -16,8 +16,8 @@ import com.risquanter.register.domain.data.iron.{Probability, SafeId}
  * @see MetalogDistribution for loss distribution
  */
 trait RiskSampler {
-  /** Unique identifier for this risk */
-  def id: SafeId.SafeId
+  /** Unique identifier for the risk node this sampler represents */
+  def nodeId: NodeId
   
   /** 
    * Sample occurrence for a trial.
@@ -82,7 +82,7 @@ object RiskSampler {
    */
   def fromDistribution(
     entitySeed: Long,
-    riskSeed: SafeId.SafeId,
+    riskSeed: NodeId,
     occurrenceProb: Probability,
     lossDistribution: Distribution,
     seed3: Long = 0L,
@@ -90,7 +90,7 @@ object RiskSampler {
   ): RiskSampler = {
     
     // Hash risk ID and offset for occurrence vs loss sampling
-    val riskHash = riskSeed.value.toString.hashCode.toLong
+    val riskHash = riskSeed.value.hashCode.toLong
     val occurrenceVarId = riskHash + 1000L
     val lossVarId = riskHash + 2000L
     
@@ -99,7 +99,7 @@ object RiskSampler {
     val lossRng = HDRWrapper.createGenerator(entitySeed, lossVarId, seed3, seed4)
     
     new RiskSampler {
-      val id: SafeId.SafeId = riskSeed
+      val nodeId: NodeId = riskSeed
       
       def sampleOccurrence(trial: Long): Boolean = {
         val uniform = occurrenceRng(trial)

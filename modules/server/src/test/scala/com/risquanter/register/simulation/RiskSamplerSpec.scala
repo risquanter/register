@@ -4,7 +4,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.iron.Probability
 import com.risquanter.register.domain.data.iron.SafeId
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
@@ -45,19 +45,19 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
           seed4 = 0L
         )
-        assertTrue(sampler.id == safeId("RISK-001"))
+        assertTrue(sampler.nodeId == nodeId("RISK-001"))
       },
       test("sampleOccurrence returns Boolean") {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -70,7 +70,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -83,7 +83,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -99,7 +99,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-ZERO"),
+          riskSeed = nodeId("RISK-ZERO"),
           occurrenceProb = prob(0.0001),  // Very small but valid
           lossDistribution = metalog,
           seed3 = 0L,
@@ -113,7 +113,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-HIGH"),
+          riskSeed = nodeId("RISK-HIGH"),
           occurrenceProb = prob(0.9999),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -129,7 +129,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val targetProb: Probability = 0.3.refineUnsafe
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-30PCT"),
+          riskSeed = nodeId("RISK-30PCT"),
           occurrenceProb = targetProb,
           lossDistribution = metalog,
           seed3 = 0L,
@@ -150,7 +150,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()  // Unbounded
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-UNBOUNDED"),
+          riskSeed = nodeId("RISK-UNBOUNDED"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -175,7 +175,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createBoundedLossDistribution()  // Bounded [0, 100k]
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-BOUNDED"),
+          riskSeed = nodeId("RISK-BOUNDED"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -193,7 +193,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -215,7 +215,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.9999),  // Almost always occurs
           lossDistribution = metalog,
           seed3 = 0L,
@@ -239,7 +239,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         
         val sampler1 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-DET"),
+          riskSeed = nodeId("RISK-DET"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -248,7 +248,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         
         val sampler2 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-DET"),
+          riskSeed = nodeId("RISK-DET"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -265,7 +265,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler1 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -273,7 +273,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         )
         val sampler2 = RiskSampler.fromDistribution(
           entitySeed = 2L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -288,7 +288,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler1 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -296,7 +296,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         )
         val sampler2 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-002"),
+          riskSeed = nodeId("RISK-002"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -311,7 +311,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler1 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 42L,
@@ -319,7 +319,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         )
         val sampler2 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 43L,
@@ -334,7 +334,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler1 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -342,7 +342,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         )
         val sampler2 = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -359,7 +359,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -385,7 +385,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-NEVER"),
+          riskSeed = nodeId("RISK-NEVER"),
           occurrenceProb = prob(0.0001),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -403,7 +403,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-ALWAYS"),
+          riskSeed = nodeId("RISK-ALWAYS"),
           occurrenceProb = prob(0.9999),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -421,7 +421,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.9999),  // Almost always occurs
           lossDistribution = metalog,
           seed3 = 0L,
@@ -441,7 +441,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -456,7 +456,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,
@@ -471,7 +471,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
         val metalog = createSimpleLossDistribution()
         val sampler = RiskSampler.fromDistribution(
           entitySeed = -999L,
-          riskSeed = safeId("RISK-001"),
+          riskSeed = nodeId("RISK-001"),
           occurrenceProb = prob(0.5),
           lossDistribution = metalog,
           seed3 = 0L,

@@ -4,7 +4,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.RiskResult
 import com.risquanter.register.domain.data.iron.SafeId
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import com.risquanter.register.configs.SimulationConfig
 
@@ -13,7 +13,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
   // Test fixtures - simulation outcomes (scoped with withCfg)
   val cyberResult = withCfg(5) {
     RiskResult(
-      nodeId = safeId("cyber"),
+      nodeId = nodeId("cyber"),
       outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
       provenances = Nil
     )
@@ -21,7 +21,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
   
   val hardwareResult = withCfg(5) {
     RiskResult(
-      nodeId = safeId("hardware"),
+      nodeId = nodeId("hardware"),
       outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
       provenances = Nil
     )
@@ -29,7 +29,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
   
   val wideRangeResult = withCfg(3) {
     RiskResult(
-      nodeId = safeId("wide"),
+      nodeId = nodeId("wide"),
       outcomes = Map(1 -> 1000L, 2 -> 100000L, 3 -> 50000L),
       provenances = Nil
     )
@@ -37,7 +37,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
   
   val emptyResult = withCfg(5) {
     RiskResult(
-      nodeId = safeId("empty"),
+      nodeId = nodeId("empty"),
       outcomes = Map.empty,
       provenances = Nil
     )

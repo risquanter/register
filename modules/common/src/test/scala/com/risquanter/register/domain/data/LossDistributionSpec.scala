@@ -6,7 +6,7 @@ import zio.prelude.*
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.RiskResultIdentityInstances.given
 import com.risquanter.register.domain.data.iron.SafeId
-import com.risquanter.register.testutil.TestHelpers.safeId
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 object LossDistributionSpec extends ZIOSpecDefault {
@@ -14,7 +14,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
   def spec = suite("LossDistributionSpec")(
     suite("RiskResult - basic functionality")(
       test("empty result has zero losses") {
-        val result = withCfg(1000) { RiskResult.empty(safeId("RISK-001")) }
+        val result = withCfg(1000) { RiskResult.empty(nodeId("RISK-001")) }
 
         assertTrue(result.outcomes.isEmpty) &&
         assertTrue(result.maxLoss == 0L) &&
@@ -22,7 +22,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(result.outcomeCount.isEmpty)
       },
       test("single outcome is captured") {
-        val result = withCfg(1000) { RiskResult(safeId("RISK-001"), Map(5 -> 1000L), Nil) }
+        val result = withCfg(1000) { RiskResult(nodeId("RISK-001"), Map(5 -> 1000L), Nil) }
 
         assertTrue(result.outcomeOf(5) == 1000L) &&
         assertTrue(result.outcomeOf(10) == 0L) &&
@@ -32,7 +32,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       test("multiple outcomes create frequency distribution") {
         val result = withCfg(1000) {
           RiskResult(
-            safeId("RISK-001"),
+            nodeId("RISK-001"),
             Map(1 -> 1000L, 2 -> 2000L, 3 -> 1000L, 4 -> 3000L),
             Nil
           )
@@ -47,7 +47,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       test("outcomeCount is sorted by loss") {
         val result = withCfg(1000) {
           RiskResult(
-            safeId("RISK-001"),
+            nodeId("RISK-001"),
             Map(1 -> 3000L, 2 -> 1000L, 3 -> 2000L),
             Nil
           )
@@ -59,14 +59,14 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("RiskResult - probability of exceedance")(
       test("probOfExceedance with no outcomes returns 0") {
-        val result = withCfg(1000) { RiskResult.empty(safeId("RISK-001")) }
+        val result = withCfg(1000) { RiskResult.empty(nodeId("RISK-001")) }
 
         assertTrue(result.probOfExceedance(1000L) == BigDecimal(0))
       },
       test("probOfExceedance calculates correctly") {
         val result = withCfg(1000) {
           RiskResult(
-            safeId("RISK-001"),
+            nodeId("RISK-001"),
             Map(
               1 -> 1000L,  // Below threshold
               2 -> 2000L,  // Below threshold
@@ -86,7 +86,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       test("probOfExceedance handles threshold above max loss") {
         val result = withCfg(1000) {
           RiskResult(
-            safeId("RISK-001"),
+            nodeId("RISK-001"),
             Map(1 -> 1000L, 2 -> 2000L),
             Nil
           )
@@ -98,33 +98,33 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("LossDistribution.merge - outer join semantics")(
       test("merges disjoint trial IDs") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(safeId("risk-002"), Map(3 -> 3000L, 4 -> 4000L), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(3 -> 3000L, 4 -> 4000L), Nil) }
 
         val merged = LossDistribution.merge(r1, r2)
 
         assertTrue(merged == Map(1 -> 1000L, 2 -> 2000L, 3 -> 3000L, 4 -> 4000L))
       },
       test("merges overlapping trial IDs by summing losses") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(safeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
 
         val merged = LossDistribution.merge(r1, r2)
 
         assertTrue(merged == Map(1 -> 1500L, 2 -> 2000L, 3 -> 3000L))
       },
       test("merges with empty result is identity") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val empty = withCfg(100) { RiskResult.empty(safeId("EMPTY")) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
+        val empty = withCfg(100) { RiskResult.empty(nodeId("EMPTY")) }
 
         val merged = LossDistribution.merge(r1, empty)
 
         assertTrue(merged == r1.outcomes)
       },
       test("merges three results correctly") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(safeId("risk-002"), Map(1 -> 2000L, 2 -> 500L), Nil) }
-        val r3 = withCfg(100) { RiskResult(safeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 2000L, 2 -> 500L), Nil) }
+        val r3 = withCfg(100) { RiskResult(nodeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L), Nil) }
 
         val merged = LossDistribution.merge(r1, r2, r3)
 
@@ -134,7 +134,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     suite("RiskResult combine - laws")(
       test("identity law: combine(identity, a) == a") {
         withCfg(100) {
-          val a = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
+          val a = RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
           val identity = Identity[RiskResult].identity
 
           val combined = RiskResult.combine(identity, a)
@@ -145,7 +145,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       },
       test("identity law: combine(a, identity) == a") {
         withCfg(100) {
-          val a = RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
+          val a = RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
           val identity = Identity[RiskResult].identity
 
           val combined = RiskResult.combine(a, identity)
@@ -155,9 +155,9 @@ object LossDistributionSpec extends ZIOSpecDefault {
         }
       },
       test("associativity: combine(a, combine(b, c)) == combine(combine(a, b), c)") {
-        val a = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val b = withCfg(100) { RiskResult(safeId("risk-002"), Map(1 -> 2000L, 2 -> 500L), Nil) }
-        val c = withCfg(100) { RiskResult(safeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L), Nil) }
+        val a = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val b = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 2000L, 2 -> 500L), Nil) }
+        val c = withCfg(100) { RiskResult(nodeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L), Nil) }
 
         val left  = RiskResult.combine(a, RiskResult.combine(b, c))
         val right = RiskResult.combine(RiskResult.combine(a, b), c)
@@ -165,8 +165,8 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(left.outcomes == right.outcomes)
       },
       test("commutativity (bonus property): combine(a, b) == combine(b, a)") {
-        val a = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val b = withCfg(100) { RiskResult(safeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
+        val a = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
+        val b = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
 
         val ab = RiskResult.combine(a, b)
         val ba = RiskResult.combine(b, a)
@@ -174,8 +174,8 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(ab.outcomes == ba.outcomes)
       },
       test("rejects combining results with different trial counts") {
-        val a = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val b = withCfg(200) { RiskResult(safeId("risk-002"), Map(1 -> 2000L), Nil) }
+        val a = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val b = withCfg(200) { RiskResult(nodeId("risk-002"), Map(1 -> 2000L), Nil) }
 
         assertTrue(
           try {
@@ -189,7 +189,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("RiskResultGroup - aggregation")(
       test("empty group has no outcomes") {
-        val group = withCfg(1000) { RiskResultGroup(safeId("TOTAL")) }
+        val group = withCfg(1000) { RiskResultGroup(nodeId("TOTAL")) }
 
         assertTrue(group.children.isEmpty) &&
         assertTrue(group.outcomes.isEmpty) &&
@@ -197,19 +197,19 @@ object LossDistributionSpec extends ZIOSpecDefault {
       },
       test("single child group equals child") {
         val child = withCfg(100) {
-          RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
+          RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
         }
-        val group = withCfg(100) { RiskResultGroup(safeId("TOTAL"), child) }
+        val group = withCfg(100) { RiskResultGroup(nodeId("TOTAL"), child) }
 
         assertTrue(group.outcomes == child.outcomes) &&
         assertTrue(group.maxLoss == child.maxLoss) &&
         assertTrue(group.children == List(child))
       },
       test("multiple children are aggregated") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(safeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
 
-        val group = withCfg(100) { RiskResultGroup(safeId("TOTAL"), r1, r2) }
+        val group = withCfg(100) { RiskResultGroup(nodeId("TOTAL"), r1, r2) }
 
         // Aggregated outcomes: trial 1 = 1500, trial 2 = 2000, trial 3 = 3000
         assertTrue(group.outcomes == Map(1 -> 1500L, 2 -> 2000L, 3 -> 3000L)) &&
@@ -217,9 +217,9 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(group.children == List(r1, r2))
       },
       test("flatten returns hierarchy") {
-        val r1    = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2    = withCfg(100) { RiskResult(safeId("risk-002"), Map(2 -> 2000L), Nil) }
-        val group = withCfg(100) { RiskResultGroup(safeId("TOTAL"), r1, r2) }
+        val r1    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val r2    = withCfg(100) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
+        val group = withCfg(100) { RiskResultGroup(nodeId("TOTAL"), r1, r2) }
 
         val flattened = group.flatten
 
@@ -228,8 +228,8 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(flattened.tail.toSet == Set(r1, r2))
       },
       test("rejects children with mismatched trial counts") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2 = withCfg(200) { RiskResult(safeId("risk-002"), Map(2 -> 2000L), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val r2 = withCfg(200) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
 
         // With config-driven constructors, mixed nTrials are prevented at construction time.
         assertTrue(r1.nTrials != r2.nTrials)
@@ -237,7 +237,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("RiskResult - flatten")(
       test("single result flattens to itself") {
-        val result    = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val result    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
         val flattened = result.flatten
 
         assertTrue(flattened == Vector(result))
@@ -245,40 +245,40 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("RiskResult - equality")(
       test("equal results are equal") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
 
         assertTrue(Equal[RiskResult].equal(r1, r2))
       },
       test("different outcomes are not equal") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 2000L), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 2000L), Nil) }
 
         assertTrue(!Equal[RiskResult].equal(r1, r2))
       },
       test("different trial counts are not equal") {
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2 = withCfg(200) { RiskResult(safeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val r2 = withCfg(200) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
 
         assertTrue(!Equal[RiskResult].equal(r1, r2))
       }
     ),
     suite("edge cases")(
       test("handles large trial IDs") {
-        val result = withCfg(2000000) { RiskResult(safeId("risk-001"), Map(1000000 -> 1000L), Nil) }
+        val result = withCfg(2000000) { RiskResult(nodeId("risk-001"), Map(1000000 -> 1000L), Nil) }
 
         assertTrue(result.outcomeOf(1000000) == 1000L)
       },
       test("handles large loss values") {
         val largeLoss = Long.MaxValue / 2
-        val result    = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> largeLoss), Nil) }
+        val result    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> largeLoss), Nil) }
 
         assertTrue(result.maxLoss == largeLoss)
       },
       test("merge handles potential overflow scenario") {
         // Note: This doesn't prevent overflow, just documents the behavior
-        val r1 = withCfg(100) { RiskResult(safeId("risk-001"), Map(1 -> Long.MaxValue / 2), Nil) }
-        val r2 = withCfg(100) { RiskResult(safeId("risk-002"), Map(1 -> Long.MaxValue / 2), Nil) }
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> Long.MaxValue / 2), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> Long.MaxValue / 2), Nil) }
 
         val merged = LossDistribution.merge(r1, r2)
 

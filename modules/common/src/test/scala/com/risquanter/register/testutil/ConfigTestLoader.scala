@@ -17,7 +17,7 @@ import java.io.File
  *   import com.risquanter.register.testutil.ConfigTestLoader.withCfg
  *   
  *   val result = withCfg(100) {
- *     RiskResult(safeId("test"), outcomes, Nil)
+ *     RiskResult(nodeId("test"), outcomes, Nil)
  *   }
  * }}}
  * 

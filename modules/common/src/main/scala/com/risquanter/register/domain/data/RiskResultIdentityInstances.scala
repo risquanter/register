@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.{SafeId, NodeId}
 import zio.prelude.Identity
 
 /**
@@ -12,11 +12,11 @@ import zio.prelude.Identity
  */
 object RiskResultIdentityInstances {
   given identity(using cfg: SimulationConfig): Identity[RiskResult] with
-    private val emptyId: SafeId.SafeId = SafeId.fromString("00000000000000000000000000").getOrElse(
+    private val emptyNodeId: NodeId = NodeId(SafeId.fromString("00000000000000000000000000").getOrElse(
       throw new IllegalStateException("Invalid identity SafeId")
-    )
+    ))
 
-    def identity: RiskResult = RiskResult(emptyId, Map.empty, Nil)
+    def identity: RiskResult = RiskResult(emptyNodeId, Map.empty, Nil)
 
     def combine(a: => RiskResult, b: => RiskResult): RiskResult =
       RiskResult.combine(a, b)

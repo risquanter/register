@@ -103,6 +103,10 @@ trait TestHelpers {
   val genSafeId: Gen[Any, SafeId.SafeId] =
     Gen.alphaNumericStringBounded(1, 32).map(label => deterministicUlidFromLabel(label))
 
+  /** ZIO Test generator for valid NodeId values. Wraps genSafeId in NodeId. */
+  val genNodeId: Gen[Any, NodeId] =
+    genSafeId.map(NodeId(_))
+
   /**
     * Extract validated value or throw AssertionError with accumulated messages.
     * Intended for deterministic test fixture construction.

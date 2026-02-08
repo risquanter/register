@@ -34,7 +34,7 @@ import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionT
   * }}}
   */
 sealed trait RiskNode {
-  def id: SafeId.SafeId
+  def id: NodeId
   def name: String
   def parentId: Option[NodeId]
 }
@@ -93,7 +93,7 @@ final case class RiskLeaf private (
   )
   
   // Public API: Extract values from Iron types
-  override def id: SafeId.SafeId = safeId
+  override def id: NodeId = NodeId(safeId)
   override def name: String = safeName.value.toString
 }
 
@@ -347,9 +347,9 @@ object RiskLeaf {
   /** Encoder: Extract primitives from Iron types for wire format */
   given encoder: JsonEncoder[RiskLeaf] = JsonEncoder[RiskLeafRaw].contramap { leaf =>
     RiskLeafRaw(
-      id = leaf.id.value.toString,
+      id = leaf.id.value,
       name = leaf.name,
-      parentId = leaf.parentId.map(_.value.toString),
+      parentId = leaf.parentId.map(_.value),
       distributionType = leaf.distributionType.toString,
       probability = leaf.probability,
       percentiles = leaf.percentiles,
@@ -390,7 +390,7 @@ final case class RiskPortfolio private (
   require(childIds != null && childIds.nonEmpty, "RiskPortfolio invariant violated: childIds must be non-empty")
   
   // Public API: Extract values from Iron types
-  override def id: SafeId.SafeId = safeId
+  override def id: NodeId = NodeId(safeId)
   override def name: String = safeName.value.toString
 }
 
@@ -519,10 +519,10 @@ object RiskPortfolio {
   /** Encoder: Extract primitives from Iron types for wire format */
   given encoder: JsonEncoder[RiskPortfolio] = JsonEncoder[RiskPortfolioRaw].contramap { portfolio =>
     RiskPortfolioRaw(
-      id = portfolio.id.value.toString,
+      id = portfolio.id.value,
       name = portfolio.name,
-      parentId = portfolio.parentId.map(_.value.toString),
-      childIds = portfolio.childIds.map(_.value.toString)
+      parentId = portfolio.parentId.map(_.value),
+      childIds = portfolio.childIds.map(_.value)
     )
   }
   

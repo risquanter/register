@@ -66,7 +66,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     val basePath = s"risk-trees/${id.value}"
     for
       existing <- getTreeWithMeta(id)
-      _        <- ZIO.foreachDiscard(existing.tree.nodes)(node => removeNode(basePath, NodeId(node.id), deleteMessage(id, NodeId(node.id))))
+      _        <- ZIO.foreachDiscard(existing.tree.nodes)(node => removeNode(basePath, node.id, deleteMessage(id, node.id)))
       _        <- removeMeta(basePath, deleteMetaMessage(id))
     yield existing.tree
 
@@ -104,7 +104,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     val json = node match
       case leaf: RiskLeaf           => leaf.toJson
       case portfolio: RiskPortfolio => portfolio.toJson
-    handleIrmin(irmin.set(IrminPath.unsafeFrom(s"$basePath/nodes/${node.id.value}"), json, upsertNodeMessage(treeId, NodeId(node.id), txn))).unit
+    handleIrmin(irmin.set(IrminPath.unsafeFrom(s"$basePath/nodes/${node.id.value}"), json, upsertNodeMessage(treeId, node.id, txn))).unit
 
   private def removeNodes(basePath: String, nodeIds: Set[NodeId], txn: String, treeId: TreeId): Task[Unit] =
     ZIO.foreachDiscard(nodeIds)(id => removeNode(basePath, id, deleteNodeMessage(treeId, id, txn)))
@@ -202,8 +202,8 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     else ZIO.fail(RepositoryFailure(s"Root ${rootId.value} not found in provided nodes"))
 
   private def obsoleteNodeIds(previous: Seq[RiskNode], current: Seq[RiskNode]): Set[NodeId] =
-    val before = previous.map(n => NodeId(n.id)).toSet
-    val after  = current.map(n => NodeId(n.id)).toSet
+    val before = previous.map(_.id).toSet
+    val after  = current.map(_.id).toSet
     before.diff(after)
 
   private def txnId(): String = UUID.randomUUID().toString.take(8)

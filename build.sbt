@@ -185,5 +185,5 @@ lazy val root = (project in file("."))
   .settings(
     name := "register"
   )
-  .aggregate(server, serverIt, app)
+  .aggregate(common.jvm, server, serverIt, app)
   .dependsOn(server)

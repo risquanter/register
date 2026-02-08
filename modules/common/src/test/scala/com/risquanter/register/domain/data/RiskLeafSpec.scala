@@ -3,6 +3,7 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.RiskLeaf
+import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId}
 
 object RiskLeafSpec extends ZIOSpecDefault {
 
@@ -10,7 +11,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
     suite("Valid RiskLeaf Creation")(
       test("creates valid expert mode risk") {
         val result = RiskLeaf.create(
-          id = "cyber-attack",
+          id = idStr("cyber-attack"),
           name = "Cyber Attack",
           distributionType = "expert",
           probability = 0.25,
@@ -21,7 +22,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("creates valid lognormal mode risk") {
         val result = RiskLeaf.create(
-          id = "data-breach",
+          id = idStr("data-breach"),
           name = "Data Breach",
           distributionType = "lognormal",
           probability = 0.15,
@@ -30,9 +31,9 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(result.isSuccess)
       },
-      test("accepts minimum valid id length (3 chars)") {
+      test("accepts ULID-format id") {
         val result = RiskLeaf.create(
-          id = "abc",
+          id = idStr("abc"),
           name = "ABC Risk",
           distributionType = "lognormal",
           probability = 0.5,
@@ -41,9 +42,9 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(result.isSuccess)
       },
-      test("accepts maximum valid id length (30 chars)") {
+      test("accepts another ULID-format id") {
         val result = RiskLeaf.create(
-          id = "a" * 30,
+          id = idStr("long-id"),
           name = "Long ID Risk",
           distributionType = "lognormal",
           probability = 0.5,
@@ -52,9 +53,9 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(result.isSuccess)
       },
-      test("accepts id with hyphens and underscores") {
+      test("accepts id derived from label with hyphens and underscores") {
         val result = RiskLeaf.create(
-          id = "ops_risk-2024",
+          id = idStr("ops_risk-2024"),
           name = "Operations Risk",
           distributionType = "lognormal",
           probability = 0.3,
@@ -65,7 +66,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("accepts boundary probability values") {
         val result = RiskLeaf.create(
-          id = "low-prob",
+          id = idStr("low-prob"),
           name = "Low Probability",
           distributionType = "lognormal",
           probability = 0.01,
@@ -87,7 +88,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(result.isFailure)
       },
-      test("rejects id too short (< 3 chars)") {
+      test("rejects non-ULID id (too short)") {
         val result = RiskLeaf.create(
           id = "ab",
           name = "Valid Name",
@@ -98,7 +99,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(result.isFailure)
       },
-      test("rejects id too long (> 30 chars)") {
+      test("rejects non-ULID id (too long)") {
         val result = RiskLeaf.create(
           id = "a" * 31,
           name = "Valid Name",
@@ -109,7 +110,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(result.isFailure)
       },
-      test("rejects id with spaces") {
+      test("rejects non-ULID id (spaces)") {
         val result = RiskLeaf.create(
           id = "cyber attack",
           name = "Valid Name",
@@ -120,7 +121,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         )
         assertTrue(result.isFailure)
       },
-      test("rejects id with special characters") {
+      test("rejects non-ULID id (special characters)") {
         val result = RiskLeaf.create(
           id = "cyber@attack!",
           name = "Valid Name",
@@ -135,7 +136,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
     suite("Invalid Name Validation")(
       test("rejects empty name") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "",
           distributionType = "lognormal",
           probability = 0.5,
@@ -146,7 +147,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects blank name") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "   ",
           distributionType = "lognormal",
           probability = 0.5,
@@ -157,7 +158,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects name too long (> 50 chars)") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "a" * 51,
           distributionType = "lognormal",
           probability = 0.5,
@@ -170,7 +171,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
     suite("Invalid Probability Validation")(
       test("rejects probability = 0.0") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.0,
@@ -181,7 +182,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects probability = 1.0") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 1.0,
@@ -192,7 +193,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects negative probability") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = -0.1,
@@ -203,7 +204,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects probability > 1.0") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 1.5,
@@ -216,7 +217,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
     suite("Invalid Distribution Type Validation")(
       test("rejects invalid distribution type") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "normal",
           probability = 0.5,
@@ -227,7 +228,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects empty distribution type") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "",
           probability = 0.5,
@@ -240,7 +241,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
     suite("Expert Mode Validation")(
       test("rejects expert mode without percentiles") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "expert",
           probability = 0.5,
@@ -250,7 +251,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects expert mode without quantiles") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "expert",
           probability = 0.5,
@@ -260,7 +261,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects expert mode with empty percentiles") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "expert",
           probability = 0.5,
@@ -271,7 +272,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects expert mode with mismatched array lengths") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "expert",
           probability = 0.5,
@@ -284,7 +285,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
     suite("Lognormal Mode Validation")(
       test("rejects lognormal mode without minLoss") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.5,
@@ -294,7 +295,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects lognormal mode without maxLoss") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.5,
@@ -304,7 +305,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects negative minLoss") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.5,
@@ -315,7 +316,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects negative maxLoss") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.5,
@@ -326,7 +327,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects minLoss >= maxLoss (equal)") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.5,
@@ -337,7 +338,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("rejects minLoss > maxLoss") {
         val result = RiskLeaf.create(
-          id = "valid-id",
+          id = idStr("valid-id"),
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.5,
@@ -438,7 +439,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
     suite("Successful Construction Properties")(
       test("constructed RiskLeaf has correct id") {
         val result = RiskLeaf.create(
-          id = "test-risk",
+          id = idStr("test-risk"),
           name = "Test Risk",
           distributionType = "lognormal",
           probability = 0.5,
@@ -446,12 +447,12 @@ object RiskLeafSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L)
         )
         assertTrue(
-          result.map(_.id).toOption.contains("test-risk")
+          result.map(_.id).toOption.contains(nodeId("test-risk"))
         )
       },
       test("constructed RiskLeaf has correct name") {
         val result = RiskLeaf.create(
-          id = "test-risk",
+          id = idStr("test-risk"),
           name = "Test Risk Name",
           distributionType = "lognormal",
           probability = 0.5,
@@ -466,7 +467,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
         val percentiles = Array(0.05, 0.5, 0.95)
         val quantiles = Array(1000.0, 5000.0, 25000.0)
         val result = RiskLeaf.create(
-          id = "test-risk",
+          id = idStr("test-risk"),
           name = "Test Risk",
           distributionType = "expert",
           probability = 0.5,
@@ -497,7 +498,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("invalid name includes field path") {
         val result = RiskLeaf.create(
-          id = "test-id",
+          id = idStr("test-id"),
           name = "",  // Blank
           distributionType = "lognormal",
           probability = 0.5,
@@ -512,7 +513,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("invalid probability includes field path") {
         val result = RiskLeaf.create(
-          id = "test-id",
+          id = idStr("test-id"),
           name = "Test",
           distributionType = "lognormal",
           probability = 1.5,  // Out of range
@@ -527,7 +528,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("invalid distributionType includes field path") {
         val result = RiskLeaf.create(
-          id = "test-id",
+          id = idStr("test-id"),
           name = "Test",
           distributionType = "invalid",
           probability = 0.5,
@@ -542,7 +543,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("minLoss >= maxLoss includes field path") {
         val result = RiskLeaf.create(
-          id = "test-id",
+          id = idStr("test-id"),
           name = "Test",
           distributionType = "lognormal",
           probability = 0.5,
@@ -557,7 +558,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       },
       test("missing expert mode fields includes field path") {
         val result = RiskLeaf.create(
-          id = "test-id",
+          id = idStr("test-id"),
           name = "Test",
           distributionType = "expert",
           probability = 0.5

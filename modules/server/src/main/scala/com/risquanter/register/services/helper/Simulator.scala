@@ -132,7 +132,7 @@ object Simulator {
 
     val trialSets = samplers.map { sampler =>
       performTrials(sampler, nTrials, trialParallelism).map { trials =>
-        RiskResult(sampler.id, trials, Nil)
+        RiskResult(sampler.nodeId, trials, Nil)
       }
     }
 
@@ -158,7 +158,7 @@ object Simulator {
       // Use sync version for sequential simulation (no parallelism overhead)
       ZIO.attempt {
         val trials = performTrialsSync(sampler, nTrials)
-        RiskResult(sampler.id, trials, Nil)
+        RiskResult(sampler.nodeId, trials, Nil)
       }
     }
   }
@@ -191,7 +191,7 @@ object Simulator {
       // Entity ID derived from leaf ID ensures unique random streams per risk
       // Entity ID is a seed of the random number generator, so it must be consistent for the same leaf ID
       // TODO: review seed generation (hashcode) to ensure good distribution and avoid collisions 
-      entitySeed = leaf.id.value.toString.hashCode.toLong
+      entitySeed = leaf.id.value.hashCode.toLong
       sampler = RiskSampler.fromDistribution(
         entitySeed = entitySeed,
         riskSeed = leaf.id,

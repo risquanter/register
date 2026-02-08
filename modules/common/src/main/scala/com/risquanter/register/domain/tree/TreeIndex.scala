@@ -200,12 +200,10 @@ object TreeIndex {
   /**
     * Extract NodeId from a RiskNode.
     *
-    * Wraps the raw SafeId.SafeId in NodeId for type-safe indexing.
+    * RiskNode.id now returns NodeId directly (ADR-018).
     */
   private def extractSafeId(node: RiskNode): NodeId =
-    node match
-      case leaf: RiskLeaf         => NodeId(leaf.safeId)
-      case portfolio: RiskPortfolio => NodeId(portfolio.safeId)
+    node.id
 
   private def validateChildToParent(
       nodes: Map[NodeId, RiskNode],

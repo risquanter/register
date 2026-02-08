@@ -143,7 +143,7 @@ object RiskTree {
     name: SafeName.SafeName,
     root: RiskNode
   ): Validation[ValidationError, RiskTree] = {
-    fromNodes(id, name, Seq(root), NodeId(root.id))
+    fromNodes(id, name, Seq(root), root.id)
   }
   
   /** Unsafe version of singleNode for tests where validity is guaranteed.
@@ -155,6 +155,6 @@ object RiskTree {
     name: SafeName.SafeName,
     root: RiskNode
   ): RiskTree = {
-    fromNodesUnsafe(id, name, Seq(root), NodeId(root.id))
+    fromNodesUnsafe(id, name, Seq(root), root.id)
   }
 }

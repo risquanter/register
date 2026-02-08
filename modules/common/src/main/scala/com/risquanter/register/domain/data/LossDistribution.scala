@@ -4,7 +4,7 @@ import zio.prelude.{Associative, Commutative, Debug, Equal, Ord}
 import com.risquanter.register.configs.SimulationConfig
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.{SafeId, NodeId}
 
 /**
  * Risk type discriminator for loss distributions.
@@ -54,7 +54,7 @@ trait LECCurve {
  * - Uses SafeId.SafeId for node ID per ADR-001 (Iron types internally)
  */
 sealed abstract class LossDistribution(
-  val nodeId: SafeId.SafeId,
+  val nodeId: NodeId,
   val outcomes: Map[TrialId, Loss],
   override val nTrials: Int,
   val distributionType: LossDistributionType
@@ -79,7 +79,7 @@ sealed abstract class LossDistribution(
  * across multiple Monte Carlo trials.
  */
 case class RiskResult private (
-  override val nodeId: SafeId.SafeId,
+  override val nodeId: NodeId,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int,
   provenances: List[NodeProvenance] = Nil
@@ -103,7 +103,7 @@ case class RiskResult private (
   def withOutcomes(updatedOutcomes: Map[TrialId, Loss]): RiskResult =
     copy(outcomes = updatedOutcomes)
 
-  def withId(updatedNodeId: SafeId.SafeId): RiskResult =
+  def withNodeId(updatedNodeId: NodeId): RiskResult =
     copy(nodeId = updatedNodeId)
 
 
@@ -113,14 +113,14 @@ case class RiskResult private (
 object RiskResult {
   /** Config-driven constructor; uses SimulationConfig.defaultNTrials */
   def apply(
-    nodeId: SafeId.SafeId,
+    nodeId: NodeId,
     outcomes: Map[TrialId, Loss],
     provenances: List[NodeProvenance]
   )(using cfg: SimulationConfig): RiskResult =
     RiskResult(nodeId, outcomes, cfg.defaultNTrials, provenances)
 
   /** Empty result (no losses occurred); uses SimulationConfig.defaultNTrials */
-  def empty(nodeId: SafeId.SafeId)(using cfg: SimulationConfig): RiskResult =
+  def empty(nodeId: NodeId)(using cfg: SimulationConfig): RiskResult =
     RiskResult(nodeId, Map.empty, cfg.defaultNTrials, Nil)
 
   /**
@@ -166,7 +166,7 @@ object RiskResult {
  */
 case class RiskResultGroup private (
   children: List[RiskResult],
-  override val nodeId: SafeId.SafeId,
+  override val nodeId: NodeId,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int
 ) extends LossDistribution(nodeId, outcomes, nTrials, LossDistributionType.Composite) {
@@ -197,7 +197,7 @@ object RiskResultGroup {
    * @param results Individual risk loss distributions to aggregate
    */
   def apply(
-    nodeId: SafeId.SafeId,
+    nodeId: NodeId,
     results: RiskResult*
   )(using cfg: SimulationConfig): RiskResultGroup = {
     val nTrials = cfg.defaultNTrials
