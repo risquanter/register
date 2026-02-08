@@ -93,7 +93,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
   // Sample RiskResult data (simulation outcomes) - scoped with withCfg
   val cyberResult = withCfg(5) {
     RiskResult(
-      name = safeId("cyber"),
+      nodeId = safeId("cyber"),
       outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
       provenances = Nil
     )
@@ -101,7 +101,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
   
   val hardwareResult = withCfg(5) {
     RiskResult(
-      name = safeId("hardware"),
+      nodeId = safeId("hardware"),
       outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
       provenances = Nil
     )
@@ -109,7 +109,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
 
   val opsRiskResult = withCfg(5) {
     RiskResult(
-      name = safeId("ops-risk"),
+      nodeId = safeId("ops-risk"),
       outcomes = Map(1 -> 15000L, 2 -> 25000L, 3 -> 8000L, 4 -> 15000L, 5 -> 3000L),
       provenances = Nil
     )
@@ -117,7 +117,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
 
   val itRiskResult = withCfg(5) {
     RiskResult(
-      name = safeId("it-risk"),
+      nodeId = safeId("it-risk"),
       outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
       provenances = Nil
     )
@@ -144,7 +144,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
           result <- cache.get(cyberId)
         yield assertTrue(
           result.isDefined,
-          result.get.name == cyberId.toSafeId,
+          result.get.nodeId == cyberId.toSafeId,
           result.get.nTrials == 5,
           result.get.outcomes.size == 5
         )

@@ -13,7 +13,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
   // Test fixtures - simulation outcomes (scoped with withCfg)
   val cyberResult = withCfg(5) {
     RiskResult(
-      name = safeId("cyber"),
+      nodeId = safeId("cyber"),
       outcomes = Map(1 -> 10000L, 2 -> 25000L, 3 -> 0L, 4 -> 15000L, 5 -> 0L),
       provenances = Nil
     )
@@ -21,7 +21,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
   
   val hardwareResult = withCfg(5) {
     RiskResult(
-      name = safeId("hardware"),
+      nodeId = safeId("hardware"),
       outcomes = Map(1 -> 5000L, 2 -> 0L, 3 -> 8000L, 4 -> 0L, 5 -> 3000L),
       provenances = Nil
     )
@@ -29,7 +29,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
   
   val wideRangeResult = withCfg(3) {
     RiskResult(
-      name = safeId("wide"),
+      nodeId = safeId("wide"),
       outcomes = Map(1 -> 1000L, 2 -> 100000L, 3 -> 50000L),
       provenances = Nil
     )
@@ -37,7 +37,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
   
   val emptyResult = withCfg(5) {
     RiskResult(
-      name = safeId("empty"),
+      nodeId = safeId("empty"),
       outcomes = Map.empty,
       provenances = Nil
     )

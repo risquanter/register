@@ -51,10 +51,10 @@ trait LECCurve {
  * - Renamed from BCG's "Risk" to avoid confusion with Risk sampling trait
  * - Outer join merge semantics (union of trial IDs, sum losses)
  * - Identity/Monoid instance for compositional aggregation
- * - Uses SafeId.SafeId for name per ADR-001 (Iron types internally)
+ * - Uses SafeId.SafeId for node ID per ADR-001 (Iron types internally)
  */
 sealed abstract class LossDistribution(
-  val name: SafeId.SafeId,
+  val nodeId: SafeId.SafeId,
   val outcomes: Map[TrialId, Loss],
   override val nTrials: Int,
   val distributionType: LossDistributionType
@@ -79,11 +79,11 @@ sealed abstract class LossDistribution(
  * across multiple Monte Carlo trials.
  */
 case class RiskResult private (
-  override val name: SafeId.SafeId,
+  override val nodeId: SafeId.SafeId,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int,
   provenances: List[NodeProvenance] = Nil
-) extends LossDistribution(name, outcomes, nTrials, LossDistributionType.Leaf) {
+) extends LossDistribution(nodeId, outcomes, nTrials, LossDistributionType.Leaf) {
   
   override lazy val outcomeCount: TreeMap[Loss, Int] = 
     TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))(using Ord[Loss].toScala)
@@ -103,8 +103,8 @@ case class RiskResult private (
   def withOutcomes(updatedOutcomes: Map[TrialId, Loss]): RiskResult =
     copy(outcomes = updatedOutcomes)
 
-  def withId(updatedName: SafeId.SafeId): RiskResult =
-    copy(name = updatedName)
+  def withId(updatedNodeId: SafeId.SafeId): RiskResult =
+    copy(nodeId = updatedNodeId)
 
 
   override def flatten: Vector[LossDistribution] = Vector(this)
@@ -113,15 +113,15 @@ case class RiskResult private (
 object RiskResult {
   /** Config-driven constructor; uses SimulationConfig.defaultNTrials */
   def apply(
-    name: SafeId.SafeId,
+    nodeId: SafeId.SafeId,
     outcomes: Map[TrialId, Loss],
     provenances: List[NodeProvenance]
   )(using cfg: SimulationConfig): RiskResult =
-    RiskResult(name, outcomes, cfg.defaultNTrials, provenances)
+    RiskResult(nodeId, outcomes, cfg.defaultNTrials, provenances)
 
   /** Empty result (no losses occurred); uses SimulationConfig.defaultNTrials */
-  def empty(name: SafeId.SafeId)(using cfg: SimulationConfig): RiskResult =
-    RiskResult(name, Map.empty, cfg.defaultNTrials, Nil)
+  def empty(nodeId: SafeId.SafeId)(using cfg: SimulationConfig): RiskResult =
+    RiskResult(nodeId, Map.empty, cfg.defaultNTrials, Nil)
 
   /**
    * Total combine operation for RiskResult.
@@ -129,9 +129,9 @@ object RiskResult {
    */
   def combine(a: RiskResult, b: RiskResult): RiskResult = {
     require(a.nTrials == b.nTrials, s"Cannot merge results with different trial counts: ${a.nTrials} vs ${b.nTrials}")
-    val combinedName = a.name
+    val combinedNodeId = a.nodeId
     RiskResult(
-      combinedName,
+      combinedNodeId,
       LossDistribution.merge(a, b),
       a.nTrials,
       a.provenances ++ b.provenances
@@ -140,7 +140,7 @@ object RiskResult {
   
   /** Value equality for RiskResult */
   given Equal[RiskResult] = Equal.make { (a, b) =>
-    a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.name == b.name && a.provenances == b.provenances
+    a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.nodeId == b.nodeId && a.provenances == b.provenances
   }
 
   /** Associative combine for RiskResult (trial-aligned summation) */
@@ -153,7 +153,7 @@ object RiskResult {
   
   /** Human-readable representation */
   given Debug[RiskResult] = Debug.make { r =>
-    s"RiskResult(${r.name}, ${r.outcomes.size} outcomes, ${r.nTrials} trials, max=${r.maxLoss}, ${r.provenances.size} provenances)"
+    s"RiskResult(${r.nodeId}, ${r.outcomes.size} outcomes, ${r.nTrials} trials, max=${r.maxLoss}, ${r.provenances.size} provenances)"
   }
 }
 
@@ -166,10 +166,10 @@ object RiskResult {
  */
 case class RiskResultGroup private (
   children: List[RiskResult],
-  override val name: SafeId.SafeId,
+  override val nodeId: SafeId.SafeId,
   override val outcomes: Map[TrialId, Loss],
   override val nTrials: Int
-) extends LossDistribution(name, outcomes, nTrials, LossDistributionType.Composite) {
+) extends LossDistribution(nodeId, outcomes, nTrials, LossDistributionType.Composite) {
   
   override lazy val outcomeCount: TreeMap[Loss, Int] = 
     TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))(using Ord[Loss].toScala)
@@ -186,27 +186,27 @@ case class RiskResultGroup private (
   }
   
   override def flatten: Vector[LossDistribution] =
-    this +: children.toVector.sortBy(_.name.value.toString)
+    this +: children.toVector.sortBy(_.nodeId.value.toString)
 }
 
 object RiskResultGroup {
   /**
    * Create aggregated loss distribution from multiple risks.
    * 
-   * @param name Name for the aggregate distribution
+   * @param nodeId Node ID for the aggregate distribution
    * @param results Individual risk loss distributions to aggregate
    */
   def apply(
-    name: SafeId.SafeId,
+    nodeId: SafeId.SafeId,
     results: RiskResult*
   )(using cfg: SimulationConfig): RiskResultGroup = {
     val nTrials = cfg.defaultNTrials
     if results.isEmpty then
-      RiskResultGroup(List.empty, name, Map.empty, nTrials)
+      RiskResultGroup(List.empty, nodeId, Map.empty, nTrials)
     else
       RiskResultGroup(
         results.toList,
-        name,
+        nodeId,
         LossDistribution.merge(results*),
         nTrials
       )

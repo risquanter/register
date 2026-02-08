@@ -138,7 +138,7 @@ final case class RiskResultResolverLive(
                 message = s"RiskPortfolio '${portfolio.id}' has no children"
               )))
             childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b))
-              .withId(updatedName = portfolio.id)
+              .withId(updatedNodeId = portfolio.id)
           }
           _ <- cache.put(NodeId(portfolio.id), combined)
         yield combined

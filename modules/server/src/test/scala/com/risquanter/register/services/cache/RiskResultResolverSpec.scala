@@ -99,7 +99,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           result <- resolver.ensureCached(testTree, risk1Id)
           
           // Verify result is valid
-          _ <- ZIO.succeed(assertTrue(result.name.value == "risk1"))
+          _ <- ZIO.succeed(assertTrue(result.nodeId.value == "risk1"))
           
           // Verify result is now cached
           cachedResult <- cache.get(risk1Id)
@@ -141,7 +141,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           
         } yield assertTrue(
           // Verify root aggregates child risks
-          rootResult.name == rootId.toSafeId,
+          rootResult.nodeId == rootId.toSafeId,
           // Root should have outcomes (aggregated from children)
           rootResult.outcomes.size >= 0
         )

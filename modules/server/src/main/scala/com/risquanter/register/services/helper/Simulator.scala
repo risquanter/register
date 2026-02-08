@@ -190,7 +190,7 @@ object Simulator {
       // Build sampler (using entityId = hash of leaf.id for determinism)
       // Entity ID derived from leaf ID ensures unique random streams per risk
       // Entity ID is a seed of the random number generator, so it must be consistent for the same leaf ID
-      //  
+      // TODO: review seed generation (hashcode) to ensure good distribution and avoid collisions 
       entitySeed = leaf.id.value.toString.hashCode.toLong
       sampler = RiskSampler.fromDistribution(
         entitySeed = entitySeed,

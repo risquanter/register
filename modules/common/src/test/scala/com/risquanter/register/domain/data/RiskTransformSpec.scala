@@ -109,7 +109,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
           assertTrue(
             transformed.outcomes == result.outcomes,
             transformed.nTrials == result.nTrials,
-            transformed.name == result.name
+            transformed.nodeId == result.nodeId
           )
         }
       }
