@@ -3,7 +3,6 @@ package com.risquanter.register.domain.data
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder, JsonFieldEncoder, JsonFieldDecoder}
 import java.time.Instant
 import com.risquanter.register.domain.data.iron.{SafeId, TreeId}
-import com.risquanter.register.domain.data.TreeIdCodecs.given
 
 /**
  * Per-node provenance metadata for reproducible Monte Carlo simulations.

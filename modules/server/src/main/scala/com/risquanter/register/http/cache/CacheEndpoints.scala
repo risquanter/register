@@ -8,7 +8,6 @@ import zio.json.*
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.domain.data.iron.TreeId
-import com.risquanter.register.domain.data.TreeIdCodecs.given
 
 /**
   * Cache management endpoint definitions.

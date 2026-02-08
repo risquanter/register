@@ -3,7 +3,6 @@ package com.risquanter.register.http.responses
 import zio.json.{JsonCodec, DeriveJsonCodec}
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.TreeId
-import com.risquanter.register.domain.data.TreeIdCodecs.given
 
 /** Response DTO for simulation data with Loss Exceedance Curve
   * 

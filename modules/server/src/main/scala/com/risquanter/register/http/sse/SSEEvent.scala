@@ -2,7 +2,6 @@ package com.risquanter.register.http.sse
 
 import zio.json.*
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
-import com.risquanter.register.domain.data.TreeIdCodecs.given
 
 /**
   * Server-Sent Events for real-time updates to browser clients.
