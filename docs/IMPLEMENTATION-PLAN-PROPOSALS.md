@@ -322,15 +322,10 @@ This phase implements **queries and mutations** using sttp HTTP client.
 > GraphQL subscriptions require WebSocket transport (graphql-ws protocol).
 > STTP HTTP client handles request-response but not persistent WebSocket subscriptions.
 > 
-> **Subscriptions will be implemented in Phase 4/5** when building the cache invalidation
-> pipeline, potentially using:
-> - Caliban client (built-in ZIO subscription support)
-> - Raw WebSocket with sttp-ws
-> - SSE polling as fallback
->
-> Affected features (deferred to Phase 4/5):
-> - `watchChanges(path)` - listen to tree modifications
-> - Cache invalidation triggers from Irmin events
+> **Subscriptions are deferred to Phase 5, Task 0** (`IrminClient.watch`) where the
+> WebSocket client dependency decision is made in context of the full cache invalidation
+> pipeline. Transport options: Caliban client, sttp-ws, or HTTP polling fallback.
+> See Phase 5 Task 0 for detailed rationale and decision criteria.
 
 ### Completed Tasks ✅
 
@@ -635,11 +630,32 @@ Connect Irmin watch notifications to cache invalidation and SSE broadcast.
 
 ### Tasks
 
+0. **Add `IrminClient.watch` — GraphQL subscription for tree changes** 🔒
+   ```
+   infra/irmin/IrminClient.scala (trait + companion accessor)
+   infra/irmin/IrminClientLive.scala (implementation)
+   infra/irmin/IrminQueries.scala (subscription query string)
+   infra/irmin/model/IrminResponses.scala (WatchResponse / Diff types)
+   ```
+   - Extends `IrminClient` trait with: `def watch(path: Option[IrminPath]): ZStream[Any, IrminError, IrminCommit]`
+   - Irmin schema: `subscription { watch(path: Path, branch: BranchName): Diff! }` where `Diff { commit: Commit! }`
+   - **Requires WebSocket client dependency** — transport decision made here:
+     - Option A: Caliban client (built-in ZIO subscription + graphql-ws protocol)
+     - Option B: sttp-ws (raw WebSocket, manual graphql-ws framing)
+     - Option C: HTTP polling fallback (simplest, no new dep, higher latency)
+   - Decision criteria: Does Phase 8 (WebSocket Enhancement / ADR-004b) also need the same dep?
+     If yes → choose a dep that serves both. If Phase 8 is distant → polling fallback is fine.
+   - **Why not implemented earlier:** No consumer exists until `TreeUpdatePipeline` (Task 3);
+     implementing in isolation would create dead code and force a premature transport decision.
+   - Add `WatchResponse` / `DiffData` response types to `IrminResponses.scala`
+   - Add `watchSubscription(path)` query string to `IrminQueries.scala`
+   - Integration test requires live Irmin with persistent WebSocket connection
+
 1. **Create invalidation handler**
    ```
    service/pipeline/InvalidationHandler.scala
    ```
-   - Receives Irmin watch events
+   - Receives Irmin watch events (from Task 0 `ZStream`)
    - Calls `TreeCacheManager.onTreeStructureChanged(treeId)` (invalidates cached results)
    - Triggers recomputation for affected path
 
@@ -656,7 +672,7 @@ Connect Irmin watch notifications to cache invalidation and SSE broadcast.
    ```
    service/pipeline/TreeUpdatePipeline.scala
    ```
-   - Subscribes to `IrminClient.watchChanges`
+   - Subscribes to `IrminClient.watch` (Task 0)
    - Routes events to InvalidationHandler
    - Manages pipeline lifecycle
 

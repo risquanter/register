@@ -11,8 +11,8 @@ import com.risquanter.register.domain.errors.IrminError
   * All operations return typed IrminError on the error channel (ADR-010).
   * Repository/service boundaries map IrminError to existing domain errors.
   *
-  * Note: Subscriptions (watch) are not implemented in this phase.
-  * They will be added in Phase 4/5 when building the cache invalidation pipeline.
+  * Note: Subscriptions (watch) are deferred to Phase 5, Task 0 (IMPLEMENTATION-PLAN-PROPOSALS.md).
+  * Requires WebSocket client dep decision; implemented with TreeUpdatePipeline as consumer.
   */
 trait IrminClient:
 

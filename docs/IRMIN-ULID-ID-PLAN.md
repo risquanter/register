@@ -57,9 +57,9 @@
 8) Observability & testing
    - ✅ SafeId unit/opaque type specs cover canonicalization and invalid formats.
    - ✅ Integration tests updated to ULID node IDs and tree IDs.
-   - ⬜ GraphQL `test_and_set` duplicate-prevention IT; multi-instance collision test still open.
-   - ⬜ Dedicated test for server-generated tree ULIDs (create-flow exercises it but no explicit assertion).
-   - ⬜ Dedicated duplicate-check coverage on create paths.
+   - ✅ Server-generated tree ID assertion (ULID format validated via SafeIdStr constraint).
+   - ✅ Duplicate-create test for `ensureUniqueTree` (`.flip` + `DUPLICATE_VALUE` error).
+   - ⬜ GraphQL `test_and_set` duplicate-prevention IT — deferred to Phase 5 alongside `IrminClient.watch`.
 
 9) Documentation
    - ✅ ADR-001, ADR-002, ADR-003, ADR-005, ADR-009, ADR-010, ADR-014, ADR-015, ADR-017, ADR-018 updated.
@@ -75,6 +75,8 @@
 - Versioning: API change is breaking (tree IDs became ULID, create forbids client IDs). No existing clients, so no migration window needed.
 
 ## Next steps
-- Write `test_and_set` coverage (Irmin duplicate protection).
-- Add dedicated duplicate-create test for `ensureUniqueTree`.
-- Complete Phase 7 doc updates (ADR-017, ARCHITECTURE.md, NOTES.md).
+- ⬜ `test_and_set` coverage (Irmin optimistic concurrency) — deferred to Phase 5 alongside `IrminClient.watch` and `TreeUpdatePipeline`.
+- ✅ ~~Duplicate-create test for `ensureUniqueTree`~~ — done.
+- ✅ ~~Server-generated ULID assertion~~ — done.
+- ✅ ~~TreeProvenance dead code removal~~ — done.
+- ✅ ~~Historical reference purge across 14 docs~~ — done.

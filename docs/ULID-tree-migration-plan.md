@@ -43,13 +43,13 @@
 - ✅ `TreeCacheManager.cacheFor(treeId: TreeId)` — internal maps are `Map[TreeId, ...]`.
 - ✅ `SSEEvent` variants carry `treeId: TreeId`.
 
-### 6. Tests & Fixtures ⚠️ Partially Done
+### 6. Tests & Fixtures ✅
 
 - ✅ All tests use `TestHelpers.treeId("label")` which wraps deterministic ULID.
 - ✅ Controller spec create-flow exercises server-generated `TreeId`.
-- ⬜ No **dedicated** test asserting created trees receive a ULID.
-- ⬜ No duplicate-create coverage test (production code `ensureUniqueTree` exists but untested).
-- ⬜ No `test_and_set` test coverage.
+- ✅ Dedicated ULID-format assertion on server-generated tree IDs (SafeIdStr constraint check).
+- ✅ Duplicate-create coverage test for `ensureUniqueTree` (`.flip` + `ValidationFailed` / `DUPLICATE_VALUE`).
+- ⬜ No `test_and_set` test coverage (Irmin optimistic concurrency — deferred to Phase 5).
 
 ### 7. Docs & Testing Guides ✅
 
@@ -67,6 +67,4 @@
 - Follow WORKING-INSTRUCTIONS: seek approval before schema/API changes are applied; tests must pass to mark a phase complete.
 
 ## Outstanding Items
-1. **`test_and_set` coverage** — Irmin schema defines it; no code or tests exercise it yet.
-2. **Dedicated server-generated ID test** — create-flow works but lacks explicit assertion.
-3. **Duplicate-create test** — `ensureUniqueTree` production code exists; needs test coverage.
+1. **`test_and_set` coverage** — Irmin schema defines it; no code or tests exercise it yet. Deferred to Phase 5 (IMPLEMENTATION-PLAN-PROPOSALS.md) alongside `IrminClient.watch` and `TreeUpdatePipeline`.
