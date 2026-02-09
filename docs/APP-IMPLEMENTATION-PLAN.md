@@ -13,9 +13,11 @@ No frontend consumes them yet
 Useful for testing and future integration
 
 ## REMARK II 
-revalidation of the whole document is needed and critical update based on [the state of the proposal](IMPLEMENTATION-PLAN-PROPOSALS.md)
+~~revalidation of the whole document is needed and critical update based on [the state of the proposal](IMPLEMENTATION-PLAN-PROPOSALS.md)~~
 
-**Architecture Context:** This plan implements the browser layer of the architecture described in ADR-004a/b. The frontend receives real-time LEC updates via SSE (Phase 1) or WebSocket (Phase 2), with the ZIO backend performing all simulation and aggregation (ADR-009).
+✅ **Revalidated 2026-02-09.** Updated to reflect: ULID-based `TreeId`/`NodeId`, server-generated IDs (no user-supplied IDs), `RiskResultCache` + `TreeCacheManager` (replaces conceptual `LECCache`), `LECCurveResponse` (replaces `LECCurveData`), `RiskResultResolver` (replaces `SimulationExecutionService`), `RiskTreeResult` removed. Phase 8 split into 8a/8b to separate available SSE events from pipeline-dependent features.
+
+**Architecture Context:** This plan implements the browser layer of the architecture described in ADR-004a/b. The frontend receives real-time cache-invalidation notifications via SSE, with the ZIO backend performing all simulation and aggregation (ADR-009). Future phases add eager LEC push via `LECUpdated` events (requires Irmin watch pipeline) and optional WebSocket for collaboration.
 
 ## Goals
 
@@ -54,14 +56,16 @@ revalidation of the whole document is needed and critical update based on [the s
 │  ┌─────────────────────────────────────────────────────────┐   │
 │  │                   ZIO Backend                            │   │
 │  │  • Computes LEC via Identity[RiskResult].combine         │   │
-│  │  • Caches per-node LECCurveData (ADR-005)               │   │
-│  │  • Pushes updates on tree changes                        │   │
+│  │  • Caches per-node RiskResult (ADR-005/014)             │   │
+│  │  • RiskResultResolver: cache-aside simulation           │   │
+│  │  • TreeCacheManager: per-tree cache lifecycle            │   │
+│  │  • SSEHub: publishes CacheInvalidated events            │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Key insight from ADR-009:** The browser only displays precomputed `LECCurveData`. All aggregation happens server-side using `Identity[RiskResult].combine`. The frontend treats leaf and aggregate LEC data uniformly.
+**Key insight from ADR-009:** The browser only displays precomputed `LECCurveResponse`. All aggregation happens server-side using `Identity[RiskResult].combine`. The frontend treats leaf and aggregate LEC data uniformly. IDs are ULID-based (`TreeId`, `NodeId`) — the server generates all IDs; the frontend never supplies them.
 
 ---
 
@@ -114,8 +118,10 @@ revalidation of the whole document is needed and critical update based on [the s
    - Open http://localhost:5173
 
 ### Approval Checkpoint
-- [ ] Dev server starts and shows "Hello from Laminar"
-- [ ] Hot reload works on Scala changes
+- [x] Dev server starts and shows "Hello from Laminar"
+- [x] Hot reload works on Scala changes
+
+**Status:** ✅ Complete — app module is active in `build.sbt`, aggregated into root, 8 source files exist under `modules/app/src/`.
 
 ---
 
@@ -194,8 +200,7 @@ revalidation of the whole document is needed and critical update based on [the s
      // Mode selection
      val distributionModeVar: Var[DistributionMode] = Var(DistributionMode.Expert)
      
-     // Common fields
-     val idVar: Var[String] = Var("")
+     // Common fields (no ID field — server generates ULID IDs)
      val nameVar: Var[String] = Var("")
      val probabilityVar: Var[String] = Var("")
      
@@ -208,8 +213,8 @@ revalidation of the whole document is needed and critical update based on [the s
      val maxLossVar: Var[String] = Var("")
      
      // Validation signals
-     val idError: Signal[Option[String]] = idVar.signal.map: v =>
-       if v.isBlank then Some("ID is required") else None
+     val nameError: Signal[Option[String]] = nameVar.signal.map: v =>
+       if v.isBlank then Some("Name is required") else None
      
      val probabilityError: Signal[Option[String]] = probabilityVar.signal.map: v =>
        parseDouble(v) match
@@ -244,7 +249,7 @@ revalidation of the whole document is needed and critical update based on [the s
      
      // Overall validity
      val hasErrors: Signal[Boolean] = 
-       Signal.combineAll(idError, probabilityError, expertError, lognormalError)
+       Signal.combineAll(nameError, probabilityError, expertError, lognormalError)
          .map(_.exists(_.isDefined))
      
      private def parseDouble(s: String): Option[Double] =
@@ -360,9 +365,8 @@ revalidation of the whole document is needed and critical update based on [the s
        
        h2("Create Risk Leaf"),
        
-       // Common fields
-       textInput("ID", state.idVar, state.idError),
-       textInput("Name", state.nameVar, Signal.fromValue(None)),
+       // Common fields (no ID — server generates ULID)
+       textInput("Name", state.nameVar, state.nameError),
        textInput("Probability", state.probabilityVar, state.probabilityError, "0.0 - 1.0"),
        
        // Mode toggle
@@ -418,40 +422,49 @@ revalidation of the whole document is needed and critical update based on [the s
    
    import sttp.client4.*
    import sttp.client4.fetch.FetchBackend
-   import common.model.RiskNode
    import scala.concurrent.Future
    import scala.scalajs.concurrent.JSExecutionContext.Implicits.queue
    
    object RiskTreeClient:
      private val backend = FetchBackend()
      
-     def createRiskLeaf(riskLeaf: RiskNode.RiskLeaf): Future[Either[String, Unit]] =
-       val request = basicRequest
-         .post(uri"http://localhost:8080/api/risk-tree")
+     // Create a tree — server generates TreeId and all NodeIds (ULIDs)
+     def createRiskTree(request: RiskTreeDefinitionRequest): Future[Either[String, RiskTree]] =
+       val req = basicRequest
+         .post(uri"http://localhost:8080/risk-trees")
          .contentType("application/json")
-         .body(/* JSON encode riskLeaf */)
+         .body(request.toJson)
        
-       request.send(backend).map: response =>
+       req.send(backend).map: response =>
+         response.body.left.map(identity)
+     
+     // Fetch LEC curve for a specific node
+     def getLECCurve(treeId: String, nodeId: String): Future[Either[String, LECCurveResponse]] =
+       val req = basicRequest
+         .get(uri"http://localhost:8080/risk-trees/$treeId/nodes/$nodeId/lec")
+       
+       req.send(backend).map: response =>
          response.body.left.map(identity)
    ```
 
 2. **Add submit handling**:
    ```scala
    val submitObserver = Observer[Unit]: _ =>
-     state.toRiskLeaf match
+     state.toRequest match
        case Left(errors) => 
          println(s"Validation errors: $errors")
-       case Right(riskLeaf) =>
-         RiskTreeClient.createRiskLeaf(riskLeaf).foreach:
-           case Right(_) => println("Success!")
+       case Right(request) =>
+         // Server generates TreeId and NodeIds
+         RiskTreeClient.createRiskTree(request).foreach:
+           case Right(tree) => println(s"Created tree: ${tree.id}")
            case Left(err) => println(s"Error: $err")
    ```
 
-3. **Add RiskLeaf conversion to FormState**:
+3. **Add request conversion to FormState**:
    ```scala
-   def toRiskLeaf: Either[List[String], RiskNode.RiskLeaf] =
-     // Use ZIO Prelude Validation or manual validation
-     // to construct RiskLeaf from form values
+   def toRequest: Either[List[String], RiskTreeDefinitionRequest] =
+     // Build a RiskTreeDefinitionRequest from form values
+     // No ID fields — server generates all IDs (TreeId, NodeId) as ULIDs
    ```
 
 ### Approval Checkpoint
@@ -499,15 +512,15 @@ Based on research, Laminar testing typically uses one of these approaches:
    
    class RiskLeafFormStateSpec extends FunSuite:
      
-     test("idError should be Some when id is blank"):
+     test("nameError should be Some when name is blank"):
        val state = new RiskLeafFormState
        var capturedError: Option[String] = null
        
        // Capture signal value
-       val subscription = state.idError.foreach(capturedError = _)(???)
+       val subscription = state.nameError.foreach(capturedError = _)(???)
        
-       state.idVar.set("")
-       assertEquals(capturedError, Some("ID is required"))
+       state.nameVar.set("")
+       assertEquals(capturedError, Some("Name is required"))
      
      test("expertError requires percentiles in expert mode"):
        val state = new RiskLeafFormState
@@ -535,13 +548,14 @@ Based on research, Laminar testing typically uses one of these approaches:
 
 ---
 
-## Phase 8: Real-Time LEC Updates (SSE)
+## Phase 8a: Real-Time Cache Invalidation (SSE — Available Now)
 
 > **Reference:** ADR-004a-proposal (SSE variant)
+> **Dependency:** None — backend already publishes `CacheInvalidated` events via `SSEHub`
 
 ### Context
 
-After form submission, the backend computes LEC curves and pushes updates via Server-Sent Events. The browser maintains a local cache of `LECCurveData` per node.
+The backend `InvalidationHandler` already publishes `SSEEvent.CacheInvalidated` events when tree cache is cleared (e.g., after a node update). The frontend can subscribe to these events NOW to know when displayed LEC data is stale and should be re-fetched.
 
 ### Tasks
 
@@ -552,56 +566,95 @@ After form submission, the backend computes LEC curves and pushes updates via Se
    import org.scalajs.dom.{EventSource, MessageEvent}
    import com.raquo.laminar.api.L.*
    
-   object LECEventStream:
-     def connect(treeId: String): EventStream[LECEvent] =
-       EventStream.fromCustomSource[LECEvent](
+   object SSEClient:
+     def connect(treeId: String): EventStream[SSEEvent] =
+       EventStream.fromCustomSource[SSEEvent](
          start = (fireEvent, _, _, _) =>
-           val source = new EventSource(s"/api/events/tree/$treeId")
+           val source = new EventSource(s"/risk-trees/$treeId/events")
            source.onmessage = (e: MessageEvent) =>
-             decode[LECEvent](e.data.toString).foreach(fireEvent)
+             decode[SSEEvent](e.data.toString).foreach(fireEvent)
            source,
          stop = source => source.close()
        )
    
-   enum LECEvent:
-     case LECUpdated(nodeId: String, curve: LECCurveData)
-     case NodeChanged(nodeId: String)
-     case Error(message: String)
+   enum SSEEvent:
+     case CacheInvalidated(treeId: String, nodesCleared: Int)
+     case TreeUpdated(treeId: String)
    ```
 
-2. **Create frontend LEC cache**:
+2. **Create frontend LEC state** (re-fetch on invalidation):
    ```scala
    package app.state
    
-   class LECCacheState:
-     private val cache: Var[Map[String, LECCurveData]] = Var(Map.empty)
+   class LECState:
+     private val cache: Var[Map[String, LECCurveResponse]] = Var(Map.empty)
+     val staleNodes: Var[Set[String]] = Var(Set.empty)  // nodes needing re-fetch
      
-     def lecFor(nodeId: String): Signal[Option[LECCurveData]] =
+     def lecFor(nodeId: String): Signal[Option[LECCurveResponse]] =
        cache.signal.map(_.get(nodeId))
      
-     def update(nodeId: String, lec: LECCurveData): Unit =
+     def update(nodeId: String, lec: LECCurveResponse): Unit =
        cache.update(_ + (nodeId -> lec))
+       staleNodes.update(_ - nodeId)
      
-     def invalidate(nodeId: String): Unit =
-       cache.update(_ - nodeId)
+     def markAllStale(treeId: String): Unit =
+       // On CacheInvalidated: mark all cached nodes as stale
+       staleNodes.set(cache.now().keySet)
    ```
 
-3. **Wire SSE to cache**:
+3. **Wire SSE to state**:
    ```scala
-   val sseObserver = Observer[LECEvent]:
-     case LECEvent.LECUpdated(nodeId, curve) =>
-       lecCache.update(nodeId, curve)
-       // Optionally update Vega chart
-     case LECEvent.NodeChanged(nodeId) =>
-       lecCache.invalidate(nodeId)
-       // Chart shows loading state until LECUpdated arrives
-     case LECEvent.Error(msg) =>
-       showError(msg)  // See ADR-008 error handling
+   val sseObserver = Observer[SSEEvent]:
+     case SSEEvent.CacheInvalidated(treeId, _) =>
+       lecState.markAllStale(treeId)
+       // Re-fetch LEC for currently visible nodes
+       visibleNodeIds.foreach: nodeId =>
+         RiskTreeClient.getLECCurve(treeId, nodeId).foreach:
+           case Right(lec) => lecState.update(nodeId, lec)
+           case Left(err) => showError(err)
+     case SSEEvent.TreeUpdated(treeId) =>
+       // Refresh tree structure from backend
    ```
 
-4. **Create LEC visualization component** (Vega-Lite):
+### Approval Checkpoint
+- [ ] SSE connection established on page load
+- [ ] `CacheInvalidated` events trigger LEC re-fetch for visible nodes
+- [ ] Stale indicators shown while re-fetching
+
+---
+
+## Phase 8b: Eager LEC Push (SSE — Requires Irmin Pipeline) 🔒
+
+> **Reference:** ADR-004a-proposal, ADR-005-proposal
+> **Blocked on:** `IrminClient.watch` (GraphQL subscription) + `TreeUpdatePipeline` + `LECRecomputer`
+
+### Context
+
+This phase upgrades from "re-fetch on invalidation" (8a) to "server pushes fresh LEC data automatically." It requires three backend components that don't exist yet:
+1. `IrminClient.watch` — Irmin GraphQL subscription for tree changes
+2. `TreeUpdatePipeline` — orchestrates watch → invalidation → recomputation
+3. `LECRecomputer` — re-simulates affected nodes and publishes `LECUpdated` via SSEHub
+
+`SSEEvent.LECUpdated` is already **defined** with codecs and tests, but **nothing in production publishes it** yet.
+
+### Tasks (when unblocked)
+
+1. **Extend SSE event handling** for `LECUpdated`:
    ```scala
-   def lecChart(lecSignal: Signal[Option[LECCurveData]]): HtmlElement =
+   // Add to SSEEvent enum
+   case LECUpdated(nodeId: String, treeId: String, quantiles: Map[String, Double])
+   
+   // Add to observer
+   case SSEEvent.LECUpdated(nodeId, treeId, quantiles) =>
+     // Fetch fresh LECCurveResponse for this node
+     RiskTreeClient.getLECCurve(treeId, nodeId).foreach:
+       case Right(lec) => lecState.update(nodeId, lec)
+       case Left(err) => showError(err)
+   ```
+
+2. **Create LEC visualization component** (Vega-Lite):
+   ```scala
+   def lecChart(lecSignal: Signal[Option[LECCurveResponse]]): HtmlElement =
      div(
        cls := "lec-chart",
        child <-- lecSignal.map:
@@ -614,9 +667,8 @@ After form submission, the backend computes LEC curves and pushes updates via Se
    ```
 
 ### Approval Checkpoint
-- [ ] SSE connection established on page load
-- [ ] LEC updates reflected in chart
-- [ ] Graceful handling of connection drops (auto-reconnect)
+- [ ] `LECUpdated` events auto-update chart without manual re-fetch
+- [ ] Graceful degradation: falls back to 8a behavior if pipeline not running
 
 ---
 
@@ -679,7 +731,7 @@ After form submission, the backend computes LEC curves and pushes updates via Se
      val maxRetries = 10
      
      def connect(): Unit =
-       val source = new EventSource(s"/api/events/tree/$treeId")
+       val source = new EventSource(s"/risk-trees/$treeId/events")
        source.onerror = _ =>
          source.close()
          if retryCount < maxRetries then
@@ -764,19 +816,20 @@ Replace SSE with WebSocket for bidirectional communication when collaborative ed
 
 ## Summary of Checkpoints
 
-| Phase | Description | Key Deliverable |
-|-------|-------------|-----------------|
-| 1 | Build Pipeline | `sbt ~fastLinkJS` + Vite works |
-| 2 | App Shell | Hello world renders |
-| 3 | Form State | Validation signals work |
-| 4 | Input Components | Fields render with validation |
-| 5 | Form Assembly | Complete form with toggle |
-| 6 | Backend Integration | Submit works end-to-end |
-| 7 | Testing | Meaningful test coverage |
-| 8 | Real-Time LEC | SSE stream → chart updates |
-| 9 | Error Handling | ADR-008 patterns implemented |
-| 10 | Scenario Branching | What-if analysis UI (future) |
-| 11 | WebSocket | Collaborative features (future) |
+| Phase | Description | Key Deliverable | Status |
+|-------|-------------|-----------------|--------|
+| 1 | Build Pipeline | `sbt ~fastLinkJS` + Vite works | ✅ Done |
+| 2 | App Shell | Hello world renders | Needs validation |
+| 3 | Form State | Validation signals work | Needs validation |
+| 4 | Input Components | Fields render with validation | Needs validation |
+| 5 | Form Assembly | Complete form with toggle | Needs validation |
+| 6 | Backend Integration | Submit works end-to-end | Not started |
+| 7 | Testing | Meaningful test coverage | Not started |
+| 8a | Cache Invalidation SSE | `CacheInvalidated` → re-fetch | Not started |
+| 8b | Eager LEC Push SSE | `LECUpdated` → auto-update | 🔒 Blocked (Irmin pipeline) |
+| 9 | Error Handling | ADR-008 patterns implemented | Not started |
+| 10 | Scenario Branching | What-if analysis UI | Future |
+| 11 | WebSocket | Collaborative features | Future |
 
 ---
 
@@ -816,18 +869,26 @@ libraryDependencies ++= Seq(
 
 | ADR | Relevance to Frontend |
 |-----|----------------------|
-| ADR-004a-proposal | SSE for real-time LEC updates (Phase 8) |
+| ADR-004a-proposal | SSE for real-time updates (Phase 8a: `CacheInvalidated`, Phase 8b: `LECUpdated`) |
 | ADR-004b-proposal | WebSocket for collaboration (Phase 11) |
-| ADR-005-proposal | Backend caches LECCurveData; frontend just displays |
+| ADR-005-proposal | Backend caches `RiskResult`; `LECCurveResponse` rendered on demand; frontend just displays |
 | ADR-006-proposal | Event types for real-time updates |
 | ADR-007-proposal | Scenario UI patterns (Phase 10) |
 | ADR-008-proposal | Error handling patterns (Phase 9) |
 | ADR-009 | Frontend treats leaf/aggregate LEC uniformly |
+| ADR-014 | RiskResult caching strategy (`RiskResultCache`, `TreeCacheManager`) |
+| ADR-015 | `RiskResultResolver` cache-aside pattern; `RiskTreeResult` removed |
+| ADR-018 | Nominal `NodeId`/`TreeId` wrappers |
 
 ---
 
 ## Next Steps
 
-**Ready to proceed with Phase 1?** 
+**Phase 1 is complete.** The app module compiles and is aggregated into the root build.
 
-I'll set up the build pipeline and create the basic Vite structure. Let me know when you'd like to start, and we'll work through each checkpoint together.
+**Immediate next actions:**
+1. Validate Phases 2–5 — source files exist under `modules/app/src/`, but need verification that they compile and render correctly.
+2. Phase 6 (Backend Integration) — update API client to use current endpoint signatures (`/risk-trees`, `TreeId` paths, `LECCurveResponse`).
+3. Phase 7 (Testing) — confirm `sbt app/test` runs; add app test count to CI.
+4. Phase 8a (SSE) — can proceed immediately; backend already publishes `CacheInvalidated` events.
+5. Phase 8b (Eager LEC Push) — blocked on Irmin watch pipeline (see IMPLEMENTATION-PLAN-PROPOSALS.md Phase 5).
