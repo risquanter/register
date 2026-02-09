@@ -1,6 +1,6 @@
 # Risk Register - Architecture Documentation
 
-**Last Updated:** January 8, 2026  
+**Last Updated:** February 9, 2026  
 **Status:** Active Development  
 **Version:** 0.1.0
 
@@ -31,16 +31,16 @@
 **Risk Register** is a functional Scala application for hierarchical Monte Carlo risk simulation. It enables users to model complex risk portfolios as trees, execute simulations, and analyze Loss Exceedance Curves (LECs).
 
 **Current State:**
-- ✅ 121 tests passing (simulation engine and service layer)
+- ✅ 512 tests passing (289 common + 223 server)
 - ✅ Core simulation engine functional with parallel execution
 - ✅ Type-safe domain model using Iron refinement types
 - ✅ Clean separation of concerns (domain/service/HTTP layers)
 - ✅ Typed error codes with field path context (ValidationErrorCode)
 - ✅ BuildInfo integration for version management
 - ✅ Sparse storage architecture validated and optimized
-- ⚠️ Configuration hardcoded (needs externalization)
-- ⚠️ Minimal structured logging (needs enhancement)
-- ⚠️ DTO/Domain separation incomplete (architectural debt)
+- ✅ Configuration externalized via ZIO Config + application.conf with env-var overrides
+- ✅ Structured logging with ZIO + Logback (JSON encoder pending for production)
+- ✅ DTO/Domain separation complete (validation-during-parsing)
 
 ---
 
@@ -51,7 +51,7 @@
 #### 1. **Type Safety with Iron Refinement Types**
 ```scala
 // Compile-time validation with zero runtime overhead
-opaque type SafeId = String :| (Not[Blank] & MinLength[3] & MaxLength[30] & Match["^[a-zA-Z0-9_-]+$"])
+opaque type SafeIdStr = String :| Match["^[0-9A-HJKMNP-TV-Z]{26}$"]  // ULID (Crockford base32)
 type Probability = Double :| (Greater[0.0] & Less[1.0])
 ```
 
@@ -73,17 +73,17 @@ val validated = idValidation
 - Functional approach (no exceptions)
 - Composable validation logic
 
-#### 3. **Recursive ADT for Risk Trees**
+#### 3. **Flat ADT for Risk Trees**
 ```scala
 sealed trait RiskNode
-case class RiskLeaf(...) extends RiskNode
-case class RiskPortfolio(children: Array[RiskNode]) extends RiskNode
+case class RiskLeaf(..., parentId: Option[NodeId]) extends RiskNode
+case class RiskPortfolio(..., childIds: Array[NodeId], parentId: Option[NodeId]) extends RiskNode
 ```
 
 **Benefits:**
-- Natural representation of hierarchical structures
-- Type-safe pattern matching
-- Compiler verifies exhaustive matching
+- Flat node collection with ID references (not recursive nesting)
+- Type-safe pattern matching with compiler-verified exhaustive matching
+- Enables O(1) node lookup via `TreeIndex`
 
 #### 4. **Parallel Execution**
 ```scala
@@ -142,13 +142,13 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
 
 ---
 
-### **Structured Logging** (Partially Implemented)
+### **Structured Logging** (Implemented)
 
-**Status:** 🔄 Phase 3 - 30% complete (see IMPLEMENTATION_PLAN.md)
+**Status:** ✅ Application-level logging complete
 
-**Current:** Basic ZIO logging integrated, JSON output and request context not yet configured
+**Current:** ZIO logging (`ZIO.logInfo`, `logWarning`, `logDebug`, `logError`) used throughout all service layers per ADR-002. Routed via `zio-logging-slf4j2` bridge to Logback with env-configurable levels (`LOG_LEVEL`). OpenTelemetry tracing and metrics fully integrated via `TelemetryLive` (console + OTLP exporters).
 
-**Intended:** JSON-formatted logs with request IDs, user context, and performance metrics for production observability.
+**Remaining (production deployment):** Swap Logback plain-text encoder to JSON encoder (e.g., `logstash-logback-encoder`) for structured log aggregation in containerised environments. Request-ID correlation and user context headers are Kubernetes deployment concerns, not application-level gaps.
 
 ---
 
@@ -171,28 +171,32 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
 ## Technology Stack
 
 ### **Core Framework**
-- **Scala:** 3.6.3
+- **Scala:** 3.6.4
 - **ZIO:** 2.1.24 (effect system, concurrency, dependency injection)
 - **ZIO Prelude:** 1.0.0-RC44 (Validation, type classes)
 - **ZIO Test:** 2.1.24 (property-based testing)
 
 ### **Type Safety**
-- **Iron:** 3.2.1 (refinement types, opaque types)
+- **Iron:** 3.2.2 (refinement types, opaque types)
 - **Metalog Distribution:** Custom implementation
 
 ### **HTTP Layer**
 - **Tapir:** 1.13.4 (endpoint definition)
 - **ZIO HTTP:** (server implementation)
-- **ZIO JSON:** 0.7.44 (serialization)
+- **ZIO JSON:** 0.8.0 (serialization)
 
-### **Configuration** (To Be Added)
-- **ZIO Config:** 4.0.2
+### **Configuration**
+- **ZIO Config:** 4.0.2 (with zio-config-magnolia, zio-config-typesafe)
 - **Typesafe Config:** 1.4.3
 
-### **Logging** (To Be Enhanced)
-- **ZIO Logging:** 2.2.4
+### **Logging**
+- **ZIO Logging:** 2.5.2
 - **Logback:** 1.5.23
-- **ZIO Logging SLF4J Bridge:** 2.2.4
+- **ZIO Logging SLF4J Bridge:** 2.5.2
+
+### **Observability**
+- **ZIO Telemetry:** 3.1.13 (OpenTelemetry bridge for tracing + metrics)
+- **OpenTelemetry SDK:** 1.57.0 (traces, metrics, OTLP + console exporters)
 
 ### **Testing**
 - **ZIO Test:** Unit & property-based tests
@@ -212,19 +216,21 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
 ```
 RiskNode (sealed trait)
 ├── RiskLeaf (terminal node - actual risk)
-│   ├── id: SafeId
+│   ├── id: NodeId                              // ULID-based nominal wrapper
 │   ├── name: SafeName
 │   ├── distributionType: "expert" | "lognormal"
 │   ├── probability: Probability (0.0 < p < 1.0)
-│   ├── percentiles: Option[Array[Double]]  // Expert mode
-│   ├── quantiles: Option[Array[Double]]    // Expert mode
-│   ├── minLoss: Option[NonNegativeLong]    // Lognormal mode
-│   └── maxLoss: Option[NonNegativeLong]    // Lognormal mode
+│   ├── percentiles: Option[Array[Double]]      // Expert mode
+│   ├── quantiles: Option[Array[Double]]         // Expert mode
+│   ├── minLoss: Option[NonNegativeLong]         // Lognormal mode
+│   ├── maxLoss: Option[NonNegativeLong]         // Lognormal mode
+│   └── parentId: Option[NodeId]                 // None for root
 │
 └── RiskPortfolio (branch node - aggregation)
-    ├── id: SafeId
+    ├── id: NodeId
     ├── name: SafeName
-    └── children: Array[RiskNode]  // Recursive
+    ├── childIds: Array[NodeId]                  // ID references (flat)
+    └── parentId: Option[NodeId]                 // None for root
 ```
 
 ### **Domain Entities**
@@ -481,9 +487,10 @@ ZIO.foreachPar(successfulTrials) { trial =>
 
 ## Testing Strategy
 
-### **Current Test Coverage: 121 Tests**
-- **Server Module:** 121 tests (service, simulation, HTTP, provenance)
-- **Focus:** Simulation determinism, parallel execution, tree aggregation
+### **Current Test Coverage: 512 Tests**
+- **Common Module:** 289 tests (domain model, validation, Iron types, tree operations)
+- **Server Module:** 223 tests (service, simulation, HTTP, cache, SSE, provenance)
+- **Focus:** Simulation determinism, parallel execution, tree aggregation, cache invalidation
 
 ### **Test Pyramid**
 
@@ -493,7 +500,7 @@ ZIO.foreachPar(successfulTrials) { trial =>
          /────\
         /      \  Integration Tests (Future: Redis, Postgres)
        /────────\
-      /          \  Unit Tests (Current: 401 tests)
+      /          \  Unit Tests (Current: 512 tests)
      /────────────\
     /              \  Property Tests (Current: Algebraic laws)
    /────────────────\
@@ -761,7 +768,7 @@ Key completed work:
 - ✅ Configuration management (ZIO Config with application.conf)
 - ✅ DTO/Domain separation (validation-during-parsing)
 - ✅ Error handling (typed error codes, field paths)
-- 🔄 Structured logging (basic ZIO logging, JSON output pending)
+- ✅ Structured logging (ZIO + Logback + OpenTelemetry; JSON encoder swap is a deployment task)
 
 ---
 
@@ -894,17 +901,35 @@ HDR Histogram would require fundamental architecture changes (approximate merge,
 - **Status:** ✅ Implemented
 - **Alternatives Rejected:** Store raw trials, store histograms
 
-#### **ADR-005: Hybrid Parallelism (ZIO + Par Collections)**
-- **Decision:** ZIO for IO-bound, Scala par collections for CPU-bound
-- **Rationale:** Best of both worlds, proven to work well
+#### **ADR-005: SSE for Server→Client Push**
+- **Decision:** Use Server-Sent Events for cache invalidation notifications
+- **Rationale:** Simple unidirectional streaming, browser-native support
 - **Status:** ✅ Implemented
-- **Future:** May migrate fully to ZIO for better control
 
-#### **ADR-006: Delegate Auth to Service Mesh** (Future)
-- **Decision:** Trust Keycloak + service mesh for authentication
-- **Rationale:** Separation of concerns, standard K8s pattern
-- **Status:** 🔄 Planned
-- **Alternatives Rejected:** Implement OAuth2 in-app
+#### **ADR-009: Simulation Configuration**
+- **Decision:** Simulation parameters from server config, not API parameters
+- **Rationale:** Consistent results, simpler API
+- **Status:** ✅ Implemented
+
+#### **ADR-010: Flat Node Storage**
+- **Decision:** Flat node collection with ID references, not recursive nesting
+- **Rationale:** Enables O(1) lookup via TreeIndex, simplifies serialization
+- **Status:** ✅ Implemented
+
+#### **ADR-014: LEC Caching Architecture**
+- **Decision:** Per-tree cache with O(depth) node-to-root invalidation
+- **Rationale:** Incremental recomputation, memory isolation per tree
+- **Status:** ✅ Implemented
+
+#### **ADR-015: Cache-Aside LEC Resolution**
+- **Decision:** RiskResultResolver uses cache-aside pattern for LEC queries
+- **Rationale:** Lazy computation, transparent caching, simple invalidation
+- **Status:** ✅ Accepted
+
+#### **ADR-018: Nominal Wrappers for Identity Types**
+- **Decision:** `NodeId` and `TreeId` case class wrappers over `SafeId`
+- **Rationale:** Prevents accidental interchange of semantically distinct IDs
+- **Status:** ✅ Implemented
 
 ---
 
@@ -973,5 +998,5 @@ For development, the current business metrics (operations counter, simulation du
 ---
 
 **Document Status:** Architecture reference (stable)
-**Last Updated:** January 8, 2026
+**Last Updated:** February 9, 2026
 **Implementation Tracking:** See IMPLEMENTATION_PLAN.md
