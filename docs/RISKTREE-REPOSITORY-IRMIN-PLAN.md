@@ -38,7 +38,7 @@ Currently there are two implementations:
 
 ### Service Call Chain: Create Risk Tree
 
-**User action:** POST a new risk tree via HTTP (node IDs are ULIDs; tree IDs remain numeric for now)
+**User action:** POST a new risk tree via HTTP (tree and node IDs are ULIDs via `SafeId`)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -218,7 +218,7 @@ With Per-Tree Storage (Option B):
 |----------|--------|
 | **What is it?** | An implementation of `RiskTreeRepository` that uses `IrminClient` to persist trees |
 | **What is implemented?** | `RiskTreeRepositoryIrmin` (per-node, ULID node IDs) with metadata schema, `IrminClient.list`/health check support, selectable repo wiring, and container-backed repo integration spec |
-| **What remains?** | Default config still uses in-memory; HTTP integration spec only covers health + create/list/get; LEC/probability and cache HTTP specs pending; optional Testcontainers isolation and SSE coverage not yet done; tree IDs still numeric |
+| **What remains?** | Default config still uses in-memory; HTTP integration spec only covers health + create/list/get; LEC/probability and cache HTTP specs pending; optional Testcontainers isolation and SSE coverage not yet done |
 | **What does it enable?** | Persistent storage, version history, and fine-grained change notifications |
 | **What happens without wiring/tests?** | Runtime stays in-memory unless `repository.type=irmin`; HTTP path lacks coverage for update/delete/LEC/cache |
 
@@ -329,7 +329,7 @@ modules/server-it/src/test/scala/com/risquanter/register/http/support/
 ### Outstanding Tasks (consolidated)
 - Expand HTTP integration to cover LEC/probability endpoints (build out `RiskTreeApiIntegrationSpec` or extend `HttpApiIntegrationSpec`).
 - Add cache-focused HTTP integration (`CacheApiIntegrationSpec`): stats/list/invalidate/clear scenarios.
-- Plan ULID adoption for tree/node IDs (see `docs/IRMIN-ULID-ID-PLAN.md`).
+- ~~Plan ULID adoption for tree/node IDs~~ — **Completed.** All tree/node IDs use ULID via `SafeId`.
 - (Optional) Add Testcontainers-based Irmin isolation instead of shared docker-compose volumes.
 - (Optional) Add SSE integration coverage after cache/LEC specs.
 

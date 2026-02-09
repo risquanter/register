@@ -20,6 +20,10 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       quantiles = None
     )
 
+  // Update request helpers use raw ULID string literals for `id` fields because
+  // the DTO layer (RiskPortfolioUpdateRequest, RiskLeafUpdateRequest) accepts pre-validation
+  // strings. Iron refinement happens inside resolveUpdate, which is the code under test.
+  // Using TestHelpers.safeId here would bypass the validation path we're testing.
   private def validLeafUpdate(id: String, name: String, parent: Option[String]) =
     RiskLeafUpdateRequest(
       id = id,
