@@ -1,8 +1,9 @@
 # LEC Caching Implementation Plan
 
 **ADR:** ADR-014  
-**Status:** Implementation Ready  
-**Created:** Based on ADR-014 decision (RiskResult Caching)
+**Status:** Phases 1–4 Complete  
+**Created:** Based on ADR-014 decision (RiskResult Caching)  
+**Last Updated:** 2026-02-09
 
 ## Executive Summary
 
@@ -14,43 +15,38 @@ This plan implements the RiskResult caching strategy defined in ADR-014. The key
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| `LECCache` | ⚠️ Wrong cache type | Caches LECCurveResponse, needs to cache RiskResult |
-| `CurveBundle*` | ❌ Wrong approach | All CurveBundle code to be deleted |
-| `LECGenerator` | ✅ Has `generateCurvePoints` | Needs `generateCurvePointsMulti` |
-| `TreeIndex` | ⚠️ Wired as empty | Provides O(depth) invalidation paths |
+| `RiskResultCache` | ✅ Implemented | Caches `RiskResult` per `NodeId` |
+| `TreeCacheManager` | ✅ Implemented | Per-tree cache lifecycle, invalidation |
+| `CurveBundle*` | ✅ Deleted | All CurveBundle code removed |
+| `LECGenerator` | ✅ Has `generateCurvePoints` | Multi-node shared ticks via `generateCurvePointsMulti` |
+| `TreeIndex` | ✅ Wired | O(1) node lookup via `nodes: Map[NodeId, RiskNode]` |
 | `CacheController` | ✅ Working | Admin endpoints for cache management |
-| `RiskTreeService` | ⚠️ No caching | Does not use cache |
+| `RiskResultResolver` | ✅ Implemented | Cache-aside pattern: `ensureCached(tree, nodeId)` |
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Delete Wrong CurveBundle Code
+### Phase 1: Delete Wrong CurveBundle Code ✅
 
 **Goal:** Remove all code based on the wrong caching approach.
 
-**Files to delete:**
-1. `modules/common/src/main/scala/.../bundle/CurveBundle.scala`
-2. `modules/common/src/test/scala/.../bundle/CurveBundleSpec.scala`
-3. `modules/server/src/main/scala/.../services/CurveBundleExecutor.scala`
-4. `modules/server/src/test/scala/.../services/CurveBundleExecutorSpec.scala`
-
-**Verification:** `sbt compile test` passes after deletion.
+**Deleted files:**
+1. `CurveBundle.scala` — removed
+2. `CurveBundleSpec.scala` — removed
+3. `CurveBundleExecutor.scala` — removed
+4. `CurveBundleExecutorSpec.scala` — removed
 
 ---
 
-### Phase 2: Refactor LECCache → RiskResultCache
+### Phase 2: Refactor LECCache → RiskResultCache ✅
 
 **Goal:** Cache `RiskResult` (simulation outcomes) instead of UI DTOs.
 
-**Files to modify:**
-1. `modules/server/src/main/scala/.../services/cache/LECCache.scala` → `RiskResultCache.scala`
-   - Change cached type: `Map[NodeId, RiskResult]`
-   - Keep `TreeIndex` dependency for O(depth) invalidation
-   - `ancestorPath` unchanged - invalidates from leaf to root
-
-2. `modules/server/src/test/scala/.../services/cache/LECCacheSpec.scala` → `RiskResultCacheSpec.scala`
-   - Update tests for RiskResult caching
+**Completed:**
+1. `LECCache.scala` → `RiskResultCache.scala` — caches `RiskResult` per `NodeId`
+2. `TreeCacheManager` — manages per-tree `RiskResultCache` instances
+3. `LECCacheSpec.scala` → `RiskResultCacheSpec.scala` — tests updated
 
 **Trait:**
 ```scala
@@ -90,43 +86,22 @@ def generateCurvePointsMulti(
 
 ---
 
-### Phase 4: Wire RiskResultCache to RiskTreeService
+### Phase 4: Wire RiskResultCache to RiskTreeService ✅
 
 **Goal:** `RiskTreeService` uses cache for simulation results.
 
-**Files to modify:**
-1. `Application.scala`: Wire `RiskResultCache` instead of `LECCache`
-2. `RiskTreeServiceLive.scala`: Add cache dependency and cache-aside pattern
-
-**Pattern:**
-```scala
-def getNodeLEC(nodeId: NodeId): Task[LECCurveResponse] =
-  for
-    cached <- cache.get(nodeId)
-    result <- cached match
-      case Some(r) => ZIO.succeed(r)
-      case None    => simulate(nodeId).tap(r => cache.put(nodeId, r))
-    curve  = LECGenerator.generateCurvePoints(result)
-  yield LECCurveResponse.fromPoints(curve)
-```
-
-For multi-node display:
-```scala
-def getMultiNodeLEC(nodeIds: Set[NodeId]): Task[Map[NodeId, LECCurveResponse]] =
-  for
-    results <- ZIO.foreach(nodeIds.toList)(id => cache.get(id).map(id -> _))
-    // fetch missing, populate cache, then:
-    curves  = LECGenerator.generateCurvePointsMulti(allResults)
-  yield curves.map((id, pts) => id -> LECCurveResponse.fromPoints(pts))
-```
+**Completed:**
+1. `RiskResultResolverLive` implements cache-aside pattern via `ensureCached(tree, nodeId)`
+2. `RiskTreeServiceLive` delegates simulation to `RiskResultResolver`
+3. Multi-node LEC uses `getLECCurvesMulti` with shared tick domain
 
 ---
 
-### Phase 5: TreeIndex Wiring (Future)
+### Phase 5: TreeIndex Wiring ✅
 
 **Goal:** Real parent-pointer data instead of empty index.
 
-**Deferred:** Current `TreeIndex.empty` works for development. Real wiring needed when Irmin integration is complete.
+**Completed:** `TreeIndex` is now built at tree construction time with `nodes: Map[NodeId, RiskNode]` providing O(1) lookup. `RiskTree.index` is populated automatically.
 
 ---
 
@@ -142,15 +117,13 @@ def getMultiNodeLEC(nodeIds: Set[NodeId]): Task[Map[NodeId, LECCurveResponse]] =
 
 ## Estimated Effort
 
-| Phase | Effort | Risk |
-|-------|--------|------|
-| 1: Delete CurveBundle | 30 min | None |
-| 2: Refactor LECCache | 2 hours | Low |
-| 3: generateCurvePointsMulti | 1 hour | Low |
-| 4: Wire to RiskTreeService | 2-3 hours | Medium |
-| 5: TreeIndex (deferred) | - | - |
-
-**Total:** ~5-7 hours
+| Phase | Status | Notes |
+|-------|--------|-------|
+| 1: Delete CurveBundle | ✅ Complete | All files removed |
+| 2: Refactor LECCache | ✅ Complete | RiskResultCache + TreeCacheManager |
+| 3: generateCurvePointsMulti | ✅ Complete | Shared tick domain |
+| 4: Wire to RiskTreeService | ✅ Complete | Via RiskResultResolver |
+| 5: TreeIndex wiring | ✅ Complete | Built at tree construction |
 
 ---
 

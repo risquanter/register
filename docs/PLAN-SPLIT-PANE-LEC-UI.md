@@ -165,10 +165,10 @@ sealed trait RiskNode
 case class RiskLeaf(...) extends RiskNode        // Terminal: has distribution
 case class RiskPortfolio(children: Array[RiskNode]) extends RiskNode  // Branch
 
-// RiskTreeResult = Leaf | Branch (simulation results)
-sealed trait RiskTreeResult
-case class Leaf(id: String, result: RiskResult) extends RiskTreeResult
-case class Branch(id: String, result: RiskResult, children: Vector[RiskTreeResult])
+// Simulation results are per-node (no RiskTreeResult tree — removed)
+case class RiskResult(nodeId: NodeId, outcomes: Map[TrialId, Loss], provenances: List[NodeProvenance])
+// Results are cached in RiskResultCache, keyed by NodeId
+// Tree structure for navigation comes from TreeIndex (built from RiskTree.nodes)
 ```
 
 ### LECCurveData (API response format)

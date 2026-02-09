@@ -69,17 +69,16 @@ Irmin (persistent)     ←→     RiskTreeRepository
 ```scala
 trait RiskResultResolver:
   /** Core primitive: ensure result is cached, simulate if needed */
-  def ensureCached(nodeId: NodeId): Task[RiskResult]
+  def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): Task[RiskResult]
   
   /** Ensure multiple nodes are cached */
-  def ensureCachedAll(nodeIds: Set[NodeId]): Task[Map[NodeId, RiskResult]] =
-    ZIO.foreach(nodeIds.toList)(id => ensureCached(id).map(id -> _))
-      .map(_.toMap)
+  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]]
 
 class RiskResultResolverLive(
-  cache: RiskResultCache,
-  nodeIndex: NodeIndex,       // lookup RiskNode by ID
-  simulator: SimulationExecutionService
+  cache: TreeCacheManager,
+  config: SimulationConfig,
+  tracing: Tracing,
+  metrics: Metrics
 ) extends RiskResultResolver:
   
   def ensureCached(nodeId: NodeId): Task[RiskResult] =
@@ -317,64 +316,64 @@ Irmin (persistent)
     ↓
 RiskNode (tree definition)
     ↓
-Simulation (in-memory)
+Simulation (in-memory, via RiskResultResolver)
     ↓
-RiskResult per node (cached in-memory, NOT in Irmin)
+RiskResult per node (cached in-memory via TreeCacheManager, NOT in Irmin)
 ```
 
-`RiskTreeResult` never touches Irmin. Removing it has no effect on persistence.
+Simulation results are never persisted to Irmin. Removing `RiskTreeResult` had no effect on persistence.
 
 ---
 
 ## Migration Path
 
-### Phase 1: Create RiskResultResolver Service
+### Phase 1: Create RiskResultResolver Service ✅
 
-1. Create `RiskResultResolver` trait with `ensureCached` and `ensureCachedAll`
-2. Create `RiskResultResolverLive` implementation
-3. Wire to `RiskResultCache` and simulation services
-4. Unit tests for resolver
+1. ✅ Created `RiskResultResolver` trait with `ensureCached` and `ensureCachedAll`
+2. ✅ Created `RiskResultResolverLive` implementation
+3. ✅ Wired to `TreeCacheManager` and `Simulator`
+4. ✅ Unit tests for resolver (`RiskResultResolverSpec`)
 
-### Phase 2: Create NodeIndex for Node Lookup
+### Phase 2: Create Node Lookup via TreeIndex ✅
 
-1. Create `NodeIndex` trait - lookup `RiskNode` by `NodeId`
-2. Implement from tree structure (walk or index at load time)
-3. Wire to `RiskResultResolver`
+1. ✅ `TreeIndex` built from nodes at tree construction time
+2. ✅ O(1) node lookup via `index.nodes: Map[NodeId, RiskNode]`
+3. ✅ `RiskResultResolver` receives `RiskTree` parameter (which embeds `TreeIndex`)
 
-### Phase 3: Refactor RiskTreeServiceLive
+### Phase 3: Refactor RiskTreeServiceLive ✅
 
-1. Replace direct simulation calls with `resolver.ensureCached`
-2. Replace `convertResultToLEC` with `LECGenerator.generateCurvePoints`
-3. Get `childIds` from `RiskNode` (via NodeIndex), not `RiskTreeResult`
-4. Update tests
+1. ✅ `getLECCurve` and `getLECCurvesMulti` use `resolver.ensureCached`
+2. ✅ `LECGenerator.generateCurvePoints` used for rendering
+3. ✅ `childIds` from `RiskNode` via `TreeIndex`, not a result tree
+4. ✅ Tests updated
 
-### Phase 4: Delete RiskTreeResult
+### Phase 4: Delete RiskTreeResult ✅
 
-1. Remove `TreeResult.scala`
-2. Update any remaining references
-3. Verify all tests pass
+1. ✅ `TreeResult.scala` removed
+2. ✅ All references removed
+3. ✅ All tests pass
 
 ### Phase 5: Integration Tests
 
-1. Test cache hit/miss behavior via API
-2. Test invalidation clears correct entries
-3. Test recomputation reuses cached siblings
+1. ✅ Cache hit/miss behavior tested (`RiskResultResolverSpec`, `RiskResultCacheSpec`)
+2. Cache invalidation via Irmin notifications — deferred to Irmin integration phase
+3. Recomputation reusing cached siblings — covered in unit tests
 
 ---
 
-## Open Questions
+## Open Questions (Resolved)
 
 1. **Simulation parameters in cache key?**  
-   Current: key is `NodeId` only.  
-   Should it be `(NodeId, nTrials, seed3, seed4)`?
+   ✅ Resolved: Key is `NodeId` only. Simulation parameters come from `SimulationConfig` (service-wide).  
+   Cache is invalidated on tree structure changes, not config changes.
 
 2. **lookupNodeDefinition implementation?**  
-   Need way to get `RiskNode` by ID from tree structure.  
-   Options: walk from root, or index nodes at tree load time.
+   ✅ Resolved: `TreeIndex` built at tree construction time. `RiskTree.index.nodes: Map[NodeId, RiskNode]`  
+   provides O(1) lookup. `RiskResultResolver` methods take `RiskTree` parameter.
 
 3. **Provenance on cache hit?**  
-   Currently provenance is generated during simulation.  
-   On cache hit, no simulation runs. Cache provenance too, or skip?
+   ✅ Resolved: Provenance is embedded in `RiskResult.provenances: List[NodeProvenance]`.  
+   On cache hit, the cached provenance is returned. No re-simulation needed.
 
 ---
 

@@ -130,14 +130,14 @@ What's implemented now:
 *Current state:* Per-node Irmin storage is wired; node IDs are ULIDs (uppercase, Crockford base32) validated via `SafeId`, with deterministic fixtures (`safeId`/`idStr`). Ancestor-path invalidation is implemented (TreeCacheManager walks the TreeIndex and clears only the affected node and its ancestors). LEC curve caching was intentionally rejected; we cache `RiskResult` outcomes only and render curves on demand to avoid tick-domain staleness.
 
 **Path Convention (Current):**
-Irmin paths encode `treeId` (still `NonNegativeLong`) and ULID node IDs:
+Irmin paths encode `treeId` (ULID `TreeId`) and ULID node IDs:
 ```
-/risk-trees/{treeId}/nodes/{nodeUlid}
+/risk-trees/{treeUlid}/nodes/{nodeUlid}
 
 Example:
-/risk-trees/1/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAV      ← treeId=1, nodeId ULID
-/risk-trees/1/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAW      ← treeId=1, different node
-/risk-trees/2/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAV      ← same node label, different tree
+/risk-trees/01ARZ3NDEKTSV4RRFFQ69G5FAX/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAV      ← treeId ULID, nodeId ULID
+/risk-trees/01ARZ3NDEKTSV4RRFFQ69G5FAX/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAW      ← same tree, different node
+/risk-trees/01ARZ3NDEKTSV4RRFFQ69G5FAY/nodes/01ARZ3NDEKTSV4RRFFQ69G5FAV      ← same node label, different tree
 ```
 
 This ensures:

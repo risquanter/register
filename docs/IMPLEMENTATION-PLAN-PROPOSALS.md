@@ -447,7 +447,7 @@ Implement the parent-pointer index and LEC cache data structures that enable O(d
    ```
    domain/tree/TreeIndex.scala
    ```
-   - ✅ `type NodeId = SafeId.SafeId` — type alias for Iron type
+   - ✅ `NodeId` — nominal case class wrapper around `SafeId.SafeId` (ADR-018)
    - ✅ `nodes: Map[NodeId, RiskNode]` — O(1) lookup
    - ✅ `parents: Map[NodeId, NodeId]` — child → parent
    - ✅ `children: Map[NodeId, List[NodeId]]` — parent → children
@@ -455,16 +455,14 @@ Implement the parent-pointer index and LEC cache data structures that enable O(d
    - ✅ `descendants(nodeId): Set[NodeId]` — subtree nodes
    - ✅ `fromTree(root: RiskNode)` — factory method
 
-2. **Created `LECCache` service**
+2. **Created `RiskResultCache` service** (originally `LECCache`, refactored per ADR-014)
    ```
-   services/cache/LECCache.scala
+   services/cache/RiskResultCache.scala
    ```
-   - ✅ `Ref[Map[NodeId, LECCurveData]]` for cache storage
-   - ✅ `get(nodeId): UIO[Option[LECCurveData]]`
-   - ✅ `set(nodeId, lec): UIO[Unit]`
-   - ✅ `invalidate(nodeId): UIO[List[NodeId]]` — returns invalidated ancestors
-   - ✅ `clear`, `size`, `contains`, `remove` helpers
-   - ✅ Logging at service layer (ADR-002)
+   - ✅ `Ref[Map[NodeId, RiskResult]]` for cache storage
+   - ✅ `get(nodeId): UIO[Option[RiskResult]]`
+   - ✅ `set(nodeId, result): UIO[Unit]`
+   - ✅ Per-tree cache managed by `TreeCacheManager`
 
 3. **Created `TreeIndexService`**
    ```
@@ -486,7 +484,7 @@ Implement the parent-pointer index and LEC cache data structures that enable O(d
 ### Deliverables ✅
 - [x] TreeIndex correctly tracks parent pointers
 - [x] ancestorPath returns correct leaf-to-root path
-- [x] LECCache invalidation clears ancestor entries
+- [x] RiskResultCache invalidation clears ancestor entries
 - [x] Tests cover edge cases (root node, leaf node, deep tree)
 - [x] All internal structures use `NodeId` (SafeId.SafeId) per ADR-001
 
@@ -642,7 +640,7 @@ Connect Irmin watch notifications to cache invalidation and SSE broadcast.
    service/pipeline/InvalidationHandler.scala
    ```
    - Receives Irmin watch events
-   - Calls `LECCache.invalidate(nodeId)`
+   - Calls `TreeCacheManager.onTreeStructureChanged(treeId)` (invalidates cached results)
    - Triggers recomputation for affected path
 
 2. **Create recomputation service**
@@ -708,8 +706,8 @@ Connect Irmin watch notifications to cache invalidation and SSE broadcast.
 - [ ] Full data flow demonstrated
 
 **ADR-005 (Cached Subtree Aggregates):**
-- [ ] TreeIndex with parent pointers
-- [ ] LECCache with O(depth) invalidation
+- [x] TreeIndex with node lookup
+- [x] RiskResultCache with per-tree caching (via TreeCacheManager)
 - [ ] Recomputation pipeline working
 
 **ADR-008 (Error Handling & Resilience):**
@@ -1018,7 +1016,7 @@ Replace SSE with WebSocket for bidirectional communication and enhanced collabor
 |-------|--------|-----------------|-------------|
 | 1 | 008 | Error types, retry, circuit breaker | — |
 | 2 | 004a | Irmin GraphQL client | — |
-| 3 | 005 | TreeIndex, LECCache | — |
+| 3 | 005 | TreeIndex, RiskResultCache | — |
 | 4 | 004a | SSE endpoint | — |
 | 5 | 004a, 005 | Invalidation pipeline | ✓ 004a, 005, 008 |
 | 6 | 006 | EventHub, conflict detection | — |

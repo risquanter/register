@@ -23,9 +23,9 @@
 ```scala
 trait RiskTreeRepository {
   def create(riskTree: RiskTree): Task[RiskTree]
-  def update(id: NonNegativeLong, op: RiskTree => RiskTree): Task[RiskTree]
-  def delete(id: NonNegativeLong): Task[RiskTree]
-  def getById(id: NonNegativeLong): Task[Option[RiskTree]]
+  def update(id: TreeId, op: RiskTree => RiskTree): Task[RiskTree]
+  def delete(id: TreeId): Task[RiskTree]
+  def getById(id: TreeId): Task[Option[RiskTree]]
   def getAll: Task[List[Either[RepositoryFailure, RiskTree]]]
 }
 ```

@@ -2,24 +2,23 @@
 
 ## Outstanding Items
 
-### ID Generation Strategy - Pending Persistence
+### ID Generation Strategy ✅
 
-**Status**: Open (deferred until persistence layer is implemented)
+**Status**: Complete — ULIDs used for both tree and node IDs.
 
 #### Current Implementation
-IDs are provided explicitly in the hierarchical API format. The system validates that:
-- IDs are 3-30 characters
-- IDs contain only alphanumeric, underscore, or hyphen characters
-
-#### Future Considerations
-When persistence is added:
-1. **Relational DB**: Consider DB-generated sequences for guaranteed uniqueness
-2. **Document DB**: Current explicit IDs may be sufficient with UUID fallback
-3. **Hybrid**: DB-generated IDs with user-friendly slug stored separately
+- **Tree IDs**: `TreeId(toSafeId: SafeId.SafeId)` — server-generated ULID via `IdGenerators.nextTreeId`.
+- **Node IDs**: `NodeId(toSafeId: SafeId.SafeId)` — server-generated ULID via `IdGenerators.nextNodeId`.
+- IDs are 26-character Crockford base32 ULIDs, canonical uppercase.
+- Client-supplied tree IDs are structurally impossible (`RiskTreeDefinitionRequest` has no `id` field).
+- `ensureUniqueTree` enforces tree name uniqueness.
 
 #### Related Files
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskNode.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/SafeId.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/NodeId.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/TreeId.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/IdGenerators.scala`
 
 ---
 
@@ -44,7 +43,7 @@ When persistence is added:
 3. ValidationUtil methods integrated with typed codes: `REQUIRED_FIELD`, `INVALID_RANGE`, `INVALID_PATTERN`
 4. ErrorResponse helpers use typed codes for API responses
 5. BuildInfo eliminates hardcoded version strings
-6. 408 tests passing (287 common + 121 server)
+6. 508 tests passing (289 common + 219 server)
 
 ### ✅ Iron Refinement Type Migration (2026-01-06)
 
@@ -87,10 +86,10 @@ When persistence is added:
 ```scala
 // Domain model
 final case class RiskLeaf private (
-  @jsonField("id") safeId: SafeId.SafeId,    // Internal: Iron type
+  nodeId: NodeId,                              // Internal: nominal wrapper around SafeId
   @jsonField("name") safeName: SafeName.SafeName
 ) extends RiskNode {
-  def id: String = safeId.toString            // Public: String
+  def id: NodeId = nodeId                      // Public: NodeId (ADR-018)
   def name: String = safeName.toString
 }
 

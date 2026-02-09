@@ -104,7 +104,8 @@ successfulTrials.par.map(computeLoss).toVector
 val appLayer = ZLayer.make[RiskTreeController & Server](
   Server.default,
   RiskTreeRepositoryInMemory.layer,
-  SimulationExecutionService.live,
+  RiskResultResolverLive.layer,
+  TreeCacheManager.layer,
   RiskTreeServiceLive.layer,
   ZLayer.fromZIO(RiskTreeController.makeZIO)
 )
@@ -231,18 +232,22 @@ RiskNode (sealed trait)
 ```scala
 // Configuration (persisted, no simulation results)
 final case class RiskTree(
-  id: NonNegativeLong,
+  id: TreeId,                          // ULID-based nominal wrapper
   name: SafeName.SafeName,
-  nTrials: Int,
-  root: RiskNode
+  nodes: Seq[RiskNode],                // Flat collection (not nested root)
+  rootId: NodeId,                      // Root node reference
+  index: TreeIndex                     // O(1) node lookup by NodeId
 )
 
-// Simulation Results (computed on-demand, not persisted)
-final case class RiskTreeWithLEC(
-  riskTree: RiskTree,
-  quantiles: Map[String, Double],      // p50, p90, p95, p99
-  vegaLiteSpec: Option[String],        // Visualization
-  lecNode: Option[LECNode]             // Hierarchical results
+// Node identity uses nominal wrapper (ADR-018)
+case class NodeId(toSafeId: SafeId.SafeId)
+case class TreeId(toSafeId: SafeId.SafeId)
+
+// Simulation results are per-node, cached in-memory
+final case class RiskResult(
+  nodeId: NodeId,
+  outcomes: Map[TrialId, Loss],
+  provenances: List[NodeProvenance]
 )
 
 // Metalog Distribution (compact representation)
@@ -291,8 +296,8 @@ See [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogr
 ┌─────────────────────────────────────────────────┐
 │ Service Layer (modules/server)                  │
 │  - RiskTreeService: Business logic              │
-│  - SimulationExecutionService: Orchestration    │
-│  - Validation: Request validation               │
+│  - RiskResultResolver: Simulation orchestration │
+│  - TreeCacheManager: Result caching             │
 └─────────────────────────────────────────────────┘
                      ↓
 ┌─────────────────────────────────────────────────┐
@@ -346,32 +351,28 @@ SimulationResponse (without LEC)
 
 ### **2. Compute LEC (On-Demand)**
 ```
-GET /risk-trees/:id/lec?nTrials=10000&depth=3
+GET /risk-trees/:treeId/nodes/:nodeId/lec
 
 Load RiskTree from Repository
   ↓
-Validate Parameters (nTrials, parallelism, depth)
-  ↓
-Simulator.simulateTree (recursive, parallel)
+RiskResultResolver.ensureCached(tree, nodeId)
   │
-  ├─→ RiskLeaf: Create Metalog → Sample trials → RiskResult
+  ├─→ Cache hit: Return cached RiskResult
   │
-  └─→ RiskPortfolio: Simulate children in parallel → Aggregate
+  └─→ Cache miss:
+      ├─→ RiskLeaf: Create Metalog → Sample trials → RiskResult
+      └─→ RiskPortfolio: Simulate children in parallel → Aggregate
   ↓
-RiskTreeResult (hierarchical)
+RiskResult (per-node, cached in TreeCacheManager)
   ↓
-Extract Quantiles (p50, p90, p95, p99)
+LECGenerator.generateCurvePoints
   ↓
-Generate Vega-Lite Spec
-  ↓
-RiskTreeWithLEC (Domain)
-  ↓
-SimulationResponse (with LEC)
+LECCurveResponse (JSON)
 ```
 
 **Key Insight:** Configuration (POST) and Computation (GET /lec) are separate.
-- **POST:** Fast, synchronous, persists metadata
-- **GET /lec:** Slow (seconds), asynchronous, computes results
+- **POST:** Fast, synchronous, persists tree definition
+- **GET /lec:** Computes per-node, caches results, incremental recomputation
 
 ---
 
@@ -436,10 +437,10 @@ Left(Chunk("id too short", "name blank", "probability out of range"))
 
 #### **Level 1: ZIO Structured Concurrency (Tree Traversal)**
 ```scala
-// Simulate children in parallel (IO-bound)
-ZIO.collectAllPar(
-  portfolio.children.map(child => simulateTreeInternal(child, ...))
-).withParallelism(8)
+// Ensure child results are cached (parallel)
+ZIO.foreachPar(
+  childIds.map(childId => resolver.ensureCached(tree, childId))
+)
 ```
 
 **Benefits:**
@@ -653,15 +654,21 @@ Persistence Strategy:
 - ✅ Future consideration: WebSocket for real-time progress updates
 - ✅ Future consideration: Caching computed LECs via memoization
 
-#### **Caching Strategy (Future)**
+#### **Caching Strategy** ✅ (Implemented)
 ```scala
-trait LECCache {
-  def get(key: CacheKey): Task[Option[RiskTreeWithLEC]]
-  def put(key: CacheKey, result: RiskTreeWithLEC): Task[Unit]
-}
+// TreeCacheManager: per-tree cache lifecycle
+trait TreeCacheManager:
+  def cacheFor(treeId: TreeId): UIO[RiskResultCache]
+  def onTreeStructureChanged(treeId: TreeId): UIO[Unit]
+  def deleteTree(treeId: TreeId): UIO[Unit]
 
-// Cache key: (treeId, nTrials, depth, treeHash)
-// Invalidate: When tree structure changes
+// RiskResultCache: per-node result cache
+trait RiskResultCache:
+  def get(nodeId: NodeId): UIO[Option[RiskResult]]
+  def put(nodeId: NodeId, result: RiskResult): UIO[Unit]
+
+// Cache key: NodeId (ULID)
+// Invalidate: onTreeStructureChanged clears all nodes for that tree
 ```
 
 #### **Incremental Recomputation (Future)**

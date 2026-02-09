@@ -4,8 +4,11 @@
 **Date:** 2026-01-16  
 **Tags:** caching, performance, lec, aggregation, zio
 
-> **Note:** Code examples in this ADR are conceptual patterns, not actual codebase types.
-> Types like `NodeId`, `LECCurveData`, `TreeIndex` are not yet implemented.
+> **Implementation status (2026-02-09):** `TreeIndex` and `RiskResultCache` are implemented.
+> `TreeIndex` is built from nodes at tree construction time and provides O(1) node/parent lookup.
+> `RiskResultCache` stores `RiskResult` per `NodeId` (not `LECCurveData`).
+> Cache invalidation uses `TreeCacheManager` with O(depth) ancestor path via `TreeIndex`.
+> The conceptual `LECCache` in this ADR was realized as `RiskResultCache` + `RiskResultResolver`.
 
 ---
 
@@ -39,19 +42,20 @@ object TreeIndex:
     // O(depth) traversal via parent pointers
 ```
 
-### 2. Per-Node LEC Cache
+### 2. Per-Node Result Cache
 
-Cache precomputed `LECCurveData` for each node:
+Cache simulation `RiskResult` for each node (not rendered curves — see ADR-014):
 
 ```scala
-// Conceptual: Cache service
-class LECCache(
-  cache: Ref[Map[NodeId, LECCurveData]],
-  index: Ref[TreeIndex]
-):
-  def get(nodeId: NodeId): UIO[Option[LECCurveData]]
-  def set(nodeId: NodeId, lec: LECCurveData): UIO[Unit]
-  def invalidate(nodeId: NodeId): UIO[List[NodeId]]  // Returns ancestors
+// Actual implementation: RiskResultCache + TreeCacheManager
+trait RiskResultCache:
+  def get(nodeId: NodeId): UIO[Option[RiskResult]]
+  def put(nodeId: NodeId, result: RiskResult): UIO[Unit]
+
+trait TreeCacheManager:
+  def cacheFor(treeId: TreeId): UIO[RiskResultCache]
+  def onTreeStructureChanged(treeId: TreeId): UIO[Unit]
+  def deleteTree(treeId: TreeId): UIO[Unit]
 ```
 
 ### 3. Invalidation on Node Change
@@ -77,23 +81,23 @@ def invalidate(nodeId: NodeId): UIO[List[NodeId]] =
 
 ### 4. Lazy Recomputation
 
-Recompute LEC only when requested (or eagerly for visible nodes):
+Recompute results only when requested (cache-aside via `RiskResultResolver`):
 
 ```scala
-// Conceptual: Lazy recomputation
-def getLEC(nodeId: NodeId): Task[LECCurveData] =
-  cache.get(nodeId).flatMap {
-    case Some(cached) => ZIO.succeed(cached)
-    case None         => recomputeAndCache(nodeId)
-  }
+// Actual implementation: RiskResultResolver
+trait RiskResultResolver:
+  def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): Task[RiskResult]
+  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]]
 
-def recomputeAndCache(nodeId: NodeId): Task[LECCurveData] =
+// Cache-aside: check cache, simulate if miss, store result
+def ensureCached(tree: RiskTree, nodeId: NodeId, ...): Task[RiskResult] =
   for
-    node     <- index.getNode(nodeId)
-    childLECs <- ZIO.foreach(node.children)(getLEC)  // Recursive
-    lec      <- Simulator.computeLEC(node, childLECs)
-    _        <- cache.set(nodeId, lec)
-  yield lec
+    cache  <- cacheManager.cacheFor(tree.id)
+    cached <- cache.get(nodeId)
+    result <- cached match
+      case Some(r) => ZIO.succeed(r)
+      case None    => simulate(tree, nodeId).tap(r => cache.put(nodeId, r))
+  yield result
 ```
 
 ### 5. Structural Sharing via Content Addressing
@@ -181,12 +185,13 @@ def onNodeChanged(nodeId: NodeId): Task[Unit] =
 
 ## Implementation
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| `TreeIndex` | `domain/TreeIndex.scala` | Parent-pointer navigation |
-| `LECCache` | `service/LECCache.scala` | Per-node LEC storage |
-| `CacheInvalidator` | `service/CacheInvalidator.scala` | Handles Irmin notifications |
-| `LECService` | `service/LECService.scala` | Lazy recomputation logic |
+| Component | Location | Purpose | Status |
+|-----------|----------|---------|--------|
+| `TreeIndex` | `domain/tree/TreeIndex.scala` | Parent-pointer navigation | ✅ Implemented |
+| `RiskResultCache` | `services/cache/RiskResultCache.scala` | Per-node result storage | ✅ Implemented |
+| `TreeCacheManager` | `services/cache/TreeCacheManager.scala` | Per-tree cache lifecycle + invalidation | ✅ Implemented |
+| `RiskResultResolverLive` | `services/cache/RiskResultResolverLive.scala` | Lazy recomputation logic | ✅ Implemented |
+| `InvalidationHandler` | `services/cache/InvalidationHandler.scala` | Handles Irmin change notifications | ✅ Implemented |
 
 ---
 

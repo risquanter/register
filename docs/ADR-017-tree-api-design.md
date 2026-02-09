@@ -744,7 +744,7 @@ type TreeProgram[A] = Free[TreeOp, A]
 
 3. **Service Layer**
   - [x] `create(req: RiskTreeDefinitionRequest): Task[RiskTree]`
-  - [x] `update(id: NonNegativeLong, req: RiskTreeUpdateRequest): Task[RiskTree]`
+  - [x] `update(id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]`
   - [x] `updateDistribution(treeId, nodeId, req): Task[RiskTree]`
   - [x] `renameNode(treeId, nodeId, req): Task[RiskTree]`
   - [x] `deleteNode(treeId, nodeId): Task[RiskTree]`
