@@ -32,6 +32,17 @@ import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
   * // 4. Connected browsers receive event (can refresh if needed)
   * }}}
   */
+/**
+  * Result of a cache invalidation operation.
+  *
+  * @param invalidatedNodes Node IDs whose cache entries were cleared (node + ancestors)
+  * @param subscribersNotified Number of SSE subscribers who received the invalidation event
+  */
+final case class InvalidationResult(
+    invalidatedNodes: List[NodeId],
+    subscribersNotified: Int
+)
+
 trait InvalidationHandler {
 
   /**
@@ -39,9 +50,9 @@ trait InvalidationHandler {
     *
     * @param treeId Tree ID for cache lookup and SSE routing
     * @param nodeId Changed node identifier
-    * @return Number of SSE subscribers notified
+    * @return Invalidation result containing affected nodes and subscriber count
     */
-  def handleNodeChange(treeId: TreeId, nodeId: NodeId): UIO[Int]
+  def handleNodeChange(treeId: TreeId, nodeId: NodeId): UIO[InvalidationResult]
 }
 
 object InvalidationHandler {
@@ -53,7 +64,7 @@ object InvalidationHandler {
     ZLayer.fromFunction(InvalidationHandlerLive(_, _, _))
 
   // Accessor methods for ZIO service pattern
-  def handleNodeChange(treeId: TreeId, nodeId: NodeId): URIO[InvalidationHandler, Int] =
+  def handleNodeChange(treeId: TreeId, nodeId: NodeId): URIO[InvalidationHandler, InvalidationResult] =
     ZIO.serviceWithZIO[InvalidationHandler](_.handleNodeChange(treeId, nodeId))
 }
 
@@ -66,15 +77,16 @@ final case class InvalidationHandlerLive(
     hub: SSEHub
 ) extends InvalidationHandler {
 
-  override def handleNodeChange(treeId: TreeId, nodeId: NodeId): UIO[Int] =
+  override def handleNodeChange(treeId: TreeId, nodeId: NodeId): UIO[InvalidationResult] =
     for {
       // Step 1: Look up tree to get current index
       treeOpt <- treeService.getById(treeId).catchAll(_ => ZIO.succeed(None))
       
       result <- treeOpt match {
         case None =>
-          // Tree not found - log warning and notify 0 subscribers
-          ZIO.logWarning(s"InvalidationHandler: tree $treeId not found") *> ZIO.succeed(0)
+          // Tree not found - log warning and return empty result
+          ZIO.logWarning(s"InvalidationHandler: tree $treeId not found") *>
+            ZIO.succeed(InvalidationResult(invalidatedNodes = Nil, subscribersNotified = 0))
           
         case Some(tree) =>
           for {
@@ -93,7 +105,7 @@ final case class InvalidationHandlerLive(
             
             // Step 5: Log notification (ADR-002)
             _ <- ZIO.logDebug(s"SSE notification sent: treeId=$treeId, subscribers=$subscriberCount")
-          } yield subscriberCount
+          } yield InvalidationResult(invalidatedNodes = invalidated, subscribersNotified = subscriberCount)
       }
     } yield result
 }

@@ -13,6 +13,24 @@ import IronConstants.Zero
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
 
+/**
+  * Response DTO for the cache invalidation endpoint.
+  *
+  * Uses `List[String]` for node IDs on the wire per ADR-001 Option A
+  * (public String API, internal Iron types).
+  *
+  * @param invalidatedNodes Node IDs whose cache entries were cleared (node + ancestors)
+  * @param subscribersNotified Number of SSE subscribers who received the invalidation event
+  */
+final case class InvalidationResponse(
+    invalidatedNodes: List[String],
+    subscribersNotified: Int
+)
+
+object InvalidationResponse {
+  given codec: zio.json.JsonCodec[InvalidationResponse] = zio.json.DeriveJsonCodec.gen[InvalidationResponse]
+}
+
 /** Tapir endpoint definitions for RiskTree API
   * Extends BaseEndpoint for standardized error handling
   * 
@@ -61,7 +79,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
   /** Manual cache invalidation endpoint for testing SSE pipeline.
     * Triggers cache invalidation for a specific node and broadcasts SSE event.
     * 
-    * @return Number of invalidated cache entries (node + ancestors)
+    * @return Number of SSE subscribers notified about the invalidation
     */
   val invalidateCacheEndpoint =
     baseEndpoint
@@ -70,7 +88,7 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .description("Manually invalidate cache for a node (triggers SSE notification)")
       .in("risk-trees" / path[TreeId]("id") / "invalidate" / path[NodeId]("nodeId"))
       .post
-      .out(jsonBody[Map[String, Int]])
+      .out(jsonBody[InvalidationResponse])
   
   // ========================================
   // LEC Query APIs

@@ -2,9 +2,9 @@ package com.risquanter.register.http.controllers
 
 import zio.*
 import sttp.tapir.server.ServerEndpoint
-import com.risquanter.register.http.endpoints.RiskTreeEndpoints
+import com.risquanter.register.http.endpoints.{RiskTreeEndpoints, InvalidationResponse}
 import com.risquanter.register.services.RiskTreeService
-import com.risquanter.register.services.pipeline.InvalidationHandler
+import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.domain.data.{LECPoint, LECCurveResponse}
 import com.risquanter.register.domain.data.iron.{PositiveInt, IronConstants, SafeId, SafeIdStr, NodeId}
@@ -49,7 +49,10 @@ class RiskTreeController private (
   val invalidateCache: ServerEndpoint[Any, Task] = invalidateCacheEndpoint.serverLogicSuccess {
     case (treeId, nodeId) =>
       invalidationHandler.handleNodeChange(treeId, nodeId)
-        .map(count => Map("invalidatedCount" -> count))
+        .map(r => InvalidationResponse(
+          invalidatedNodes = r.invalidatedNodes.map(_.value.toString),
+          subscribersNotified = r.subscribersNotified
+        ))
   }
   
   // ========================================
