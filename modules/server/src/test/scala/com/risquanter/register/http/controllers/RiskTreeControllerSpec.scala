@@ -7,10 +7,10 @@ import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
-import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
 import com.risquanter.register.domain.data.iron.{NonNegativeLong, TreeId}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
 import com.risquanter.register.util.IdGenerators
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.numeric.*
@@ -66,6 +66,24 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
     )
   }
 
+  // Valid request with hierarchical structure (shared baseline; derive variants via .copy)
+  private val validRequest = RiskTreeDefinitionRequest(
+    name = "Test Risk Portfolio",
+    portfolios = Seq(RiskPortfolioDefinitionRequest("Root Portfolio", None)),
+    leaves = Seq(
+      RiskLeafDefinitionRequest(
+        name = "Test Risk",
+        parentName = Some("Root Portfolio"),
+        distributionType = "lognormal",
+        probability = 0.25,
+        minLoss = Some(1000L),
+        maxLoss = Some(50000L),
+        percentiles = None,
+        quantiles = None
+      )
+    )
+  )
+
   override def spec = suite("RiskTreeController")(
     suite("Health endpoint")(
       test("returns healthy status") {
@@ -77,7 +95,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
 
     suite("Hierarchical tree creation with discriminators")(
       test("POST with RiskPortfolio discriminator creates tree") {
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
+        val request = validRequest.copy(
           name = "Ops Risk Portfolio",
           portfolios = Seq(RiskPortfolioDefinitionRequest("Total Operational Risk", None)),
           leaves = Seq(
@@ -104,26 +122,27 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
           )
         )
 
-        val program = service(_.create(hierarchicalRequest))
+        val program = service(_.create(request))
 
         program.assert { tree =>
-          tree.name.value == "Ops Risk Portfolio" && tree.id.value.nonEmpty
+          tree.name.value == "Ops Risk Portfolio" &&
+          tree.id.value.nonEmpty &&
+          // Server-generated ID must satisfy SafeIdStr constraint (Crockford base32 ULID)
+          tree.id.value.matches("^[0-9A-HJKMNP-TV-Z]{26}$")
         }.provide(serviceLayer)
-      }
-    ),
+      },
 
-    suite("Get by ID")(
-      test("returns tree metadata when exists") {
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
-          name = "Test Tree",
-          portfolios = Seq.empty,
+      test("duplicate tree name is rejected by ensureUniqueTree") {
+        val firstRequest  = validRequest.copy(name = "Duplicate Risk Portfolio")
+        val secondRequest = validRequest.copy(
+          name = "Duplicate Risk Portfolio", // Same name as first
           leaves = Seq(
             RiskLeafDefinitionRequest(
-              name = "Test Risk",
-              parentName = None,
+              name = "Risk B",
+              parentName = Some("Root Portfolio"),
               distributionType = "lognormal",
-              probability = 0.5,
-              minLoss = Some(1000L),
+              probability = 0.3,
+              minLoss = Some(500L),
               maxLoss = Some(10000L),
               percentiles = None,
               quantiles = None
@@ -132,7 +151,24 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         )
 
         val program = for {
-          tree <- service(_.create(hierarchicalRequest))
+          _ <- service(_.create(firstRequest))
+          e <- service(_.create(secondRequest)).flip
+        } yield e
+
+        program.assert {
+          case ValidationFailed(errors) =>
+            errors.exists(e => e.field == "name" && e.code == ValidationErrorCode.DUPLICATE_VALUE)
+          case _ => false
+        }.provide(serviceLayer)
+      }
+    ),
+
+    suite("Get by ID")(
+      test("returns tree metadata when exists") {
+        val request = validRequest.copy(name = "Test Tree")
+
+        val program = for {
+          tree <- service(_.create(request))
           result <- service(_.getById(tree.id))
         } yield result
 
