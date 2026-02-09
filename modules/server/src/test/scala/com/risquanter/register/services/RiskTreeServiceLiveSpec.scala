@@ -122,6 +122,22 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
+      test("root NodeId is present in tree nodes (ADR-018 nominal identity)") {
+        // Verifies that RiskNode.id (NodeId) matches rootId (NodeId) via
+        // structural equality — the same invariant guarded by ensureRootPresent
+        val program = service(_.create(validRequest))
+
+        program.assert { tree =>
+          val rootId = tree.rootId
+          // NodeId-to-NodeId lookup must find the root
+          tree.nodes.exists(_.id == rootId) &&
+            // The index (keyed by NodeId) must also resolve it
+            tree.index.nodes.contains(rootId) &&
+            // root accessor (index lookup by NodeId) must succeed
+            tree.root.id == rootId
+        }
+      },
+
       test("create fails with invalid name") {
         val invalidRequest = validRequest.copy(name = "")
         val program = service(_.create(invalidRequest)).flip

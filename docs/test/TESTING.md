@@ -14,6 +14,7 @@ This document provides comprehensive testing procedures for the Risk Register ap
 ## Table of Contents
 
 - [Prerequisites](#prerequisites)
+- [SBT Unit & Integration Tests](#sbt-unit--integration-tests)
 - [API Testing - Register Server](#api-testing---register-server)
 - [Container Testing](#container-testing)
 - [Irmin GraphQL Server Tests](#irmin-graphql-server-tests)
@@ -39,6 +40,42 @@ sleep 2
 **Services:**
 - Register Server: `http://localhost:8080`
 - Irmin GraphQL: `http://localhost:9080/graphql`
+
+---
+
+## SBT Unit & Integration Tests
+
+### Quick Reference
+
+All commands filter output to show pass/fail counts, individual failures, and compilation errors.
+
+```bash
+# All tests (common + server + integration — requires Docker)
+sbt clean test 2>&1 | grep -E 'tests passed|tests failed|FAILED|FAIL|error.*Tests|\[error\]|success|Executed in'
+
+# Unit tests only (common + server, no integration)
+sbt 'commonJVM/test; server/test' 2>&1 | grep -E 'tests passed|tests failed|FAILED|FAIL|error.*Tests|\[error\]|success|Executed in'
+
+# Server tests only
+sbt server/test 2>&1 | grep -E 'tests passed|tests failed|FAILED|FAIL|error.*Tests|\[error\]|success|Executed in'
+```
+
+### Docker Cleanup
+
+When integration tests leave stale containers or the Docker namespace fills up:
+
+```bash
+docker compose down --remove-orphans --volumes && docker network prune -f
+```
+
+### Expected Counts (as of 2026-02-09)
+
+| Project | Tests | Notes |
+|---------|-------|-------|
+| `commonJVM` | 289 | Domain model, Iron types, tree operations |
+| `server` | 219 | Service layer, simulation, controllers |
+| `serverIt` | 14 | Integration (Irmin via Docker Compose) |
+| **Total** | **522** | |
 
 ---
 

@@ -4,10 +4,10 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.Ord
 import com.risquanter.register.domain.data.{RiskResult, RiskResultGroup, Loss}
-import com.risquanter.register.domain.data.iron.SafeId
+import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.PreludeInstances.given
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId}
+import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /**

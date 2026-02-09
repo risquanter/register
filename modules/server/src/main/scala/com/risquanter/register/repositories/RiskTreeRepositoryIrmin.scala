@@ -198,7 +198,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     decodeMeta(json).catchSome { case _ => decodeLegacyMeta(json, treeId) }
 
   private def ensureRootPresent(rootId: NodeId, nodes: Seq[RiskNode]): Task[Unit] =
-    if nodes.exists(_.id == rootId.toSafeId) then ZIO.unit
+    if nodes.exists(_.id == rootId) then ZIO.unit
     else ZIO.fail(RepositoryFailure(s"Root ${rootId.value} not found in provided nodes"))
 
   private def obsoleteNodeIds(previous: Seq[RiskNode], current: Seq[RiskNode]): Set[NodeId] =

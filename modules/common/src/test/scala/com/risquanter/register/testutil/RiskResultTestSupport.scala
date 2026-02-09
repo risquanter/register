@@ -1,7 +1,7 @@
 package com.risquanter.register.testutil
 
 import com.risquanter.register.domain.data.{Loss, RiskResult, TrialId}
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId}
+import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /** Test-only helpers for RiskResult domain fixtures.

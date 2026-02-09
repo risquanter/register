@@ -3,8 +3,8 @@ package com.risquanter.register.simulation
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.iron.Probability
-import com.risquanter.register.domain.data.iron.SafeId
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId}
+import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.testutil.TestHelpers.nodeId
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 

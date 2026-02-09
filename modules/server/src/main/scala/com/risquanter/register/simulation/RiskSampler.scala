@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.iron.{Probability, SafeId, NodeId}
+import com.risquanter.register.domain.data.iron.{Probability, NodeId}
 
 /**
  * Samples risk events combining occurrence probability and loss distribution.

@@ -4,7 +4,7 @@ import zio.prelude.{Associative, Commutative, Debug, Equal, Ord}
 import com.risquanter.register.configs.SimulationConfig
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
-import com.risquanter.register.domain.data.iron.{SafeId, NodeId}
+import com.risquanter.register.domain.data.iron.NodeId
 
 /**
  * Risk type discriminator for loss distributions.
@@ -51,7 +51,7 @@ trait LECCurve {
  * - Renamed from BCG's "Risk" to avoid confusion with Risk sampling trait
  * - Outer join merge semantics (union of trial IDs, sum losses)
  * - Identity/Monoid instance for compositional aggregation
- * - Uses SafeId.SafeId for node ID per ADR-001 (Iron types internally)
+ * - Uses NodeId for node ID per ADR-018 (nominal wrapper over Iron type)
  */
 sealed abstract class LossDistribution(
   val nodeId: NodeId,
@@ -186,7 +186,7 @@ case class RiskResultGroup private (
   }
   
   override def flatten: Vector[LossDistribution] =
-    this +: children.toVector.sortBy(_.nodeId.value.toString)
+    this +: children.toVector.sortBy(_.nodeId.value)
 }
 
 object RiskResultGroup {

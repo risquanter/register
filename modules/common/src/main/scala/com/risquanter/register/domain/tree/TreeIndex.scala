@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.tree
 
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{SafeId, NodeId}
+import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
 
@@ -13,7 +13,7 @@ import zio.prelude.Validation
   * - O(1) parent lookup
   * - O(depth) ancestor path construction
   *
-  * Uses SafeId.SafeId (Iron-refined type) for all node identifiers per ADR-001.
+  * Uses NodeId (nominal wrapper over Iron-refined SafeId) for all node identifiers per ADR-018.
   *
   * Example tree:
   * {{{
@@ -25,15 +25,15 @@ import zio.prelude.Validation
   * }}}
   *
   * Index structure:
-  * - nodes: { SafeId("ops-risk") → RiskPortfolio, SafeId("cyber") → RiskLeaf, ... }
-  * - parents: { SafeId("cyber") → SafeId("ops-risk"), ... }
-  * - children: { SafeId("ops-risk") → [SafeId("cyber"), SafeId("it-risk")], ... }
+  * - nodes: { NodeId("ops-risk") → RiskPortfolio, NodeId("cyber") → RiskLeaf, ... }
+  * - parents: { NodeId("cyber") → NodeId("ops-risk"), ... }
+  * - children: { NodeId("ops-risk") → [NodeId("cyber"), NodeId("it-risk")], ... }
   *
   * When "hardware" changes:
-  * 1. Look up SafeId("hardware") → parent = SafeId("it-risk")
-  * 2. Look up SafeId("it-risk") → parent = SafeId("ops-risk")
-  * 3. Look up SafeId("ops-risk") → parent = None (root)
-  * 4. Invalidate cache for: [SafeId("hardware"), SafeId("it-risk"), SafeId("ops-risk")]
+  * 1. Look up NodeId("hardware") → parent = NodeId("it-risk")
+  * 2. Look up NodeId("it-risk") → parent = NodeId("ops-risk")
+  * 3. Look up NodeId("ops-risk") → parent = None (root)
+  * 4. Invalidate cache for: [NodeId("hardware"), NodeId("it-risk"), NodeId("ops-risk")]
   *
   * @param nodes Map from node ID to RiskNode (all nodes in tree)
   * @param parents Map from child ID to parent ID (no entry for root)
@@ -173,7 +173,7 @@ object TreeIndex {
     * @return Validation with accumulated errors or TreeIndex
     */
   def fromNodeSeq(nodes: Seq[RiskNode]): Validation[ValidationError, TreeIndex] = {
-    val nodeMap = nodes.map(n => extractSafeId(n) -> n).toMap
+    val nodeMap = nodes.map(n => extractNodeId(n) -> n).toMap
     fromNodes(nodeMap)
   }
 
@@ -197,13 +197,7 @@ object TreeIndex {
     }
   }
 
-  /**
-    * Extract NodeId from a RiskNode.
-    *
-    * RiskNode.id now returns NodeId directly (ADR-018).
-    */
-  private def extractSafeId(node: RiskNode): NodeId =
-    node.id
+  private def extractNodeId(node: RiskNode): NodeId = node.id
 
   private def validateChildToParent(
       nodes: Map[NodeId, RiskNode],

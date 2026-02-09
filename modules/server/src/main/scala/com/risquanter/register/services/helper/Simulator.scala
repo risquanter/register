@@ -4,7 +4,7 @@ import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
 import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, NodeProvenance, ExpertDistributionParams, LognormalDistributionParams}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
-import com.risquanter.register.domain.data.iron.{PositiveInt, Probability, SafeId}
+import com.risquanter.register.domain.data.iron.{PositiveInt, Probability}
 import io.github.iltotore.iron.refineUnsafe
 import io.github.iltotore.iron.constraint.numeric.{Greater, given}
 import zio.prelude.Identity

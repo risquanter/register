@@ -2,8 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.test.Assertion.*
-import com.risquanter.register.domain.data.iron.{SafeId, NodeId}
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, idStr}
+import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
 
 object RiskPortfolioSpec extends ZIOSpecDefault {
 
@@ -306,7 +306,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
 
     suite("Successful Construction Properties")(
       
-      test("extract ID as SafeId correctly") {
+      test("extract ID as NodeId correctly") {
         val result = RiskPortfolio.create(
           id = idStr("test-id"),
           name = "Test Name",

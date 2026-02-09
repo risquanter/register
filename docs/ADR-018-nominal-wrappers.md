@@ -71,18 +71,20 @@ given JsonDecoder[TreeId] = JsonDecoder[String].mapOrFail(s =>
   TreeId.fromString(s).left.map(_.mkString(", ")))
 ```
 
-### 4. Domain Model Stays on Base Type
+### 4. Domain Model Uses Wrapper Type
 
-Domain data classes (`RiskNode.id`, `RiskLeaf.safeId`) continue to use `SafeId.SafeId` — the raw validated ULID. Wrapping happens at structural boundaries:
+Domain data classes use the nominal wrapper directly — `RiskNode.id` returns `NodeId`, not `SafeId.SafeId`. This gives type-safe identity throughout the domain layer without requiring boundary wrapping:
 
 ```scala
-// RiskNode stores the base type
+// RiskNode stores and exposes NodeId directly
 sealed trait RiskNode:
-  def id: SafeId.SafeId
+  def id: NodeId
 
-// TreeIndex wraps at construction
-private def extractNodeId(node: RiskNode): NodeId = NodeId(node.id)
+// All maps, lookups, and comparisons use NodeId
+val nodeMap: Map[NodeId, RiskNode] = nodes.map(n => n.id -> n).toMap
 ```
+
+The allocation cost of the case class wrapper is negligible — these IDs flow through service/HTTP layers, not hot simulation loops (where opaque types like `PRNGCounter` are used instead).
 
 ---
 
