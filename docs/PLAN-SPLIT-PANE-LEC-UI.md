@@ -26,7 +26,7 @@ This document captures the complete implementation plan to enable continuation f
 - Input filters and on-blur validation working
 - Backend has `Simulator.simulateTree` for Monte Carlo simulation
 - `VegaLiteBuilder` generates LEC chart specs server-side
-- `LECCurveData` hierarchical structure exists
+- `LECCurveResponse` API response type exists
 
 ---
 
@@ -117,7 +117,7 @@ This document captures the complete implementation plan to enable continuation f
 │   └── RiskSampler.scala       # Monte Carlo sampling
 └── services/
     ├── RiskTreeService.scala       # Service trait
-    └── RiskTreeServiceLive.scala   # Implementation with buildLECNode
+    └── RiskTreeServiceLive.scala   # Implementation using RiskResultResolver
 ```
 
 ### Current Frontend Code
@@ -165,20 +165,21 @@ sealed trait RiskNode
 case class RiskLeaf(...) extends RiskNode        // Terminal: has distribution
 case class RiskPortfolio(children: Array[RiskNode]) extends RiskNode  // Branch
 
-// Simulation results are per-node (no RiskTreeResult tree — removed)
+// Simulation results are per-node, cached in RiskResultCache
 case class RiskResult(nodeId: NodeId, outcomes: Map[TrialId, Loss], provenances: List[NodeProvenance])
 // Results are cached in RiskResultCache, keyed by NodeId
 // Tree structure for navigation comes from TreeIndex (built from RiskTree.nodes)
 ```
 
-### LECCurveData (API response format)
+### LECCurveResponse (API response format)
 ```scala
-case class LECCurveData(
+final case class LECCurveResponse(
   id: String,
   name: String,
   curve: Vector[LECPoint],           // (loss, exceedanceProbability) points
   quantiles: Map[String, Double],    // p50, p90, p95, p99
-  children: Option[Vector[LECCurveData]]  // Hierarchical children
+  childIds: Option[List[String]] = None,  // Flat child ID list
+  provenances: List[NodeProvenance] = Nil
 )
 ```
 
@@ -216,7 +217,7 @@ case class LECCurveData(
 
 **Endpoint**: `GET /risk-trees/{treeId}/nodes/{nodeId}/lec`
 - Query params: `depth` (default 1), `nTrials` (optional)
-- Returns: `LECCurveData` for selected node + children at depth
+- Returns: `LECCurveResponse` for selected node + children at depth
 
 **Files to modify**:
 1. `modules/common/src/main/scala/.../http/endpoints/RiskTreeEndpoints.scala`
@@ -238,7 +239,7 @@ case class LECCurveData(
 **Goal**: Ensure frontend can deserialize backend responses
 
 **Check existing**:
-- `LECCurveData` in common module ✓
+- `LECCurveResponse` in common module ✓
 - `LECPoint` in common module ✓
 - JSON codecs with `zio-json` ✓
 
@@ -378,7 +379,7 @@ class TreeViewState:
   val treeStructure: Var[Option[RiskNode]] = Var(None)
   val expandedNodes: Var[Set[String]] = Var(Set.empty)
   val selectedNodeId: Var[Option[String]] = Var(None)
-  val lecData: Var[Option[LECCurveData]] = Var(None)
+  val lecData: Var[Option[LECCurveResponse]] = Var(None)
   val isLoading: Var[Boolean] = Var(false)
   val error: Var[Option[String]] = Var(None)
   
@@ -468,7 +469,7 @@ modules/app/src/main/scala/app/services/TreeService.scala
 ### Phase 5: LEC Chart Component
 
 #### Step 5.1: Vega-Lite Spec Builder (Frontend)
-**Goal**: Generate BCG-style chart spec from `LECCurveData`
+**Goal**: Generate BCG-style chart spec from `LECCurveResponse`
 
 **Files to create**:
 ```
@@ -482,13 +483,13 @@ object LECChartBuilder:
     "#60b0f0", "#F2A64A", "#75B56A", "#E1716A", ...
   )
   
-  def build(data: LECCurveData, width: Int = 600, height: Int = 300): js.Object =
+  def build(data: LECCurveResponse, width: Int = 600, height: Int = 300): js.Object =
     // Build Vega-Lite spec with:
     // - Mark: line with "basis" interpolation
     // - X: loss (quantitative), formatted for B/M
     // - Y: exceedance probability (quantitative), formatted as %
     // - Color: by risk name
-    // - Data: flatten LECCurveData into values array
+    // - Data: flatten LECCurveResponse into values array
 ```
 
 **Key features**:
@@ -513,7 +514,7 @@ modules/app/src/main/scala/app/views/LECChartView.scala
 
 **Pattern**:
 ```scala
-def apply(lecSignal: Signal[Option[LECCurveData]]): HtmlElement =
+def apply(lecSignal: Signal[Option[LECCurveResponse]]): HtmlElement =
   div(
     cls := "lec-chart-container",
     child <-- lecSignal.map {
@@ -630,8 +631,8 @@ selectedNodeId.signal.changes.foreach { maybeNodeId =>
 - Redundant computation when re-selecting nodes
 
 ## Options
-1. **Client-side LRU cache**: Cache `LECCurveData` by (treeId, nodeId, nTrials)
-2. **Server-side memoization**: Cache `RiskResult` per node
+1. **Client-side LRU cache**: Cache `LECCurveResponse` by (treeId, nodeId)
+2. **Server-side cache**: `RiskResultCache` stores `RiskResult` per node (already implemented)
 3. **Persistent cache**: Store computed LECs in database
 
 ## Invalidation

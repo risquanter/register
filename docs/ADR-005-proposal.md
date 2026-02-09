@@ -4,12 +4,6 @@
 **Date:** 2026-01-16  
 **Tags:** caching, performance, lec, aggregation, zio
 
-> **Implementation status (2026-02-09):** `TreeIndex` and `RiskResultCache` are implemented.
-> `TreeIndex` is built from nodes at tree construction time and provides O(1) node/parent lookup.
-> `RiskResultCache` stores `RiskResult` per `NodeId` (not `LECCurveData`).
-> Cache invalidation uses `TreeCacheManager` with O(depth) ancestor path via `TreeIndex`.
-> The conceptual `LECCache` in this ADR was realized as `RiskResultCache` + `RiskResultResolver`.
-
 ---
 
 ## Context

@@ -4,8 +4,8 @@
 **Date:** 2026-01-16  
 **Tags:** persistence, irmin, graphql, sse, architecture
 
-> **Note:** Code examples in this ADR are conceptual patterns, not actual codebase types.
-> Types like `TreeId`, `NodeId`, `LECCurveData`, `IrminClient` are not yet implemented.
+> **Note:** Code examples in this ADR are conceptual patterns showing the intended data flow.
+> See actual implementations: `IrminClient`, `RiskResultCache`, `SSEHub`, `SSEController`.
 
 ---
 
@@ -100,8 +100,8 @@ LEC curves cached in ZIO, invalidated on Irmin notifications:
 
 ```scala
 // Conceptual: Cache pattern
-class LECCache:
-  private val cache: Ref[Map[NodeId, LECCurveData]]
+class RiskResultCache:
+  private val cache: Ref[Map[NodeId, RiskResult]]
   
   def invalidatePath(nodeId: NodeId): UIO[List[NodeId]] =
     // Walk parent pointers, invalidate ancestors
@@ -176,7 +176,7 @@ def streamChanges: ZStream[Any, Throwable, NodeUpdate]
 
 // GOOD: Scala computes, Irmin stores structure only
 // Irmin stores: /nodes/<id>/v (parameters only)
-// ZIO computes and caches LECCurveData
+// ZIO computes and caches RiskResult
 ```
 
 ---
@@ -186,7 +186,7 @@ def streamChanges: ZStream[Any, Throwable, NodeUpdate]
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | `IrminClient` | sttp + GraphQL | Mutations and subscriptions to Irmin |
-| `LECCache` | ZIO Ref + Map | In-memory LEC curve storage |
+| `RiskResultCache` | ZIO Ref + Map | In-memory simulation result storage |
 | `SSEController` | Tapir streamBody + ZioStreams | Push updates to browsers (text/event-stream) |
 | `SSEHub` | ZIO Hub | Fan-out broadcasting to SSE subscribers |
 | `TreeWatcher` | ZStream | Process Irmin notifications |

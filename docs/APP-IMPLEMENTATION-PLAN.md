@@ -4,19 +4,6 @@
 
 This document outlines an incremental plan to create a Laminar frontend app for the Register project. The app will provide a form for creating `RiskLeaf` entities with expert/lognormal mode toggle, validation feedback, and backend submission.
 
-## REMARK I
-this decision was made regarding SEE notification of stale state
-Implement SSE Notification as Infrastructure
-
-CacheInvalidated events are published
-No frontend consumes them yet
-Useful for testing and future integration
-
-## REMARK II 
-~~revalidation of the whole document is needed and critical update based on [the state of the proposal](IMPLEMENTATION-PLAN-PROPOSALS.md)~~
-
-✅ **Revalidated 2026-02-09.** Updated to reflect: ULID-based `TreeId`/`NodeId`, server-generated IDs (no user-supplied IDs), `RiskResultCache` + `TreeCacheManager` (replaces conceptual `LECCache`), `LECCurveResponse` (replaces `LECCurveData`), `RiskResultResolver` (replaces `SimulationExecutionService`), `RiskTreeResult` removed. Phase 8 split into 8a/8b to separate available SSE events from pipeline-dependent features.
-
 **Architecture Context:** This plan implements the browser layer of the architecture described in ADR-004a/b. The frontend receives real-time cache-invalidation notifications via SSE, with the ZIO backend performing all simulation and aggregation (ADR-009). Future phases add eager LEC push via `LECUpdated` events (requires Irmin watch pipeline) and optional WebSocket for collaboration.
 
 ## Goals
@@ -46,7 +33,7 @@ Useful for testing and future integration
 │  │  ─────           │  ─────          │  ──────────        │   │
 │  │  • RiskLeafForm  │  • FormState    │  • REST mutations  │   │
 │  │  • TreeView      │  • TreeState    │  • SSE events      │   │
-│  │  • LECChart      │  • LECCache     │  • Error handling  │   │
+│  │  • LECChart      │  • LECState     │  • Error handling  │   │
 │  │  • ScenarioBar   │  • UIState      │                    │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                           │                                     │
@@ -877,7 +864,7 @@ libraryDependencies ++= Seq(
 | ADR-008-proposal | Error handling patterns (Phase 9) |
 | ADR-009 | Frontend treats leaf/aggregate LEC uniformly |
 | ADR-014 | RiskResult caching strategy (`RiskResultCache`, `TreeCacheManager`) |
-| ADR-015 | `RiskResultResolver` cache-aside pattern; `RiskTreeResult` removed |
+| ADR-015 | `RiskResultResolver` cache-aside pattern |
 | ADR-018 | Nominal `NodeId`/`TreeId` wrappers |
 
 ---

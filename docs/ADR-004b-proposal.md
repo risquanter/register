@@ -4,8 +4,8 @@
 **Date:** 2026-01-16  
 **Tags:** persistence, irmin, graphql, websocket, architecture
 
-> **Note:** Code examples in this ADR are conceptual patterns, not actual codebase types.
-> Types like `TreeId`, `NodeId`, `LECCurveData`, `IrminClient` are not yet implemented.
+> **Note:** Code examples in this ADR are conceptual patterns showing the intended data flow.
+> See actual implementations: `IrminClient`, `RiskResultCache`, `SSEHub`.
 
 ---
 
@@ -96,7 +96,7 @@ case class PresenceUpdate(userId: UserId, status: Status) extends ClientMessage
 
 // Server → Client messages
 sealed trait ServerMessage
-case class LECUpdated(nodeId: NodeId, lec: LECCurveData) extends ServerMessage
+case class LECUpdated(nodeId: NodeId, lec: LECCurveResponse) extends ServerMessage
 case class NodeChanged(nodeId: NodeId, node: RiskNode) extends ServerMessage
 case class ConflictDetected(nodeId: NodeId, users: List[UserId]) extends ServerMessage
 case class UserCursor(userId: UserId, nodeId: NodeId) extends ServerMessage
@@ -108,8 +108,8 @@ LEC curves cached in ZIO, invalidated on Irmin notifications:
 
 ```scala
 // Conceptual: Cache pattern
-class LECCache:
-  private val cache: Ref[Map[NodeId, LECCurveData]]
+class RiskResultCache:
+  private val cache: Ref[Map[NodeId, RiskResult]]
   
   def invalidatePath(nodeId: NodeId): UIO[List[NodeId]] =
     // Walk parent pointers, invalidate ancestors
@@ -238,7 +238,7 @@ presenceHub.getEditorsFor(nodeId).flatMap {
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | `IrminClient` | sttp + GraphQL | Mutations and subscriptions to Irmin |
-| `LECCache` | ZIO Ref + Map | In-memory LEC curve storage |
+| `RiskResultCache` | ZIO Ref + Map | In-memory simulation result storage |
 | `WebSocketHub` | ZIO HTTP WebSocket | Bidirectional client communication |
 | `PresenceHub` | ZIO Ref + Hub | Track connected users and cursors |
 | `ConflictDetector` | ZIO logic | Pre-commit conflict awareness |

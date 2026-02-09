@@ -430,14 +430,14 @@ Implement the parent-pointer index and LEC cache data structures that enable O(d
 **Reviewed ADRs:** ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011
 **Deviations detected:** None
 **Alignment notes:**
-- Uses existing RiskResult and LECCurveData types (ADR-009)
+- Uses existing RiskResult and LECCurveResponse types (ADR-009)
 - Iron-refined NodeId types (ADR-001)
 - Cache operations logged at service layer (ADR-002)
 
 ### Validation Checklist
 - [x] Compliant with ADR-001 (Iron types for NodeId — uses `type NodeId = SafeId.SafeId`)
 - [x] Compliant with ADR-002 (cache operations logged)
-- [x] Compliant with ADR-009 (uses existing RiskResult, LECCurveData)
+- [x] Compliant with ADR-009 (uses existing RiskResult, LECCurveResponse)
 - [x] Compliant with ADR-010 (cache errors use SimulationError)
 - [x] Compliant with ADR-011 (top-level imports)
 
@@ -455,7 +455,7 @@ Implement the parent-pointer index and LEC cache data structures that enable O(d
    - ✅ `descendants(nodeId): Set[NodeId]` — subtree nodes
    - ✅ `fromTree(root: RiskNode)` — factory method
 
-2. **Created `RiskResultCache` service** (originally `LECCache`, refactored per ADR-014)
+2. **Created `RiskResultCache` service** (per ADR-014)
    ```
    services/cache/RiskResultCache.scala
    ```
@@ -476,7 +476,7 @@ Implement the parent-pointer index and LEC cache data structures that enable O(d
 4. **Added tests**
    ```
    test/.../TreeIndexSpec.scala (14 tests)
-   test/.../LECCacheSpec.scala (11 tests)
+   test/.../RiskResultCacheSpec.scala (11 tests)
    ```
    - ✅ 25 tests all passing
    - ✅ Tests use `SafeId.fromString(...).getOrElse(throw...)` pattern
@@ -827,7 +827,7 @@ Implement what-if scenario management via Irmin branches.
 - ScenarioId, ScenarioName use Iron refinement (ADR-001)
 - Branch operations via Irmin GraphQL client (ADR-004a)
 - Merge conflicts use MergeConflict from SimulationError (ADR-010)
-- Scenario comparison uses cached LECCurveData (ADR-005, ADR-009)
+- Scenario comparison uses cached RiskResult (ADR-005, ADR-009)
 
 ### Validation Checklist
 - [ ] Compliant with ADR-001 (ScenarioName, ScenarioId validated with Iron)
@@ -869,7 +869,7 @@ Implement what-if scenario management via Irmin branches.
    service/scenario/ScenarioComparator.scala
    ```
    - `compare(a, b)` → diff nodes and LEC impact
-   - Use cached LECCurveData for fast comparison
+   - Use cached RiskResult for fast comparison
 
 5. **Create API endpoints**
    ```

@@ -606,8 +606,8 @@ Frontend Features:
 ```
 
 **Technical Needs:**
-- ✅ Already have: Hierarchical LEC results (`LECNode` tree structure)
-- 🔄 Future: Frontend implementation (React + D3.js)
+- ✅ Already have: Per-node LEC via `LECCurveResponse` (flat `childIds` structure)
+- 🔄 Future: Frontend implementation (Scala.js + Laminar + Vega-Lite)
 - 🔄 Future: Memoization/caching of expanded nodes
 
 #### **3. Scenario Analysis**
@@ -791,7 +791,7 @@ For large-scale Monte Carlo simulations (1M+ trials), memory consumption of spar
 
 This appears to offer a 100x memory reduction for high-volume simulations.
 
-### Why HDR Histogram Was Rejected
+### Why HDR Histogram Is Not Used
 
 **Critical incompatibility with trial-level aggregation:**
 

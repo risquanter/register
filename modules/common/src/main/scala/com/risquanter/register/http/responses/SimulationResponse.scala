@@ -7,7 +7,7 @@ import com.risquanter.register.domain.data.iron.TreeId
 /** Response DTO for simulation data with Loss Exceedance Curve
   * 
   * Contains aggregated quantiles and optional Vega-Lite visualization.
-  * Use hierarchical lecNode field in RiskTreeWithLEC for detailed per-risk data.
+  * For per-node LEC data, use the `/risk-trees/{treeId}/nodes/{nodeId}/lec` endpoint.
   * 
   * @param id Unique simulation identifier
   * @param name Simulation name

@@ -17,7 +17,6 @@ This plan implements the RiskResult caching strategy defined in ADR-014. The key
 |-----------|--------|-------|
 | `RiskResultCache` | ✅ Implemented | Caches `RiskResult` per `NodeId` |
 | `TreeCacheManager` | ✅ Implemented | Per-tree cache lifecycle, invalidation |
-| `CurveBundle*` | ✅ Deleted | All CurveBundle code removed |
 | `LECGenerator` | ✅ Has `generateCurvePoints` | Multi-node shared ticks via `generateCurvePointsMulti` |
 | `TreeIndex` | ✅ Wired | O(1) node lookup via `nodes: Map[NodeId, RiskNode]` |
 | `CacheController` | ✅ Working | Admin endpoints for cache management |
@@ -27,26 +26,20 @@ This plan implements the RiskResult caching strategy defined in ADR-014. The key
 
 ## Implementation Phases
 
-### Phase 1: Delete Wrong CurveBundle Code ✅
+### Phase 1: Remove Incorrect Cache Approach ✅
 
-**Goal:** Remove all code based on the wrong caching approach.
-
-**Deleted files:**
-1. `CurveBundle.scala` — removed
-2. `CurveBundleSpec.scala` — removed
-3. `CurveBundleExecutor.scala` — removed
-4. `CurveBundleExecutorSpec.scala` — removed
+**Status:** Complete. The incorrect CurveBundle-based caching approach was replaced with `RiskResultCache`.
 
 ---
 
-### Phase 2: Refactor LECCache → RiskResultCache ✅
+### Phase 2: RiskResultCache ✅
 
-**Goal:** Cache `RiskResult` (simulation outcomes) instead of UI DTOs.
+**Status:** Complete. Caches `RiskResult` (simulation outcomes) per `NodeId`.
 
-**Completed:**
-1. `LECCache.scala` → `RiskResultCache.scala` — caches `RiskResult` per `NodeId`
-2. `TreeCacheManager` — manages per-tree `RiskResultCache` instances
-3. `LECCacheSpec.scala` → `RiskResultCacheSpec.scala` — tests updated
+**Components:**
+1. `RiskResultCache` — per-node result storage
+2. `TreeCacheManager` — per-tree cache lifecycle + invalidation
+3. `RiskResultCacheSpec` — test coverage
 
 **Trait:**
 ```scala
@@ -107,11 +100,10 @@ def generateCurvePointsMulti(
 
 ## Success Criteria
 
-1. **All CurveBundle* files deleted**
-2. **RiskResultCache caches simulation outcomes**
-3. **generateCurvePointsMulti produces shared tick domain**
-4. **All existing tests pass** after refactoring
-5. **O(depth) invalidation** via TreeIndex.ancestorPath
+1. **RiskResultCache caches simulation outcomes**
+2. **generateCurvePointsMulti produces shared tick domain**
+3. **All existing tests pass**
+4. **O(depth) invalidation** via TreeIndex.ancestorPath
 
 ---
 
@@ -119,14 +111,10 @@ def generateCurvePointsMulti(
 
 | Phase | Status | Notes |
 |-------|--------|-------|
-| 1: Delete CurveBundle | ✅ Complete | All files removed |
-| 2: Refactor LECCache | ✅ Complete | RiskResultCache + TreeCacheManager |
+| 1: Remove incorrect cache | ✅ Complete | |
+| 2: RiskResultCache | ✅ Complete | Per-node result storage |
 | 3: generateCurvePointsMulti | ✅ Complete | Shared tick domain |
 | 4: Wire to RiskTreeService | ✅ Complete | Via RiskResultResolver |
 | 5: TreeIndex wiring | ✅ Complete | Built at tree construction |
 
----
-
-## Next Action
-
-**Proceed with Phase 1: Delete Wrong CurveBundle Code?**
+All phases complete.

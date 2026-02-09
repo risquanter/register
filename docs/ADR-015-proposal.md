@@ -8,24 +8,18 @@
 
 ## Context
 
-We have implemented `RiskResultCache` (ADR-014) but need to define how it integrates with the simulation and query APIs. The existing `RiskTreeResult` structure packages simulation outputs into a tree, but this is redundant with the cache.
+`RiskResultCache` (ADR-014) stores per-node simulation outcomes. This ADR defines how the cache integrates with the simulation and query APIs.
 
 ### Key Insight
 
-The tree STRUCTURE comes from `RiskNode` (the definition stored in Irmin). The simulation RESULTS are `RiskResult` per node. `RiskTreeResult` couples these unnecessarily.
+The tree STRUCTURE comes from `RiskNode` (the definition stored in Irmin). The simulation RESULTS are `RiskResult` per node, cached by `NodeId`. The cache is the single source of truth for simulation outputs.
 
 ---
 
 ## Decision
 
-### Remove RiskTreeResult, Use Cache Directly
+### Cache-Direct Architecture
 
-**Current model:**
-```
-Simulation → RiskTreeResult (tree of results) → Extract per-node → Use
-```
-
-**Proposed model:**
 ```
 Simulation → Cache (RiskResult per node) → Query cache directly
 ```
@@ -321,43 +315,19 @@ Simulation (in-memory, via RiskResultResolver)
 RiskResult per node (cached in-memory via TreeCacheManager, NOT in Irmin)
 ```
 
-Simulation results are never persisted to Irmin. Removing `RiskTreeResult` had no effect on persistence.
+Simulation results are not persisted to Irmin — they are computed and cached in-memory only.
 
 ---
 
-## Migration Path
+## Implementation Status
 
-### Phase 1: Create RiskResultResolver Service ✅
-
-1. ✅ Created `RiskResultResolver` trait with `ensureCached` and `ensureCachedAll`
-2. ✅ Created `RiskResultResolverLive` implementation
-3. ✅ Wired to `TreeCacheManager` and `Simulator`
-4. ✅ Unit tests for resolver (`RiskResultResolverSpec`)
-
-### Phase 2: Create Node Lookup via TreeIndex ✅
-
-1. ✅ `TreeIndex` built from nodes at tree construction time
-2. ✅ O(1) node lookup via `index.nodes: Map[NodeId, RiskNode]`
-3. ✅ `RiskResultResolver` receives `RiskTree` parameter (which embeds `TreeIndex`)
-
-### Phase 3: Refactor RiskTreeServiceLive ✅
-
-1. ✅ `getLECCurve` and `getLECCurvesMulti` use `resolver.ensureCached`
-2. ✅ `LECGenerator.generateCurvePoints` used for rendering
-3. ✅ `childIds` from `RiskNode` via `TreeIndex`, not a result tree
-4. ✅ Tests updated
-
-### Phase 4: Delete RiskTreeResult ✅
-
-1. ✅ `TreeResult.scala` removed
-2. ✅ All references removed
-3. ✅ All tests pass
-
-### Phase 5: Integration Tests
-
-1. ✅ Cache hit/miss behavior tested (`RiskResultResolverSpec`, `RiskResultCacheSpec`)
-2. Cache invalidation via Irmin notifications — deferred to Irmin integration phase
-3. Recomputation reusing cached siblings — covered in unit tests
+| Phase | Status |
+|-------|--------|
+| `RiskResultResolver` service | ✅ Implemented |
+| Node lookup via `TreeIndex` | ✅ Implemented |
+| `RiskTreeServiceLive` uses `resolver.ensureCached` | ✅ Implemented |
+| Cache hit/miss behavior tested | ✅ Implemented |
+| Cache invalidation via Irmin notifications | Deferred to Irmin integration phase |
 
 ---
 

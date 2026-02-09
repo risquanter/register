@@ -54,17 +54,18 @@ trait LECCurve {
 
 **Practical implementation:** `LossDistribution` implements `LECCurve` via its simulation data.
 
-### LEC Curve Data
+### LEC Curve Response
 The **serialized representation** of an LEC curve for API responses.
 
 **Structure:**
 ```scala
-case class LECCurveData(
+final case class LECCurveResponse(
   id: String,
   name: String,
   curve: Vector[LECPoint],           // Discrete sampling of LEC function
   quantiles: Map[String, Double],    // Key percentiles (p50, p90, p95, p99)
-  children: Option[Vector[LECCurveData]]
+  childIds: Option[List[String]] = None,  // Flat child ID references
+  provenances: List[NodeProvenance] = Nil
 )
 ```
 
@@ -111,7 +112,7 @@ val lecFunction: Loss => BigDecimal =
   threshold => combined.probOfExceedance(threshold)
 
 // Generate curve data for API
-val curveData: LECCurveData = 
+val curveData: LECCurveResponse = 
   generateCurveData(combined, nPoints = 100)
 ```
 
@@ -150,7 +151,7 @@ val var95: BigDecimal =
 
 ### 4. Generate Curve Data for API
 ```scala
-val curveData: LECCurveData = 
+val curveData: LECCurveResponse = 
   LECGenerator.generateCurveData(distribution, nPoints = 100)
 ```
 
@@ -168,12 +169,12 @@ val vegaSpec: String =
 | **Loss** | `Long` | Outcome value | Monetary impact |
 | **Loss Distribution** | `LossDistribution` | Empirical distribution | Simulation data |
 | **LEC Curve** | `LECCurve` trait | `Loss → ℝ` function | `probOfExceedance` method |
-| **LEC Curve Data** | `LECCurveData` | Discrete sampling | API response format |
+| **LEC Curve Response** | `LECCurveResponse` | Discrete sampling | API response format |
 
 ## Key Insights
 
 1. **LEC is a function**, backed by a Loss Distribution
-2. **Loss Distribution is the data**, LEC Curve Data is its serialization
+2. **Loss Distribution is the data**, LEC Curve Response is its serialization
 3. **Combine distributions, not curves** - sum trial-wise losses, then compute LEC
 4. **Identity structure** enables compositional risk aggregation
 5. **LECCurve trait** provides the `Loss → Probability` abstraction

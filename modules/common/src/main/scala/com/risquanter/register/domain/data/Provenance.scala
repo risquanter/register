@@ -13,7 +13,7 @@ import com.risquanter.register.domain.data.iron.NodeId
  * - Execution metadata (timestamp, library versions)
  * 
  * **Reproduction workflow:**
- * 1. Extract NodeProvenance from RiskTreeWithLEC response
+ * 1. Extract NodeProvenance from RiskResult.provenances
  * 2. Reconstruct RiskSampler with exact parameters
  * 3. Re-run simulation with same nTrials and parallelism
  * 4. Verify identical outcomes
