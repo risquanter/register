@@ -1,8 +1,8 @@
 package com.risquanter.register.domain.data
 
-import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder, JsonFieldEncoder, JsonFieldDecoder}
+import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import java.time.Instant
-import com.risquanter.register.domain.data.iron.{SafeId, TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.NodeId
 
 /**
  * Per-node provenance metadata for reproducible Monte Carlo simulations.
@@ -45,32 +45,6 @@ case class NodeProvenance(
   // Execution Metadata
   timestamp: Instant,
   simulationUtilVersion: String
-)
-
-/**
- * Tree-level provenance metadata aggregating all node provenances.
- * 
- * Provides complete reproducibility information for an entire risk tree simulation:
- * - Global parameters (seeds, trials, parallelism)
- * - Per-node provenances indexed by riskId
- * 
- * **Usage:**
- * - Returned in RiskTreeWithLEC when ?includeProvenance=true
- * - Maps each risk node to its specific provenance
- * - Enables partial reproduction (single node or subtree)
- * 
- * @param treeId Database ID of the risk tree
- * @param globalSeeds (seed3, seed4) tuple applied to all risks
- * @param nTrials Number of Monte Carlo trials executed
- * @param parallelism Degree of parallelism used
- * @param nodeProvenances Map from riskId to NodeProvenance for each risk in tree
- */
-case class TreeProvenance(
-  treeId: TreeId,
-  globalSeeds: (Long, Long),
-  nTrials: Int,
-  parallelism: Int,
-  nodeProvenances: Map[NodeId, NodeProvenance]
 )
 
 /**
@@ -149,18 +123,3 @@ object NodeProvenance {
   given schema: Schema[NodeProvenance] = Schema.any[NodeProvenance]
 }
 
-object TreeProvenance {
-  import sttp.tapir.Schema
-  import NodeId.given
-  
-  // Map[NodeId, _] needs field encoder/decoder for JSON object keys
-  private given nodeIdFieldEncoder: JsonFieldEncoder[NodeId] = JsonFieldEncoder.string.contramap(_.value)
-  private given nodeIdFieldDecoder: JsonFieldDecoder[NodeId] = JsonFieldDecoder.string.mapOrFail(s =>
-    SafeId.fromString(s).map(NodeId(_)).left.map(errors => errors.map(_.message).mkString(", "))
-  )
-  
-  given codec: JsonCodec[TreeProvenance] = DeriveJsonCodec.gen[TreeProvenance]
-  
-  // TODO: Phase D - Replace with proper Schema derivation
-  given schema: Schema[TreeProvenance] = Schema.any[TreeProvenance]
-}

@@ -96,42 +96,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         assertTrue(decoded.toOption.get.confidenceInterval == 0.90)
       },
       
-      test("TreeProvenance serializes with node provenances") {
-        val nodeProvenance = NodeProvenance(
-          riskId = nodeId("risk1"),
-          entityId = 123L,
-          occurrenceVarId = 1123L,
-          lossVarId = 2123L,
-          globalSeed3 = 0L,
-          globalSeed4 = 0L,
-          distributionType = "expert",
-          distributionParams = ExpertDistributionParams(
-            percentiles = Array(0.1, 0.5, 0.9),
-            quantiles = Array(100.0, 500.0, 2000.0),
-            terms = 3
-          ),
-          timestamp = Instant.now(),
-          simulationUtilVersion = BuildInfo.simulationUtilVersion
-        )
-        
-        val treeProvenance = TreeProvenance(
-          treeId = treeId("tree-42"),
-          globalSeeds = (0L, 0L),
-          nTrials = 10000,
-          parallelism = 4,
-          nodeProvenances = Map(nodeId("risk1") -> nodeProvenance)
-        )
-        
-        val json = treeProvenance.toJson
-        val decoded = json.fromJson[TreeProvenance]
-        
-        assertTrue(decoded.isRight) &&
-        assertTrue(decoded.toOption.get.treeId == treeId("tree-42")) &&
-        assertTrue(decoded.toOption.get.nTrials == 10000) &&
-        assertTrue(decoded.toOption.get.nodeProvenances.size == 1) &&
-        assertTrue(decoded.toOption.get.nodeProvenances.contains(nodeId("risk1")))
-      },
-      
       test("DistributionParams sealed trait handles both subtypes") {
         val expert: DistributionParams = ExpertDistributionParams(
           percentiles = Array(0.5),
