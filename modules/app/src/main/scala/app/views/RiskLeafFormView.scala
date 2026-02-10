@@ -1,7 +1,8 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import app.state.{RiskLeafFormState, DistributionMode}
+import zio.prelude.Validation
+import app.state.{RiskLeafFormState, DistributionMode, TreeBuilderState}
 import app.components.FormInputs.*
 
 /**
@@ -10,12 +11,14 @@ import app.components.FormInputs.*
  */
 object RiskLeafFormView:
 
-  def apply(): HtmlElement =
+  def apply(builderState: TreeBuilderState): HtmlElement =
     val state = new RiskLeafFormState
+    val parentVar: Var[Option[String]] = Var(None)
+    val submitError: Var[Option[String]] = Var(None)
     
     div(
       cls := "risk-leaf-form",
-      h2("Create Risk Leaf"),
+      h2("Add Risk Leaf"),
       p(
         cls := "form-description",
         "Configure a risk leaf node with either expert distribution or lognormal distribution."
@@ -51,6 +54,9 @@ object RiskLeafFormView:
         selectedVar = state.distributionModeVar
       ),
       
+      // Parent selection
+      parentSelect(parentVar, builderState),
+      
       // Conditional Fields based on mode
       child <-- state.distributionModeVar.signal.map {
         case DistributionMode.Expert => expertFields(state)
@@ -59,10 +65,11 @@ object RiskLeafFormView:
       
       // Submit Button
       submitButton(
-        text = "Create Risk Leaf",
+        text = "Add Leaf",
         isDisabled = state.hasErrors,
-        onClickCallback = () => handleSubmit(state)
-      )
+        onClickCallback = () => handleSubmit(state, parentVar, builderState, submitError)
+      ),
+      child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
     )
   
   /** Expert mode specific fields */
@@ -125,8 +132,43 @@ object RiskLeafFormView:
       crossFieldError(state.lognormalCrossFieldError)
     )
   
+  private def parentSelect(parentVar: Var[Option[String]], builderState: TreeBuilderState): HtmlElement =
+    div(
+      cls := "form-field",
+      label(cls := "form-label", "Parent Portfolio"),
+      select(
+        cls := "form-input",
+        controlled(
+          value <-- parentVar.signal.map(_.getOrElse(builderState.rootLabel)),
+          onChange.mapToValue.map { v => if v == builderState.rootLabel then None else Some(v) } --> parentVar
+        ),
+        children <-- builderState.parentOptions.map { opts =>
+          opts.map { opt =>
+            option(
+              value := opt,
+              opt
+            )
+          }
+        }
+      )
+    )
+
   /** Handle form submission */
-  private def handleSubmit(state: RiskLeafFormState): Unit =
+  private def handleSubmit(
+    state: RiskLeafFormState,
+    parentVar: Var[Option[String]],
+    builderState: TreeBuilderState,
+    submitError: Var[Option[String]]
+  ): Unit =
     state.triggerValidation()
-    // TODO: Phase 6 - POST to backend
-    org.scalajs.dom.console.log("Submit clicked - validation triggered")
+    state.toDistributionDraft match
+      case Validation.Success(_, dist) =>
+        builderState.addLeaf(state.nameVar.now(), parentVar.now(), dist) match
+          case Validation.Success(_, _) =>
+            submitError.set(None)
+            parentVar.set(None)
+            state.showErrorsVar.set(false)
+            state.touchedFields.set(Set.empty)
+            // keep leaf field values? For now leave as-is so user can add variants
+          case Validation.Failure(_, errs) => submitError.set(Some(errs.head.message))
+      case Validation.Failure(_, errs) => submitError.set(Some(errs.head.message))

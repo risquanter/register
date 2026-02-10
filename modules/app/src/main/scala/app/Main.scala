@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.Layout
-import app.views.RiskLeafFormView
+import app.views.TreeBuilderView
 
 object Main:
 
@@ -12,7 +12,7 @@ object Main:
     val container = dom.document.querySelector("#app")
     
     val appElement = Layout(
-      RiskLeafFormView()
+      TreeBuilderView()
     )
     
     render(container, appElement)

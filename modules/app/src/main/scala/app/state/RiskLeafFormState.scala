@@ -2,6 +2,9 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 import com.risquanter.register.domain.data.iron.ValidationUtil
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import zio.prelude.Validation
+import app.state.LeafDistributionDraft
 
 /**
  * Reactive form state for creating a RiskLeaf.
@@ -104,12 +107,12 @@ class RiskLeafFormState extends FormState:
   /** Probability validation using Iron Probability type (open interval 0 < p < 1) */
   private val probabilityErrorRaw: Signal[Option[String]] = probabilityVar.signal.map { v =>
     if v.isBlank then Some("Probability is required")
-    else parseDouble(v) match
+    else this.parseDouble(v) match
       case None => Some("Probability must be a number")
-      case Some(p) => 
-        ValidationUtil.refineProbability(p) match
+      case Some(prob) => 
+        ValidationUtil.refineProbability(prob) match
           case Right(_) => None
-          case Left(errors) => Some(errors.head.message)
+          case Left(errs) => Some(errs.head.message)
   }
   
   /** Expert mode: percentiles validation (0-100, but Metalog needs 0 < p < 100) */
@@ -240,5 +243,51 @@ class RiskLeafFormState extends FormState:
   
   /** Check if form is valid (for submit button) */
   val isValid: Signal[Boolean] = hasErrors.map(!_)
+
+  /** Build a distribution draft from current fields (lightweight parsing; full validation happens in TreeBuilderState). */
+  def toDistributionDraft: Validation[ValidationError, LeafDistributionDraft] =
+    val mode = distributionModeVar.now()
+    val distType = mode match
+      case DistributionMode.Expert => "expert"
+      case DistributionMode.Lognormal => "lognormal"
+
+    val probabilityV = parseDoubleField(probabilityVar.now(), "leaf.probability")
+    val minLossV = mode match
+      case DistributionMode.Lognormal => parseLongField(minLossVar.now(), "leaf.minLoss").map(Some(_))
+      case _ => Validation.succeed(None)
+    val maxLossV = mode match
+      case DistributionMode.Lognormal => parseLongField(maxLossVar.now(), "leaf.maxLoss").map(Some(_))
+      case _ => Validation.succeed(None)
+    val percentilesV = mode match
+      case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(percentilesVar.now())))
+      case _ => Validation.succeed(None)
+    val quantilesV = mode match
+      case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(quantilesVar.now())))
+      case _ => Validation.succeed(None)
+
+    Validation.validateWith(probabilityV, minLossV, maxLossV, percentilesV, quantilesV) {
+      (prob, minL, maxL, pcts, quants) =>
+        LeafDistributionDraft(
+          distributionType = distType,
+          probability = prob,
+          minLoss = minL,
+          maxLoss = maxL,
+          percentiles = pcts,
+          quantiles = quants
+        )
+    }
+
+  private def parseDoubleField(raw: String, field: String): Validation[ValidationError, Double] =
+    this.parseDouble(raw) match
+      case Some(v) => Validation.succeed(v)
+      case None => Validation.fail(ValidationError(field, ValidationErrorCode.INVALID_FORMAT, s"$field must be a number"))
+
+  private def parseLongField(raw: String, field: String): Validation[ValidationError, Long] =
+    this.parseLong(raw) match
+      case Some(v) => Validation.succeed(v)
+      case None => Validation.fail(ValidationError(field, ValidationErrorCode.INVALID_FORMAT, s"$field must be a whole number"))
+
+  private def toArrayOpt(values: List[Double]): Option[Array[Double]] =
+    if values.isEmpty then None else Some(values.toArray)
 
 
