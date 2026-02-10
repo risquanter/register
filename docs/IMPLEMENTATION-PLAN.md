@@ -286,62 +286,62 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 - Vite dev server on port 5173
 - Dev workflow: `sbt ~app/fastLinkJS` + `cd modules/app && npm run dev`
 
-### Phase V: Validate Existing Code
+### Phase V: Validate Existing Code — ✅ COMPLETE
 
-**Goal:** Confirm that the 8 existing source files (Phases 2–5 from old plan) compile and render correctly.
+**Goal:** Confirm that existing source files compile and render correctly.
 
-**Tasks:**
-1. Run `sbt app/fastLinkJS` — confirm clean compilation
-2. Start Vite dev server — confirm form renders in browser
-3. Verify radio toggle switches between Expert/Lognormal
-4. Verify validation errors display inline
-5. Document any issues found
+**Findings:**
+- 7 source files (not 8 as previously documented)
+- File naming differs from old plan: `Main.scala` (not `App.scala`), `FormInputs.scala` (not `FormComponents.scala`), `Header.scala` (not `AppHeader.scala`), `Layout.scala` (not `AppLayout.scala`)
+- `ValidationUtil.refineId` uses `zio-ulid` (JVM-only) — blocked Scala.js linking. Resolved by removing vestigial `idVar`/`idFilter`/`idError` (pulled forward from Phase A)
 
 **Checkpoint:**
-- [ ] App compiles without errors
-- [ ] Form renders in browser at `http://localhost:5173`
-- [ ] Mode toggle and validation work
+- [x] App compiles without errors
+- [x] Form renders in browser at `http://localhost:5173`
+- [x] Mode toggle and validation work
 
 ---
 
-### Phase A: Align Form to Current DTO Contract
+### Phase A: Align Form to Current DTO Contract — ✅ COMPLETE
 
-**Goal:** Fix `RiskLeafFormState` to match the actual `RiskTreeDefinitionRequest` contract.
+**Goal:** Align frontend form to `RiskTreeDefinitionRequest` contract and build full tree construction UI.
 
-**Critical finding:** The form has `idVar`/`idFilter` fields for user-supplied alphanumeric IDs. The actual `RiskTreeDefinitionRequest` uses `name`/`parentName` with server-generated ULID IDs. The `idVar` is vestigial.
+**What was done:**
 
-**Current `RiskTreeDefinitionRequest`:**
-```scala
-final case class RiskTreeDefinitionRequest(
-  name: String,
-  portfolios: Seq[RiskPortfolioDefinitionRequest],
-  leaves: Seq[RiskLeafDefinitionRequest]
-)
+The scope expanded from simple form alignment to a complete tree builder. Key decisions:
+- Tree builder pattern with incremental portfolio/leaf construction (ADR-019)
+- Cascade delete for node removal (transitive closure of descendants)
+- `TreeBuilderLogic` in common module for JVM-testable topology validation
+- Composable function pattern over class hierarchies (ADR-019)
 
-final case class RiskLeafDefinitionRequest(
-  name: String,
-  parentName: Option[String],
-  distributionType: String,
-  probability: Double,
-  minLoss: Option[Long],
-  maxLoss: Option[Long],
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]]
-)
-```
+**Files created:**
 
-**Tasks:**
-1. Remove `idVar` and `idFilter` from `RiskLeafFormState`
-2. Remove ID field from `RiskLeafFormView`
-3. Add `parentNameVar` field (dropdown or text input for parent portfolio name)
-4. Add `toRequest(): Either[List[String], RiskTreeDefinitionRequest]` method
-5. Update validation to match Iron constraints on `name` (not ID)
+| File | Purpose |
+|------|---------|
+| `app/state/TreeBuilderState.scala` | Tree assembly: name, portfolio/leaf lists, parent options signal, `addPortfolio`, `addLeaf`, `removeNode` (cascade), `toRequest()` |
+| `app/state/PortfolioFormState.scala` | Single portfolio name + parent validation (reactive, Iron-based) |
+| `app/views/TreeBuilderView.scala` | Orchestrator: composes tree name input, portfolio form, leaf form, tree preview |
+| `app/views/PortfolioFormView.scala` | "Add Portfolio" sub-form with parent dropdown |
+| `app/views/TreePreview.scala` | Live preview of portfolios + leaves with remove buttons |
+| `common/.../frontend/TreeBuilderLogic.scala` | Pure topology validation + cascade collection (shared, JVM-testable) |
+| `common/.../frontend/TreeBuilderLogicSpec.scala` | 7 tests: lone leaf, root constraints, duplicates, cascade |
+
+**Files modified:**
+
+| File | Change |
+|------|--------|
+| `app/state/RiskLeafFormState.scala` | Removed `idVar`/`idFilter`/`idError`; added `toDistributionDraft` |
+| `app/views/RiskLeafFormView.scala` | Accepts `TreeBuilderState`; parent dropdown; "Add Leaf" button |
+| `app/Main.scala` | Renders `TreeBuilderView()` instead of `RiskLeafFormView()` |
 
 **Checkpoint:**
-- [ ] No ID field in form
-- [ ] `parentName` field present
-- [ ] `toRequest()` produces valid `RiskTreeDefinitionRequest`
-- [ ] Existing validation still works
+- [x] No ID field in form
+- [x] Parent dropdown present (derived signal from portfolio list)
+- [x] `toRequest()` produces valid `RiskTreeDefinitionRequest` via `Validation`
+- [x] Existing validation still works
+- [x] Cascade node removal with `TreeBuilderLogic.collectCascade`
+- [x] 7 topology tests passing in common module
+- [ ] App-module tests for `TreeBuilderState` (deferred to Phase G)
 
 ---
 

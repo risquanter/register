@@ -12,8 +12,7 @@
 - The app module depends on `common.js` — shared DTOs, Iron types, and Tapir endpoints compile for both JVM and JS
 - Laminar's model is **signals down, events up** — parent components own state, children receive signals and emit callbacks
 - UI validation reuses the same `ValidationUtil` (Iron-based) as the backend — single source of truth for field constraints
-- No virtual DOM — Laminar binds reactive signals directly to real DOM nodes
-- Given Laminar's direct DOM binding, component re-rendering must be managed via Signal granularity — coarse signals cause unnecessary DOM updates
+- Laminar's direct DOM binding (no virtual DOM) means component updates must be managed via **Signal granularity** — coarse signals cause unnecessary DOM updates
 
 ---
 
