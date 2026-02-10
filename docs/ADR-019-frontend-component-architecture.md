@@ -13,6 +13,7 @@
 - Laminar's model is **signals down, events up** — parent components own state, children receive signals and emit callbacks
 - UI validation reuses the same `ValidationUtil` (Iron-based) as the backend — single source of truth for field constraints
 - No virtual DOM — Laminar binds reactive signals directly to real DOM nodes
+- Given Laminar's direct DOM binding, component re-rendering must be managed via Signal granularity — coarse signals cause unnecessary DOM updates
 
 ---
 
