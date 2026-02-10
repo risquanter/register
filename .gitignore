@@ -1,6 +1,10 @@
 # macOS
 .DS_Store
 
+# Node.js
+node_modules/
+package-lock.json
+
 # sbt specific
 dist/*
 target/
@@ -63,3 +67,7 @@ _opam/
 /temp/
 /temp/*
 private-docs/*
+
+# npm
+.vite/
+node_modules/
