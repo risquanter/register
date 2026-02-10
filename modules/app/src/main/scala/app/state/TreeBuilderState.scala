@@ -28,7 +28,7 @@ final class TreeBuilderState:
   val portfoliosVar: Var[List[PortfolioDraft]] = Var(Nil)
   val leavesVar: Var[List[LeafDraft]] = Var(Nil)
 
-  private val rootLabel = "(root)"
+  val rootLabel = "(root)"
 
   /** Parent dropdown options: root sentinel + current portfolio names. */
   val parentOptions: Signal[List[String]] =

@@ -55,3 +55,10 @@ final class PortfolioFormState extends FormState:
     val nameV: ZValidation[Nothing, ValidationError, String] =
       toValidation(ValidationUtil.refineName(nameVar.now(), "portfolio.name")).map(_.value)
     Validation.validateWith(nameV, Validation.succeed(parentVar.now()))((name, parent) => (name, parent))
+
+  /** Reset form fields and error display state after successful submit. */
+  def reset(): Unit =
+    nameVar.set("")
+    parentVar.set(None)
+    showErrorsVar.set(false)
+    touchedFields.set(Set.empty)
