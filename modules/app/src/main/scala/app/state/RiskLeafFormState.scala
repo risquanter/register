@@ -12,7 +12,6 @@ import com.risquanter.register.domain.data.iron.ValidationUtil
  * - Error display timing: controlled by showErrors flag (set on blur/submit)
  * 
  * Validation rules use Iron types from common module (same as backend):
- * - SafeId: 3-30 alphanumeric chars + hyphen/underscore
  * - SafeName: non-blank, max 50 chars
  * - Probability: 0.0 < p < 1.0 (exclusive - open interval)
  * - Expert mode: requires percentiles + quantiles of equal length
@@ -50,7 +49,6 @@ class RiskLeafFormState extends FormState:
   val distributionModeVar: Var[DistributionMode] = Var(DistributionMode.Expert)
   
   // Common fields
-  val idVar: Var[String] = Var("")
   val nameVar: Var[String] = Var("")
   val probabilityVar: Var[String] = Var("")
   
@@ -65,9 +63,6 @@ class RiskLeafFormState extends FormState:
   // ============================================================
   // Input Filters (prevent invalid characters - UX only)
   // ============================================================
-  
-  /** Filter for ID field: alphanumeric + hyphen + underscore only */
-  val idFilter: String => Boolean = _.forall(c => c.isLetterOrDigit || c == '-' || c == '_')
   
   /** Filter for name field: any printable characters */
   val nameFilter: String => Boolean = _ => true
@@ -98,13 +93,6 @@ class RiskLeafFormState extends FormState:
   // ============================================================
   // Raw Validation Signals (using ValidationUtil from common)
   // ============================================================
-  
-  /** ID validation using Iron SafeId rules */
-  private val idErrorRaw: Signal[Option[String]] = idVar.signal.map { v =>
-    ValidationUtil.refineId(v) match
-      case Right(_) => None
-      case Left(errors) => Some(errors.head.message)
-  }
   
   /** Name validation using Iron SafeName rules */
   private val nameErrorRaw: Signal[Option[String]] = nameVar.signal.map { v =>
@@ -217,7 +205,6 @@ class RiskLeafFormState extends FormState:
       case (false, _) => None
     }
   
-  val idError: Signal[Option[String]] = withDisplayControl("id", idErrorRaw)
   val nameError: Signal[Option[String]] = withDisplayControl("name", nameErrorRaw)
   val probabilityError: Signal[Option[String]] = withDisplayControl("probability", probabilityErrorRaw)
   val percentilesError: Signal[Option[String]] = withDisplayControl("percentiles", percentilesErrorRaw)
@@ -233,7 +220,6 @@ class RiskLeafFormState extends FormState:
   
   /** Raw errors for hasErrors check (ignores display timing) */
   override def errorSignals: List[Signal[Option[String]]] = List(
-    idErrorRaw,
     nameErrorRaw,
     probabilityErrorRaw,
     percentilesErrorRaw,

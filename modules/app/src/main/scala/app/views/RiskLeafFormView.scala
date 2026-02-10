@@ -23,15 +23,6 @@ object RiskLeafFormView:
       
       // Common Fields
       textInput(
-        labelText = "ID",
-        valueVar = state.idVar,
-        errorSignal = state.idError,
-        filter = state.idFilter,
-        onBlurCallback = () => state.markTouched("id"),
-        placeholderText = "e.g., cyber-attack-1"
-      ),
-      
-      textInput(
         labelText = "Name",
         valueVar = state.nameVar,
         errorSignal = state.nameError,
