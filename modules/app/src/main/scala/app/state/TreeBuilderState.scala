@@ -7,6 +7,7 @@ import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.ValidationUtil
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
+import com.risquanter.register.frontend.TreeBuilderLogic
 
 final case class PortfolioDraft(name: String, parent: Option[String])
 final case class LeafDistributionDraft(
@@ -40,7 +41,7 @@ final class TreeBuilderState:
       parent <- validateParentName(rawParent, "portfolio.parentName")
       draft = PortfolioDraft(name, parent)
       updatedPortfolios = portfoliosVar.now() :+ draft
-      _ <- validateTopology(updatedPortfolios, leavesVar.now())
+      _ <- TreeBuilderLogic.validateTopology(updatedPortfolios.map(p => p.name -> p.parent), leavesVar.now().map(l => l.name -> l.parent))
     yield
       portfoliosVar.set(updatedPortfolios)
       draft
@@ -52,7 +53,7 @@ final class TreeBuilderState:
       _ <- validateDistribution(dist)
       draft = LeafDraft(name, parent, dist)
       updatedLeaves = leavesVar.now() :+ draft
-      _ <- validateTopology(portfoliosVar.now(), updatedLeaves)
+      _ <- TreeBuilderLogic.validateTopology(portfoliosVar.now().map(p => p.name -> p.parent), updatedLeaves.map(l => l.name -> l.parent))
     yield
       leavesVar.set(updatedLeaves)
       draft
@@ -61,7 +62,7 @@ final class TreeBuilderState:
   def removeNode(name: String): Unit =
     val portfolios = portfoliosVar.now()
     val leaves = leavesVar.now()
-    val toRemove = collectCascade(Set(name), portfolios)
+    val toRemove = TreeBuilderLogic.collectCascade(Set(name), portfolios.map(p => p.name -> p.parent))
     portfoliosVar.set(portfolios.filterNot(p => toRemove.contains(p.name)))
     leavesVar.set(leaves.filterNot(l => toRemove.contains(l.name) || l.parent.exists(toRemove.contains)))
 
@@ -72,7 +73,7 @@ final class TreeBuilderState:
     val treeNameV = validateName(treeNameVar.now(), "tree.name")
     val portfoliosV = Validation.validateAll(portfolios.map(toPortfolioRequest))
     val leavesV = Validation.validateAll(leaves.map(toLeafRequest))
-    val topologyV = validateTopology(portfolios, leaves)
+    val topologyV = TreeBuilderLogic.validateTopology(portfolios.map(p => p.name -> p.parent), leaves.map(l => l.name -> l.parent))
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, topologyV) { (treeName, ports, leafs, _) =>
       RiskTreeDefinitionRequest(treeName, ports, leafs)
@@ -118,54 +119,3 @@ final class TreeBuilderState:
       )
     }
 
-  private def validateTopology(portfolios: List[PortfolioDraft], leaves: List[LeafDraft]): Validation[ValidationError, Unit] =
-    val names = portfolios.map(_.name) ++ leaves.map(_.name)
-    val duplicates = names.groupBy(identity).collect { case (n, xs) if xs.size > 1 => n }
-    val portfolioNames = portfolios.map(_.name).toSet
-    val validations = List(
-      require(duplicates.isEmpty, "tree.names", ValidationErrorCode.DUPLICATE_VALUE, s"Duplicate names: ${duplicates.mkString(", ")}"),
-      validateRoot(portfolios, leaves),
-      validatePortfolioParents(portfolios, portfolioNames),
-      validateLeafParents(leaves, portfolioNames)
-    )
-
-    Validation.validateAll(validations).as(())
-
-  private def validateRoot(portfolios: List[PortfolioDraft], leaves: List[LeafDraft]): Validation[ValidationError, Unit] =
-    if portfolios.isEmpty then
-      leaves match
-        case leaf :: Nil if leaf.parent.isEmpty => Validation.succeed(())
-        case Nil => Validation.fail(ValidationError("tree", ValidationErrorCode.REQUIRED_FIELD, "Tree requires a root"))
-        case _ => Validation.fail(ValidationError("tree.leaves", ValidationErrorCode.INVALID_COMBINATION, "Leaves require a portfolio parent unless lone-leaf tree"))
-    else
-      val roots = portfolios.filter(_.parent.isEmpty)
-      roots match
-        case Nil => Validation.fail(ValidationError("tree.portfolios", ValidationErrorCode.REQUIRED_FIELD, "Exactly one root portfolio required"))
-        case _ :: Nil => Validation.succeed(())
-        case _ => Validation.fail(ValidationError("tree.portfolios", ValidationErrorCode.AMBIGUOUS_REFERENCE, "Multiple root portfolios found"))
-
-  private def validatePortfolioParents(portfolios: List[PortfolioDraft], portfolioNames: Set[String]): Validation[ValidationError, Unit] =
-    val checks = portfolios.flatMap { p =>
-      p.parent.map { parentName =>
-        require(portfolioNames.contains(parentName), s"portfolio[${p.name}].parentName", ValidationErrorCode.MISSING_REFERENCE, s"Parent portfolio '${parentName}' not found")
-      }
-    }
-    Validation.validateAll(checks).as(())
-
-  private def validateLeafParents(leaves: List[LeafDraft], portfolioNames: Set[String]): Validation[ValidationError, Unit] =
-    val hasPortfolios = portfolioNames.nonEmpty
-    val checks = leaves.map { leaf =>
-      leaf.parent match
-        case Some(parentName) if portfolioNames.contains(parentName) => Validation.succeed(())
-        case Some(parentName) => Validation.fail(ValidationError(s"leaf[${leaf.name}].parentName", ValidationErrorCode.MISSING_REFERENCE, s"Parent portfolio '${parentName}' not found"))
-        case None if hasPortfolios => Validation.fail(ValidationError(s"leaf[${leaf.name}].parentName", ValidationErrorCode.REQUIRED_FIELD, "Leaf must select a parent portfolio"))
-        case None => Validation.succeed(()) // lone-leaf tree handled in root validation
-    }
-    Validation.validateAll(checks).as(())
-
-  private def collectCascade(targets: Set[String], portfolios: List[PortfolioDraft]): Set[String] =
-    val children = portfolios.collect { case p if p.parent.exists(targets.contains) => p.name }.toSet
-    if children.isEmpty then targets else collectCascade(targets ++ children, portfolios)
-
-  private def require(cond: Boolean, field: String, code: ValidationErrorCode, message: String): Validation[ValidationError, Unit] =
-    if cond then Validation.succeed(()) else Validation.fail(ValidationError(field, code, message))
