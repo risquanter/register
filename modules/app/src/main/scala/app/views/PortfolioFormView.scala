@@ -22,7 +22,7 @@ object PortfolioFormView:
         labelText = "Portfolio Name",
         valueVar = form.nameVar,
         errorSignal = form.nameError,
-        onBlurCallback = () => form.markTouched("name"),
+        onBlurCallback = () => if form.nameVar.now().nonEmpty then form.markTouched("name"),
         placeholderText = "e.g., Operations",
         filter = _ => true
       ),
@@ -43,9 +43,21 @@ object PortfolioFormView:
       select(
         cls := "form-input",
         controlled(
-          value <-- form.parentVar.signal.map(_.getOrElse(builderState.rootLabel)),
+          value <-- form.parentVar.signal.combineWith(builderState.parentOptions).map { (sel, opts) =>
+            val display = sel.getOrElse(builderState.rootLabel)
+            if opts.contains(display) then display else opts.headOption.getOrElse(builderState.rootLabel)
+          },
           onChange.mapToValue.map { v => if v == builderState.rootLabel then None else Some(v) } --> form.parentVar
         ),
+        // Auto-sync parentVar when options change and current selection becomes invalid
+        builderState.parentOptions --> { opts =>
+          val current = form.parentVar.now().getOrElse(builderState.rootLabel)
+          if !opts.contains(current) then
+            opts.headOption match
+              case Some(v) if v == builderState.rootLabel => form.parentVar.set(None)
+              case Some(v) => form.parentVar.set(Some(v))
+              case None => ()
+        },
         children <-- builderState.parentOptions.map { opts =>
           opts.map { opt =>
             option(

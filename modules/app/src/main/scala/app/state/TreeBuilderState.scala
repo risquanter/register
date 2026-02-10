@@ -31,9 +31,13 @@ final class TreeBuilderState:
 
   val rootLabel = "(root)"
 
-  /** Parent dropdown options: root sentinel + current portfolio names. */
+  /** Parent dropdown options: root sentinel (if unclaimed) + current portfolio names. */
   val parentOptions: Signal[List[String]] =
-    portfoliosVar.signal.map(ps => rootLabel :: ps.map(_.name))
+    portfoliosVar.signal.combineWith(leavesVar.signal).map { (ps, ls) =>
+      val rootTaken = ps.exists(_.parent.isEmpty) || ls.exists(_.parent.isEmpty)
+      val base = ps.map(_.name)
+      if rootTaken then base else rootLabel :: base
+    }
 
   def addPortfolio(rawName: String, rawParent: Option[String]): Validation[ValidationError, PortfolioDraft] =
     for

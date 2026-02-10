@@ -30,7 +30,7 @@ object RiskLeafFormView:
         valueVar = state.nameVar,
         errorSignal = state.nameError,
         filter = state.nameFilter,
-        onBlurCallback = () => state.markTouched("name"),
+        onBlurCallback = () => if state.nameVar.now().nonEmpty then state.markTouched("name"),
         placeholderText = "e.g., Cyber Attack Risk"
       ),
       
@@ -139,9 +139,21 @@ object RiskLeafFormView:
       select(
         cls := "form-input",
         controlled(
-          value <-- parentVar.signal.map(_.getOrElse(builderState.rootLabel)),
+          value <-- parentVar.signal.combineWith(builderState.parentOptions).map { (sel, opts) =>
+            val display = sel.getOrElse(builderState.rootLabel)
+            if opts.contains(display) then display else opts.headOption.getOrElse(builderState.rootLabel)
+          },
           onChange.mapToValue.map { v => if v == builderState.rootLabel then None else Some(v) } --> parentVar
         ),
+        // Auto-sync parentVar when options change and current selection becomes invalid
+        builderState.parentOptions --> { opts =>
+          val current = parentVar.now().getOrElse(builderState.rootLabel)
+          if !opts.contains(current) then
+            opts.headOption match
+              case Some(v) if v == builderState.rootLabel => parentVar.set(None)
+              case Some(v) => parentVar.set(Some(v))
+              case None => ()
+        },
         children <-- builderState.parentOptions.map { opts =>
           opts.map { opt =>
             option(
