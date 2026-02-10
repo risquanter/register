@@ -10,7 +10,7 @@ object Header:
       cls := "app-header",
       div(
         cls := "header-content",
-        h1("Risk Tree Builder"),
+        h1("Risquanter Register"),
         p(cls := "tagline", "Create and configure risk models")
       )
     )

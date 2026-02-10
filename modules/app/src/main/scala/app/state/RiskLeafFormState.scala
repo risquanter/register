@@ -23,28 +23,6 @@ import app.state.LeafDistributionDraft
 class RiskLeafFormState extends FormState:
 
   // ============================================================
-  // Error Display Timing Control
-  // ============================================================
-  
-  /** Set to true after first submit attempt or field blur */
-  val showErrorsVar: Var[Boolean] = Var(false)
-  
-  /** Per-field "touched" state for showing errors on blur */
-  val touchedFields: Var[Set[String]] = Var(Set.empty)
-  
-  def markTouched(fieldName: String): Unit =
-    touchedFields.update(_ + fieldName)
-  
-  def isTouched(fieldName: String): Signal[Boolean] =
-    touchedFields.signal.map(_.contains(fieldName))
-  
-  /** Show error for a field if: showErrors is true OR field has been touched */
-  def shouldShowError(fieldName: String): Signal[Boolean] =
-    showErrorsVar.signal.combineWith(isTouched(fieldName)).map {
-      case (showAll, touched) => showAll || touched
-    }
-
-  // ============================================================
   // Form Field Vars (mutable reactive state)
   // ============================================================
   
@@ -62,6 +40,17 @@ class RiskLeafFormState extends FormState:
   // Lognormal mode fields
   val minLossVar: Var[String] = Var("")
   val maxLossVar: Var[String] = Var("")
+
+  /** Reset all form fields and error display to initial state. */
+  def resetFields(): Unit =
+    nameVar.set("")
+    probabilityVar.set("")
+    distributionModeVar.set(DistributionMode.Expert)
+    percentilesVar.set("10, 50, 90")
+    quantilesVar.set("")
+    minLossVar.set("")
+    maxLossVar.set("")
+    resetTouched()
 
   // ============================================================
   // Input Filters (prevent invalid characters - UX only)
@@ -236,10 +225,6 @@ class RiskLeafFormState extends FormState:
   // ============================================================
   // Form Submission
   // ============================================================
-  
-  /** Call before submit to show all errors */
-  def triggerValidation(): Unit =
-    showErrorsVar.set(true)
   
   /** Check if form is valid (for submit button) */
   val isValid: Signal[Boolean] = hasErrors.map(!_)

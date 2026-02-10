@@ -30,7 +30,7 @@ object RiskLeafFormView:
         valueVar = state.nameVar,
         errorSignal = state.nameError,
         filter = state.nameFilter,
-        onBlurCallback = () => if state.nameVar.now().nonEmpty then state.markTouched("name"),
+        onBlurCallback = () => state.markTouched("name"),
         placeholderText = "e.g., Cyber Attack Risk"
       ),
       
@@ -55,7 +55,7 @@ object RiskLeafFormView:
       ),
       
       // Parent selection
-      parentSelect(parentVar, builderState),
+      parentSelect(parentVar, builderState.parentOptions, builderState.rootLabel),
       
       // Conditional Fields based on mode
       child <-- state.distributionModeVar.signal.map {
@@ -63,11 +63,24 @@ object RiskLeafFormView:
         case DistributionMode.Lognormal => lognormalFields(state)
       },
       
-      // Submit Button
-      submitButton(
-        text = "Add Leaf",
-        isDisabled = state.hasErrors,
-        onClickCallback = () => handleSubmit(state, parentVar, builderState, submitError)
+      // Submit / Clear Buttons
+      div(
+        cls := "form-actions",
+        submitButton(
+          text = "Add Leaf",
+          isDisabled = state.hasErrors,
+          onClickCallback = () => handleSubmit(state, parentVar, builderState, submitError)
+        ),
+        button(
+          typ := "button",
+          cls := "form-clear",
+          "Clear Form",
+          onClick --> { _ =>
+            state.resetFields()
+            parentVar.set(None)
+            submitError.set(None)
+          }
+        )
       ),
       child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
     )
@@ -132,39 +145,6 @@ object RiskLeafFormView:
       crossFieldError(state.lognormalCrossFieldError)
     )
   
-  private def parentSelect(parentVar: Var[Option[String]], builderState: TreeBuilderState): HtmlElement =
-    div(
-      cls := "form-field",
-      label(cls := "form-label", "Parent Portfolio"),
-      select(
-        cls := "form-input",
-        controlled(
-          value <-- parentVar.signal.combineWith(builderState.parentOptions).map { (sel, opts) =>
-            val display = sel.getOrElse(builderState.rootLabel)
-            if opts.contains(display) then display else opts.headOption.getOrElse(builderState.rootLabel)
-          },
-          onChange.mapToValue.map { v => if v == builderState.rootLabel then None else Some(v) } --> parentVar
-        ),
-        // Auto-sync parentVar when options change and current selection becomes invalid
-        builderState.parentOptions --> { opts =>
-          val current = parentVar.now().getOrElse(builderState.rootLabel)
-          if !opts.contains(current) then
-            opts.headOption match
-              case Some(v) if v == builderState.rootLabel => parentVar.set(None)
-              case Some(v) => parentVar.set(Some(v))
-              case None => ()
-        },
-        children <-- builderState.parentOptions.map { opts =>
-          opts.map { opt =>
-            option(
-              value := opt,
-              opt
-            )
-          }
-        }
-      )
-    )
-
   /** Handle form submission */
   private def handleSubmit(
     state: RiskLeafFormState,
@@ -179,8 +159,6 @@ object RiskLeafFormView:
           case Validation.Success(_, _) =>
             submitError.set(None)
             parentVar.set(None)
-            state.showErrorsVar.set(false)
-            state.touchedFields.set(Set.empty)
-            // keep leaf field values? For now leave as-is so user can add variants
+            state.resetTouched()
           case Validation.Failure(_, errs) => submitError.set(Some(errs.head.message))
       case Validation.Failure(_, errs) => submitError.set(Some(errs.head.message))

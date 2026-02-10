@@ -12,19 +12,6 @@ import com.risquanter.register.domain.errors.ValidationError
  */
 final class PortfolioFormState extends FormState:
 
-  // Error display timing
-  val showErrorsVar: Var[Boolean] = Var(false)
-  private val touchedFields: Var[Set[String]] = Var(Set.empty)
-
-  def markTouched(fieldName: String): Unit =
-    touchedFields.update(_ + fieldName)
-
-  private def isTouched(fieldName: String): Signal[Boolean] =
-    touchedFields.signal.map(_.contains(fieldName))
-
-  private def shouldShowError(fieldName: String): Signal[Boolean] =
-    showErrorsVar.signal.combineWith(isTouched(fieldName)).map { case (showAll, touched) => showAll || touched }
-
   // Fields
   val nameVar: Var[String] = Var("")
   val parentVar: Var[Option[String]] = Var(None) // None means root
@@ -47,18 +34,15 @@ final class PortfolioFormState extends FormState:
 
   val isValid: Signal[Boolean] = hasErrors.map(! _)
 
-  def triggerValidation(): Unit =
-    showErrorsVar.set(true)
-
   /** Build validated inputs for submission. */
   def toDraft: Validation[ValidationError, (String, Option[String])] =
     val nameV: ZValidation[Nothing, ValidationError, String] =
       toValidation(ValidationUtil.refineName(nameVar.now(), "portfolio.name")).map(_.value)
     Validation.validateWith(nameV, Validation.succeed(parentVar.now()))((name, parent) => (name, parent))
 
-  /** Reset form fields and error display state after successful submit. */
+  /** Reset form fields and error display state after successful submit.
+   *  Note: parentVar is NOT reset — it is auto-synced by FormInputs.parentSelect
+   *  based on available options. Resetting it to None would race with auto-sync. */
   def reset(): Unit =
     nameVar.set("")
-    parentVar.set(None)
-    showErrorsVar.set(false)
-    touchedFields.set(Set.empty)
+    resetTouched()

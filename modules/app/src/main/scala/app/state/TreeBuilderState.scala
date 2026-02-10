@@ -40,27 +40,35 @@ final class TreeBuilderState:
     }
 
   def addPortfolio(rawName: String, rawParent: Option[String]): Validation[ValidationError, PortfolioDraft] =
-    for
+    val result = for
       name <- validateName(rawName, "portfolio.name")
       parent <- validateParentName(rawParent, "portfolio.parentName")
       draft = PortfolioDraft(name, parent)
-      updatedPortfolios = portfoliosVar.now() :+ draft
-      _ <- TreeBuilderLogic.validateTopology(updatedPortfolios.map(p => p.name -> p.parent), leavesVar.now().map(l => l.name -> l.parent))
-    yield
-      portfoliosVar.set(updatedPortfolios)
-      draft
+      _ <- TreeBuilderLogic.validateTopology(
+        (portfoliosVar.now() :+ draft).map(p => p.name -> p.parent),
+        leavesVar.now().map(l => l.name -> l.parent)
+      )
+    yield draft
+    result match
+      case Validation.Success(_, draft) => portfoliosVar.update(_ :+ draft)
+      case _ => ()
+    result
 
   def addLeaf(rawName: String, rawParent: Option[String], dist: LeafDistributionDraft): Validation[ValidationError, LeafDraft] =
-    for
+    val result = for
       name <- validateName(rawName, "leaf.name")
       parent <- validateParentName(rawParent, "leaf.parentName")
       _ <- validateDistribution(dist)
       draft = LeafDraft(name, parent, dist)
-      updatedLeaves = leavesVar.now() :+ draft
-      _ <- TreeBuilderLogic.validateTopology(portfoliosVar.now().map(p => p.name -> p.parent), updatedLeaves.map(l => l.name -> l.parent))
-    yield
-      leavesVar.set(updatedLeaves)
-      draft
+      _ <- TreeBuilderLogic.validateTopology(
+        portfoliosVar.now().map(p => p.name -> p.parent),
+        (leavesVar.now() :+ draft).map(l => l.name -> l.parent)
+      )
+    yield draft
+    result match
+      case Validation.Success(_, draft) => leavesVar.update(_ :+ draft)
+      case _ => ()
+    result
 
   /** Remove node by name; cascades removal of portfolio descendants and their leaves. */
   def removeNode(name: String): Unit =

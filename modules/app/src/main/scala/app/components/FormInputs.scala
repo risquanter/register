@@ -44,7 +44,7 @@ object FormInputs:
           value <-- valueVar.signal,
           onInput.mapToValue.filter(filter) --> valueVar
         ),
-        onBlur --> (_ => onBlurCallback())
+        onBlur --> (_ => if valueVar.now().nonEmpty then onBlurCallback())
       ),
       child.maybe <-- errorSignal.map(_.map(msg => 
         span(cls := "form-error", msg)
@@ -76,7 +76,7 @@ object FormInputs:
           value <-- valueVar.signal,
           onInput.mapToValue.filter(filter) --> valueVar
         ),
-        onBlur --> (_ => onBlurCallback())
+        onBlur --> (_ => if valueVar.now().nonEmpty then onBlurCallback())
       ),
       child.maybe <-- errorSignal.map(_.map(msg =>
         span(cls := "form-error", msg)
@@ -136,4 +136,49 @@ object FormInputs:
       child.maybe <-- errorSignal.map(_.map(msg =>
         div(cls := "form-error", msg)
       ))
+    )
+
+  /**
+   * Dropdown for selecting a parent node.
+   * Auto-syncs parentVar when available options change (e.g., root slot claimed).
+   *
+   * @param parentVar Var holding None (root) or Some(portfolioName)
+   * @param options Signal of available parent names (may include rootLabel)
+   * @param rootLabel Sentinel string representing the root (e.g., "(root)")
+   */
+  def parentSelect(
+    parentVar: Var[Option[String]],
+    options: Signal[List[String]],
+    rootLabel: String
+  ): HtmlElement =
+    div(
+      cls := "form-field",
+      label(cls := "form-label", "Parent Portfolio"),
+      select(
+        cls := "form-input",
+        controlled(
+          value <-- parentVar.signal.combineWith(options).map { (sel, opts) =>
+            val display = sel.getOrElse(rootLabel)
+            if opts.contains(display) then display else opts.headOption.getOrElse(rootLabel)
+          },
+          onChange.mapToValue.map { v => if v == rootLabel then None else Some(v) } --> parentVar
+        ),
+        // Auto-sync parentVar when options change and current selection becomes invalid
+        options --> { opts =>
+          val current = parentVar.now().getOrElse(rootLabel)
+          if !opts.contains(current) then
+            opts.headOption match
+              case Some(v) if v == rootLabel => parentVar.set(None)
+              case Some(v) => parentVar.set(Some(v))
+              case None => ()
+        },
+        children <-- options.map { opts =>
+          opts.map { opt =>
+            option(
+              value := opt,
+              opt
+            )
+          }
+        }
+      )
     )
