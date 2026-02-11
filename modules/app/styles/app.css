@@ -1,0 +1,471 @@
+/* =============================================
+   Design Tokens (from Figma UI Library)
+   ============================================= */
+:root {
+  /* Colors — dark scheme */
+  --surface:                   #060f11;
+  --surface-raised:            #0d1a1e;
+  --surface-overlay:           rgba(230, 232, 232, 0.08);
+  --surface-overlay-hover:     rgba(230, 232, 232, 0.12);
+  --surface-overlay-active:    rgba(230, 232, 232, 0.16);
+  --foreground:                #e6e8e8;
+  --foreground-muted:          #7e8385;
+  --foreground-variant:        #b8bbbc;
+  --border:                    rgba(230, 232, 232, 0.12);
+  --border-focus:              #b8bbbc;
+  --accent:                    #b8bbbc;
+  --error:                     #ef4444;
+  --error-surface:             rgba(239, 68, 68, 0.10);
+
+  /* Typography */
+  --font-sans:  'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono:  'Geist Mono', ui-monospace, 'SFMono-Regular', monospace;
+  --font-weight-normal: 400;
+  --font-weight-medium: 450;
+
+  --text-xs:  0.75rem;     /* 12px */
+  --text-sm:  0.8125rem;   /* 13px */
+  --text-base: 0.875rem;   /* 14px */
+  --text-lg:  1rem;        /* 16px */
+  --text-xl:  1.125rem;    /* 18px */
+  --text-2xl: 1.25rem;     /* 20px */
+
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  /* Spacing (4px base grid) */
+  --sp-0: 0px;
+  --sp-0-5: 2px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-14: 56px;
+  --sp-20: 80px;
+
+  /* Radii */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+/* =============================================
+   Reset & Base
+   ============================================= */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-normal);
+  background-color: var(--surface);
+  color: var(--foreground);
+  line-height: var(--leading-normal);
+  font-size: var(--text-base);
+}
+
+/* =============================================
+   Layout
+   ============================================= */
+.app-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header bar (Figma nav-bar style) */
+.app-header {
+  background-color: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: var(--sp-4) var(--sp-8);
+}
+
+.header-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+
+.app-header h1 {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+}
+
+.app-header .tagline {
+  font-size: var(--text-sm);
+  color: var(--foreground-muted);
+}
+
+/* Main content */
+.main-content {
+  flex: 1;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--sp-6);
+}
+
+/* =============================================
+   Tree Builder
+   ============================================= */
+.tree-builder h1 {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xl);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+  margin-bottom: var(--sp-6);
+}
+
+.tree-name-field {
+  margin-bottom: var(--sp-6);
+}
+
+.forms-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-6);
+}
+
+@media (max-width: 768px) {
+  .forms-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* =============================================
+   Form Containers
+   ============================================= */
+.risk-leaf-form,
+.portfolio-form {
+  background-color: var(--surface-raised);
+  padding: var(--sp-6);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+}
+
+.risk-leaf-form h2,
+.portfolio-form h2 {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-medium);
+  margin-bottom: var(--sp-2);
+  color: var(--foreground);
+}
+
+.form-description {
+  color: var(--foreground-muted);
+  font-size: var(--text-sm);
+  margin-bottom: var(--sp-6);
+}
+
+.form-placeholder {
+  padding: var(--sp-10);
+  background-color: var(--surface-overlay);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-md);
+  text-align: center;
+  color: var(--foreground-muted);
+}
+
+/* =============================================
+   Form Fields
+   ============================================= */
+.form-field {
+  margin-bottom: var(--sp-4);
+}
+
+.form-label {
+  display: block;
+  font-weight: var(--font-weight-medium);
+  font-size: var(--text-sm);
+  margin-bottom: var(--sp-1);
+  color: var(--foreground-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--font-mono);
+}
+
+.form-input {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  background-color: transparent;
+  color: var(--foreground);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.form-input::placeholder {
+  color: var(--foreground-muted);
+  opacity: 0.6;
+}
+
+.form-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(184, 187, 188, 0.15);
+}
+
+.form-input.error {
+  border-color: var(--error);
+  background-color: var(--error-surface);
+}
+
+.form-input.error:focus {
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
+}
+
+select.form-input {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%237e8385' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--sp-3) center;
+  padding-right: var(--sp-8);
+}
+
+select.form-input option {
+  background-color: var(--surface-raised);
+  color: var(--foreground);
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 60px;
+}
+
+.form-error {
+  display: block;
+  color: var(--error);
+  font-size: var(--text-xs);
+  margin-top: var(--sp-1);
+}
+
+.cross-field-error {
+  margin-bottom: var(--sp-4);
+}
+
+/* =============================================
+   Radio Group
+   ============================================= */
+.radio-group {
+  display: flex;
+  gap: var(--sp-6);
+}
+
+.radio-option {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.radio-option input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin-right: var(--sp-2);
+  accent-color: var(--foreground-variant);
+}
+
+.radio-label {
+  color: var(--foreground-variant);
+  font-size: var(--text-sm);
+}
+
+/* =============================================
+   Mode Fields (conditional groups)
+   ============================================= */
+.mode-fields {
+  margin-top: var(--sp-4);
+  padding: var(--sp-4);
+  background-color: var(--surface-overlay);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+}
+
+.mode-fields-title {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground-muted);
+  margin-bottom: var(--sp-4);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* =============================================
+   Buttons
+   ============================================= */
+.form-submit {
+  width: 100%;
+  padding: var(--sp-2) var(--sp-4);
+  background-color: var(--surface-overlay);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.form-submit:hover:not(:disabled) {
+  background-color: var(--surface-overlay-hover);
+}
+
+.form-submit:active:not(:disabled) {
+  background-color: var(--surface-overlay-active);
+}
+
+.form-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.form-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.form-actions .form-submit {
+  flex: 1;
+}
+
+.form-clear {
+  flex: 0 0 auto;
+  padding: var(--sp-2) var(--sp-3);
+  background-color: transparent;
+  color: var(--foreground-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.form-clear:hover {
+  background-color: var(--surface-overlay);
+  color: var(--foreground-variant);
+}
+
+/* =============================================
+   Tree Preview
+   ============================================= */
+.tree-preview {
+  background-color: var(--surface-raised);
+  padding: var(--sp-6);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+}
+
+.tree-preview h3 {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+  margin-bottom: var(--sp-4);
+}
+
+.tree-container {
+  font-family: var(--font-mono) !important;
+  font-size: var(--text-sm);
+  line-height: var(--leading-tight);
+}
+
+.tree-node {
+  display: flex;
+  align-items: center;
+  padding: 1px 0;
+}
+
+.tree-branch {
+  color: var(--foreground-muted);
+}
+
+.tree-label {
+  color: var(--foreground-variant);
+}
+
+.tree-root {
+  color: var(--foreground);
+  font-weight: var(--font-weight-medium);
+}
+
+.tree-empty {
+  color: var(--foreground-muted);
+  font-style: italic;
+  font-size: var(--text-sm);
+}
+
+.remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--foreground-muted);
+  cursor: pointer;
+  font-size: var(--text-xs);
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background-color 0.15s;
+}
+
+.tree-node:hover .remove-btn {
+  opacity: 1;
+}
+
+.remove-btn:hover {
+  color: var(--error);
+  background-color: var(--error-surface);
+}
+
+/* =============================================
+   Footer
+   ============================================= */
+.app-footer {
+  border-top: 1px solid var(--border);
+  background-color: var(--surface);
+  color: var(--foreground-muted);
+  padding: var(--sp-4) var(--sp-6);
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+/* =============================================
+   Scrollbar (subtle dark theme)
+   ============================================= */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--surface-overlay-hover);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--surface-overlay-active);
+}
