@@ -5,8 +5,18 @@ import zio.prelude.Validation
 import com.risquanter.register.testutil.TestHelpers.safeId
 import com.risquanter.register.http.requests.RiskTreeRequests.*
 import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.errors.ValidationError
 
 object RiskTreeRequestsSpec extends ZIOSpecDefault {
+
+  /** Assert that a `Validation` failed and at least one error message contains every given substring. */
+  private def assertFailsWith(result: Validation[ValidationError, ?])(substrings: String*) =
+    result match
+      case Validation.Failure(_, errors) =>
+        val messages = errors.map(_.message)
+        substrings.map(sub => assertTrue(messages.exists(_.contains(sub)))).reduce(_ && _)
+      case Validation.Success(_, _) =>
+        assertTrue(false).label(s"expected failure containing: ${substrings.mkString(", ")}")
 
   private def validLeafDef(name: String, parent: Option[String]) =
     RiskLeafDefinitionRequest(
@@ -56,16 +66,8 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         )
       )
 
-      val result: Validation[com.risquanter.register.domain.errors.ValidationError, ResolvedCreate] =
-        resolveCreate(req, () => safeId("generated"))
-
-      result match {
-        case Validation.Success(_, _) =>
-          assertTrue(false).label("expected validation failure for invalid lognormal distribution")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("Lognormal mode requires minLoss and maxLoss"))
-      }
+      val result = resolveCreate(req, () => safeId("generated"))
+      assertFailsWith(result)("Lognormal mode requires minLoss and maxLoss")
     },
 
     test("resolveCreate returns validated distributions for leaves") {
@@ -75,8 +77,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         leaves = Seq(validLeafDef("Leaf", Some("Root")))
       )
 
-      val result: Validation[com.risquanter.register.domain.errors.ValidationError, ResolvedCreate] =
-        resolveCreate(req, () => safeId("generated"))
+      val result = resolveCreate(req, () => safeId("generated"))
 
       result match {
         case Validation.Success(_, resolved) =>
@@ -87,8 +88,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
             dist.maxLoss.exists(_ == 5000L)
           )
         case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(errors.isEmpty).label(s"resolveCreate should succeed but failed: $message")
+          assertTrue(false).label(s"resolveCreate should succeed but failed: ${errors.map(_.message).mkString(", ")}")
       }
     },
 
@@ -101,12 +101,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveCreate(req, () => safeId("generated"))
 
-      result match {
-        case Validation.Success(_, _) => assertTrue(false).label("expected duplicate names failure")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("Duplicate names"))
-      }
+      assertFailsWith(result)("Duplicate names")
     },
 
     test("resolveCreate fails when leaf parent points to a leaf") {
@@ -121,12 +116,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveCreate(req, () => safeId("generated"))
 
-      result match {
-        case Validation.Success(_, _) => assertTrue(false).label("expected invalid leaf parent failure")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("refers to a leaf"))
-      }
+      assertFailsWith(result)("refers to a leaf")
     },
 
     test("resolveCreate fails when leaf parent is missing") {
@@ -138,12 +128,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveCreate(req, () => safeId("generated"))
 
-      result match {
-        case Validation.Success(_, _) => assertTrue(false).label("expected missing parent failure")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("not found in portfolios"))
-      }
+      assertFailsWith(result)("not found in portfolios")
     },
 
     test("resolveCreate fails when multiple roots are provided") {
@@ -158,12 +143,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveCreate(req, () => safeId("generated"))
 
-      result match {
-        case Validation.Success(_, _) => assertTrue(false).label("expected multiple roots failure")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("Multiple roots"))
-      }
+      assertFailsWith(result)("Multiple roots")
     },
 
     test("resolveCreate fails when a cycle exists") {
@@ -179,12 +159,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveCreate(req, () => safeId("generated"))
 
-      result match {
-        case Validation.Success(_, _) => assertTrue(false).label("expected cycle detection failure")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("Cycle detected"))
-      }
+      assertFailsWith(result)("Cycle detected")
     },
 
     test("resolveCreate fails when a portfolio is left empty") {
@@ -199,12 +174,58 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveCreate(req, () => safeId("generated"))
 
-      result match {
-        case Validation.Success(_, _) => assertTrue(false).label("expected non-empty portfolio failure")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("Portfolios cannot be left empty"))
-      }
+      assertFailsWith(result)("Every portfolio must have at least one child")
+    },
+
+    test("resolveCreate fails naming the childless portfolio") {
+      // Root ← {P1 ← L1, P2 (empty)} – error should mention P2
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(
+          RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
+          RiskPortfolioDefinitionRequest(name = "P1", parentName = Some("Root")),
+          RiskPortfolioDefinitionRequest(name = "P2", parentName = Some("Root"))
+        ),
+        leaves = Seq(validLeafDef("L1", Some("P1")))
+      )
+
+      val result = resolveCreate(req, () => safeId("generated"))
+
+      assertFailsWith(result)("P2", "Every portfolio must have at least one child")
+    },
+
+    test("resolveCreate succeeds when all portfolios have children") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(
+          RiskPortfolioDefinitionRequest(name = "Root", parentName = None),
+          RiskPortfolioDefinitionRequest(name = "P1", parentName = Some("Root")),
+          RiskPortfolioDefinitionRequest(name = "P2", parentName = Some("Root"))
+        ),
+        leaves = Seq(validLeafDef("L1", Some("P1")), validLeafDef("L2", Some("P2")))
+      )
+
+      val result = resolveCreate(req, () => safeId("generated"))
+
+      assertTrue(result.isSuccess)
+    },
+
+    test("resolveUpdate fails when existing portfolio becomes childless") {
+      // Root (existing) with no children → should fail
+      val req = RiskTreeUpdateRequest(
+        name = "Tree",
+        portfolios = Seq(
+          RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None),
+          RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R9", name = "Child", parentName = Some("Root"))
+        ),
+        leaves = Seq.empty,
+        newPortfolios = Seq.empty,
+        newLeaves = Seq.empty
+      )
+
+      val result = resolveUpdate(req, () => safeId("generated"))
+
+      assertFailsWith(result)("Every portfolio must have at least one child")
     },
 
     test("resolveUpdate fails when names conflict between existing and new nodes") {
@@ -218,12 +239,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveUpdate(req, () => safeId("generated"))
 
-      result match {
-        case Validation.Success(_, _) => assertTrue(false).label("expected duplicate name failure in update")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("Duplicate names"))
-      }
+      assertFailsWith(result)("Duplicate names")
     },
 
     test("resolveUpdate fails when new leaf parent is a leaf") {
@@ -237,12 +253,7 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       val result = resolveUpdate(req, () => safeId("generated"))
 
-      result match {
-        case Validation.Success(_, _) => assertTrue(false).label("expected invalid parent failure in update")
-        case Validation.Failure(_, errors) =>
-          val message = errors.map(_.message).mkString(", ")
-          assertTrue(message.contains("refers to a leaf"))
-      }
+      assertFailsWith(result)("refers to a leaf")
     }
   )
 }

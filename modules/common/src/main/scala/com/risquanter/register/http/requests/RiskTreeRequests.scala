@@ -195,7 +195,6 @@ object RiskTreeRequests {
         portfolioNames = portfolios.map(_._1),
         portfolioParents = portfolios.map(_._2),
         leafParents = leaves.map(_._2),
-        totalNodes = totalNodes,
         labelPrefix = "request.portfolios"
       )
     } yield root
@@ -233,7 +232,6 @@ object RiskTreeRequests {
         portfolioNames = portNames,
         portfolioParents = portfolios.map(_._3) ++ newPortfolios.map(_._2),
         leafParents = leaves.map(_._2) ++ newLeaves.map(_._2),
-        totalNodes = totalNodes,
         labelPrefix = "request.portfolios"
       )
     } yield root
@@ -258,24 +256,56 @@ object RiskTreeRequests {
     }
   }
 
-  // Guard: portfolios must not be left without children (unless single-node tree).
+  /** Guard: every portfolio must have at least one child (portfolio or leaf).
+    *
+    * This rule, together with `requireNoCycles`, enforces the structural invariant
+    * that '''every path from the root terminates at a RiskLeaf'''. The well-formed
+    * tree corresponds to the recursive ADT:
+    *
+    * {{{Tree = Leaf(distribution) | Portfolio(children: NonEmptyList[Tree])}}}
+    *
+    * '''Proof (by induction on tree depth):'''
+    *   - '''Base case:''' A lone `RiskLeaf` (no portfolios) trivially satisfies the
+    *     invariant — the only terminal node is a leaf.
+    *   - '''Inductive step:''' Assume every portfolio at depth < k has a child.
+    *     A portfolio P at depth k has ≥1 child (by this guard). Each child is
+    *     either a leaf (path terminates ✓) or a portfolio at depth k+1 which
+    *     also has ≥1 child (by induction). Since the tree is finite and acyclic
+    *     (`requireNoCycles`), every descending path must eventually reach a leaf.
+    *
+    * '''Valid examples:'''
+    *   - `L`                       — lone leaf, no portfolios to check
+    *   - `P ← L`                   — P has 1 child (leaf)
+    *   - `P0 ← P1 ← L`            — P0 has child P1, P1 has child L
+    *   - `P0 ← {P1 ← L1, P2 ← L2}` — both child portfolios have leaves
+    *
+    * '''Invalid example:'''
+    *   - `P0 ← {P1 ← L1, P2}`     — P2 is a childless portfolio (terminal
+    *     but not a leaf), so it can never contribute simulation results.
+    *
+    * '''Why no `totalNodes` exemption is needed:''' When `portfolioNames` is empty
+    * (the lone-leaf case), there are zero portfolios to check, so this method
+    * trivially succeeds. Any exemption based on `totalNodes == 1` would
+    * incorrectly allow a single childless portfolio through.
+    *
+    * '''Defence-in-depth:''' `RiskPortfolio` has a `require(childIds.nonEmpty)`
+    * invariant (ADR-010) that catches this at construction time. This guard
+    * catches it earlier with a typed `ValidationError`.
+    *
+    * @see ADR-017 §Topology validation
+    */
   private[requests] def requireNonEmptyPortfolios(
     portfolioNames: Seq[SafeName.SafeName],
     portfolioParents: Seq[Option[SafeName.SafeName]],
     leafParents: Seq[Option[SafeName.SafeName]],
-    totalNodes: Int,
     labelPrefix: String
   ): Validation[ValidationError, Unit] = {
-    val childrenByParent = scala.collection.mutable.Map.empty[SafeName.SafeName, Int].withDefaultValue(0)
-    leafParents.foreach(_.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)))
-    portfolioParents.foreach(_.foreach(p => childrenByParent.update(p, childrenByParent(p) + 1)))
-
-    val emptyParents = portfolioNames.collect {
-      case name if childrenByParent(name) == 0 && !(totalNodes == 1) => name
-    }
+    val childParents = (portfolioParents.flatten ++ leafParents.flatten)
+      .groupBy(identity).view.mapValues(_.size).toMap
+    val emptyParents = portfolioNames.filterNot(childParents.contains)
 
     if emptyParents.nonEmpty then
-      Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.CONSTRAINT_VIOLATION, s"Portfolios cannot be left empty: ${emptyParents.map(_.value).mkString(", ")}"))
+      Validation.fail(ValidationError(labelPrefix, ValidationErrorCode.EMPTY_COLLECTION, s"Every portfolio must have at least one child: ${emptyParents.map(_.value).mkString(", ")}"))
     else Validation.succeed(())
   }
 

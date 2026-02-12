@@ -23,7 +23,8 @@ object TreeBuilderLogic:
       requireCond(duplicates.isEmpty, "tree.names", ValidationErrorCode.DUPLICATE_VALUE, s"Duplicate names: ${duplicates.mkString(", ")}"),
       validateRoot(portfolios, leaves),
       validatePortfolioParents(portfolios, portfolioNames),
-      validateLeafParents(leaves, portfolioNames)
+      validateLeafParents(leaves, portfolioNames),
+      validateNonEmptyPortfolios(portfolios, leaves)
     )
     Validation.validateAll(validations).as(())
 
@@ -65,6 +66,22 @@ object TreeBuilderLogic:
         case None => Validation.succeed(())
     }
     Validation.validateAll(checks).as(())
+
+  /** Every portfolio must have ≥1 child. Together with acyclicity, this ensures
+    * every path from root terminates at a leaf. See `requireNonEmptyPortfolios`
+    * in `RiskTreeRequests` for the full inductive proof.
+    */
+  private def validateNonEmptyPortfolios(
+    portfolios: List[(Name, Parent)],
+    leaves: List[(Name, Parent)]
+  ): Validation[ValidationError, Unit] =
+    val childParents = (portfolios.flatMap(_._2) ++ leaves.flatMap(_._2)).groupBy(identity).view.mapValues(_.size).toMap
+    val empty = portfolios.map(_._1).filterNot(childParents.contains)
+    if empty.isEmpty then Validation.succeed(())
+    else Validation.fail(ValidationError(
+      "tree.portfolios", ValidationErrorCode.EMPTY_COLLECTION,
+      s"Every portfolio must have at least one child: ${empty.mkString(", ")}"
+    ))
 
   private def requireCond(cond: Boolean, field: String, code: ValidationErrorCode, message: String): Validation[ValidationError, Unit] =
     if cond then Validation.succeed(()) else Validation.fail(ValidationError(field, code, message))

@@ -40,5 +40,60 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
       )
       val remove = TreeBuilderLogic.collectCascade(Set("Child"), ports)
       assertTrue(remove == Set("Child", "Grand"))
+    },
+
+    // ── validateNonEmptyPortfolios ─────────────────────────────────
+
+    test("rejects single portfolio with no children") {
+      val res = TreeBuilderLogic.validateTopology(
+        List("Root" -> None),
+        Nil
+      )
+      assertTrue(res.isFailure) &&
+      assertTrue(
+        res.fold(es => es.exists(_.message.contains("Every portfolio must have at least one child")), _ => false)
+      )
+    },
+    test("accepts portfolio with a leaf child") {
+      val res = TreeBuilderLogic.validateTopology(
+        List("Root" -> None),
+        List("Leaf" -> Some("Root"))
+      )
+      assertTrue(res.isSuccess)
+    },
+    test("rejects nested portfolio tree where terminal portfolio is childless") {
+      // Root ← {Child}, Child has no children → fails
+      val res = TreeBuilderLogic.validateTopology(
+        List("Root" -> None, "Child" -> Some("Root")),
+        Nil
+      )
+      assertTrue(res.isFailure) &&
+      assertTrue(
+        res.fold(es => es.exists(_.message.contains("Child")), _ => false)
+      )
+    },
+    test("rejects tree where one sibling portfolio is childless") {
+      // Root ← {P1 ← L1, P2 (empty)} → fails on P2
+      val res = TreeBuilderLogic.validateTopology(
+        List("Root" -> None, "P1" -> Some("Root"), "P2" -> Some("Root")),
+        List("L1" -> Some("P1"))
+      )
+      assertTrue(res.isFailure) &&
+      assertTrue(
+        res.fold(es => es.exists(_.message.contains("P2")), _ => false)
+      )
+    },
+    test("accepts tree where all portfolios have children") {
+      // Root ← {P1 ← L1, P2 ← L2} → valid
+      val res = TreeBuilderLogic.validateTopology(
+        List("Root" -> None, "P1" -> Some("Root"), "P2" -> Some("Root")),
+        List("L1" -> Some("P1"), "L2" -> Some("P2"))
+      )
+      assertTrue(res.isSuccess)
+    },
+    test("lone leaf with no portfolios still passes") {
+      // Degenerate tree: just a single leaf, zero portfolios
+      val res = TreeBuilderLogic.validateTopology(Nil, List("OnlyLeaf" -> None))
+      assertTrue(res.isSuccess)
     }
   )
