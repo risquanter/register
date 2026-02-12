@@ -3,9 +3,8 @@ package com.risquanter.register
 import zio.*
 import zio.http.Server
 import zio.config.typesafe.TypesafeConfigProvider
-import sttp.tapir.server.ziohttp.ZioHttpInterpreter
-import zio.http.{Middleware, Header}
-import zio.http.Header.{AccessControlAllowHeaders, AccessControlAllowOrigin, AccessControlExposeHeaders}
+import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
+import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig}
 import com.risquanter.register.http.HttpApi
@@ -118,25 +117,21 @@ object Application extends ZIOAppDefault {
     _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.allowedOrigins.mkString(", ")}")
     endpoints  <- HttpApi.endpointsZIO
     _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
-    httpApp     = ZioHttpInterpreter().toHttp(endpoints)
-    
-    // Apply CORS middleware
-    corsMiddleware = Middleware.cors(Middleware.CorsConfig(
-      allowedOrigin = { origin =>
-        val rendered = origin.renderedValue
-        val matches = corsConfig.allowedOrigins.contains(rendered)
-        if (matches)
-          Some(AccessControlAllowOrigin.Specific(origin))
-        else
-          None
-      },
-      allowedHeaders = AccessControlAllowHeaders.All,
-      exposedHeaders = AccessControlExposeHeaders.All
-    ))
-    corsApp = corsMiddleware(httpApp)
-    
+
+    // CORS at the tapir interceptor layer — handles OPTIONS preflight before
+    // route matching, avoiding the 405 that zio-http Middleware.cors produces.
+    tapirCorsConfig = TapirCORSConfig.default
+      .allowMatchingOrigins(origin => corsConfig.allowedOrigins.contains(origin))
+      .reflectHeaders
+      .exposeAllHeaders
+    serverOptions = ZioHttpServerOptions
+      .customiseInterceptors[Any]
+      .corsInterceptor(CORSInterceptor.customOrThrow[Task](tapirCorsConfig))
+      .options
+    httpApp = ZioHttpInterpreter(serverOptions).toHttp(endpoints)
+
     _          <- ZIO.logInfo(s"Starting HTTP server on ${cfg.host}:${cfg.port}...")
-    _          <- Server.serve(corsApp)
+    _          <- Server.serve(httpApp)
   } yield ()
 
   def program = for {
