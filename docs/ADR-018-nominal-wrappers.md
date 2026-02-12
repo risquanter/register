@@ -102,6 +102,30 @@ The allocation cost of the case class wrapper is negligible — these IDs flow t
 
 ---
 
+## Frontend Display Boundary
+
+Nominal wrappers flow typed through the full stack — including the ScalaJS frontend via shared DTOs in `common.js`. The `.value` extraction to `String` happens **only at the DOM rendering edge**, never in intermediate code:
+
+```scala
+// Server serializes TreeId → String on the wire (JSON codec)
+given JsonEncoder[TreeId] = JsonEncoder[String].contramap(_.value)
+
+// ScalaJS client deserializes String → TreeId (JSON codec)
+given JsonDecoder[TreeId] = JsonDecoder[String].mapOrFail(...)
+
+// Frontend code works with typed SimulationResponse throughout
+val submitState: Var[SubmitState] = Var(SubmitState.Idle)
+// response.id is TreeId, not String — type safety preserved
+
+// .value extraction ONLY at the display boundary
+case SubmitState.Success(response) =>
+  s"""Tree "${response.name}" created with ID: ${response.id.value}"""
+```
+
+**Why this matters:** The wrapper prevents accidental use of a `TreeId` where a `NodeId` is expected, even in frontend view logic. Raw `String` extraction is deferred to the last possible moment — DOM text rendering — consistent with parse-don't-validate (ADR-001).
+
+---
+
 ## Code Smells
 
 ### ❌ Transparent Type Alias for Distinction

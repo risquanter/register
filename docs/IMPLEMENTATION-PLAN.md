@@ -1306,6 +1306,26 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 
 ---
 
+## Technical Debt / Follow-Up Tasks
+
+### TD-1: Convert `commonDependencies` from `%%` to `%%%`
+
+**Status:** Open  
+**Discovered:** 2026-02-12 (Phase B.1)  
+**Priority:** Medium
+
+`commonDependencies` in `build.sbt` uses `%%` for all entries. In a `crossProject`, `%%` does NOT auto-expand to `%%%` — it resolves the JVM artifact for both platforms. The `app` project masks this by re-declaring most deps with `%%%`, but it's fragile: any `common`-only dependency without a matching `app` `%%%` declaration will fail at ScalaJS link time (as happened with `zio-ulid`). All `commonDependencies` entries that are cross-published for ScalaJS should use `%%%`.
+
+### TD-2: Remove redundant Iron regex in `ValidationUtil.refineUlid`
+
+**Status:** Open  
+**Discovered:** 2026-02-12 (Phase B.1)  
+**Priority:** Low
+
+`refineUlid` performs two sequential checks: (1) `ULID(normalized)` — library validates length, Crockford Base32 charset, and 128-bit overflow; (2) `.refineEither[Match["^[0-9A-HJKMNP-TV-Z]{26}$"]]` — Iron regex on the library's canonical output. Step 2 is strictly weaker than step 1 (no overflow check) and operates on the library's own output, making it redundant. Prefer the library check per ADR-001 (validation via smart constructors / dedicated libraries). Step 2 can be removed.
+
+---
+
 ## Decisions Log
 
 | ID | Decision | Choice | Date | Rationale |

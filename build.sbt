@@ -38,7 +38,6 @@ val commonDependencies = Seq(
   "dev.zio"                       %% "zio"                     % zioVersion,
   "dev.zio"                       %% "zio-json"                % "0.8.0",
   "dev.zio"                       %% "zio-prelude"             % "1.0.0-RC44",
-  "com.bilal-fazlani"             %% "zio-ulid"                % zioUlidVersion,
   "dev.zio"                       %% "zio-config"              % zioConfigVersion,
   "dev.zio"                       %% "zio-config-magnolia"     % zioConfigVersion,
   "dev.zio"                       %% "zio-config-typesafe"     % zioConfigVersion,
@@ -84,7 +83,8 @@ lazy val common = crossProject(JVMPlatform, JSPlatform)
   .in(file("modules/common"))
   .settings(
     name := "register-common",
-    libraryDependencies ++= commonDependencies
+    libraryDependencies ++= commonDependencies,
+    libraryDependencies += "com.bilal-fazlani" %%% "zio-ulid" % zioUlidVersion
   )
   .jsSettings(
     libraryDependencies ++= Seq(
