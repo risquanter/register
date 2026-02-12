@@ -10,7 +10,7 @@ object Layout:
       cls := "app-layout",
       Header(),
       mainTag(
-        cls := "main-content",
+        cls := "main-content main-content--full",
         content
       ),
       footerTag(

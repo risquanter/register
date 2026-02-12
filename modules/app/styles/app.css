@@ -163,6 +163,96 @@ body {
   padding: var(--sp-6);
 }
 
+.main-content--full {
+  max-width: none;
+}
+
+/* =============================================
+   Split Pane Layout (Phase C)
+   ============================================= */
+.split-pane {
+  display: flex;
+  gap: 0;
+  min-height: 0;
+}
+
+.split-horizontal {
+  flex-direction: row;
+  height: calc(100vh - 120px); /* viewport minus header + footer */
+}
+
+.split-vertical {
+  flex-direction: column;
+  height: 100%;
+}
+
+.split-panel {
+  overflow-y: auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+.split-left {
+  border-right: 1px solid var(--border);
+  padding: var(--sp-6);
+}
+
+.split-right {
+  padding: 0;
+}
+
+.split-top {
+  border-bottom: 1px solid var(--border);
+  padding: var(--sp-6);
+}
+
+.split-bottom {
+  padding: var(--sp-6);
+}
+
+/* =============================================
+   LEC Chart Placeholder
+   ============================================= */
+.lec-chart-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.lec-chart-placeholder h3 {
+  font-family: var(--font-mono);
+  font-size: var(--text-lg);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+  margin-bottom: var(--sp-4);
+}
+
+.placeholder-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--surface-overlay);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground-muted);
+  font-size: var(--text-sm);
+  gap: var(--sp-2);
+}
+
+.placeholder-icon {
+  font-size: 2rem;
+  opacity: 0.5;
+  margin-bottom: var(--sp-2);
+}
+
+.placeholder-hint {
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+  opacity: 0.7;
+}
+
 /* =============================================
    Tree Builder
    ============================================= */
@@ -447,6 +537,10 @@ select.form-input option {
   padding: var(--sp-6);
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .tree-preview h3 {
@@ -455,12 +549,15 @@ select.form-input option {
   font-weight: var(--font-weight-medium);
   color: var(--foreground);
   margin-bottom: var(--sp-4);
+  flex-shrink: 0;
 }
 
 .tree-container {
   font-family: var(--font-mono) !important;
   font-size: var(--text-sm);
   line-height: var(--leading-tight);
+  flex: 1;
+  overflow-y: auto;
 }
 
 .tree-node {

@@ -16,8 +16,7 @@ import com.risquanter.register.http.endpoints.RiskTreeEndpoints
  * are pushed directly into `submitState: Var[SubmitState]`.
  */
 object TreeBuilderView extends RiskTreeEndpoints:
-  def apply(): HtmlElement =
-    val state = new TreeBuilderState
+  def apply(state: TreeBuilderState): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
     def handleSubmit(): Unit =
@@ -49,7 +48,6 @@ object TreeBuilderView extends RiskTreeEndpoints:
           )
         )
       ),
-      TreePreview(state),
       div(
         cls := "forms-grid",
         PortfolioFormView(state),
