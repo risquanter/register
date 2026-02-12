@@ -182,12 +182,16 @@ val parentOptions: Signal[List[String]] =
 
 | Location | Pattern |
 |----------|---------|
+| `Main` | Orchestrator — creates shared `TreeBuilderState`, wires layout (Pattern 2 owner) |
 | `FormInputs.textInput` | Stateless function, Var + Signal params (Pattern 5) |
 | `FormInputs.radioGroup[T]` | Generic type-parameterized component (Pattern 5) |
 | `RiskLeafFormState` | Field-level Vars + reactive validation (Pattern 3) |
 | `FormState.hasErrors` | Derived Signal from `errorSignals` (Pattern 4) |
-| `TreeBuilderView` | Orchestrator — owns BuilderState, passes to children (Pattern 2) |
-| `TreePreview` | Pure function: Signal → HtmlElement (Pattern 4) |
+| `TreeBuilderView` | Receives shared state, owns submit lifecycle (Pattern 2 consumer) |
+| `TreePreview` | Pure derived view: Signal → HtmlElement (Pattern 4) |
+| `SplitPane` | Stateless layout — CSS custom property bridge, no state (Pattern 5) |
+| `Header` | Singleton — module-level `Var` for health status, fires on mount |
+| `LECChartPlaceholder` | Stateless placeholder (Pattern 5) |
 
 ---
 

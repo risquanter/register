@@ -11,10 +11,9 @@ import com.risquanter.register.http.endpoints.RiskTreeEndpoints
   */
 object Header extends RiskTreeEndpoints:
 
-  /** None = checking, Some(true) = connected, Some(false) = failed */
-  private val healthStatus: Var[Option[Boolean]] = Var(None)
-
   def apply(): HtmlElement =
+    // None = checking, Some(true) = connected, Some(false) = failed
+    val healthStatus: Var[Option[Boolean]] = Var(None)
     headerTag(
       cls := "app-header",
       onMountCallback { _ =>

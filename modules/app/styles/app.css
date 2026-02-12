@@ -95,8 +95,6 @@ body {
 }
 
 .header-content {
-  max-width: 1200px;
-  margin: 0 auto;
   display: flex;
   align-items: center;
   gap: var(--sp-6);
@@ -157,14 +155,9 @@ body {
 /* Main content */
 .main-content {
   flex: 1;
-  max-width: 1200px;
   width: 100%;
-  margin: 0 auto;
-  padding: var(--sp-6);
-}
-
-.main-content--full {
-  max-width: none;
+  padding: 0;
+  min-height: 0;
 }
 
 /* =============================================
@@ -187,6 +180,7 @@ body {
 }
 
 .split-panel {
+  flex: 0 0 var(--split-size, 50%);
   overflow-y: auto;
   min-height: 0;
   min-width: 0;
@@ -208,6 +202,27 @@ body {
 
 .split-bottom {
   padding: var(--sp-6);
+}
+
+@media (max-width: 768px) {
+  .split-horizontal {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .split-panel {
+    flex: 1 1 auto !important;
+  }
+
+  .split-left {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .split-vertical {
+    height: auto;
+    min-height: 50vh;
+  }
 }
 
 /* =============================================
