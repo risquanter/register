@@ -8,8 +8,9 @@ This guide covers containerization, deployment, and development environment setu
 
 - Docker 20.10+ 
 - Docker Compose 2.0+
-- JDK 21 (for Scala development)
+- JDK 21 (for Scala / sbt development)
 - sbt (Scala Build Tool)
+- Node.js 18+ and npm (for frontend Vite dev server)
 - At least 4GB RAM available for Docker
 
 ---
@@ -224,50 +225,99 @@ docker volume rm register_irmin-data
 
 ## Development Workflow
 
-### Local Development
+### Backend Only (Docker)
+
+For backend-only work or API testing:
 
 ```bash
-# Start with Irmin backend (using .env.irmin from above)
+# Start server (in-memory backend, default)
+docker compose up -d
+
+# Start with Irmin persistence
 docker compose --profile persistence --env-file .env.irmin up -d register-server irmin
 
-# Start with in-memory backend only
-docker compose --env-file .env.inmemory up -d register-server
-
-# Check status
-docker compose ps
-
-# View combined logs
+# View logs
 docker compose logs -f
 
-# Restart specific service
+# Restart after config changes
 docker compose restart register-server
+
+# Stop
+docker compose down
 ```
+
+### Full-Stack Development (Backend + Frontend)
+
+The frontend is a Scala.js SPA served by Vite on port 5173. It calls the backend on port 8080 (CORS is pre-configured for this). You need **three terminals**:
+
+**Terminal 1 — Backend (Docker):**
+```bash
+docker compose up -d
+```
+
+**Terminal 2 — Scala.js continuous compilation:**
+```bash
+sbt ~app/fastLinkJS
+```
+This watches for Scala source changes in `modules/app/` and `modules/common/` and recompiles to JavaScript. The `~` prefix means it re-runs on every file save.
+
+**Terminal 3 — Vite dev server:**
+```bash
+cd modules/app && npm run dev
+```
+Serves the frontend at `http://localhost:5173` with hot module replacement. Vite picks up the Scala.js output automatically via the `@scala-js/vite-plugin-scalajs` plugin.
+
+**Verify the full stack:**
+1. Open `http://localhost:5173` — the frontend should load
+2. The header should show "Connected" (health check to backend)
+3. Open `http://localhost:8080/docs` — Swagger UI for API exploration
+
+### Backend Development (sbt, no Docker)
+
+For faster iteration on server code without rebuilding the native image:
+
+```bash
+# Run server directly on JVM (faster startup cycle than native image rebuild)
+sbt server/run
+
+# Run with continuous restart on changes
+sbt ~server/run
+```
+
+Note: `sbt server/run` runs the JVM version. The Docker image uses a GraalVM native binary which must be explicitly rebuilt (see below).
 
 ### Running Tests
 
 ```bash
-# Scala unit tests
+# All tests (common + server)
 sbt test
+
+# Common module tests only (fastest)
+sbt commonJVM/test
+
+# Server module tests only
+sbt server/test
+
+# Frontend compilation check (no unit tests yet)
+sbt app/fastLinkJS
 
 # With coverage
 sbt coverage test coverageReport
-
-# Run test suite against containers
-./docs/test/run-tests.sh
 ```
 
-### Rebuilding
+### Rebuilding the Native Image
+
+The Docker image contains a GraalVM native binary. Source changes are **not** reflected until you rebuild:
 
 ```bash
-# Rebuild specific service
-docker compose build register-server
+# Full rebuild (clean image, pick up all source changes)
+docker compose down && docker compose build --no-cache register-server && docker compose up -d
 
-# Rebuild without cache
-docker compose build --no-cache
-
-# Rebuild and restart
+# Incremental rebuild (uses Docker layer cache — faster but may miss some changes)
 docker compose up --build -d
 ```
+
+The native image build takes several minutes (GraalVM compilation inside Docker). For faster iteration, use `sbt server/run` during development and only rebuild the native image for integration testing or deployment.
 
 ---
 

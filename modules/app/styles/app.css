@@ -16,6 +16,8 @@
   --accent:                    #b8bbbc;
   --error:                     #ef4444;
   --error-surface:             rgba(239, 68, 68, 0.10);
+  --success:                   #4ade80;
+  --success-surface:           rgba(74, 222, 128, 0.08);
 
   /* Typography */
   --font-sans:  'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -110,6 +112,46 @@ body {
 .app-header .tagline {
   font-size: var(--text-sm);
   color: var(--foreground-muted);
+}
+
+/* Health indicator (right-aligned in header) */
+.health-indicator {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.health-checking {
+  background-color: var(--foreground-muted);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.health-ok {
+  background-color: var(--success);
+}
+
+.health-error {
+  background-color: var(--error);
+}
+
+.health-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 /* Main content */
@@ -381,8 +423,8 @@ select.form-input option {
 }
 
 .submit-success {
-  color: #4ade80;
-  background-color: rgba(74, 222, 128, 0.08);
+  color: var(--success);
+  background-color: var(--success-surface);
   border: 1px solid rgba(74, 222, 128, 0.20);
 }
 

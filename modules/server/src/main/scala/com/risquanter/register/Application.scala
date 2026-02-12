@@ -5,7 +5,7 @@ import zio.http.Server
 import zio.config.typesafe.TypesafeConfigProvider
 import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import zio.http.{Middleware, Header}
-import zio.http.Header.{AccessControlAllowHeaders, AccessControlAllowOrigin, AccessControlExposeHeaders, Origin}
+import zio.http.Header.{AccessControlAllowHeaders, AccessControlAllowOrigin, AccessControlExposeHeaders}
 
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig}
 import com.risquanter.register.http.HttpApi
@@ -123,7 +123,9 @@ object Application extends ZIOAppDefault {
     // Apply CORS middleware
     corsMiddleware = Middleware.cors(Middleware.CorsConfig(
       allowedOrigin = { origin =>
-        if (corsConfig.allowedOrigins.exists(allowed => Origin.parse(allowed).toOption.contains(origin)))
+        val rendered = origin.renderedValue
+        val matches = corsConfig.allowedOrigins.contains(rendered)
+        if (matches)
           Some(AccessControlAllowOrigin.Specific(origin))
         else
           None
