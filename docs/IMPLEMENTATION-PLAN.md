@@ -1079,6 +1079,128 @@ Upon completing Tier 3, promote the following proposals:
 
 ---
 
+## Phase X: Capability URL Demo Mode
+
+**ADR Reference:** [ADR-021: Capability URLs](./ADR-021-capability-urls.md)  
+**Prerequisites:** Phase B (BackendClient + ZJS), Phase D (Tree View)  
+**Priority:** Independent — can be implemented in parallel with Tier 2/3  
+
+**Objective:** Enable a public demo where users create and interact with trees without authentication. Access is controlled by unguessable capability URLs rather than user credentials.
+
+### Task X.1: ShareToken Domain Type
+
+```
+common/.../domain/data/ShareToken.scala
+```
+
+- `case class ShareToken(value: String)` — 128-bit `SecureRandom`, base64url encoded (22 chars)
+- `ShareToken.generate: UIO[ShareToken]` factory
+- Tapir codec + JSON codec (same pattern as `TreeId` / `NodeId`)
+- **Must use `java.security.SecureRandom`**, not `java.util.Random`
+
+### Task X.2: DemoStore Service
+
+```
+server/.../service/demo/DemoStore.scala
+server/.../service/demo/DemoStoreLive.scala
+server/.../config/DemoConfig.scala
+```
+
+- `DemoStore` trait: `create(treeId, ttl) → ShareToken`, `resolve(token) → Option[TreeId]`, `evictExpired → Int`
+- `DemoStoreLive`: `TrieMap[ShareToken, (TreeId, Instant)]` with background reaper fiber
+- `DemoConfig`: `ttl` (default 24h), `reaperInterval` (default 5m), `maxCreatesPerIpPerHour` (default 10)
+- Config loaded from `register.demo` block in `application.conf`
+
+### Task X.3: Demo Endpoints + Controller
+
+```
+common/.../endpoints/DemoEndpoints.scala
+server/.../controller/DemoController.scala
+```
+
+Endpoints scoped under `/demo` — **no** `securityIn`, no JWT:
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/demo/trees` | Create tree → return `{ shareToken, expiresAt }` |
+| GET | `/demo/t/{shareToken}` | Resolve token → return tree |
+| POST | `/demo/t/{shareToken}/nodes/lec-multi` | LEC curves for demo tree |
+| GET | `/demo/t/{shareToken}/events` | SSE stream for demo tree |
+| DELETE | `/demo/t/{shareToken}` | Delete demo tree (optional) |
+
+**Not exposed:** `GET /demo/trees` (list-all) — prevents enumeration.
+
+### Task X.4: Rate Limiting
+
+- Simple `Ref[Map[IpAddress, (Int, Instant)]]`-based rate limiter
+- Configurable via `DemoConfig.maxCreatesPerIpPerHour`
+- Returns HTTP 429 on limit exceeded
+- In production with mesh: defer to Istio EnvoyFilter rate limiting
+
+### Task X.5: Security Headers
+
+- `Referrer-Policy: no-referrer` on all `/demo/*` responses
+- `Cache-Control: no-store` on all `/demo/*` responses
+- HTTPS enforcement (mesh handles in production; documented for standalone)
+
+### Task X.6: Frontend Demo Route
+
+```
+app/.../pages/DemoPage.scala
+app/.../core/DemoClient.scala
+```
+
+- Route: `/#/demo/{shareToken}` — resolves token, renders tree view + LEC chart
+- "Create Demo Tree" landing page at `/#/demo`
+- On creation: browser navigates to `/#/demo/{shareToken}` — user bookmarks/shares this URL
+- No login UI, no session management
+- Expiry countdown indicator ("This tree expires in 23h 14m")
+
+### Task X.7: Tests
+
+```
+server/.../service/demo/DemoStoreSpec.scala
+server/.../controller/DemoControllerSpec.scala  (or integration test)
+```
+
+- `ShareToken` generation produces 22-char base64url strings
+- `DemoStore` resolves valid tokens, rejects expired/unknown tokens
+- Reaper fiber evicts expired entries
+- Rate limiter rejects excessive creation
+- Demo endpoints return 404 (not 403) for invalid tokens — no information leakage
+
+### Task X.8: Istio Policy Exception (Production)
+
+Add `AuthorizationPolicy` to skip JWT validation for `/demo/*`:
+
+```yaml
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: demo-public-access
+  namespace: register
+spec:
+  action: ALLOW
+  rules:
+  - to:
+    - operation:
+        paths: ["/demo/*"]
+```
+
+All other routes remain protected per ADR-012.
+
+**Checkpoint:**
+- [ ] `ShareToken` generated with `SecureRandom` (128 bits)
+- [ ] Demo tree creation returns capability URL
+- [ ] Token resolves to tree; invalid/expired tokens return 404
+- [ ] No enumeration endpoint on demo surface
+- [ ] TTL eviction works (background reaper)
+- [ ] Rate limiting prevents abuse
+- [ ] Security headers set on demo responses
+- [ ] Frontend renders tree at `/#/demo/{shareToken}`
+
+---
+
 ## Reference Resources
 
 ### BCG Implementation (for frontend patterns)
@@ -1165,6 +1287,9 @@ final case class LECCurveResponse(
 | ADR-015 | Cache-Aside Pattern | Accepted | `RiskResultResolver` lazy computation |
 | ADR-017 | Tree API Design | Accepted | Phase 1 CRUD ✅, Phase 2 batch `TreeOp` pending |
 | ADR-018 | Nominal Wrappers | Accepted | `NodeId`, `TreeId` opaque types |
+| ADR-019 | Frontend Component Architecture | Accepted | Composable function pattern, tree builder |
+| ADR-020 | Supply Chain Security | Accepted | Dependency management |
+| ADR-021 | Capability URLs | Proposed | Unauthenticated demo access via `ShareToken` (Phase X) |
 
 ### Batch Operations & Algebraic API (ADR-017 Phase 2)
 
@@ -1196,6 +1321,7 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 | — | Irmin resilience | Service mesh (ADR-012) | 2026-01-17 | No app-level retries; Istio handles |
 | — | Irmin dev image | Alpine (distroless deferred) | 2026-01-17 | ~650 MB dev image; <50 MB target for prod |
 | — | Repository selection | Config-driven (`repositoryType`) | 2026-01-20 | Default `in-memory`; `irmin` available |
+| DP-6 | Demo access model | Capability URLs (ADR-021) | 2026-02-12 | `ShareToken` (128-bit SecureRandom) instead of exposing `TreeId`; separate `/demo` routes; TTL eviction; no user management |
 | — | Per-node vs per-tree storage | Per-node (Option A) | 2026-01-20 | Fine-grained Irmin watch notifications identify exact node changed → O(depth) ancestor invalidation. Per-tree storage would require full tree diff on every change. |
 
 ---
