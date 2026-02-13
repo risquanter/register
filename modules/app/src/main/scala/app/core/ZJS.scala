@@ -59,6 +59,45 @@ object ZJS:
       eventBus.events
 
   // ---------------------------------------------------------------------------
+  // Extensions on ZIO + LoadState — DRY the tap/tapError/runJs lifecycle
+  // ---------------------------------------------------------------------------
+
+  import app.state.LoadState
+
+  extension [E <: Throwable, A](zio: ZIO[BackendClient, E, A])
+
+    /** Fork the ZIO and push its lifecycle into a `Var[LoadState[A]]`.
+      *
+      * Sets Loading → Loaded(a) on success, Loading → Failed(msg) on error.
+      */
+    def loadInto(target: Var[LoadState[A]]): Unit =
+      target.set(LoadState.Loading)
+      forkProvided {
+        zio
+          .tap(a => ZIO.succeed(target.set(LoadState.Loaded(a))))
+          .tapError(e => ZIO.succeed(target.set(LoadState.Failed(e.getMessage()))))
+      }
+
+  /** Extension for ZIO effects returning `Option[B]` — unwraps into `LoadState[B]`. */
+  extension [E <: Throwable, B](zio: ZIO[BackendClient, E, Option[B]])
+
+    /** Fork the ZIO and push `Some(b) → Loaded(b)`, `None → Failed(noneMessage)`.
+      *
+      * Useful for endpoints that return `Option` (e.g. getById) where the
+      * target `Var` holds the unwrapped type.
+      */
+    def loadOptionInto(target: Var[LoadState[B]], noneMessage: String): Unit =
+      target.set(LoadState.Loading)
+      forkProvided {
+        zio
+          .tap {
+            case Some(b) => ZIO.succeed(target.set(LoadState.Loaded(b)))
+            case None    => ZIO.succeed(target.set(LoadState.Failed(noneMessage)))
+          }
+          .tapError(e => ZIO.succeed(target.set(LoadState.Failed(e.getMessage()))))
+      }
+
+  // ---------------------------------------------------------------------------
   // Extension on unsecured Tapir endpoints
   // ---------------------------------------------------------------------------
 

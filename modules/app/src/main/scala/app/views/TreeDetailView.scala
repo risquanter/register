@@ -17,12 +17,30 @@ import com.risquanter.register.domain.data.iron.NodeId
   */
 object TreeDetailView:
 
+  // ── Node display helpers (mirrors TreePreview.TreeNode pattern) ──
+
+  private def nodeIcon(node: RiskNode): String = node match
+    case _: RiskPortfolio => "📁"
+    case _: RiskLeaf      => "🍃"
+
+  private def nodeLabel(node: RiskNode): String = node match
+    case leaf: RiskLeaf =>
+      s"${leaf.name} (${leaf.distributionType}, p=${f"${leaf.probability}%.2f"})"
+    case portfolio: RiskPortfolio =>
+      portfolio.name
+
+  private def isPortfolio(node: RiskNode): Boolean = node match
+    case _: RiskPortfolio => true
+    case _: RiskLeaf      => false
+
+  // ── Public API ────────────────────────────────────────────────
+
   def apply(state: TreeViewState): HtmlElement =
     div(
       cls := "tree-detail-view",
       child <-- state.selectedTree.signal.map {
-        case LoadState.Idle       => renderPlaceholder("Select a tree to view its structure.")
-        case LoadState.Loading    => renderPlaceholder("Loading tree structure…")
+        case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
+        case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
         case LoadState.Failed(msg) => renderError(msg)
         case LoadState.Loaded(tree) => renderTree(tree, state)
       }
@@ -36,14 +54,11 @@ object TreeDetailView:
 
   /** Render the full tree from a RiskTree domain object. */
   private def renderTree(tree: RiskTree, state: TreeViewState): HtmlElement =
-    // Build lookup: NodeId → RiskNode for O(1) access
-    val nodeMap: Map[NodeId, RiskNode] = tree.nodes.map(n => n.id -> n).toMap
-
     // Build children lookup: parentId → child nodes
     val childrenOf: Map[Option[NodeId], Seq[RiskNode]] =
       tree.nodes.groupBy(_.parentId)
 
-    val rootNode = nodeMap.get(tree.rootId)
+    val rootNode = tree.nodes.find(_.id == tree.rootId)
 
     div(
       cls := "tree-detail-container",
@@ -69,12 +84,12 @@ object TreeDetailView:
     state: TreeViewState,
     depth: Int
   ): HtmlElement =
-    val nodeIdStr = node.id.value
-    val children = childrenOf.getOrElse(Some(node.id), Seq.empty)
-    val isPortfolio = node.isInstanceOf[RiskPortfolio]
+    val nodeId   = node.id
+    val children = childrenOf.getOrElse(Some(nodeId), Seq.empty)
+    val hasChildren = isPortfolio(node) && children.nonEmpty
 
-    val isExpanded: Signal[Boolean] = state.expandedNodes.signal.map(_.contains(nodeIdStr))
-    val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeIdStr))
+    val isExpanded: Signal[Boolean] = state.expandedNodes.signal.map(_.contains(nodeId))
+    val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeId))
 
     div(
       cls := "tree-detail-node",
@@ -83,41 +98,31 @@ object TreeDetailView:
         cls <-- isSelected.map(sel => if sel then "node-row node-selected" else "node-row"),
         paddingLeft := s"${depth * 20}px",
         // Expand/collapse toggle (only for portfolios with children)
-        if isPortfolio && children.nonEmpty then
+        if hasChildren then
           span(
             cls := "node-toggle",
             cursor.pointer,
             child.text <-- isExpanded.map(if _ then "▼ " else "▶ "),
-            onClick --> (_ => state.toggleExpanded(nodeIdStr))
+            onClick --> (_ => state.toggleExpanded(nodeId))
           )
         else
           span(cls := "node-toggle node-toggle-spacer", "  "),
-        // Icon
-        span(cls := "node-icon", if isPortfolio then "📁" else "🍃"),
-        // Label
+        // Icon + Label
+        span(cls := "node-icon", nodeIcon(node)),
         span(
           cls := "node-label",
           cursor.pointer,
           nodeLabel(node),
-          onClick --> (_ => state.selectNode(nodeIdStr))
+          onClick --> (_ => state.selectNode(nodeId))
         )
       ),
       // Children (only rendered when expanded)
-      if isPortfolio && children.nonEmpty then
+      if hasChildren then
         div(
           cls := "node-children",
           display <-- isExpanded.map(if _ then "block" else "none"),
-          children.toList.map(child => renderNode(child, childrenOf, state, depth + 1))
+          children.toList.map(c => renderNode(c, childrenOf, state, depth + 1))
         )
       else
         emptyNode
     )
-
-  /** Format the display label for a node. */
-  private def nodeLabel(node: RiskNode): String = node match
-    case leaf: RiskLeaf =>
-      val dt = leaf.distributionType.toString
-      val p  = leaf.probability
-      s"${leaf.name} ($dt, p=${f"$p%.2f"})"
-    case portfolio: RiskPortfolio =>
-      portfolio.name

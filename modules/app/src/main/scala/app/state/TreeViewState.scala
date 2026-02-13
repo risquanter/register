@@ -2,11 +2,9 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 
-import zio.*
-
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId}
 import com.risquanter.register.http.endpoints.RiskTreeEndpoints
 import com.risquanter.register.http.responses.SimulationResponse
 
@@ -27,42 +25,31 @@ final class TreeViewState extends RiskTreeEndpoints:
   val selectedTreeId: Var[Option[TreeId]] = Var(None)
   val selectedTree: Var[LoadState[RiskTree]] = Var(LoadState.Idle)
 
-  // ── UI state ──────────────────────────────────────────────────
-  val expandedNodes: Var[Set[String]] = Var(Set.empty)
-  val selectedNodeId: Var[Option[String]] = Var(None)
+  // ── UI state (uses NodeId per ADR-001 §7) ─────────────────────
+  val expandedNodes: Var[Set[NodeId]] = Var(Set.empty)
+  val selectedNodeId: Var[Option[NodeId]] = Var(None)
 
   // ── Actions ───────────────────────────────────────────────────
 
   /** Fetch all trees from the backend (summary only). */
   def loadTreeList(): Unit =
-    availableTrees.set(LoadState.Loading)
-    getAllEndpoint(())
-      .tap(trees => ZIO.succeed(availableTrees.set(LoadState.Loaded(trees))))
-      .tapError(e => ZIO.succeed(availableTrees.set(LoadState.Failed(e.getMessage()))))
-      .runJs
+    getAllEndpoint(()).loadInto(availableTrees)
 
   /** Fetch the full tree structure for the given id. */
   def loadTreeStructure(id: TreeId): Unit =
-    selectedTree.set(LoadState.Loading)
     expandedNodes.set(Set.empty)
     selectedNodeId.set(None)
-    getTreeStructureEndpoint(id)
-      .tap {
-        case Some(tree) => ZIO.succeed(selectedTree.set(LoadState.Loaded(tree)))
-        case None       => ZIO.succeed(selectedTree.set(LoadState.Failed("Tree not found")))
-      }
-      .tapError(e => ZIO.succeed(selectedTree.set(LoadState.Failed(e.getMessage()))))
-      .runJs
+    getTreeStructureEndpoint(id).loadOptionInto(selectedTree, "Tree not found")
 
   /** Select a tree by id — sets `selectedTreeId` and triggers structure fetch. */
   def selectTree(id: TreeId): Unit =
     selectedTreeId.set(Some(id))
     loadTreeStructure(id)
 
-  def toggleExpanded(nodeId: String): Unit =
+  def toggleExpanded(nodeId: NodeId): Unit =
     expandedNodes.update { nodes =>
       if nodes.contains(nodeId) then nodes - nodeId else nodes + nodeId
     }
 
-  def selectNode(nodeId: String): Unit =
+  def selectNode(nodeId: NodeId): Unit =
     selectedNodeId.set(Some(nodeId))
