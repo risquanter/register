@@ -11,8 +11,12 @@ object TreeBuilderLogic:
   type Name = String
   type Parent = Option[String]
 
-  /** Validate topology rules (single root, parent constraints, duplicates). */
-  def validateTopology(
+  /** Structural topology rules safe for incremental construction:
+    * uniqueness, single root, valid parent references.
+    * Does '''not''' check for childless portfolios — that is a valid
+    * mid-construction state (e.g. adding a portfolio before its leaves).
+    */
+  def preValidateTopology(
     portfolios: List[(Name, Parent)],
     leaves: List[(Name, Parent)]
   ): Validation[ValidationError, Unit] =
@@ -23,10 +27,21 @@ object TreeBuilderLogic:
       requireCond(duplicates.isEmpty, "tree.names", ValidationErrorCode.DUPLICATE_VALUE, s"Duplicate names: ${duplicates.mkString(", ")}"),
       validateRoot(portfolios, leaves),
       validatePortfolioParents(portfolios, portfolioNames),
-      validateLeafParents(leaves, portfolioNames),
-      validateNonEmptyPortfolios(portfolios, leaves)
+      validateLeafParents(leaves, portfolioNames)
     )
     Validation.validateAll(validations).as(())
+
+  /** Full topology validation for submit time: all incremental rules
+    * '''plus''' the requirement that every portfolio has ≥1 child.
+    */
+  def fullValidateTopology(
+    portfolios: List[(Name, Parent)],
+    leaves: List[(Name, Parent)]
+  ): Validation[ValidationError, Unit] =
+    Validation.validateWith(
+      preValidateTopology(portfolios, leaves),
+      validateNonEmptyPortfolios(portfolios, leaves)
+    )((_, _) => ())
 
   /** Collect a portfolio and all descendant portfolio names (for cascade delete). */
   def collectCascade(targets: Set[String], portfolios: List[(Name, Parent)]): Set[String] =

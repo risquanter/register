@@ -8,28 +8,32 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
 
   def spec = suite("TreeBuilderLogic")(
     test("accepts lone leaf tree with no portfolios") {
-      val res = TreeBuilderLogic.validateTopology(Nil, List("Leaf" -> None))
+      val res = TreeBuilderLogic.preValidateTopology(Nil, List("Leaf" -> None))
       assertTrue(res.isSuccess)
     },
     test("rejects missing root when no nodes") {
-      val res = TreeBuilderLogic.validateTopology(Nil, Nil)
+      val res = TreeBuilderLogic.preValidateTopology(Nil, Nil)
       assertTrue(res.isFailure)
     },
     test("enforces single root portfolio") {
-      val res = TreeBuilderLogic.validateTopology(List("R1" -> None, "R2" -> None), Nil)
+      val res = TreeBuilderLogic.preValidateTopology(List("R1" -> None, "R2" -> None), Nil)
       assertTrue(res.isFailure)
     },
     test("rejects duplicate names across portfolios and leaves") {
-      val res = TreeBuilderLogic.validateTopology(List("P" -> None), List("P" -> Some("P")))
+      val res = TreeBuilderLogic.preValidateTopology(List("P" -> None), List("P" -> Some("P")))
       assertTrue(res.isFailure)
     },
     test("rejects leaf without parent when portfolio exists") {
-      val res = TreeBuilderLogic.validateTopology(List("Root" -> None), List("Leaf" -> None))
+      val res = TreeBuilderLogic.preValidateTopology(List("Root" -> None), List("Leaf" -> None))
       assertTrue(res.isFailure)
     },
     test("validates leaf must point to portfolio") {
-      val res = TreeBuilderLogic.validateTopology(List("Root" -> None), List("Leaf" -> Some("Missing")))
+      val res = TreeBuilderLogic.preValidateTopology(List("Root" -> None), List("Leaf" -> Some("Missing")))
       assertTrue(res.isFailure)
+    },
+    test("preValidateTopology allows childless portfolio (valid mid-construction state)") {
+      val res = TreeBuilderLogic.preValidateTopology(List("Root" -> None), Nil)
+      assertTrue(res.isSuccess)
     },
     test("cascade collects descendants") {
       val ports = List(
@@ -44,8 +48,8 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
 
     // ── validateNonEmptyPortfolios ─────────────────────────────────
 
-    test("rejects single portfolio with no children") {
-      val res = TreeBuilderLogic.validateTopology(
+    test("fullValidateTopology rejects single portfolio with no children") {
+      val res = TreeBuilderLogic.fullValidateTopology(
         List("Root" -> None),
         Nil
       )
@@ -54,16 +58,16 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
         res.fold(es => es.exists(_.message.contains("Every portfolio must have at least one child")), _ => false)
       )
     },
-    test("accepts portfolio with a leaf child") {
-      val res = TreeBuilderLogic.validateTopology(
+    test("fullValidateTopology accepts portfolio with a leaf child") {
+      val res = TreeBuilderLogic.fullValidateTopology(
         List("Root" -> None),
         List("Leaf" -> Some("Root"))
       )
       assertTrue(res.isSuccess)
     },
-    test("rejects nested portfolio tree where terminal portfolio is childless") {
+    test("fullValidateTopology rejects nested portfolio tree where terminal portfolio is childless") {
       // Root ← {Child}, Child has no children → fails
-      val res = TreeBuilderLogic.validateTopology(
+      val res = TreeBuilderLogic.fullValidateTopology(
         List("Root" -> None, "Child" -> Some("Root")),
         Nil
       )
@@ -72,9 +76,9 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
         res.fold(es => es.exists(_.message.contains("Child")), _ => false)
       )
     },
-    test("rejects tree where one sibling portfolio is childless") {
+    test("fullValidateTopology rejects tree where one sibling portfolio is childless") {
       // Root ← {P1 ← L1, P2 (empty)} → fails on P2
-      val res = TreeBuilderLogic.validateTopology(
+      val res = TreeBuilderLogic.fullValidateTopology(
         List("Root" -> None, "P1" -> Some("Root"), "P2" -> Some("Root")),
         List("L1" -> Some("P1"))
       )
@@ -83,17 +87,17 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
         res.fold(es => es.exists(_.message.contains("P2")), _ => false)
       )
     },
-    test("accepts tree where all portfolios have children") {
+    test("fullValidateTopology accepts tree where all portfolios have children") {
       // Root ← {P1 ← L1, P2 ← L2} → valid
-      val res = TreeBuilderLogic.validateTopology(
+      val res = TreeBuilderLogic.fullValidateTopology(
         List("Root" -> None, "P1" -> Some("Root"), "P2" -> Some("Root")),
         List("L1" -> Some("P1"), "L2" -> Some("P2"))
       )
       assertTrue(res.isSuccess)
     },
-    test("lone leaf with no portfolios still passes") {
+    test("fullValidateTopology passes lone leaf with no portfolios") {
       // Degenerate tree: just a single leaf, zero portfolios
-      val res = TreeBuilderLogic.validateTopology(Nil, List("OnlyLeaf" -> None))
+      val res = TreeBuilderLogic.fullValidateTopology(Nil, List("OnlyLeaf" -> None))
       assertTrue(res.isSuccess)
     }
   )

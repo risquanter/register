@@ -111,9 +111,7 @@ object Application extends ZIOAppDefault {
 
   def startServer = for {
     cfg        <- ZIO.service[ServerConfig]
-    rawCors    <- ZIO.service[CorsConfig]
-    // Normalise: env-var override may deliver a single comma-separated string
-    corsConfig  = CorsConfig.normalise(rawCors.allowedOrigins)
+    corsConfig <- ZIO.service[CorsConfig]
     _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
     _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.allowedOrigins.mkString(", ")}")
     endpoints  <- HttpApi.endpointsZIO

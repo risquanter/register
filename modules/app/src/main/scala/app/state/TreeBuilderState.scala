@@ -61,7 +61,7 @@ final class TreeBuilderState extends FormState:
       name <- validateName(rawName, "portfolio.name")
       parent <- validateParentName(rawParent, "portfolio.parentName")
       draft = PortfolioDraft(name, parent)
-      _ <- TreeBuilderLogic.validateTopology(
+      _ <- TreeBuilderLogic.preValidateTopology(
         (portfoliosVar.now() :+ draft).map(p => p.name -> p.parent),
         leavesVar.now().map(l => l.name -> l.parent)
       )
@@ -77,7 +77,7 @@ final class TreeBuilderState extends FormState:
       parent <- validateParentName(rawParent, "leaf.parentName")
       _ <- validateDistribution(dist)
       draft = LeafDraft(name, parent, dist)
-      _ <- TreeBuilderLogic.validateTopology(
+      _ <- TreeBuilderLogic.preValidateTopology(
         portfoliosVar.now().map(p => p.name -> p.parent),
         (leavesVar.now() :+ draft).map(l => l.name -> l.parent)
       )
@@ -102,7 +102,7 @@ final class TreeBuilderState extends FormState:
     val treeNameV = validateName(treeNameVar.now(), "tree.name")
     val portfoliosV = Validation.validateAll(portfolios.map(toPortfolioRequest))
     val leavesV = Validation.validateAll(leaves.map(toLeafRequest))
-    val topologyV = TreeBuilderLogic.validateTopology(portfolios.map(p => p.name -> p.parent), leaves.map(l => l.name -> l.parent))
+    val topologyV = TreeBuilderLogic.fullValidateTopology(portfolios.map(p => p.name -> p.parent), leaves.map(l => l.name -> l.parent))
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, topologyV) { (treeName, ports, leafs, _) =>
       RiskTreeDefinitionRequest(treeName, ports, leafs)
