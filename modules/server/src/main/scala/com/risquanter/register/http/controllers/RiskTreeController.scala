@@ -45,6 +45,11 @@ class RiskTreeController private (
       .map(_.map(SimulationResponse.fromRiskTree))
   }
 
+  /** Full tree structure for frontend rendering (expandable node hierarchy). */
+  val getTreeStructure: ServerEndpoint[Any, Task] = getTreeStructureEndpoint.serverLogicSuccess { id =>
+    riskTreeService.getById(id)
+  }
+
   /** Manual cache invalidation for testing SSE pipeline. */
   val invalidateCache: ServerEndpoint[Any, Task] = invalidateCacheEndpoint.serverLogicSuccess {
     case (treeId, nodeId) =>
@@ -80,7 +85,7 @@ class RiskTreeController private (
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(health, create, getAll, getById, invalidateCache, getLECCurve, probOfExceedance, getLECCurvesMulti)
+    List(health, create, getAll, getById, getTreeStructure, invalidateCache, getLECCurve, probOfExceedance, getLECCurvesMulti)
 }
 
 object RiskTreeController {

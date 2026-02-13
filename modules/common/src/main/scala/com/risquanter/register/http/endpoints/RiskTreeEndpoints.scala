@@ -6,7 +6,7 @@ import sttp.tapir.generic.auto.*
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.{LECCurveResponse, LECPoint, RiskLeaf}
+import com.risquanter.register.domain.data.{LECCurveResponse, LECPoint, RiskLeaf, RiskTree}
 import com.risquanter.register.domain.data.RiskLeaf.given // JsonCodecs for SafeId.SafeId
 import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, SafeId, TreeId, NodeId, IronConstants}
 import IronConstants.Zero
@@ -75,6 +75,22 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .in("risk-trees" / path[TreeId]("id"))
       .get
       .out(jsonBody[Option[SimulationResponse]])
+
+  /** Get the full tree structure including all nodes.
+    *
+    * Returns the complete `RiskTree` with its flat node list and rootId,
+    * enabling the client to render an expandable node hierarchy.
+    * Separated from `getByIdEndpoint` (which returns summary-only
+    * `SimulationResponse`) to keep list endpoints lightweight.
+    */
+  val getTreeStructureEndpoint =
+    baseEndpoint
+      .tag("risk-trees")
+      .name("getTreeStructure")
+      .description("Get the full tree structure with all nodes")
+      .in("risk-trees" / path[TreeId]("id") / "structure")
+      .get
+      .out(jsonBody[Option[RiskTree]])
 
   /** Manual cache invalidation endpoint for testing SSE pipeline.
     * Triggers cache invalidation for a specific node and broadcasts SSE event.

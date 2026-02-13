@@ -6,12 +6,14 @@ package com.risquanter.register.configs
   * syntax and comma-separated env-var strings.  When `REGISTER_CORS_ORIGINS`
   * overrides the HOCON list via `$​{?REGISTER_CORS_ORIGINS}`, HOCON treats
   * the env-var value as a single scalar string (e.g. `"http://a,http://b"`),
-  * producing a one-element list.  The constructor splits and trims each
-  * entry so that `allowMatchingOrigins` receives individual origin strings.
+  * producing a one-element list.
+  *
+  * `DeriveConfig` (magnolia) calls the primary constructor directly,
+  * bypassing any companion `apply`.  Therefore normalisation happens
+  * eagerly inside the class body so it works regardless of how
+  * the instance is created.
   */
-final case class CorsConfig private (allowedOrigins: List[String])
-
-object CorsConfig:
-  /** Smart constructor: splits comma-separated entries and trims whitespace. */
-  def apply(rawOrigins: List[String]): CorsConfig =
-    new CorsConfig(rawOrigins.flatMap(_.split(",").map(_.trim)).filter(_.nonEmpty))
+final case class CorsConfig(allowedOrigins: List[String]):
+  /** Normalised origins — comma-separated entries split and trimmed. */
+  val normalised: List[String] =
+    allowedOrigins.flatMap(_.split(",").map(_.trim)).filter(_.nonEmpty)

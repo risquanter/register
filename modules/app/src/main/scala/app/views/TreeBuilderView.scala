@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 import zio.*
 import zio.prelude.Validation
-import app.state.{TreeBuilderState, SubmitState}
+import app.state.{TreeBuilderState, TreeViewState, SubmitState}
 import app.components.FormInputs
 import app.core.ZJS.*
 import com.risquanter.register.http.endpoints.RiskTreeEndpoints
@@ -16,7 +16,7 @@ import com.risquanter.register.http.endpoints.RiskTreeEndpoints
  * are pushed directly into `submitState: Var[SubmitState]`.
  */
 object TreeBuilderView extends RiskTreeEndpoints:
-  def apply(state: TreeBuilderState): HtmlElement =
+  def apply(state: TreeBuilderState, treeViewState: TreeViewState): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
     def handleSubmit(): Unit =
@@ -25,7 +25,12 @@ object TreeBuilderView extends RiskTreeEndpoints:
         case Validation.Success(_, request) =>
           submitState.set(SubmitState.Submitting)
           createEndpoint(request)
-            .tap(response => ZIO.succeed(submitState.set(SubmitState.Success(response))))
+            .tap { response =>
+              ZIO.succeed {
+                submitState.set(SubmitState.Success(response))
+                treeViewState.loadTreeList()
+              }
+            }
             .tapError(e => ZIO.succeed(submitState.set(SubmitState.Failed(e.getMessage()))))
             .runJs
         case Validation.Failure(_, errors) =>

@@ -4,24 +4,35 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.{Layout, SplitPane}
-import app.state.TreeBuilderState
-import app.views.{TreeBuilderView, TreePreview, LECChartPlaceholder}
+import app.state.{TreeBuilderState, TreeViewState}
+import app.views.{TreeBuilderView, TreePreview, TreeListView, TreeDetailView, LECChartPlaceholder}
 
 object Main:
 
   def main(args: Array[String]): Unit =
     val container = dom.document.querySelector("#app")
-    val state = new TreeBuilderState
+    val builderState = new TreeBuilderState
+    val treeViewState = new TreeViewState
+
+    val savedTreePanel = div(
+      cls := "saved-tree-panel",
+      TreeListView(treeViewState),
+      TreeDetailView(treeViewState)
+    )
 
     val appElement = Layout(
       SplitPane.horizontal(
-        left = TreeBuilderView(state),
+        left = TreeBuilderView(builderState, treeViewState),
         right = SplitPane.vertical(
-          top = TreePreview(state),
+          top = SplitPane.horizontal(
+            left = TreePreview(builderState),
+            right = savedTreePanel,
+            leftPercent = 50
+          ),
           bottom = LECChartPlaceholder(),
           topPercent = 60
         ),
-        leftPercent = 50
+        leftPercent = 40
       )
     )
 

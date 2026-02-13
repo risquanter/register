@@ -113,14 +113,14 @@ object Application extends ZIOAppDefault {
     cfg        <- ZIO.service[ServerConfig]
     corsConfig <- ZIO.service[CorsConfig]
     _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
-    _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.allowedOrigins.mkString(", ")}")
+    _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.normalised.mkString(", ")}")
     endpoints  <- HttpApi.endpointsZIO
     _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
 
     // CORS at the tapir interceptor layer — handles OPTIONS preflight before
     // route matching, avoiding the 405 that zio-http Middleware.cors produces.
     tapirCorsConfig = TapirCORSConfig.default
-      .allowMatchingOrigins(origin => corsConfig.allowedOrigins.contains(origin))
+      .allowMatchingOrigins(origin => corsConfig.normalised.contains(origin))
       .reflectHeaders
       .exposeAllHeaders
     serverOptions = ZioHttpServerOptions
