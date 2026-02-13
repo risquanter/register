@@ -164,7 +164,11 @@ object RiskLeafFormView:
         builderState.addLeaf(state.nameVar.now(), parentVar.now(), dist) match
           case Validation.Success(_, _) =>
             submitError.set(None)
-            parentVar.set(None)
+            // Intentional: parentVar is NOT reset — it is auto-synced by
+            // FormInputs.parentSelect based on available options.  Resetting
+            // it to None races with auto-sync and causes the displayed value
+            // ("Root") to diverge from the Var (None), making subsequent
+            // leaf additions fail with "must select a parent portfolio".
             // Intentional: resetTouched() (not resetFields()) preserves form values
             // so the user can quickly add successive leaves with similar parameters,
             // only changing name/parent between submits.
