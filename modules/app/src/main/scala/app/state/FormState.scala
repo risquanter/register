@@ -36,6 +36,14 @@ trait FormState:
       case (showAll, touched) => showAll || touched
     }
 
+  /** Gate a raw error signal through display timing for a given field.
+   *  Error is shown only after the field is touched (blur) or form-wide validation is triggered (submit). */
+  def withDisplayControl(fieldName: String, rawError: Signal[Option[String]]): Signal[Option[String]] =
+    shouldShowError(fieldName).combineWith(rawError).map {
+      case (true, error) => error
+      case (false, _)    => None
+    }
+
   /** Call before submit to show all errors */
   def triggerValidation(): Unit =
     showErrorsVar.set(true)

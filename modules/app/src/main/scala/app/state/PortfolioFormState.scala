@@ -24,10 +24,7 @@ final class PortfolioFormState extends FormState:
   }
 
   // Display-controlled errors
-  val nameError: Signal[Option[String]] = shouldShowError("name").combineWith(nameErrorRaw).map {
-    case (true, err) => err
-    case _ => None
-  }
+  val nameError: Signal[Option[String]] = withDisplayControl("name", nameErrorRaw)
 
   // FormState implementation
   override def errorSignals: List[Signal[Option[String]]] = List(nameErrorRaw)

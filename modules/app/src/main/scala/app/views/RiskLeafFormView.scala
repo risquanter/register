@@ -25,14 +25,16 @@ object RiskLeafFormView:
       ),
 
       // Clear stale submit error whenever the user edits any field
-      state.nameVar.signal.changes --> { _ => submitError.set(None) },
-      state.probabilityVar.signal.changes --> { _ => submitError.set(None) },
-      state.distributionModeVar.signal.changes --> { _ => submitError.set(None) },
-      state.percentilesVar.signal.changes --> { _ => submitError.set(None) },
-      state.quantilesVar.signal.changes --> { _ => submitError.set(None) },
-      state.minLossVar.signal.changes --> { _ => submitError.set(None) },
-      state.maxLossVar.signal.changes --> { _ => submitError.set(None) },
-      parentVar.signal.changes --> { _ => submitError.set(None) },
+      EventStream.merge(
+        state.nameVar.signal.changes.mapTo(()),
+        state.probabilityVar.signal.changes.mapTo(()),
+        state.distributionModeVar.signal.changes.mapTo(()),
+        state.percentilesVar.signal.changes.mapTo(()),
+        state.quantilesVar.signal.changes.mapTo(()),
+        state.minLossVar.signal.changes.mapTo(()),
+        state.maxLossVar.signal.changes.mapTo(()),
+        parentVar.signal.changes.mapTo(())
+      ) --> { _ => submitError.set(None) },
 
       // Common Fields
       textInput(

@@ -23,8 +23,12 @@ final case class LeafDraft(name: String, parent: Option[String], distribution: L
 /**
  * Builder state for constructing a risk tree on the client.
  * Performs client-side validation aligned with backend rules (no ID generation).
+ *
+ * Extends FormState for the tree-name field's error display timing
+ * (same touched / triggerValidation / withDisplayControl infrastructure
+ * used by RiskLeafFormState and PortfolioFormState).
  */
-final class TreeBuilderState:
+final class TreeBuilderState extends FormState:
   val treeNameVar: Var[String] = Var("")
   val portfoliosVar: Var[List[PortfolioDraft]] = Var(Nil)
   val leavesVar: Var[List[LeafDraft]] = Var(Nil)
@@ -32,8 +36,6 @@ final class TreeBuilderState:
   val rootLabel = "(root)"
 
   // ── Tree-name validation ──────────────────────────────────────
-  private val treeNameTouched: Var[Boolean] = Var(false)
-
   private val treeNameErrorRaw: Signal[Option[String]] = treeNameVar.signal.map { v =>
     ValidationUtil.refineName(v, "tree.name") match
       case Right(_) => None
@@ -41,17 +43,10 @@ final class TreeBuilderState:
   }
 
   /** Display-controlled tree-name error (only shows after blur or submit trigger). */
-  val treeNameError: Signal[Option[String]] =
-    treeNameTouched.signal.combineWith(treeNameErrorRaw).map {
-      case (true, err) => err
-      case _ => None
-    }
+  val treeNameError: Signal[Option[String]] = withDisplayControl("treeName", treeNameErrorRaw)
 
-  /** Mark tree-name as touched (called on blur). */
-  def markTreeNameTouched(): Unit = treeNameTouched.set(true)
-
-  /** Force tree-name error to show (called on submit). */
-  def triggerTreeNameValidation(): Unit = treeNameTouched.set(true)
+  /** Raw errors for hasErrors check — tree-name is the only builder-level field. */
+  override def errorSignals: List[Signal[Option[String]]] = List(treeNameErrorRaw)
 
   /** Parent dropdown options: root sentinel (if unclaimed) + current portfolio names. */
   val parentOptions: Signal[List[String]] =

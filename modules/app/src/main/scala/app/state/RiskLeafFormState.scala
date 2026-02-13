@@ -190,13 +190,6 @@ class RiskLeafFormState extends FormState:
   // Display-controlled Error Signals (for UI binding)
   // ============================================================
   
-  /** Combine raw error with display timing */
-  private def withDisplayControl(fieldName: String, rawError: Signal[Option[String]]): Signal[Option[String]] =
-    shouldShowError(fieldName).combineWith(rawError).map {
-      case (true, error) => error
-      case (false, _) => None
-    }
-  
   val nameError: Signal[Option[String]] = withDisplayControl("name", nameErrorRaw)
   val probabilityError: Signal[Option[String]] = withDisplayControl("probability", probabilityErrorRaw)
 

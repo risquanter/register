@@ -10,7 +10,7 @@ import com.risquanter.register.configs.{IrminConfig, SimulationConfig, Telemetry
 import com.risquanter.register.domain.data.iron.SafeUrl
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.cache.CacheController
-import com.risquanter.register.http.controllers.{HealthController, RiskTreeController}
+import com.risquanter.register.http.controllers.RiskTreeController
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.RiskTreeServiceLive
@@ -50,8 +50,8 @@ object HttpTestHarness {
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       simConfig: SimulationConfig = defaultSimulationConfig
   ): ZIO[Any, Throwable, SttpBackend[Task, Any]] =
-    val controllersLayer: ZLayer[Any, Throwable, RiskTreeController & HealthController & SSEController & CacheController] =
-      ZLayer.make[RiskTreeController & HealthController & SSEController & CacheController](
+    val controllersLayer: ZLayer[Any, Throwable, RiskTreeController & SSEController & CacheController] =
+      ZLayer.make[RiskTreeController & SSEController & CacheController](
         ZLayer.succeed(simConfig),
         ZLayer.succeed(defaultTelemetryConfig),
         TracingLive.console,
@@ -65,8 +65,7 @@ object HttpTestHarness {
         InvalidationHandler.live,
         SSEController.layer,
         CacheController.layer,
-        ZLayer.fromZIO(RiskTreeController.makeZIO),
-        HealthController.live
+        ZLayer.fromZIO(RiskTreeController.makeZIO)
       )
 
     for

@@ -12,7 +12,7 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.configs.*
 import com.risquanter.register.http.cache.CacheController
-import com.risquanter.register.http.controllers.{HealthController, RiskTreeController}
+import com.risquanter.register.http.controllers.RiskTreeController
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
@@ -106,9 +106,9 @@ object HttpTestHarness:
       port: Int,
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       cfg: HarnessConfig
-  ): ZLayer[Any, Throwable, Server & CorsConfig & RiskTreeController & HealthController & SSEController & CacheController] =
+  ): ZLayer[Any, Throwable, Server & CorsConfig & RiskTreeController & SSEController & CacheController] =
     ZLayer.make[
-      Server & CorsConfig & RiskTreeController & HealthController & SSEController & CacheController
+      Server & CorsConfig & RiskTreeController & SSEController & CacheController
     ](
       ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port)),
       ZLayer.succeed(cfg.simulation),
@@ -128,14 +128,13 @@ object HttpTestHarness:
       InvalidationHandler.live,
       SSEController.layer,
       CacheController.layer,
-      ZLayer.fromZIO(RiskTreeController.makeZIO),
-      HealthController.live
+      ZLayer.fromZIO(RiskTreeController.makeZIO)
     )
 
   private def waitForHealth(baseUrl: String): Task[Unit] =
     val client = HttpClient.newHttpClient()
     val request = HttpRequest.newBuilder()
-      .uri(URI.create(s"$baseUrl/api/health"))
+      .uri(URI.create(s"$baseUrl/health"))
       .timeout(Duration.ofSeconds(2))
       .GET()
       .build()

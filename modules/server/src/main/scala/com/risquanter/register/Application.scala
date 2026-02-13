@@ -8,7 +8,7 @@ import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirC
 
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig}
 import com.risquanter.register.http.HttpApi
-import com.risquanter.register.http.controllers.{RiskTreeController, HealthController}
+import com.risquanter.register.http.controllers.RiskTreeController
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.services.RiskTreeServiceLive
@@ -74,8 +74,8 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, RiskTreeController & HealthController & SSEController & CacheController & Server & ServerConfig & CorsConfig] =
-    ZLayer.make[RiskTreeController & HealthController & SSEController & CacheController & Server & ServerConfig & CorsConfig](
+  val appLayer: ZLayer[Any, Throwable, RiskTreeController & SSEController & CacheController & Server & ServerConfig & CorsConfig] =
+    ZLayer.make[RiskTreeController & SSEController & CacheController & Server & ServerConfig & CorsConfig](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
@@ -106,13 +106,14 @@ object Application extends ZIOAppDefault {
       InvalidationHandler.live,
       SSEController.layer,
       CacheController.layer,
-      ZLayer.fromZIO(RiskTreeController.makeZIO),
-      HealthController.live
+      ZLayer.fromZIO(RiskTreeController.makeZIO)
     )
 
   def startServer = for {
     cfg        <- ZIO.service[ServerConfig]
-    corsConfig <- ZIO.service[CorsConfig]
+    rawCors    <- ZIO.service[CorsConfig]
+    // Normalise: env-var override may deliver a single comma-separated string
+    corsConfig  = CorsConfig.normalise(rawCors.allowedOrigins)
     _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
     _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.allowedOrigins.mkString(", ")}")
     endpoints  <- HttpApi.endpointsZIO
