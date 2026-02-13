@@ -20,6 +20,7 @@ object TreeBuilderView extends RiskTreeEndpoints:
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
     def handleSubmit(): Unit =
+      state.triggerTreeNameValidation()
       state.toRequest() match
         case Validation.Success(_, request) =>
           submitState.set(SubmitState.Submitting)
@@ -35,18 +36,16 @@ object TreeBuilderView extends RiskTreeEndpoints:
     div(
       cls := "tree-builder",
       h1("Risk Tree Builder"),
-      div(
-        cls := "tree-name-field",
-        label(cls := "form-label", "Tree Name"),
-        input(
-          typ := "text",
-          cls := "form-input",
-          placeholder := "e.g., Enterprise Risk Tree",
-          controlled(
-            value <-- state.treeNameVar.signal,
-            onInput.mapToValue --> state.treeNameVar
-          )
-        )
+
+      // Clear stale submit feedback when the user edits the tree name
+      state.treeNameVar.signal.changes --> { _ => submitState.set(SubmitState.Idle) },
+
+      FormInputs.textInput(
+        labelText = "Tree Name",
+        valueVar = state.treeNameVar,
+        errorSignal = state.treeNameError,
+        onBlurCallback = () => state.markTreeNameTouched(),
+        placeholderText = "e.g., Enterprise Risk Tree"
       ),
       div(
         cls := "forms-grid",

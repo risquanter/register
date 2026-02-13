@@ -23,7 +23,17 @@ object RiskLeafFormView:
         cls := "form-description",
         "Configure a risk leaf node with either expert distribution or lognormal distribution."
       ),
-      
+
+      // Clear stale submit error whenever the user edits any field
+      state.nameVar.signal.changes --> { _ => submitError.set(None) },
+      state.probabilityVar.signal.changes --> { _ => submitError.set(None) },
+      state.distributionModeVar.signal.changes --> { _ => submitError.set(None) },
+      state.percentilesVar.signal.changes --> { _ => submitError.set(None) },
+      state.quantilesVar.signal.changes --> { _ => submitError.set(None) },
+      state.minLossVar.signal.changes --> { _ => submitError.set(None) },
+      state.maxLossVar.signal.changes --> { _ => submitError.set(None) },
+      parentVar.signal.changes --> { _ => submitError.set(None) },
+
       // Common Fields
       textInput(
         labelText = "Name",
@@ -153,6 +163,9 @@ object RiskLeafFormView:
           case Validation.Success(_, _) =>
             submitError.set(None)
             parentVar.set(None)
+            // Intentional: resetTouched() (not resetFields()) preserves form values
+            // so the user can quickly add successive leaves with similar parameters,
+            // only changing name/parent between submits.
             state.resetTouched()
           case Validation.Failure(_, errs) => submitError.set(Some(errs.head.message))
       case Validation.Failure(_, errs) => submitError.set(Some(errs.head.message))

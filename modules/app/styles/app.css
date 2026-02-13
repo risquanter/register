@@ -279,10 +279,6 @@ body {
   margin-bottom: var(--sp-6);
 }
 
-.tree-name-field {
-  margin-bottom: var(--sp-6);
-}
-
 .forms-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

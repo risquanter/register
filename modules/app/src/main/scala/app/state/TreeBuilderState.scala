@@ -31,6 +31,28 @@ final class TreeBuilderState:
 
   val rootLabel = "(root)"
 
+  // ── Tree-name validation ──────────────────────────────────────
+  private val treeNameTouched: Var[Boolean] = Var(false)
+
+  private val treeNameErrorRaw: Signal[Option[String]] = treeNameVar.signal.map { v =>
+    ValidationUtil.refineName(v, "tree.name") match
+      case Right(_) => None
+      case Left(errors) => Some(errors.head.message)
+  }
+
+  /** Display-controlled tree-name error (only shows after blur or submit trigger). */
+  val treeNameError: Signal[Option[String]] =
+    treeNameTouched.signal.combineWith(treeNameErrorRaw).map {
+      case (true, err) => err
+      case _ => None
+    }
+
+  /** Mark tree-name as touched (called on blur). */
+  def markTreeNameTouched(): Unit = treeNameTouched.set(true)
+
+  /** Force tree-name error to show (called on submit). */
+  def triggerTreeNameValidation(): Unit = treeNameTouched.set(true)
+
   /** Parent dropdown options: root sentinel (if unclaimed) + current portfolio names. */
   val parentOptions: Signal[List[String]] =
     portfoliosVar.signal.combineWith(leavesVar.signal).map { (ps, ls) =>

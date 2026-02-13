@@ -18,6 +18,11 @@ object PortfolioFormView:
     div(
       cls := "portfolio-form",
       h2("Add Portfolio"),
+
+      // Clear stale submit error whenever the user edits a field
+      form.nameVar.signal.changes --> { _ => submitError.set(None) },
+      form.parentVar.signal.changes --> { _ => submitError.set(None) },
+
       FormInputs.textInput(
         labelText = "Portfolio Name",
         valueVar = form.nameVar,
