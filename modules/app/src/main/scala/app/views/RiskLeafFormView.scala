@@ -109,10 +109,7 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched("quantiles"),
         placeholderText = "e.g., 100, 500, 2000",
         inputModeAttr = "decimal"
-      ),
-      
-      // Cross-field error
-      crossFieldError(state.expertCrossFieldError)
+      )
     )
   
   /** Lognormal mode specific fields */
@@ -139,10 +136,7 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched("maxLoss"),
         placeholderText = "e.g., 50000",
         inputModeAttr = "numeric"
-      ),
-      
-      // Cross-field error
-      crossFieldError(state.lognormalCrossFieldError)
+      )
     )
   
   /** Handle form submission */

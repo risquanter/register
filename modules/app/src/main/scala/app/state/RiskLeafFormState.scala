@@ -199,18 +199,36 @@ class RiskLeafFormState extends FormState:
   
   val nameError: Signal[Option[String]] = withDisplayControl("name", nameErrorRaw)
   val probabilityError: Signal[Option[String]] = withDisplayControl("probability", probabilityErrorRaw)
-  val percentilesError: Signal[Option[String]] = withDisplayControl("percentiles", percentilesErrorRaw)
-  val quantilesError: Signal[Option[String]] = withDisplayControl("quantiles", quantilesErrorRaw)
-  val expertCrossFieldError: Signal[Option[String]] = withDisplayControl("expertCrossField", expertCrossFieldErrorRaw)
-  val minLossError: Signal[Option[String]] = withDisplayControl("minLoss", minLossErrorRaw)
-  val maxLossError: Signal[Option[String]] = withDisplayControl("maxLoss", maxLossErrorRaw)
-  val lognormalCrossFieldError: Signal[Option[String]] = withDisplayControl("lognormalCrossField", lognormalCrossFieldErrorRaw)
+
+  // Cross-field errors merged into per-field signals (BCA-style):
+  // own-field error takes priority; cross-field error is the fallback.
+  // Both fields get a red border when the cross-field constraint is violated.
+
+  /** Percentiles: own error ∪ expert cross-field (length mismatch) */
+  val percentilesError: Signal[Option[String]] = withDisplayControl("percentiles",
+    percentilesErrorRaw.combineWith(expertCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
+  )
+  /** Quantiles: own error ∪ expert cross-field (length mismatch) */
+  val quantilesError: Signal[Option[String]] = withDisplayControl("quantiles",
+    quantilesErrorRaw.combineWith(expertCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
+  )
+  /** Min loss: own error ∪ lognormal cross-field (min ≥ max) */
+  val minLossError: Signal[Option[String]] = withDisplayControl("minLoss",
+    minLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
+  )
+  /** Max loss: own error ∪ lognormal cross-field (min ≥ max) */
+  val maxLossError: Signal[Option[String]] = withDisplayControl("maxLoss",
+    maxLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
+  )
 
   // ============================================================
   // FormState Implementation
   // ============================================================
   
-  /** Raw errors for hasErrors check (ignores display timing) */
+  /** Raw errors for hasErrors check (ignores display timing).
+   *  Cross-field errors are already folded into the per-field composed signals,
+   *  but we still include the standalone cross-field raws here so that
+   *  `hasErrors` / `isValid` catches them even when neither field has an own error. */
   override def errorSignals: List[Signal[Option[String]]] = List(
     nameErrorRaw,
     probabilityErrorRaw,
