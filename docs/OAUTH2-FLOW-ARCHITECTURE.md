@@ -211,11 +211,11 @@ Before runtime, the following must be configured:
 
 ## Reference Implementation
 
-For initial implementation guidance, consult the **Cheleb reference architecture**:
+For initial implementation guidance:
 
-- OAuth2/OIDC integration patterns
-- ZIO middleware for claims extraction
-- Keycloak configuration templates
+- **Keycloak:** Consult Keycloak OIDC documentation and JS adapter docs for OAuth2/OIDC integration
+- **Istio JWT:** Consult Istio RequestAuthentication docs for claims extraction via `x-jwt-claims` header
+- **ZIO + PostgreSQL patterns:** Consult Cheleb reference architecture (relevant for persistence layer patterns only)
 
 Validate applicability against current implementation state before adopting patterns.
 
