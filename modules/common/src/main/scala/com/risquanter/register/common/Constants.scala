@@ -19,4 +19,7 @@ object Constants {
   
   /** Maximum length for risk names (SafeName constraint) */
   val MaxNameLength = 50
+
+  /** Maximum length for short optional text fields (SafeExtraShortStr constraint) */
+  val MaxShortTextLength = 20
 }

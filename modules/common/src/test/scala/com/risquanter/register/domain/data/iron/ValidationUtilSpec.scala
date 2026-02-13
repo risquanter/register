@@ -27,7 +27,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineName("   ")
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message.contains("failed constraint check"))
+          result.left.exists(_.head.message == ValidationMessages.nameRequired)
         )
       },
       
@@ -46,7 +46,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         val result = ValidationUtil.refineName(longName)
         assertTrue(
           result.isLeft &&
-          result.left.exists(_.head.message.contains("failed constraint check"))
+          result.left.exists(_.head.message == ValidationMessages.nameTooLong)
         )
       },
       
@@ -55,8 +55,7 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         assertTrue(
           result.isLeft &&
           result.left.exists(errors => 
-            errors.head.message.contains("Name") && 
-            errors.head.message.contains("failed constraint check")
+            errors.head.message == ValidationMessages.nameRequired
           )
         )
       }

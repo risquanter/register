@@ -1,7 +1,7 @@
 package app.state
 
 import com.raquo.laminar.api.L.{*, given}
-import com.risquanter.register.domain.data.iron.ValidationUtil
+import com.risquanter.register.domain.data.iron.{ValidationUtil, ValidationMessages}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
 import app.state.LeafDistributionDraft
@@ -95,9 +95,9 @@ class RiskLeafFormState extends FormState:
   
   /** Probability validation using Iron Probability type (open interval 0 < p < 1) */
   private val probabilityErrorRaw: Signal[Option[String]] = probabilityVar.signal.map { v =>
-    if v.isBlank then Some("Probability is required")
+    if v.isBlank then Some(ValidationMessages.probabilityRequired)
     else this.parseDouble(v) match
-      case None => Some("Probability must be a number")
+      case None => Some(ValidationMessages.probabilityNotANumber)
       case Some(prob) => 
         ValidationUtil.refineProbability(prob) match
           case Right(_) => None
@@ -108,12 +108,12 @@ class RiskLeafFormState extends FormState:
   private val percentilesErrorRaw: Signal[Option[String]] = 
     distributionModeVar.signal.combineWith(percentilesVar.signal).map {
       case (DistributionMode.Expert, v) =>
-        if v.isBlank then Some("Percentiles are required for expert mode")
+        if v.isBlank then Some(ValidationMessages.percentilesRequired)
         else
           val values = parseDoubleList(v)
-          if values.isEmpty then Some("Enter comma-separated percentile values")
+          if values.isEmpty then Some(ValidationMessages.percentilesFormat)
           else if values.exists(p => p <= 0 || p >= 100) then 
-            Some("Percentiles must be between 0 and 100 (exclusive)")
+            Some(ValidationMessages.percentilesOutOfRange)
           else None
       case _ => None
     }
@@ -122,11 +122,11 @@ class RiskLeafFormState extends FormState:
   private val quantilesErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(quantilesVar.signal).map {
       case (DistributionMode.Expert, v) =>
-        if v.isBlank then Some("Quantiles are required for expert mode")
+        if v.isBlank then Some(ValidationMessages.quantilesRequired)
         else
           val values = parseDoubleList(v)
-          if values.isEmpty then Some("Enter comma-separated quantile values (loss amounts)")
-          else if values.exists(_ < 0) then Some("Quantiles must be non-negative")
+          if values.isEmpty then Some(ValidationMessages.quantilesFormat)
+          else if values.exists(_ < 0) then Some(ValidationMessages.quantilesMustBeNonNegative)
           else None
       case _ => None
     }
@@ -140,7 +140,7 @@ class RiskLeafFormState extends FormState:
           val pList = parseDoubleList(pStr)
           val qList = parseDoubleList(qStr)
           if pList.nonEmpty && qList.nonEmpty && pList.length != qList.length then
-            Some(s"Percentiles and quantiles must have same length (${pList.length} vs ${qList.length})")
+            Some(ValidationMessages.expertLengthMismatch(pList.length, qList.length))
           else None
         case _ => None
       }
@@ -149,9 +149,9 @@ class RiskLeafFormState extends FormState:
   private val minLossErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(minLossVar.signal).map {
       case (DistributionMode.Lognormal, v) =>
-        if v.isBlank then Some("Minimum loss is required for lognormal mode")
+        if v.isBlank then Some(ValidationMessages.minLossRequired)
         else parseLong(v) match
-          case None => Some("Minimum loss must be a whole number")
+          case None => Some(ValidationMessages.lossMustBeWholeNumber("Minimum loss"))
           case Some(n) => 
             ValidationUtil.refineNonNegativeLong(n, "minLoss") match
               case Right(_) => None
@@ -163,9 +163,9 @@ class RiskLeafFormState extends FormState:
   private val maxLossErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(maxLossVar.signal).map {
       case (DistributionMode.Lognormal, v) =>
-        if v.isBlank then Some("Maximum loss is required for lognormal mode")
+        if v.isBlank then Some(ValidationMessages.maxLossRequired)
         else parseLong(v) match
-          case None => Some("Maximum loss must be a whole number")
+          case None => Some(ValidationMessages.lossMustBeWholeNumber("Maximum loss"))
           case Some(n) =>
             ValidationUtil.refineNonNegativeLong(n, "maxLoss") match
               case Right(_) => None
@@ -181,7 +181,7 @@ class RiskLeafFormState extends FormState:
         case (DistributionMode.Lognormal, minStr, maxStr) =>
           (parseLong(minStr), parseLong(maxStr)) match
             case (Some(min), Some(max)) if min >= max =>
-              Some("Minimum loss must be less than maximum loss")
+              Some(ValidationMessages.minMustBeLessThanMax)
             case _ => None
         case _ => None
       }

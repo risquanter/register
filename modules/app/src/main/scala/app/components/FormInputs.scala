@@ -44,6 +44,9 @@ object FormInputs:
           value <-- valueVar.signal,
           onInput.mapToValue.filter(filter) --> valueVar
         ),
+        // Guard: only mark touched if user actually typed something and then left.
+        // Prevents showing "Name is required" when clicking into a pristine empty
+        // field and clicking out — the field stays untouched until meaningful input.
         onBlur --> (_ => if valueVar.now().nonEmpty then onBlurCallback())
       ),
       child.maybe <-- errorSignal.map(_.map(msg => 

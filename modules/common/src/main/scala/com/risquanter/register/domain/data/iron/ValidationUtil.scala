@@ -38,11 +38,14 @@ object ValidationUtil {
       .refineEither[Not[Blank] & MaxLength[50]]
       .map(SafeName.SafeName(_))
       .left
-      .map(err => List(ValidationError(
-        field = fieldPath,
-        code = if err.contains("Blank") then ValidationErrorCode.REQUIRED_FIELD else ValidationErrorCode.INVALID_LENGTH,
-        message = s"Name '$sanitized' failed constraint check: $err"
-      )))
+      .map { err =>
+        val isBlank = sanitized.isEmpty || err.toLowerCase.contains("blank")
+        List(ValidationError(
+          field = fieldPath,
+          code = if isBlank then ValidationErrorCode.REQUIRED_FIELD else ValidationErrorCode.INVALID_LENGTH,
+          message = if isBlank then ValidationMessages.nameRequired else ValidationMessages.nameTooLong
+        ))
+      }
   }
 
   // Refinement for email; using a maximum length of 50 and requiring single @ symbol
@@ -52,10 +55,10 @@ object ValidationUtil {
       .refineEither[Not[Blank] & MaxLength[50] & Match["[^@]+@[^@]+"]]
       .map(Email.Email(_))
       .left
-      .map(err => List(ValidationError(
+      .map(_ => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_FORMAT,
-        message = s"Email '$sanitized' is invalid: $err"
+        message = ValidationMessages.emailInvalid
       )))
   }
 
@@ -66,10 +69,10 @@ object ValidationUtil {
       .refineEither[UrlConstraint]
       .map(Url.Url(_))
       .left
-      .map(err => List(ValidationError(
+      .map(_ => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_FORMAT,
-        message = s"URL '$sanitized' is invalid: $err"
+        message = ValidationMessages.urlInvalid
       )))
   }
 
@@ -78,10 +81,10 @@ object ValidationUtil {
     value
       .refineEither[GreaterEqual[0L]]
       .left
-      .map(err => List(ValidationError(
+      .map(_ => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_RANGE,
-        message = s"Value must be non-negative: $err"
+        message = ValidationMessages.valueMustBeNonNegative
       )))
   }
 
@@ -90,10 +93,10 @@ object ValidationUtil {
     value
       .refineEither[Greater[0.0] & Less[1.0]]
       .left
-      .map(err => List(ValidationError(
+      .map(_ => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_RANGE,
-        message = s"Value must be between 0.0 and 1.0 (exclusive): $err"
+        message = ValidationMessages.probabilityOutOfRange
       )))
   }
 
@@ -102,10 +105,10 @@ object ValidationUtil {
     value
       .refineEither[Greater[0]]
       .left
-      .map(err => List(ValidationError(
+      .map(_ => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_RANGE,
-        message = s"Value must be positive (> 0): $err"
+        message = ValidationMessages.valueMustBePositive
       )))
   }
 
@@ -114,10 +117,10 @@ object ValidationUtil {
     value
       .refineEither[GreaterEqual[0]]
       .left
-      .map(err => List(ValidationError(
+      .map(_ => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_RANGE,
-        message = s"Value must be non-negative (>= 0): $err"
+        message = ValidationMessages.valueMustBeNonNegative
       )))
   }
 
@@ -126,10 +129,10 @@ object ValidationUtil {
     value
       .refineEither[Match["^(expert|lognormal)$"]]
       .left
-      .map(err => List(ValidationError(
+      .map(_ => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_PATTERN,
-        message = s"Distribution type '$value' must be either 'expert' or 'lognormal': $err"
+        message = ValidationMessages.distributionTypeInvalid
       )))
   }
 
@@ -167,11 +170,11 @@ object ValidationUtil {
         sanitized
           .refineEither[Not[Blank] & MaxLength[20]]
           .left
-          .map(err =>
+          .map(_ =>
             List(ValidationError(
               field = fieldPath,
               code = ValidationErrorCode.INVALID_LENGTH,
-              message = s"Value failed constraint check: $err"
+              message = ValidationMessages.shortTextTooLong
             ))
           )
           .map(refined => Some(refined))
