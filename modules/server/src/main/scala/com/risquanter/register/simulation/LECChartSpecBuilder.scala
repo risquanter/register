@@ -122,14 +122,25 @@ object LECChartSpecBuilder {
       // Map each curve ID to its theme colour (keyed by id, not full case class)
       val colorById: Map[String, String] = sortedCurves.map(_.id).zip(themeColorsRisk).toMap
 
-      val minLoss = allPoints.map(_.loss).min
+      val minLoss = allPoints.map(_.loss).min.toDouble
+
+      // ── Y-axis data-adaptive ceiling ──────────────────────────
+      // Fit to the highest starting exceedance across all curves,
+      // plus a 10% relative buffer for visual breathing room.
+      // X-axis needs no clamping — tick domain is already trimmed
+      // by LECGenerator.generateCurvePointsMulti (tail cutoff).
+      val yBuffer = 1.1
+      val yCeiling: Double = math.min(
+        1.0,
+        sortedCurves.flatMap(_.curve.headOption).map(_.exceedanceProbability).max * yBuffer
+      )
 
       // Generate data points in Vega-Lite format
       val dataValues: Seq[Json] = sortedCurves.flatMap { curve =>
         curve.curve.map { point =>
           obj(
             "risk"        -> str(curve.name),
-            "loss"        -> num(point.loss),
+            "loss"        -> num(point.loss.toDouble),
             "exceedance"  -> num(point.exceedanceProbability)
           )
         }
@@ -172,7 +183,7 @@ object LECChartSpecBuilder {
             "type"  -> str("quantitative"),
             "title" -> str("Probability"),
             "axis"  -> obj("format" -> str(".1~%")),
-            "scale" -> obj("domain" -> arr(Seq(num(0), num(1))))
+            "scale" -> obj("domain" -> arr(Seq(num(0.0), num(yCeiling))))
           ),
           "color" -> obj(
             "field" -> str("risk"),

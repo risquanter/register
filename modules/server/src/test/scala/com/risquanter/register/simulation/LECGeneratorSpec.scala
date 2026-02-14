@@ -139,15 +139,41 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         
         assertTrue(curves.contains(1) && curves.contains(2))
       },
-      test("single result degenerates to generateCurvePoints behavior") {
+      test("single result produces subset of generateCurvePoints (trimmed tail)") {
         val multiPoints = LECGenerator.generateCurvePointsMulti(Map("cyber" -> cyberResult), 20)("cyber")
         val singlePoints = LECGenerator.generateCurvePoints(cyberResult, 20)
         
-        // Should be similar (may differ slightly due to tick domain calculation)
+        // Multi trims trailing near-zero ticks, so size ≤ single
         assertTrue(
-          multiPoints.size == singlePoints.size,
+          multiPoints.size <= singlePoints.size,
           multiPoints.forall((_, p) => p >= 0.0 && p <= 1.0)
         )
+      },
+      test("tail is trimmed: no long near-zero plateau") {
+        // wideRangeResult: 3 trials, outcomes [1000, 100000, 50000]
+        // getTicks covers [1000, 110000] with 100 ticks.
+        // probOfExceedance drops to 0 well before tick 100.
+        // After trimming, last point should have exceedance near 0
+        // but the curve should NOT extend far past the last meaningful tick.
+        val results = Map("wide" -> wideRangeResult)
+        val curves = LECGenerator.generateCurvePointsMulti(results, 100)
+        val wideCurve = curves("wide")
+        val untrimmedTicks = LECGenerator.getTicks(1000L, 100000L, 100)
+
+        // Trimmed curve should be shorter than untrimmed tick count
+        assertTrue(wideCurve.size < untrimmedTicks.size)
+
+        // Last point should be near-zero (the one tick past cutoff)
+        val (_, lastProb) = wideCurve.last
+        assertTrue(lastProb < LECGenerator.tailCutoff)
+      },
+      test("trimmed curves still share the same tick domain") {
+        val results = Map("cyber" -> cyberResult, "hardware" -> hardwareResult)
+        val curves = LECGenerator.generateCurvePointsMulti(results, 10)
+        
+        val cyberLosses = curves("cyber").map(_._1)
+        val hardwareLosses = curves("hardware").map(_._1)
+        assertTrue(cyberLosses == hardwareLosses)
       }
     ),
     

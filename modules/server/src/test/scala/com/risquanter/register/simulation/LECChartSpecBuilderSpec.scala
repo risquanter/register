@@ -59,6 +59,21 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
     quantiles = Map.empty
   )
 
+  /** Curve starting below 1.0 with a long near-zero tail — exercises axis clamping */
+  private val curveWithTail = LECNodeCurve(
+    id = "tail-id",
+    name = "Tail Risk",
+    curve = Vector(
+      LECPoint(0L, 0.30),
+      LECPoint(50L, 0.20),
+      LECPoint(100L, 0.05),
+      LECPoint(200L, 0.009),  // below 1% tail cutoff
+      LECPoint(500L, 0.001),  // deep tail
+      LECPoint(1000L, 0.0)    // far-right tail
+    ),
+    quantiles = Map.empty
+  )
+
   /** Realistic 100-tick curve simulating actual simulation output */
   private def make100TickCurve(id: String, name: String, maxLoss: Long): LECNodeCurve = {
     val ticks = LECGenerator.getTicks(1L, maxLoss, 100)
@@ -287,6 +302,51 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
           result.contains(colors(0)),
           result.contains(colors(1))
         )
+      }
+    ),
+    suite("y-axis adaptive ceiling")(
+      test("y-axis domain ceiling fits to data, not hardcoded to 1.0") {
+        // curveWithTail starts at 0.30 → yCeiling = min(1.0, 0.30 × 1.1) = 0.33
+        val result = LECChartSpecBuilder.generateSpec(curveWithTail)
+        val json   = parseSpec(result)
+        val layers = fieldAt(json, "layer")
+        val lastIdx = layers.collect { case Json.Arr(es) => es.size - 1 }.getOrElse(0)
+        val yDomain = fieldAt(json, "layer", lastIdx, "encoding", "y", "scale", "domain")
+        val domainValues = yDomain.collect { case Json.Arr(elems) =>
+          elems.collect { case Json.Num(n) => n.doubleValue() }.toSeq
+        }.getOrElse(Seq.empty)
+        // Floor = 0, ceiling = 0.33 (0.30 × 1.1)
+        assertTrue(
+          domainValues.length == 2,
+          domainValues(0) == 0.0,
+          domainValues(1) == 0.33
+        )
+      },
+      test("y-axis ceiling is capped at 1.0 when curves start at 1.0") {
+        // samplePoints starts at (0, 1.0) → ceiling = min(1.0, 1.0 × 1.1) = 1.0
+        val result = LECChartSpecBuilder.generateSpec(rootCurve)
+        val json   = parseSpec(result)
+        val layers = fieldAt(json, "layer")
+        val lastIdx = layers.collect { case Json.Arr(es) => es.size - 1 }.getOrElse(0)
+        val yDomain = fieldAt(json, "layer", lastIdx, "encoding", "y", "scale", "domain")
+        val domainValues = yDomain.collect { case Json.Arr(elems) =>
+          elems.collect { case Json.Num(n) => n.doubleValue() }.toSeq
+        }.getOrElse(Seq.empty)
+        assertTrue(
+          domainValues == Seq(0.0, 1.0)
+        )
+      },
+      test("multi-curve y ceiling uses max across all curves") {
+        // childAlpha starts at 1.0, curveWithTail starts at 0.30 → max = 1.0 → capped at 1.0
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(curveWithTail, childAlpha))
+        val json   = parseSpec(result)
+        val layers = fieldAt(json, "layer")
+        val lastIdx = layers.collect { case Json.Arr(es) => es.size - 1 }.getOrElse(0)
+        val yDomain = fieldAt(json, "layer", lastIdx, "encoding", "y", "scale", "domain")
+        val domainValues = yDomain.collect { case Json.Arr(elems) =>
+          elems.collect { case Json.Num(n) => n.doubleValue() }.toSeq
+        }.getOrElse(Seq.empty)
+        assertTrue(domainValues == Seq(0.0, 1.0))
       }
     )
   )

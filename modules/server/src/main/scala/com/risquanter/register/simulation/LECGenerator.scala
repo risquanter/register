@@ -191,6 +191,15 @@ object LECGenerator {
     * @param nEntries Number of sample points for the shared tick domain
     * @return Map of node ID to curve points (loss, exceedanceProbability)
     */
+  /** Exceedance threshold below which a tick is considered "tail".
+    * A tick is kept if *any* curve still has exceedance ≥ this value.
+    * This trims the long near-zero right tail that wastes ~90% of the
+    * x-axis on typical fat-tailed distributions.
+    *
+    * 0.5% keeps the visual descent toward zero without the dead tail.
+    */
+  val tailCutoff: Double = 0.005
+
   def generateCurvePointsMulti[K](
     results: Map[K, RiskResult], 
     nEntries: Int = 100
@@ -208,8 +217,8 @@ object LECGenerator {
     // Generate shared tick domain
     val sharedTicks = getTicks(combinedMin, combinedMax, nEntries)
     
-    // Compute curves for all results using shared ticks
-    results.map { case (nodeId, result) =>
+    // Evaluate all curves at every tick
+    val evaluated: Map[K, Vector[(Long, Double)]] = results.map { case (nodeId, result) =>
       if (result.outcomeCount.isEmpty) {
         nodeId -> Vector.empty
       } else {
@@ -217,6 +226,22 @@ object LECGenerator {
           (loss, result.probOfExceedance(loss).toDouble)
         }
       }
+    }
+
+    // Trim the uninformative tail: keep ticks where at least one curve
+    // still has meaningful exceedance, plus one tick beyond (smooth end).
+    val nonEmptyCurves = evaluated.values.filter(_.nonEmpty).toVector
+    if (nonEmptyCurves.isEmpty) return evaluated
+
+    val lastMeaningfulIdx = sharedTicks.indices.reverse.find { i =>
+      nonEmptyCurves.exists(curve => curve(i)._2 >= tailCutoff)
+    }.getOrElse(sharedTicks.size - 1)
+
+    // Keep one tick past the cutoff so the curve visually reaches near-zero
+    val trimIdx = math.min(lastMeaningfulIdx + 1, sharedTicks.size - 1)
+
+    evaluated.map { case (k, pts) =>
+      k -> (if (pts.isEmpty) pts else pts.take(trimIdx + 1))
     }
   }
 }
