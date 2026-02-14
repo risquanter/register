@@ -90,12 +90,21 @@ object TreeDetailView:
 
     val isExpanded: Signal[Boolean] = state.expandedNodes.signal.map(_.contains(nodeId))
     val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeId))
+    val isChartSelected: Signal[Boolean] = state.chartNodeIds.signal.map(_.contains(nodeId))
+
+    val rowCls: Signal[String] = isSelected.combineWith(isChartSelected).map { (sel, chart) =>
+      (sel, chart) match
+        case (true, true)   => "node-row node-selected node-chart-selected"
+        case (true, false)  => "node-row node-selected"
+        case (false, true)  => "node-row node-chart-selected"
+        case (false, false) => "node-row"
+    }
 
     div(
       cls := "tree-detail-node",
       // Node row
       div(
-        cls <-- isSelected.map(sel => if sel then "node-row node-selected" else "node-row"),
+        cls <-- rowCls,
         paddingLeft := s"${depth * 20}px",
         // Expand/collapse toggle (only for portfolios with children)
         if hasChildren then
@@ -113,7 +122,13 @@ object TreeDetailView:
           cls := "node-label",
           cursor.pointer,
           nodeLabel(node),
-          onClick --> (_ => state.selectNode(nodeId))
+          onClick --> { ev =>
+            if ev.ctrlKey || ev.metaKey then
+              ev.preventDefault()
+              state.toggleChartSelection(nodeId)
+            else
+              state.selectNode(nodeId)
+          }
         )
       ),
       // Children (only rendered when expanded)

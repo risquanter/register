@@ -122,11 +122,18 @@ object FormInputs:
     isDisabled: Signal[Boolean],
     onClickCallback: () => Unit
   ): HtmlElement =
+    submitButton(Signal.fromValue(text), isDisabled, onClickCallback)
+
+  def submitButton(
+    textSignal: Signal[String],
+    isDisabled: Signal[Boolean],
+    onClickCallback: () => Unit
+  ): HtmlElement =
     button(
       typ := "button",
       cls := "form-submit",
       disabled <-- isDisabled,
-      text,
+      child.text <-- textSignal,
       onClick --> (_ => onClickCallback())
     )
 

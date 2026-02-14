@@ -255,7 +255,8 @@ class RiskLeafFormState extends FormState:
       case DistributionMode.Lognormal => parseLongField(maxLossVar.now(), "leaf.maxLoss").map(Some(_))
       case _ => Validation.succeed(None)
     val percentilesV = mode match
-      case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(percentilesVar.now())))
+      // UI uses 0-100 scale; domain model requires 0-1 scale (refineProbability expects exclusive (0,1))
+      case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(percentilesVar.now()).map(_ / 100.0)))
       case _ => Validation.succeed(None)
     val quantilesV = mode match
       case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(quantilesVar.now())))

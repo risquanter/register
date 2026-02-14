@@ -780,6 +780,20 @@ select.form-input option {
   background-color: var(--surface-overlay-active);
 }
 
+.node-row.node-chart-selected {
+  border-left: 3px solid var(--accent);
+  padding-left: calc(var(--sp-1) - 3px); /* compensate for border width */
+  background-color: rgba(184, 187, 188, 0.06);
+}
+
+.node-row.node-chart-selected .node-label {
+  color: var(--foreground);
+}
+
+.node-row.node-selected.node-chart-selected {
+  background-color: var(--surface-overlay-active);
+}
+
 .node-toggle {
   width: 1.2em;
   text-align: center;

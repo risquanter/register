@@ -4,9 +4,9 @@ import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.{Validation, ForEach}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.ValidationUtil
+import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
 import com.risquanter.register.frontend.TreeBuilderLogic
 
 final case class PortfolioDraft(name: String, parent: Option[String])
@@ -32,6 +32,12 @@ final class TreeBuilderState extends FormState:
   val treeNameVar: Var[String] = Var("")
   val portfoliosVar: Var[List[PortfolioDraft]] = Var(Nil)
   val leavesVar: Var[List[LeafDraft]] = Var(Nil)
+
+  /** When set, subsequent submits update the existing tree instead of creating. */
+  val editingTreeId: Var[Option[TreeId]] = Var(None)
+
+  /** Whether the builder is in update mode (previously created tree). */
+  val isUpdateMode: Signal[Boolean] = editingTreeId.signal.map(_.isDefined)
 
   val rootLabel = "(root)"
 
@@ -106,6 +112,20 @@ final class TreeBuilderState extends FormState:
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, topologyV) { (treeName, ports, leafs, _) =>
       RiskTreeDefinitionRequest(treeName, ports, leafs)
+    }
+
+  /** Build update request — full replacement with all nodes as "new"
+    * (server regenerates IDs; tree ID is preserved).
+    */
+  def toUpdateRequest(): Validation[ValidationError, RiskTreeUpdateRequest] =
+    toRequest().map { createReq =>
+      RiskTreeUpdateRequest(
+        name = createReq.name,
+        portfolios = Seq.empty,
+        leaves = Seq.empty,
+        newPortfolios = createReq.portfolios,
+        newLeaves = createReq.leaves
+      )
     }
 
   // ------------------------------------------------------------

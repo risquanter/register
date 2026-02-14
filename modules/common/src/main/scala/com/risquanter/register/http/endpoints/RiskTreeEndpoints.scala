@@ -3,7 +3,7 @@ package com.risquanter.register.http.endpoints
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
-import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.domain.data.{LECCurveResponse, LECPoint, LECNodeCurve, RiskLeaf, RiskTree}
@@ -56,6 +56,21 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .in("risk-trees")
       .post
       .in(jsonBody[RiskTreeDefinitionRequest])
+      .out(jsonBody[SimulationResponse])
+
+  /** Full replacement update of an existing risk tree.
+    *
+    * Replaces the entire tree structure (nodes + topology).
+    * The tree ID is preserved; all node IDs are regenerated.
+    */
+  val updateEndpoint =
+    baseEndpoint
+      .tag("risk-trees")
+      .name("update")
+      .description("Full replacement update of an existing risk tree")
+      .in("risk-trees" / path[TreeId]("id"))
+      .put
+      .in(jsonBody[RiskTreeUpdateRequest])
       .out(jsonBody[SimulationResponse])
 
   val getAllEndpoint =

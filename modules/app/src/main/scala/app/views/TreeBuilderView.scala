@@ -19,24 +19,36 @@ object TreeBuilderView extends RiskTreeEndpoints:
   def apply(state: TreeBuilderState, treeViewState: TreeViewState): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
+    def onSuccess(response: com.risquanter.register.http.responses.SimulationResponse): Unit =
+      submitState.set(SubmitState.Success(response))
+      state.editingTreeId.set(Some(response.id))
+      treeViewState.loadTreeList()
+
     def handleSubmit(): Unit =
       state.triggerValidation()
-      state.toRequest() match
-        case Validation.Success(_, request) =>
-          submitState.set(SubmitState.Submitting)
-          createEndpoint(request)
-            .tap { response =>
-              ZIO.succeed {
-                submitState.set(SubmitState.Success(response))
-                treeViewState.loadTreeList()
-              }
-            }
-            .tapError(e => ZIO.succeed(submitState.set(SubmitState.Failed(e.getMessage()))))
-            .runJs
-        case Validation.Failure(_, errors) =>
-          submitState.set(SubmitState.Failed(
-            errors.map(_.message).toList.mkString("; ")
-          ))
+      state.editingTreeId.now() match
+        // ── Update mode ──
+        case Some(treeId) =>
+          state.toUpdateRequest() match
+            case Validation.Success(_, request) =>
+              submitState.set(SubmitState.Submitting)
+              updateEndpoint((treeId, request))
+                .tap(r => ZIO.succeed(onSuccess(r)))
+                .tapError(e => ZIO.succeed(submitState.set(SubmitState.Failed(e.getMessage()))))
+                .runJs
+            case Validation.Failure(_, errors) =>
+              submitState.set(SubmitState.Failed(errors.map(_.message).toList.mkString("; ")))
+        // ── Create mode ──
+        case None =>
+          state.toRequest() match
+            case Validation.Success(_, request) =>
+              submitState.set(SubmitState.Submitting)
+              createEndpoint(request)
+                .tap(r => ZIO.succeed(onSuccess(r)))
+                .tapError(e => ZIO.succeed(submitState.set(SubmitState.Failed(e.getMessage()))))
+                .runJs
+            case Validation.Failure(_, errors) =>
+              submitState.set(SubmitState.Failed(errors.map(_.message).toList.mkString("; ")))
 
     div(
       cls := "tree-builder",
@@ -58,19 +70,20 @@ object TreeBuilderView extends RiskTreeEndpoints:
         RiskLeafFormView(state)
       ),
       FormInputs.submitButton(
-        "Create Risk Tree",
+        state.isUpdateMode.map(if _ then "Update Risk Tree" else "Create Risk Tree"),
         isDisabled = submitState.signal.map(_ == SubmitState.Submitting),
         onClickCallback = () => handleSubmit()
       ),
-      child.maybe <-- submitState.signal.map {
-        case SubmitState.Idle        => None
-        case SubmitState.Submitting  =>
-          Some(div(cls := "submit-feedback submit-spinner", "Creating risk tree…"))
-        case SubmitState.Success(r)  =>
+      child.maybe <-- submitState.signal.combineWith(state.isUpdateMode).map {
+        case (SubmitState.Idle, _)        => None
+        case (SubmitState.Submitting, isUpdate)  =>
+          val verb = if isUpdate then "Updating" else "Creating"
+          Some(div(cls := "submit-feedback submit-spinner", s"$verb risk tree…"))
+        case (SubmitState.Success(r), _)  =>
           Some(div(cls := "submit-feedback submit-success",
-            s"""Tree "${r.name}" created with ID: ${r.id.value}"""
+            s"""Tree "${r.name}" saved with ID: ${r.id.value}"""
           ))
-        case SubmitState.Failed(msg) =>
+        case (SubmitState.Failed(msg), _) =>
           Some(div(cls := "submit-feedback submit-error", msg))
       }
     )

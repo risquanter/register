@@ -36,6 +36,11 @@ class RiskTreeController private (
     riskTreeService.create(req).map(SimulationResponse.fromRiskTree).either
   }
 
+  val update: ServerEndpoint[Any, Task] = updateEndpoint.serverLogic {
+    case (id, req) =>
+      riskTreeService.update(id, req).map(SimulationResponse.fromRiskTree).either
+  }
+
   val getAll: ServerEndpoint[Any, Task] = getAllEndpoint.serverLogicSuccess { _ =>
     riskTreeService.getAll.map(_.map(SimulationResponse.fromRiskTree))
   }
@@ -77,21 +82,22 @@ class RiskTreeController private (
   }
   
   /** Get LEC curves for multiple nodes with shared tick domain. */
-  val getLECCurvesMulti: ServerEndpoint[Any, Task] = getLECCurvesMultiEndpoint.serverLogicSuccess {
+  val getLECCurvesMulti: ServerEndpoint[Any, Task] = getLECCurvesMultiEndpoint.serverLogic {
     case (treeId, includeProvenance, nodeIds) =>
       // nodeIds already validated as List[SafeId.SafeId] by JsonDecoder
       riskTreeService.getLECCurvesMulti(treeId, nodeIds.toSet, includeProvenance)
         .map(_.map { case (nodeId, nodeCurve) => (nodeId.value, nodeCurve) })
+        .either
   }
 
   /** Get render-ready Vega-Lite chart spec for LEC visualization. */
-  val getLECChart: ServerEndpoint[Any, Task] = getLECChartEndpoint.serverLogicSuccess {
+  val getLECChart: ServerEndpoint[Any, Task] = getLECChartEndpoint.serverLogic {
     case (treeId, nodeIds) =>
-      riskTreeService.getLECChart(treeId, nodeIds.toSet)
+      riskTreeService.getLECChart(treeId, nodeIds.toSet).either
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(health, create, getAll, getById, getTreeStructure, invalidateCache, getLECCurve, probOfExceedance, getLECCurvesMulti, getLECChart)
+    List(health, create, update, getAll, getById, getTreeStructure, invalidateCache, getLECCurve, probOfExceedance, getLECCurvesMulti, getLECChart)
 }
 
 object RiskTreeController {
