@@ -13,6 +13,9 @@
     "vite": "6.4.1"
   },
   "dependencies": {
-    "geist": "1.7.0"
+    "geist": "1.7.0",
+    "vega": "6.2.0",
+    "vega-embed": "7.1.0",
+    "vega-lite": "6.4.2"
   }
 }
