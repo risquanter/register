@@ -226,15 +226,15 @@ body {
 }
 
 /* =============================================
-   LEC Chart Placeholder
+   LEC Chart View
    ============================================= */
-.lec-chart-placeholder {
+.lec-chart-view {
   height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-.lec-chart-placeholder h3 {
+.lec-chart-view h3 {
   font-family: var(--font-mono);
   font-size: var(--text-lg);
   font-weight: var(--font-weight-medium);
@@ -242,7 +242,24 @@ body {
   margin-bottom: var(--sp-4);
 }
 
-.placeholder-content {
+.lec-chart-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.lec-chart-container {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Ensure Vega canvas fills the container */
+.lec-chart-container .vega-embed {
+  width: 100%;
+}
+
+.lec-chart-message {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -256,16 +273,18 @@ body {
   gap: var(--sp-2);
 }
 
-.placeholder-icon {
+.lec-chart-icon {
   font-size: 2rem;
   opacity: 0.5;
   margin-bottom: var(--sp-2);
 }
 
-.placeholder-hint {
-  font-size: var(--text-xs);
-  color: var(--foreground-muted);
-  opacity: 0.7;
+.lec-chart-loading {
+  font-style: italic;
+}
+
+.lec-chart-error {
+  color: var(--error);
 }
 
 /* =============================================

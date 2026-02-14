@@ -4,8 +4,8 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.{Layout, SplitPane}
-import app.state.{TreeBuilderState, TreeViewState}
-import app.views.{TreeBuilderView, TreePreview, TreeListView, TreeDetailView, LECChartPlaceholder}
+import app.state.{TreeBuilderState, TreeViewState, LoadState}
+import app.views.{TreeBuilderView, TreePreview, TreeListView, TreeDetailView, LECChartView, LECChartTestSpec}
 
 object Main:
 
@@ -29,7 +29,8 @@ object Main:
             right = savedTreePanel,
             leftPercent = 50
           ),
-          bottom = LECChartPlaceholder(),
+          // THROWAWAY — remove hardcoded spec by Phase F completion
+          bottom = LECChartView(Var(LoadState.Loaded(LECChartTestSpec.sampleSpec)).signal),
           topPercent = 60
         ),
         leftPercent = 40
