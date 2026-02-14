@@ -512,16 +512,21 @@ Server:                                    Client:
 
 `lec-chart` composes on the same service method as `lec-multi` — no simulation/cache logic duplicated.
 
-#### New shared type: `LECNodeCurve` (enriches `lec-multi` response)
+#### Core curve type: `LECNodeCurve` (identity + drawing data)
 
 ```scala
-// common/.../data/LECCurveResponse.scala
+// common/.../data/LEC.scala
 final case class LECNodeCurve(
-  name: String,
-  curve: Vector[LECPoint],
-  quantiles: Map[String, Double]  // e.g. "P50" → 12_000_000
+  id: String,                     // node identity (preserved after map destructuring)
+  name: String,                   // chart legend label
+  curve: Vector[LECPoint],        // shared tick domain across all nodes
+  quantiles: Map[String, Double]  // e.g. "p50" → 12_000_000
 )
 ```
+
+`LECNodeCurve` is the universal curve type for drawing and identification. `LECCurveResponse`
+(single-node endpoint) wraps the same core data with navigation (`childIds` — deprecated,
+see review note below) and tracing (`provenances`) metadata.
 
 Current `lec-multi` returns `Map[String, Vector[LECPoint]]`. After enrichment: `Map[String, LECNodeCurve]`.
 Quantiles computed server-side from full `RiskResult.outcomeCount` TreeMap (exact to simulation resolution — not interpolated from the 100-tick curve subset).
@@ -603,13 +608,21 @@ trait EmbedResult extends js.Object:
 - Error: error message with retry action
 
 **Checkpoint:**
-- [ ] `LECNodeCurve` type added to common; `lec-multi` return type enriched
-- [ ] `lec-chart` endpoint defined and implemented
-- [ ] `LECChartSpecBuilder` generates valid Vega-Lite v6 spec (JVM-testable)
+- [x] `LECNodeCurve` type added to common (with `id` field); `lec-multi` return type enriched
+- [x] `lec-chart` endpoint defined and implemented
+- [x] `LECChartSpecBuilder` generates valid Vega-Lite v6 spec (JVM-testable)
+- [x] `LECChartSpecBuilder` accepts `Vector[LECNodeCurve]` (not `LECCurveResponse`) — ISP compliance
 - [ ] VegaEmbed facade renders server-generated spec
 - [ ] Multiple curves display with legend
 - [ ] Interpolation toggle works client-side via `params` bind
 - [ ] Quantile annotations render as vertical rules
+
+**⚠️ `childIds` deprecation (Phase E review note):**
+`LECCurveResponse.childIds` is marked deprecated. The frontend reads childIds from the
+tree structure it already holds in memory (`TreeViewState`), making this field redundant
+on the LEC response. During E.5–E.7 and Phase F, **avoid depending on `childIds` from
+`LECCurveResponse`**. If a legitimate use case arises that requires it, raise it as a
+re-evaluation point before introducing a dependency.
 
 ---
 
@@ -647,6 +660,13 @@ LECChartView re-renders via VegaEmbed
 - [ ] Click node → chart updates with node's LEC + children
 - [ ] Loading state shown during fetch
 - [ ] Errors displayed gracefully
+
+**⚠️ Phase F completion review — `childIds` deprecation verdict:**
+At Phase F completion, review whether `LECCurveResponse.childIds` was consumed by any
+frontend code. The frontend should read `childIds` from the tree structure (`TreeViewState`),
+not from the LEC response. If no consumer reads `childIds` from `LECCurveResponse` by this
+point, **delete the field**. If a legitimate use case emerged during E.5–F that requires it,
+document the justification and remove the deprecation notice from `LEC.scala`.
 
 ---
 
@@ -1241,6 +1261,34 @@ common/.../domain/data/iron/WorkspaceKeySpec.scala
 
 ---
 
+### Phase W.8: API Content-Type Correctness
+
+**Goal:** Fix `lec-chart` endpoint Content-Type from `text/plain` to `application/json`.
+
+**Problem:** The `lec-chart` endpoint uses Tapir's `stringBody` which defaults to `Content-Type: text/plain`. The response is a valid JSON string (Vega-Lite spec), so the correct Content-Type is `application/json`. This matters for:
+1. **Browser fetch API** — `response.json()` works only with `application/json` Content-Type (some implementations are strict)
+2. **API documentation** — Swagger/OpenAPI shows `text/plain` which is misleading
+3. **Middleware** — compression, caching, and CORS middleware may treat `text/plain` differently from `application/json`
+
+**Why `stringBody` was chosen:** `LECChartSpecBuilder.generateMultiCurveSpec` returns a pre-built JSON string. Using Tapir's `jsonBody[String]` would double-encode it (wrapping the JSON in quotes as a JSON string literal). The correct approach is `stringBody` with an explicit content type override.
+
+**Fix** (single line in `RiskTreeEndpoints.scala`):
+```scala
+// Before:
+.out(stringBody.description("Vega-Lite JSON specification"))
+
+// After:
+.out(stringBody.description("Vega-Lite JSON specification")
+  .contentType(sttp.model.MediaType.ApplicationJson))
+```
+
+**Checkpoint:**
+- [ ] `lec-chart` response has `Content-Type: application/json`
+- [ ] Swagger UI shows correct media type
+- [ ] VegaEmbed frontend still parses response correctly
+
+---
+
 ### Tier 1.5 Dependency Graph
 
 ```
@@ -1267,6 +1315,32 @@ Phase W.6 (Frontend workspace flow) ──────────────�
 | `loadInto` / `loadOptionInto` (ZJS) | No change — workspace endpoints use same pattern | — |
 | `getAllEndpoint` (backend) | Sealed with configurable auth gate (default deny) | W.3 |
 | ADR-021 | Amended: `ShareToken` → `WorkspaceKey`, `DemoStore` → `WorkspaceStore` | W.1 |
+
+### Phase W.9: Telemetry Span Regression Audit
+
+**Background:** `RiskTreeServiceLive` methods use a repeated boilerplate pattern for OpenTelemetry tracing — each method wraps its body in `ZIO.serviceWithZIO[Tracing] { tracing => tracing.span(...)(body) }`. This was identified during the Phase E code review as a pre-existing pattern that adds ~5 lines of ceremony per method and obscures the business logic.
+
+**Problem:** The pattern is copy-pasted across every service method (≈12 occurrences in `RiskTreeServiceLive`). If the tracing API changes or the span attribute conventions evolve, every method must be updated individually. The pattern also makes it easy to accidentally nest spans or forget to propagate the span context.
+
+**Proposed fix:** Extract a reusable `traced` combinator (or ZIO aspect) that captures the span-name + attribute-extraction pattern once:
+```scala
+// Example approach — evaluate at implementation time
+private def traced[R, E, A](name: String, attrs: (String, String)*)(zio: ZIO[R, E, A]): ZIO[R & Tracing, E, A] =
+  ZIO.serviceWithZIO[Tracing](_.span(name, attrs*)(zio))
+```
+This would reduce each call site from ~5 lines to 1 line while preserving identical trace output.
+
+**Scope:**
+1. Audit all `RiskTreeServiceLive` methods for the boilerplate pattern
+2. Design the combinator (standalone function, extension method, or ZIO aspect)
+3. Refactor all occurrences
+4. Verify trace output is unchanged (same span names, same attributes)
+5. Run full test suite — no behavioural change expected
+
+**Checkpoint:**
+- [ ] All tracing call sites use the new combinator
+- [ ] `sbt server/test` passes (223+ tests)
+- [ ] Manual verification: trace output unchanged in collector
 
 ---
 

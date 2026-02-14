@@ -158,7 +158,7 @@ val curveData: LECCurveResponse =
 ### 5. Visualize
 ```scala
 val vegaSpec: String = 
-  VegaLiteBuilder.buildSpec(curveData)
+  LECChartSpecBuilder.generateMultiCurveSpec(curveData)
 ```
 
 ## Summary

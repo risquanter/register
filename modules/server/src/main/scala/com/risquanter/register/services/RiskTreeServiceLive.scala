@@ -17,6 +17,7 @@ import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.LECGenerator
+import com.risquanter.register.simulation.LECChartSpecBuilder
 import com.risquanter.register.services.cache.RiskResultResolver
 import com.risquanter.register.util.IdGenerators
 /**
@@ -450,12 +451,12 @@ class RiskTreeServiceLive private (
         // Generate curves with shared tick domain (ADR-014 render-time strategy)
         curvesData = LECGenerator.generateCurvePointsMulti(results)
         
-        // Enrich with name + quantiles to produce LECNodeCurve per node
+        // Enrich with id + name + quantiles to produce LECNodeCurve per node
         enriched = curvesData.map { case (nodeId, points) =>
           val name = nodesMap.get(nodeId).map(_.name).getOrElse(nodeId.value)
           val curvePoints = points.map { case (loss, prob) => LECPoint(loss, prob) }
           val quantiles = results.get(nodeId).map(LECGenerator.calculateQuantiles).getOrElse(Map.empty)
-          nodeId -> LECNodeCurve(name, curvePoints, quantiles)
+          nodeId -> LECNodeCurve(nodeId.value, name, curvePoints, quantiles)
         }
         
         _ <- tracing.setAttribute("curves_generated", enriched.size.toLong)
@@ -465,6 +466,26 @@ class RiskTreeServiceLive private (
     operation.tapBoth(
       error => logIfUnexpected("getLECCurvesMulti")(error) *> recordOperation("getLECCurvesMulti", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getLECCurvesMulti", success = true)
+    )
+  }
+
+  override def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String] = {
+    val operation = tracing.span("getLECChart", SpanKind.INTERNAL) {
+      for {
+        _ <- tracing.setAttribute("tree_id", treeId.value)
+        _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
+
+        // Reuse getLECCurvesMulti for data resolution (no duplication)
+        nodeCurves <- getLECCurvesMulti(treeId, nodeIds)
+
+        spec = LECChartSpecBuilder.generateMultiCurveSpec(nodeCurves.values.toVector)
+        _ <- tracing.setAttribute("spec_length", spec.length.toLong)
+      } yield spec
+    }
+
+    operation.tapBoth(
+      error => logIfUnexpected("getLECChart")(error) *> recordOperation("getLECChart", success = false, Some(extractErrorContext(error))),
+      _ => recordOperation("getLECChart", success = true)
     )
   }
 }

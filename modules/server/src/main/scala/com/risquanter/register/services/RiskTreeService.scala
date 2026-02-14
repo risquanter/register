@@ -80,11 +80,24 @@ trait RiskTreeService {
     * 
     * Used for multi-curve overlay (e.g., split pane comparison).
     * All curves share the same loss ticks for aligned rendering.
-    * Returns LECNodeCurve (name + curve + quantiles) per node.
+    * Returns LECNodeCurve (id + name + curve + quantiles) per node.
     * 
     * @param nodeIds Set of node identifiers
     * @param includeProvenance Whether to include provenance metadata for reproducibility
-    * @return Map from nodeId to LECNodeCurve (name, curve points, quantiles)
+    * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
   def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]]
+
+  /** Get a complete Vega-Lite chart specification for LEC visualization.
+    * 
+    * Composes on getLECCurvesMulti: resolves cached results, generates curves
+    * with shared tick domain, then builds a render-ready Vega-Lite JSON spec.
+    * The frontend renders this directly via VegaEmbed — no client-side spec
+    * construction needed.
+    * 
+    * @param treeId Tree identifier
+    * @param nodeIds Set of node identifiers to include in the chart
+    * @return Vega-Lite JSON specification as a string
+    */
+  def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String]
 }

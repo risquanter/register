@@ -156,4 +156,20 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[List[NodeId]].description("Array of node IDs"))
       .out(jsonBody[Map[String, LECNodeCurve]])
+
+  /** Get a complete Vega-Lite chart specification for LEC visualization.
+    *
+    * Returns a render-ready Vega-Lite JSON spec for multi-curve overlay.
+    * The frontend passes this directly to VegaEmbed — no client-side spec
+    * construction needed.
+    */
+  val getLECChartEndpoint =
+    baseEndpoint
+      .tag("risk-trees")
+      .name("getLECChart")
+      .description("Get Vega-Lite chart spec for LEC visualization (render-ready)")
+      .in("risk-trees" / path[TreeId]("treeId") / "lec-chart")
+      .post
+      .in(jsonBody[List[NodeId]].description("Array of node IDs to include in chart"))
+      .out(stringBody.description("Vega-Lite JSON specification"))
 }

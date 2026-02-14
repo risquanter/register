@@ -107,6 +107,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       ZIO.fail(new UnsupportedOperationException("stub"))
     def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] =
       ZIO.fail(new UnsupportedOperationException("stub"))
+    def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String] =
+      ZIO.fail(new UnsupportedOperationException("stub"))
   }
 
   val testLayer: ZLayer[Any, Nothing, InvalidationHandler & SSEHub] =

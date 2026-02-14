@@ -84,8 +84,14 @@ class RiskTreeController private (
         .map(_.map { case (nodeId, nodeCurve) => (nodeId.value, nodeCurve) })
   }
 
+  /** Get render-ready Vega-Lite chart spec for LEC visualization. */
+  val getLECChart: ServerEndpoint[Any, Task] = getLECChartEndpoint.serverLogicSuccess {
+    case (treeId, nodeIds) =>
+      riskTreeService.getLECChart(treeId, nodeIds.toSet)
+  }
+
   override val routes: List[ServerEndpoint[Any, Task]] =
-    List(health, create, getAll, getById, getTreeStructure, invalidateCache, getLECCurve, probOfExceedance, getLECCurvesMulti)
+    List(health, create, getAll, getById, getTreeStructure, invalidateCache, getLECCurve, probOfExceedance, getLECCurvesMulti, getLECChart)
 }
 
 object RiskTreeController {
