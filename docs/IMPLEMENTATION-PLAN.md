@@ -258,8 +258,8 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 | `LECChartBuilder` | Vega-Lite spec generation | Phase E |
 | `LECChartView` | Reactive chart component | Phase E |
 | `LECService` | Selection → fetch → chart wiring | Phase F |
-| `SSEClient` | SSE subscription | Phase H |
-| `AppError` / `ErrorBanner` | Error handling | Phase I |
+| `SSEClient` | SSE subscription | Phase H (deferred post-1.5) |
+| `AppError` / `ErrorBanner` | Error handling | Phase I.a |
 
 ### Irmin Infrastructure (Implemented)
 
@@ -355,7 +355,7 @@ The scope expanded from simple form alignment to a complete tree builder. Key de
 - [x] Existing validation still works
 - [x] Cascade node removal with `TreeBuilderLogic.collectCascade`
 - [x] 7 topology tests passing in common module
-- [ ] App-module tests for `TreeBuilderState` (deferred to Phase G)
+- [ ] App-module tests for `TreeBuilderState` (nice to have — see Phase G at end of document)
 
 ---
 
@@ -686,84 +686,9 @@ document the justification and remove the deprecation notice from `LEC.scala`.
 
 ---
 
-### Phase G: Testing
+### Phase I.a: Error Handling (Non-SSE)
 
-**Goal:** Meaningful test coverage for the app module using zio-test.
-
-**Testing approach** (DP-3 decision — zio-test, no munit):
-1. **State-only testing** (primary) — test `FormState` signals, `TreeViewState` transitions
-2. **Integration testing** — Playwright/Cypress for E2E (future)
-
-**Test dependencies** (already in `build.sbt`):
-```scala
-"dev.zio" %%% "zio-test"     % zioVersion % Test
-"dev.zio" %%% "zio-test-sbt" % zioVersion % Test
-```
-
-**Test targets:**
-- FormState validation rules (name, probability, percentiles, quantiles, cross-field)
-- `toRequest()` conversion (happy path + error cases)
-- TreeViewState transitions (select, expand, collapse)
-- LECService multi-fetch assembly logic
-
-**Checkpoint:**
-- [ ] `sbt app/test` runs successfully
-- [ ] Validation rules have test coverage
-- [ ] State transitions tested
-
----
-
-### Phase H: SSE Cache Invalidation
-
-**Goal:** Subscribe to SSE events so the frontend knows when displayed LEC data is stale.
-
-**Context:** The backend already publishes `SSEEvent.CacheInvalidated` events via `SSEHub` + `InvalidationHandler`. The frontend can subscribe NOW.
-
-**Files to create/modify:**
-```
-modules/app/src/main/scala/app/
-├── api/SSEClient.scala
-└── state/LECChartState.scala  # Extend with stale tracking (already exists from SRP split)
-```
-
-**SSEClient:**
-```scala
-object SSEClient:
-  def connect(treeId: String): EventStream[SSEEvent] =
-    EventStream.fromCustomSource[SSEEvent](
-      start = (fireEvent, _, _, _) =>
-        val source = new EventSource(s"/events/tree/$treeId")
-        source.onmessage = (e: MessageEvent) =>
-          decode[SSEEvent](e.data.toString).foreach(fireEvent)
-        source,
-      stop = source => source.close()
-    )
-```
-
-**LECChartState** extension (stale tracking — builds on existing SRP split):
-```scala
-// LECChartState already owns chartNodeIds + lecChartSpec.
-// Phase H adds stale-tracking fields:
-class LECChartState(...):
-  // ... existing fields ...
-  val staleNodes: Var[Set[NodeId]] = Var(Set.empty)
-
-  def markAllStale(): Unit =
-    staleNodes.set(chartNodeIds.now())
-
-  // On CacheInvalidated → mark stale → re-fetch visible nodes
-```
-
-**Checkpoint:**
-- [ ] SSE connection established on tree selection
-- [ ] `CacheInvalidated` events trigger LEC re-fetch for visible nodes
-- [ ] Stale indicators shown while re-fetching
-
----
-
-### Phase I: Error Handling
-
-**Goal:** Robust error handling following ADR-008 patterns.
+**Goal:** Robust error handling for API calls following ADR-008 patterns.
 
 **Files to create:**
 ```
@@ -781,15 +706,15 @@ enum AppError:
   case ServerError(referenceId: String)
 ```
 
-**SSE reconnection with exponential backoff:**
-- Max 10 retries, delays from 1s to 30s
-- Error banner shows reconnection status
-- After max retries: "Unable to connect. Please refresh."
-
 **Checkpoint:**
 - [ ] Error banner displays on API failure
-- [ ] SSE auto-reconnects with exponential backoff
+- [ ] Network errors show retryable status
 - [ ] Conflict errors show refresh action
+
+> **SSE-related items (Phase H + Phase I.b) are deferred to after Tier 1.5.**
+> SSE cache invalidation, stale tracking, and SSE reconnection with exponential
+> backoff have no value until multi-user or Irmin watch is in play. See the
+> "Deferred: SSE Phases" section after Tier 1.5.
 
 ---
 
@@ -838,11 +763,7 @@ Phase E (Vega-Lite Chart) ──────────────────
   ↓                                               │    │       │
 Phase F (Selection → LEC → Chart) ←───────────────┘────┘───────┘
   ↓
-Phase G (Testing)
-  ↓
-Phase H (SSE Cache Invalidation)
-  ↓
-Phase I (Error Handling)
+Phase I.a (Error Handling — non-SSE)
   ↓
 Phase J (Type Naming Review) ·········· low priority, optional gate
   ↓
@@ -850,6 +771,10 @@ Phase J (Type Naming Review) ·········· low priority, optional gate
   ║       TIER 1.5 ENTRY POINT           ║
   ║  Phase W (Workspace Capability)       ║
   ╚═══════════════════════════════════════╝
+  ↓
+Phase H  (SSE Cache Invalidation) ····· deferred, see post-1.5 section
+Phase I.b (SSE Reconnection) ·········· deferred, see post-1.5 section
+Phase G  (App-Module Testing) ·········· nice to have, see end of document
 ```
 
 ---
@@ -859,7 +784,7 @@ Phase J (Type Naming Review) ·········· low priority, optional gate
 **Updated:** February 13, 2026
 **ADR Reference:** [ADR-021: Capability URLs](./ADR-021-capability-urls.md) (to be amended)
 **Authorization Roadmap:** [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md)
-**Prerequisites:** Tier 1 complete (Phases V–I)
+**Prerequisites:** Tier 1 complete (Phases V–F, I.a, optionally J)
 **Priority:** Immediately after Tier 1 — required for public free-tier deployment
 
 ### Overview
@@ -1434,6 +1359,76 @@ case class Mark(tpe: MarkType, interpolate: Option[Interpolate], ...)
 - [x] Color mapping keyed by `id: String` (not full `LECNodeCurve` case class)
 - [x] All 20 tests pass (`sbt server/testOnly *LECChartSpecBuilderSpec`)
 - [ ] (Deferred) Typed DSL case classes with derived codecs
+
+---
+
+## Deferred: SSE Phases (Post Tier 1.5)
+
+These phases were originally on the Tier 1 critical path but have been deferred.
+In a single-user demo environment SSE push notifications add no value — the user
+mutates data, manually re-selects, and sees the updated chart. SSE becomes
+meaningful in **Tier 2** (Irmin watch → cache invalidation) and **Tier 3**
+(multi-user collaboration). Grouping them here avoids blocking the workspace
+capability work that is actually needed for public deployment.
+
+### Phase H: SSE Cache Invalidation
+
+**Goal:** Subscribe to SSE events so the frontend knows when displayed LEC data is stale.
+
+**Context:** The backend already publishes `SSEEvent.CacheInvalidated` events via `SSEHub` + `InvalidationHandler`. The frontend can subscribe when multi-user or Irmin watch is live.
+
+**Files to create/modify:**
+```
+modules/app/src/main/scala/app/
+├── api/SSEClient.scala
+└── state/LECChartState.scala  # Extend with stale tracking (already exists from SRP split)
+```
+
+**SSEClient:**
+```scala
+object SSEClient:
+  def connect(treeId: String): EventStream[SSEEvent] =
+    EventStream.fromCustomSource[SSEEvent](
+      start = (fireEvent, _, _, _) =>
+        val source = new EventSource(s"/events/tree/$treeId")
+        source.onmessage = (e: MessageEvent) =>
+          decode[SSEEvent](e.data.toString).foreach(fireEvent)
+        source,
+      stop = source => source.close()
+    )
+```
+
+**LECChartState** extension (stale tracking — builds on existing SRP split):
+```scala
+// LECChartState already owns chartNodeIds + lecChartSpec.
+// Phase H adds stale-tracking fields:
+class LECChartState(...):
+  // ... existing fields ...
+  val staleNodes: Var[Set[NodeId]] = Var(Set.empty)
+
+  def markAllStale(): Unit =
+    staleNodes.set(chartNodeIds.now())
+
+  // On CacheInvalidated → mark stale → re-fetch visible nodes
+```
+
+**Checkpoint:**
+- [ ] SSE connection established on tree selection
+- [ ] `CacheInvalidated` events trigger LEC re-fetch for visible nodes
+- [ ] Stale indicators shown while re-fetching
+
+### Phase I.b: SSE Reconnection
+
+**Goal:** Resilient SSE connection with exponential backoff. Split from Phase I — the non-SSE error handling (I.a) is on the critical path; this part depends on Phase H.
+
+**SSE reconnection with exponential backoff:**
+- Max 10 retries, delays from 1s to 30s
+- Error banner shows reconnection status
+- After max retries: "Unable to connect. Please refresh."
+
+**Checkpoint:**
+- [ ] SSE auto-reconnects with exponential backoff
+- [ ] Reconnection status shown in error banner
 
 ---
 
@@ -2114,6 +2109,50 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 | DP-16 | Vega-Lite API version | v6 (`params` API) | 2026-02-13 | Prototype uses deprecated v4 `selection` syntax. Migrate to v6 `params` API. NPM deps: vega ^6.2.0, vega-lite ^6.4.1, vega-embed ^7.1.0. |
 | DP-17 | Domain type naming review | Deferred (Phase J) | 2026-02-13 | `RiskLeaf`, `RiskPortfolio`, `RiskResult`, `SimulationResponse` candidates for rename. Pattern TBD — requires semantic analysis. Low priority; execute as isolated refactoring after Tier 1 feature work. |
 | — | Per-node vs per-tree storage | Per-node (Option A) | 2026-01-20 | Fine-grained Irmin watch notifications identify exact node changed → O(depth) ancestor invalidation. Per-tree storage would require full tree diff on every change. |
+
+---
+
+---
+
+## Nice to Have
+
+Items below are deprioritised based on cost-benefit analysis. They can be
+picked up opportunistically but are not gating any tier.
+
+### Phase G: App-Module Testing
+
+**Original goal:** Unit test coverage for `TreeBuilderState`, `FormState`,
+`TreeViewState`, and `LECChartState` via `sbt app/test`.
+
+**Why deprioritised — cost-benefit analysis:**
+
+The app module is a **ScalaJS project** (`enablePlugins(ScalaJSPlugin)`).
+Every state class depends on Laminar reactive primitives (`Var`, `Signal`,
+`StrictSignal`) and the ZJS bridge (`FetchZioBackend`, browser Fetch API).
+These have **no JVM implementations** — tests must run under a ScalaJS
+test runner (jsdom / Node.js), not plain `sbt test`.
+
+| Cost | Detail |
+|------|--------|
+| jsEnv infrastructure | Configure `scalajs-env-jsdom-nodejs` in build.sbt; install Node.js + jsdom in CI |
+| Mock backend layer | `ZJS.forkProvided` calls `FetchZioBackend` — requires a test `BackendClient` stub layer |
+| Ongoing maintenance | ScalaJS test toolchain is a second CI axis to keep green |
+
+| Benefit | Detail |
+|---------|--------|
+| Low | The testable **business logic** (`TreeBuilderLogic`, `ValidationUtil`, domain model validation, `LECGenerator`, `LECChartSpecBuilder`) already lives in the `common` and `server` modules and has **44+ JVM tests** with full coverage |
+| Low | The state classes are **thin reactive wiring** — they glue Laminar `Var`/`Signal` to backend calls via `ZJS`. There is very little logic that isn't already validated by common/server module tests + integration tests |
+
+**Conclusion:** The ROI of standing up a ScalaJS test harness for thin
+reactive glue code is poor while the underlying logic is already well-tested
+on the JVM. If E2E coverage becomes a priority, **Playwright browser tests**
+(Phase G.2, integration testing) would provide far higher confidence per unit
+of effort.
+
+**Checkpoint (unchanged, for future reference):**
+- [ ] `sbt app/test` runs successfully
+- [ ] Validation rules have test coverage
+- [ ] State transitions tested
 
 ---
 
