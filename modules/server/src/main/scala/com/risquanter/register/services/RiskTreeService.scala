@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint}
+import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /** Service layer for RiskTree business logic.
@@ -80,10 +80,11 @@ trait RiskTreeService {
     * 
     * Used for multi-curve overlay (e.g., split pane comparison).
     * All curves share the same loss ticks for aligned rendering.
+    * Returns LECNodeCurve (name + curve + quantiles) per node.
     * 
     * @param nodeIds Set of node identifiers
     * @param includeProvenance Whether to include provenance metadata for reproducibility
-    * @return Map from nodeId to curve points
+    * @return Map from nodeId to LECNodeCurve (name, curve points, quantiles)
     */
-  def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]]
+  def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]]
 }

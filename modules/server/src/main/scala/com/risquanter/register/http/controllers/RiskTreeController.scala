@@ -6,7 +6,7 @@ import com.risquanter.register.http.endpoints.{RiskTreeEndpoints, InvalidationRe
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.pipeline.{InvalidationHandler, InvalidationResult}
 import com.risquanter.register.http.responses.SimulationResponse
-import com.risquanter.register.domain.data.{LECPoint, LECCurveResponse}
+import com.risquanter.register.domain.data.{LECPoint, LECNodeCurve, LECCurveResponse}
 import com.risquanter.register.domain.data.iron.{PositiveInt, IronConstants, SafeId, SafeIdStr, NodeId}
 import io.github.iltotore.iron.refineUnsafe
 import IronConstants.Four
@@ -81,7 +81,7 @@ class RiskTreeController private (
     case (treeId, includeProvenance, nodeIds) =>
       // nodeIds already validated as List[SafeId.SafeId] by JsonDecoder
       riskTreeService.getLECCurvesMulti(treeId, nodeIds.toSet, includeProvenance)
-        .map(_.map { case (nodeId, curve) => (nodeId.value, curve) })
+        .map(_.map { case (nodeId, nodeCurve) => (nodeId.value, nodeCurve) })
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

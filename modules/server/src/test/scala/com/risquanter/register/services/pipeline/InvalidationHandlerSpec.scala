@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import io.github.iltotore.iron.*
-import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskResult, LECCurveResponse, LECPoint}
+import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskResult, LECCurveResponse, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.services.RiskTreeService
@@ -105,7 +105,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       ZIO.fail(new UnsupportedOperationException("stub"))
     def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[BigDecimal] =
       ZIO.fail(new UnsupportedOperationException("stub"))
-    def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, Vector[LECPoint]]] =
+    def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] =
       ZIO.fail(new UnsupportedOperationException("stub"))
   }
 

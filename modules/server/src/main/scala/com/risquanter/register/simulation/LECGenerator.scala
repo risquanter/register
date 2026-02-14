@@ -3,7 +3,7 @@ package com.risquanter.register.simulation
 import com.risquanter.register.domain.data.RiskResult
 import scala.collection.immutable.TreeMap
 
-/** Utility for generating Loss Exceedance Curve (LEC) data from simulation results
+/** Utility for generating Loss Exceedance Curve (LEC) data from simulation outcomes.
   * 
   * Key concepts:
   * - Loss values are in millions: 1L = $1M
@@ -21,7 +21,7 @@ import scala.collection.immutable.TreeMap
   */
 object LECGenerator {
   
-  /** Calculate key quantiles from simulation results
+  /** Calculate key quantiles from simulation outcomes
     * 
     * @param result Risk simulation result with outcome counts
     * @return Map of quantile names to loss values (in millions)

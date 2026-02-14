@@ -9,7 +9,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint, Distribution}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint, LECNodeCurve, Distribution}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, Probability, DistributionType, TreeId, NodeId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
@@ -423,7 +423,7 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, Vector[LECPoint]]] = {
+  override def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]] = {
     val operation = tracing.span("getLECCurvesMulti", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -441,7 +441,7 @@ class RiskTreeServiceLive private (
         } else {
           lookupNodesInTree(treeId, nodeIds)
         }
-        (tree, _) = treeWithNodes
+        (tree, nodesMap) = treeWithNodes
         
         // Batch cache-aside: ensure all results are cached
         results <- resolver.ensureCachedAll(tree, nodeIds, includeProvenance)
@@ -450,13 +450,16 @@ class RiskTreeServiceLive private (
         // Generate curves with shared tick domain (ADR-014 render-time strategy)
         curvesData = LECGenerator.generateCurvePointsMulti(results)
         
-        // Convert to API response format
-        curves = curvesData.map { case (nodeId, points) =>
-          nodeId -> points.map { case (loss, prob) => LECPoint(loss, prob) }
+        // Enrich with name + quantiles to produce LECNodeCurve per node
+        enriched = curvesData.map { case (nodeId, points) =>
+          val name = nodesMap.get(nodeId).map(_.name).getOrElse(nodeId.value)
+          val curvePoints = points.map { case (loss, prob) => LECPoint(loss, prob) }
+          val quantiles = results.get(nodeId).map(LECGenerator.calculateQuantiles).getOrElse(Map.empty)
+          nodeId -> LECNodeCurve(name, curvePoints, quantiles)
         }
         
-        _ <- tracing.setAttribute("curves_generated", curves.size.toLong)
-      } yield curves
+        _ <- tracing.setAttribute("curves_generated", enriched.size.toLong)
+      } yield enriched
     }
     
     operation.tapBoth(

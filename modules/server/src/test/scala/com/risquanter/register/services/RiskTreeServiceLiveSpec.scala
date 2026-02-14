@@ -390,7 +390,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         program.assert { curves =>
           curves.size == 2 &&
-            curves.values.forall(_.nonEmpty)
+            curves.values.forall(_.curve.nonEmpty)
         }
       },
 
@@ -432,8 +432,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         } yield (curves, nodeAId, nodeBId)
 
         program.assert { case (curves, nodeAId, nodeBId) =>
-          val curveA = curves(nodeAId)
-          val curveB = curves(nodeBId)
+          val curveA = curves(nodeAId).curve
+          val curveB = curves(nodeBId).curve
           
           // Both curves should have same number of points (shared tick domain)
           curveA.size == curveB.size &&

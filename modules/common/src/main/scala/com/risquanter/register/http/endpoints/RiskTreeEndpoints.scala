@@ -6,7 +6,7 @@ import sttp.tapir.generic.auto.*
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.{LECCurveResponse, LECPoint, RiskLeaf, RiskTree}
+import com.risquanter.register.domain.data.{LECCurveResponse, LECPoint, LECNodeCurve, RiskLeaf, RiskTree}
 import com.risquanter.register.domain.data.RiskLeaf.given // JsonCodecs for SafeId.SafeId
 import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, SafeId, TreeId, NodeId, IronConstants}
 import IronConstants.Zero
@@ -155,5 +155,5 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .post
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[List[NodeId]].description("Array of node IDs"))
-      .out(jsonBody[Map[String, Vector[LECPoint]]])
+      .out(jsonBody[Map[String, LECNodeCurve]])
 }

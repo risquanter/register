@@ -50,3 +50,30 @@ object LECCurveResponse {
   given codec: JsonCodec[LECCurveResponse] = DeriveJsonCodec.gen[LECCurveResponse]
   given schema: Schema[LECCurveResponse] = Schema.derived[LECCurveResponse]
 }
+
+/** Lean LEC data for multi-curve overlay (lec-multi endpoint).
+  * 
+  * Unlike LECCurveResponse (single-node endpoint), this type carries only
+  * the data needed for chart rendering: name, curve points, and quantiles.
+  * Navigation metadata (childIds) and tracing metadata (provenances) are
+  * excluded — the multi endpoint returns a Map keyed by node ID, making
+  * the id field redundant as well.
+  * 
+  * Quantiles are computed server-side from the full RiskResult.outcomeCount
+  * TreeMap (exact to simulation resolution — not interpolated from the
+  * 100-tick curve subset).
+  * 
+  * @param name Human-readable node name (for chart legend)
+  * @param curve Loss exceedance curve points (shared tick domain across all nodes)
+  * @param quantiles Key percentiles (p50, p90, p95, p99) as loss values
+  */
+final case class LECNodeCurve(
+  name: String,
+  curve: Vector[LECPoint],
+  quantiles: Map[String, Double]
+)
+
+object LECNodeCurve {
+  given codec: JsonCodec[LECNodeCurve] = DeriveJsonCodec.gen[LECNodeCurve]
+  given schema: Schema[LECNodeCurve] = Schema.derived[LECNodeCurve]
+}
