@@ -23,6 +23,8 @@ object TreeBuilderView extends RiskTreeEndpoints:
       submitState.set(SubmitState.Success(response))
       state.editingTreeId.set(Some(response.id))
       treeViewState.loadTreeList()
+      // Auto-select the saved tree in the right panel so changes are visible
+      treeViewState.selectTree(response.id)
 
     def handleSubmit(): Unit =
       state.triggerValidation()

@@ -114,12 +114,12 @@ object RiskLeafFormView:
       ),
       
       textInput(
-        labelText = "Quantiles (loss values)",
+        labelText = "Quantiles (loss in $M)",
         valueVar = state.quantilesVar,
         errorSignal = state.quantilesError,
         filter = state.arrayFilter,
         onBlurCallback = () => state.markTouched("quantiles"),
-        placeholderText = "e.g., 100, 500, 2000",
+        placeholderText = "e.g., 50, 200, 1000 ($50M, $200M, $1B)",
         inputModeAttr = "decimal"
       )
     )

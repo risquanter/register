@@ -68,7 +68,10 @@ object TreeListView:
       button(
         cls := "refresh-btn",
         "↻",
-        title := "Refresh tree list",
-        onClick --> (_ => state.loadTreeList())
+        title := "Refresh tree list and selected tree",
+        onClick --> { _ =>
+          state.loadTreeList()
+          state.refreshSelectedTree()
+        }
       )
     )

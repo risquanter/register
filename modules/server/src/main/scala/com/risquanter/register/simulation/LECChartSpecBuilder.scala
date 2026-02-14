@@ -1,5 +1,9 @@
 package com.risquanter.register.simulation
 
+import zio.json.EncoderOps
+import zio.json.ast.Json
+import zio.json.ast.Json.*
+
 import com.risquanter.register.domain.data.{LECPoint, LECNodeCurve}
 
 /** Vega-Lite v6 specification builder for Loss Exceedance Curves.
@@ -16,6 +20,11 @@ import com.risquanter.register.domain.data.{LECPoint, LECNodeCurve}
   *   - Quantile annotation vertical rules (P50, P95)
   *   - B/M axis formatting (≥ 1 000 M → 1.0B, else 500M)
   *   - Sorting: root curve first, children alphabetically
+  *
+  * Implementation note: Uses `zio.json.ast.Json` AST for structural
+  * JSON construction — eliminates manual escaping and quoting bugs.
+  * This is an intermediate step toward a fully typed Vega-Lite DSL
+  * (see Phase W.11 in IMPLEMENTATION-PLAN.md).
   */
 object LECChartSpecBuilder {
   
@@ -33,6 +42,37 @@ object LECChartSpecBuilder {
     "#350c28"   // Purple-black
   )
   
+  // ── JSON AST helpers ──────────────────────────────────────────
+
+  private def str(s: String): Json               = Str(s)
+  private def num(n: Double): Json               = Num(java.math.BigDecimal.valueOf(n))
+  private def bool(b: Boolean): Json             = Bool(b)
+  private def arr(xs: Iterable[Json]): Json      = Arr(zio.Chunk.from(xs))
+  private def obj(fields: (String, Json)*): Json = Obj(zio.Chunk.from(fields))
+
+  // ── Vega-Lite annotation helpers ──────────────────────────────
+
+  /** Quantile annotation: a dashed vertical rule + a text label.
+    * Returns a pair of Vega-Lite layer objects for the given quantile value.
+    */
+  private def quantileAnnotation(value: Double, label: String): Seq[Json] =
+    val data = obj("values" -> arr(Seq(obj("x" -> num(value)))))
+    val xEnc = obj("field" -> str("x"), "type" -> str("quantitative"))
+    Seq(
+      obj(
+        "mark"     -> obj("type" -> str("rule"), "strokeDash" -> arr(Seq(num(4.0), num(4.0))), "color" -> str("#6a8a8e")),
+        "data"     -> data,
+        "encoding" -> obj("x" -> xEnc)
+      ),
+      obj(
+        "mark"     -> obj("type" -> str("text"), "align" -> str("left"), "dx" -> num(4.0), "dy" -> num(-6.0), "fontSize" -> num(11.0), "color" -> str("#a0b0b0")),
+        "data"     -> obj("values" -> arr(Seq(obj("x" -> num(value), "label" -> str(label))))),
+        "encoding" -> obj("x" -> xEnc, "text" -> obj("field" -> str("label")))
+      )
+    )
+
+  // ── Public API ────────────────────────────────────────────────
+
   /** Generate Vega-Lite JSON specification for single LEC curve
     * 
     * @param curve Single LEC curve to display
@@ -79,151 +119,126 @@ object LECChartSpecBuilder {
       val rootCurve = curves.head
       val sortedChildren = curves.tail.sortBy(_.name)
       val sortedCurves = rootCurve +: sortedChildren
-      val colorMapping = sortedCurves.zip(themeColorsRisk).toMap
+      // Map each curve ID to its theme colour (keyed by id, not full case class)
+      val colorById: Map[String, String] = sortedCurves.map(_.id).zip(themeColorsRisk).toMap
 
       val minLoss = allPoints.map(_.loss).min
 
       // Generate data points in Vega-Lite format
-      val dataValues = sortedCurves.flatMap { curve =>
+      val dataValues: Seq[Json] = sortedCurves.flatMap { curve =>
         curve.curve.map { point =>
-          s"""{
-          "risk": "${escapeJson(curve.name)}",
-          "loss": ${point.loss},
-          "exceedance": ${point.exceedanceProbability}
-        }"""
+          obj(
+            "risk"        -> str(curve.name),
+            "loss"        -> num(point.loss),
+            "exceedance"  -> num(point.exceedanceProbability)
+          )
         }
-      }.mkString(",\n        ")
+      }
 
       // Sorted risk names for legend order and color domain (root first, then alphabetically)
-      val sortedRiskNames = sortedCurves.map(c => s""""${escapeJson(c.name)}""""").mkString(", ")
+      val sortedRiskNames: Seq[Json] = sortedCurves.map(c => str(c.name))
 
-      // Color scale matching BCG approach
-      val colorRange = sortedCurves.map(c => s""""${colorMapping.getOrElse(c, "#000000")}"""").mkString(", ")
+      // Color scale matching BCG approach (keyed by id — avoids hashing full case class)
+      val colorRange: Seq[Json] = sortedCurves.map(c => str(colorById.getOrElse(c.id, "#000000")))
 
       // Quantile vertical-rule annotations (P50, P95) for the root curve
-      val quantileKeys = List("p50" -> "P50", "p95" -> "P95")
-      val quantileRuleLayers = {
-        val entries = quantileKeys.flatMap { case (key, label) =>
-          rootCurve.quantiles.get(key).map { value =>
-            val lbl = escapeJson(label)
-            s"""    {
-      "mark": {"type": "rule", "strokeDash": [4, 4], "color": "#888888"},
-      "data": {"values": [{"x": $value}]},
-      "encoding": {
-        "x": {"field": "x", "type": "quantitative"}
-      }
-    },
-    {
-      "mark": {"type": "text", "align": "left", "dx": 4, "dy": -6, "fontSize": 11, "color": "#666666"},
-      "data": {"values": [{"x": $value, "label": "$lbl"}]},
-      "encoding": {
-        "x": {"field": "x", "type": "quantitative"},
-        "text": {"field": "label"}
-      }
-    }"""
-          }
+      val quantileRuleLayers: Seq[Json] =
+        List("p50" -> "P50", "p95" -> "P95").flatMap { case (key, label) =>
+          rootCurve.quantiles.get(key).toList.flatMap(quantileAnnotation(_, label))
         }
-        if entries.nonEmpty then entries.mkString(",\n") + "," else ""
-      }
 
-      s"""{
-  "$$schema": "https://vega.github.io/schema/vega-lite/v6.json",
-  "width": $width,
-  "height": $height,
-  "config": {
-    "legend": { "disable": false },
-    "axis": {
-      "grid": true,
-      "gridColor": "#dadada"
-    }
-  },
-  "params": [
-    {
-      "name": "interpolate",
-      "value": "monotone",
-      "bind": {
-        "input": "select",
-        "options": ["monotone", "basis", "linear", "step-after"],
-        "name": "Interpolation: "
-      }
-    }
-  ],
-  "layer": [
-$quantileRuleLayers
-    {
-      "data": {
-        "values": [
-            $dataValues
-        ]
-      },
-      "mark": {
-        "type": "line",
-        "interpolate": {"expr": "interpolate"},
-        "point": false,
-        "tooltip": true
-      },
-      "encoding": {
-        "x": {
-          "field": "loss",
-          "type": "quantitative",
-          "title": "Loss",
-          "axis": {
-            "labelAngle": 0,
-            "labelExpr": "if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')"
-          },
-          "scale": {
-            "domainMin": $minLoss
-          }
-        },
-        "y": {
-          "field": "exceedance",
-          "type": "quantitative",
-          "title": "Probability",
-          "axis": {
-            "format": ".1~%"
-          },
-          "scale": {
-            "domain": [0, 1]
-          }
-        },
-        "color": {
-          "field": "risk",
-          "type": "nominal",
-          "title": "Risk modelled",
-          "scale": {
-            "domain": [$sortedRiskNames],
-            "range": [$colorRange]
-          },
-          "sort": [$sortedRiskNames]
-        }
-      }
-    }
-  ]
-}"""
+      // Main line layer
+      val lineLayer = obj(
+        "data" -> obj("values" -> arr(dataValues)),
+        "mark" -> obj(
+          "type"        -> str("line"),
+          "interpolate" -> obj("expr" -> str("interpolate")),
+          "point"       -> bool(false),
+          "tooltip"     -> bool(true)
+        ),
+        "encoding" -> obj(
+          "x" -> obj(
+            "field" -> str("loss"),
+            "type"  -> str("quantitative"),
+            "title" -> str("Loss"),
+            "axis"  -> obj(
+              "labelAngle" -> num(0.0),
+              "labelExpr"  -> str("if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')")
+            ),
+            "scale" -> obj("domainMin" -> num(minLoss))
+          ),
+          "y" -> obj(
+            "field" -> str("exceedance"),
+            "type"  -> str("quantitative"),
+            "title" -> str("Probability"),
+            "axis"  -> obj("format" -> str(".1~%")),
+            "scale" -> obj("domain" -> arr(Seq(num(0), num(1))))
+          ),
+          "color" -> obj(
+            "field" -> str("risk"),
+            "type"  -> str("nominal"),
+            "title" -> str("Risk modelled"),
+            "scale" -> obj(
+              "domain" -> arr(sortedRiskNames),
+              "range"  -> arr(colorRange)
+            ),
+            "sort" -> arr(sortedRiskNames)
+          )
+        )
+      )
+
+      val allLayers = quantileRuleLayers :+ lineLayer
+
+      val spec = obj(
+        "$schema"    -> str("https://vega.github.io/schema/vega-lite/v6.json"),
+        "width"      -> num(width),
+        "height"     -> num(height),
+        "background" -> str("transparent"),
+        "config"     -> obj(
+          "legend" -> obj(
+            "disable"    -> bool(false),
+            "labelColor" -> str("#e6e8e8"),
+            "titleColor" -> str("#e6e8e8")
+          ),
+          "axis" -> obj(
+            "grid"        -> bool(true),
+            "gridColor"   -> str("#2a3a3e"),
+            "labelColor"  -> str("#b0b8b8"),
+            "titleColor"  -> str("#e6e8e8"),
+            "domainColor" -> str("#4a5a5e"),
+            "tickColor"   -> str("#4a5a5e")
+          ),
+          "title" -> obj("color" -> str("#e6e8e8"))
+        ),
+        "params" -> arr(Seq(
+          obj(
+            "name"  -> str("interpolate"),
+            "value" -> str("monotone"),
+            "bind"  -> obj(
+              "input"   -> str("select"),
+              "options" -> arr(Seq(str("monotone"), str("basis"), str("linear"), str("step-after"))),
+              "name"    -> str("Interpolation: ")
+            )
+          )
+        )),
+        "layer" -> arr(allLayers)
+      )
+
+      spec.toJson
     }
   }
   
   /** Generate empty spec when no data available */
   private def generateEmptySpec(width: Int, height: Int): String = {
-    s"""{
-  "$$schema": "https://vega.github.io/schema/vega-lite/v6.json",
-  "width": $width,
-  "height": $height,
-  "data": { "values": [] },
-  "mark": "text",
-  "encoding": {
-    "text": { "value": "No data available" }
-  }
-}"""
-  }
-  
-  /** Escape JSON special characters in strings */
-  private def escapeJson(str: String): String = {
-    str
-      .replace("\\", "\\\\")
-      .replace("\"", "\\\"")
-      .replace("\n", "\\n")
-      .replace("\r", "\\r")
-      .replace("\t", "\\t")
+    val spec = obj(
+      "$schema"    -> str("https://vega.github.io/schema/vega-lite/v6.json"),
+      "width"      -> num(width),
+      "height"     -> num(height),
+      "background" -> str("transparent"),
+      "data"       -> obj("values" -> arr(Seq.empty)),
+      "mark"       -> obj("type" -> str("text"), "color" -> str("#b0b8b8")),
+      "encoding"   -> obj("text" -> obj("value" -> str("No data available")))
+    )
+    spec.toJson
   }
 }

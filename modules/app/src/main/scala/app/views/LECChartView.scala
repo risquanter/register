@@ -24,6 +24,9 @@ object LECChartView:
     // Mutable ref for the current EmbedResult — needed for cleanup.
     // This is local to the component lifecycle, not shared state.
     var currentResult: js.UndefOr[EmbedResult] = js.undefined
+    // Mutable ref for the last error — used to show render errors without
+    // re-triggering the signal (which would dispose the container).
+    val renderError$ : Var[Option[String]] = Var(None)
 
     def disposeChart(): Unit =
       currentResult.foreach { result =>
@@ -36,15 +39,24 @@ object LECChartView:
       h3("LEC Chart"),
       div(
         cls := "lec-chart-content",
-        child <-- specSignal.map { state =>
+        child <-- specSignal.combineWith(renderError$.signal).map { (state, renderErr) =>
           disposeChart()
-          state match
-            case LoadState.Idle           => renderIdle
-            case LoadState.Loading        => renderLoading
-            case LoadState.Failed(msg)    => renderError(msg)
-            case LoadState.Loaded(specJson) =>
-              renderChart(specJson, result => currentResult = result)
+          renderErr match
+            case Some(msg) => renderError(msg)
+            case None =>
+              state match
+                case LoadState.Idle           => renderIdle
+                case LoadState.Loading        => renderLoading
+                case LoadState.Failed(msg)    => renderError(msg)
+                case LoadState.Loaded(specJson) =>
+                  renderChart(
+                    specJson,
+                    onResult = result => currentResult = result,
+                    onError = msg => renderError$.set(Some(msg))
+                  )
         },
+        // Clear render error when spec changes (new fetch attempt)
+        specSignal.changes --> { _ => renderError$.set(None) },
         onUnmountCallback(_ => disposeChart())
       )
     )
@@ -73,7 +85,8 @@ object LECChartView:
   /** Mount a chart into a fresh container element via VegaEmbed. */
   private def renderChart(
       specJson: String,
-      onResult: EmbedResult => Unit
+      onResult: EmbedResult => Unit,
+      onError: String => Unit
   ): HtmlElement =
     val container = div(cls := "lec-chart-container")
     container.amend(
@@ -84,10 +97,18 @@ object LECChartView:
           "renderer"   -> "canvas",
           "hover"      -> true
         )
-        vegaEmbed(ctx.thisNode.ref, parsed, options).`then`[Unit] { (result: EmbedResult) =>
-          onResult(result)
-          ()
-        }
+        vegaEmbed(ctx.thisNode.ref, parsed, options)
+          .`then`[Unit] { (result: EmbedResult) =>
+            onResult(result)
+            ()
+          }
+          .`catch`[Unit] { (err: Any) =>
+            val dyn = err.asInstanceOf[js.Dynamic]
+            val msg = dyn.selectDynamic("message")
+            val errorStr = if js.isUndefined(msg) then s"$err" else msg.toString
+            onError(s"Vega render failed: $errorStr")
+            ()
+          }
         ()
       }
     )

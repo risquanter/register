@@ -251,7 +251,8 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 | `BackendClient` | HTTP calls to backend | Phase B |
 | `ZJS` | ZIO-to-Laminar bridge | Phase B |
 | `SplitPane` | Layout structure | Phase C |
-| `TreeViewState` / `TreeService` | Tree data + interaction | Phase D |
+| `TreeViewState` | Tree data + navigation state | Phase D |
+| `LECChartState` | Chart selection + LEC spec state | Phase D (split from TreeViewState) |
 | `TreeView` | Expandable tree UI | Phase D |
 | `VegaEmbed` facade | Scala.js bindings for charting | Phase E |
 | `LECChartBuilder` | Vega-Lite spec generation | Phase E |
@@ -439,24 +440,39 @@ SplitPane.horizontal(
 **Files to create:**
 ```
 modules/app/src/main/scala/app/
-├── state/TreeViewState.scala
+├── state/TreeViewState.scala    # Navigation state (expand/collapse/select)
+├── state/LECChartState.scala    # Chart selection + LEC spec (split from TreeViewState)
 ├── services/TreeService.scala
 └── views/TreeView.scala
 ```
 
-**TreeViewState:**
+**TreeViewState** (navigation + tree data lifecycle):
 ```scala
-class TreeViewState:
-  val availableTrees: Var[List[SimulationResponse]] = Var(Nil)
-  val selectedTreeId: Var[Option[String]] = Var(None)
-  val treeStructure: Var[Option[RiskTree]] = Var(None)
-  val expandedNodes: Var[Set[String]] = Var(Set.empty)
-  val selectedNodeId: Var[Option[String]] = Var(None)
-  val isLoading: Var[Boolean] = Var(false)
-  val error: Var[Option[String]] = Var(None)
+class TreeViewState extends RiskTreeEndpoints:
+  val availableTrees: Var[LoadState[List[SimulationResponse]]] = Var(LoadState.Idle)
+  val selectedTreeId: Var[Option[TreeId]] = Var(None)
+  val selectedTree: Var[LoadState[RiskTree]] = Var(LoadState.Idle)
+  val expandedNodes: Var[Set[NodeId]] = Var(Set.empty)
+  val selectedNodeId: Var[Option[NodeId]] = Var(None)
 
-  def toggleExpanded(nodeId: String): Unit = ...
-  def selectNode(nodeId: String): Unit = ...
+  // Chart state delegated to LECChartState (SRP split)
+  val chartState: LECChartState = ...
+  // Convenience accessors for backward compatibility:
+  def chartNodeIds = chartState.chartNodeIds
+  def lecChartSpec = chartState.lecChartSpec
+  def toggleChartSelection(nodeId) = chartState.toggleChartSelection(nodeId)
+```
+
+**LECChartState** (chart selection + LEC spec lifecycle):
+```scala
+class LECChartState(
+  selectedTreeId: StrictSignal[Option[TreeId]],
+  selectedTree: StrictSignal[LoadState[RiskTree]]
+) extends RiskTreeEndpoints:
+  val chartNodeIds: Var[Set[NodeId]] = Var(Set.empty)
+  val lecChartSpec: Var[LoadState[String]] = Var(LoadState.Idle)
+  def reset(): Unit = ...
+  def toggleChartSelection(nodeId: NodeId): Unit = ...
 ```
 
 **TreeView rendering:**
@@ -535,7 +551,7 @@ Quantiles computed server-side from full `RiskResult.outcomeCount` TreeMap (exac
 
 **Server:**
 ```
-server/.../simulation/LECChartSpecBuilder.scala  # Typed Vega-Lite DSL → JSON spec
+server/.../simulation/LECChartSpecBuilder.scala  # zio.json.ast.Json AST → JSON spec (W.11: typed DSL deferred)
 ```
 
 **Common (shared):**
@@ -703,11 +719,11 @@ document the justification and remove the deprecation notice from `LEC.scala`.
 
 **Context:** The backend already publishes `SSEEvent.CacheInvalidated` events via `SSEHub` + `InvalidationHandler`. The frontend can subscribe NOW.
 
-**Files to create:**
+**Files to create/modify:**
 ```
 modules/app/src/main/scala/app/
 ├── api/SSEClient.scala
-└── state/LECState.scala
+└── state/LECChartState.scala  # Extend with stale tracking (already exists from SRP split)
 ```
 
 **SSEClient:**
@@ -724,14 +740,16 @@ object SSEClient:
     )
 ```
 
-**LECState** (stale tracking):
+**LECChartState** extension (stale tracking — builds on existing SRP split):
 ```scala
-class LECState:
-  private val cache: Var[Map[String, LECCurveResponse]] = Var(Map.empty)
-  val staleNodes: Var[Set[String]] = Var(Set.empty)
+// LECChartState already owns chartNodeIds + lecChartSpec.
+// Phase H adds stale-tracking fields:
+class LECChartState(...):
+  // ... existing fields ...
+  val staleNodes: Var[Set[NodeId]] = Var(Set.empty)
 
-  def markAllStale(treeId: String): Unit =
-    staleNodes.set(cache.now().keySet)
+  def markAllStale(): Unit =
+    staleNodes.set(chartNodeIds.now())
 
   // On CacheInvalidated → mark stale → re-fetch visible nodes
 ```
@@ -1341,6 +1359,81 @@ This would reduce each call site from ~5 lines to 1 line while preserving identi
 - [ ] All tracing call sites use the new combinator
 - [ ] `sbt server/test` passes (223+ tests)
 - [ ] Manual verification: trace output unchanged in collector
+
+### Phase W.10: Submit-Time Error Border Routing (UX Polish)
+
+**Background:** Form fields (`RiskLeafFormView`, `PortfolioFormView`) have two error display paths:
+1. **Reactive validation signals** — per-field `Signal[Option[String]]` from `RiskLeafFormState` / `PortfolioFormState` (e.g., `nameError`, `probabilityError`). These drive both error messages *and* red border CSS (`cls.toggle("error") <-- errorSignal.map(_.isDefined)`).
+2. **Submit-time topology errors** — validation failures from `TreeBuilderLogic` (e.g., duplicate node name, missing parent, root conflict). These are caught in `handleSubmit` and routed to a `submitError: Var[Option[String]]` rendered as text at the form bottom.
+
+**Problem:** When a submit-time error has a `field` attribute (e.g., `ValidationError("name", DUPLICATE_VALUE, "Duplicate leaf name 'X'")`) that corresponds to a form field, the user sees the error message at the bottom of the form but the offending field has **no red border** — because the error is not injected into the per-field `errorSignal`.
+
+**Reproduction:**
+1. Create a tree with a leaf node named "Server".
+2. Add a second leaf node also named "Server".
+3. Click Submit → error message appears at form bottom: "Duplicate leaf name 'Server'".
+4. Expected: the Name field should also have a red border.
+5. Actual: no red border — the Name field's `nameError` signal is `None` (the name passes SafeName validation).
+
+**Root cause:** The form state signals (`RiskLeafFormState.nameError`, etc.) are purely reactive — they derive from current field values. Submit-time topology errors are a separate channel (`submitError: Var`) that is not connected to per-field signals. There is no mechanism to inject an imperative error into a derived `Signal`.
+
+**Proposed fix:**
+1. Add a `submitFieldErrors: Var[Map[String, String]]` to `FormState` (or each form state).
+2. In `handleSubmit`, when `TreeBuilderLogic` returns `ValidationError` objects with a `.field` matching a form field name (e.g., `"name"`, `"probability"`), inject those into `submitFieldErrors`.
+3. Each per-field error signal becomes: `reactiveError.combineWith(submitFieldErrors.signal).map { (reactive, submitted) => reactive.orElse(submitted.get(fieldName)) }`.
+4. Clear `submitFieldErrors` on any field value change (so the injected error disappears when the user edits the field).
+
+**Affected files:**
+- `FormState.scala` — add `submitFieldErrors` Var + clear-on-change wiring
+- `RiskLeafFormState.scala` — compose submit errors into per-field signals
+- `PortfolioFormState.scala` — same
+- `RiskLeafFormView.scala` — `handleSubmit` maps `ValidationError.field` → `submitFieldErrors`
+- `PortfolioFormView.scala` — same
+
+**Scope:** UX polish only — no backend changes, no API changes.
+
+**Checkpoint:**
+- [ ] Duplicate leaf name shows red border on Name field
+- [ ] Error clears when user edits the Name field
+- [ ] Existing reactive validation (blank name, invalid probability) still works
+- [ ] `sbt app/fastLinkJS` compiles
+
+### Phase W.11: Typed Vega-Lite DSL Migration (LECChartSpecBuilder)
+
+**Background:** DP-12 describes `LECChartSpecBuilder` as using "a typed DSL" for Vega-Lite spec construction. The initial implementation used string interpolation (Phase E). A Phase F code review identified this as a plan-vs-reality gap: string interpolation is fragile for JSON construction (quoting bugs, no structural guarantees).
+
+**Current state (intermediate step — completed):** `LECChartSpecBuilder` now uses `zio.json.ast.Json` AST construction (`Json.Obj`, `Json.Arr`, `Json.Str`, `Json.Num`, `Json.Bool`) instead of string interpolation. This eliminates:
+- Manual `escapeJson()` — the AST handles escaping via `.toJson`
+- Triple-quote ambiguity bugs (e.g., `s""""${name}""""``)
+- Invalid JSON from missing commas or mismatched brackets
+
+**Remaining work (deferred — low priority):** Full typed DSL with case classes mirroring Vega-Lite schema:
+```scala
+// Example target (not yet implemented):
+case class VegaLiteSpec(schema: String, width: Int, height: Int, layer: Seq[Layer], ...)
+case class Layer(mark: Mark, encoding: Encoding, data: Data)
+case class Mark(tpe: MarkType, interpolate: Option[Interpolate], ...)
+// ...generates Json via derived codecs
+```
+
+**Effort estimate:**
+| Step | Effort | Status |
+|------|--------|--------|
+| JSON AST intermediate (eliminate string interpolation) | ~2 hours | ✅ Complete |
+| Typed DSL case classes + derived codecs | ~2 days | ⬜ Deferred |
+
+**Why defer the full DSL:** The AST approach is structurally sound (valid JSON guaranteed by construction). A full typed DSL adds compile-time schema enforcement but requires modeling the Vega-Lite schema — high effort for marginal safety gain at this stage. Revisit when spec builder grows beyond ~200 lines or when adding new chart types.
+
+**Affected files:**
+- `server/.../simulation/LECChartSpecBuilder.scala` — ✅ migrated to `zio.json.ast.Json`
+- `server/.../simulation/LECChartSpecBuilderSpec.scala` — ✅ tests updated to AST-based assertions (20 tests)
+
+**Checkpoint:**
+- [x] `LECChartSpecBuilder` uses `zio.json.ast.Json` AST (no string interpolation)
+- [x] `escapeJson` helper removed (AST handles escaping)
+- [x] Color mapping keyed by `id: String` (not full `LECNodeCurve` case class)
+- [x] All 20 tests pass (`sbt server/testOnly *LECChartSpecBuilderSpec`)
+- [ ] (Deferred) Typed DSL case classes with derived codecs
 
 ---
 
@@ -2014,7 +2107,7 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 | DP-9 | Workspace persistence | PostgreSQL (planned) | 2026-02-13 | In-memory TrieMap initially. PG implementation follows cheleb demo patterns. Config-selectable. |
 | DP-10 | `GET /risk-trees` (list-all) | Configurable auth gate | 2026-02-13 | Default deny. Config: `register.api.list-all-trees.enabled = false`. Frontend unwired. |
 | DP-11 | URL scheme consistency | Same workspace key URL everywhere | 2026-02-13 | URL `/#/{workspaceKey}/...` is identical across free-tier and enterprise. Enterprise adds JWT as additional gate — leaked URL alone insufficient. No URL scheme change between layers. |
-| DP-12 | Chart generation strategy | Server-side (BCG pattern) | 2026-02-13 | Server constructs complete Vega-Lite JSON spec via typed DSL. Client only renders via VegaEmbed. Tick recalculation + quantile annotation = single server concern. JVM-testable. |
+| DP-12 | Chart generation strategy | Server-side (BCG pattern) | 2026-02-13 | Server constructs complete Vega-Lite JSON spec via `zio.json.ast.Json` AST (intermediate step; typed DSL deferred — see W.11). Client only renders via VegaEmbed. Tick recalculation + quantile annotation = single server concern. JVM-testable. |
 | DP-13 | `lec-multi` vs `lec-chart` coexistence | Both endpoints coexist | 2026-02-13 | `lec-multi` = data API (raw curves + quantiles, for API consumers/tests). `lec-chart` = presentation API (render-ready Vega-Lite spec, for GUI). `lec-chart` composes on same service method — no duplication. |
 | DP-14 | X-axis scale | Linear default (not log) | 2026-02-13 | Linear scale with `labelExpr` B/M formatting. Log scale may be added as toggle in future phase. |
 | DP-15 | Interpolation method | `monotone` default, toggleable | 2026-02-13 | Hermite spline preserves monotonicity of LEC curves. `basis`/`cardinal` can overshoot. Toggle via Vega-Lite `params` bind (client-side, no server round trip). |

@@ -13,7 +13,7 @@ object ErrorResponse {
 
   /** Decode error response tuple back to Throwable */
   def decode(tuple: (StatusCode, ErrorResponse)): Throwable =
-    new RuntimeException(tuple._2.error.errors.mkString("; "))
+    new RuntimeException(tuple._2.error.errors.map(_.message).mkString("; "))
 
   /** Encode Throwable to error response tuple for HTTP.
     * 

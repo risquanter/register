@@ -30,7 +30,7 @@ object Main:
             leftPercent = 50
           ),
           // LEC chart panel — wired to real chart selection state
-          bottom = LECChartView(treeViewState.lecChartSpec.signal),
+          bottom = LECChartView(treeViewState.lecChartSpec),
           topPercent = 60
         ),
         leftPercent = 40

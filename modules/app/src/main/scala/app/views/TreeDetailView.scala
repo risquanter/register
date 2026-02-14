@@ -90,7 +90,7 @@ object TreeDetailView:
 
     val isExpanded: Signal[Boolean] = state.expandedNodes.signal.map(_.contains(nodeId))
     val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeId))
-    val isChartSelected: Signal[Boolean] = state.chartNodeIds.signal.map(_.contains(nodeId))
+    val isChartSelected: Signal[Boolean] = state.chartNodeIds.map(_.contains(nodeId))
 
     val rowCls: Signal[String] = isSelected.combineWith(isChartSelected).map { (sel, chart) =>
       (sel, chart) match
