@@ -59,6 +59,7 @@ metals.sbt
 _build/
 _opam/
 *.native
+!Dockerfile.native
 *.byte
 *.opt
 .ocamlinit.local

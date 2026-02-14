@@ -4,8 +4,8 @@
 # Build essentials only
 !build.sbt
 !project/
-!modules/common/
-!modules/server/src/
+!modules/
+!version.sbt
 
 # Exclude nested build artifacts even from allowed dirs
 project/target/
@@ -32,11 +32,11 @@ secrets/
 *.iml
 metals.sbt
 
-# Documentation and tests (** matches nested paths)
+# Documentation and tests
 docs/
 test/
-**/*Spec.scala
-**/*.md
+*Spec.scala
+*.md
 
 # Temporary files
 temp/
