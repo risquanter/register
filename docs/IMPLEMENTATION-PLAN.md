@@ -480,50 +480,136 @@ class TreeViewState:
 
 ### Phase E: Vega-Lite LEC Chart
 
-**Goal:** Embed Vega-Lite charts for LEC visualization.
+**Goal:** Server-side Vega-Lite spec generation + client-side rendering for multi-curve LEC visualization.
 
-**Files to create:**
+#### Architecture (DP-12: Server-side chart generation)
+
+Follows the BCG `VegaLiteLossDiagramm` pattern: server constructs a complete Vega-Lite JSON spec using a typed DSL, client renders it with VegaEmbed. This keeps tick recalculation, quantile annotation, and spec assembly as a single server-side concern, testable on the JVM.
+
 ```
-modules/app/src/main/scala/app/
-├── facades/VegaEmbed.scala     # Scala.js facade
-└── charts/LECChartBuilder.scala # Spec generation
-└── views/LECChartView.scala     # Reactive chart component
+Server:                                    Client:
+┌──────────────────────────────┐           ┌─────────────────────────┐
+│ POST /risk-trees/{id}/lec-chart          │ VegaEmbed facade        │
+│   ↓                          │           │   ↓                     │
+│ Resolve cached RiskResults   │  ──JSON──▶│ vegaEmbed(el, spec)     │
+│   ↓                          │           │   ↓                     │
+│ LECGenerator.generateCurve   │           │ Signal listener         │
+│ PointsMulti (shared ticks)   │           │ (hover → quantile info) │
+│   ↓                          │           └─────────────────────────┘
+│ LECChartSpecBuilder          │
+│ (typed Vega-Lite DSL)        │
+│   ↓                          │
+│ Complete JSON spec           │
+└──────────────────────────────┘
 ```
 
-**NPM dependencies to add** (in `modules/app/package.json`):
+#### Two endpoints, different purposes (DP-13)
+
+| Endpoint | Returns | Consumer | Purpose |
+|----------|---------|----------|---------|
+| `POST .../nodes/lec-multi` | `Map[String, LECNodeCurve]` (enriched) | API consumers, tests, future custom viz | **Data API** — raw curves + quantiles |
+| `POST .../lec-chart` (new) | Complete Vega-Lite spec JSON | GUI via VegaEmbed | **Presentation API** — render-ready |
+
+`lec-chart` composes on the same service method as `lec-multi` — no simulation/cache logic duplicated.
+
+#### New shared type: `LECNodeCurve` (enriches `lec-multi` response)
+
+```scala
+// common/.../data/LECCurveResponse.scala
+final case class LECNodeCurve(
+  name: String,
+  curve: Vector[LECPoint],
+  quantiles: Map[String, Double]  // e.g. "P50" → 12_000_000
+)
+```
+
+Current `lec-multi` returns `Map[String, Vector[LECPoint]]`. After enrichment: `Map[String, LECNodeCurve]`.
+Quantiles computed server-side from full `RiskResult.outcomeCount` TreeMap (exact to simulation resolution — not interpolated from the 100-tick curve subset).
+
+#### Files to create/modify
+
+**Server:**
+```
+server/.../simulation/LECChartSpecBuilder.scala  # Typed Vega-Lite DSL → JSON spec
+```
+
+**Common (shared):**
+```
+common/.../data/LECCurveResponse.scala           # Add LECNodeCurve type
+common/.../endpoints/RiskTreeEndpoints.scala      # Add lec-chart endpoint; update lec-multi return type
+```
+
+**App (client):**
+```
+app/src/main/scala/app/
+├── facades/VegaEmbed.scala       # Scala.js facade (vegaEmbed + signal listener)
+└── views/LECChartView.scala      # Reactive chart component (mount/update/dispose)
+```
+
+**NPM dependencies** (in `modules/app/package.json`):
 ```json
 "dependencies": {
-  "vega": "^5.30.0",
-  "vega-lite": "^5.21.0",
-  "vega-embed": "^6.26.0"
+  "vega": "^6.2.0",
+  "vega-lite": "^6.4.1",
+  "vega-embed": "^7.1.0"
 }
 ```
+Note: Vega-Lite v6 — uses `params` API (not deprecated `selection` from v4/v5).
 
-**VegaEmbed facade:**
+#### Chart spec details (DP-14, DP-15, DP-16)
+
+- **X-axis:** Loss (quantitative, **linear** scale). Formatted with `labelExpr` for finance convention:
+  `if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')`
+  Log scale may be added as a toggle in a future phase — not default.
+- **Y-axis:** Exceedance probability (0–1 or %).
+- **Interpolation:** `"monotone"` default (Hermite spline — preserves monotonicity of LEC curves). `"basis"` and `"cardinal"` can overshoot. Toggleable via Vega-Lite `params` bind (no server round trip — client-side spec parameter).
+- **Multi-curve:** Color-encoded by node name, legend auto-generated from sorted risk names.
+- **Data format:** Flattened `Vector[Map[String, String]]` with `symbol`/`x`/`y` keys (BCG pattern).
+- **Quantile annotations:** Vertical rules at key quantiles (P50, P90, P95, P99) from `LECNodeCurve.quantiles`.
+
+#### Subtask: Migrate prototype from `selection` to `params` API
+
+The `temp/vega-lite-experiments` prototype uses deprecated Vega-Lite v4 `selection` syntax.
+The `params` API (v5+, required in v6) replaces it:
+```js
+// Old (v4): "selection": { "hover": { "type": "single", "on": "mouseover" } }
+// New (v6): "params": [{ "name": "hover", "select": { "type": "point", "on": "pointerover" } }]
+```
+Interpolation toggle uses `params` bind:
+```js
+{ "name": "interp", "value": "monotone",
+  "bind": { "input": "select", "options": ["monotone", "linear", "basis"] } }
+```
+
+#### VegaEmbed facade
+
 ```scala
 @js.native
 @JSImport("vega-embed", JSImport.Default)
 object VegaEmbed extends js.Object:
-  def apply(el: dom.Element, spec: js.Any, options: js.UndefOr[js.Any]): Promise[js.Dynamic]
+  def apply(el: dom.Element, spec: js.Any, options: js.UndefOr[js.Any]): js.Promise[EmbedResult]
+
+@js.native
+trait EmbedResult extends js.Object:
+  val view: js.Dynamic = js.native
+  def finalize(): Unit = js.native
 ```
 
-**LECChartBuilder** (based on BCG's `VegaLiteLossDiagramm`):
-- Multi-curve display (aggregate + children)
-- Color palette matching BCG theme
-- X: loss (quantitative, formatted B/M)
-- Y: exceedance probability (%, smooth "basis" interpolation)
-- Data: flattened from `LECCurveResponse`
+#### LECChartView states
 
-**LECChartView states:**
 - Empty: "Select a node to view LEC"
 - Loading: spinner
-- Data: rendered chart via `onMountCallback` + `VegaEmbed`
-- Error: error message
+- Data: rendered chart via `onMountCallback` + `VegaEmbed`; disposed via `finalize()` on unmount
+- Error: error message with retry action
 
 **Checkpoint:**
-- [ ] Hardcoded chart spec renders correctly
-- [ ] Chart updates when signal changes
+- [ ] `LECNodeCurve` type added to common; `lec-multi` return type enriched
+- [ ] `lec-chart` endpoint defined and implemented
+- [ ] `LECChartSpecBuilder` generates valid Vega-Lite v6 spec (JVM-testable)
+- [ ] VegaEmbed facade renders server-generated spec
 - [ ] Multiple curves display with legend
+- [ ] Interpolation toggle works client-side via `params` bind
+- [ ] Quantile annotations render as vertical rules
 
 ---
 
@@ -544,18 +630,18 @@ state.selectedNodeId.set(nodeId)
   ↓
 Signal triggers effect:
   1. Get children of selected node from tree structure
-  2. POST /risk-trees/{treeId}/nodes/lec-multi  (selected + children)
+  2. POST /risk-trees/{treeId}/lec-chart  (body: [selectedNodeId] ++ childIds)
   ↓
-Response updates LECChartView
+Response = complete Vega-Lite spec JSON
   ↓
-Chart re-renders with multi-curve display
+LECChartView re-renders via VegaEmbed
 ```
 
-**Multi-fetch approach** (DP-1 decision):
+**GUI uses `lec-chart`** (DP-13 decision):
 - Frontend reads node's `childIds` from the tree structure
 - Builds list: `[selectedNodeId] ++ childIds`
-- Calls `getLECCurvesMultiEndpoint` in one request
-- Constructs `LECCurveResponse`-like structure for chart builder
+- Calls `lec-chart` endpoint → receives render-ready Vega-Lite spec
+- `lec-multi` remains available for API consumers / programmatic access
 
 **Checkpoint:**
 - [ ] Click node → chart updates with node's LEC + children
@@ -669,6 +755,34 @@ enum AppError:
 
 ---
 
+### Phase J: Domain Type Naming Review (Low Priority)
+
+**Goal:** Improve semantic clarity of core domain type names. Isolated refactoring — no feature changes.
+
+**Priority:** Low. Execute only after Tier 1 feature work is complete. Do as a standalone refactoring pass.
+
+**Candidates under review:**
+
+| Current name | Issue | Notes |
+|---|---|---|
+| `RiskLeaf` | "Risk" prefix ambiguous — is it the risk itself or a node that holds a risk? | Consider names that clarify leaf-as-risk-event semantics |
+| `RiskPortfolio` | "Risk" prefix same ambiguity — portfolio *of* risks, or a risk *that is* a portfolio? | Consider names that clarify aggregation semantics |
+| `RiskResult` | Misleading — not a "risk" but the simulation output for a node | Consider names that clarify simulation-output semantics |
+| `RiskResultGroup` | Follows from `RiskResult` | Cascades from `RiskResult` rename |
+| `SimulationResponse` | HTTP DTO — could be confused with a renamed `RiskResult` | Consider names that clarify it's a tree-metadata DTO, not simulation output |
+
+**Rename pattern:** TBD — requires semantic analysis before committing to a pattern. See naming discussion in decisions log (DP-17).
+
+**Scope:** Domain types + cascading DTOs (`*DefinitionRequest`, `*UpdateRequest`, `*Raw`), companion types (`*Cache`, `*Resolver`, `*TestSupport`, `*IdentityInstances`), string literals in error field paths, and file renames.
+
+**Checkpoint:**
+- [ ] Naming pattern decided and documented
+- [ ] All renames applied atomically (single refactoring pass)
+- [ ] All tests pass after rename
+- [ ] ADRs and docs updated to reflect new names
+
+---
+
 ### Tier 1 Dependency Graph
 
 ```
@@ -691,6 +805,8 @@ Phase G (Testing)
 Phase H (SSE Cache Invalidation)
   ↓
 Phase I (Error Handling)
+  ↓
+Phase J (Type Naming Review) ·········· low priority, optional gate
   ↓
   ╔═══════════════════════════════════════╗
   ║       TIER 1.5 ENTRY POINT           ║
@@ -1824,6 +1940,12 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 | DP-9 | Workspace persistence | PostgreSQL (planned) | 2026-02-13 | In-memory TrieMap initially. PG implementation follows cheleb demo patterns. Config-selectable. |
 | DP-10 | `GET /risk-trees` (list-all) | Configurable auth gate | 2026-02-13 | Default deny. Config: `register.api.list-all-trees.enabled = false`. Frontend unwired. |
 | DP-11 | URL scheme consistency | Same workspace key URL everywhere | 2026-02-13 | URL `/#/{workspaceKey}/...` is identical across free-tier and enterprise. Enterprise adds JWT as additional gate — leaked URL alone insufficient. No URL scheme change between layers. |
+| DP-12 | Chart generation strategy | Server-side (BCG pattern) | 2026-02-13 | Server constructs complete Vega-Lite JSON spec via typed DSL. Client only renders via VegaEmbed. Tick recalculation + quantile annotation = single server concern. JVM-testable. |
+| DP-13 | `lec-multi` vs `lec-chart` coexistence | Both endpoints coexist | 2026-02-13 | `lec-multi` = data API (raw curves + quantiles, for API consumers/tests). `lec-chart` = presentation API (render-ready Vega-Lite spec, for GUI). `lec-chart` composes on same service method — no duplication. |
+| DP-14 | X-axis scale | Linear default (not log) | 2026-02-13 | Linear scale with `labelExpr` B/M formatting. Log scale may be added as toggle in future phase. |
+| DP-15 | Interpolation method | `monotone` default, toggleable | 2026-02-13 | Hermite spline preserves monotonicity of LEC curves. `basis`/`cardinal` can overshoot. Toggle via Vega-Lite `params` bind (client-side, no server round trip). |
+| DP-16 | Vega-Lite API version | v6 (`params` API) | 2026-02-13 | Prototype uses deprecated v4 `selection` syntax. Migrate to v6 `params` API. NPM deps: vega ^6.2.0, vega-lite ^6.4.1, vega-embed ^7.1.0. |
+| DP-17 | Domain type naming review | Deferred (Phase J) | 2026-02-13 | `RiskLeaf`, `RiskPortfolio`, `RiskResult`, `SimulationResponse` candidates for rename. Pattern TBD — requires semantic analysis. Low priority; execute as isolated refactoring after Tier 1 feature work. |
 | — | Per-node vs per-tree storage | Per-node (Option A) | 2026-01-20 | Fine-grained Irmin watch notifications identify exact node changed → O(depth) ancestor invalidation. Per-tree storage would require full tree diff on every change. |
 
 ---
