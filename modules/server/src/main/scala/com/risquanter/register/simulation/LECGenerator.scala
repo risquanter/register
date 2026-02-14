@@ -191,12 +191,16 @@ object LECGenerator {
     * @param nEntries Number of sample points for the shared tick domain
     * @return Map of node ID to curve points (loss, exceedanceProbability)
     */
-  /** Exceedance threshold below which a tick is considered "tail".
-    * A tick is kept if *any* curve still has exceedance ≥ this value.
-    * This trims the long near-zero right tail that wastes ~90% of the
-    * x-axis on typical fat-tailed distributions.
+  /** Visual-only exceedance threshold for chart tail trimming.
     *
-    * 0.5% keeps the visual descent toward zero without the dead tail.
+    * Ticks where every curve drops below this value are removed from the
+    * rendered chart data. The underlying RiskResult and all analytical
+    * queries (probOfExceedance, quantiles, aggregation) remain unaffected.
+    *
+    * 0.5% corresponds to the Solvency II 1-in-200 year return period —
+    * the most conservative regulatory floor in common use.
+    *
+    * @see docs/LEC-TAIL-TRIMMING.md for full rationale and references.
     */
   val tailCutoff: Double = 0.005
 

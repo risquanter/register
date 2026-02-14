@@ -8,3 +8,4 @@ object MinimalTapir extends ZIOAppDefault {
   val app = ZioHttpInterpreter().toHttp(pingEndpoint)
   override def run = Server.serve(app).provide(Server.default)
 }
+// cache-test-1771103897
