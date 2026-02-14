@@ -36,22 +36,14 @@ object LECChartView:
       h3("LEC Chart"),
       div(
         cls := "lec-chart-content",
-        child <-- specSignal.map {
-          case LoadState.Idle =>
-            disposeChart()
-            renderIdle
-
-          case LoadState.Loading =>
-            disposeChart()
-            renderLoading
-
-          case LoadState.Failed(msg) =>
-            disposeChart()
-            renderError(msg)
-
-          case LoadState.Loaded(specJson) =>
-            disposeChart()
-            renderChart(specJson, result => currentResult = result)
+        child <-- specSignal.map { state =>
+          disposeChart()
+          state match
+            case LoadState.Idle           => renderIdle
+            case LoadState.Loading        => renderLoading
+            case LoadState.Failed(msg)    => renderError(msg)
+            case LoadState.Loaded(specJson) =>
+              renderChart(specJson, result => currentResult = result)
         },
         onUnmountCallback(_ => disposeChart())
       )
