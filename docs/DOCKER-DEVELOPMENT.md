@@ -72,13 +72,41 @@ docker compose ps irmin
 - Memory: ~50-80 MB
 - Image size: ~118 MB
 
+#### Build Architecture
+
+The native image build uses a **two-layer strategy** to minimise rebuild times:
+
+1. **Pre-built builder base image** (`local/graalvm-builder:21`) — contains
+   GraalVM, native-image, OS packages, and sbt. Built once from
+   `dev/Dockerfile.graalvm-builder`. Rebuild only when GraalVM or sbt versions
+   change.
+2. **Dependency layer** — resolves sbt dependencies from `build.sbt` and
+   `project/`. Cached as long as build definitions don't change.
+3. **Source layer** — compiles application code and produces the native binary.
+   This is the only layer that rebuilds on a source-only edit.
+
+The production image (stage 2) remains `gcr.io/distroless/static-debian12:nonroot`.
+
+#### One-Time Setup: Builder Base Image
+
+Before the first build (or after bumping GraalVM/sbt versions), build the
+toolchain image:
+
+```bash
+docker build -f dev/Dockerfile.graalvm-builder -t local/graalvm-builder:21 dev/
+```
+
+This takes ~1–2 minutes and only needs to be repeated when:
+- GraalVM version changes (update the `FROM` in `dev/Dockerfile.graalvm-builder`)
+- sbt version changes (update `SBT_VERSION` arg to match `project/build.properties`)
+
 #### Build Options
 
 ```bash
 # Build native image (production)
 docker compose build register-server
 
-# Build without cache
+# Build without cache (forces dependency re-resolution + recompile)
 docker compose build --no-cache register-server
 
 # Build and start

@@ -54,8 +54,8 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
       test("health endpoint returns OK (Irmin-backed server)") {
         for
           client   <- ZIO.service[SttpClientFixture.Client]
-          response <- basicRequest.get(uri"${client.baseUrl}/api/health").send(client.backend)
-        yield assertTrue(response.code.isSuccess) && assertTrue(response.body.exists(_.contains("OK")))
+          response <- basicRequest.get(uri"${client.baseUrl}/health").send(client.backend)
+        yield assertTrue(response.code.isSuccess) && assertTrue(response.body.exists(_.contains("healthy")))
       },
       test("create and retrieve risk tree via live HTTP") {
         val request = sampleRequest

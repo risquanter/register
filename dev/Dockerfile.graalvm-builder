@@ -1,0 +1,27 @@
+# ============================================================================
+# GraalVM + sbt Builder Base Image
+# ============================================================================
+# Pre-built toolchain image for native-image compilation.
+# Rebuild only when GraalVM or sbt versions change.
+#
+# Build:  docker build -f dev/Dockerfile.graalvm-builder -t local/graalvm-builder:21 dev/
+# ============================================================================
+
+FROM ghcr.io/graalvm/native-image-community:21-muslib
+
+LABEL maintainer="risquanter"
+LABEL description="GraalVM native-image builder with sbt"
+
+RUN microdnf install -y wget tar gzip findutils zlib-static && \
+    microdnf clean all
+
+# Match project/build.properties — sbt launcher will use this directly
+# without downloading a second copy at build time.
+ARG SBT_VERSION=1.12.0-RC1
+RUN wget -q "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" -O sbt.tgz && \
+    tar -xzf sbt.tgz -C /opt && \
+    ln -s /opt/sbt/bin/sbt /usr/local/bin/sbt && \
+    rm sbt.tgz
+
+# Warm the sbt launcher so first project build doesn't pay startup cost
+RUN sbt --version

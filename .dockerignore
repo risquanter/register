@@ -4,8 +4,8 @@
 # Build essentials only
 !build.sbt
 !project/
-!modules/
-!version.sbt
+!modules/common/src/main/
+!modules/server/src/main/
 
 # Exclude nested build artifacts even from allowed dirs
 project/target/
