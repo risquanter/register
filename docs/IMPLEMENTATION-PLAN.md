@@ -181,13 +181,13 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 
 ## Current State
 
-### Test Counts (as of Feb 10, 2026)
+### Test Counts (as of Feb 15, 2026)
 
 | Module | Tests | Status |
 |--------|-------|--------|
-| commonJVM | 289 | ✅ Passing |
-| server | 223 | ✅ Passing |
-| **Total** | **512** | ✅ |
+| commonJVM | 349 | ✅ Passing |
+| server | 258 | ✅ Passing |
+| **Total** | **607** | ✅ |
 
 ### Backend Endpoints (Implemented)
 
@@ -942,50 +942,33 @@ They are either low-effort or structurally load-bearing (retrofitting later chan
 - **W.7:** A26 (500 response body test assertions)
 - **Enterprise:** A7, A34-A39
 
-### Phase W.1: WorkspaceKey Domain Type
+### Phase W.1: WorkspaceKey Domain Type — ✅ COMPLETE
 
 **Goal:** Define the workspace capability credential as an Iron-wrapped nominal type.
 
-**Files to create:**
+**Files created:**
 ```
-common/.../domain/data/iron/WorkspaceKey.scala
-```
-
-**WorkspaceKey:**
-```scala
-case class WorkspaceKey(value: String)  // 128-bit SecureRandom, base64url (22 chars)
-
-object WorkspaceKey:
-  def generate: UIO[WorkspaceKey] =
-    ZIO.succeed {
-      val bytes = new Array[Byte](16)  // 128 bits
-      java.security.SecureRandom().nextBytes(bytes)
-      WorkspaceKey(java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes))
-    }
-
-  def fromString(s: String): Either[List[ValidationError], WorkspaceKey] =
-    // Validate: 22 chars, base64url charset
-    ...
-
-  given JsonEncoder[WorkspaceKey] = ...
-  given JsonDecoder[WorkspaceKey] = ...
-  // Tapir path codec for /w/{workspaceKey}/...
+common/.../domain/data/iron/WorkspaceKey.scala  (opaque type in OpaqueTypes.scala)
+common/.../http/codecs/IronTapirCodecs.scala     (Tapir path codec)
+common/test/.../domain/data/iron/WorkspaceKeySpec.scala  (15 tests)
 ```
 
-- **MUST** use `java.security.SecureRandom`, not `java.util.Random`
-- Follows ADR-018 nominal wrapper pattern (like `TreeId`, `NodeId`)
-- Tapir codec for path segment extraction
-- JSON codecs for API responses
+**Implementation notes:**
+- `WorkspaceKey` is an opaque type following ADR-018 nominal wrapper pattern (like `TreeId`, `NodeId`)
+- Uses `java.security.SecureRandom` (128-bit, base64url-encoded → 22 chars)
+- `fromString` validates: exactly 22 chars, base64url charset only (no `+`, `/`, `=`, whitespace)
+- JSON codecs and Tapir path codec registered in `IronTapirCodecs`
 
 **Checkpoint:**
-- [ ] `WorkspaceKey.generate` produces 22-char base64url strings
-- [ ] `WorkspaceKey.fromString` validates format
-- [ ] Tapir path codec works in endpoint definitions
-- [ ] JSON round-trip works
+- [x] `WorkspaceKey.generate` produces 22-char base64url strings
+- [x] `WorkspaceKey.fromString` validates format
+- [x] Tapir path codec works in endpoint definitions
+- [x] JSON round-trip works
+- [x] 15 tests passing (`WorkspaceKeySpec`)
 
 ---
 
-### Phase W.2: Workspace Domain Model & Store
+### Phase W.2: Workspace Domain Model & Store — ✅ COMPLETE
 
 **Goal:** Backend service for workspace lifecycle: create, resolve, tree association, TTL, eviction.
 
@@ -1149,17 +1132,47 @@ register.workspace {
 - Survives server restart — required for enterprise deployments
 
 **Checkpoint:**
-- [ ] `WorkspaceStore.create()` generates workspace with configured TTL
-- [ ] `resolve()` returns `WorkspaceExpired` for expired workspaces (absolute TTL check)
-- [ ] `resolve()` returns `WorkspaceExpired` for idle workspaces (idle timeout check — A11)
-- [ ] `resolve()` updates `lastAccessedAt` on successful resolution (A10)
-- [ ] `addTree()` associates tree with workspace
-- [ ] `listTrees()` returns only trees in the specified workspace
-- [ ] `evictExpired` removes expired entries (absolute + idle) and returns count
-- [ ] `delete()` cascade-deletes workspace + all associated trees
-- [ ] `rotate()` atomically generates new key + transfers trees + invalidates old key (instant, no grace)
-- [ ] Config-driven: `ttl = infinite` disables absolute expiry
-- [ ] Security logging: creation, deletion, rotation events (A29, A33)
+- [x] `WorkspaceStore.create()` generates workspace with configured TTL
+- [x] `resolve()` returns `WorkspaceExpired` for expired workspaces (absolute TTL check)
+- [x] `resolve()` returns `WorkspaceExpired` for idle workspaces (idle timeout check — A11)
+- [x] `resolve()` updates `lastAccessedAt` on successful resolution (A10)
+- [x] `addTree()` associates tree with workspace
+- [x] `listTrees()` returns only trees in the specified workspace
+- [x] `evictExpired` removes expired entries (absolute + idle) and returns count
+- [x] `delete()` cascade-deletes workspace + all associated trees
+- [x] `rotate()` atomically generates new key + transfers trees + invalidates old key (instant, no grace)
+- [x] Config-driven: `ttl = infinite` disables absolute expiry
+- [x] Security logging: creation, deletion, rotation events (A29, A33)
+- [x] `resolve()` is atomic (single `Ref.modify` — no TOCTOU race)
+- [x] `RateLimiter` off-by-one fixed (rejected requests don't consume slots)
+- [x] Workspace errors unified into `AppError` sealed hierarchy (ADR-002 §5)
+- [x] Error sanitisation: `WorkspaceNotFound`, `WorkspaceExpired` → opaque 404 at HTTP layer (A13)
+- [x] 7 tests passing (`WorkspaceStoreSpec`), 3 tests passing (`RateLimiterSpec`)
+
+**Files created/modified (W.2):**
+
+| File | Action | Notes |
+|------|--------|-------|
+| `common/.../domain/data/Workspace.scala` | Created | Domain model with dual timeout, `isExpired`, `touch`, `expiresAt` |
+| `common/.../domain/errors/AppError.scala` | Modified | Added `WorkspaceNotFound`, `WorkspaceExpired`, `TreeNotInWorkspace` as `SimError` subtypes (ADR-002) |
+| `common/.../domain/errors/ErrorResponse.scala` | Modified | `encode` maps workspace errors to opaque 404 (A13) |
+| `server/.../services/workspace/WorkspaceStore.scala` | Created | Trait with `create`, `resolve`, `addTree`, `listTrees`, `belongsTo`, `evictExpired`, `delete`, `rotate` |
+| `server/.../services/workspace/WorkspaceStoreLive.scala` | Created | Ref-based impl with `logSecurity` helpers, `validateWorkspace` pure function, atomic `resolve` |
+| `server/.../services/workspace/RateLimiter.scala` | Created | IP-based fixed-window rate limiter (A27) |
+| `server/.../configs/WorkspaceConfig.scala` | Created | `ttl`, `idleTimeout`, `reaperInterval`, `maxCreatesPerIpPerHour`, `maxTreesPerWorkspace` |
+| `server/.../configs/ApiConfig.scala` | Created | `listAllTreesEnabled` gate (A17) |
+| `server/.../configs/TestConfigs.scala` | Modified | Added `workspace` + `workspaceLayer` test defaults |
+| `server/test/.../WorkspaceStoreSpec.scala` | Created | 7 security regression tests |
+| `server/test/.../RateLimiterSpec.scala` | Created | 3 security regression tests |
+| `common/test/.../ErrorResponseSpec.scala` | Modified | Added workspace error round-trip tests (29 total) |
+
+**Security items baked in (as planned):**
+- A5: `delete(key)` and `rotate(key)` in trait ✅
+- A10: `lastAccessedAt` tracking in domain model ✅
+- A11: Dual timeout (absolute + idle) in `resolve()` ✅
+- A14: O(1) `Map.get` lookup, constant-time documented ✅
+- A29: Creation, deletion, rotation event logging ✅
+- A33: Structured log fields (`workspace_key`, `event_type`) ✅
 
 ---
 
@@ -1468,6 +1481,32 @@ common/.../domain/data/iron/WorkspaceKeySpec.scala
 - [ ] TTL logic tested with `TestClock` (advance time → verify expiry)
 - [ ] Rate limiter tested with counter assertions
 - [ ] Enterprise mode (infinite TTL) tested
+
+---
+
+### Phase W.7b: HTTP Integration Tests for Security Semantics (Optional Improvement)
+
+**Goal:** Verify security-critical behaviour through the full Tapir HTTP stack, not just unit tests against service traits.
+
+**Motivation:** The W.2 unit tests validate `WorkspaceStore` and `RateLimiter` in isolation. However, several security properties are only observable at the HTTP boundary:
+
+- **A17:** `GET /risk-trees` returns 403 when `listAllTreesEnabled = false` — requires the endpoint to be wired with the `ApiConfig` gate
+- **A6:** `DELETE /w/{key}` cascade-deletes all associated trees — requires the controller's orchestration through `RiskTreeService.delete`
+- **A13:** Not-found and expired workspaces return identical 404 responses — requires `ErrorResponse.encode` integration with Tapir's error output
+
+These are currently verified indirectly (unit tests on `ErrorResponse.encode`, `WorkspaceStoreLive`, etc.) but not end-to-end through a Tapir server interpreter.
+
+**Approach:** Use the existing `server-it` module's `HttpTestHarness` (random-port test server) to add HTTP-level assertions:
+
+| Test | Asserts |
+|------|---------|
+| `GET /risk-trees` with gate=false | 403 Forbidden, body matches `ErrorResponse` |
+| `DELETE /w/{key}` cascade | 204 No Content; subsequent `GET /w/{key}/risk-trees` → 404 |
+| Expired workspace → 404 | Same status + body as non-existent workspace |
+| Cross-workspace tree access → 404 | Tree exists but wrong workspace key → 404 |
+
+**Priority:** Low — the unit tests cover the logic. This is a defence-in-depth measure.
+Implement opportunistically when adding `WorkspaceController` HTTP wiring in W.3.
 
 ---
 
