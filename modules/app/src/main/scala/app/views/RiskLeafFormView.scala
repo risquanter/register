@@ -24,17 +24,33 @@ object RiskLeafFormView:
         "Configure a risk leaf node with either expert distribution or lognormal distribution."
       ),
 
-      // Clear stale submit error whenever the user edits any field
-      EventStream.merge(
-        state.nameVar.signal.changes.mapTo(()),
-        state.probabilityVar.signal.changes.mapTo(()),
-        state.distributionModeVar.signal.changes.mapTo(()),
-        state.percentilesVar.signal.changes.mapTo(()),
-        state.quantilesVar.signal.changes.mapTo(()),
-        state.minLossVar.signal.changes.mapTo(()),
-        state.maxLossVar.signal.changes.mapTo(()),
-        parentVar.signal.changes.mapTo(())
-      ) --> { _ => submitError.set(None) },
+      // Clear stale submit + per-field errors whenever the user edits a field
+      state.nameVar.signal.changes --> { _ =>
+        submitError.set(None)
+        state.clearSubmitFieldError(RiskLeafField.Name)
+      },
+      state.probabilityVar.signal.changes --> { _ =>
+        submitError.set(None)
+        state.clearSubmitFieldError(RiskLeafField.Probability)
+      },
+      state.percentilesVar.signal.changes --> { _ =>
+        submitError.set(None)
+        state.clearSubmitFieldError(RiskLeafField.Percentiles)
+      },
+      state.quantilesVar.signal.changes --> { _ =>
+        submitError.set(None)
+        state.clearSubmitFieldError(RiskLeafField.Quantiles)
+      },
+      state.minLossVar.signal.changes --> { _ =>
+        submitError.set(None)
+        state.clearSubmitFieldError(RiskLeafField.MinLoss)
+      },
+      state.maxLossVar.signal.changes --> { _ =>
+        submitError.set(None)
+        state.clearSubmitFieldError(RiskLeafField.MaxLoss)
+      },
+      state.distributionModeVar.signal.changes --> { _ => submitError.set(None) },
+      parentVar.signal.changes --> { _ => submitError.set(None) },
 
       // Common Fields
       textInput(

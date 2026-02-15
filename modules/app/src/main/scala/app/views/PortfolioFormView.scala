@@ -20,8 +20,14 @@ object PortfolioFormView:
       h2("Add Portfolio"),
 
       // Clear stale submit error whenever the user edits a field
-      form.nameVar.signal.changes --> { _ => submitError.set(None) },
-      form.parentVar.signal.changes --> { _ => submitError.set(None) },
+      form.nameVar.signal.changes --> { _ =>
+        submitError.set(None)
+        form.clearSubmitFieldError(PortfolioField.Name)
+      },
+      form.parentVar.signal.changes --> { _ =>
+        submitError.set(None)
+        form.clearSubmitFieldError(PortfolioField.Parent)
+      },
 
       FormInputs.textInput(
         labelText = "Portfolio Name",

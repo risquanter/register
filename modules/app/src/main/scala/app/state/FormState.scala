@@ -36,6 +36,10 @@ trait FormState[F]:
   def setSubmitFieldError(field: F, message: String): Unit =
     submitFieldErrors.update(_ + (field -> message))
 
+  /** Clear a single field's submit error (e.g. when the user edits that field). */
+  def clearSubmitFieldError(field: F): Unit =
+    submitFieldErrors.update(_ - field)
+
   def isTouched(field: F): Signal[Boolean] =
     touchedFields.signal.map(_.contains(field))
 

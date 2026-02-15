@@ -3,6 +3,7 @@ package com.risquanter.register.http.endpoints
 import sttp.tapir.*
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
+import sttp.model.{Header, MediaType}
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
@@ -187,4 +188,5 @@ trait RiskTreeEndpoints extends BaseEndpoint {
       .post
       .in(jsonBody[List[NodeId]].description("Array of node IDs to include in chart"))
       .out(stringBody.description("Vega-Lite JSON specification"))
+      .out(header(Header.contentType(MediaType.ApplicationJson)))
 }

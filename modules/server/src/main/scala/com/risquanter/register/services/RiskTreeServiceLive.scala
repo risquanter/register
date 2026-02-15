@@ -212,6 +212,24 @@ class RiskTreeServiceLive private (
     case _: AppError => ZIO.unit  // Domain errors: logged at origin or expected
     case _ => ZIO.logErrorCause(s"Unexpected error in $operation", Cause.fail(error))
   }
+
+  /** Wrap a traced LEC query operation with span + metrics + error logging.
+    *
+    * Eliminates the repeated ceremony of:
+    *  1. `tracing.span(name, SpanKind.INTERNAL) { ... }`
+    *  2. `.tapBoth(logIfUnexpected ∘ recordOperation, recordOperation)`
+    *
+    * The body receives the `Tracing` instance for `setAttribute` calls.
+    * Span names, metric labels, and log context are derived from `name`.
+    *
+    * @param name Operation name — used as span name, metric label, and log context
+    * @param body Effect to execute within the span (may call `tracing.setAttribute`)
+    */
+  private def traced[A](name: String)(body: Task[A]): Task[A] =
+    tracing.span(name, SpanKind.INTERNAL)(body).tapBoth(
+      error => logIfUnexpected(name)(error) *> recordOperation(name, success = false, Some(extractErrorContext(error))),
+      _ => recordOperation(name, success = true)
+    )
   
   /** Record simulation performance metrics
     * 
@@ -351,8 +369,8 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] = {
-    val operation = tracing.span("getLECCurve", SpanKind.INTERNAL) {
+  override def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] =
+    traced("getLECCurve") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_id", nodeId.value)
@@ -390,15 +408,9 @@ class RiskTreeServiceLive private (
         )
       } yield response
     }
-    
-    operation.tapBoth(
-      error => logIfUnexpected("getLECCurve")(error) *> recordOperation("getLECCurve", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("getLECCurve", success = true)
-    )
-  }
   
-  override def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal] = {
-    val operation = tracing.span("probOfExceedance", SpanKind.INTERNAL) {
+  override def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal] =
+    traced("probOfExceedance") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_id", nodeId.value)
@@ -417,15 +429,9 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("exceedance_probability", prob.toDouble)
       } yield prob
     }
-    
-    operation.tapBoth(
-      error => logIfUnexpected("probOfExceedance")(error) *> recordOperation("probOfExceedance", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("probOfExceedance", success = true)
-    )
-  }
   
-  override def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]] = {
-    val operation = tracing.span("getLECCurvesMulti", SpanKind.INTERNAL) {
+  override def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]] =
+    traced("getLECCurvesMulti") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
@@ -462,15 +468,9 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("curves_generated", enriched.size.toLong)
       } yield enriched
     }
-    
-    operation.tapBoth(
-      error => logIfUnexpected("getLECCurvesMulti")(error) *> recordOperation("getLECCurvesMulti", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("getLECCurvesMulti", success = true)
-    )
-  }
 
-  override def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String] = {
-    val operation = tracing.span("getLECChart", SpanKind.INTERNAL) {
+  override def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String] =
+    traced("getLECChart") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
@@ -482,12 +482,6 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("spec_length", spec.length.toLong)
       } yield spec
     }
-
-    operation.tapBoth(
-      error => logIfUnexpected("getLECChart")(error) *> recordOperation("getLECChart", success = false, Some(extractErrorContext(error))),
-      _ => recordOperation("getLECChart", success = true)
-    )
-  }
 }
 
 object RiskTreeServiceLive {

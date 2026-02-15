@@ -15,19 +15,47 @@ import sttp.tapir.Endpoint
   *
   * All effects are forked on `Runtime.default` with `BackendClientLive.configuredLayer`
   * so callers never need to manually provide the ZIO environment.
+  *
+  * An optional `ErrorObserver` can be registered once at app startup to surface
+  * network/server errors in the global error banner and auto-dismiss on success.
   */
 object ZJS:
+
+  /** Observer for cross-cutting error/success reporting (e.g. global error banner).
+    *
+    * Registered once at app startup via `registerErrorObserver`. Every ZIO effect
+    * forked through `forkProvided` automatically notifies this observer, giving
+    * universal banner coverage with zero per-call-site wiring.
+    */
+  trait ErrorObserver:
+    /** Called when any forked ZIO fails (network error, server error, etc.). */
+    def onError(error: Throwable): Unit
+    /** Called when any forked ZIO succeeds — used to auto-dismiss stale banners. */
+    def onSuccess(): Unit
+
+  private var errorObserver: Option[ErrorObserver] = None
+
+  /** Register the global error observer. Called once from Main.scala at startup. */
+  def registerErrorObserver(observer: ErrorObserver): Unit =
+    errorObserver = Some(observer)
 
   /** Fork a ZIO on the default runtime with BackendClient provided.
     *
     * This is the single integration point between the ZIO and Laminar worlds.
     * All public extension methods delegate here to avoid duplicating the
     * Unsafe / Runtime / provide boilerplate.
+    *
+    * If an `ErrorObserver` is registered, every fork automatically:
+    *  - reports errors via `onError` (surfaces in global banner)
+    *  - clears stale errors via `onSuccess` (auto-dismiss on recovery)
     */
   private def forkProvided[E <: Throwable, A](zio: ZIO[BackendClient, E, A]): Unit =
     Unsafe.unsafe { implicit unsafe =>
       Runtime.default.unsafe.fork(
-        zio.provide(BackendClientLive.configuredLayer)
+        zio
+          .tapError(e => ZIO.succeed(errorObserver.foreach(_.onError(e))))
+          .tap(_ => ZIO.succeed(errorObserver.foreach(_.onSuccess())))
+          .provide(BackendClientLive.configuredLayer)
       )
     }
 

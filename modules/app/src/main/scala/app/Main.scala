@@ -6,6 +6,7 @@ import org.scalajs.dom
 import app.components.{Layout, SplitPane}
 import app.state.{TreeBuilderState, TreeViewState, GlobalError}
 import app.views.{TreeBuilderView, TreePreview, TreeListView, TreeDetailView, LECChartView}
+import app.core.ZJS
 
 object Main:
 
@@ -16,6 +17,17 @@ object Main:
 
     // Global error state — safety net for errors with no per-view handler
     val globalError: Var[Option[GlobalError]] = Var(None)
+
+    // Register the global error observer at the ZJS chokepoint.
+    // Every API call forked via forkProvided will automatically:
+    //  - surface network/server errors in the error banner
+    //  - auto-dismiss stale banners on the next successful call
+    ZJS.registerErrorObserver(new ZJS.ErrorObserver:
+      def onError(error: Throwable): Unit =
+        globalError.set(Some(GlobalError.fromThrowable(error)))
+      def onSuccess(): Unit =
+        globalError.set(None)
+    )
 
     val savedTreePanel = div(
       cls := "saved-tree-panel",
