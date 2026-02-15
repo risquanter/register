@@ -2,6 +2,7 @@ package com.risquanter.register.configs
 
 import zio.*
 import io.github.iltotore.iron.refineUnsafe
+import java.time.Duration
 
 /** Test configuration values - single source of truth for tests */
 object TestConfigs {
@@ -27,4 +28,14 @@ object TestConfigs {
   )
   
   val telemetryLayer: ULayer[TelemetryConfig] = ZLayer.succeed(telemetry)
+
+  val workspace: WorkspaceConfig = WorkspaceConfig(
+    ttl = Duration.ofHours(24),
+    idleTimeout = Duration.ofMinutes(1),
+    reaperInterval = Duration.ofMinutes(1),
+    maxCreatesPerIpPerHour = 100,
+    maxTreesPerWorkspace = 10
+  )
+
+  val workspaceLayer: ULayer[WorkspaceConfig] = ZLayer.succeed(workspace)
 }

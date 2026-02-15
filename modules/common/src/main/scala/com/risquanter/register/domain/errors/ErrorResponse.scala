@@ -36,6 +36,14 @@ object ErrorResponse {
       case 400 =>
         ValidationFailed(details.map(d => ValidationError(d.field, d.code, d.message)))
 
+      // 403 → AccessDenied
+      case 403 =>
+        AccessDenied(message)
+
+      // 429 → RateLimitExceeded
+      case 429 =>
+        RateLimitExceeded("unknown", 0)
+
       // 409 → disambiguate by field
       case 409 => firstField match
         case "version" => VersionConflict("unknown", "unknown", message)  // nodeId lost through HTTP
@@ -74,6 +82,12 @@ object ErrorResponse {
   def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
     // Domain errors - typed hierarchy
     case ValidationFailed(errors)     => makeValidationResponse(errors)
+    case AccessDenied(reason)         => makeAccessDeniedResponse(reason)
+    case RateLimitExceeded(ip, limit, window) => makeRateLimitExceededResponse(ip, limit, window)
+    // Workspace errors — part of SimError hierarchy. Intentionally collapsed to opaque 404 (A13)
+    case _: WorkspaceNotFound      => makeWorkspaceOpaqueNotFoundResponse()
+    case _: WorkspaceExpired       => makeWorkspaceOpaqueNotFoundResponse()
+    case _: TreeNotInWorkspace     => makeWorkspaceOpaqueNotFoundResponse()
     case RepositoryFailure(reason)    => makeRepositoryFailureResponse(reason)
     case SimulationFailure(id, cause) => makeSimulationFailureResponse(id)
     case DataConflict(reason)         => makeDataConflictResponse(reason)
@@ -119,8 +133,23 @@ object ErrorResponse {
   def makeDataConflictResponse(message: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.Conflict, "unknown", ValidationErrorCode.DUPLICATE_VALUE, message, domain, requestId)
 
+  def makeAccessDeniedResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.Forbidden, "authorization", ValidationErrorCode.CONSTRAINT_VIOLATION,
+      "Forbidden", domain, requestId)
+
+  def makeRateLimitExceededResponse(ip: String, limit: Int, window: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.TooManyRequests, "rate-limit", ValidationErrorCode.CONSTRAINT_VIOLATION,
+      "Too many requests", domain, requestId)
+
+  /** A13: constant opaque 404 to avoid not-found vs expired distinction leaks. */
+  def makeWorkspaceOpaqueNotFoundResponse(domain: String = "workspaces", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.NotFound, "workspace", ValidationErrorCode.CONSTRAINT_VIOLATION,
+      "Workspace not found", domain, requestId)
+
   def makeRepositoryFailureResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.InternalServerError, "unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, reason, domain, requestId)
+    // A25: do not leak repository internals in client responses
+    response(StatusCode.InternalServerError, "unknown", ValidationErrorCode.CONSTRAINT_VIOLATION,
+      "Internal server error", domain, requestId)
 
   def makeSimulationFailureResponse(simulationId: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.InternalServerError, "simulation", ValidationErrorCode.CONSTRAINT_VIOLATION,
@@ -137,8 +166,9 @@ object ErrorResponse {
       s"Network timeout after ${duration.toMillis}ms during: $operation", domain, requestId)
 
   def makeIrminHttpErrorResponse(status: StatusCode, body: String, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    // A24: never forward upstream body to clients
     response(status, "http", ValidationErrorCode.DEPENDENCY_FAILED,
-      s"HTTP ${status.code}: $body", domain, requestId)
+      s"Upstream service error (HTTP ${status.code})", domain, requestId)
 
   def makeIrminGraphQlErrorResponse(messages: List[String], path: Option[List[String]], domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     val field = path.filter(_.nonEmpty).map(_.mkString(".")).getOrElse("graphql")

@@ -2,6 +2,8 @@ package com.risquanter.register.domain.errors
 
 import scala.concurrent.duration.Duration
 import sttp.model.StatusCode
+import java.time.{Duration as JDuration, Instant}
+import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId}
 
 sealed trait AppError extends Throwable
 sealed trait SimError extends AppError
@@ -30,6 +32,33 @@ case class SimulationFailure(simulationId: String, cause: Throwable) extends Sim
 
 /** Data conflict (e.g., duplicate key) */
 case class DataConflict(reason: String) extends SimError
+
+/** Authorization failure for disabled/forbidden operations */
+case class AccessDenied(reason: String) extends SimError
+
+/** Rate limiting failure for abuse-prevention controls */
+case class RateLimitExceeded(ip: String, limit: Int, window: String = "1h") extends SimError {
+  override def getMessage: String = s"Rate limit exceeded for $ip: max $limit per $window"
+}
+
+// ============================================================================
+// Workspace Errors (A13: all map to opaque 404 at HTTP layer)
+// ============================================================================
+
+/** Workspace not found — maps to opaque 404 (A13). */
+case class WorkspaceNotFound(key: WorkspaceKey) extends SimError {
+  override def getMessage: String = s"Workspace not found: ${key.value}"
+}
+
+/** Workspace expired — maps to same opaque 404 as not-found (A13). */
+case class WorkspaceExpired(key: WorkspaceKey, createdAt: Instant, ttl: JDuration) extends SimError {
+  override def getMessage: String = s"Workspace expired: ${key.value}"
+}
+
+/** Tree not associated with workspace — maps to opaque 404 (A13). */
+case class TreeNotInWorkspace(key: WorkspaceKey, treeId: TreeId) extends SimError {
+  override def getMessage: String = s"Tree ${treeId.value} is not in workspace ${key.value}"
+}
 
 // ============================================================================
 // Infrastructure Errors (ADR-008: Error Handling & Resilience)

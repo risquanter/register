@@ -6,15 +6,16 @@ import zio.config.typesafe.TypesafeConfigProvider
 import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 
-import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig}
+import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, ApiConfig, WorkspaceConfig}
 import com.risquanter.register.http.HttpApi
-import com.risquanter.register.http.controllers.RiskTreeController
+import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.cache.{TreeCacheManager, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
+import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -74,13 +75,15 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, RiskTreeController & SSEController & CacheController & Server & ServerConfig & CorsConfig] =
-    ZLayer.make[RiskTreeController & SSEController & CacheController & Server & ServerConfig & CorsConfig](
+  val appLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig] =
+    ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
       Configs.makeLayer[TelemetryConfig]("register.telemetry"),
       Configs.makeLayer[CorsConfig]("register.cors"),
+      Configs.makeLayer[ApiConfig]("register.api"),
+      Configs.makeLayer[WorkspaceConfig]("register.workspace"),
       // Server layer uses ServerConfig
       ZLayer.fromZIO(
         ZIO.service[ServerConfig].map(cfg => 
@@ -104,9 +107,12 @@ object Application extends ZIOAppDefault {
       RiskResultResolverLive.layer,  // ADR-015: ensureCached primitive
       SSEHub.live,
       InvalidationHandler.live,
+      WorkspaceStoreLive.layer,
+      RateLimiterLive.layer,
       SSEController.layer,
       CacheController.layer,
-      ZLayer.fromZIO(RiskTreeController.makeZIO)
+      ZLayer.fromZIO(RiskTreeController.makeZIO),
+      ZLayer.fromZIO(WorkspaceController.makeZIO)
     )
 
   def startServer = for {

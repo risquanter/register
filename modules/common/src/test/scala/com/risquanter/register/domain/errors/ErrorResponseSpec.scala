@@ -1,10 +1,12 @@
 package com.risquanter.register.domain.errors
 
 import scala.concurrent.duration.*
+import java.time.{Instant, Duration as JDuration}
 
 import zio.test.*
 import zio.json.*
 import sttp.model.StatusCode
+import com.risquanter.register.domain.data.iron.WorkspaceKey
 
 object ErrorResponseSpec extends ZIOSpecDefault {
 
@@ -31,7 +33,54 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         assertTrue(
           status == StatusCode.InternalServerError,
           response.error.code == 500,
-          response.error.errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION
+          response.error.errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
+          response.error.message == "Internal server error"
+        )
+      },
+
+      test("encodes AccessDenied to Forbidden") {
+        val error = AccessDenied("Endpoint disabled")
+        val (status, response) = ErrorResponse.encode(error)
+
+        assertTrue(
+          status == StatusCode.Forbidden,
+          response.error.code == 403,
+          response.error.message == "Forbidden"
+        )
+      },
+
+      test("encodes RateLimitExceeded to TooManyRequests") {
+        val error = RateLimitExceeded("127.0.0.1", 5)
+        val (status, response) = ErrorResponse.encode(error)
+
+        assertTrue(
+          status == StatusCode.TooManyRequests,
+          response.error.code == 429,
+          response.error.message == "Too many requests"
+        )
+      },
+
+      test("encodes WorkspaceNotFound to opaque 404") {
+        val key = WorkspaceKey.fromString("abcdefghijklmnopqrstuv").toOption.get
+        val (status, response) = ErrorResponse.encode(WorkspaceNotFound(key))
+
+        assertTrue(
+          status == StatusCode.NotFound,
+          response.error.code == 404,
+          response.error.message == "Workspace not found"
+        )
+      },
+
+      test("encodes WorkspaceExpired to same opaque 404 as not-found (A13)") {
+        val key = WorkspaceKey.fromString("ABCDEFGHIJKLMNOPQRSTUV").toOption.get
+        val (status, response) = ErrorResponse.encode(
+          WorkspaceExpired(key, Instant.now(), JDuration.ofHours(1))
+        )
+
+        assertTrue(
+          status == StatusCode.NotFound,
+          response.error.code == 404,
+          response.error.message == "Workspace not found"
         )
       },
       
@@ -77,6 +126,20 @@ object ErrorResponseSpec extends ZIOSpecDefault {
           response.error.code == 504,
           response.error.errors.head.code == ValidationErrorCode.DEPENDENCY_FAILED,
           response.error.message.contains("timeout")
+        )
+      },
+
+      test("encodes IrminHttpError without leaking upstream body") {
+        val sensitiveBody = "upstream stacktrace: jdbc://user:password@host/db"
+        val error = IrminHttpError(StatusCode.BadGateway, sensitiveBody)
+        val (status, response) = ErrorResponse.encode(error)
+
+        assertTrue(
+          status == StatusCode.BadGateway,
+          response.error.code == 502,
+          response.error.message == "Upstream service error (HTTP 502)",
+          !response.error.message.contains("password"),
+          !response.error.message.contains("stacktrace")
         )
       },
       
@@ -161,6 +224,26 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         )
         val throwable = ErrorResponse.decode((StatusCode.ServiceUnavailable, response))
         assertTrue(throwable.isInstanceOf[IrminUnavailable])
+      },
+
+      test("decodes 403 to AccessDenied") {
+        val response = ErrorResponse(
+          JsonHttpError(403, "Forbidden", List(
+            ErrorDetail("risk-trees", "authorization", ValidationErrorCode.CONSTRAINT_VIOLATION, "Forbidden")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.Forbidden, response))
+        assertTrue(throwable.isInstanceOf[AccessDenied])
+      },
+
+      test("decodes 429 to RateLimitExceeded") {
+        val response = ErrorResponse(
+          JsonHttpError(429, "Too many requests", List(
+            ErrorDetail("risk-trees", "rate-limit", ValidationErrorCode.CONSTRAINT_VIOLATION, "Too many requests")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.TooManyRequests, response))
+        assertTrue(throwable.isInstanceOf[RateLimitExceeded])
       },
 
       test("decodes 504 to NetworkTimeout") {

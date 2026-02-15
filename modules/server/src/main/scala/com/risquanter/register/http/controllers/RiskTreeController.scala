@@ -8,6 +8,8 @@ import com.risquanter.register.services.pipeline.{InvalidationHandler, Invalidat
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.domain.data.{LECPoint, LECNodeCurve, LECCurveResponse}
 import com.risquanter.register.domain.data.iron.{PositiveInt, IronConstants, SafeId, SafeIdStr, NodeId}
+import com.risquanter.register.configs.ApiConfig
+import com.risquanter.register.domain.errors.AccessDenied
 import io.github.iltotore.iron.refineUnsafe
 import IronConstants.Four
 
@@ -21,7 +23,8 @@ import IronConstants.Four
   */
 class RiskTreeController private (
   riskTreeService: RiskTreeService,
-  invalidationHandler: InvalidationHandler
+  invalidationHandler: InvalidationHandler,
+  apiConfig: ApiConfig
 ) extends BaseController
     with RiskTreeEndpoints {
 
@@ -41,8 +44,15 @@ class RiskTreeController private (
       riskTreeService.update(id, req).map(SimulationResponse.fromRiskTree).either
   }
 
-  val getAll: ServerEndpoint[Any, Task] = getAllEndpoint.serverLogicSuccess { _ =>
-    riskTreeService.getAll.map(_.map(SimulationResponse.fromRiskTree))
+  /** List all risk trees.
+    * A17: Sealed with config gate — returns 403 Forbidden when disabled (default).
+    * This prevents unauthenticated enumeration of all trees across all workspaces.
+    */
+  val getAll: ServerEndpoint[Any, Task] = getAllEndpoint.serverLogic { _ =>
+    if apiConfig.listAllTreesEnabled then
+      riskTreeService.getAll.map(_.map(SimulationResponse.fromRiskTree)).either
+    else
+      ZIO.left(AccessDenied("GET /risk-trees is disabled by configuration") : Throwable)
   }
 
   val getById: ServerEndpoint[Any, Task] = getByIdEndpoint.serverLogicSuccess { id =>
@@ -101,8 +111,9 @@ class RiskTreeController private (
 }
 
 object RiskTreeController {
-  val makeZIO: ZIO[RiskTreeService & InvalidationHandler, Nothing, RiskTreeController] = for {
+  val makeZIO: ZIO[RiskTreeService & InvalidationHandler & ApiConfig, Nothing, RiskTreeController] = for {
     riskTreeService <- ZIO.service[RiskTreeService]
     invalidationHandler <- ZIO.service[InvalidationHandler]
-  } yield new RiskTreeController(riskTreeService, invalidationHandler)
+    apiConfig <- ZIO.service[ApiConfig]
+  } yield new RiskTreeController(riskTreeService, invalidationHandler, apiConfig)
 }
