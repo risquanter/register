@@ -5,6 +5,9 @@ import com.raquo.laminar.api.L.{*, given}
 /**
  * FormState trait — reactive form infrastructure with error display timing control.
  *
+ * Type parameter `F` is the per-form field enum, ensuring compile-time safety
+ * for field references (markTouched, withDisplayControl, setSubmitFieldError, etc.).
+ *
  * Provides:
  * - Error display timing: `markTouched`, `shouldShowError`, `triggerValidation`
  * - Error aggregation: `errorSignals`, `hasErrors`
@@ -12,7 +15,7 @@ import com.raquo.laminar.api.L.{*, given}
  *
  * Subclasses define `errorSignals` and use `shouldShowError` to gate display.
  */
-trait FormState:
+trait FormState[F]:
 
   // ============================================================
   // Error Display Timing (shared infrastructure)
@@ -22,39 +25,39 @@ trait FormState:
   private val showErrorsVar: Var[Boolean] = Var(false)
 
   /** Per-field "touched" state for showing errors on blur */
-  private val touchedFields: Var[Set[String]] = Var(Set.empty)
+  private val touchedFields: Var[Set[F]] = Var(Set.empty)
 
   /** Per-field submit-time errors routed from topology validation (W.10) */
-  private val submitFieldErrors: Var[Map[String, String]] = Var(Map.empty)
+  private val submitFieldErrors: Var[Map[F, String]] = Var(Map.empty)
 
-  def markTouched(fieldName: String): Unit =
-    touchedFields.update(_ + fieldName)
+  def markTouched(field: F): Unit =
+    touchedFields.update(_ + field)
 
-  def setSubmitFieldError(fieldName: String, message: String): Unit =
-    submitFieldErrors.update(_ + (fieldName -> message))
+  def setSubmitFieldError(field: F, message: String): Unit =
+    submitFieldErrors.update(_ + (field -> message))
 
-  def isTouched(fieldName: String): Signal[Boolean] =
-    touchedFields.signal.map(_.contains(fieldName))
+  def isTouched(field: F): Signal[Boolean] =
+    touchedFields.signal.map(_.contains(field))
 
   /** Show error for a field if: showErrors is true OR field has been touched */
-  def shouldShowError(fieldName: String): Signal[Boolean] =
-    showErrorsVar.signal.combineWith(isTouched(fieldName)).map {
+  def shouldShowError(field: F): Signal[Boolean] =
+    showErrorsVar.signal.combineWith(isTouched(field)).map {
       case (showAll, touched) => showAll || touched
     }
 
   /** Gate a raw error signal through display timing for a given field.
    *  Error is shown only after the field is touched (blur) or form-wide validation is triggered (submit). */
-  def withDisplayControl(fieldName: String, rawError: Signal[Option[String]]): Signal[Option[String]] =
-    shouldShowError(fieldName).combineWith(rawError).map {
+  def withDisplayControl(field: F, rawError: Signal[Option[String]]): Signal[Option[String]] =
+    shouldShowError(field).combineWith(rawError).map {
       case (true, error) => error
       case (false, _)    => None
     }
 
   /** Compose submit-time server errors with reactive validation for a field.
    *  Reactive errors take priority; submit error is shown when no reactive error exists. */
-  def withSubmitErrors(fieldName: String, rawError: Signal[Option[String]]): Signal[Option[String]] =
-    val submitErr = submitFieldErrors.signal.map(_.get(fieldName))
-    withDisplayControl(fieldName, rawError.combineWith(submitErr).map {
+  def withSubmitErrors(field: F, rawError: Signal[Option[String]]): Signal[Option[String]] =
+    val submitErr = submitFieldErrors.signal.map(_.get(field))
+    withDisplayControl(field, rawError.combineWith(submitErr).map {
       case (reactive, submitted) => reactive.orElse(submitted)
     })
 

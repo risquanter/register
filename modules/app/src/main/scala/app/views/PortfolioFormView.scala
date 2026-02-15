@@ -1,7 +1,7 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import app.state.{PortfolioFormState, TreeBuilderState}
+import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState}
 import app.components.FormInputs
 import zio.prelude.Validation
 
@@ -27,7 +27,7 @@ object PortfolioFormView:
         labelText = "Portfolio Name",
         valueVar = form.nameVar,
         errorSignal = form.nameError,
-        onBlurCallback = () => form.markTouched("name"),
+        onBlurCallback = () => form.markTouched(PortfolioField.Name),
         placeholderText = "e.g., Operations",
         filter = _ => true
       ),
@@ -54,6 +54,10 @@ object PortfolioFormView:
             submitError.set(None)
             form.reset()
           case Validation.Failure(_, errs) =>
-            FormSubmitUtil.routeTopologyErrors(form, errs.toList, submitError)
+            FormSubmitUtil.routeTopologyErrors(form, errs.toList, submitError, {
+              case "name"   => Some(PortfolioField.Name)
+              case "parent" => Some(PortfolioField.Parent)
+              case _        => None
+            })
       case Validation.Failure(_, errs) =>
         submitError.set(Some(errs.head.message))

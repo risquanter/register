@@ -6,6 +6,10 @@ import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCo
 import zio.prelude.Validation
 import app.state.LeafDistributionDraft
 
+/** Type-safe field identifiers for the risk leaf form. */
+enum RiskLeafField:
+  case Name, Probability, Percentiles, Quantiles, MinLoss, MaxLoss
+
 /**
  * Reactive form state for creating a RiskLeaf.
  * 
@@ -20,7 +24,8 @@ import app.state.LeafDistributionDraft
  * - Expert mode: requires percentiles + quantiles of equal length
  * - Lognormal mode: requires minLoss < maxLoss (both non-negative)
  */
-class RiskLeafFormState extends FormState:
+class RiskLeafFormState extends FormState[RiskLeafField]:
+  import RiskLeafField.*
 
   // ============================================================
   // Form Field Vars (mutable reactive state)
@@ -190,27 +195,27 @@ class RiskLeafFormState extends FormState:
   // Display-controlled Error Signals (for UI binding)
   // ============================================================
   
-  val nameError: Signal[Option[String]] = withSubmitErrors("name", nameErrorRaw)
-  val probabilityError: Signal[Option[String]] = withSubmitErrors("probability", probabilityErrorRaw)
+  val nameError: Signal[Option[String]] = withSubmitErrors(Name, nameErrorRaw)
+  val probabilityError: Signal[Option[String]] = withSubmitErrors(Probability, probabilityErrorRaw)
 
   // Cross-field errors merged into per-field signals (BCA-style):
   // own-field error takes priority; cross-field error is the fallback.
   // Both fields get a red border when the cross-field constraint is violated.
 
   /** Percentiles: own error ∪ expert cross-field (length mismatch) */
-  val percentilesError: Signal[Option[String]] = withSubmitErrors("percentiles",
+  val percentilesError: Signal[Option[String]] = withSubmitErrors(Percentiles,
     percentilesErrorRaw.combineWith(expertCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
   /** Quantiles: own error ∪ expert cross-field (length mismatch) */
-  val quantilesError: Signal[Option[String]] = withSubmitErrors("quantiles",
+  val quantilesError: Signal[Option[String]] = withSubmitErrors(Quantiles,
     quantilesErrorRaw.combineWith(expertCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
   /** Min loss: own error ∪ lognormal cross-field (min ≥ max) */
-  val minLossError: Signal[Option[String]] = withSubmitErrors("minLoss",
+  val minLossError: Signal[Option[String]] = withSubmitErrors(MinLoss,
     minLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
   /** Max loss: own error ∪ lognormal cross-field (min ≥ max) */
-  val maxLossError: Signal[Option[String]] = withSubmitErrors("maxLoss",
+  val maxLossError: Signal[Option[String]] = withSubmitErrors(MaxLoss,
     maxLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
 

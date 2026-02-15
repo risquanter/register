@@ -20,6 +20,10 @@ final case class LeafDistributionDraft(
 )
 final case class LeafDraft(name: String, parent: Option[String], distribution: LeafDistributionDraft)
 
+/** Type-safe field identifiers for the tree builder form. */
+enum TreeBuilderField:
+  case TreeName
+
 /**
  * Builder state for constructing a risk tree on the client.
  * Performs client-side validation aligned with backend rules (no ID generation).
@@ -28,7 +32,8 @@ final case class LeafDraft(name: String, parent: Option[String], distribution: L
  * (same touched / triggerValidation / withDisplayControl infrastructure
  * used by RiskLeafFormState and PortfolioFormState).
  */
-final class TreeBuilderState extends FormState:
+final class TreeBuilderState extends FormState[TreeBuilderField]:
+  import TreeBuilderField.*
   val treeNameVar: Var[String] = Var("")
   val portfoliosVar: Var[List[PortfolioDraft]] = Var(Nil)
   val leavesVar: Var[List[LeafDraft]] = Var(Nil)
@@ -49,7 +54,7 @@ final class TreeBuilderState extends FormState:
   }
 
   /** Display-controlled tree-name error (only shows after blur or submit trigger). */
-  val treeNameError: Signal[Option[String]] = withDisplayControl("treeName", treeNameErrorRaw)
+  val treeNameError: Signal[Option[String]] = withDisplayControl(TreeName, treeNameErrorRaw)
 
   /** Raw errors for hasErrors check — tree-name is the only builder-level field. */
   override def errorSignals: List[Signal[Option[String]]] = List(treeNameErrorRaw)

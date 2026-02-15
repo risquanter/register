@@ -6,11 +6,16 @@ import com.risquanter.register.domain.data.iron.ValidationUtil
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.errors.ValidationError
 
+/** Type-safe field identifiers for the portfolio form. */
+enum PortfolioField:
+  case Name, Parent
+
 /**
  * Reactive form state for creating a portfolio.
  * Validates name eagerly (Iron SafeName) and exposes parent selection as an Option[String].
  */
-final class PortfolioFormState extends FormState:
+final class PortfolioFormState extends FormState[PortfolioField]:
+  import PortfolioField.*
 
   // Fields
   val nameVar: Var[String] = Var("")
@@ -24,7 +29,7 @@ final class PortfolioFormState extends FormState:
   }
 
   // Display-controlled errors (with submit-time server error composition)
-  val nameError: Signal[Option[String]] = withSubmitErrors("name", nameErrorRaw)
+  val nameError: Signal[Option[String]] = withSubmitErrors(Name, nameErrorRaw)
 
   // FormState implementation
   override def errorSignals: List[Signal[Option[String]]] = List(nameErrorRaw)

@@ -16,16 +16,21 @@ object FormSubmitUtil:
 
   /** Route topology errors: field-bound errors go to per-field submit errors,
     * unrouted (structural) errors go to the submit-error banner.
+    *
+    * @param fieldMapping converts the `String` returned by `formFieldFor`
+    *                     to the form's typed field enum `F`. Returns `None`
+    *                     for field names that don't apply to this form.
     */
-  def routeTopologyErrors(
-    form: FormState,
+  def routeTopologyErrors[F](
+    form: FormState[F],
     errors: List[ValidationError],
-    submitError: Var[Option[String]]
+    submitError: Var[Option[String]],
+    fieldMapping: String => Option[F]
   ): Unit =
     val unrouted = errors.filterNot { err =>
-      TreeBuilderLogic.formFieldFor(err.field) match
-        case Some(fieldName) =>
-          form.setSubmitFieldError(fieldName, err.message)
+      TreeBuilderLogic.formFieldFor(err.field).flatMap(fieldMapping) match
+        case Some(field) =>
+          form.setSubmitFieldError(field, err.message)
           true
         case None => false
     }

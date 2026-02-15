@@ -2,7 +2,7 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.Validation
-import app.state.{RiskLeafFormState, DistributionMode, TreeBuilderState}
+import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState}
 import app.components.FormInputs.*
 
 /**
@@ -42,7 +42,7 @@ object RiskLeafFormView:
         valueVar = state.nameVar,
         errorSignal = state.nameError,
         filter = state.nameFilter,
-        onBlurCallback = () => state.markTouched("name"),
+        onBlurCallback = () => state.markTouched(RiskLeafField.Name),
         placeholderText = "e.g., Cyber Attack Risk"
       ),
       
@@ -51,7 +51,7 @@ object RiskLeafFormView:
         valueVar = state.probabilityVar,
         errorSignal = state.probabilityError,
         filter = state.probabilityFilter,
-        onBlurCallback = () => state.markTouched("probability"),
+        onBlurCallback = () => state.markTouched(RiskLeafField.Probability),
         placeholderText = "e.g., 0.25",
         inputModeAttr = "decimal"
       ),
@@ -108,7 +108,7 @@ object RiskLeafFormView:
         valueVar = state.percentilesVar,
         errorSignal = state.percentilesError,
         filter = state.arrayFilter,
-        onBlurCallback = () => state.markTouched("percentiles"),
+        onBlurCallback = () => state.markTouched(RiskLeafField.Percentiles),
         placeholderText = "e.g., 10, 50, 90",
         inputModeAttr = "decimal"
       ),
@@ -118,7 +118,7 @@ object RiskLeafFormView:
         valueVar = state.quantilesVar,
         errorSignal = state.quantilesError,
         filter = state.arrayFilter,
-        onBlurCallback = () => state.markTouched("quantiles"),
+        onBlurCallback = () => state.markTouched(RiskLeafField.Quantiles),
         placeholderText = "e.g., 50, 200, 1000 ($50M, $200M, $1B)",
         inputModeAttr = "decimal"
       )
@@ -135,7 +135,7 @@ object RiskLeafFormView:
         valueVar = state.minLossVar,
         errorSignal = state.minLossError,
         filter = state.lossFilter,
-        onBlurCallback = () => state.markTouched("minLoss"),
+        onBlurCallback = () => state.markTouched(RiskLeafField.MinLoss),
         placeholderText = "e.g., 1000",
         inputModeAttr = "numeric"
       ),
@@ -145,7 +145,7 @@ object RiskLeafFormView:
         valueVar = state.maxLossVar,
         errorSignal = state.maxLossError,
         filter = state.lossFilter,
-        onBlurCallback = () => state.markTouched("maxLoss"),
+        onBlurCallback = () => state.markTouched(RiskLeafField.MaxLoss),
         placeholderText = "e.g., 50000",
         inputModeAttr = "numeric"
       )
@@ -174,6 +174,10 @@ object RiskLeafFormView:
             // only changing name/parent between submits.
             state.resetTouched()
           case Validation.Failure(_, errs) =>
-            FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError)
+            FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError, {
+              case "name"   => Some(RiskLeafField.Name)
+              case "parent" => None  // leaf form has no parent text input to highlight
+              case _        => None
+            })
       case Validation.Failure(_, errs) =>
         submitError.set(Some(errs.head.message))

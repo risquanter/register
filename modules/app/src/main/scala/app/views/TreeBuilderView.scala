@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 import zio.*
 import zio.prelude.Validation
-import app.state.{TreeBuilderState, TreeViewState, SubmitState}
+import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState}
 import app.components.FormInputs
 import app.core.ZJS.*
 import com.risquanter.register.http.endpoints.RiskTreeEndpoints
@@ -63,7 +63,7 @@ object TreeBuilderView extends RiskTreeEndpoints:
         labelText = "Tree Name",
         valueVar = state.treeNameVar,
         errorSignal = state.treeNameError,
-        onBlurCallback = () => state.markTouched("treeName"),
+        onBlurCallback = () => state.markTouched(TreeBuilderField.TreeName),
         placeholderText = "e.g., Enterprise Risk Tree"
       ),
       div(
