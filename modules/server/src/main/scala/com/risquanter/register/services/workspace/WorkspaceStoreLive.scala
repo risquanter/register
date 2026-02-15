@@ -86,6 +86,15 @@ final class WorkspaceStoreLive private (
       _ <- ref.update(_.updatedWith(key)(_.map(w => w.copy(trees = w.trees + treeId))))
     yield ()
 
+  /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op.
+    * Same non-atomic resolve + update pattern as addTree (see justification above).
+    */
+  override def removeTree(key: WorkspaceKey, treeId: TreeId): IO[AppError, Unit] =
+    for
+      _ <- resolveInternal(key)
+      _ <- ref.update(_.updatedWith(key)(_.map(w => w.copy(trees = w.trees - treeId))))
+    yield ()
+
   /** List all tree IDs in a workspace. */
   override def listTrees(key: WorkspaceKey): IO[AppError, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)

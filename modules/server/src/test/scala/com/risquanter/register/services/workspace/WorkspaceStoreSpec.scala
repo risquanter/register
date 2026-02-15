@@ -8,6 +8,7 @@ import java.time.Duration
 import scala.concurrent.duration.*
 
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
+import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.domain.errors.{WorkspaceNotFound, WorkspaceExpired}
 import com.risquanter.register.util.IdGenerators
 
@@ -57,6 +58,33 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         list   <- store.listTrees(key)
         inWs   <- store.belongsTo(key, treeId)
       yield assertTrue(list.contains(treeId), inWs)
+    },
+
+    test("removeTree disassociates tree from workspace") {
+      for
+        store  <- mkStore
+        key    <- store.create()
+        ids    <- IdGenerators.batch(2).map(_.map(TreeId(_)))
+        t1      = ids(0)
+        t2      = ids(1)
+        _      <- store.addTree(key, t1)
+        _      <- store.addTree(key, t2)
+        _      <- store.removeTree(key, t1)
+        list   <- store.listTrees(key)
+        gone   <- store.belongsTo(key, t1)
+        kept   <- store.belongsTo(key, t2)
+      yield assertTrue(!list.contains(t1), list.contains(t2), !gone, kept)
+    },
+
+    test("removeTree is idempotent — removing non-member is a no-op") {
+      for
+        store  <- mkStore
+        key    <- store.create()
+        treeId <- IdGenerators.nextTreeId
+        // Remove a tree that was never added — should succeed silently
+        _      <- store.removeTree(key, treeId)
+        list   <- store.listTrees(key)
+      yield assertTrue(list.isEmpty)
     },
 
     test("rotate instantly invalidates old key and keeps tree associations") {

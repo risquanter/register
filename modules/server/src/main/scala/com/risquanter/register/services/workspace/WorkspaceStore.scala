@@ -27,6 +27,9 @@ trait WorkspaceStore:
   /** Associate a tree with a workspace. Fails if workspace expired or not found. */
   def addTree(key: WorkspaceKey, treeId: TreeId): IO[AppError, Unit]
 
+  /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op. */
+  def removeTree(key: WorkspaceKey, treeId: TreeId): IO[AppError, Unit]
+
   /** List all tree IDs in a workspace. Fails if expired or not found. */
   def listTrees(key: WorkspaceKey): IO[AppError, List[TreeId]]
 
@@ -70,6 +73,9 @@ object WorkspaceStore:
 
   def addTree(key: WorkspaceKey, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.addTree(key, treeId))
+
+  def removeTree(key: WorkspaceKey, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
+    ZIO.serviceWithZIO[WorkspaceStore](_.removeTree(key, treeId))
 
   def listTrees(key: WorkspaceKey): ZIO[WorkspaceStore, AppError, List[TreeId]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.listTrees(key))

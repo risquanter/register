@@ -47,8 +47,15 @@ object ErrorBanner:
       case GlobalError.DependencyError(msg) =>
         ("⚡", s"Service issue: $msg")
 
+      case GlobalError.WorkspaceExpired(msg) =>
+        ("ℹ", msg)
+
+    val bannerClass = error match
+      case _: GlobalError.WorkspaceExpired => "error-banner info-banner"
+      case _                               => "error-banner"
+
     div(
-      cls := "error-banner",
+      cls := bannerClass,
       span(cls := "error-banner-icon", icon),
       span(cls := "error-banner-message", message),
       button(

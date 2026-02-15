@@ -126,6 +126,29 @@ object ZJS:
       }
 
   // ---------------------------------------------------------------------------
+  // Extensions on ZIO + SubmitState — DRY the submit lifecycle
+  // ---------------------------------------------------------------------------
+
+  import app.state.SubmitState
+
+  extension [E <: Throwable, A](zio: ZIO[BackendClient, E, A])
+
+    /** Fork the ZIO and drive a `Var[SubmitState]` through its lifecycle.
+      *
+      * Sets Submitting → Success (via onSuccess callback) on success,
+      * Submitting → Failed(msg) on error. Mirrors `loadInto` but for
+      * the submit lifecycle where success requires caller-defined side-effects
+      * (e.g. updating editing state, refreshing tree list).
+      */
+    def submitInto(target: Var[SubmitState])(onSuccess: A => Unit): Unit =
+      target.set(SubmitState.Submitting)
+      forkProvided {
+        zio
+          .tap(a => ZIO.succeed(onSuccess(a)))
+          .tapError(e => ZIO.succeed(target.set(SubmitState.Failed(e.getMessage()))))
+      }
+
+  // ---------------------------------------------------------------------------
   // Extension on unsecured Tapir endpoints
   // ---------------------------------------------------------------------------
 

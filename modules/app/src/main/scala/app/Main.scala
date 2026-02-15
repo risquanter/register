@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.{Layout, SplitPane}
-import app.state.{TreeBuilderState, TreeViewState, GlobalError}
+import app.state.{TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState}
 import app.views.{TreeBuilderView, TreePreview, TreeListView, TreeDetailView, LECChartView}
 import app.core.ZJS
 
@@ -12,8 +12,12 @@ object Main:
 
   def main(args: Array[String]): Unit =
     val container = dom.document.querySelector("#app")
+
+    // ── Workspace state (owns the key lifecycle) ──────────────────
+    val wsState = new WorkspaceState
+
     val builderState = new TreeBuilderState
-    val treeViewState = new TreeViewState
+    val treeViewState = new TreeViewState(wsState.keySignal)
 
     // Global error state — safety net for errors with no per-view handler
     val globalError: Var[Option[GlobalError]] = Var(None)
@@ -29,6 +33,17 @@ object Main:
         globalError.set(None)
     )
 
+    // ── Pre-validate workspace key from URL (Scenarios 2 & 3) ────
+    wsState.preValidate(
+      onTreesLoaded = trees =>
+        treeViewState.availableTrees.set(LoadState.Loaded(trees)),
+      onExpired = () =>
+        globalError.set(Some(GlobalError.WorkspaceExpired(
+          "Your previous workspace has expired and its data is no longer available. " +
+          "Creating a new tree will start a fresh workspace."
+        )))
+    )
+
     val savedTreePanel = div(
       cls := "saved-tree-panel",
       TreeListView(treeViewState),
@@ -39,7 +54,7 @@ object Main:
       globalError = globalError.signal,
       onDismissError = () => globalError.set(None),
       SplitPane.horizontal(
-        left = TreeBuilderView(builderState, treeViewState),
+        left = TreeBuilderView(builderState, treeViewState, wsState),
         right = SplitPane.vertical(
           top = SplitPane.horizontal(
             left = TreePreview(builderState),

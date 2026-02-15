@@ -48,6 +48,13 @@ enum GlobalError:
     */
   case DependencyError(message: String)
 
+  /** Workspace pre-validation detected an expired or missing workspace.
+    * Informational — not an error. Rendered with blue info styling in ErrorBanner,
+    * not the red error treatment. The stale key has already been cleared;
+    * the user can create a new tree to start a fresh workspace.
+    */
+  case WorkspaceExpired(message: String)
+
 object GlobalError:
 
   /** Classify a Throwable into a GlobalError.

@@ -3,54 +3,58 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 import zio.*
 import zio.prelude.Validation
-import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState}
+import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState}
 import app.components.FormInputs
 import app.core.ZJS.*
-import com.risquanter.register.http.endpoints.RiskTreeEndpoints
+import com.risquanter.register.http.endpoints.WorkspaceEndpoints
+import com.risquanter.register.http.responses.SimulationResponse
 
 /**
  * Orchestrates portfolio + leaf forms, preview, and tree submission
  * using TreeBuilderState.
  *
- * Submission uses the cheleb tapError→Var pattern: success and failure
- * are pushed directly into `submitState: Var[SubmitState]`.
+ * Submission uses the `submitInto` ZJS extension (see `ZJS.scala`),
+ * which drives a `Var[SubmitState]` through its lifecycle:
+ * Submitting → Success (via callback) or Failed(msg).
  */
-object TreeBuilderView extends RiskTreeEndpoints:
-  def apply(state: TreeBuilderState, treeViewState: TreeViewState): HtmlElement =
+object TreeBuilderView extends WorkspaceEndpoints:
+  def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
-    def onSuccess(response: com.risquanter.register.http.responses.SimulationResponse): Unit =
+    def onSuccess(response: SimulationResponse): Unit =
       submitState.set(SubmitState.Success(response))
       state.editingTreeId.set(Some(response.id))
       treeViewState.loadTreeList()
-      // Auto-select the saved tree in the right panel so changes are visible
       treeViewState.selectTree(response.id)
+
+    def validationFailed(errors: zio.NonEmptyChunk[com.risquanter.register.domain.errors.ValidationError]): Unit =
+      submitState.set(SubmitState.Failed(errors.map(_.message).toList.mkString("; ")))
 
     def handleSubmit(): Unit =
       state.triggerValidation()
       state.editingTreeId.now() match
-        // ── Update mode ──
+        // ── Update mode (workspace must already exist) ──
         case Some(treeId) =>
-          state.toUpdateRequest() match
-            case Validation.Success(_, request) =>
-              submitState.set(SubmitState.Submitting)
-              updateEndpoint((treeId, request))
-                .tap(r => ZIO.succeed(onSuccess(r)))
-                .tapError(e => ZIO.succeed(submitState.set(SubmitState.Failed(e.getMessage()))))
-                .runJs
-            case Validation.Failure(_, errors) =>
-              submitState.set(SubmitState.Failed(errors.map(_.message).toList.mkString("; ")))
+          wsState.currentKey match
+            case None =>
+              submitState.set(SubmitState.Failed("Cannot update — no active workspace"))
+            case Some(key) =>
+              state.toUpdateRequest() match
+                case Validation.Success(_, request) =>
+                  updateWorkspaceTreeEndpoint((key, treeId, request)).submitInto(submitState)(onSuccess)
+                case Validation.Failure(_, errors) => validationFailed(errors)
+
         // ── Create mode ──
         case None =>
           state.toRequest() match
             case Validation.Success(_, request) =>
-              submitState.set(SubmitState.Submitting)
-              createEndpoint(request)
-                .tap(r => ZIO.succeed(onSuccess(r)))
-                .tapError(e => ZIO.succeed(submitState.set(SubmitState.Failed(e.getMessage()))))
-                .runJs
-            case Validation.Failure(_, errors) =>
-              submitState.set(SubmitState.Failed(errors.map(_.message).toList.mkString("; ")))
+              wsState.currentKey match
+                case Some(key) =>
+                  createWorkspaceTreeEndpoint((key, request)).submitInto(submitState)(onSuccess)
+                case None =>
+                  submitState.set(SubmitState.Submitting)
+                  wsState.bootstrap(request, onSuccess, msg => submitState.set(SubmitState.Failed(msg)))
+            case Validation.Failure(_, errors) => validationFailed(errors)
 
     div(
       cls := "tree-builder",

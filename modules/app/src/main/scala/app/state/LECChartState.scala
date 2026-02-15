@@ -4,8 +4,8 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId}
-import com.risquanter.register.http.endpoints.RiskTreeEndpoints
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKey}
+import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 
 /** Chart selection and LEC spec state, separated from tree navigation.
   *
@@ -17,13 +17,18 @@ import com.risquanter.register.http.endpoints.RiskTreeEndpoints
   * navigation state (expand/collapse/select) vs chart state (chart selection/spec).
   * Phase H's `LECState` (stale tracking for SSE) will extend this class.
   *
-  * Extends `RiskTreeEndpoints` to access shared Tapir endpoint definitions
-  * for ZJS bridge calls (established codebase pattern).
+  * Extends `WorkspaceEndpoints` to access workspace-scoped Tapir endpoint
+  * definitions for ZJS bridge calls.
+  *
+  * @param keySignal      Read-only signal providing the active workspace key.
+  * @param selectedTreeId Signal for the currently selected tree ID.
+  * @param selectedTree   Signal for the currently loaded tree structure.
   */
 final class LECChartState(
+  keySignal: StrictSignal[Option[WorkspaceKey]],
   selectedTreeId: StrictSignal[Option[TreeId]],
   selectedTree: StrictSignal[LoadState[RiskTree]]
-) extends RiskTreeEndpoints:
+) extends WorkspaceEndpoints:
 
   // ── Chart selection state ─────────────────────────────────────
   /** Node IDs currently selected for LEC chart overlay. */
@@ -62,7 +67,7 @@ final class LECChartState(
 
   /** Fetch the LEC chart spec from the backend for the given node IDs. */
   private def loadLECChart(nodeIds: Set[NodeId]): Unit =
-    selectedTreeId.now() match
-      case Some(treeId) =>
-        getLECChartEndpoint((treeId, nodeIds.toList)).loadInto(lecChartSpec)
-      case None => () // No tree selected — nothing to do
+    (keySignal.now(), selectedTreeId.now()) match
+      case (Some(key), Some(treeId)) =>
+        getWorkspaceLECChartEndpoint((key, treeId, nodeIds.toList)).loadInto(lecChartSpec)
+      case _ => () // No workspace or tree selected — nothing to do
