@@ -52,6 +52,11 @@ object ValidationMessages:
   val distributionTypeInvalid: String   = "Distribution type must be 'expert' or 'lognormal'"
 
   // ══════════════════════════════════════════════════════════════════
+  // Workspace key (base64url, 22 chars)
+  // ══════════════════════════════════════════════════════════════════
+  val workspaceKeyInvalid: String = "Invalid workspace key (expected 22-character base64url token)"
+
+  // ══════════════════════════════════════════════════════════════════
   // Short optional text (MaxLength[20])
   // ══════════════════════════════════════════════════════════════════
   val shortTextTooLong: String  =

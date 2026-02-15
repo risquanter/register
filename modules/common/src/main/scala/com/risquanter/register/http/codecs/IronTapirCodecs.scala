@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, TreeId, NodeId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, TreeId, NodeId, WorkspaceKey, ValidationUtil}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -112,4 +112,18 @@ object IronTapirCodecs {
     )(_.value)
 
   given Schema[NodeId] = Schema.string
+
+  /** Codec for WorkspaceKey (base64url, 22 chars).
+    * Used as path segment for workspace-scoped capability URLs.
+    * Standalone validation — not a ULID wrapper.
+    */
+  given Codec[String, WorkspaceKey, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[WorkspaceKey](raw =>
+      WorkspaceKey.fromString(raw).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.value)
+
+  given Schema[WorkspaceKey] = Schema.string
 }

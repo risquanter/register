@@ -5,6 +5,7 @@ import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.Match
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import zio.{UIO, ZIO}
 import zio.json.{JsonEncoder, JsonDecoder}
 
 // Base refined type alias used for most short strings:
@@ -208,3 +209,28 @@ object NodeId:
   given JsonEncoder[NodeId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[NodeId] = JsonDecoder[String].mapOrFail(s =>
     NodeId.fromString(s).left.map(_.mkString(", ")))
+
+// WorkspaceKey: 128-bit SecureRandom credential, base64url encoded (22 chars, no padding).
+// Used as capability URL token for workspace access. Standalone type — NOT a ULID wrapper.
+// Different charset (base64url vs Crockford base32) and length (22 vs 26) from SafeId.
+type WorkspaceKeyStr = String :| Match["^[A-Za-z0-9_-]{22}$"]
+
+case class WorkspaceKey(value: String)
+
+object WorkspaceKey:
+  /** Generate a cryptographically random workspace key (128-bit entropy). */
+  def generate: UIO[WorkspaceKey] =
+    ZIO.succeed {
+      val bytes = new Array[Byte](16) // 128 bits
+      java.security.SecureRandom().nextBytes(bytes)
+      WorkspaceKey(java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes))
+    }
+
+  /** Smart constructor: validates base64url format, 22 chars. */
+  def fromString(s: String): Either[List[ValidationError], WorkspaceKey] =
+    ValidationUtil.refineWorkspaceKey(s)
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[WorkspaceKey] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[WorkspaceKey] = JsonDecoder[String].mapOrFail(s =>
+    WorkspaceKey.fromString(s).left.map(_.mkString(", ")))

@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
-import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId, NodeId, WorkspaceKey}
 import com.bilalfazlani.zioUlid.ULID
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
@@ -150,6 +150,21 @@ object ValidationUtil {
   // @see ADR-018 for nominal wrapper pattern
   def refineNodeId(value: String, fieldPath: String = "nodeId"): Either[List[ValidationError], NodeId] =
     refineId(value, fieldPath).map(NodeId(_))
+
+  // Refinement for workspace keys — validates base64url format (22 chars, no padding).
+  // Standalone validation — NOT a ULID, different charset and length.
+  def refineWorkspaceKey(value: String, fieldPath: String = "workspaceKey"): Either[List[ValidationError], WorkspaceKey] = {
+    val sanitized = nonEmpty(value)
+    sanitized
+      .refineEither[Match["^[A-Za-z0-9_-]{22}$"]]
+      .map(refined => WorkspaceKey(refined))
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_FORMAT,
+        message = ValidationMessages.workspaceKeyInvalid
+      )))
+  }
 
   // Refinement for optional short text (max 20 chars)
   def refineShortOptText(
