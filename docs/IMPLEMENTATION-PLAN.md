@@ -860,6 +860,88 @@ This tier replaces the standalone Phase X by combining:
 - Workspace grouping (multiple trees per key, preserves dropdown/list UX)
 - Config-driven deployment modes (free-tier vs enterprise)
 
+### OWASP Security Cross-Reference
+
+**Date:** 2026-02-14
+**Sources:** OWASP Authentication, Authorization, Abuse Case, JWT for Java, Session Management cheat sheets.
+
+39 actionable items (A1–A39) identified across 14 findings, cross-referenced against the three-layer auth scheme. Items are mapped to phases where they are implemented.
+
+#### Priority Matrix
+
+| Priority | IDs | Finding | Phase |
+|----------|-----|---------|-------|
+| 🔴 Critical | A5-A7 | No token revocation mechanism | W.2 (trait), W.3 (endpoint), Enterprise (denylist) |
+| 🔴 Critical | A15-A16 | SSE unauthenticated / no lifecycle | W.3, W.4 |
+| 🔴 Critical | A17 | `GET /risk-trees` open to all | W.3 |
+| 🔴 Critical | A27-A28 | No rate limiting | W.4 |
+| 🟠 High | A1-A4 | No security headers for `/w/*` | W.5 |
+| 🟠 High | A10-A11 | No dual timeout (idle + absolute) | W.2 |
+| 🟠 High | A29-A33 | No lifecycle logging | W.2–W.4 (inline) |
+| 🟡 Medium | A8-A9 | No token fingerprint binding | W.5 |
+| 🟡 Medium | A13-A14 | Timing side-channel (not-found vs expired) | W.3 |
+| 🟡 Medium | A18-A20 | CORS too permissive (`reflectHeaders`) | W.5 |
+| 🟡 Medium | A21-A23 | Missing global security headers | W.5 |
+| 🟡 Medium | A24-A26 | Error information leakage (`IrminHttpError`, `RepositoryFailure`) | W.3, W.7 |
+| 🟢 Future | A34-A37 | JWT algorithm hardening | Enterprise phase |
+| 🟢 Future | A38-A39 | SPA PKCE + closure storage | Enterprise phase |
+
+#### Actionable Item Index
+
+| ID | Item | Effort | Phase | Notes |
+|----|------|--------|-------|-------|
+| A1 | `Referrer-Policy: no-referrer` on `/w/*` | Trivial | W.5 | Already planned |
+| A2 | `Cache-Control: no-store` on `/w/*` | Trivial | W.5 | Already planned |
+| A3 | `X-Content-Type-Options: nosniff` on `/w/*` | Trivial | W.5 | Already planned |
+| A4 | `Strict-Transport-Security` header | Trivial | W.5 | Add to W.5 spec |
+| A5 | Add `delete(key)` and `rotate(key)` to `WorkspaceStore` trait | Low | W.2 | Bake into initial trait design |
+| A6 | Wire `DELETE /w/{key}` endpoint (cascade hard-delete) | Low | W.3 | Natural companion to bootstrap |
+| A7 | Denylist for revoked keys (PG-backed, long-lived) | Medium | Enterprise | In-memory: revoke = delete from Map. Denylist for external validity only |
+| A8 | Token fingerprint: `Set-Cookie` with hash | Medium | W.5 | Alongside header hardening |
+| A9 | Fingerprint validation middleware | Medium | W.5 | Alongside A8 |
+| A10 | Add `lastAccessedAt` to `Workspace` model | Low | W.2 | Bake into initial domain model |
+| A11 | Dual timeout logic (idle + absolute) in `resolve()` | Medium | W.2 | Single branch in resolve |
+| A12 | *(reserved)* | — | — | — |
+| A13 | Constant response for not-found vs expired | Low | W.3 | Collapse to single opaque 404 at HTTP layer |
+| A14 | Constant-time workspace lookup | Low | W.2/W.3 | `Map.get` already O(1); document principle |
+| A15 | SSE scope to workspace key | Low | W.3 | Confirm SSE uses workspace validation middleware |
+| A16 | Close SSE on workspace expiry/revocation | Medium | W.4 | Reaper notifies SSE hub |
+| A17 | Seal `GET /risk-trees` with config gate | Trivial | W.3 | Already planned (`list-all-trees.enabled = false`) |
+| A18 | Remove `reflectHeaders` from CORS | Low | W.5 | Replace with explicit origin whitelist |
+| A19 | Environment-specific CORS origin config | Low | W.5 | Config-driven origin list |
+| A20 | CORS preflight caching (`Access-Control-Max-Age`) | Trivial | W.5 | Single header addition |
+| A21 | `X-Frame-Options: DENY` global | Trivial | W.5 | Global interceptor |
+| A22 | `Content-Security-Policy` global | Medium | W.5 | Requires SPA asset audit |
+| A23 | `X-XSS-Protection: 0` global | Trivial | W.5 | Modern best practice (disable legacy filter) |
+| A24 | Sanitise `IrminHttpError` — don't forward upstream body | Low | W.3 | Log full body, return generic message |
+| A25 | Sanitise `RepositoryFailure` — generic message to client | Low | W.3 | Log reason, return "Internal error" |
+| A26 | Audit all 500 responses for information leakage | Low | W.7 | Test assertions on 500 response bodies |
+| A27 | IP-based rate limit on `POST /workspaces` | Medium | W.4 | Already planned (`RateLimiter`) |
+| A28 | Rate limit on resolve/operations per IP | Medium | W.4 | Prevents key brute-force |
+| A29 | Log workspace creation events | Low | W.2 | Inline during implementation |
+| A30 | Log resolve failures (not-found, expired) | Low | W.3 | Inline during implementation |
+| A31 | Log eviction events | Low | W.4 | Already planned in reaper |
+| A32 | Log rate-limit trigger events | Low | W.4 | Inline during implementation |
+| A33 | Structured log fields (`workspace_key`, `event_type`, `ip`) | Low | W.2–W.4 | Use existing structured logging |
+| A34 | JWT algorithm allowlist (RS256 only) | Low | Enterprise | No JWT in Layer 0 |
+| A35 | JWT audience validation | Low | Enterprise | Istio `RequestAuthentication` |
+| A36 | JWT issuer validation | Low | Enterprise | Istio `RequestAuthentication` |
+| A37 | JWT claim extraction + app-level validation | Medium | Enterprise | ~50-80 lines middleware |
+| A38 | SPA PKCE flow for Keycloak | Medium | Enterprise | No OAuth in free-tier |
+| A39 | Closure-based JWT storage (not global `Var`) | Low | Enterprise | Defence-in-depth for XSS |
+
+#### Initial Pass — Bake Into W.2/W.3/W.4 (not separate phases)
+
+The following items are implemented **inline** during their mapped phase, not as separate work items.
+They are either low-effort or structurally load-bearing (retrofitting later changes the interface):
+
+- **W.2:** A5 (delete + rotate in trait), A10 (lastAccessedAt), A11 (dual timeout), A14 (constant-time), A29 (creation logging), A33 (structured fields)
+- **W.3:** A6 (DELETE endpoint — cascade hard-delete), A13 (constant response), A15 (SSE workspace scoping), A17 (seal GET /risk-trees), A24-A25 (error sanitisation), A30 (resolve failure logging)
+- **W.4:** A16 (SSE lifecycle on eviction), A27-A28 (rate limiting), A31-A32 (eviction/rate-limit logging)
+- **W.5:** A1-A4, A8-A9, A18-A23 (all header/CORS hardening)
+- **W.7:** A26 (500 response body test assertions)
+- **Enterprise:** A7, A34-A39
+
 ### Phase W.1: WorkspaceKey Domain Type
 
 **Goal:** Define the workspace capability credential as an Iron-wrapped nominal type.
@@ -921,7 +1003,9 @@ final case class Workspace(
   key: WorkspaceKey,
   trees: Set[TreeId],
   createdAt: Instant,
-  ttl: Duration
+  lastAccessedAt: Instant,          // A10: idle timeout tracking
+  ttl: Duration,                     // absolute timeout
+  idleTimeout: Duration              // A11: idle timeout (e.g., 1h)
 )
 ```
 
@@ -938,17 +1022,33 @@ trait WorkspaceStore:
   def listTrees(key: WorkspaceKey): IO[WorkspaceError, List[TreeId]]
 
   /** Resolve a workspace. Fails with WorkspaceExpired or WorkspaceNotFound.
-    * This is the lazy TTL check — provides correct "expired" error to user.
+    * Implements dual timeout: absolute (createdAt + ttl) AND idle (lastAccessedAt + idleTimeout).
+    * Updates lastAccessedAt on successful resolution (A10).
+    * Constant response for not-found vs expired at HTTP layer (A13).
     */
   def resolve(key: WorkspaceKey): IO[WorkspaceError, Workspace]
 
   /** Check if a tree belongs to a workspace. Lazy TTL check included. */
   def belongsTo(key: WorkspaceKey, treeId: TreeId): IO[WorkspaceError, Boolean]
 
-  /** Evict all expired workspaces. Returns count of evicted workspaces.
+  /** Evict all expired workspaces (absolute + idle). Returns count evicted.
     * Called by both the background reaper fiber and the admin endpoint.
     */
   def evictExpired: UIO[Int]
+
+  /** Hard delete. Removes workspace AND cascade-deletes all associated trees
+    * from RiskTreeRepository. Preview feature — no data preservation.
+    * Controller orchestrates: listTrees → delete each tree → delete workspace.
+    */
+  def delete(key: WorkspaceKey): IO[WorkspaceError, Unit]
+
+  /** Atomic rotation. Generates new key, transfers all tree associations,
+    * instantly invalidates old key. No grace period — old key is immediately
+    * dead, new key is immediately live. Single Ref.modify (in-memory) or
+    * single transaction (Postgres).
+    * Returns new key.
+    */
+  def rotate(key: WorkspaceKey): IO[WorkspaceError, WorkspaceKey]
 ```
 
 **WorkspaceError ADT:**
@@ -959,10 +1059,69 @@ enum WorkspaceError:
   case TreeNotInWorkspace(key: WorkspaceKey, treeId: TreeId)
 ```
 
-**WorkspaceStoreLive (initial implementation):**
-- `TrieMap[WorkspaceKey, Workspace]` — in-memory, same process
+#### Persistence Architecture: Layered Separation
+
+**Key insight:** Workspace data is an **association/token index**, not domain content.
+The workspace layer maps capability keys to sets of TreeIds — it does not store or
+duplicate tree data. This means workspace persistence is **orthogonal** to the
+tree storage backend (in-memory vs Irmin):
+
+```
+┌──────────────────────────────────────────────────────┐
+│               WorkspaceStore                         │  association/token index
+│   WorkspaceKey → {Set[TreeId], createdAt, ttl, ...}  │  (Ref-based now, Postgres later)
+│   create / resolve / addTree / evict / delete / rotate│
+└───────────────────────┬──────────────────────────────┘
+                        │  treeId references only
+                        │  (no tree data flows through here)
+┌───────────────────────▼──────────────────────────────┐
+│           RiskTreeRepository                         │  domain content store
+│   TreeId → RiskTree                                  │  (in-memory OR Irmin, config-driven)
+│   create / update / delete / getById / getAll        │  unchanged by workspace feature
+└──────────────────────────────────────────────────────┘
+```
+
+**Why workspace keys do NOT affect Irmin paths:** The workspace key is a capability
+token in the URL (`/#/{workspaceKey}/...`) used for access control routing. It is
+resolved to a set of TreeIds by `WorkspaceStore` *before* any tree operations occur.
+The `RiskTreeRepository` never sees the workspace key — it continues to use its
+existing path structure (`risk-trees/{treeId}/nodes/...`, `risk-trees/{treeId}/meta`)
+unchanged. The workspace key is consumed at the HTTP/controller layer and does not
+propagate into storage paths.
+
+**Why Irmin is wrong for workspaces:** Irmin is a content-addressed store optimised
+for immutable history, branching, and structural sharing. Workspace associations are:
+- Ephemeral (TTL-evicted in free-tier)
+- Relational (key → set of IDs, not nested content)
+- Token-like (the key functions as an access credential)
+
+Content-addressing provides no value here: workspace history is irrelevant, and
+recording "workspace W contained trees {A, B}" as Irmin commits would create
+permanent garbage in the content-addressed store that conflicts with TTL eviction.
+
+**Why PostgreSQL is right for durable workspace persistence:** Workspaces are
+semantically a **token store** — the workspace key is an opaque credential that
+grants access to a set of resources. This maps naturally to relational tables
+with foreign keys, TTL-based expiry via `DELETE WHERE created_at + ttl < now()`,
+and transactional association management. PostgreSQL is the correct durable backend
+for workspace data, while Irmin remains the correct backend for tree content data.
+
+#### Persistence Roadmap
+
+| Phase | WorkspaceStore backend | Tree backend | Deployment |
+|-------|----------------------|-------------|------------|
+| W.2 (this phase) | `Ref[Map]` (in-memory) | In-memory or Irmin (config) | Dev / free-tier |
+| Future: enterprise | `WorkspaceStorePostgres` | Irmin (production) | Enterprise |
+
+Selection will be config-driven, following the same pattern as
+`RepositoryConfig` → `chooseRepo` in Application.scala. The `WorkspaceStore` trait
+is the abstraction boundary.
+
+**WorkspaceStoreLive (initial implementation — Ref-based):**
+- `Ref[Map[WorkspaceKey, Workspace]]` — ZIO idiomatic in-memory store
 - Lazy TTL check in `resolve()`: compare `Duration.between(createdAt, now)` against `ttl`
-- `evictExpired`: iterate map, remove entries where TTL exceeded
+- `evictExpired`: update Ref, remove entries where TTL exceeded, return count
+- Data is ephemeral — lost on server restart (acceptable for free-tier: create a new workspace)
 
 **WorkspaceConfig:**
 ```hocon
@@ -981,20 +1140,26 @@ register.workspace {
 }
 ```
 
-**PostgreSQL persistence (planned):**
-- `WorkspaceStorePostgres` implementation to be added alongside `WorkspaceStoreLive`
-- Selectable via config (same pattern as `RiskTreeRepository` in-memory vs Irmin)
+**PostgreSQL persistence (planned — enterprise phase):**
+- `WorkspaceStorePostgres` implementation behind the same `WorkspaceStore` trait
+- Selectable via config (same `chooseRepo` pattern)
 - **Reference:** Review cheleb demo source code for ZIO + PostgreSQL persistence patterns BEFORE implementation
 - Schema: `workspaces(key TEXT PRIMARY KEY, created_at TIMESTAMPTZ, ttl INTERVAL)` + `workspace_trees(workspace_key TEXT FK, tree_id TEXT FK)`
 - DB-level pruning: `DELETE FROM workspaces WHERE created_at + ttl < now()` — callable from admin endpoint or `pg_cron`
+- Survives server restart — required for enterprise deployments
 
 **Checkpoint:**
 - [ ] `WorkspaceStore.create()` generates workspace with configured TTL
-- [ ] `resolve()` returns `WorkspaceExpired` for expired workspaces (lazy check)
+- [ ] `resolve()` returns `WorkspaceExpired` for expired workspaces (absolute TTL check)
+- [ ] `resolve()` returns `WorkspaceExpired` for idle workspaces (idle timeout check — A11)
+- [ ] `resolve()` updates `lastAccessedAt` on successful resolution (A10)
 - [ ] `addTree()` associates tree with workspace
 - [ ] `listTrees()` returns only trees in the specified workspace
-- [ ] `evictExpired` removes expired entries and returns count
-- [ ] Config-driven: `ttl = infinite` disables expiry
+- [ ] `evictExpired` removes expired entries (absolute + idle) and returns count
+- [ ] `delete()` cascade-deletes workspace + all associated trees
+- [ ] `rotate()` atomically generates new key + transfers trees + invalidates old key (instant, no grace)
+- [ ] Config-driven: `ttl = infinite` disables absolute expiry
+- [ ] Security logging: creation, deletion, rotation events (A29, A33)
 
 ---
 
@@ -1020,7 +1185,9 @@ common/.../http/responses/WorkspaceResponse.scala
 | GET | `/w/{key}/risk-trees/{treeId}/structure` | Get full tree structure | Workspace key |
 | POST | `/w/{key}/risk-trees/{treeId}/nodes/lec-multi` | LEC curves | Workspace key |
 | GET | `/w/{key}/risk-trees/{treeId}/nodes/{nodeId}/lec` | Single LEC curve | Workspace key |
-| GET | `/w/{key}/events/tree/{treeId}` | SSE stream | Workspace key |
+| GET | `/w/{key}/events/tree/{treeId}` | SSE stream (A15: workspace-scoped) | Workspace key |
+| POST | `/w/{key}/rotate` | Rotate: instant revoke old → new key → transfer trees | Workspace key |
+| DELETE | `/w/{key}` | Hard delete workspace + cascade-delete all trees | Workspace key |
 | DELETE | `/admin/workspaces/expired` | Evict expired workspaces | Admin-only (configurable gate) |
 
 **Bootstrap endpoint (`POST /workspaces`):**
@@ -1044,10 +1211,31 @@ The bootstrap endpoint:
 
 All `/w/{key}/*` endpoints include a workspace resolution step:
 1. Extract `WorkspaceKey` from path
-2. Call `WorkspaceStore.resolve(key)` — lazy TTL check
-3. If `WorkspaceNotFound` → 404 (no information leakage)
-4. If `WorkspaceExpired` → 410 Gone with message "Workspace expired"
-5. For tree-specific endpoints: verify `belongsTo(key, treeId)` → 404 if not
+2. Call `WorkspaceStore.resolve(key)` — dual TTL check (absolute + idle)
+3. If success → proceed (resolve already updated `lastAccessedAt`)
+4. If `WorkspaceNotFound` → 404 (A13)
+5. If `WorkspaceExpired` → 404 (same as not-found — A13: constant response, no timing oracle)
+6. For tree-specific endpoints: verify `belongsTo(key, treeId)` → 404 if not
+
+**A13 rationale:** At the HTTP layer, not-found and expired return identical 404 responses.
+This eliminates the timing side-channel that would let an attacker distinguish "this key
+never existed" from "this key existed but expired." The `WorkspaceError` ADT retains the
+distinction for internal logging (A30). Deleted workspaces simply don't exist → `WorkspaceNotFound`.
+
+**Rotation endpoint (`POST /w/{key}/rotate`):**
+1. Call `WorkspaceStore.rotate(key)` — atomic key rotation (instant, no grace period)
+2. Returns `WorkspaceResponse` with new workspace key + tree list + expiry
+3. Old key is immediately invalid — any subsequent resolve returns `WorkspaceNotFound`
+4. SSE connections on old key are dropped (server-side hub closes them)
+5. Active clients must obtain the new key out-of-band (this is a feature, not a bug —
+   immediate revocation is the security requirement; deferred revocation is a vulnerability)
+
+**Hard delete endpoint (`DELETE /w/{key}`):**
+1. Controller orchestrates: `store.listTrees(key)` → `repo.delete(treeId)` for each → `store.delete(key)`
+2. Returns 204 No Content
+3. All trees cascade-deleted from `RiskTreeRepository`
+4. SSE connections on deleted workspace are dropped
+5. Worst case (crash mid-delete): orphaned trees — reaper can clean up
 
 **Existing `GET /risk-trees` (list-all):**
 - Frontend: unwired (no longer called)
@@ -1061,10 +1249,17 @@ All `/w/{key}/*` endpoints include a workspace resolution step:
 - [ ] `GET /w/{key}/risk-trees` lists only workspace-scoped trees
 - [ ] `POST /w/{key}/risk-trees` creates tree within workspace
 - [ ] Tree-specific endpoints validate `belongsTo` check
-- [ ] Expired workspace → 410 Gone (not 404)
-- [ ] Invalid/unknown workspace → 404
-- [ ] `GET /risk-trees` blocked by default
+- [ ] Not-found and expired both return identical 404 (A13)
+- [ ] `POST /w/{key}/rotate` atomically rotates key (instant), returns new key
+- [ ] `DELETE /w/{key}` cascade-deletes workspace + all trees, returns 204
+- [ ] Old key immediately invalid after rotate or delete — no grace period
+- [ ] SSE scoped to workspace key (A15)
+- [ ] SSE connections dropped on delete/rotate (A16)
+- [ ] `GET /risk-trees` blocked by default (A17)
+- [ ] `IrminHttpError` sanitised — generic message to client (A24)
+- [ ] `RepositoryFailure` sanitised — generic message to client (A25)
 - [ ] `DELETE /admin/workspaces/expired` callable for manual eviction
+- [ ] Security logging: resolve failures, deletion, rotation events (A30, A33)
 
 ---
 
@@ -1119,23 +1314,47 @@ final class RateLimiterLive(ref: Ref[Map[String, (Int, Instant)]], maxPerHour: I
 **Checkpoint:**
 - [ ] Reaper fiber runs at configured interval in free-tier mode
 - [ ] Reaper is no-op in enterprise mode
-- [ ] Evicted workspaces are logged
-- [ ] Rate limiter returns 429 when threshold exceeded
+- [ ] Evicted workspaces are logged (A31)
+- [ ] Rate limiter returns 429 when threshold exceeded (A27)
+- [ ] Rate limiter covers resolve attempts per IP, not just creation (A28)
+- [ ] Rate-limit trigger events logged (A32)
+- [ ] Reaper notifies SSE hub to close connections for evicted workspaces (A16)
 - [ ] Reaper fiber shuts down gracefully with application
 
 ---
 
-### Phase W.5: Security Headers
+### Phase W.5: Security Headers & CORS Hardening
 
-**Goal:** Prevent workspace key leakage via HTTP headers.
+**Goal:** Prevent workspace key leakage, harden CORS, add token fingerprint binding.
 
-**Headers applied to all `/w/*` and `/workspaces` responses:**
+**Headers applied to all `/w/*` and `/workspaces` responses (A1-A4):**
 
 | Header | Value | Purpose |
 |--------|-------|---------|
 | `Referrer-Policy` | `no-referrer` | Prevent workspace key leaking via Referer header when clicking external links |
 | `Cache-Control` | `no-store` | Prevent proxy/CDN caching of responses containing workspace key |
 | `X-Content-Type-Options` | `nosniff` | Standard security header |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Enforce HTTPS (A4) |
+
+**Global security headers (A21-A23) — applied to ALL responses:**
+
+| Header | Value | Purpose |
+|--------|-------|---------|
+| `X-Frame-Options` | `DENY` | Prevent clickjacking (A21) |
+| `X-XSS-Protection` | `0` | Disable legacy XSS filter — modern CSP preferred (A23) |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'` | XSS mitigation (A22 — audit SPA assets for inline scripts) |
+
+**CORS hardening (A18-A20):**
+- Remove `reflectHeaders` from `CORSConfig` — replace with explicit origin whitelist (A18)
+- Config-driven origin list: `register.cors.allowed-origins = ["http://localhost:5173"]` (A19)
+- Add `Access-Control-Max-Age: 3600` for preflight caching (A20)
+
+**Token fingerprint binding (A8-A9):**
+- On workspace creation, generate a random fingerprint → hash it → store hash in `Workspace`
+- Set `__Host-wsfp=<fingerprint>` cookie (`Secure; HttpOnly; SameSite=Strict; Path=/`)
+- On `resolve()`, validate that cookie hash matches stored hash
+- Prevents sidejacking if workspace key is intercepted (attacker lacks the cookie)
+- Free-tier only (enterprise uses JWT with its own binding mechanisms)
 
 **Implementation:** Tapir server interceptor or middleware that matches `/w/*` paths and appends headers.
 
@@ -1239,10 +1458,10 @@ common/.../domain/data/iron/WorkspaceKeySpec.scala
 | Spec | Tests |
 |------|-------|
 | `WorkspaceKeySpec` | Generate produces 22-char base64url; fromString validates; round-trip JSON |
-| `WorkspaceStoreSpec` | Create + resolve; addTree + listTrees; belongsTo check; expired → WorkspaceExpired; evictExpired removes correct entries; enterprise mode (infinite TTL) never expires |
+| `WorkspaceStoreSpec` | Create + resolve; addTree + listTrees; belongsTo check; expired → WorkspaceExpired; idle timeout → WorkspaceExpired; evictExpired removes correct entries; enterprise mode (infinite TTL) never expires; delete cascade-removes workspace; rotate instant-invalidates old key + transfers trees |
 | `WorkspaceReaperSpec` | Reaper evicts after TTL; reaper is no-op in enterprise mode; logging on eviction |
 | `RateLimiterSpec` | Under limit → success; over limit → 429; window resets after hour |
-| `WorkspaceControllerSpec` | Bootstrap creates workspace; scoped list returns correct trees; expired workspace → 410; invalid key → 404; belongsTo rejects cross-workspace access |
+| `WorkspaceControllerSpec` | Bootstrap creates workspace; scoped list returns correct trees; expired workspace → 404; invalid key → 404 (identical responses — A13); belongsTo rejects cross-workspace access; DELETE cascade-deletes trees; rotate returns new key + old key dead |
 
 **Checkpoint:**
 - [ ] `sbt server/test` passes with workspace tests
