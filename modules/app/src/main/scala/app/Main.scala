@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.{Layout, SplitPane}
-import app.state.{TreeBuilderState, TreeViewState}
+import app.state.{TreeBuilderState, TreeViewState, GlobalError}
 import app.views.{TreeBuilderView, TreePreview, TreeListView, TreeDetailView, LECChartView}
 
 object Main:
@@ -14,6 +14,9 @@ object Main:
     val builderState = new TreeBuilderState
     val treeViewState = new TreeViewState
 
+    // Global error state — safety net for errors with no per-view handler
+    val globalError: Var[Option[GlobalError]] = Var(None)
+
     val savedTreePanel = div(
       cls := "saved-tree-panel",
       TreeListView(treeViewState),
@@ -21,6 +24,8 @@ object Main:
     )
 
     val appElement = Layout(
+      globalError = globalError.signal,
+      onDismissError = () => globalError.set(None),
       SplitPane.horizontal(
         left = TreeBuilderView(builderState, treeViewState),
         right = SplitPane.vertical(

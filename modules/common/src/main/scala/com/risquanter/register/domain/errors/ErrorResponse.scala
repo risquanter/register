@@ -11,9 +11,57 @@ final case class ErrorResponse(error: JsonHttpError)
 object ErrorResponse {
   given codec: JsonCodec[ErrorResponse] = DeriveJsonCodec.gen[ErrorResponse]
 
-  /** Decode error response tuple back to Throwable */
+  /** Reconstruct a domain error from an HTTP error response.
+    *
+    * This is the inverse of `encode`: it maps `(StatusCode, ErrorResponse)` back
+    * to the shared `AppError` hierarchy so the client can pattern-match on typed
+    * domain errors rather than parsing status codes or strings.
+    *
+    * The reconstruction is not perfectly lossless (a 500 could be `RepositoryFailure`
+    * or `SimulationFailure` — we disambiguate via `ErrorDetail.field`). But it
+    * preserves type safety at the sealed-trait level, which is the right granularity
+    * for client-side error handling.
+    *
+    * @see `encode` for the forward direction (domain error → HTTP)
+    */
   def decode(tuple: (StatusCode, ErrorResponse)): Throwable =
-    new RuntimeException(tuple._2.error.errors.map(_.message).mkString("; "))
+    val (status, response) = tuple
+    val details = response.error.errors
+    val message = details.map(_.message).mkString("; ")
+    val firstField = details.headOption.map(_.field).getOrElse("unknown")
+    val firstCode = details.headOption.map(_.code).getOrElse(ValidationErrorCode.CONSTRAINT_VIOLATION)
+
+    status.code match
+      // 400 → ValidationFailed (only source for this status code)
+      case 400 =>
+        ValidationFailed(details.map(d => ValidationError(d.field, d.code, d.message)))
+
+      // 409 → disambiguate by field
+      case 409 => firstField match
+        case "version" => VersionConflict("unknown", "unknown", message)  // nodeId lost through HTTP
+        case "branch"  => MergeConflict("unknown", message)               // branch name lost through HTTP
+        case _         => DataConflict(message)
+
+      // 502 → IrminGraphQLError
+      case 502 =>
+        IrminGraphQLError(details.map(_.message), Some(List(firstField)))
+
+      // 503 → IrminUnavailable
+      case 503 =>
+        IrminUnavailable(message)
+
+      // 504 → NetworkTimeout
+      case 504 =>
+        NetworkTimeout(message, scala.concurrent.duration.Duration.Zero)
+
+      // 500 → disambiguate by field
+      case 500 => firstField match
+        case "simulation" => SimulationFailure("unknown", new RuntimeException(message))
+        case _            => RepositoryFailure(message)
+
+      // Any other status code → generic
+      case _ =>
+        RepositoryFailure(s"HTTP ${status.code}: $message")
 
   /** Encode Throwable to error response tuple for HTTP.
     * 

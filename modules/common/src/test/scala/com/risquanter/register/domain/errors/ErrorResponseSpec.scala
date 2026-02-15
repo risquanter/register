@@ -106,17 +106,139 @@ object ErrorResponseSpec extends ZIOSpecDefault {
     ),
     
     suite("decode")(
-      test("decodes error response to RuntimeException") {
+      test("decodes 400 to ValidationFailed with structured errors") {
         val response = ErrorResponse(
           JsonHttpError(400, "Validation failed", List(
-            ErrorDetail("simulations", "name", ValidationErrorCode.REQUIRED_FIELD, "Name is required")
+            ErrorDetail("simulations", "name", ValidationErrorCode.REQUIRED_FIELD, "Name is required"),
+            ErrorDetail("simulations", "email", ValidationErrorCode.INVALID_FORMAT, "Email is invalid")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.BadRequest, response))
         
         assertTrue(
-          throwable.isInstanceOf[RuntimeException],
-          throwable.getMessage.contains("Name is required")
+          throwable.isInstanceOf[ValidationFailed],
+          throwable.asInstanceOf[ValidationFailed].errors.length == 2,
+          throwable.asInstanceOf[ValidationFailed].errors.head.field == "name",
+          throwable.asInstanceOf[ValidationFailed].errors.head.code == ValidationErrorCode.REQUIRED_FIELD
+        )
+      },
+
+      test("decodes 409 with version field to VersionConflict") {
+        val response = ErrorResponse(
+          JsonHttpError(409, "Version conflict", List(
+            ErrorDetail("risk-trees", "version", ValidationErrorCode.CONSTRAINT_VIOLATION, "Version conflict on node-123")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
+        assertTrue(throwable.isInstanceOf[VersionConflict])
+      },
+
+      test("decodes 409 with branch field to MergeConflict") {
+        val response = ErrorResponse(
+          JsonHttpError(409, "Merge conflict", List(
+            ErrorDetail("scenarios", "branch", ValidationErrorCode.CONSTRAINT_VIOLATION, "Merge conflict on feature-1")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
+        assertTrue(throwable.isInstanceOf[MergeConflict])
+      },
+
+      test("decodes 409 with generic field to DataConflict") {
+        val response = ErrorResponse(
+          JsonHttpError(409, "Data conflict", List(
+            ErrorDetail("risk-trees", "unknown", ValidationErrorCode.DUPLICATE_VALUE, "Duplicate key")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
+        assertTrue(throwable.isInstanceOf[DataConflict])
+      },
+
+      test("decodes 503 to IrminUnavailable") {
+        val response = ErrorResponse(
+          JsonHttpError(503, "Service unavailable", List(
+            ErrorDetail("irmin", "service", ValidationErrorCode.DEPENDENCY_FAILED, "Connection refused")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.ServiceUnavailable, response))
+        assertTrue(throwable.isInstanceOf[IrminUnavailable])
+      },
+
+      test("decodes 504 to NetworkTimeout") {
+        val response = ErrorResponse(
+          JsonHttpError(504, "Gateway timeout", List(
+            ErrorDetail("irmin", "network", ValidationErrorCode.DEPENDENCY_FAILED, "Timed out")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.GatewayTimeout, response))
+        assertTrue(throwable.isInstanceOf[NetworkTimeout])
+      },
+
+      test("decodes 502 to IrminGraphQLError") {
+        val response = ErrorResponse(
+          JsonHttpError(502, "Bad gateway", List(
+            ErrorDetail("irmin", "graphql", ValidationErrorCode.DEPENDENCY_FAILED, "Query failed")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.BadGateway, response))
+        assertTrue(throwable.isInstanceOf[IrminGraphQLError])
+      },
+
+      test("decodes 500 with simulation field to SimulationFailure") {
+        val response = ErrorResponse(
+          JsonHttpError(500, "Simulation failed", List(
+            ErrorDetail("risk-trees", "simulation", ValidationErrorCode.CONSTRAINT_VIOLATION, "Simulation sim-1 failed")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.InternalServerError, response))
+        assertTrue(throwable.isInstanceOf[SimulationFailure])
+      },
+
+      test("decodes 500 with generic field to RepositoryFailure") {
+        val response = ErrorResponse(
+          JsonHttpError(500, "Error", List(
+            ErrorDetail("risk-trees", "unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "DB connection failed")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.InternalServerError, response))
+        assertTrue(throwable.isInstanceOf[RepositoryFailure])
+      },
+
+      test("roundtrip: encode then decode preserves type for each error kind") {
+        // ValidationFailed
+        val vf = ValidationFailed(List(ValidationError("name", ValidationErrorCode.REQUIRED_FIELD, "Required")))
+        val vfDecoded = ErrorResponse.decode(ErrorResponse.encode(vf))
+        // DataConflict
+        val dc = DataConflict("Duplicate key")
+        val dcDecoded = ErrorResponse.decode(ErrorResponse.encode(dc))
+        // VersionConflict
+        val vc = VersionConflict("n1", "v1", "v2")
+        val vcDecoded = ErrorResponse.decode(ErrorResponse.encode(vc))
+        // MergeConflict
+        val mc = MergeConflict("feat", "conflict detail")
+        val mcDecoded = ErrorResponse.decode(ErrorResponse.encode(mc))
+        // IrminUnavailable
+        val iu = IrminUnavailable("Connection refused")
+        val iuDecoded = ErrorResponse.decode(ErrorResponse.encode(iu))
+        // NetworkTimeout
+        val nt = NetworkTimeout("getNode", 5.seconds)
+        val ntDecoded = ErrorResponse.decode(ErrorResponse.encode(nt))
+        // SimulationFailure
+        val sf = SimulationFailure("sim-1", new RuntimeException("boom"))
+        val sfDecoded = ErrorResponse.decode(ErrorResponse.encode(sf))
+        // RepositoryFailure
+        val rf = RepositoryFailure("DB down")
+        val rfDecoded = ErrorResponse.decode(ErrorResponse.encode(rf))
+
+        assertTrue(
+          vfDecoded.isInstanceOf[ValidationFailed],
+          vfDecoded.asInstanceOf[ValidationFailed].errors.head.field == "name",
+          dcDecoded.isInstanceOf[DataConflict],
+          vcDecoded.isInstanceOf[VersionConflict],
+          mcDecoded.isInstanceOf[MergeConflict],
+          iuDecoded.isInstanceOf[IrminUnavailable],
+          ntDecoded.isInstanceOf[NetworkTimeout],
+          sfDecoded.isInstanceOf[SimulationFailure],
+          rfDecoded.isInstanceOf[RepositoryFailure]
         )
       }
     ),

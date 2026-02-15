@@ -152,6 +152,68 @@ body {
   50% { opacity: 0.3; }
 }
 
+/* =============================================
+   Error Banner (global safety net — Phase I.a)
+   ============================================= */
+.error-banner-container {
+  width: 100%;
+}
+
+.error-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  background-color: var(--error-surface);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.20);
+  color: var(--error);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+}
+
+.error-banner-icon {
+  flex-shrink: 0;
+  font-size: var(--text-base);
+}
+
+.error-banner-message {
+  flex: 1;
+  min-width: 0;
+}
+
+.error-banner-action {
+  flex-shrink: 0;
+  padding: var(--sp-1) var(--sp-3);
+  background-color: transparent;
+  border: 1px solid var(--error);
+  border-radius: var(--radius-sm);
+  color: var(--error);
+  font-size: var(--text-xs);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.error-banner-action:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+}
+
+.error-banner-dismiss {
+  flex-shrink: 0;
+  padding: var(--sp-1) var(--sp-2);
+  background: none;
+  border: none;
+  color: var(--error);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
+}
+
+.error-banner-dismiss:hover {
+  opacity: 1;
+}
+
 /* Main content */
 .main-content {
   flex: 1;

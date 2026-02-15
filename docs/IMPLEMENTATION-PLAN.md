@@ -686,30 +686,78 @@ document the justification and remove the deprecation notice from `LEC.scala`.
 
 ---
 
-### Phase I.a: Error Handling (Non-SSE)
+### Phase I.a: Error Handling (Non-SSE) ✅
 
 **Goal:** Robust error handling for API calls following ADR-008 patterns.
 
-**Files to create:**
+**Decision:** Option A — supplement per-view error flows with a global `ErrorBanner`.
+Per-view handlers (`LoadState.Failed`, `SubmitState.Failed`, `submitError`) are unchanged.
+The banner is a safety net for errors with no per-view owner (server down, future
+workspace auth failures, SSE disconnection).
+
+**Key design decision — shared type roundtrip:**
+The `ErrorResponse.decode` method (common module) was rewritten to reconstruct the shared
+`AppError` sealed hierarchy from HTTP responses, rather than producing a raw `RuntimeException`.
+This makes `encode`/`decode` a proper codec pair:
+
+```
+Server:  ValidationFailed(errors)  →encode→  (400, ErrorResponse)  →wire→  (400, ErrorResponse)
+Client:                                                              →decode→  ValidationFailed(errors')
+```
+
+The frontend classifier `GlobalError.fromThrowable` then pattern-matches on the **shared
+sealed hierarchy** — the same types that cross-compile to JS via the `common` module.
+No status-code integer matching, no string parsing (ADR-010 §5). The reconstruction is
+not perfectly lossless (a 409 could be `DataConflict`, `VersionConflict`, or `MergeConflict`
+— disambiguated by `ErrorDetail.field`) but preserves type safety at the sealed-trait level.
+
+**Files created:**
 ```
 modules/app/src/main/scala/app/
-├── state/AppError.scala
-└── views/ErrorBanner.scala
+├── state/GlobalError.scala   — Client-side error ADT + fromThrowable classifier
+└── views/ErrorBanner.scala   — Dismissible global error banner component
 ```
 
-**AppError enum:**
+**Files modified:**
+- `common/.../errors/ErrorResponse.scala` — `decode` reconstructs shared `AppError` subtypes
+  (`ValidationFailed`, `DataConflict`, `VersionConflict`, `MergeConflict`, `IrminUnavailable`,
+  `NetworkTimeout`, `IrminGraphQLError`, `SimulationFailure`, `RepositoryFailure`)
+- `common/.../errors/ErrorResponseSpec.scala` — 22 tests including full roundtrip coverage
+- `app/components/Layout.scala` — accepts `globalError: Signal[Option[GlobalError]]` + `onDismissError`
+- `app/Main.scala` — creates `globalError: Var[Option[GlobalError]]`, passes to Layout
+- `styles/app.css` — `.error-banner` styles (consistent with `--error` / `--error-surface` tokens)
+
+**GlobalError enum** (named to avoid collision with `domain.errors.AppError`):
 ```scala
-enum AppError:
-  case ValidationFailed(errors: List[String])
+enum GlobalError:
+  case ValidationFailed(errors: List[ValidationError])  // shared type, not List[String]
   case NetworkError(message: String, retryable: Boolean)
-  case Conflict(message: String, refreshAction: () => Unit)
-  case ServerError(referenceId: String)
+  case Conflict(message: String)
+  case ServerError(message: String)
+  case DependencyError(message: String)                 // IrminError subtypes
 ```
+
+All variants are pure values — no embedded side effects (ADR-010: errors are values).
+`fromThrowable` matches on the shared hierarchy first, then falls through to JVM exception
+types for browser-side transport errors.
+
+**Wiring:** The `globalError: Var[Option[GlobalError]]` in `Main` is not yet connected to
+any error producer — that is by design (Option A). It will be consumed when:
+- Health-check failure in `Header.scala` is upgraded to push to `globalError` (optional)
+- Workspace auth errors surface in Tier 1.5
+- SSE disconnection surfaces in deferred Phase I.b
 
 **Checkpoint:**
-- [ ] Error banner displays on API failure
-- [ ] Network errors show retryable status
-- [ ] Conflict errors show refresh action
+- [x] `ErrorResponse.decode` reconstructs shared `AppError` hierarchy (not `RuntimeException`)
+- [x] Roundtrip test: `decode(encode(e)).isInstanceOf` for all 8 error types
+- [x] `GlobalError.fromThrowable` pattern-matches on shared sealed hierarchy
+- [x] `GlobalError` variants are pure values (no `() => Unit` callbacks)
+- [x] No name collision with `domain.errors.AppError` (named `GlobalError`)
+- [x] `ErrorBanner` + Layout wired with dismiss callback
+- [x] CSS styles consistent with design tokens
+- [x] `sbt app/fastLinkJS` compiles
+- [x] `sbt server/test` — 248 tests pass
+- [x] `sbt commonJVM/testOnly *ErrorResponseSpec` — 22 tests pass
 
 > **SSE-related items (Phase H + Phase I.b) are deferred to after Tier 1.5.**
 > SSE cache invalidation, stale tracking, and SSE reconnection with exponential
@@ -1287,40 +1335,229 @@ This would reduce each call site from ~5 lines to 1 line while preserving identi
 
 ### Phase W.10: Submit-Time Error Border Routing (UX Polish)
 
+**Depends on:** None (independent of I.a). Must be completed before W.10b.
+
 **Background:** Form fields (`RiskLeafFormView`, `PortfolioFormView`) have two error display paths:
 1. **Reactive validation signals** — per-field `Signal[Option[String]]` from `RiskLeafFormState` / `PortfolioFormState` (e.g., `nameError`, `probabilityError`). These drive both error messages *and* red border CSS (`cls.toggle("error") <-- errorSignal.map(_.isDefined)`).
 2. **Submit-time topology errors** — validation failures from `TreeBuilderLogic` (e.g., duplicate node name, missing parent, root conflict). These are caught in `handleSubmit` and routed to a `submitError: Var[Option[String]]` rendered as text at the form bottom.
 
-**Problem:** When a submit-time error has a `field` attribute (e.g., `ValidationError("name", DUPLICATE_VALUE, "Duplicate leaf name 'X'")`) that corresponds to a form field, the user sees the error message at the bottom of the form but the offending field has **no red border** — because the error is not injected into the per-field `errorSignal`.
+**Problem:** When a submit-time error has a `field` attribute (e.g., `ValidationError("tree.names", DUPLICATE_VALUE, "Duplicate names: Server")`) that corresponds to a form field, the user sees the error message at the bottom of the form but the offending field has **no red border** — because the error is not injected into the per-field `errorSignal`.
 
 **Reproduction:**
 1. Create a tree with a leaf node named "Server".
 2. Add a second leaf node also named "Server".
-3. Click Submit → error message appears at form bottom: "Duplicate leaf name 'Server'".
+3. Click "Add Risk Leaf" → error message appears at form bottom: "Duplicate names: Server".
 4. Expected: the Name field should also have a red border.
-5. Actual: no red border — the Name field's `nameError` signal is `None` (the name passes SafeName validation).
+5. Actual: no red border — the Name field's `nameError` signal is `None` (the name passes SafeName validation individually; the duplicate is a topology-level concern).
 
-**Root cause:** The form state signals (`RiskLeafFormState.nameError`, etc.) are purely reactive — they derive from current field values. Submit-time topology errors are a separate channel (`submitError: Var`) that is not connected to per-field signals. There is no mechanism to inject an imperative error into a derived `Signal`.
+**Root cause:** Two disconnected error channels. The reactive signals (`RiskLeafFormState.nameError`, etc.) derive from current field values. Submit-time topology errors route to a separate `submitError: Var[Option[String]]` rendered only as text at the form bottom. There is no mechanism to inject an imperative error into the per-field `Signal` that drives the red border CSS.
 
-**Proposed fix:**
-1. Add a `submitFieldErrors: Var[Map[String, String]]` to `FormState` (or each form state).
-2. In `handleSubmit`, when `TreeBuilderLogic` returns `ValidationError` objects with a `.field` matching a form field name (e.g., `"name"`, `"probability"`), inject those into `submitFieldErrors`.
-3. Each per-field error signal becomes: `reactiveError.combineWith(submitFieldErrors.signal).map { (reactive, submitted) => reactive.orElse(submitted.get(fieldName)) }`.
-4. Clear `submitFieldErrors` on any field value change (so the injected error disappears when the user edits the field).
+**Design — three parts:**
+
+**Part 1: `submitFieldErrors` in `FormState` (infrastructure)**
+
+Add to `FormState.scala`:
+```scala
+private val submitFieldErrors: Var[Map[String, String]] = Var(Map.empty)
+
+def setSubmitFieldError(fieldName: String, message: String): Unit =
+  submitFieldErrors.update(_ + (fieldName -> message))
+
+def withSubmitErrors(fieldName: String, rawError: Signal[Option[String]]): Signal[Option[String]] =
+  val submitErr = submitFieldErrors.signal.map(_.get(fieldName))
+  withDisplayControl(fieldName, rawError.combineWith(submitErr).map {
+    case (reactive, submitted) => reactive.orElse(submitted)
+  })
+```
+
+**Stale-state prevention:** `triggerValidation()` must clear `submitFieldErrors` at the start of
+each submit cycle. This is the single correct reset point — it means "new submit cycle begins,
+prior submit errors are stale." Between submits, the reactive validation signal takes over as
+soon as the user types, so per-field `changes -->` listeners do not need to know about
+`submitFieldErrors`.
+```scala
+def triggerValidation(): Unit =
+  showErrorsVar.set(true)
+  submitFieldErrors.set(Map.empty)  // ← reset stale submit errors
+```
+
+**Field key type:** Uses `String` keys matching the existing `markTouched(fieldName: String)` /
+`withDisplayControl(fieldName: String, ...)` convention. This is a deliberate choice to keep
+W.10 minimal. W.10b replaces all string keys with per-form field enums for compile-time safety.
+
+**Part 2: `formFieldFor` in `TreeBuilderLogic` (field mapping)**
+
+Add to `TreeBuilderLogic.scala` (common module, testable on JVM):
+```scala
+/** Map a topology validation field to the form field it should highlight.
+  * Returns None for structural errors that have no corresponding form field
+  * (e.g., "tree.portfolios" empty-collection error).
+  *
+  * Co-located with the validation rules that produce these field strings
+  * so that adding a new validation rule forces updating the mapping.
+  */
+def formFieldFor(validationField: String): Option[String] =
+  validationField match
+    case "tree.names"                          => Some("name")
+    case f if f.endsWith(".parentName")        => Some("parent")
+    case f if f.startsWith("tree.portfolios")  => None  // structural
+    case f if f.startsWith("tree.leaves")      => None  // structural
+    case f if f.startsWith("tree")             => None  // structural
+    case _                                     => None
+```
+
+This replaces the fragile `contains`-based heuristic. `endsWith` is safe because `TreeBuilderLogic`
+constructs field strings as `"prefix[name].fieldName"` — the form-relevant part is always the
+dot-separated suffix.
+
+**Part 3: Wire into `handleSubmit` (view layer)**
+
+In `PortfolioFormView.handleSubmit` and `RiskLeafFormView.handleSubmit`, replace the current
+pattern that discards field information:
+```scala
+// Before (discards field → form mapping):
+case Validation.Failure(_, errs) =>
+  submitError.set(Some(errs.head.message))
+
+// After (routes field-bound errors to red borders):
+case Validation.Failure(_, errs) =>
+  val allErrors = errs.toList
+  allErrors.foreach { err =>
+    TreeBuilderLogic.formFieldFor(err.field) match
+      case Some(formField) => form.setSubmitFieldError(formField, err.message)
+      case None            => () // structural, stays in submitError
+  }
+  // Non-field-bound errors still go to the banner
+  val bannerErrors = allErrors.filter(e => TreeBuilderLogic.formFieldFor(e.field).isEmpty)
+  submitError.set(bannerErrors.headOption.map(_.message))
+```
+
+**Note on empty-portfolio errors:** The `EMPTY_COLLECTION` error (`"tree.portfolios"`) is
+structural — it means "portfolio X has no children." There is no form field to highlight
+because the portfolio form that created that node has already reset. This error correctly
+stays in the submit-error banner in `TreeBuilderView`. A future enhancement could highlight
+the portfolio name in `TreePreview`, but that is out of scope for W.10.
+
+**Subclass changes:**
+
+In `PortfolioFormState.scala`, change:
+```scala
+// Before:
+val nameError = withDisplayControl("name", nameErrorRaw)
+// After:
+val nameError = withSubmitErrors("name", nameErrorRaw)
+```
+
+In `RiskLeafFormState.scala`, change all `withDisplayControl` calls to `withSubmitErrors`:
+```scala
+val nameError = withSubmitErrors("name", nameErrorRaw)
+val probabilityError = withSubmitErrors("probability", probabilityErrorRaw)
+// ... etc for all per-field error signals
+```
 
 **Affected files:**
-- `FormState.scala` — add `submitFieldErrors` Var + clear-on-change wiring
-- `RiskLeafFormState.scala` — compose submit errors into per-field signals
-- `PortfolioFormState.scala` — same
-- `RiskLeafFormView.scala` — `handleSubmit` maps `ValidationError.field` → `submitFieldErrors`
-- `PortfolioFormView.scala` — same
+- `FormState.scala` — add `submitFieldErrors` Var, `setSubmitFieldError`, `withSubmitErrors`; modify `triggerValidation`
+- `TreeBuilderLogic.scala` — add `formFieldFor` method
+- `TreeBuilderLogicSpec.scala` — add tests for `formFieldFor`
+- `PortfolioFormState.scala` — `withDisplayControl` → `withSubmitErrors` for name
+- `RiskLeafFormState.scala` — `withDisplayControl` → `withSubmitErrors` for all fields
+- `PortfolioFormView.scala` — `handleSubmit` routes field-bound errors via `formFieldFor`
+- `RiskLeafFormView.scala` — same
 
 **Scope:** UX polish only — no backend changes, no API changes.
 
 **Checkpoint:**
 - [ ] Duplicate leaf name shows red border on Name field
-- [ ] Error clears when user edits the Name field
+- [ ] Missing parent reference shows red border on Parent field
+- [ ] Error clears on next submit (via `triggerValidation` reset)
 - [ ] Existing reactive validation (blank name, invalid probability) still works
+- [ ] `formFieldFor` has JVM test coverage in `TreeBuilderLogicSpec`
+- [ ] `sbt app/fastLinkJS` compiles
+
+---
+
+### Phase W.10b: Type-Safe FormState Field Enums (Refactor)
+
+**Depends on:** W.10 (uses the `submitFieldErrors` infrastructure introduced there).
+
+**Problem:** All field references in `FormState` are stringly-typed:
+```scala
+markTouched("name")                          // typo → silent no-op
+withDisplayControl("name", nameErrorRaw)     // "name" vs "Name" → silent mismatch
+setSubmitFieldError("nmae", msg)             // typo → error never reaches field
+```
+
+There is no compile-time check that a field name used in a view matches a field name
+used in a form state. This applies to the existing `touchedFields: Var[Set[String]]`,
+`withDisplayControl(fieldName: String, ...)`, and the new `submitFieldErrors: Var[Map[String, String]]`
+from W.10.
+
+**Proposed fix:** Parameterize `FormState` with a per-form field enum:
+
+```scala
+trait FormState[F]:
+  private val touchedFields: Var[Set[F]] = Var(Set.empty)
+  private val submitFieldErrors: Var[Map[F, String]] = Var(Map.empty)
+
+  def markTouched(field: F): Unit =
+    touchedFields.update(_ + field)
+
+  def shouldShowError(field: F): Signal[Boolean] =
+    touchedFields.signal.map(_.contains(field))
+
+  def withDisplayControl(field: F, rawError: Signal[Option[String]]): Signal[Option[String]] =
+    shouldShowError(field).combineWith(rawError).map {
+      case (true, error) => error
+      case (false, _)    => None
+    }
+
+  def withSubmitErrors(field: F, rawError: Signal[Option[String]]): Signal[Option[String]] =
+    val submitErr = submitFieldErrors.signal.map(_.get(field))
+    withDisplayControl(field, rawError.combineWith(submitErr).map {
+      case (reactive, submitted) => reactive.orElse(submitted)
+    })
+```
+
+Each form defines its own enum:
+```scala
+enum PortfolioField:
+  case Name, Parent
+
+class PortfolioFormState extends FormState[PortfolioField]:
+  val nameError = withSubmitErrors(PortfolioField.Name, nameErrorRaw)
+```
+
+The `formFieldFor` mapping in `TreeBuilderLogic` returns `Option[PortfolioField]` (or a
+union type / generic `F`) instead of `Option[String]`.
+
+**Scope analysis:**
+- `FormState.scala` — add type parameter `[F]` to trait, update all method signatures
+- `PortfolioFormState.scala` — define `PortfolioField` enum, change `extends FormState` to `extends FormState[PortfolioField]`
+- `RiskLeafFormState.scala` — define `RiskLeafField` enum (8+ variants: Name, Probability, Percentiles, Quantiles, MinLoss, MaxLoss, etc.), change extends
+- `TreeBuilderState.scala` — define `TreeBuilderField` enum (TreeName), change extends
+- `PortfolioFormView.scala` — `markTouched("name")` → `markTouched(PortfolioField.Name)`, update `formFieldFor` call
+- `RiskLeafFormView.scala` — same pattern for all field references
+- `TreeBuilderView.scala` — `markTouched("treeName")` → `markTouched(TreeBuilderField.TreeName)`
+- `TreeBuilderLogic.scala` — `formFieldFor` return type changes (design decision: see below)
+
+**Open design decision — `formFieldFor` return type:**
+`TreeBuilderLogic` lives in `common` (shared JVM/JS). It cannot import `PortfolioField` or
+`RiskLeafField` (those are app-module types). Options:
+1. **Keep `formFieldFor` returning `Option[String]`**, map to enum at call site in the view.
+   Pro: no coupling. Con: one string↔enum mapping point remains.
+2. **Move field enums to `common`** so `formFieldFor` can return them.
+   Pro: fully typed end-to-end. Con: `common` now knows about GUI field names.
+3. **`formFieldFor` returns a generic tag** (e.g., `FormFieldTag` enum in common),
+   and each form state maps `FormFieldTag → F`. Pro: typed without coupling. Con: extra
+   indirection.
+
+Recommendation: Option 1 (keep string, map at call site). The mapping is a one-liner in
+the view and avoids coupling common-module to GUI concerns.
+
+**Checkpoint:**
+- [ ] `markTouched(SomeField.Typo)` is a compile error
+- [ ] `setSubmitFieldError(SomeField.Typo, msg)` is a compile error
+- [ ] All existing tests pass unchanged
 - [ ] `sbt app/fastLinkJS` compiles
 
 ### Phase W.11: Typed Vega-Lite DSL Migration (LECChartSpecBuilder)
