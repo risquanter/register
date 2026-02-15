@@ -76,8 +76,22 @@ object GlobalError:
     // ── Transport layer errors (browser Fetch API / JVM networking) ──
     case _: java.io.IOException => NetworkError(msg(e), retryable = true)
 
-    // ── Catch-all ──
+    // ── Catch-all with browser Fetch API detection ──
+    case _ if isFetchNetworkError(e) =>
+      NetworkError("Server unreachable — check your connection", retryable = true)
+
     case _ => NetworkError(msg(e), retryable = false)
+
+  /** Detect browser Fetch API network failures.
+    *
+    * The Fetch API signals connection-refused / DNS / timeout as a
+    * `TypeError` with "NetworkError" in the message. This is standard
+    * browser behavior (Firefox, Chrome, Safari all use this pattern).
+    */
+  private def isFetchNetworkError(e: Throwable): Boolean =
+    val name = e.getClass.getSimpleName
+    val message = Option(e.getMessage).getOrElse("")
+    name == "TypeError" && message.contains("NetworkError")
 
   private def msg(e: Throwable): String =
     Option(e.getMessage).getOrElse("Unknown error")
