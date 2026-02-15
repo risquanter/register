@@ -1,6 +1,7 @@
 package app.state
 
 import com.risquanter.register.domain.errors.*
+import app.core.safeMessage
 
 /** Global error ADT for errors that are not handled by per-view
   * error channels (LoadState.Failed, SubmitState.Failed, submitError).
@@ -68,37 +69,52 @@ object GlobalError:
     * falls through to JVM exception type matching.
     */
   def fromThrowable(e: Throwable): GlobalError = e match
+    // ── Transport layer errors — check FIRST, before domain types ──
+    // Fetch API failures must be caught before domain pattern-matching
+    // because sttp passes raw JS exceptions through (not SttpClientException).
+    case _ if isFetchNetworkError(e) =>
+      NetworkError(msg(e), retryable = true)
+
+    case _: java.io.IOException => NetworkError(msg(e), retryable = true)
+
     // ── Shared domain errors (reconstructed by ErrorResponse.decode) ──
     case vf: com.risquanter.register.domain.errors.ValidationFailed =>
       ValidationFailed(vf.errors)
 
-    case _: DataConflict    => Conflict(e.getMessage)
-    case _: VersionConflict => Conflict(e.getMessage)
-    case _: MergeConflict   => Conflict(e.getMessage)
+    case _: DataConflict    => Conflict(msg(e))
+    case _: VersionConflict => Conflict(msg(e))
+    case _: MergeConflict   => Conflict(msg(e))
 
-    case _: IrminError      => DependencyError(e.getMessage)
+    case _: IrminError      => DependencyError(msg(e))
 
-    case _: SimError        => ServerError(e.getMessage)
+    case _: SimError        => ServerError(msg(e))
 
-    // ── Transport layer errors (browser Fetch API / JVM networking) ──
-    case _: java.io.IOException => NetworkError(msg(e), retryable = true)
-
-    // ── Catch-all with browser Fetch API detection ──
-    case _ if isFetchNetworkError(e) =>
-      NetworkError("Server unreachable — check your connection", retryable = true)
-
+    // ── Catch-all ──
     case _ => NetworkError(msg(e), retryable = false)
 
   /** Detect browser Fetch API network failures.
     *
     * The Fetch API signals connection-refused / DNS / timeout as a
-    * `TypeError` with "NetworkError" in the message. This is standard
-    * browser behavior (Firefox, Chrome, Safari all use this pattern).
+    * `TypeError` with varying messages across browsers:
+    *   - Firefox: "NetworkError when attempting to fetch resource."
+    *   - Chrome:  "Failed to fetch"
+    *   - Safari:  "Load failed"
+    *
+    * sttp's FetchZioBackend does NOT wrap these in `SttpClientException`
+    * on Scala.js — the raw `JavaScriptException` passes through unchanged.
     */
   private def isFetchNetworkError(e: Throwable): Boolean =
-    val name = e.getClass.getSimpleName
     val message = Option(e.getMessage).getOrElse("")
-    name == "TypeError" && message.contains("NetworkError")
+    message.contains("NetworkError when attempting to fetch") ||
+    message.contains("Failed to fetch") ||
+    message.contains("Load failed")
 
+  /** Extract a user-friendly message from a Throwable.
+    *
+    * Strips browser-internal prefixes ("TypeError: ", "Error: ") that
+    * leak JS implementation details into the UI.
+    */
   private def msg(e: Throwable): String =
-    Option(e.getMessage).getOrElse("Unknown error")
+    e.safeMessage
+      .replaceFirst("^TypeError:\\s*", "")
+      .replaceFirst("^Error:\\s*", "")

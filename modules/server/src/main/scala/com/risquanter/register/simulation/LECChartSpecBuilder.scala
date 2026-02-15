@@ -119,8 +119,12 @@ object LECChartSpecBuilder {
       val rootCurve = curves.head
       val sortedChildren = curves.tail.sortBy(_.name)
       val sortedCurves = rootCurve +: sortedChildren
-      // Map each curve ID to its theme colour (keyed by id, not full case class)
-      val colorById: Map[String, String] = sortedCurves.map(_.id).zip(themeColorsRisk).toMap
+      // Stable colour assignment keyed by curve ID.
+      // Each curve's ID deterministically selects a palette colour via hash,
+      // so the same curve always gets the same colour regardless of which
+      // other curves are present in the request.
+      def stableColor(id: String): String =
+        themeColorsRisk((id.hashCode.abs) % themeColorsRisk.size)
 
       val minLoss = allPoints.map(_.loss).min.toDouble
 
@@ -135,10 +139,11 @@ object LECChartSpecBuilder {
         sortedCurves.flatMap(_.curve.headOption).map(_.exceedanceProbability).max * yBuffer
       )
 
-      // Generate data points in Vega-Lite format
+      // Generate data points — keyed by curve ID for stable colour binding
       val dataValues: Seq[Json] = sortedCurves.flatMap { curve =>
         curve.curve.map { point =>
           obj(
+            "curveId"     -> str(curve.id),
             "risk"        -> str(curve.name),
             "loss"        -> num(point.loss.toDouble),
             "exceedance"  -> num(point.exceedanceProbability)
@@ -146,11 +151,14 @@ object LECChartSpecBuilder {
         }
       }
 
-      // Sorted risk names for legend order and color domain (root first, then alphabetically)
-      val sortedRiskNames: Seq[Json] = sortedCurves.map(c => str(c.name))
+      // ID→name lookup expression for Vega-Lite legend labels.
+      // Translates the curveId domain values into human-readable names.
+      val idToNamePairs = sortedCurves.map(c => s"datum.value == '${c.id}' ? '${c.name}'")
+      val legendLabelExpr = (idToNamePairs :+ "datum.value").mkString(" : ")
 
-      // Color scale matching BCG approach (keyed by id — avoids hashing full case class)
-      val colorRange: Seq[Json] = sortedCurves.map(c => str(colorById.getOrElse(c.id, "#000000")))
+      // Colour domain/range keyed by ID — stable across add/remove
+      val colorDomain: Seq[Json] = sortedCurves.map(c => str(c.id))
+      val colorRange: Seq[Json]  = sortedCurves.map(c => str(stableColor(c.id)))
 
       // Quantile vertical-rule annotations (P50, P95) for the root curve
       val quantileRuleLayers: Seq[Json] =
@@ -176,7 +184,9 @@ object LECChartSpecBuilder {
               "labelAngle" -> num(0.0),
               "labelExpr"  -> str("if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')")
             ),
-            "scale" -> obj("domainMin" -> num(minLoss))
+            "scale" -> obj(
+              "domainMin" -> num(minLoss)
+            )
           ),
           "y" -> obj(
             "field" -> str("exceedance"),
@@ -186,14 +196,16 @@ object LECChartSpecBuilder {
             "scale" -> obj("domain" -> arr(Seq(num(0.0), num(yCeiling))))
           ),
           "color" -> obj(
-            "field" -> str("risk"),
+            "field" -> str("curveId"),
             "type"  -> str("nominal"),
             "title" -> str("Risk modelled"),
             "scale" -> obj(
-              "domain" -> arr(sortedRiskNames),
+              "domain" -> arr(colorDomain),
               "range"  -> arr(colorRange)
             ),
-            "sort" -> arr(sortedRiskNames)
+            "legend" -> obj(
+              "labelExpr" -> str(legendLabelExpr)
+            )
           )
         )
       )

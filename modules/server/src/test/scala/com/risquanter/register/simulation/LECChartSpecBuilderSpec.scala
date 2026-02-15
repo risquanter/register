@@ -169,7 +169,7 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
     ),
     suite("multi-curve ordering")(
       test("root curve is first in color domain, children sorted alphabetically") {
-        // Order: Portfolio (root), then Alpha Risk, Zeta Risk (alphabetical)
+        // Order: root ID first, then children sorted by name (Alpha, Zeta)
         val result = LECChartSpecBuilder.generateMultiCurveSpec(
           Vector(rootCurve, childZeta, childAlpha)
         )
@@ -178,9 +178,9 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
         val layers = fieldAt(json, "layer")
         val lastLayerIdx = layers.collect { case Json.Arr(elems) => elems.size - 1 }.getOrElse(0)
         val domain = fieldAt(json, "layer", lastLayerIdx, "encoding", "color", "scale", "domain")
-        val names  = domain.map(strValues).getOrElse(Seq.empty)
+        val ids  = domain.map(strValues).getOrElse(Seq.empty)
         assertTrue(
-          names == Seq("Portfolio", "Alpha Risk", "Zeta Risk")
+          ids == Seq("root-id", "alpha-id", "zeta-id")
         )
       }
     ),
@@ -217,14 +217,16 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
       }
     ),
     suite("color palette")(
-      test("first curve gets first palette color, second gets second") {
+      test("each curve gets a stable palette color from its ID") {
         val colors = LECChartSpecBuilder.themeColorsRisk
+        def stableColor(id: String): String =
+          colors((id.hashCode.abs) % colors.size)
         val result = LECChartSpecBuilder.generateMultiCurveSpec(
           Vector(rootCurve, childAlpha)
         )
         assertTrue(
-          result.contains(colors(0)),
-          result.contains(colors(1))
+          result.contains(stableColor(rootCurve.id)),
+          result.contains(stableColor(childAlpha.id))
         )
       }
     ),
@@ -294,13 +296,16 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
       test("curves with same name but different IDs get distinct colors") {
         val curveA = LECNodeCurve("id-a", "Duplicate Name", samplePoints, Map.empty)
         val curveB = LECNodeCurve("id-b", "Duplicate Name", samplePoints, Map.empty)
-        // This should not throw or produce incorrect colors even with same name
+        val colors = LECChartSpecBuilder.themeColorsRisk
+        def stableColor(id: String): String =
+          colors((id.hashCode.abs) % colors.size)
+        // Same name, different IDs → different stable colors
         val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(curveA, curveB))
         val json = parseSpec(result)
-        val colors = LECChartSpecBuilder.themeColorsRisk
         assertTrue(
-          result.contains(colors(0)),
-          result.contains(colors(1))
+          result.contains(stableColor("id-a")),
+          result.contains(stableColor("id-b")),
+          stableColor("id-a") != stableColor("id-b")
         )
       }
     ),

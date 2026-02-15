@@ -72,7 +72,7 @@ object ZJS:
     def emitTo(bus: EventBus[A]): Unit =
       forkProvided {
         zio
-          .tapError(e => Console.printLineError(e.getMessage()))
+          .tapError(e => Console.printLineError(e.safeMessage))
           .tap(a => ZIO.attempt(bus.emit(a)))
       }
 
@@ -103,7 +103,7 @@ object ZJS:
       forkProvided {
         zio
           .tap(a => ZIO.succeed(target.set(LoadState.Loaded(a))))
-          .tapError(e => ZIO.succeed(target.set(LoadState.Failed(e.getMessage()))))
+          .tapError(e => ZIO.succeed(target.set(LoadState.Failed(e.safeMessage))))
       }
 
   /** Extension for ZIO effects returning `Option[B]` — unwraps into `LoadState[B]`. */
@@ -122,7 +122,7 @@ object ZJS:
             case Some(b) => ZIO.succeed(target.set(LoadState.Loaded(b)))
             case None    => ZIO.succeed(target.set(LoadState.Failed(noneMessage)))
           }
-          .tapError(e => ZIO.succeed(target.set(LoadState.Failed(e.getMessage()))))
+          .tapError(e => ZIO.succeed(target.set(LoadState.Failed(e.safeMessage))))
       }
 
   // ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ object ZJS:
       forkProvided {
         zio
           .tap(a => ZIO.succeed(onSuccess(a)))
-          .tapError(e => ZIO.succeed(target.set(SubmitState.Failed(e.getMessage()))))
+          .tapError(e => ZIO.succeed(target.set(SubmitState.Failed(e.safeMessage))))
       }
 
   // ---------------------------------------------------------------------------

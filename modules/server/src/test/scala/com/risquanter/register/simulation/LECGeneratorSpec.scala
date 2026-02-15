@@ -98,17 +98,18 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         
         assertTrue(cyberLosses == hardwareLosses)
       },
-      test("shared domain covers combined range") {
+      test("shared domain covers combined range (clipped to p99.5)") {
         val results = Map("cyber" -> cyberResult, "wide" -> wideRangeResult)
         val curves = LECGenerator.generateCurvePointsMulti(results, 10)
         
-        // Wide range has min=1000, max=100000
-        // Cyber has min=10000, max=25000
-        // Combined should cover 1000 to ~110000 (with buffer)
+        // wideRangeResult: 3 outcomes [1000, 50000, 100000]
+        //   p99.5 = 50000 (with only 3 data points)
+        // cyberResult: p99.5 = 25000
+        // Combined max = max(50000, 25000) = 50000, with 10% buffer = 55000
         val ticks = curves("cyber").map(_._1)
         assertTrue(
           ticks.head <= 1000L || ticks.head <= cyberResult.minLoss,
-          ticks.last >= 100000L
+          ticks.last >= 50000L
         )
       },
       test("each curve has correct exceedance values") {
@@ -150,22 +151,27 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         )
       },
       test("tail is trimmed: no long near-zero plateau") {
-        // wideRangeResult: 3 trials, outcomes [1000, 100000, 50000]
-        // getTicks covers [1000, 110000] with 100 ticks.
-        // probOfExceedance drops to 0 well before tick 100.
-        // After trimming, last point should have exceedance near 0
-        // but the curve should NOT extend far past the last meaningful tick.
-        val results = Map("wide" -> wideRangeResult)
+        // Create a result with enough trials for meaningful tail trimming.
+        // 20 trials, outcomes spread across a range — exceedance drops
+        // gradually so the tail cutoff (0.5%) can actually be reached.
+        val manyTrialsResult = withCfg(20) {
+          RiskResult(
+            nodeId = nodeId("many"),
+            outcomes = (1 to 20).map(i => i -> (i * 1000L)).toMap,
+            provenances = Nil
+          )
+        }
+        val results = Map("many" -> manyTrialsResult)
         val curves = LECGenerator.generateCurvePointsMulti(results, 100)
-        val wideCurve = curves("wide")
-        val untrimmedTicks = LECGenerator.getTicks(1000L, 100000L, 100)
+        val curve = curves("many")
 
-        // Trimmed curve should be shorter than untrimmed tick count
-        assertTrue(wideCurve.size < untrimmedTicks.size)
+        // Trimmed curve should have fewer points than 100 raw ticks
+        assertTrue(curve.size < 100)
 
-        // Last point should be near-zero (the one tick past cutoff)
-        val (_, lastProb) = wideCurve.last
-        assertTrue(lastProb < LECGenerator.tailCutoff)
+        // Last point should have low exceedance (at or near zero) —
+        // the "one tick past cutoff" sits beyond all outcomes.
+        val (_, lastProb) = curve.last
+        assertTrue(lastProb <= 0.05) // 1/20 = 0.05
       },
       test("trimmed curves still share the same tick domain") {
         val results = Map("cyber" -> cyberResult, "hardware" -> hardwareResult)

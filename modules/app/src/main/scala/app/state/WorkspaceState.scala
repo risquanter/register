@@ -9,6 +9,7 @@ import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 
 import app.core.ZJS.*
+import app.core.safeMessage
 
 /** Central workspace lifecycle state — deferred bootstrap pattern.
   *
@@ -117,5 +118,5 @@ final class WorkspaceState extends WorkspaceEndpoints:
           onSuccess(response.tree)
         }
       }
-      .tapError(e => zio.ZIO.succeed(onError(e.getMessage())))
+      .tapError(e => zio.ZIO.succeed(onError(e.safeMessage)))
       .runJs

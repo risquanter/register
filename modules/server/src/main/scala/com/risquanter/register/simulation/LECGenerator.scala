@@ -29,32 +29,59 @@ object LECGenerator {
     */
   def calculateQuantiles(result: RiskResult): Map[String, Double] = {
     val outcomes = result.outcomeCount
-    if (outcomes.isEmpty) return Map.empty
-    
-    val totalTrials = outcomes.values.sum
-    if (totalTrials == 0) return Map.empty
-    
-    // Build cumulative distribution
-    var cumulativeCount = 0L
-    val cumulativeProbs = outcomes.map { case (loss, count) =>
-      cumulativeCount += count
-      loss -> (cumulativeCount.toDouble / totalTrials)
-    }
-    
-    // Find quantiles
-    def findQuantile(p: Double): Double = {
-      cumulativeProbs.find(_._2 >= p) match {
-        case Some((loss, _)) => loss.toDouble
-        case None => cumulativeProbs.lastOption.map(_._1.toDouble).getOrElse(0.0)
+    if (outcomes.isEmpty || outcomes.values.sum == 0) Map.empty
+    else {
+      val totalTrials = outcomes.values.sum
+      
+      // Build cumulative distribution
+      var cumulativeCount = 0L
+      val cumulativeProbs = outcomes.map { case (loss, count) =>
+        cumulativeCount += count
+        loss -> (cumulativeCount.toDouble / totalTrials)
       }
+      
+      // Find quantiles
+      def findQuantile(p: Double): Double = {
+        cumulativeProbs.find(_._2 >= p) match {
+          case Some((loss, _)) => loss.toDouble
+          case None => cumulativeProbs.lastOption.map(_._1.toDouble).getOrElse(0.0)
+        }
+      }
+      
+      Map(
+        "p50" -> findQuantile(0.50),
+        "p90" -> findQuantile(0.90),
+        "p95" -> findQuantile(0.95),
+        "p99" -> findQuantile(0.99)
+      )
     }
-    
-    Map(
-      "p50" -> findQuantile(0.50),
-      "p90" -> findQuantile(0.90),
-      "p95" -> findQuantile(0.95),
-      "p99" -> findQuantile(0.99)
-    )
+  }
+
+  /** Find the loss value at a given percentile of the conditional distribution.
+    *
+    * Walks the sorted outcome histogram (TreeMap) and returns the loss value
+    * where the cumulative count reaches the target percentile. Only considers
+    * non-zero outcomes (conditional on event occurring), consistent with
+    * `calculateQuantiles`.
+    *
+    * Used to clip tick ranges to a meaningful percentile (e.g. p99.5) instead
+    * of `maxLoss`, which is a single extreme outlier and stretches the x-axis
+    * far beyond the informative range.
+    *
+    * @param result     Simulation result with outcome histogram
+    * @param percentile Target percentile in [0, 1] (e.g. 0.995 for p99.5)
+    * @return Loss value at the percentile, or None if no outcomes
+    */
+  def findQuantileLoss(result: RiskResult, percentile: Double): Option[Long] = {
+    val outcomes = result.outcomeCount
+    val total = outcomes.values.sum.toLong
+    Option.when(total > 0) {
+      val target = (percentile * total).toLong
+      val cumSums = outcomes.valuesIterator.scanLeft(0L)(_ + _).drop(1)
+      cumSums.zip(outcomes.keysIterator)
+        .collectFirst { case (cum, loss) if cum >= target => loss }
+        .getOrElse(outcomes.lastKey)
+    }
   }
   
   /** Generate Vega-Lite JSON specification for exceedance curve visualization
@@ -67,10 +94,9 @@ object LECGenerator {
     */
   def generateVegaLiteSpec(result: RiskResult, maxPoints: Int = 100): Option[String] = {
     val outcomes = result.outcomeCount
-    if (outcomes.isEmpty) return None
-    
+    if (outcomes.isEmpty || outcomes.values.sum == 0) None
+    else {
     val totalTrials = outcomes.values.sum
-    if (totalTrials == 0) return None
     
     // Sample points for large datasets
     val sampledOutcomes = if (outcomes.size > maxPoints) {
@@ -118,6 +144,7 @@ object LECGenerator {
     }"""
     
     Some(spec)
+    }
   }
   
   /** Generate both quantiles and Vega-Lite spec in one pass
@@ -162,18 +189,32 @@ object LECGenerator {
     * @return Vector of (loss, exceedanceProbability) tuples
     */
   def generateCurvePoints(result: RiskResult, nEntries: Int = 100): Vector[(Long, Double)] = {
-    if (result.outcomeCount.isEmpty) return Vector.empty
-    
-    val minLoss = result.minLoss
-    val maxLoss = result.maxLoss
-    val ticks = getTicks(minLoss, maxLoss, nEntries)
-    
-    ticks.map { loss =>
-      val exceedanceProb = result.probOfExceedance(loss).toDouble
-      (loss, exceedanceProb)
+    if (result.outcomeCount.isEmpty) Vector.empty
+    else {
+      val minLoss = result.minLoss
+      val maxLoss = findQuantileLoss(result, 0.995).getOrElse(result.maxLoss)
+      val ticks = getTicks(minLoss, maxLoss, nEntries)
+      
+      ticks.map { loss =>
+        val exceedanceProb = result.probOfExceedance(loss).toDouble
+        (loss, exceedanceProb)
+      }
     }
   }
   
+  /** Visual-only exceedance threshold for chart tail trimming.
+    *
+    * Ticks where every curve drops below this value are removed from the
+    * rendered chart data. The underlying RiskResult and all analytical
+    * queries (probOfExceedance, quantiles, aggregation) remain unaffected.
+    *
+    * 0.5% corresponds to the Solvency II 1-in-200 year return period —
+    * the most conservative regulatory floor in common use.
+    *
+    * @see docs/LEC-TAIL-TRIMMING.md for full rationale and references.
+    */
+  val tailCutoff: Double = 0.005
+
   /** Generate LEC curves for multiple nodes with a shared tick domain.
     * 
     * When displaying multiple LEC curves together, they must share the same
@@ -191,49 +232,42 @@ object LECGenerator {
     * @param nEntries Number of sample points for the shared tick domain
     * @return Map of node ID to curve points (loss, exceedanceProbability)
     */
-  /** Visual-only exceedance threshold for chart tail trimming.
-    *
-    * Ticks where every curve drops below this value are removed from the
-    * rendered chart data. The underlying RiskResult and all analytical
-    * queries (probOfExceedance, quantiles, aggregation) remain unaffected.
-    *
-    * 0.5% corresponds to the Solvency II 1-in-200 year return period —
-    * the most conservative regulatory floor in common use.
-    *
-    * @see docs/LEC-TAIL-TRIMMING.md for full rationale and references.
-    */
-  val tailCutoff: Double = 0.005
-
   def generateCurvePointsMulti[K](
     results: Map[K, RiskResult], 
     nEntries: Int = 100
   ): Map[K, Vector[(Long, Double)]] = {
     if (results.isEmpty) return Map.empty
     
-    // Filter out empty results
     val nonEmpty = results.filter(_._2.outcomeCount.nonEmpty)
     if (nonEmpty.isEmpty) return results.map((k, _) => k -> Vector.empty)
     
-    // Compute combined loss range
+    // Compute combined loss range, clipping max to p99.5 to avoid
+    // extreme outliers stretching the x-axis beyond the informative range
     val combinedMin = nonEmpty.values.map(_.minLoss).min
-    val combinedMax = nonEmpty.values.map(_.maxLoss).max
+    val combinedMax = nonEmpty.values.map(r => findQuantileLoss(r, 0.995).getOrElse(r.maxLoss)).max
     
     // Generate shared tick domain
     val sharedTicks = getTicks(combinedMin, combinedMax, nEntries)
     
     // Evaluate all curves at every tick
     val evaluated: Map[K, Vector[(Long, Double)]] = results.map { case (nodeId, result) =>
-      if (result.outcomeCount.isEmpty) {
-        nodeId -> Vector.empty
-      } else {
-        nodeId -> sharedTicks.map { loss =>
-          (loss, result.probOfExceedance(loss).toDouble)
-        }
-      }
+      if (result.outcomeCount.isEmpty) nodeId -> Vector.empty
+      else nodeId -> sharedTicks.map(loss => (loss, result.probOfExceedance(loss).toDouble))
     }
 
-    // Trim the uninformative tail: keep ticks where at least one curve
-    // still has meaningful exceedance, plus one tick beyond (smooth end).
+    trimTail(evaluated, sharedTicks)
+  }
+
+  /** Trim the uninformative tail from evaluated LEC curves.
+    *
+    * Removes trailing ticks where every curve drops below `tailCutoff`,
+    * keeping one tick beyond the last meaningful point for visual continuity.
+    * The underlying RiskResult and all analytical queries remain unaffected.
+    */
+  private def trimTail[K](
+    evaluated: Map[K, Vector[(Long, Double)]],
+    sharedTicks: Vector[Long]
+  ): Map[K, Vector[(Long, Double)]] = {
     val nonEmptyCurves = evaluated.values.filter(_.nonEmpty).toVector
     if (nonEmptyCurves.isEmpty) return evaluated
 
@@ -241,7 +275,6 @@ object LECGenerator {
       nonEmptyCurves.exists(curve => curve(i)._2 >= tailCutoff)
     }.getOrElse(sharedTicks.size - 1)
 
-    // Keep one tick past the cutoff so the curve visually reaches near-zero
     val trimIdx = math.min(lastMeaningfulIdx + 1, sharedTicks.size - 1)
 
     evaluated.map { case (k, pts) =>

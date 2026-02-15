@@ -36,19 +36,19 @@ object ErrorBanner:
 
       case GlobalError.NetworkError(msg, retryable) =>
         val hint = if retryable then " — will retry" else ""
-        ("⚡", s"$msg$hint")
+        ("⚡", s"${safe(msg)}$hint")
 
       case GlobalError.Conflict(msg) =>
-        ("🔄", msg)
+        ("🔄", safe(msg))
 
       case GlobalError.ServerError(msg) =>
-        ("🔥", msg)
+        ("🔥", safe(msg))
 
       case GlobalError.DependencyError(msg) =>
-        ("⚡", s"Service issue: $msg")
+        ("⚡", s"Service issue: ${safe(msg)}")
 
       case GlobalError.WorkspaceExpired(msg) =>
-        ("ℹ", msg)
+        ("ℹ", safe(msg))
 
     val bannerClass = error match
       case _: GlobalError.WorkspaceExpired => "error-banner info-banner"
@@ -64,3 +64,9 @@ object ErrorBanner:
         onClick --> (_ => onDismiss())
       )
     )
+
+  /** Null-safe message accessor — last-resort defense against null messages
+    * leaking from JS exceptions through Scala.js interop.
+    */
+  private def safe(msg: String): String =
+    if msg == null || msg.isEmpty then "An unexpected error occurred" else msg
