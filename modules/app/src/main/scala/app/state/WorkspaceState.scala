@@ -28,6 +28,10 @@ import app.core.ZJS.*
   */
 final class WorkspaceState extends WorkspaceEndpoints:
 
+  // ── URL management ────────────────────────────────────────────
+
+  private val workspacePathPattern = "^/w/([A-Za-z0-9_-]{22})(?:/.*)?$".r
+
   /** The active workspace key. None until bootstrap or pre-validation succeeds. */
   val workspaceKey: Var[Option[WorkspaceKey]] = Var(extractKeyFromURL())
 
@@ -39,10 +43,6 @@ final class WorkspaceState extends WorkspaceEndpoints:
 
   /** Whether a workspace is currently active. */
   def hasWorkspace: Boolean = currentKey.isDefined
-
-  // ── URL management ────────────────────────────────────────────
-
-  private val workspacePathPattern = "^/w/([A-Za-z0-9_-]{22})(?:/.*)?$".r
 
   /** Extract workspace key from the current browser URL path. */
   private def extractKeyFromURL(): Option[WorkspaceKey] =
