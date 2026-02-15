@@ -190,27 +190,27 @@ class RiskLeafFormState extends FormState:
   // Display-controlled Error Signals (for UI binding)
   // ============================================================
   
-  val nameError: Signal[Option[String]] = withDisplayControl("name", nameErrorRaw)
-  val probabilityError: Signal[Option[String]] = withDisplayControl("probability", probabilityErrorRaw)
+  val nameError: Signal[Option[String]] = withSubmitErrors("name", nameErrorRaw)
+  val probabilityError: Signal[Option[String]] = withSubmitErrors("probability", probabilityErrorRaw)
 
   // Cross-field errors merged into per-field signals (BCA-style):
   // own-field error takes priority; cross-field error is the fallback.
   // Both fields get a red border when the cross-field constraint is violated.
 
   /** Percentiles: own error ∪ expert cross-field (length mismatch) */
-  val percentilesError: Signal[Option[String]] = withDisplayControl("percentiles",
+  val percentilesError: Signal[Option[String]] = withSubmitErrors("percentiles",
     percentilesErrorRaw.combineWith(expertCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
   /** Quantiles: own error ∪ expert cross-field (length mismatch) */
-  val quantilesError: Signal[Option[String]] = withDisplayControl("quantiles",
+  val quantilesError: Signal[Option[String]] = withSubmitErrors("quantiles",
     quantilesErrorRaw.combineWith(expertCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
   /** Min loss: own error ∪ lognormal cross-field (min ≥ max) */
-  val minLossError: Signal[Option[String]] = withDisplayControl("minLoss",
+  val minLossError: Signal[Option[String]] = withSubmitErrors("minLoss",
     minLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
   /** Max loss: own error ∪ lognormal cross-field (min ≥ max) */
-  val maxLossError: Signal[Option[String]] = withDisplayControl("maxLoss",
+  val maxLossError: Signal[Option[String]] = withSubmitErrors("maxLoss",
     maxLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
 

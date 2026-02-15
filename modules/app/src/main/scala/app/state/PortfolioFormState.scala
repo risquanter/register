@@ -23,8 +23,8 @@ final class PortfolioFormState extends FormState:
       case Validation.Failure(_, errs) => Some(errs.head.message)
   }
 
-  // Display-controlled errors
-  val nameError: Signal[Option[String]] = withDisplayControl("name", nameErrorRaw)
+  // Display-controlled errors (with submit-time server error composition)
+  val nameError: Signal[Option[String]] = withSubmitErrors("name", nameErrorRaw)
 
   // FormState implementation
   override def errorSignals: List[Signal[Option[String]]] = List(nameErrorRaw)

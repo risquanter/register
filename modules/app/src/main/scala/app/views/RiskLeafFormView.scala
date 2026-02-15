@@ -173,5 +173,7 @@ object RiskLeafFormView:
             // so the user can quickly add successive leaves with similar parameters,
             // only changing name/parent between submits.
             state.resetTouched()
-          case Validation.Failure(_, errs) => submitError.set(Some(errs.head.message))
-      case Validation.Failure(_, errs) => submitError.set(Some(errs.head.message))
+          case Validation.Failure(_, errs) =>
+            FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError)
+      case Validation.Failure(_, errs) =>
+        submitError.set(Some(errs.head.message))

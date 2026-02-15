@@ -98,5 +98,25 @@ object TreeBuilderLogic:
       s"Every portfolio must have at least one child: ${empty.mkString(", ")}"
     ))
 
+  /** Map a topology validation field to the form field it should highlight.
+    *
+    * Returns `None` for structural errors that have no corresponding form input
+    * (e.g., `"tree.portfolios"` empty-collection error).
+    *
+    * Co-located with the validation rules that produce these field strings
+    * so that adding a new validation rule forces updating the mapping.
+    *
+    * Field conventions (from validation rules above):
+    *   - `"tree.names"`                → duplicate name        → `Some("name")`
+    *   - `"portfolio[X].parentName"`   → missing parent ref    → `Some("parent")`
+    *   - `"leaf[X].parentName"`        → missing/required parent → `Some("parent")`
+    *   - `"tree"`, `"tree.portfolios"`, `"tree.leaves"` → structural → `None`
+    */
+  def formFieldFor(validationField: String): Option[String] =
+    validationField match
+      case "tree.names"                     => Some("name")
+      case f if f.endsWith(".parentName")   => Some("parent")
+      case _                                => None
+
   private def requireCond(cond: Boolean, field: String, code: ValidationErrorCode, message: String): Validation[ValidationError, Unit] =
     if cond then Validation.succeed(()) else Validation.fail(ValidationError(field, code, message))

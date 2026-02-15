@@ -54,6 +54,6 @@ object PortfolioFormView:
             submitError.set(None)
             form.reset()
           case Validation.Failure(_, errs) =>
-            submitError.set(Some(errs.head.message))
+            FormSubmitUtil.routeTopologyErrors(form, errs.toList, submitError)
       case Validation.Failure(_, errs) =>
         submitError.set(Some(errs.head.message))

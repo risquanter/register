@@ -164,5 +164,30 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
         // full rejects at submit time — "Sub" has no children
         assertTrue(TreeBuilderLogic.fullValidateTopology(ps, ls).isFailure)
       }
-    )
+    ),
+
+    // ── formFieldFor ──────────────────────────────────────────────
+
+    suite("formFieldFor")(
+      test("maps tree.names to name field") {
+        assertTrue(TreeBuilderLogic.formFieldFor("tree.names") == Some("name"))
+      },
+      test("maps portfolio parentName to parent field") {
+        assertTrue(TreeBuilderLogic.formFieldFor("portfolio[Root].parentName") == Some("parent"))
+      },
+      test("maps leaf parentName to parent field") {
+        assertTrue(TreeBuilderLogic.formFieldFor("leaf[Leaf1].parentName") == Some("parent"))
+      },
+      test("returns None for tree structural error") {
+        assertTrue(TreeBuilderLogic.formFieldFor("tree") == None)
+      },
+      test("returns None for tree.portfolios structural error") {
+        assertTrue(TreeBuilderLogic.formFieldFor("tree.portfolios") == None)
+      },
+      test("returns None for tree.leaves structural error") {
+        assertTrue(TreeBuilderLogic.formFieldFor("tree.leaves") == None)
+      },
+      test("returns None for unknown field") {
+        assertTrue(TreeBuilderLogic.formFieldFor("something.else") == None)
+      }    )
   )

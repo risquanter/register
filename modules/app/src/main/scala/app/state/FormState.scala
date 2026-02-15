@@ -24,8 +24,14 @@ trait FormState:
   /** Per-field "touched" state for showing errors on blur */
   private val touchedFields: Var[Set[String]] = Var(Set.empty)
 
+  /** Per-field submit-time errors routed from topology validation (W.10) */
+  private val submitFieldErrors: Var[Map[String, String]] = Var(Map.empty)
+
   def markTouched(fieldName: String): Unit =
     touchedFields.update(_ + fieldName)
+
+  def setSubmitFieldError(fieldName: String, message: String): Unit =
+    submitFieldErrors.update(_ + (fieldName -> message))
 
   def isTouched(fieldName: String): Signal[Boolean] =
     touchedFields.signal.map(_.contains(fieldName))
@@ -44,14 +50,24 @@ trait FormState:
       case (false, _)    => None
     }
 
+  /** Compose submit-time server errors with reactive validation for a field.
+   *  Reactive errors take priority; submit error is shown when no reactive error exists. */
+  def withSubmitErrors(fieldName: String, rawError: Signal[Option[String]]): Signal[Option[String]] =
+    val submitErr = submitFieldErrors.signal.map(_.get(fieldName))
+    withDisplayControl(fieldName, rawError.combineWith(submitErr).map {
+      case (reactive, submitted) => reactive.orElse(submitted)
+    })
+
   /** Call before submit to show all errors */
   def triggerValidation(): Unit =
+    submitFieldErrors.set(Map.empty)
     showErrorsVar.set(true)
 
   /** Reset error display and touched state (e.g., after successful submit) */
   def resetTouched(): Unit =
     showErrorsVar.set(false)
     touchedFields.set(Set.empty)
+    submitFieldErrors.set(Map.empty)
 
   // ============================================================
   // Error Aggregation
