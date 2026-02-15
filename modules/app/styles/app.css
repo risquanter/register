@@ -181,23 +181,6 @@ body {
   min-width: 0;
 }
 
-.error-banner-action {
-  flex-shrink: 0;
-  padding: var(--sp-1) var(--sp-3);
-  background-color: transparent;
-  border: 1px solid var(--error);
-  border-radius: var(--radius-sm);
-  color: var(--error);
-  font-size: var(--text-xs);
-  font-family: var(--font-sans);
-  cursor: pointer;
-  transition: background-color 0.15s ease;
-}
-
-.error-banner-action:hover {
-  background-color: rgba(239, 68, 68, 0.15);
-}
-
 .error-banner-dismiss {
   flex-shrink: 0;
   padding: var(--sp-1) var(--sp-2);

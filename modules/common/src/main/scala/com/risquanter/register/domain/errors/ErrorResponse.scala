@@ -85,127 +85,65 @@ object ErrorResponse {
     case _ => makeGeneralResponse()
   }
 
-  def makeGeneralResponse(domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = "General server error, please check the logs..."
-    val statusCode = StatusCode.InternalServerError
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "unknown",
-      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = message,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
-
-  def makeValidationResponse(errors: List[ValidationError], domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = "Domain validation error"
-    val statusCode = StatusCode.BadRequest
-    val errorDetails = errors.map { ve =>
-      ErrorDetail(
-        domain = domain,
-        field = ve.field,
-        code = ve.code,
-        message = ve.message,
-        requestId = requestId
-      )
-    }
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errorDetails)))
-  }
-
-  def makeDataConflictResponse(message: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val statusCode = StatusCode.Conflict
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "unknown",
-      code = ValidationErrorCode.DUPLICATE_VALUE,
-      message = message,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
-
-  def makeRepositoryFailureResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = "Repository operation failed"
-    val statusCode = StatusCode.InternalServerError
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "unknown",
-      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = reason,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
-
-  def makeSimulationFailureResponse(simulationId: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = s"Simulation $simulationId failed"
-    val statusCode = StatusCode.InternalServerError
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "simulation",
-      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = message,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
-
   // ============================================================================
-  // Infrastructure Error Responses (ADR-008)
+  // Response Builders
   // ============================================================================
 
-  def makeServiceUnavailableResponse(reason: String, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = s"Service unavailable: $reason"
-    val statusCode = StatusCode.ServiceUnavailable  // 503
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "service",
-      code = ValidationErrorCode.DEPENDENCY_FAILED,
-      message = message,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
-
-  def makeNetworkTimeoutResponse(operation: String, duration: Duration, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = s"Network timeout after ${duration.toMillis}ms during: $operation"
-    val statusCode = StatusCode.GatewayTimeout  // 504
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "network",
-      code = ValidationErrorCode.DEPENDENCY_FAILED,
-      message = message,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
-
-  def makeIrminHttpErrorResponse(status: StatusCode, body: String, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = s"HTTP ${status.code}: $body"
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "http",
-      code = ValidationErrorCode.DEPENDENCY_FAILED,
-      message = message,
-      requestId = requestId
-    ))
+  /** Shared builder for single-detail error responses.
+    * All `make*Response` methods delegate here, varying only the
+    * status code, field, error code, message, and domain.
+    */
+  private def response(
+    status: StatusCode,
+    field: String,
+    code: ValidationErrorCode,
+    message: String,
+    domain: String = "risk-trees",
+    requestId: Option[String] = None
+  ): (StatusCode, ErrorResponse) =
+    val errors = List(ErrorDetail(domain, field, code, message, requestId))
     (status, ErrorResponse(JsonHttpError(status.code, message, errors)))
-  }
 
-  def makeIrminGraphQlErrorResponse(messages: List[String], path: Option[List[String]], domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = messages.mkString("; ")
+  def makeGeneralResponse(domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.InternalServerError, "unknown", ValidationErrorCode.CONSTRAINT_VIOLATION,
+      "General server error, please check the logs...", domain, requestId)
+
+  /** Validation responses carry multiple `ErrorDetail` entries (one per `ValidationError`),
+    * so they cannot use the single-detail `response()` builder.
+    */
+  def makeValidationResponse(errors: List[ValidationError], domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = "Domain validation error"
+    val details = errors.map(ve => ErrorDetail(domain, ve.field, ve.code, ve.message, requestId))
+    (StatusCode.BadRequest, ErrorResponse(JsonHttpError(StatusCode.BadRequest.code, message, details)))
+
+  def makeDataConflictResponse(message: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.Conflict, "unknown", ValidationErrorCode.DUPLICATE_VALUE, message, domain, requestId)
+
+  def makeRepositoryFailureResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.InternalServerError, "unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, reason, domain, requestId)
+
+  def makeSimulationFailureResponse(simulationId: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.InternalServerError, "simulation", ValidationErrorCode.CONSTRAINT_VIOLATION,
+      s"Simulation $simulationId failed", domain, requestId)
+
+  // ── Infrastructure Error Responses (ADR-008) ───────────────────────────────
+
+  def makeServiceUnavailableResponse(reason: String, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.ServiceUnavailable, "service", ValidationErrorCode.DEPENDENCY_FAILED,
+      s"Service unavailable: $reason", domain, requestId)
+
+  def makeNetworkTimeoutResponse(operation: String, duration: Duration, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.GatewayTimeout, "network", ValidationErrorCode.DEPENDENCY_FAILED,
+      s"Network timeout after ${duration.toMillis}ms during: $operation", domain, requestId)
+
+  def makeIrminHttpErrorResponse(status: StatusCode, body: String, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(status, "http", ValidationErrorCode.DEPENDENCY_FAILED,
+      s"HTTP ${status.code}: $body", domain, requestId)
+
+  def makeIrminGraphQlErrorResponse(messages: List[String], path: Option[List[String]], domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     val field = path.filter(_.nonEmpty).map(_.mkString(".")).getOrElse("graphql")
-    val statusCode = StatusCode.BadGateway // 502
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = field,
-      code = ValidationErrorCode.DEPENDENCY_FAILED,
-      message = message,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
+    response(StatusCode.BadGateway, field, ValidationErrorCode.DEPENDENCY_FAILED,
+      messages.mkString("; "), domain, requestId)
 
   private def makeIrminErrorResponse(error: IrminError): (StatusCode, ErrorResponse) = error match
     case IrminUnavailable(reason)            => makeServiceUnavailableResponse(reason)
@@ -213,29 +151,11 @@ object ErrorResponse {
     case IrminHttpError(status, body)        => makeIrminHttpErrorResponse(status, body)
     case IrminGraphQLError(messages, path)   => makeIrminGraphQlErrorResponse(messages, path)
 
-  def makeVersionConflictResponse(nodeId: String, expected: String, actual: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = s"Version conflict on node $nodeId: expected $expected, found $actual"
-    val statusCode = StatusCode.Conflict  // 409
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "version",
-      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = message,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
+  def makeVersionConflictResponse(nodeId: String, expected: String, actual: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.Conflict, "version", ValidationErrorCode.CONSTRAINT_VIOLATION,
+      s"Version conflict on node $nodeId: expected $expected, found $actual", domain, requestId)
 
-  def makeMergeConflictResponse(branch: String, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) = {
-    val message = s"Merge conflict on branch $branch: $details"
-    val statusCode = StatusCode.Conflict  // 409
-    val errors = List(ErrorDetail(
-      domain = domain,
-      field = "branch",
-      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = message,
-      requestId = requestId
-    ))
-    (statusCode, ErrorResponse(JsonHttpError(statusCode.code, message, errors)))
-  }
+  def makeMergeConflictResponse(branch: String, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.Conflict, "branch", ValidationErrorCode.CONSTRAINT_VIOLATION,
+      s"Merge conflict on branch $branch: $details", domain, requestId)
 }
