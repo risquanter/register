@@ -2510,7 +2510,6 @@ final case class LECCurveResponse(
   name: String,
   curve: Vector[LECPoint],
   quantiles: Map[String, Double],    // p50, p90, p95, p99
-  childIds: Option[List[String]] = None,
   provenances: List[NodeProvenance] = Nil
 )
 ```

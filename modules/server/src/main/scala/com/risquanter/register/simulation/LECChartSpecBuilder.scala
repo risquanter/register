@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.{LECPoint, LECNodeCurve}
   *
   * Accepts `LECNodeCurve` — the core curve drawing type (id, name, curve,
   * quantiles). Does not depend on `LECCurveResponse` or its navigation/
-  * tracing metadata (childIds, provenances) — those are endpoint envelope
+  * tracing metadata (provenances) — those are endpoint envelope
   * concerns, not chart concerns.
   *
   * Generates a self-contained Vega-Lite JSON spec including:

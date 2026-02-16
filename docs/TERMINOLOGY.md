@@ -64,7 +64,6 @@ final case class LECCurveResponse(
   name: String,
   curve: Vector[LECPoint],           // Discrete sampling of LEC function
   quantiles: Map[String, Double],    // Key percentiles (p50, p90, p95, p99)
-  childIds: Option[List[String]] = None,  // Flat child ID references
   provenances: List[NodeProvenance] = Nil
 )
 ```

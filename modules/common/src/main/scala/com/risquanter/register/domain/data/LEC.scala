@@ -57,9 +57,8 @@ object LECCurveResponse {
   *   - Frontend chart cache (`LECState`)
   *
   * Carries exactly what's needed to draw and identify a curve: id, name,
-  * curve points, and quantiles. Navigation metadata (childIds) and tracing
-  * metadata (provenances) live on `LECCurveResponse` — the single-node
-  * endpoint envelope.
+  * curve points, and quantiles. Tracing metadata (provenances) lives on
+  * `LECCurveResponse` — the single-node endpoint envelope.
   *
   * Quantiles are computed server-side from the full RiskResult.outcomeCount
   * TreeMap (exact to simulation resolution — not interpolated from the
