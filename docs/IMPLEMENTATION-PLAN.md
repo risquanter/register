@@ -906,7 +906,7 @@ This tier replaces the standalone Phase X by combining:
 | A13 | Constant response for not-found vs expired | Low | W.3 | Collapse to single opaque 404 at HTTP layer |
 | A14 | Constant-time workspace lookup | Low | W.2/W.3 | `Map.get` already O(1); document principle |
 | A15 | SSE scope to workspace key | Low | W.3 | Confirm SSE uses workspace validation middleware |
-| A16 | Close SSE on workspace expiry/revocation | Medium | W.4 | Reaper notifies SSE hub |
+| A16 | Close SSE on workspace expiry/revocation | Medium | Deferred | Client-side `WorkspaceExpired` error handling is the reliability mechanism; SSE notification deferred |
 | A17 | Seal `GET /risk-trees` with config gate | Trivial | W.3 | Already planned (`list-all-trees.enabled = false`) |
 | A18 | Remove `reflectHeaders` from CORS | Low | W.5 | Replace with explicit origin whitelist |
 | A19 | Environment-specific CORS origin config | Low | W.5 | Config-driven origin list |
@@ -938,7 +938,7 @@ They are either low-effort or structurally load-bearing (retrofitting later chan
 
 - **W.2:** A5 (delete + rotate in trait), A10 (lastAccessedAt), A11 (dual timeout), A14 (constant-time), A29 (creation logging), A33 (structured fields)
 - **W.3:** A6 (DELETE endpoint — cascade hard-delete), A13 (constant response), A15 (SSE workspace scoping), A17 (seal GET /risk-trees), A24-A25 (error sanitisation), A30 (resolve failure logging)
-- **W.4:** A16 (SSE lifecycle on eviction), A27-A28 (rate limiting), A31-A32 (eviction/rate-limit logging)
+- **W.4:** A27-A28 (rate limiting), A31-A32 (eviction/rate-limit logging). A16 (SSE lifecycle on eviction) deferred — client-side error handling is the reliability mechanism
 - **W.5:** A1-A4, A8-A9, A18-A23 (all header/CORS hardening)
 - **W.7:** A26 (500 response body test assertions)
 - **Enterprise:** A7, A34-A39
@@ -1268,7 +1268,7 @@ distinction for internal logging (A30). Deleted workspaces simply don't exist �
 - [ ] `DELETE /w/{key}` cascade-deletes workspace + all trees, returns 204
 - [ ] Old key immediately invalid after rotate or delete — no grace period
 - [ ] SSE scoped to workspace key (A15)
-- [ ] SSE connections dropped on delete/rotate (A16)
+- [ ] SSE connections dropped on delete/rotate (A16) — deferred; client handles `WorkspaceExpired` errors
 - [ ] `GET /risk-trees` blocked by default (A17)
 - [ ] `IrminHttpError` sanitised — generic message to client (A24)
 - [ ] `RepositoryFailure` sanitised — generic message to client (A25)
@@ -1281,59 +1281,96 @@ distinction for internal logging (A30). Deleted workspaces simply don't exist �
 
 **Goal:** Storage hygiene via background eviction and abuse prevention via rate limiting.
 
+**RateLimiter:** ✅ COMPLETE — `RateLimiterLive` with fixed-window IP throttling, HTTP 429.
+
+**WorkspaceReaper — revised design (Feb 2026):**
+
+The reaper is a **background effect, not a service with an API**. Nobody calls
+methods on it. It uses `ZLayer.scoped` + `forkScoped` so the fiber's lifetime
+is managed by the ZIO layer system — automatic graceful shutdown, no leaked
+`Fiber` references.
+
 **Files to create/modify:**
 ```
-server/.../service/workspace/WorkspaceReaper.scala
-server/.../service/workspace/RateLimiter.scala
-server/.../Application.scala  (wire reaper fiber)
+server/.../services/workspace/WorkspaceReaper.scala  (new)
+server/.../Application.scala                          (wire layer)
+server/.../services/workspace/WorkspaceReaperSpec.scala (new)
 ```
 
-**WorkspaceReaper:**
+**Implementation:**
 ```scala
 object WorkspaceReaper:
-  /** Background fiber that periodically evicts expired workspaces.
-    * In enterprise mode (ttl = infinite), this is a no-op.
-    */
-  def start(store: WorkspaceStore, config: WorkspaceConfig): UIO[Fiber[Nothing, Nothing]] =
-    config.mode match
-      case "enterprise" => ZIO.never.fork  // no-op
-      case _            =>
-        val loop = for
-          evicted <- store.evictExpired
-          _       <- ZIO.logInfo(s"Workspace reaper: evicted $evicted expired workspaces")
-                       .when(evicted > 0)
-          _       <- ZIO.sleep(config.reaperInterval)
-        yield ()
-        loop.forever.fork
+  val layer: ZLayer[WorkspaceStore & WorkspaceConfig, Nothing, Unit] =
+    ZLayer.scoped {
+      for
+        config <- ZIO.service[WorkspaceConfig]
+        store  <- ZIO.service[WorkspaceStore]
+        _      <- reapLoop(store, config.reaperInterval)
+                    .when(!isNoOp(config))
+                    .forkScoped
+      yield ()
+    }
+
+  // Enterprise no-op: both TTL and idleTimeout must be zero/negative
+  private def isNoOp(c: WorkspaceConfig): Boolean =
+    (c.ttl.isZero || c.ttl.isNegative) && (c.idleTimeout.isZero || c.idleTimeout.isNegative)
+
+  private def reapLoop(store: WorkspaceStore, interval: Duration): UIO[Nothing] =
+    (ZIO.sleep(interval) *> store.evictExpired).forever
 ```
 
-**RateLimiter (creation throttle):**
-```scala
-trait RateLimiter:
-  def checkCreate(ip: String): IO[RateLimitExceeded, Unit]
+**Key design decisions:**
 
-final class RateLimiterLive(ref: Ref[Map[String, (Int, Instant)]], maxPerHour: Int) extends RateLimiter:
-  def checkCreate(ip: String): IO[RateLimitExceeded, Unit] = ...
-```
+1. **No trait / no `start` method.** The reaper has no callers — it is a
+   layer-scoped daemon. `ZLayer.scoped` + `forkScoped` ties the fiber to the
+   layer scope: automatic interrupt on application shutdown, zero manual
+   fiber management.
 
-- `Ref[Map[IpAddress, (count, windowStart)]]` — sliding window
-- Configurable via `WorkspaceConfig.maxCreatesPerIpPerHour`
-- Returns HTTP 429 Too Many Requests when exceeded
-- Enterprise mode: rate limiting deferred to Istio EnvoyFilter
+2. **No `evictExpiredDetailed` / no SSE notification on eviction (Option B).**
+   SSE is fire-and-forget (`Hub.sliding`). A `workspace_evicted` SSE event
+   would reach only *currently connected* clients. Disconnected clients would
+   miss it and must handle `WorkspaceExpired` API errors anyway. Since the
+   client **must** handle `WorkspaceExpired` errors regardless, the SSE event
+   adds interface complexity (`evictExpiredDetailed`, new SSE event type) with
+   no reliability gain. See "Client-side error handling" below.
 
-**Application.scala integration:**
-- Start reaper fiber in `run` method (alongside existing server start)
-- Graceful shutdown via `Fiber.interrupt` on app termination
+3. **Enterprise no-op guards both `ttl` AND `idleTimeout`.**
+   `Workspace.isExpired` fires on *either* absolute or idle timeout. The
+   reaper is only truly a no-op when both are disabled (zero/negative).
+
+4. **No changes to `WorkspaceStore` trait.** The existing `evictExpired: UIO[Int]`
+   is sufficient. No interface change required.
+
+5. **Application.scala:** Only change is adding `WorkspaceReaper.layer` to
+   `appLayer`. No changes to `program` — the reaper is purely a layer concern.
+
+**Client-side error handling (approved enhancement):**
+
+The frontend must treat `WorkspaceExpired` / `WorkspaceNotFound` API errors as
+first-class concerns in its error handling layer:
+- Intercept these errors in the HTTP client layer (all API calls)
+- Show an "expired workspace" modal with a "Create New Workspace" action
+- Clear local workspace state (router returns to landing)
+- This is **the** reliability mechanism — SSE is a courtesy, error handling is the contract
+
+This is more reliable than SSE notification because it works regardless of
+connection state and requires no server-side changes beyond what already exists.
 
 **Checkpoint:**
 - [ ] Reaper fiber runs at configured interval in free-tier mode
-- [ ] Reaper is no-op in enterprise mode
-- [ ] Evicted workspaces are logged (A31)
-- [ ] Rate limiter returns 429 when threshold exceeded (A27)
-- [ ] Rate limiter covers resolve attempts per IP, not just creation (A28)
-- [ ] Rate-limit trigger events logged (A32)
-- [ ] Reaper notifies SSE hub to close connections for evicted workspaces (A16)
-- [ ] Reaper fiber shuts down gracefully with application
+- [ ] Reaper is no-op when both `ttl` and `idleTimeout` are zero/negative
+- [ ] Evicted workspaces are logged (A31 — already in `evictExpired`)
+- [x] Rate limiter returns 429 when threshold exceeded (A27) ✅
+- [ ] Rate limiter covers resolve attempts per IP (A28)
+- [x] Rate-limit trigger events logged (A32) ✅
+- [ ] Reaper fiber shuts down gracefully with application (automatic via `forkScoped`)
+- [ ] Client handles `WorkspaceExpired` errors as first-class concern
+
+**A16 status (SSE lifecycle on eviction):** Deferred. The reaper does **not**
+send SSE events on eviction — client-side error handling is the reliability
+mechanism. A16 may be revisited if heartbeat-based workspace health checks are
+added in a future phase (the server would send periodic heartbeats, and the
+client would probe workspace validity on reconnect).
 
 ---
 

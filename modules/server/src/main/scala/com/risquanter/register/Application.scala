@@ -15,7 +15,7 @@ import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.cache.{TreeCacheManager, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
+import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive, WorkspaceReaper}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -75,8 +75,8 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig] =
-    ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig](
+  val appLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig & WorkspaceReaper] =
+    ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig & WorkspaceReaper](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
@@ -109,6 +109,7 @@ object Application extends ZIOAppDefault {
       InvalidationHandler.live,
       WorkspaceStoreLive.layer,
       RateLimiterLive.layer,
+      WorkspaceReaper.layer,
       SSEController.layer,
       CacheController.layer,
       ZLayer.fromZIO(RiskTreeController.makeZIO),
