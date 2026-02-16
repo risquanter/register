@@ -96,8 +96,8 @@ object SecurityHeadersInterceptorSpec extends ZIOSpecDefault:
       test("does not match /risk-trees") {
         assertTrue(!isWorkspacePath(List("risk-trees")))
       },
-      test("does not match /events/tree/{id}") {
-        assertTrue(!isWorkspacePath(List("events", "tree", "abc")))
+      test("matches /w/{key}/events/tree/{id} (A15: SSE workspace-scoped)") {
+        assertTrue(isWorkspacePath(List("w", "abc123", "events", "tree", "tree-1")))
       },
       test("does not match /docs") {
         assertTrue(!isWorkspacePath(List("docs")))

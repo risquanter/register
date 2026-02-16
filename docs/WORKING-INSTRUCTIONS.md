@@ -230,7 +230,7 @@ After implementation, verify that new components are **actually connected** to t
 curl http://localhost:8080/docs/openapi.json | jq '.paths | keys'
 
 # Verify specific endpoint exists
-curl -I http://localhost:8080/events/tree/1
+curl -I http://localhost:8080/w/{key}/events/tree/1
 
 # Run all tests including integration
 sbt test

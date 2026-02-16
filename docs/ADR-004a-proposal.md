@@ -86,7 +86,7 @@ Server-Sent Events stream LEC updates to connected browsers:
 
 ```scala
 // Conceptual: Endpoint pattern
-// GET /events/tree/{treeId}
+// GET /w/{key}/events/tree/{treeId}  (A15: workspace-scoped)
 case class TreeEvent(
   nodeId: NodeId,
   eventType: String,  // "lec_updated" | "node_changed" | "conflict"

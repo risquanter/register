@@ -1,9 +1,11 @@
 # ADR-021: Capability URLs for Unauthenticated Demo Access
 
-**Status:** Proposed  
-**Date:** 2026-02-12  
+**Status:** Amended  
+**Date:** 2026-02-12 (amended 2026-02-16)  
 **Tags:** security, capability-url, demo, access-control, ids  
 **Related:** [ADR-012](./ADR-012.md) (Service Mesh Strategy), [ADR-018](./ADR-018-nominal-wrappers.md) (Nominal Wrappers)
+
+> **Amendment (2026-02-16):** This ADR's concepts were implemented under different names. `ShareToken` → `WorkspaceKey`, `DemoStore` → `WorkspaceStore`, `/demo/*` routes → `/w/{key}/*` routes. The cryptographic properties (128-bit SecureRandom, base64url, 22-char) are preserved unchanged. See [IMPLEMENTATION-PLAN.md Phase W](./IMPLEMENTATION-PLAN.md) for the implemented design. The original text below is retained for historical context.
 
 ---
 
