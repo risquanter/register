@@ -613,8 +613,7 @@ Frontend Features:
 ```
 
 **Technical Needs:**
-- ✅ Already have: Per-node LEC via `LECCurveResponse` (flat `childIds` structure)
-- 🔄 Future: Frontend implementation (Scala.js + Laminar + Vega-Lite)
+- ✅ Already have: Per-node LEC via `LECCurveResponse` (flat structure, client-side navigation)\n- ✅ Implemented: Frontend (Scala.js + Laminar + Vega-Lite)", "oldString": "- ✅ Already have: Per-node LEC via `LECCurveResponse` (flat `childIds` structure)\n- 🔄 Future: Frontend implementation (Scala.js + Laminar + Vega-Lite)
 - 🔄 Future: Memoization/caching of expanded nodes
 
 #### **3. Scenario Analysis**

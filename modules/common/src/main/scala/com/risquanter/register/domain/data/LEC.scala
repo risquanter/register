@@ -26,7 +26,7 @@ object LECPoint {
   * Contains curve points sampled at specific loss values (ticks).
   * 
   * Design (post ADR-004a/005 redesign):
-  * - Flat structure: no embedded children, just childIds for navigation
+  * - Flat structure: client reads child navigation from tree structure
   * - Client fetches child curves separately via node-specific endpoints
   * - Enables per-node caching and SSE streaming
   * 
@@ -34,12 +34,6 @@ object LECPoint {
   * @param name Human-readable name
   * @param curve Loss exceedance curve points (loss → P(Loss >= loss))
   * @param quantiles Key percentiles (p50, p90, p95, p99) for quick reference
-  * @param childIds '''DEPRECATED''' — Navigation child IDs. The frontend reads childIds from the
-  *   tree structure it already holds in memory (TreeViewState), making this field
-  *   redundant. Retained until end of Phase F for backward compatibility.
-  *   If no consumer reads this field by the Phase F review checkpoint, delete it.
-  *   If a legitimate use case arises during E.5–F, raise it as a re-evaluation
-  *   point before depending on it.
   * @param provenances Opt-in provenance metadata for reproducibility (via ?includeProvenance=true)
   */
 final case class LECCurveResponse(
@@ -47,7 +41,6 @@ final case class LECCurveResponse(
   name: String,
   curve: Vector[LECPoint],
   quantiles: Map[String, Double],
-  childIds: Option[List[String]] = None,
   provenances: List[NodeProvenance] = Nil
 )
 

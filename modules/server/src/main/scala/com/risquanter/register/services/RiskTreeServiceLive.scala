@@ -390,12 +390,6 @@ class RiskTreeServiceLive private (
         // Calculate quantiles
         quantiles = LECGenerator.calculateQuantiles(result)
         
-        // Get child IDs if portfolio node
-        childIds = node match {
-          case portfolio: RiskPortfolio => Some(portfolio.childIds.map(_.value).toList)
-          case _: RiskLeaf => None
-        }
-        
         // Convert to response format
         lecPoints = curvePoints.map { case (loss, prob) => LECPoint(loss, prob) }
         response = LECCurveResponse(
@@ -403,7 +397,6 @@ class RiskTreeServiceLive private (
           name = node.name,  // Use node.name (display name), not result.nodeId (which is the node ID)
           curve = lecPoints,
           quantiles = quantiles,
-          childIds = childIds,
           provenances = if (includeProvenance) result.provenances else Nil  // Filter provenance on output
         )
       } yield response

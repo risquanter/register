@@ -213,12 +213,11 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             response.curve.nonEmpty &&
             response.quantiles.nonEmpty &&
             response.quantiles.contains("p50") &&
-            response.quantiles.contains("p90") &&
-            response.childIds.isEmpty  // Leaf has no children
+            response.quantiles.contains("p90")
         }
       },
 
-      test("getLECCurve returns curve with childIds for portfolio node") {
+      test("getLECCurve returns curve data for portfolio node") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
           name = "Portfolio Test",
           portfolios = Seq(RiskPortfolioDefinitionRequest("Portfolio", None)),
@@ -253,9 +252,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         } yield (tree, response)
 
         program.assert { case (tree, response) =>
-          val childIds = tree.index.children.getOrElse(tree.rootId, Nil).map(_.value.toString).toSet
           response.id == tree.rootId.value.toString &&
-            response.childIds.exists(_.toSet == childIds)
+            response.curve.nonEmpty &&
+            response.quantiles.nonEmpty
         }
       },
 
