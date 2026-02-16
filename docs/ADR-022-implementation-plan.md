@@ -45,11 +45,30 @@ Assessment for each:
 
 After the `final class` conversion, these messages would use `$key` (which prints `WorkspaceKey(***)`) rather than `key.reveal`. No call site needs the raw value.
 
-### D3: `Config.Secret` for future infrastructure secrets
+### D3: `Config.Secret` for future infrastructure secrets — boundary with `WorkspaceKey`
 
 `zio.Config.Secret` is ZIO's built-in type for loading sensitive config values (database passwords, API keys) from environment variables or config files. Its `toString` returns `"Secret(<redacted>)"`.
 
 Currently unused — no config-loaded secrets exist. Documented as the pattern to follow when infrastructure secrets are added (e.g., SpiceDB pre-shared key, direct database connection).
+
+**Why not use `Config.Secret` for `WorkspaceKey`?** Three reasons:
+
+1. **Accessor shape:** `Config.Secret.value` returns `Chunk[Char]`, not `String`. Every call site (JSON codecs, Tapir codec, URL embedding, Iron validation) works with `String`. Converting back and forth adds friction with zero security benefit.
+2. **`unapply` exists:** `Config.Secret` has a compiler-generated `unapply` that extracts the raw value. For config-loaded secrets this is acceptable (see D3a below). For `WorkspaceKey` — which flows through error types, pattern matches, and logging — it's a leakage vector.
+3. **Design intent:** `Config.Secret` is for values loaded from config and consumed immediately. `WorkspaceKey` is generated at runtime and flows through the entire request lifecycle (endpoints → controllers → stores → frontend state → error types).
+
+**Why is `unapply` acceptable on `Config.Secret` but not on `WorkspaceKey`?** (D3a)
+
+The threat model differs:
+
+| | `Config.Secret` | `WorkspaceKey` |
+|---|---|---|
+| **Where it's pattern-matched** | Config loading code only — `case Secret(raw) =>` in a config parser | Error handlers, controller logic, store lookups, test assertions |
+| **Logging exposure** | Config code rarely logs; values consumed immediately | Error `getMessage`, string interpolation in controllers, test output |
+| **Lifecycle** | Created once at startup, consumed, wiped | Created per-request, stored in maps, held in frontend `Var`, embedded in error types, serialised to JSON |
+| **Number of call sites** | 1-2 (config layer) | 14+ across 10 files |
+
+A stray `case Secret(raw) =>` in a config parser is low-risk — it's a single controlled call site that developers review. A stray `case WorkspaceKey(raw) =>` in an error handler or controller could silently embed the credential in a log line or exception message. The `final class` (no `unapply`) makes that pattern a **compile error**.
 
 ### D4: Exhaustive error encoding — separate from `WorkspaceKey` conversion
 

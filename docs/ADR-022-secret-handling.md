@@ -74,20 +74,54 @@ For config-loaded secrets, use ZIO's built-in `Config.Secret` (already a depende
 val dbPassword: Config[Config.Secret] = Config.secret("DB_PASSWORD")
 ```
 
-### 2. WorkspaceKey — Override `toString`
+### 2. WorkspaceKey — Convert to `final class`
 
-`WorkspaceKey` is the sole credential in Layer 0 (capability-only mode). It is currently a `case class` with auto-generated `toString` that prints the full token value.
-
-Rather than wrapping in `Secret[WorkspaceKey]` (which would break JSON codecs, Tapir codecs, frontend state, and error types across the codebase), override `toString` on the existing `case class`:
+`WorkspaceKey` is the sole credential in Layer 0 (capability-only mode). Rather than creating a generic `Secret[A]` wrapper and then not using it on the only candidate, convert `WorkspaceKey` itself to a `final class` — it *is* the secret type:
 
 ```scala
-case class WorkspaceKey(value: String):
+final class WorkspaceKey private (private val raw: String):
   override def toString: String = "WorkspaceKey(***)"
+  def reveal: String = raw
+  override def hashCode: Int = raw.hashCode
+  override def equals(that: Any): Boolean = that match
+    case wk: WorkspaceKey => raw == wk.raw
+    case _                => false
+
+object WorkspaceKey:
+  def apply(value: String): WorkspaceKey = new WorkspaceKey(value)
+  given JsonEncoder[WorkspaceKey] = JsonEncoder[String].contramap(_.reveal)
+  given JsonDecoder[WorkspaceKey] = JsonDecoder[String].mapOrFail(s =>
+    WorkspaceKey.fromString(s).left.map(_.mkString(", ")))
 ```
 
-This is a **minimal, non-breaking change** — JSON serialisation still uses `value` (via the explicit `JsonEncoder`/`JsonDecoder`), Tapir codecs still work, and the type remains a `case class` for pattern matching in error handlers. The only change is that `println(key)` and string interpolation `s"key=$key"` now print `WorkspaceKey(***)` instead of the raw token.
+This gives all the `Secret[A]` properties — no `copy`, no `unapply`, `private val`, redacted `toString` — without an additional layer of indirection. The JSON codecs use `reveal` explicitly (opt-in access), Tapir codec uses `reveal`, and `println(key)` prints `WorkspaceKey(***)`.
 
-**Effort:** Trivial — one line added to `OpaqueTypes.scala`. No downstream changes.
+**Effort:** ~40 lines across 6 files (see [implementation plan](./ADR-022-implementation-plan.md)).
+
+### 2a. Config.Secret vs WorkspaceKey — Boundary Decision
+
+Two tools exist for secret handling. They serve **different threat models**:
+
+| Property | `WorkspaceKey` (`final class`) | `zio.Config.Secret` |
+|----------|-------------------------------|---------------------|
+| **Lifecycle** | Generated at runtime, flows through request lifecycle (endpoints, controllers, stores, frontend state, error types) | Loaded once at startup from env/config, consumed immediately |
+| **Accessor** | `.reveal: String` | `.value: Chunk[Char]`, `.stringValue: String` |
+| **Pattern matching** | No `unapply` — cannot be extracted accidentally in `match`/`for` | Has `unapply` — but acceptable because config values aren't pattern-matched in error handlers or logging |
+| **Validation** | Iron-validated via `fromString` | No validation — raw config value |
+| **Serialisation** | Explicit JSON codecs via `reveal`, Tapir codec | No JSON codecs needed — never serialised to clients |
+| **Where it appears** | URL paths, JSON responses, error types, frontend Var/Signal | Config loading only — `Config[Config.Secret]` |
+
+**Why `unapply` is acceptable on `Config.Secret` but not on `WorkspaceKey`:**
+
+| | `Config.Secret` | `WorkspaceKey` |
+|---|---|---|
+| **Pattern-matched where?** | Config loading code only — 1–2 controlled call sites | Error handlers, controllers, stores, tests — 14+ sites across 10 files |
+| **Logging risk** | Config code rarely logs; value consumed immediately | `getMessage`, string interpolation, test output — many vectors |
+| **Lifecycle** | Created once at startup, consumed, wiped | Created per-request, stored in maps, held in frontend `Var`, embedded in errors, serialised to JSON |
+
+A stray `case Secret(raw) =>` in a config parser is low-risk — one reviewed call site. A stray `case WorkspaceKey(raw) =>` in an error handler could silently embed the credential in a log line. The `final class` (no `unapply`) makes that pattern a **compile error**.
+
+**Rule:** Use `WorkspaceKey` (or similar `final class` pattern) for credentials that flow through application code. Use `Config.Secret` for infrastructure secrets loaded from environment/config that never leave the config layer. See [D3 in the implementation plan](./ADR-022-implementation-plan.md) for details.
 
 ### 3. Scoped Lifecycle — Acquire, Use, Wipe
 
@@ -180,10 +214,10 @@ Exception `getMessage` must never include credentials or tokens:
 val key = WorkspaceKey("abcdefghijklmnopqrstuv")
 log.info(s"Resolving $key") // prints "Resolving WorkspaceKey(abcdefghijklmnopqrstuv)"
 
-// GOOD: override toString on the case class
-case class WorkspaceKey(value: String):
-  override def toString: String = "WorkspaceKey(***)"
+// GOOD: final class with redacted toString (Decision 2)
+// WorkspaceKey is a final class — toString returns "WorkspaceKey(***)"
 log.info(s"Resolving $key") // prints "Resolving WorkspaceKey(***)"
+// Access requires explicit opt-in: key.reveal
 ```
 
 ### ❌ Raw String for Infrastructure Secrets
@@ -230,11 +264,10 @@ case RepositoryFailure(reason) =>
 
 | Location | Pattern | Effort |
 |----------|---------|--------|
-| `WorkspaceKey` (`OpaqueTypes.scala`) | Override `toString` → `"WorkspaceKey(***)"` | Trivial (1 line) |
+| `WorkspaceKey` (`OpaqueTypes.scala`) | Convert to `final class` with `reveal`, `equals`/`hashCode`, redacted `toString` | Low (~40 lines across 6 files) |
 | `ErrorResponse.encode` | Split into `encode` + `encodeAppError` + `encodeSimError` + `encodeIrminError` | Low (~30 lines refactored) |
 | `build.sbt` | Add `-Wconf:msg=match may not be exhaustive:error` | Trivial (1 line) |
-| `Secret[A]` | New type in `domain.data` — `final class`, no codecs | Low (when first credential enters app code) |
-| `Config.Secret` | Use for infrastructure secrets (DB, SpiceDB) | Trivial (when added) |
+| `Config.Secret` | Use for infrastructure secrets (DB, SpiceDB) — boundary documented in Decision 2a | Trivial (when added) |
 
 ---
 
