@@ -7,7 +7,7 @@ import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, ApiConfig, WorkspaceConfig}
-import com.risquanter.register.http.HttpApi
+import com.risquanter.register.http.{HttpApi, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
@@ -126,12 +126,16 @@ object Application extends ZIOAppDefault {
 
     // CORS at the tapir interceptor layer — handles OPTIONS preflight before
     // route matching, avoiding the 405 that zio-http Middleware.cors produces.
+    // A18: explicit header whitelist (no reflectHeaders)
+    // A20: preflight caching (maxAge 1 hour)
     tapirCorsConfig = TapirCORSConfig.default
       .allowMatchingOrigins(origin => corsConfig.normalised.contains(origin))
-      .reflectHeaders
-      .exposeAllHeaders
+      .allowHeaders("Content-Type", "Accept", "Authorization")
+      .exposeHeaders("Content-Type")
+      .maxAge(scala.concurrent.duration.Duration(3600, "s"))
     serverOptions = ZioHttpServerOptions
       .customiseInterceptors[Any]
+      .prependInterceptor(SecurityHeadersInterceptor.interceptor)
       .corsInterceptor(CORSInterceptor.customOrThrow[Task](tapirCorsConfig))
       .options
     httpApp = ZioHttpInterpreter(serverOptions).toHttp(endpoints)

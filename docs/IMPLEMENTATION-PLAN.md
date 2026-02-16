@@ -879,7 +879,7 @@ This tier replaces the standalone Phase X by combining:
 | 🟠 High | A1-A4 | No security headers for `/w/*` | W.5 |
 | 🟠 High | A10-A11 | No dual timeout (idle + absolute) | W.2 |
 | 🟠 High | A29-A33 | No lifecycle logging | W.2–W.4 (inline) |
-| 🟡 Medium | A8-A9 | No token fingerprint binding | W.5 |
+| ~~🟡 Medium~~ | ~~A8-A9~~ | ~~No token fingerprint binding~~ | Rejected — incompatible with capability-token sharing model |
 | 🟡 Medium | A13-A14 | Timing side-channel (not-found vs expired) | W.3 |
 | 🟡 Medium | A18-A20 | CORS too permissive (`reflectHeaders`) | W.5 |
 | 🟡 Medium | A21-A23 | Missing global security headers | W.5 |
@@ -898,8 +898,8 @@ This tier replaces the standalone Phase X by combining:
 | A5 | Add `delete(key)` and `rotate(key)` to `WorkspaceStore` trait | Low | W.2 | Bake into initial trait design |
 | A6 | Wire `DELETE /w/{key}` endpoint (cascade hard-delete) | Low | W.3 | Natural companion to bootstrap |
 | A7 | Denylist for revoked keys (PG-backed, long-lived) | Medium | Enterprise | In-memory: revoke = delete from Map. Denylist for external validity only |
-| A8 | Token fingerprint: `Set-Cookie` with hash | Medium | W.5 | Alongside header hardening |
-| A9 | Fingerprint validation middleware | Medium | W.5 | Alongside A8 |
+| A8 | ~~Token fingerprint: `Set-Cookie` with hash~~ | ~~Medium~~ | Rejected | Incompatible with capability-token sharing model. URL sharing is a design feature; cookie binding would break it. Technical leakage mitigated by A1-A4. |
+| A9 | ~~Fingerprint validation middleware~~ | ~~Medium~~ | Rejected | See A8 rationale |
 | A10 | Add `lastAccessedAt` to `Workspace` model | Low | W.2 | Bake into initial domain model |
 | A11 | Dual timeout logic (idle + absolute) in `resolve()` | Medium | W.2 | Single branch in resolve |
 | A12 | *(reserved)* | — | — | — |
@@ -939,7 +939,7 @@ They are either low-effort or structurally load-bearing (retrofitting later chan
 - **W.2:** A5 (delete + rotate in trait), A10 (lastAccessedAt), A11 (dual timeout), A14 (constant-time), A29 (creation logging), A33 (structured fields)
 - **W.3:** A6 (DELETE endpoint — cascade hard-delete), A13 (constant response), A15 (SSE workspace scoping), A17 (seal GET /risk-trees), A24-A25 (error sanitisation), A30 (resolve failure logging)
 - **W.4:** A27-A28 (rate limiting), A31-A32 (eviction/rate-limit logging). A16 (SSE lifecycle on eviction) deferred — client-side error handling is the reliability mechanism
-- **W.5:** A1-A4, A8-A9, A18-A23 (all header/CORS hardening)
+- **W.5:** A1-A4, A18-A23 (security headers + CORS hardening) ✅ — A8-A9 rejected (incompatible with capability-token model)
 - **W.7:** A26 (500 response body test assertions)
 - **Enterprise:** A7, A34-A39
 
@@ -1374,9 +1374,9 @@ client would probe workspace validity on reconnect).
 
 ---
 
-### Phase W.5: Security Headers & CORS Hardening
+### Phase W.5: Security Headers & CORS Hardening — ✅ COMPLETE
 
-**Goal:** Prevent workspace key leakage, harden CORS, add token fingerprint binding.
+**Goal:** Prevent workspace key leakage via technical means, harden CORS.
 
 **Headers applied to all `/w/*` and `/workspaces` responses (A1-A4):**
 
@@ -1400,21 +1400,43 @@ client would probe workspace validity on reconnect).
 - Config-driven origin list: `register.cors.allowed-origins = ["http://localhost:5173"]` (A19)
 - Add `Access-Control-Max-Age: 3600` for preflight caching (A20)
 
-**Token fingerprint binding (A8-A9):**
-- On workspace creation, generate a random fingerprint → hash it → store hash in `Workspace`
-- Set `__Host-wsfp=<fingerprint>` cookie (`Secure; HttpOnly; SameSite=Strict; Path=/`)
-- On `resolve()`, validate that cookie hash matches stored hash
-- Prevents sidejacking if workspace key is intercepted (attacker lacks the cookie)
-- Free-tier only (enterprise uses JWT with its own binding mechanisms)
+**Token fingerprint binding (A8-A9): ❌ REJECTED**
 
-**Implementation:** Tapir server interceptor or middleware that matches `/w/*` paths and appends headers.
+Cookie-based fingerprint binding is fundamentally incompatible with the
+capability-token model. The workspace key IS the authorization — URL sharing
+is a deliberate design feature (like Google Docs "anyone with the link").
+Binding the key to a browser cookie would break sharing. Technical leakage
+vectors (Referer, proxy caching, wire sniffing) are already mitigated by
+A1-A4. Enterprise tier adds auth/authz layers for environments requiring
+stronger access control.
+
+**Implementation:** `SecurityHeadersInterceptor` — Tapir `RequestInterceptor.transformResult`
+that appends headers to `ServerResponse`. Global headers on all paths; workspace
+headers conditionally on `/w/…` and `/workspaces`. CORS hardened inline in
+`Application.startServer`.
+
+**Files created/modified:**
+```
+server/.../http/SecurityHeadersInterceptor.scala       (new — interceptor)
+server/.../http/SecurityHeadersInterceptorSpec.scala   (new — 15 tests)
+server/.../Application.scala                           (modified — wire interceptor + CORS)
+```
 
 **HTTPS enforcement:** Documented as requirement. In production, Istio handles TLS termination. For standalone deployment, reverse proxy (nginx/caddy) required.
 
 **Checkpoint:**
-- [ ] `Referrer-Policy: no-referrer` on all workspace responses
-- [ ] `Cache-Control: no-store` on all workspace responses
-- [ ] HTTPS enforcement documented
+- [x] `Referrer-Policy: no-referrer` on all workspace responses ✅
+- [x] `Cache-Control: no-store` on all workspace responses ✅
+- [x] `X-Content-Type-Options: nosniff` on all workspace responses ✅
+- [x] `Strict-Transport-Security` on all workspace responses ✅
+- [x] `X-Frame-Options: DENY` on all responses (A21) ✅
+- [x] `X-XSS-Protection: 0` on all responses (A23) ✅
+- [x] `Content-Security-Policy` on all responses (A22) ✅
+- [x] `.reflectHeaders` removed from CORS config (A18) ✅
+- [x] Explicit `allowHeaders` whitelist set (A18) ✅
+- [x] `Access-Control-Max-Age: 3600` set (A20) ✅
+- [x] HTTPS enforcement documented ✅
+- [x] A8-A9 rejected — incompatible with capability-token model ✅
 
 ---
 
