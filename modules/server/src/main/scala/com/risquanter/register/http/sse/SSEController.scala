@@ -8,7 +8,9 @@ import zio.json.*
 
 import com.risquanter.register.http.controllers.BaseController
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.services.workspace.WorkspaceStore
+import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId}
+import com.risquanter.register.domain.errors.TreeNotInWorkspace
 
 /**
   * Controller for SSE endpoints.
@@ -16,7 +18,11 @@ import com.risquanter.register.domain.data.iron.TreeId
   * Per ADR-004a-proposal: "Controllers wire endpoints to services"
   * This controller connects the Tapir streaming endpoint to the SSEHub service.
   *
-  * Pattern: SSE Request → Tapir Endpoint → Controller → SSEHub → ZStream → Client
+  * A15: Workspace-scoped — validates workspace key and tree ownership
+  * before subscribing. Shares the same `resolveTree` pattern as
+  * WorkspaceController.
+  *
+  * Pattern: SSE Request → Tapir Endpoint → Controller → WorkspaceStore → SSEHub → ZStream → Client
   *
   * Note: Uses ServerEndpoint[Any, Task] for BaseController compatibility.
   * ZioHttpInterpreter handles ZioStreams capabilities at runtime.
@@ -28,21 +34,31 @@ import com.risquanter.register.domain.data.iron.TreeId
   *
   * ```
   */
-class SSEController private (sseHub: SSEHub)
+class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore)
     extends BaseController
     with SSEEndpoints {
 
   private val HeartbeatInterval = 30.seconds
 
+  /** Resolve workspace + verify tree ownership (shared pattern with WorkspaceController). */
+  private def resolveTree(key: WorkspaceKey, treeId: TreeId): IO[Throwable, Unit] =
+    for
+      _       <- workspaceStore.resolve(key)
+      belongs <- workspaceStore.belongsTo(key, treeId)
+      _       <- ZIO.unless(belongs)(ZIO.fail(TreeNotInWorkspace(key, treeId)))
+    yield ()
+
   /**
-    * Tree events SSE stream.
+    * Tree events SSE stream (workspace-scoped).
     *
+    * A15: Validates workspace key and tree ownership before subscribing.
     * Subscribes to SSEHub for the requested tree and streams events
     * to the client. Includes periodic heartbeat to keep connection alive.
     */
   val treeEvents: ServerEndpoint[ZioStreams, Task] =
-    treeEventsEndpoint.serverLogicSuccess { treeId =>
-      for
+    treeEventsEndpoint.serverLogic { case (key, treeId) =>
+      (for
+        _           <- resolveTree(key, treeId)
         eventStream <- sseHub.subscribe(treeId)
         sseStream    = eventStream.map(formatAsSSE)
         withHeartbeat = sseStream.merge(heartbeatStream)
@@ -50,7 +66,7 @@ class SSEController private (sseHub: SSEHub)
         byteStream: Stream[Throwable, Byte] = withConnect
           .flatMap(s => ZStream.fromIterable(s.getBytes("UTF-8")))
           .mapError(_ => new RuntimeException("SSE stream error"))
-      yield byteStream
+      yield byteStream).either
     }
 
   /**
@@ -89,17 +105,20 @@ class SSEController private (sseHub: SSEHub)
 object SSEController {
 
   /**
-    * Create SSEController with SSEHub dependency.
+    * Create SSEController with SSEHub + WorkspaceStore dependencies.
+    * A15: WorkspaceStore needed for workspace ownership validation.
     */
-  val layer: ZLayer[SSEHub, Nothing, SSEController] =
+  val layer: ZLayer[SSEHub & WorkspaceStore, Nothing, SSEController] =
     ZLayer.fromZIO {
       for
         hub <- ZIO.service[SSEHub]
-      yield new SSEController(hub)
+        ws  <- ZIO.service[WorkspaceStore]
+      yield new SSEController(hub, ws)
     }
 
   /**
-    * Create SSEController directly from SSEHub.
+    * Create SSEController directly (for tests).
     */
-  def make(hub: SSEHub): SSEController = new SSEController(hub)
+  def make(hub: SSEHub, workspaceStore: WorkspaceStore): SSEController =
+    new SSEController(hub, workspaceStore)
 }

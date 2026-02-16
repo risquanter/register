@@ -9,7 +9,7 @@ import zio.stream.*
 
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId}
 
 /**
   * SSE endpoint definitions for real-time updates.
@@ -17,13 +17,17 @@ import com.risquanter.register.domain.data.iron.TreeId
   * Per ADR-004a-proposal: Uses Tapir streamBody with ZioStreams for consistency 
   * with existing endpoint patterns and Swagger documentation.
   *
-  * Endpoint: GET /events/tree/{treeId}
+  * Endpoint: GET /w/{key}/events/tree/{treeId}
   * Returns: Server-Sent Events stream (text/event-stream)
+  *
+  * A15: Workspace-scoped — requires valid workspace key and tree ownership.
   */
 trait SSEEndpoints extends BaseEndpoint {
 
   /**
-    * SSE stream endpoint for tree updates.
+    * SSE stream endpoint for tree updates (workspace-scoped).
+    *
+    * A15: Validates workspace key and tree ownership before subscribing.
     *
     * Clients connect to receive real-time notifications about:
     * - LEC curve updates
@@ -32,13 +36,15 @@ trait SSEEndpoints extends BaseEndpoint {
     *
     * Response format: text/event-stream with newline-delimited JSON events
     */
-  val treeEventsEndpoint: PublicEndpoint[TreeId, Unit, Stream[Throwable, Byte], ZioStreams] =
-    endpoint
+  val treeEventsEndpoint =
+    baseEndpoint
       .tag("events")
       .name("treeEvents")
-      .summary("Subscribe to real-time tree updates")
+      .summary("Subscribe to real-time tree updates (workspace-scoped)")
       .description(
         """Server-Sent Events stream for receiving real-time updates about a risk tree.
+          |
+          |Requires a valid workspace key. The tree must belong to the workspace.
           |
           |Event types:
           |- `lec_updated`: LEC curve recomputed for a node
@@ -54,7 +60,7 @@ trait SSEEndpoints extends BaseEndpoint {
           |```
           |""".stripMargin
       )
-      .in("events" / "tree" / path[TreeId]("treeId"))
+      .in("w" / path[WorkspaceKey]("key") / "events" / "tree" / path[TreeId]("treeId"))
       .get
       .out(
         streamBody(ZioStreams)(

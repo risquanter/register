@@ -20,7 +20,7 @@ import com.risquanter.register.http.codecs.IronTapirCodecs.given
   * Security features represented here:
   *   - A6:  `DELETE /w/{key}` hard delete endpoint
   *   - A13: Workspace errors mapped to opaque 404
-  *   - A15: SSE scoped to workspace key (future)
+  *   - A15: SSE scoped to workspace key (implemented in SSEEndpoints)
   *   - A27: `POST /workspaces` accepts caller IP via X-Forwarded-For
   */
 trait WorkspaceEndpoints extends BaseEndpoint:
