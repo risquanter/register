@@ -12,13 +12,14 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.configs.*
 import com.risquanter.register.http.cache.CacheController
-import com.risquanter.register.http.controllers.RiskTreeController
+import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeServiceLive, SimulationSemaphore}
 import com.risquanter.register.services.cache.{RiskResultResolverLive, TreeCacheManager}
 import com.risquanter.register.services.pipeline.InvalidationHandler
+import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
 
@@ -48,10 +49,13 @@ object HttpTestHarness:
 
   private val defaultCorsConfig = CorsConfig(allowedOrigins = List("*"))
 
+  private val defaultWorkspaceConfig = WorkspaceConfig()
+
   final case class HarnessConfig(
     simulation: SimulationConfig = defaultSimulationConfig,
     telemetry: TelemetryConfig = defaultTelemetryConfig,
-    cors: CorsConfig = defaultCorsConfig
+    cors: CorsConfig = defaultCorsConfig,
+    workspace: WorkspaceConfig = defaultWorkspaceConfig
   )
 
   /** In-memory HTTP server (useful for lightweight component tests). */
@@ -106,14 +110,16 @@ object HttpTestHarness:
       port: Int,
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       cfg: HarnessConfig
-  ): ZLayer[Any, Throwable, Server & CorsConfig & RiskTreeController & SSEController & CacheController] =
+  ): ZLayer[Any, Throwable, Server & CorsConfig & RiskTreeController & WorkspaceController & SSEController & CacheController] =
     ZLayer.make[
-      Server & CorsConfig & RiskTreeController & SSEController & CacheController
+      Server & CorsConfig & RiskTreeController & WorkspaceController & SSEController & CacheController
     ](
       ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port)),
       ZLayer.succeed(cfg.simulation),
       ZLayer.succeed(cfg.telemetry),
       ZLayer.succeed(cfg.cors),
+      ZLayer.succeed(cfg.workspace),
+      ZLayer.succeed(ApiConfig()),
       ZLayer.fromZIO(
         ZIO.service[ServerConfig].map(sc => Server.Config.default.binding(sc.host, sc.port))
       ) >>> Server.live,
@@ -126,9 +132,12 @@ object HttpTestHarness:
       RiskResultResolverLive.layer,
       SSEHub.live,
       InvalidationHandler.live,
+      WorkspaceStoreLive.layer,
+      RateLimiterLive.layer,
       SSEController.layer,
       CacheController.layer,
-      ZLayer.fromZIO(RiskTreeController.makeZIO)
+      ZLayer.fromZIO(RiskTreeController.makeZIO),
+      ZLayer.fromZIO(WorkspaceController.makeZIO)
     )
 
   private def waitForHealth(baseUrl: String): Task[Unit] =

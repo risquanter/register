@@ -6,23 +6,24 @@ import sttp.monad.MonadError
 import sttp.client3.testing.SttpBackendStub
 import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
-import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig}
+import com.risquanter.register.configs.{ApiConfig, IrminConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.SafeUrl
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.cache.CacheController
-import com.risquanter.register.http.controllers.RiskTreeController
+import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.SimulationSemaphore
 import com.risquanter.register.services.cache.{RiskResultResolverLive, TreeCacheManager}
 import com.risquanter.register.services.pipeline.InvalidationHandler
+import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
 import com.risquanter.register.infra.irmin.IrminClientLive
 import io.github.iltotore.iron.*
 
-object HttpTestHarness {
+object StubHttpTestHarness {
 
   private val defaultSimulationConfig = SimulationConfig(
     defaultNTrials = 10.refineUnsafe,
@@ -50,10 +51,12 @@ object HttpTestHarness {
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       simConfig: SimulationConfig = defaultSimulationConfig
   ): ZIO[Any, Throwable, SttpBackend[Task, Any]] =
-    val controllersLayer: ZLayer[Any, Throwable, RiskTreeController & SSEController & CacheController] =
-      ZLayer.make[RiskTreeController & SSEController & CacheController](
+    val controllersLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController] =
+      ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController](
         ZLayer.succeed(simConfig),
         ZLayer.succeed(defaultTelemetryConfig),
+        ZLayer.succeed(WorkspaceConfig()),
+        ZLayer.succeed(ApiConfig()),
         TracingLive.console,
         MetricsLive.console,
         SimulationSemaphore.layer,
@@ -63,9 +66,12 @@ object HttpTestHarness {
         RiskTreeServiceLive.layer,
         SSEHub.live,
         InvalidationHandler.live,
+        WorkspaceStoreLive.layer,
+        RateLimiterLive.layer,
         SSEController.layer,
         CacheController.layer,
-        ZLayer.fromZIO(RiskTreeController.makeZIO)
+        ZLayer.fromZIO(RiskTreeController.makeZIO),
+        ZLayer.fromZIO(WorkspaceController.makeZIO)
       )
 
     for
