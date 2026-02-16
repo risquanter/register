@@ -1357,13 +1357,13 @@ This is more reliable than SSE notification because it works regardless of
 connection state and requires no server-side changes beyond what already exists.
 
 **Checkpoint:**
-- [ ] Reaper fiber runs at configured interval in free-tier mode
-- [ ] Reaper is no-op when both `ttl` and `idleTimeout` are zero/negative
-- [ ] Evicted workspaces are logged (A31 — already in `evictExpired`)
+- [x] Reaper fiber runs at configured interval in free-tier mode ✅
+- [x] Reaper is no-op when both `ttl` and `idleTimeout` are zero/negative ✅
+- [x] Evicted workspaces are logged (A31 — already in `evictExpired`) ✅
 - [x] Rate limiter returns 429 when threshold exceeded (A27) ✅
 - [ ] Rate limiter covers resolve attempts per IP (A28)
 - [x] Rate-limit trigger events logged (A32) ✅
-- [ ] Reaper fiber shuts down gracefully with application (automatic via `forkScoped`)
+- [x] Reaper fiber shuts down gracefully with application (automatic via `forkScoped`) ✅
 - [ ] Client handles `WorkspaceExpired` errors as first-class concern
 
 **A16 status (SSE lifecycle on eviction):** Deferred. The reaper does **not**

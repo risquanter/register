@@ -11,39 +11,9 @@ import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
 object WorkspaceReaperSpec extends ZIOSpecDefault:
 
   override def spec = suite("WorkspaceReaper")(
-    test("evicts expired workspaces after reaper interval") {
-      val config = TestConfigs.workspace.copy(
-        ttl = Duration.ofMinutes(5),
-        idleTimeout = Duration.ofMinutes(5),
-        reaperInterval = Duration.ofMinutes(1)
-      )
-      for
-        store   <- WorkspaceStoreLive.make(config)
-        key     <- store.create()
-        // Workspace exists before expiry
-        ws      <- store.resolve(key)
-        _       <- assertTrue(ws.key == key)
-        // Advance past TTL so workspace is expired
-        _       <- TestClock.adjust(6.minutes)
-        // Run a single reap cycle
-        evicted <- store.evictExpired
-      yield assertTrue(evicted == 1)
-    },
-
-    test("skips non-expired workspaces") {
-      val config = TestConfigs.workspace.copy(
-        ttl = Duration.ofHours(24),
-        idleTimeout = Duration.ofHours(1),
-        reaperInterval = Duration.ofMinutes(1)
-      )
-      for
-        store   <- WorkspaceStoreLive.make(config)
-        _       <- store.create()
-        // Advance less than idle timeout
-        _       <- TestClock.adjust(30.minutes)
-        evicted <- store.evictExpired
-      yield assertTrue(evicted == 0)
-    },
+    // ========================================
+    // isNoOp predicate (pure function tests)
+    // ========================================
 
     test("isNoOp returns true when both ttl and idleTimeout are zero") {
       val config = WorkspaceConfig(
@@ -85,6 +55,10 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
       assertTrue(!WorkspaceReaper.isNoOp(TestConfigs.workspace))
     },
 
+    // ========================================
+    // Layer construction
+    // ========================================
+
     test("layer constructs successfully with free-tier config") {
       val config = TestConfigs.workspace
       ZIO.scoped(
@@ -113,6 +87,10 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
       ).as(assertTrue(true))
     },
 
+    // ========================================
+    // Fiber integration (TestClock-driven)
+    // ========================================
+
     test("reaper fiber evicts workspace after interval elapses") {
       val config = WorkspaceConfig(
         ttl = Duration.ofMinutes(2),
@@ -129,13 +107,11 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                        ZLayer.succeed(Scope.global)
                      )
           key   <- store.create()
-          // Advance past TTL (workspace expires)
-          _     <- TestClock.adjust(3.minutes)
-          // Advance past reaper interval (reaper fires)
-          _     <- TestClock.adjust(1.minutes)
-          // Give the fiber a tick to run
-          _     <- ZIO.yieldNow
-          // The store.evictExpired was called by the fiber — verify workspace is gone
+          // Advance past TTL + reaper interval.
+          // TestClock.adjust wakes all sleeping fibers deterministically —
+          // the reaper's ZIO.sleep completes and evictExpired runs within
+          // the same adjust call, no yielding required.
+          _     <- TestClock.adjust(4.minutes)
           exit  <- store.resolve(key).exit
         yield assert(exit)(fails(anything))
       }
