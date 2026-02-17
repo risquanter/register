@@ -492,6 +492,39 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
           assertTrue(result.subscribersNotified == 0) &&
           assertTrue(after.size == 5)
       }
+    ),
+
+    // ── Precondition violation (ADR-010 §3 defense-in-depth) ────────
+
+    suite("precondition: mismatched tree IDs")(
+
+      test("handleMutation dies with IllegalArgumentException when oldTree.id != newTree.id") {
+        val otherTreeId: TreeId = treeId("completely-different-tree")
+        val otherTree: RiskTree = unsafeGet(
+          RiskTree.fromNodes(
+            id = otherTreeId,
+            name = SafeName.SafeName("Other Tree".refineUnsafe),
+            nodes = allNodes,
+            rootId = nodeId("portfolio")
+          ),
+          "Other tree fixture has invalid RiskTree"
+        )
+
+        for
+          handler <- ZIO.service[InvalidationHandler]
+          // require() throws before ZIO construction — wrap to capture
+          exit    <- ZIO.attempt(handler.handleMutation(baseTree, otherTree)).flatten.exit
+        yield assertTrue(exit match
+          case Exit.Failure(cause) =>
+            cause.failureOrCause match
+              case Left(e: IllegalArgumentException) =>
+                e.getMessage.contains("handleMutation precondition violated") &&
+                e.getMessage.contains(testTreeId.toString) &&
+                e.getMessage.contains(otherTreeId.toString)
+              case _ => false
+          case _ => false
+        )
+      }
     )
 
   ).provide(testLayer) @@ TestAspect.sequential
