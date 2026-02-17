@@ -124,17 +124,17 @@ final class WorkspaceStoreLive private (
   override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean] =
     resolveInternal(key).map(_.trees.contains(treeId))
 
-  /** Evict all expired workspaces. Returns count evicted. (A31: logs eviction) */
-  override def evictExpired: UIO[Int] =
+  /** Evict all expired workspaces. Returns evicted entries for cascade. (A31: logs eviction) */
+  override def evictExpired: UIO[Map[WorkspaceKeySecret, Workspace]] =
     for
-      now <- Clock.instant
+      now     <- Clock.instant
       evicted <- ref.modify { map =>
         val (expired, alive) = map.partition((_, ws) => ws.isExpired(now))
-        (expired.size, alive)
+        (expired, alive)
       }
-      _ <- logSecurity("workspace.eviction", "evicted_count" -> evicted.toString)(
-             s"Workspace reaper: evicted $evicted expired workspaces"
-           ).when(evicted > 0)
+      _ <- logSecurity("workspace.eviction", "evicted_count" -> evicted.size.toString)(
+             s"Workspace reaper: evicted ${evicted.size} expired workspaces"
+           ).when(evicted.nonEmpty)
     yield evicted
 
   /** Hard delete. Removes workspace from the store. (A29: logs deletion)

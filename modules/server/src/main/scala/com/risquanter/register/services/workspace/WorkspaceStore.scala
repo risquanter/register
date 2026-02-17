@@ -43,11 +43,16 @@ trait WorkspaceStore:
   /** Check if a tree belongs to a workspace. Lazy TTL check included. */
   def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean]
 
-  /** Evict all expired workspaces (absolute + idle). Returns count evicted.
+  /** Evict all expired workspaces (absolute + idle). Returns evicted entries.
+    *
+    * Returns the full `Map[WorkspaceKeySecret, Workspace]` of evicted entries so that
+    * callers (e.g. `WorkspaceReaper`) can cascade-delete associated trees. Count is
+    * derivable via `.size`.
+    *
     * Called by both the background reaper fiber and the admin endpoint.
     * Security: logs eviction events (A31).
     */
-  def evictExpired: UIO[Int]
+  def evictExpired: UIO[Map[WorkspaceKeySecret, Workspace]]
 
   /** Hard delete. Removes workspace from the store.
     * Tree cascade-deletion is orchestrated by the controller (Option B).
@@ -83,7 +88,7 @@ object WorkspaceStore:
   def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Boolean] =
     ZIO.serviceWithZIO[WorkspaceStore](_.belongsTo(key, treeId))
 
-  def evictExpired: ZIO[WorkspaceStore, Nothing, Int] =
+  def evictExpired: ZIO[WorkspaceStore, Nothing, Map[WorkspaceKeySecret, Workspace]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.evictExpired)
 
   def delete(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, Unit] =

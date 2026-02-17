@@ -2,6 +2,7 @@ package com.risquanter.register.services.workspace
 
 import zio.*
 import com.risquanter.register.configs.WorkspaceConfig
+import com.risquanter.register.services.RiskTreeService
 
 /** Background daemon that periodically evicts expired workspaces.
   *
@@ -20,6 +21,13 @@ import com.risquanter.register.configs.WorkspaceConfig
   * the layer scope. On application shutdown, ZIO interrupts the fiber automatically
   * — graceful shutdown with zero manual fiber management.
   *
+  * == Cascade deletion ==
+  * When workspaces expire, their associated trees must be cascade-deleted to prevent
+  * orphans. The reaper calls `RiskTreeService.delete` for each tree in the evicted
+  * workspace, which triggers the full pipeline: repo delete → cache evict → SSE notify.
+  * This mirrors `WorkspaceController.deleteWorkspace`'s cascade pattern. Tree deletion
+  * failures are ignored (best-effort) — a tree may already have been manually deleted.
+  *
   * == Enterprise no-op ==
   * When both `ttl` and `idleTimeout` are zero or negative, `Workspace.isExpired`
   * can never return `true`, so the reaper loop would be pure waste. The layer
@@ -29,18 +37,19 @@ trait WorkspaceReaper
 
 object WorkspaceReaper:
 
-  val layer: ZLayer[WorkspaceStore & WorkspaceConfig, Nothing, WorkspaceReaper] =
+  val layer: ZLayer[WorkspaceStore & WorkspaceConfig & RiskTreeService, Nothing, WorkspaceReaper] =
     ZLayer.scoped {
       for
-        config <- ZIO.service[WorkspaceConfig]
-        store  <- ZIO.service[WorkspaceStore]
-        _      <- reapLoop(store, config.reaperInterval)
-                    .forkScoped
-                    .when(!isNoOp(config))
-        _      <- ZIO.logInfo(
-                    if isNoOp(config) then "Workspace reaper: no-op (TTL and idle timeout both disabled)"
-                    else s"Workspace reaper: started (interval=${config.reaperInterval})"
-                  )
+        config      <- ZIO.service[WorkspaceConfig]
+        store       <- ZIO.service[WorkspaceStore]
+        treeService <- ZIO.service[RiskTreeService]
+        _           <- reapLoop(store, treeService, config.reaperInterval)
+                         .forkScoped
+                         .when(!isNoOp(config))
+        _           <- ZIO.logInfo(
+                         if isNoOp(config) then "Workspace reaper: no-op (TTL and idle timeout both disabled)"
+                         else s"Workspace reaper: started (interval=${config.reaperInterval})"
+                       )
       yield new WorkspaceReaper {}
     }
 
@@ -54,5 +63,20 @@ object WorkspaceReaper:
     (config.ttl.isZero || config.ttl.isNegative) &&
       (config.idleTimeout.isZero || config.idleTimeout.isNegative)
 
-  private def reapLoop(store: WorkspaceStore, interval: java.time.Duration): UIO[Nothing] =
-    (ZIO.sleep(zio.Duration.fromJava(interval)) *> store.evictExpired).forever
+  /** Reap loop: evict expired workspaces, then cascade-delete their trees.
+    *
+    * Best-effort cascade: each `treeService.delete(id).ignore` swallows failures
+    * (the tree may already be gone). This matches `WorkspaceController.deleteWorkspace`.
+    */
+  private def reapLoop(
+    store: WorkspaceStore,
+    treeService: RiskTreeService,
+    interval: java.time.Duration
+  ): UIO[Nothing] =
+    val cycle =
+      for
+        evicted <- store.evictExpired
+        treeIds  = evicted.values.flatMap(_.trees)
+        _       <- treeService.cascadeDeleteTrees(treeIds)
+      yield ()
+    (ZIO.sleep(zio.Duration.fromJava(interval)) *> cycle).forever

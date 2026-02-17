@@ -109,13 +109,13 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
       yield assert(exit)(fails(isSubtype[WorkspaceNotFound](anything)))
     },
 
-    test("evictExpired removes expired workspaces and returns count") {
+    test("evictExpired removes expired workspaces and returns evicted entries") {
       val shortConfig = testConfig.copy(ttl = Duration.ofMinutes(1), idleTimeout = Duration.ofMinutes(1))
       for
-        store <- WorkspaceStoreLive.make(shortConfig)
-        _     <- store.create()
-        _     <- TestClock.adjust(2.minutes)
-        n     <- store.evictExpired
-      yield assertTrue(n == 1)
+        store   <- WorkspaceStoreLive.make(shortConfig)
+        key     <- store.create()
+        _       <- TestClock.adjust(2.minutes)
+        evicted <- store.evictExpired
+      yield assertTrue(evicted.size == 1, evicted.contains(key))
     }
   )

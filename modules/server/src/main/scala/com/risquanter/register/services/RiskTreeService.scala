@@ -101,3 +101,15 @@ trait RiskTreeService {
     */
   def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String]
 }
+
+object RiskTreeService:
+
+  /** Best-effort cascade deletion — deletes each tree, swallowing individual failures.
+    *
+    * Used by both `WorkspaceController.deleteWorkspace` (explicit delete) and
+    * `WorkspaceReaper` (TTL expiry). Extracted here as the single source of truth
+    * for the cascade-delete semantic.
+    */
+  extension (self: RiskTreeService)
+    def cascadeDeleteTrees(ids: Iterable[TreeId]): UIO[Unit] =
+      ZIO.foreachDiscard(ids)(id => self.delete(id).ignore)

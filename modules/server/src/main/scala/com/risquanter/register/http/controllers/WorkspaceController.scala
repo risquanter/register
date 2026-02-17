@@ -95,15 +95,13 @@ class WorkspaceController private (
   val deleteWorkspace: ServerEndpoint[Any, Task] = deleteWorkspaceEndpoint.serverLogic { key =>
     (for
       ids <- workspaceStore.listTrees(key)
-      // Best-effort cascade: ignore individual tree deletion failures
-      // (tree may already be gone; cascade should not abort)
-      _   <- ZIO.foreachDiscard(ids)(id => riskTreeService.delete(id).ignore)
+      _   <- riskTreeService.cascadeDeleteTrees(ids)
       _   <- workspaceStore.delete(key)
     yield ()).either
   }
 
   val evictExpired: ServerEndpoint[Any, Task] = evictExpiredEndpoint.serverLogicSuccess { _ =>
-    workspaceStore.evictExpired.map(n => Map("evicted" -> n))
+    workspaceStore.evictExpired.map(evicted => Map("evicted" -> evicted.size))
   }
 
   // ── Workspace-scoped tree operations ──────────────────────────────
