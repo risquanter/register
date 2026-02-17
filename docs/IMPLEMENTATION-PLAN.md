@@ -762,8 +762,10 @@ any error producer — that is by design (Option A). It will be consumed when:
 
 > **SSE-related items (Phase H + Phase I.b) are deferred to after Tier 1.5.**
 > SSE cache invalidation, stale tracking, and SSE reconnection with exponential
-> backoff have no value until multi-user or Irmin watch is in play. See the
-> "Deferred: SSE Phases" section after Tier 1.5.
+> backoff are deferred because mutations do not yet trigger `InvalidationHandler`
+> (see deferred decision: **mutation → invalidation wiring**, post-1.5).
+> Multi-client scenarios (multiple browsers sharing the same workspace URL) would
+> benefit from SSE even in free-tier. See the "Deferred: SSE Phases" section.
 
 ---
 
@@ -1920,17 +1922,20 @@ case class Mark(tpe: MarkType, interpolate: Option[Interpolate], ...)
 ## Deferred: SSE Phases (Post Tier 1.5)
 
 These phases were originally on the Tier 1 critical path but have been deferred.
-In a single-user demo environment SSE push notifications add no value — the user
-mutates data, manually re-selects, and sees the updated chart. SSE becomes
-meaningful in **Tier 2** (Irmin watch → cache invalidation) and **Tier 3**
-(multi-user collaboration). Grouping them here avoids blocking the workspace
-capability work that is actually needed for public deployment.
+The backend SSE infrastructure (`SSEHub`, `SSEEndpoints`, `InvalidationHandler`) is
+complete, but mutations (`create`/`update`/`delete` in `RiskTreeServiceLive`) do not
+call `InvalidationHandler.handleNodeChange` — so SSE events never fire. Wiring
+mutations → invalidation → SSE is a backend-only change that would enable multi-client
+awareness even in free-tier (multiple browsers sharing the same workspace URL). The
+frontend `SSEClient` (Phase H) and reconnection logic (Phase I.b) depend on this
+wiring being in place. **Deferred decision: mutation → invalidation wiring scope and
+test strategy — see post-1.5 planning.**
 
 ### Phase H: SSE Cache Invalidation
 
 **Goal:** Subscribe to SSE events so the frontend knows when displayed LEC data is stale.
 
-**Context:** The backend already publishes `SSEEvent.CacheInvalidated` events via `SSEHub` + `InvalidationHandler`. The frontend can subscribe when multi-user or Irmin watch is live.
+**Context:** The backend `SSEHub` + `InvalidationHandler` infrastructure is complete and backend-agnostic (works with both in-memory and Irmin). The missing piece is wiring `RiskTreeServiceLive` mutations to call `InvalidationHandler.handleNodeChange`, after which the frontend can subscribe to receive `CacheInvalidated` events. This benefits multi-client free-tier (shared workspace URLs) — not only enterprise/Irmin scenarios.
 
 **Files to create/modify:**
 ```
@@ -2117,7 +2122,11 @@ These are important implementation details discovered during Phase 4 (SSE Infras
 
 ### Overview
 
-This is a **core feature** tier implementing multi-user collaboration with conflict detection and scenario branching via Irmin branches. These features leverage Irmin's native capabilities (branching, merging, content-addressing) to provide what-if analysis and collaborative risk editing.
+This is a **core feature** tier implementing multi-client collaboration with conflict detection and scenario branching via Irmin branches. These features leverage Irmin's native capabilities (branching, merging, content-addressing) to provide what-if analysis and collaborative risk editing.
+
+> **Note:** Scenario analysis tier placement is under review — a lightweight in-memory
+> variant (clone-and-compare without Irmin branches) may be viable for free-tier.
+> See scenario analysis planning. Full Irmin-backed branching/merging remains Tier 3.
 
 **Prerequisites:** Tier 2 (cache invalidation pipeline) must be complete for reactive updates.
 

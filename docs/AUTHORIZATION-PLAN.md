@@ -447,7 +447,7 @@ Beyond authorization, the deployment mode also gates features:
 
 ```hocon
 register.features {
-  scenario-branching = false   # Tier 3 feature — enterprise only
+  scenario-branching = false   # Tier 3 feature — tier placement under review (see scenario analysis planning)
   collaboration = false        # Tier 3 feature — enterprise only
   websocket = false            # Tier 4 feature — enterprise only
   workspace-sharing = false    # Layer 2 feature

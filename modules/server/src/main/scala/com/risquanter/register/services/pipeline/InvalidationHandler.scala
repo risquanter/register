@@ -18,7 +18,9 @@ import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
   * 2. Invalidates affected cache entries (node + ancestors) using TreeCacheManager
   * 3. Broadcasts CacheInvalidated event via SSE to all subscribers
   *
-  * Currently triggered manually via API endpoint. Future: triggered by Irmin watch subscription.
+  * Currently triggered manually via API endpoint. Future: triggered automatically
+  * by RiskTreeServiceLive mutations (backend-agnostic) and/or Irmin watch subscription
+  * (Irmin-specific, for external mutations).
   *
   * == Example ==
   * {{{
