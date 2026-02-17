@@ -19,52 +19,65 @@
 
 ## Decision
 
-### 1. WorkspaceKey as Capability Credential
+### 1. WorkspaceKeySecret as Capability Credential
 
-A dedicated `WorkspaceKey` type — a 128-bit `SecureRandom` value, base64url encoded to 22 characters — serves as the external-facing capability credential:
+A dedicated `WorkspaceKeySecret` type — a 128-bit `SecureRandom` value, base64url encoded to 22 characters — serves as the external-facing capability credential:
 
 ```scala
-final class WorkspaceKey private (private val raw: String):
-  override def toString: String = "WorkspaceKey(***)"
-  def reveal: String = raw
+// Iron-refined type alias — validation proof carried through to the class
+type WorkspaceKeyStr = String :| Match["^[A-Za-z0-9_-]{22}$"]
 
-object WorkspaceKey:
-  def generate: UIO[WorkspaceKey] =
+final class WorkspaceKeySecret private (private val raw: WorkspaceKeyStr):
+  def reveal: String = raw
+  override def toString: String = "WorkspaceKeySecret(***)"
+  override def hashCode: Int = raw.hashCode
+  override def equals(that: Any): Boolean = that match
+    case wk: WorkspaceKeySecret => raw == wk.raw
+    case _                      => false
+
+object WorkspaceKeySecret:
+  def apply(value: WorkspaceKeyStr): WorkspaceKeySecret = new WorkspaceKeySecret(value)
+
+  // Thread-safe shared instance — avoids repeated /dev/urandom seeding per call
+  private val rng: java.security.SecureRandom = new java.security.SecureRandom()
+
+  def generate: UIO[WorkspaceKeySecret] =
     ZIO.succeed {
       val bytes = new Array[Byte](16)  // 128 bits
-      java.security.SecureRandom().nextBytes(bytes)
-      WorkspaceKey(java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes))
+      rng.nextBytes(bytes)
+      val encoded = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
+      new WorkspaceKeySecret(encoded.refineUnsafe[Match["^[A-Za-z0-9_-]{22}$"]])
     }
 ```
 
-`TreeId` remains internal (server-assigned ULID). `WorkspaceKey` is the external-facing capability. This follows **least privilege**: leaking a `WorkspaceKey` exposes one workspace's trees; leaking a `TreeId` could interact with internal APIs.
+`TreeId` remains internal (server-assigned ULID). `WorkspaceKeySecret` is the external-facing capability. This follows **least privilege**: leaking a `WorkspaceKeySecret` exposes one workspace's trees; leaking a `TreeId` could interact with internal APIs.
 
-**Secret handling:** `WorkspaceKey` is a `final class` with redacted `toString` (ADR-022). See [ADR-022](./ADR-022-secret-handling.md) for the rationale.
+**Secret handling:** `WorkspaceKeySecret` is a `final class` with Iron-validated internals and redacted `toString` (ADR-022). See [ADR-022](./ADR-022-secret-handling.md) for the full requirements checklist (R1–R8).
 
 ### 2. WorkspaceStore with TTL Eviction
 
-A `WorkspaceStore` maps `WorkspaceKey → Workspace` (containing tree list, creation time, TTL) with automatic expiry:
+A `WorkspaceStore` maps `WorkspaceKeySecret → Workspace` (containing tree list, creation time, TTL) with automatic expiry:
 
 ```scala
 trait WorkspaceStore:
-  def create(): UIO[WorkspaceKey]
-  def addTree(key: WorkspaceKey, treeId: TreeId): IO[AppError, Unit]
-  def resolve(key: WorkspaceKey): IO[AppError, Workspace]
-  def belongsTo(key: WorkspaceKey, treeId: TreeId): IO[AppError, Boolean]
-  def listTrees(key: WorkspaceKey): IO[AppError, List[TreeId]]
-  def delete(key: WorkspaceKey): IO[AppError, Unit]
-  def rotate(key: WorkspaceKey): IO[AppError, WorkspaceKey]
+  def create(): UIO[WorkspaceKeySecret]
+  def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit]
+  def resolve(key: WorkspaceKeySecret): IO[AppError, Workspace]
+  def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean]
+  def listTrees(key: WorkspaceKeySecret): IO[AppError, List[TreeId]]
+  def delete(key: WorkspaceKeySecret): IO[AppError, Unit]
+  def rotate(key: WorkspaceKeySecret): IO[AppError, WorkspaceKeySecret]
   def evictExpired: UIO[Int]
 ```
 
-In-memory `Ref[Map[WorkspaceKey, Workspace]]` implementation with a background reaper fiber (configurable interval, default 5 minutes). Default TTL: 24 hours.
+In-memory `Ref[Map[WorkspaceKeySecret, Workspace]]` implementation with a background reaper fiber (configurable interval, default 5 minutes). Default TTL: 24 hours.
 
 ### 3. Workspace Endpoint Surface
 
 All workspace routes are scoped under `/w/{key}`:
 
 ```
-POST   /w                                    → create workspace + tree, return WorkspaceKey
+POST   /w                                    → create workspace + tree, return WorkspaceKeySecret
 GET    /w/{key}/risk-trees                    → list trees in workspace
 POST   /w/{key}/risk-trees                    → create tree in workspace
 GET    /w/{key}/risk-trees/{treeId}            → get tree (validates ownership)
@@ -87,7 +100,7 @@ The `GET /risk-trees` (list-all) endpoint is **sealed** with a config gate (A17,
 
 ### 5. PRNG — Cryptographic Randomness Required
 
-`WorkspaceKey` uses `java.security.SecureRandom` (not `java.util.Random`). This is critical — capability tokens **must** be cryptographically random. `TreeId` ULIDs can continue using standard `Random` since they are not exposed as credentials.
+`WorkspaceKeySecret` uses `java.security.SecureRandom` (not `java.util.Random`). A shared instance is used across calls for efficiency (thread-safe per JDK docs). This is critical — capability tokens **must** be cryptographically random. `TreeId` ULIDs can continue using standard `Random` since they are not exposed as credentials.
 
 ---
 
@@ -103,7 +116,7 @@ val url = s"/trees/$treeId"
 ```
 
 ```scala
-// GOOD: Separate WorkspaceKey with SecureRandom
+// GOOD: Separate WorkspaceKeySecret with SecureRandom
 workspaceStore.create().map { key =>
   s"/w/${key.reveal}/risk-trees"
 }
@@ -134,7 +147,7 @@ workspaceStore.create()  // no expiry
 
 ```scala
 // BAD: Enumeration endpoint reveals all active workspaces
-GET /w  → List[WorkspaceKey]
+GET /w  → List[WorkspaceKeySecret]
 
 // GOOD: No enumeration — capability URLs only
 // A17: GET /risk-trees sealed with config gate (default deny)
@@ -146,7 +159,7 @@ GET /w  → List[WorkspaceKey]
 
 | Location | Pattern |
 |----------|---------|
-| `WorkspaceKey` | `common/.../domain/data/iron/OpaqueTypes.scala` — `final class` with `SecureRandom` factory (ADR-022) |
+| `WorkspaceKeySecret` | `common/.../domain/data/iron/OpaqueTypes.scala` — `final class` with Iron-validated `WorkspaceKeyStr` internal, `SecureRandom` factory, redacted `toString` (ADR-022) |
 | `WorkspaceStore` | `server/.../services/workspace/WorkspaceStore.scala` — trait + `Ref[Map]` + TTL + reaper fiber |
 | `WorkspaceEndpoints` | `common/.../http/endpoints/WorkspaceEndpoints.scala` — Tapir endpoint definitions under `/w/{key}` |
 | `WorkspaceController` | `server/.../http/controllers/WorkspaceController.scala` — wires endpoints to `WorkspaceStore` + `RiskTreeService` |
@@ -183,4 +196,4 @@ All other routes remain protected by the Keycloak JWT + OPA pipeline defined in 
 - W3C TAG: [Good Practices for Capability URLs](https://www.w3.org/TR/capability-urls/)
 - [ADR-012: Service Mesh Strategy](./ADR-012.md)
 - [ADR-018: Nominal Wrappers](./ADR-018-nominal-wrappers.md)
-- [ADR-022: Secret Handling](./ADR-022-secret-handling.md) — `WorkspaceKey` as `final class`
+- [ADR-022: Secret Handling](./ADR-022-secret-handling.md) — `WorkspaceKeySecret` as `final class` with R1–R8 requirements

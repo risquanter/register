@@ -606,7 +606,7 @@ trivy image register-server:latest
 - [Testing Guide](test/TESTING.md) - Comprehensive test procedures
 - [ADR-012: Service Mesh Strategy](ADR-012.md)
 - [Implementation Plan](IMPLEMENTATION-PLAN-PROPOSALS.md)
-- [OAuth2 Flow Architecture](OAUTH2-FLOW-ARCHITECTURE.md)
+- [Authorization Plan](AUTHORIZATION-PLAN.md)
 
 ---
 

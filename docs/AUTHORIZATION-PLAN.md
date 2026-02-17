@@ -181,12 +181,14 @@ app/.../state/AuthState.scala
 3. If `mode == "capability-only"`:
    - No login UI (current free-tier behaviour)
 
+**Security:** The SPA stores JWT in memory only (not `localStorage`) — prevents XSS-based token exfiltration.
+
 **URL scheme:**
 - URL remains `/#/{workspaceKey}/...` (same as free-tier)
 - No URL change — enterprise uses identical workspace key URLs
 - Login button and user menu added to UI; workspace URLs unchanged
 
-**Note:** Cheleb reference architecture does **not** contain OAuth2/OIDC patterns. For OIDC authorization code flow, consult Keycloak JS adapter documentation and [OAUTH2-FLOW-ARCHITECTURE.md](./OAUTH2-FLOW-ARCHITECTURE.md).
+**Note:** Cheleb reference architecture does **not** contain OAuth2/OIDC patterns. For OIDC authorization code flow, consult Keycloak JS adapter documentation directly.
 
 ### Task L1.4: My Workspaces API
 
@@ -202,6 +204,26 @@ These endpoints require JWT — scoped to the authenticated user. Enterprise wor
 
 ### Task L1.5: Istio Configuration
 
+#### Bootstrap (Pre-Deploy)
+
+Before deploying Layer 1, the following must be configured:
+
+1. **Keycloak:**
+   - Create realm: `register`
+   - Create client: `register-api` (confidential, service account enabled)
+   - Create client: `register-web` (public, PKCE flow)
+   - Define roles: admin, analyst, viewer
+   - Configure mappers: include roles in JWT claims
+   - Export public key for JWT validation
+
+2. **OPA Policy Bundle:**
+   - `allow_read.rego` → viewer, analyst, admin
+   - `allow_write.rego` → analyst, admin
+   - `allow_admin.rego` → admin only
+   - Deploy to OPA bundle server (or ConfigMap)
+
+#### RequestAuthentication (Keycloak JWKS)
+
 **RequestAuthentication (Keycloak JWKS):**
 ```yaml
 apiVersion: security.istio.io/v1
@@ -213,6 +235,8 @@ spec:
   jwtRules:
   - issuer: "https://keycloak.example.com/realms/register"
     jwksUri: "https://keycloak.example.com/realms/register/protocol/openid-connect/certs"
+    audiences:
+    - "register-api"
     forwardOriginalToken: true
 ```
 
@@ -469,8 +493,8 @@ When upgrading a free-tier deployment to enterprise:
 ## References
 
 - [ADR-012: Service Mesh Strategy](./ADR-012.md) — Istio + Keycloak + OPA architecture
-- [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — Original capability model (being amended)
-- [OAUTH2-FLOW-ARCHITECTURE.md](./OAUTH2-FLOW-ARCHITECTURE.md) — OAuth2/OIDC flow diagrams
+- [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — Layer 0 capability model
+- [ADR-022: Secret Handling](./ADR-022-secret-handling.md) — WorkspaceKeySecret credential hardening
 - [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) — Tier 1.5 (Layer 0 implementation)
 - Cheleb reference architecture — ZIO + PostgreSQL layer patterns (review before Tier 1.5 Phase W.2, **not** relevant for Keycloak/OAuth2)
 - SpiceDB: https://authzed.com/spicedb

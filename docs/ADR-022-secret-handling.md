@@ -1,7 +1,7 @@
 # ADR-022: Secret Handling & Error Leakage Prevention
 
-**Status:** Proposed  
-**Date:** 2026-02-16  
+**Status:** Accepted  
+**Date:** 2026-02-16 (implemented 2026-02-17)  
 **Tags:** security, secrets, error-handling, type-safety, CWE-209  
 **Related:** [ADR-001](./ADR-001.md) (Validation / Iron), [ADR-002](./ADR-002.md) (Logging / Typed Errors), [ADR-008](./ADR-008-proposal.md) (Error Resilience), [ADR-012](./ADR-012.md) (Service Mesh), [ADR-018](./ADR-018-nominal-wrappers.md) (Nominal Wrappers), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs)
 
@@ -27,7 +27,7 @@ The three-layer authorization model ([AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLA
 | JWT tokens | Browser memory → `Authorization` header | Istio validates; app sees only decoded claims via `x-jwt-claims` |
 | mTLS certificates | ztunnel auto-rotated | Zero-config, never in app code |
 
-**This ADR does NOT cover those secrets** — they are structurally unreachable by design (ADR-012, OAUTH2-FLOW-ARCHITECTURE.md).
+**This ADR does NOT cover those secrets** — they are structurally unreachable by design (ADR-012, [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md)).
 
 This ADR covers:
 1. **`WorkspaceKey`** — the Layer 0 capability credential that lives in application code today
@@ -113,7 +113,7 @@ For config-loaded infrastructure secrets (future: database passwords, SpiceDB pr
 val dbPassword: Config[Config.Secret] = Config.secret("DB_PASSWORD")
 ```
 
-**Effort:** ~40 lines across 6 files, plus mechanical rename `WorkspaceKey` → `WorkspaceKeySecret` across ~15 files (see [implementation plan](./ADR-022-implementation-plan.md)).
+**Effort:** ~40 lines across 6 files, plus mechanical rename `WorkspaceKey` → `WorkspaceKeySecret` across ~17 files (completed 2026-02-17).
 
 ### 2a. Config.Secret vs WorkspaceKeySecret — Boundary Decision
 
@@ -138,7 +138,7 @@ Two tools exist for secret handling. They serve **different threat models**:
 
 A stray `case Secret(raw) =>` in a config parser is low-risk — one reviewed call site. A stray `case WorkspaceKeySecret(raw) =>` in an error handler is a **compile error** — the `final class` has no `unapply` (R1).
 
-**Rule:** Use the credential type requirements checklist (Decision 1) for credentials that flow through application code. Use `Config.Secret` for infrastructure secrets loaded from environment/config that never leave the config layer. See [D3 in the implementation plan](./ADR-022-implementation-plan.md) for details.
+**Rule:** Use the credential type requirements checklist (Decision 1) for credentials that flow through application code. Use `Config.Secret` for infrastructure secrets loaded from environment/config that never leave the config layer.
 
 ### 3. Scoped Lifecycle — Acquire, Use, Wipe
 
@@ -267,11 +267,11 @@ def encode(error: Throwable) = error match
 ```scala
 // BAD: forwarding the reason string to the client
 case RepositoryFailure(reason) =>
-  response(500, "unknown", CONSTRAINT_VIOLATION, reason)  // leaks SQL errors
+  response(500, "unknown", INTERNAL_ERROR, reason)  // leaks SQL errors
 
 // GOOD: opaque message, reason logged server-side only (ADR-002 Decision 5)
 case RepositoryFailure(reason) =>
-  response(500, "unknown", CONSTRAINT_VIOLATION, "Internal server error")
+  response(500, "unknown", INTERNAL_ERROR, "Internal server error")
 ```
 
 ---
