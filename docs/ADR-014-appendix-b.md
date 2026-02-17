@@ -18,7 +18,7 @@ User edits B's probability in UI
     Irmin watch fires (IrminWatcher service)
         │
         ▼
-    InvalidationHandler.handleNodeChange(treeId, "B")
+    InvalidationHandler.handleNodeChange(nodeId = "B", tree)
         │
         ▼
     RiskResultCache.invalidate("B")

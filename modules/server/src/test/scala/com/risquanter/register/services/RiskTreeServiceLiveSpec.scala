@@ -455,6 +455,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       com.risquanter.register.configs.TestConfigs.simulationLayer,
       com.risquanter.register.services.cache.RiskResultResolverLive.layer,
       com.risquanter.register.services.cache.TreeCacheManager.layer,
+      com.risquanter.register.services.pipeline.InvalidationHandler.live,
+      com.risquanter.register.services.sse.SSEHub.live,
       // Concurrency control (uses SimulationConfig)
       com.risquanter.register.configs.TestConfigs.simulationLayer >>> com.risquanter.register.services.SimulationSemaphore.layer,
       // Telemetry layers require TelemetryConfig

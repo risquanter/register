@@ -138,13 +138,14 @@ class WorkspaceController private (
 
   val invalidateCache: ServerEndpoint[Any, Task] = invalidateWorkspaceCacheEndpoint.serverLogic {
     case (key, treeId, nodeId) =>
-      (resolveTree(key, treeId) *>
-        invalidationHandler.handleNodeChange(treeId, nodeId)
-          .map(r => InvalidationResponse(
-            invalidatedNodes = r.invalidatedNodes.map(_.value.toString),
-            subscribersNotified = r.subscribersNotified
-          ))
-      ).either
+      (for
+        _    <- resolveTree(key, treeId)
+        tree <- riskTreeService.getById(treeId).someOrFail(TreeNotInWorkspace(key, treeId))
+        r    <- invalidationHandler.handleNodeChange(nodeId, tree)
+      yield InvalidationResponse(
+        invalidatedNodes = r.invalidatedNodes.map(_.value.toString),
+        subscribersNotified = r.subscribersNotified
+      )).either
   }
 
   // ── Workspace-scoped LEC queries ──────────────────────────────────

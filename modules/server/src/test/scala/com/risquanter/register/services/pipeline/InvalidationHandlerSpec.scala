@@ -4,10 +4,8 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import io.github.iltotore.iron.*
-import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskResult, LECCurveResponse, LECPoint, LECNodeCurve}
+import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskResult}
 import com.risquanter.register.domain.data.iron.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.cache.TreeCacheManager
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
@@ -21,8 +19,8 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
   * - invalidatedNodes: the node + ancestor path whose cache entries were cleared
   * - subscribersNotified: how many SSE subscribers received the event
   *
-  * Uses a stub RiskTreeService that returns a known test tree,
-  * with real TreeCacheManager and SSEHub implementations.
+  * Uses real TreeCacheManager and SSEHub implementations.
+  * Caller provides the tree directly (no internal lookup).
   */
 object InvalidationHandlerSpec extends ZIOSpecDefault {
 
@@ -86,37 +84,11 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     "Test fixture has invalid RiskTree"
   )
 
-  // ========================================
-  // Stub RiskTreeService — returns testTree for known ID, None otherwise
-  // ========================================
-
-  val stubTreeService: RiskTreeService = new RiskTreeService {
-    def create(req: RiskTreeDefinitionRequest): Task[RiskTree] =
-      ZIO.fail(new UnsupportedOperationException("stub"))
-    def update(id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree] =
-      ZIO.fail(new UnsupportedOperationException("stub"))
-    def delete(id: TreeId): Task[RiskTree] =
-      ZIO.fail(new UnsupportedOperationException("stub"))
-    def getAll: Task[List[RiskTree]] =
-      ZIO.fail(new UnsupportedOperationException("stub"))
-    def getById(id: TreeId): Task[Option[RiskTree]] =
-      ZIO.succeed(if id == testTreeId then Some(testTree) else None)
-    def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean): Task[LECCurveResponse] =
-      ZIO.fail(new UnsupportedOperationException("stub"))
-    def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[BigDecimal] =
-      ZIO.fail(new UnsupportedOperationException("stub"))
-    def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] =
-      ZIO.fail(new UnsupportedOperationException("stub"))
-    def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String] =
-      ZIO.fail(new UnsupportedOperationException("stub"))
-  }
-
   val testLayer: ZLayer[Any, Nothing, InvalidationHandler & SSEHub] =
     ZLayer.make[InvalidationHandler & SSEHub](
       InvalidationHandler.live,
       TreeCacheManager.layer,
-      SSEHub.live,
-      ZLayer.succeed(stubTreeService)
+      SSEHub.live
     )
 
   // ========================================
@@ -129,7 +101,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       for {
         handler <- ZIO.service[InvalidationHandler]
         // Invalidate a leaf node — should clear cyber + ops-risk (root)
-        result  <- handler.handleNodeChange(testTreeId, nodeId("cyber"))
+        result  <- handler.handleNodeChange(nodeId("cyber"), testTree)
       } yield {
         // cyber's ancestor path: cyber → ops-risk (root)
         assertTrue(result.invalidatedNodes.map(_.value).toSet == Set(idStr("cyber"), idStr("ops-risk"))) &&
@@ -142,20 +114,10 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       for {
         handler <- ZIO.service[InvalidationHandler]
         // hardware is nested: hardware → it-risk → ops-risk
-        result  <- handler.handleNodeChange(testTreeId, nodeId("hardware"))
+        result  <- handler.handleNodeChange(nodeId("hardware"), testTree)
       } yield {
         val ids = result.invalidatedNodes.map(_.value).toSet
         assertTrue(ids == Set(idStr("hardware"), idStr("it-risk"), idStr("ops-risk"))) &&
-        assertTrue(result.subscribersNotified == 0)
-      }
-    },
-
-    test("tree not found returns empty result") {
-      for {
-        handler <- ZIO.service[InvalidationHandler]
-        result  <- handler.handleNodeChange(treeId("nonexistent"), nodeId("cyber"))
-      } yield {
-        assertTrue(result.invalidatedNodes.isEmpty) &&
         assertTrue(result.subscribersNotified == 0)
       }
     },
@@ -171,7 +133,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         fiber   <- stream.foreach(queue.offer).fork
         // Wait for subscriber to be registered
         _       <- hub.subscriberCount(testTreeId).repeatUntil(_ >= 1)
-        result  <- handler.handleNodeChange(testTreeId, nodeId("cyber"))
+        result  <- handler.handleNodeChange(nodeId("cyber"), testTree)
         _       <- fiber.interrupt
         // Verify subscriber was counted
       } yield assertTrue(result.subscribersNotified == 1)

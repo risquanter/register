@@ -1928,14 +1928,24 @@ call `InvalidationHandler.handleNodeChange` — so SSE events never fire. Wiring
 mutations → invalidation → SSE is a backend-only change that would enable multi-client
 awareness even in free-tier (multiple browsers sharing the same workspace URL). The
 frontend `SSEClient` (Phase H) and reconnection logic (Phase I.b) depend on this
-wiring being in place. **Deferred decision: mutation → invalidation wiring scope and
-test strategy — see post-1.5 planning.**
+wiring being in place.
+
+**Status:** ✅ Mutation → invalidation wiring is complete.
+- `InvalidationHandler.handleMutation(oldTree, newTree)` — diffs trees, invalidates
+  affected ancestor paths, publishes single SSE event (treeId derived from `newTree.id`)
+- `InvalidationHandler.handleTreeDeletion(tree)` — clears cache, publishes
+  `CacheInvalidated(allNodeIds, treeId)` — browser re-fetches, gets `NOT_FOUND`
+- Wired in `RiskTreeServiceLive`: `update` → `handleMutation`, `delete` → `handleTreeDeletion`
+
+> **TODO:** Review this wiring when implementing ADR-017 Phase 2 (Batch Operations / `TreeOp`
+> algebra). `TreeOp` operations carry explicit change semantics, which may simplify or replace
+> the old-vs-new tree diffing logic.
 
 ### Phase H: SSE Cache Invalidation
 
 **Goal:** Subscribe to SSE events so the frontend knows when displayed LEC data is stale.
 
-**Context:** The backend `SSEHub` + `InvalidationHandler` infrastructure is complete and backend-agnostic (works with both in-memory and Irmin). The missing piece is wiring `RiskTreeServiceLive` mutations to call `InvalidationHandler.handleNodeChange`, after which the frontend can subscribe to receive `CacheInvalidated` events. This benefits multi-client free-tier (shared workspace URLs) — not only enterprise/Irmin scenarios.
+**Context:** The backend `SSEHub` + `InvalidationHandler` infrastructure is complete and backend-agnostic (works with both in-memory and Irmin). Mutation → invalidation wiring is in place: `RiskTreeServiceLive.update` calls `handleMutation` and `delete` calls `handleTreeDeletion`. The frontend can now subscribe to receive `CacheInvalidated` events. This benefits multi-client free-tier (shared workspace URLs) — not only enterprise/Irmin scenarios.
 
 **Files to create/modify:**
 ```
@@ -2621,6 +2631,12 @@ The batch update feature and category-theory-based tree API are fully designed i
 - **WebSocket-ready** — same `TreeOp` schema works across HTTP batch and future WebSocket
 
 The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (zippers, optics, recursion schemes, catamorphisms). No optics/zipper libraries are currently in dependencies.
+
+> **TODO:** When implementing ADR-017 Phase 2, review the mutation → invalidation wiring in
+> `RiskTreeServiceLive` and `InvalidationHandler.handleMutation`. The `TreeOp` operations carry
+> explicit change semantics (`AddLeaf`, `DeleteNode`, `ReparentNode`, `UpdateDistribution`),
+> which may eliminate the need for old-vs-new tree diffing — each `TreeOp` directly maps to an
+> affected node for cache invalidation.
 
 ---
 

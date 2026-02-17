@@ -19,6 +19,7 @@ import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.simulation.LECChartSpecBuilder
 import com.risquanter.register.services.cache.RiskResultResolver
+import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
 /**
  * Live implementation of RiskTreeService with telemetry instrumentation.
@@ -33,6 +34,7 @@ class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   config: SimulationConfig,
   resolver: RiskResultResolver,
+  invalidationHandler: InvalidationHandler,
   tracing: Tracing,
   semaphore: SimulationSemaphore,
   // Pre-created metric instruments (cached at construction time)
@@ -326,6 +328,7 @@ class RiskTreeServiceLive private (
 
   override def update(id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree] = {
     val operation = for {
+      oldTree <- getTreeOrFail(id)
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
       resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(id, resolved.treeName, excludeId = Some(id))
@@ -339,6 +342,7 @@ class RiskTreeServiceLive private (
         rootId = rootId
       ).toZIOValidation
       updated <- repo.update(id, _ => riskTree)
+      _ <- invalidationHandler.handleMutation(oldTree, updated)
     } yield updated
     
     operation.tapBoth(
@@ -348,7 +352,9 @@ class RiskTreeServiceLive private (
   }
   
   override def delete(id: TreeId): Task[RiskTree] =
-    repo.delete(id).tapBoth(
+    repo.delete(id)
+      .tap(tree => invalidationHandler.handleTreeDeletion(tree))
+      .tapBoth(
       error => logIfUnexpected("delete")(error) *> recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
     )
@@ -508,11 +514,12 @@ object RiskTreeServiceLive {
     val trialsDesc = "Total number of simulation trials executed"
   }
   
-  val layer: ZLayer[RiskTreeRepository & SimulationConfig & RiskResultResolver & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationConfig & RiskResultResolver & InvalidationHandler & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       config <- ZIO.service[SimulationConfig]
       resolver <- ZIO.service[RiskResultResolver]
+      invalidationHandler <- ZIO.service[InvalidationHandler]
       tracing <- ZIO.service[Tracing]
       semaphore <- ZIO.service[SimulationSemaphore]
       meter <- ZIO.service[Meter]
@@ -533,6 +540,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.trialsUnit),
         Some(MetricNames.trialsDesc)
       )
-    } yield new RiskTreeServiceLive(repo, config, resolver, tracing, semaphore, opsCounter, simDuration, trials)
+    } yield new RiskTreeServiceLive(repo, config, resolver, invalidationHandler, tracing, semaphore, opsCounter, simDuration, trials)
   }
 }

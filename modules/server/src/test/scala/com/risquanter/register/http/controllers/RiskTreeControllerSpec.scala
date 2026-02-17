@@ -61,6 +61,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       com.risquanter.register.services.SimulationSemaphore.layer,
       com.risquanter.register.services.cache.TreeCacheManager.layer,
       com.risquanter.register.services.cache.RiskResultResolverLive.layer,
+      com.risquanter.register.services.pipeline.InvalidationHandler.live,
+      com.risquanter.register.services.sse.SSEHub.live,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
     )
