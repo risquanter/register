@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKey}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 
 /** Chart selection and LEC spec state, separated from tree navigation.
@@ -25,7 +25,7 @@ import com.risquanter.register.http.endpoints.WorkspaceEndpoints
   * @param selectedTree   Signal for the currently loaded tree structure.
   */
 final class LECChartState(
-  keySignal: StrictSignal[Option[WorkspaceKey]],
+  keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
   selectedTree: StrictSignal[LoadState[RiskTree]]
 ) extends WorkspaceEndpoints:

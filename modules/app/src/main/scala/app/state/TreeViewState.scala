@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKey}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 import com.risquanter.register.http.responses.SimulationResponse
 
@@ -23,7 +23,7 @@ import com.risquanter.register.http.responses.SimulationResponse
   *
   * @param keySignal Read-only signal providing the active workspace key.
   */
-final class TreeViewState(keySignal: StrictSignal[Option[WorkspaceKey]]) extends WorkspaceEndpoints:
+final class TreeViewState(keySignal: StrictSignal[Option[WorkspaceKeySecret]]) extends WorkspaceEndpoints:
 
   // ── Available trees (summary list) ────────────────────────────
   val availableTrees: Var[LoadState[List[SimulationResponse]]] = Var(LoadState.Idle)

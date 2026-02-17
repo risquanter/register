@@ -38,90 +38,107 @@ This ADR covers:
 
 ## Decision
 
-### 1. `Secret[A]` Wrapper — toString-safe, serialisation-hostile
+### 1. Credential Type Requirements — Checklist
 
-Secrets are wrapped in a `final class` (not `case class`) that overrides `toString` and provides no JSON codec:
+Any type that wraps a credential flowing through application code (request lifecycle, error types, frontend state) **must** satisfy all of the following:
+
+| # | Requirement | Rationale | How to verify |
+|---|-------------|-----------|---------------|
+| R1 | **`final class`** (not `case class`) | Prevents compiler-generated `copy`, `unapply`, and product serialisation | `case class` → compile error on `copy`/`unapply` |
+| R2 | **`private val`** for the raw value | Field inaccessible without explicit opt-in method | Direct field access → compile error |
+| R3 | **Redacted `toString`** | `println(key)`, `s"got $key"`, exception messages all safe | `println` prints `TypeName(***)`, never the credential |
+| R4 | **Explicit `reveal` method** | Call sites must opt in to raw value extraction — visible in code review | `grep reveal` finds all extraction points |
+| R5 | **Iron-validated internally** | Correct-by-construction: the raw value carries its validation proof through the type (ADR-001) | Constructor takes Iron-refined type, not plain `String` |
+| R6 | **Manual `equals`/`hashCode`** | Case-class auto-generation lost; must be explicitly provided | Unit test: equal values → same hash; distinct values → different |
+| R7 | **Companion `fromString` with Iron validation** | Canonical validated entry point; returns `Either[List[ValidationError], T]` | Invalid input → `Left`; valid input → `Right` |
+| R8 | **No default JSON codec on generic wrapper** | Serialisation must be opt-in per credential type, not inherited | Codec defined on the specific type's companion, not on a generic base |
+
+**Relationship to ADR-018 (Nominal Wrappers):** ADR-018 uses `case class` wrappers to add *identity distinction* over Iron types — `TreeId` vs `NodeId` are both ULIDs but compile-time distinct. Credential types deliberately break from the case-class wrapper pattern because the goals are opposed: ADR-018 wants transparent serialisation and pattern matching; credential types exist specifically to *prevent* those operations.
+
+**Relationship to ADR-001 (Iron Types):** Iron constrains value *shape* (format, range); credential types constrain value *visibility*. They are orthogonal and compose: `WorkspaceKeySecret` is both format-validated (Iron `WorkspaceKeyStr` stored internally) and leak-proof (redacted `toString`, no `unapply`).
+
+#### Reference Implementation: `WorkspaceKeySecret`
+
+`WorkspaceKeySecret` (formerly `WorkspaceKey`) is the sole credential in Layer 0 application code. It satisfies all eight requirements:
 
 ```scala
-final class Secret[A] private (private val raw: A):
-  override def toString: String = "Secret(***)"
-  override def hashCode: Int = raw.hashCode
-  override def equals(that: Any): Boolean = that match
-    case s: Secret[?] => raw == s.raw
-    case _            => false
+// R5: Iron-refined type alias — validation proof carried through to the class
+type WorkspaceKeyStr = String :| Match["^[A-Za-z0-9_-]{22}$"]
 
-  /** Explicit opt-in to access the value. */
-  def reveal: A = raw
+// R1: final class, not case class
+final class WorkspaceKeySecret private (private val raw: WorkspaceKeyStr): // R2: private val
+  def reveal: String = raw                                                // R4: explicit opt-in
+  override def toString: String = "WorkspaceKeySecret(***)"               // R3: redacted
+  override def hashCode: Int = raw.hashCode                               // R6: manual
+  override def equals(that: Any): Boolean = that match                    // R6: manual
+    case wk: WorkspaceKeySecret => raw == wk.raw
+    case _                      => false
 
-object Secret:
-  def apply[A](value: A): Secret[A] = new Secret(value)
-  // Deliberately: NO given JsonEncoder, Show, or similar
+object WorkspaceKeySecret:
+  // R5: constructor takes WorkspaceKeyStr (Iron proof required)
+  def apply(value: WorkspaceKeyStr): WorkspaceKeySecret = new WorkspaceKeySecret(value)
+
+  // Thread-safe shared instance — avoids repeated /dev/urandom seeding per call
+  private val rng: java.security.SecureRandom = new java.security.SecureRandom()
+
+  def generate: UIO[WorkspaceKeySecret] = ZIO.succeed {
+    val bytes = new Array[Byte](16)
+    rng.nextBytes(bytes)
+    val encoded = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
+    // refineUnsafe safe: SecureRandom(16 bytes) → base64url always produces 22 chars from [A-Za-z0-9_-]
+    new WorkspaceKeySecret(encoded.refineUnsafe[Match["^[A-Za-z0-9_-]{22}$"]])
+  }
+
+  // R7: canonical validated entry point
+  def fromString(s: String): Either[List[ValidationError], WorkspaceKeySecret] =
+    ValidationUtil.refineWorkspaceKey(s)
+
+  // R8: codecs defined here, not on a generic base — opt-in per type
+  given JsonEncoder[WorkspaceKeySecret] = JsonEncoder[String].contramap(_.reveal)
+  given JsonDecoder[WorkspaceKeySecret] = JsonDecoder[String].mapOrFail(s =>
+    WorkspaceKeySecret.fromString(s).left.map(_.mkString(", ")))
 ```
 
-Key properties:
-- `final class` — no `copy`, no `unapply`, no product serialisation
-- `private val` — inaccessible without `reveal`
-- No `JsonEncoder[Secret[A]]` given — compile error if serialisation attempted
-- `toString` → `"Secret(***)"` — safe for logging, interpolation, exception messages
+The `Secret` prefix in the name is deliberate: it signals that this type has special handling properties (no `unapply`, redacted `toString`). Follow the type definition to this ADR for the full rationale.
 
-**Relationship to ADR-018 (Nominal Wrappers):** ADR-018 uses `case class` wrappers to add *identity distinction* over Iron types — `TreeId` vs `NodeId` are both ULIDs but compile-time distinct. `Secret[A]` deliberately breaks from the case-class wrapper pattern because the goals are opposed: ADR-018 wants transparent serialisation and pattern matching; `Secret` exists specifically to *prevent* those operations. `final class` removes `copy`, `unapply`, and product serialisation that `case class` provides.
+### 2. `WorkspaceKeySecret` — The Sole Application-Level Credential
 
-**Relationship to ADR-001 (Iron Types):** Iron constrains value *shape* (format, range); `Secret` constrains value *visibility*. They are orthogonal and compose: a `Secret[WorkspaceKey]` is both format-validated (Iron, via `WorkspaceKey.fromString`) and leak-proof (`toString` returns `"Secret(***)"`, no JSON codec).
+`WorkspaceKeySecret` is the only credential that flows through application code today. All Layer 1/2 secrets (passwords, JWT signing keys, mTLS certs) are handled by the service mesh (ADR-012) and never enter the application.
 
-For config-loaded secrets, use ZIO's built-in `Config.Secret` (already a dependency):
+The name was chosen to be self-documenting: any developer encountering `WorkspaceKeySecret` can follow the type definition to find the `// ADR-022` comment and this document, understanding immediately why the type is a `final class` rather than a `case class` like `TreeId` or `NodeId`.
+
+For config-loaded infrastructure secrets (future: database passwords, SpiceDB pre-shared keys), use ZIO's built-in `Config.Secret`:
 
 ```scala
 val dbPassword: Config[Config.Secret] = Config.secret("DB_PASSWORD")
 ```
 
-### 2. WorkspaceKey — Convert to `final class`
+**Effort:** ~40 lines across 6 files, plus mechanical rename `WorkspaceKey` → `WorkspaceKeySecret` across ~15 files (see [implementation plan](./ADR-022-implementation-plan.md)).
 
-`WorkspaceKey` is the sole credential in Layer 0 (capability-only mode). Rather than creating a generic `Secret[A]` wrapper and then not using it on the only candidate, convert `WorkspaceKey` itself to a `final class` — it *is* the secret type:
-
-```scala
-final class WorkspaceKey private (private val raw: String):
-  override def toString: String = "WorkspaceKey(***)"
-  def reveal: String = raw
-  override def hashCode: Int = raw.hashCode
-  override def equals(that: Any): Boolean = that match
-    case wk: WorkspaceKey => raw == wk.raw
-    case _                => false
-
-object WorkspaceKey:
-  def apply(value: String): WorkspaceKey = new WorkspaceKey(value)
-  given JsonEncoder[WorkspaceKey] = JsonEncoder[String].contramap(_.reveal)
-  given JsonDecoder[WorkspaceKey] = JsonDecoder[String].mapOrFail(s =>
-    WorkspaceKey.fromString(s).left.map(_.mkString(", ")))
-```
-
-This gives all the `Secret[A]` properties — no `copy`, no `unapply`, `private val`, redacted `toString` — without an additional layer of indirection. The JSON codecs use `reveal` explicitly (opt-in access), Tapir codec uses `reveal`, and `println(key)` prints `WorkspaceKey(***)`.
-
-**Effort:** ~40 lines across 6 files (see [implementation plan](./ADR-022-implementation-plan.md)).
-
-### 2a. Config.Secret vs WorkspaceKey — Boundary Decision
+### 2a. Config.Secret vs WorkspaceKeySecret — Boundary Decision
 
 Two tools exist for secret handling. They serve **different threat models**:
 
-| Property | `WorkspaceKey` (`final class`) | `zio.Config.Secret` |
+| Property | `WorkspaceKeySecret` (`final class`) | `zio.Config.Secret` |
 |----------|-------------------------------|---------------------|
 | **Lifecycle** | Generated at runtime, flows through request lifecycle (endpoints, controllers, stores, frontend state, error types) | Loaded once at startup from env/config, consumed immediately |
 | **Accessor** | `.reveal: String` | `.value: Chunk[Char]`, `.stringValue: String` |
 | **Pattern matching** | No `unapply` — cannot be extracted accidentally in `match`/`for` | Has `unapply` — but acceptable because config values aren't pattern-matched in error handlers or logging |
-| **Validation** | Iron-validated via `fromString` | No validation — raw config value |
-| **Serialisation** | Explicit JSON codecs via `reveal`, Tapir codec | No JSON codecs needed — never serialised to clients |
+| **Validation** | Iron-validated via `fromString` (R5, R7) | No validation — raw config value |
+| **Serialisation** | Explicit JSON codecs via `reveal`, Tapir codec (R4, R8) | No JSON codecs needed — never serialised to clients |
 | **Where it appears** | URL paths, JSON responses, error types, frontend Var/Signal | Config loading only — `Config[Config.Secret]` |
 
-**Why `unapply` is acceptable on `Config.Secret` but not on `WorkspaceKey`:**
+**Why `unapply` is acceptable on `Config.Secret` but not on `WorkspaceKeySecret`:**
 
-| | `Config.Secret` | `WorkspaceKey` |
+| | `Config.Secret` | `WorkspaceKeySecret` |
 |---|---|---|
 | **Pattern-matched where?** | Config loading code only — 1–2 controlled call sites | Error handlers, controllers, stores, tests — 14+ sites across 10 files |
 | **Logging risk** | Config code rarely logs; value consumed immediately | `getMessage`, string interpolation, test output — many vectors |
 | **Lifecycle** | Created once at startup, consumed, wiped | Created per-request, stored in maps, held in frontend `Var`, embedded in errors, serialised to JSON |
 
-A stray `case Secret(raw) =>` in a config parser is low-risk — one reviewed call site. A stray `case WorkspaceKey(raw) =>` in an error handler could silently embed the credential in a log line. The `final class` (no `unapply`) makes that pattern a **compile error**.
+A stray `case Secret(raw) =>` in a config parser is low-risk — one reviewed call site. A stray `case WorkspaceKeySecret(raw) =>` in an error handler is a **compile error** — the `final class` has no `unapply` (R1).
 
-**Rule:** Use `WorkspaceKey` (or similar `final class` pattern) for credentials that flow through application code. Use `Config.Secret` for infrastructure secrets loaded from environment/config that never leave the config layer. See [D3 in the implementation plan](./ADR-022-implementation-plan.md) for details.
+**Rule:** Use the credential type requirements checklist (Decision 1) for credentials that flow through application code. Use `Config.Secret` for infrastructure secrets loaded from environment/config that never leave the config layer. See [D3 in the implementation plan](./ADR-022-implementation-plan.md) for details.
 
 ### 3. Scoped Lifecycle — Acquire, Use, Wipe
 
@@ -152,9 +169,9 @@ sealed trait AppError extends Throwable
 │   ├── DataConflict(reason: String)
 │   ├── AccessDenied(reason: String)
 │   ├── RateLimitExceeded(ip: String, limit: Int, window: String)
-│   ├── WorkspaceNotFound(key: WorkspaceKey)
-│   ├── WorkspaceExpired(key: WorkspaceKey, createdAt: Instant, ttl: Duration)
-│   ├── TreeNotInWorkspace(key: WorkspaceKey, treeId: TreeId)
+│   ├── WorkspaceNotFound(key: WorkspaceKeySecret)
+│   ├── WorkspaceExpired(key: WorkspaceKeySecret, createdAt: Instant, ttl: Duration)
+│   ├── TreeNotInWorkspace(key: WorkspaceKeySecret, treeId: TreeId)
 │   ├── VersionConflict(nodeId: String, expected: String, actual: String)
 │   └── MergeConflict(branch: String, details: String)
 └── sealed trait IrminError extends AppError
@@ -201,7 +218,7 @@ The ZIO error channel in each `serverLogic` block calls `.either`, which passes 
 Exception `getMessage` must never include credentials or tokens:
 - `RepositoryFailure(reason)` — `reason` is an internal diagnostic string, sanitised to `"Internal server error"` by `encode`
 - Workspace errors (A13) — opaque `"Workspace not found"` regardless of variant
-- `WorkspaceNotFound(key)` and `WorkspaceExpired(key, ...)` include the key in `getMessage` for server-side diagnostics — this is safe because `getMessage` is logged (ADR-002), not serialised to clients (A13 collapses all workspace errors to opaque 404). After Decision 2, these messages will print `WorkspaceKey(***)` instead of the raw token
+- `WorkspaceNotFound(key)` and `WorkspaceExpired(key, ...)` include the key in `getMessage` for server-side diagnostics — this is safe because `getMessage` is logged (ADR-002), not serialised to clients (A13 collapses all workspace errors to opaque 404). After Decision 2, these messages will print `WorkspaceKeySecret(***)` instead of the raw token (R3)
 
 ---
 
@@ -212,12 +229,11 @@ Exception `getMessage` must never include credentials or tokens:
 ```scala
 // BAD: case class auto-toString prints the full credential
 val key = WorkspaceKey("abcdefghijklmnopqrstuv")
-log.info(s"Resolving $key") // prints "Resolving WorkspaceKey(abcdefghijklmnopqrstuv)"
+log.info(s"Resolving $key") // prints "WorkspaceKey(abcdefghijklmnopqrstuv)"
 
-// GOOD: final class with redacted toString (Decision 2)
-// WorkspaceKey is a final class — toString returns "WorkspaceKey(***)"
-log.info(s"Resolving $key") // prints "Resolving WorkspaceKey(***)"
-// Access requires explicit opt-in: key.reveal
+// GOOD: WorkspaceKeySecret — final class with redacted toString (R1, R3)
+log.info(s"Resolving $key") // prints "WorkspaceKeySecret(***)"
+// Access requires explicit opt-in: key.reveal (R4)
 ```
 
 ### ❌ Raw String for Infrastructure Secrets
@@ -264,7 +280,8 @@ case RepositoryFailure(reason) =>
 
 | Location | Pattern | Effort |
 |----------|---------|--------|
-| `WorkspaceKey` (`OpaqueTypes.scala`) | Convert to `final class` with `reveal`, `equals`/`hashCode`, redacted `toString` | Low (~40 lines across 6 files) |
+| `WorkspaceKeySecret` (`OpaqueTypes.scala`) | `final class` with Iron-validated `WorkspaceKeyStr` internal, `reveal`, `equals`/`hashCode`, redacted `toString` (R1–R8) | Low (~40 lines) |
+| Rename `WorkspaceKey` → `WorkspaceKeySecret` | Mechanical rename across imports, type annotations, endpoints, controllers, stores, tests | Medium (~15 files, mechanical) |
 | `ErrorResponse.encode` | Split into `encode` + `encodeAppError` + `encodeSimError` + `encodeIrminError` | Low (~30 lines refactored) |
 | `build.sbt` | Add `-Wconf:msg=match may not be exhaustive:error` | Trivial (1 line) |
 | `Config.Secret` | Use for infrastructure secrets (DB, SpiceDB) — boundary documented in Decision 2a | Trivial (when added) |
@@ -283,7 +300,7 @@ The following secrets are handled by the service mesh (ADR-012) and **never ente
 | mTLS certificates | ztunnel | Auto-rotated, zero-config; app is unaware of cert lifecycle |
 | OAuth2 client secrets | Keycloak service accounts | Service-to-service auth via mTLS, not client secrets in app code |
 
-If a future deployment requires app-code access to infrastructure secrets (e.g., direct database connection without mesh, SpiceDB pre-shared key), use `Config.Secret` (Decision 1) and the scoped lifecycle (Decision 3).
+If a future deployment requires app-code access to infrastructure secrets (e.g., direct database connection without mesh, SpiceDB pre-shared key), use `Config.Secret` (Decision 2) and the scoped lifecycle (Decision 3). If the secret flows through the request lifecycle (not just config loading), apply the credential type checklist (Decision 1).
 
 ---
 
@@ -293,8 +310,8 @@ If a future deployment requires app-code access to infrastructure secrets (e.g.,
 - [ADR-002: Logging / Typed Errors (Decision 5)](./ADR-002.md) — error hierarchy propagates type-safely; this ADR strengthens to compiler-enforced
 - [ADR-008: Error Handling & Resilience](./ADR-008-proposal.md) — established sealed `AppError` hierarchy that enables exhaustive matching
 - [ADR-012: Service Mesh](./ADR-012.md) — externalises JWT/mTLS/password handling to infrastructure
-- [ADR-018: Nominal Wrappers](./ADR-018-nominal-wrappers.md) — case-class wrappers for identity distinction; `Secret` breaks from this pattern deliberately
-- [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — `WorkspaceKey` (originally proposed as `ShareToken`) is the credential this ADR hardens
+- [ADR-018: Nominal Wrappers](./ADR-018-nominal-wrappers.md) — case-class wrappers for identity distinction; credential types break from this pattern deliberately (R1)
+- [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — `WorkspaceKeySecret` (originally `ShareToken` → `WorkspaceKey`) is the credential this ADR hardens
 - [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md) — three-layer model; Layers 1-2 delegate secrets to mesh
 - [CWE-209: Information Exposure Through Error Messages](https://cwe.mitre.org/data/definitions/209.html)
 - [OWASP Error Handling Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html)

@@ -6,7 +6,7 @@ import java.time.{Instant, Duration as JDuration}
 import zio.test.*
 import zio.json.*
 import sttp.model.StatusCode
-import com.risquanter.register.domain.data.iron.WorkspaceKey
+import com.risquanter.register.domain.data.iron.WorkspaceKeySecret
 
 object ErrorResponseSpec extends ZIOSpecDefault {
 
@@ -61,7 +61,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       },
 
       test("encodes WorkspaceNotFound to opaque 404") {
-        val key = WorkspaceKey.fromString("abcdefghijklmnopqrstuv").toOption.get
+        val key = WorkspaceKeySecret.fromString("abcdefghijklmnopqrstuv").toOption.get
         val (status, response) = ErrorResponse.encode(WorkspaceNotFound(key))
 
         assertTrue(
@@ -72,7 +72,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       },
 
       test("encodes WorkspaceExpired to same opaque 404 as not-found (A13)") {
-        val key = WorkspaceKey.fromString("ABCDEFGHIJKLMNOPQRSTUV").toOption.get
+        val key = WorkspaceKeySecret.fromString("ABCDEFGHIJKLMNOPQRSTUV").toOption.get
         val (status, response) = ErrorResponse.encode(
           WorkspaceExpired(key, Instant.now(), JDuration.ofHours(1))
         )

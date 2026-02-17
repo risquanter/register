@@ -3,7 +3,7 @@ package com.risquanter.register.domain.errors
 import scala.concurrent.duration.Duration
 import sttp.model.StatusCode
 import java.time.{Duration as JDuration, Instant}
-import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
 
 sealed trait AppError extends Throwable
 sealed trait SimError extends AppError
@@ -45,19 +45,25 @@ case class RateLimitExceeded(ip: String, limit: Int, window: String = "1h") exte
 // Workspace Errors (A13: all map to opaque 404 at HTTP layer)
 // ============================================================================
 
-/** Workspace not found — maps to opaque 404 (A13). */
-case class WorkspaceNotFound(key: WorkspaceKey) extends SimError {
-  override def getMessage: String = s"Workspace not found: ${key.value}"
+/** Workspace not found — maps to opaque 404 (A13).
+  * ADR-022: getMessage omits raw key (zero diagnostic value — request URL identifies workspace).
+  */
+case class WorkspaceNotFound(key: WorkspaceKeySecret) extends SimError {
+  override def getMessage: String = "Workspace not found"
 }
 
-/** Workspace expired — maps to same opaque 404 as not-found (A13). */
-case class WorkspaceExpired(key: WorkspaceKey, createdAt: Instant, ttl: JDuration) extends SimError {
-  override def getMessage: String = s"Workspace expired: ${key.value}"
+/** Workspace expired — maps to same opaque 404 as not-found (A13).
+  * ADR-022: getMessage uses createdAt/ttl as diagnostics, not raw key.
+  */
+case class WorkspaceExpired(key: WorkspaceKeySecret, createdAt: Instant, ttl: JDuration) extends SimError {
+  override def getMessage: String = s"Workspace expired (created: $createdAt, ttl: $ttl)"
 }
 
-/** Tree not associated with workspace — maps to opaque 404 (A13). */
-case class TreeNotInWorkspace(key: WorkspaceKey, treeId: TreeId) extends SimError {
-  override def getMessage: String = s"Tree ${treeId.value} is not in workspace ${key.value}"
+/** Tree not associated with workspace — maps to opaque 404 (A13).
+  * ADR-022: getMessage omits raw key; treeId is the useful diagnostic.
+  */
+case class TreeNotInWorkspace(key: WorkspaceKeySecret, treeId: TreeId) extends SimError {
+  override def getMessage: String = s"Tree ${treeId.value} not found in workspace"
 }
 
 // ============================================================================

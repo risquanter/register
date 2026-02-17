@@ -210,27 +210,48 @@ object NodeId:
   given JsonDecoder[NodeId] = JsonDecoder[String].mapOrFail(s =>
     NodeId.fromString(s).left.map(_.mkString(", ")))
 
-// WorkspaceKey: 128-bit SecureRandom credential, base64url encoded (22 chars, no padding).
+// WorkspaceKeySecret: 128-bit SecureRandom credential, base64url encoded (22 chars, no padding).
 // Used as capability URL token for workspace access. Standalone type — NOT a ULID wrapper.
 // Different charset (base64url vs Crockford base32) and length (22 vs 26) from SafeId.
+//
+// ADR-022: final class — no compiler-generated unapply, copy, or product serialisation.
+// Raw value accessible only via explicit `reveal` call; toString is redacted.
 type WorkspaceKeyStr = String :| Match["^[A-Za-z0-9_-]{22}$"]
 
-case class WorkspaceKey(value: String)
+final class WorkspaceKeySecret private (private val raw: WorkspaceKeyStr):
+  /** Explicitly extract the raw credential string. Call sites must opt in. */
+  def reveal: String = raw
+  override def toString: String = "WorkspaceKeySecret(***)"
+  override def hashCode: Int = raw.hashCode
+  override def equals(that: Any): Boolean = that match
+    case wk: WorkspaceKeySecret => raw == wk.raw
+    case _                => false
 
-object WorkspaceKey:
-  /** Generate a cryptographically random workspace key (128-bit entropy). */
-  def generate: UIO[WorkspaceKey] =
+object WorkspaceKeySecret:
+  /** Construct from an already-validated WorkspaceKeyStr (Iron proof required). */
+  def apply(value: WorkspaceKeyStr): WorkspaceKeySecret = new WorkspaceKeySecret(value)
+
+  // Thread-safe: SecureRandom is documented as thread-safe in the JDK.
+  // Shared instance avoids repeated seeding overhead from /dev/urandom on each call.
+  private val rng: java.security.SecureRandom = new java.security.SecureRandom()
+
+  /** Generate a cryptographically random workspace key (128-bit entropy).
+    * refineUnsafe is safe here: SecureRandom(16 bytes) → base64url encoding
+    * always produces exactly 22 chars from [A-Za-z0-9_-].
+    */
+  def generate: UIO[WorkspaceKeySecret] =
     ZIO.succeed {
       val bytes = new Array[Byte](16) // 128 bits
-      java.security.SecureRandom().nextBytes(bytes)
-      WorkspaceKey(java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes))
+      rng.nextBytes(bytes)
+      val encoded = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
+      new WorkspaceKeySecret(encoded.refineUnsafe[Match["^[A-Za-z0-9_-]{22}$"]])
     }
 
   /** Smart constructor: validates base64url format, 22 chars. */
-  def fromString(s: String): Either[List[ValidationError], WorkspaceKey] =
-    ValidationUtil.refineWorkspaceKey(s)
+  def fromString(s: String): Either[List[ValidationError], WorkspaceKeySecret] =
+    ValidationUtil.refineWorkspaceKeySecret(s)
 
   // JSON codecs (companion object placement ensures implicit scope)
-  given JsonEncoder[WorkspaceKey] = JsonEncoder[String].contramap(_.value)
-  given JsonDecoder[WorkspaceKey] = JsonDecoder[String].mapOrFail(s =>
-    WorkspaceKey.fromString(s).left.map(_.mkString(", ")))
+  given JsonEncoder[WorkspaceKeySecret] = JsonEncoder[String].contramap(_.reveal)
+  given JsonDecoder[WorkspaceKeySecret] = JsonDecoder[String].mapOrFail(s =>
+    WorkspaceKeySecret.fromString(s).left.map(_.mkString(", ")))

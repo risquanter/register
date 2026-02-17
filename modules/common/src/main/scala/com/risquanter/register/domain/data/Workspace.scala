@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
 import java.time.{Duration, Instant}
-import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
 
 /** Workspace domain model — association/token index.
   *
@@ -14,7 +14,7 @@ import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId}
   * - `idleTimeout` + `ttl` (A11): dual timeout — absolute AND idle
   */
 final case class Workspace(
-  key: WorkspaceKey,
+  key: WorkspaceKeySecret,
   trees: Set[TreeId],
   createdAt: Instant,
   lastAccessedAt: Instant,

@@ -9,7 +9,7 @@ import zio.json.*
 import com.risquanter.register.http.controllers.BaseController
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStore
-import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
 import com.risquanter.register.domain.errors.TreeNotInWorkspace
 
 /**
@@ -41,7 +41,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore)
   private val HeartbeatInterval = 30.seconds
 
   /** Resolve workspace + verify tree ownership (shared pattern with WorkspaceController). */
-  private def resolveTree(key: WorkspaceKey, treeId: TreeId): IO[Throwable, Unit] =
+  private def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[Throwable, Unit] =
     for
       _       <- workspaceStore.resolve(key)
       belongs <- workspaceStore.belongsTo(key, treeId)

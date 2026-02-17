@@ -6,7 +6,10 @@ ThisBuild / scalacOptions ++= Seq(
   "-deprecation",
   "-feature",
   "-Xlint:type-parameter-shadow",
-  "-Xmax-inlines:64"
+  "-Xmax-inlines:64",
+  // ADR-022 Decision 3: promote inexhaustive sealed-trait matches to compile errors.
+  // This ensures new AppError subtypes must be handled in ErrorResponse.encode.
+  "-Wconf:msg=match may not be exhaustive:error"
 )
 
 ThisBuild / libraryDependencySchemes ++= Seq(

@@ -77,26 +77,41 @@ object ErrorResponse {
     * All error logging should happen at the service layer using tapErrorCause
     * before errors reach this boundary. See ADR-002 Decision 5.
     * 
-    * Uses typed pattern matching on AppError hierarchy - no string matching.
+    * Dispatches to exhaustive sub-matchers for SimError and IrminError so the
+    * compiler enforces coverage when new subtypes are added (ADR-022 Decision 3).
     */
   def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
-    // Domain errors - typed hierarchy
-    case ValidationFailed(errors)     => makeValidationResponse(errors)
-    case AccessDenied(reason)         => makeAccessDeniedResponse(reason)
-    case RateLimitExceeded(ip, limit, window) => makeRateLimitExceededResponse(ip, limit, window)
-    // Workspace errors — part of SimError hierarchy. Intentionally collapsed to opaque 404 (A13)
-    case _: WorkspaceNotFound      => makeWorkspaceOpaqueNotFoundResponse()
-    case _: WorkspaceExpired       => makeWorkspaceOpaqueNotFoundResponse()
-    case _: TreeNotInWorkspace     => makeWorkspaceOpaqueNotFoundResponse()
-    case RepositoryFailure(reason)    => makeRepositoryFailureResponse(reason)
-    case SimulationFailure(id, cause) => makeSimulationFailureResponse(id)
-    case DataConflict(reason)         => makeDataConflictResponse(reason)
-    // Infrastructure errors (ADR-008)
-    case e: IrminError                         => makeIrminErrorResponse(e)
-    case VersionConflict(nodeId, expected, actual) => makeVersionConflictResponse(nodeId, expected, actual)
-    case MergeConflict(branch, details)        => makeMergeConflictResponse(branch, details)
-    // Unexpected errors - already logged at service layer (ADR-002 Decision 5)
+    case e: SimError   => encodeSimError(e)
+    case e: IrminError => encodeIrminError(e)
+    // Genuine unknown — already logged at service layer (ADR-002 Decision 5)
     case _ => makeGeneralResponse()
+  }
+
+  /** Exhaustive match on SimError — compiler-enforced coverage.
+    * Adding a new SimError subtype without a case here is a compile error
+    * (requires -Wconf:msg=match may not be exhaustive:error in build.sbt).
+    */
+  private def encodeSimError(error: SimError): (StatusCode, ErrorResponse) = error match {
+    case ValidationFailed(errors)                  => makeValidationResponse(errors)
+    case AccessDenied(reason)                      => makeAccessDeniedResponse(reason)
+    case RateLimitExceeded(ip, limit, window)      => makeRateLimitExceededResponse(ip, limit, window)
+    // Workspace errors — intentionally collapsed to opaque 404 (A13)
+    case _: WorkspaceNotFound                      => makeWorkspaceOpaqueNotFoundResponse()
+    case _: WorkspaceExpired                       => makeWorkspaceOpaqueNotFoundResponse()
+    case _: TreeNotInWorkspace                     => makeWorkspaceOpaqueNotFoundResponse()
+    case RepositoryFailure(reason)                 => makeRepositoryFailureResponse(reason)
+    case SimulationFailure(id, cause)              => makeSimulationFailureResponse(id)
+    case DataConflict(reason)                      => makeDataConflictResponse(reason)
+    case VersionConflict(nodeId, expected, actual) => makeVersionConflictResponse(nodeId, expected, actual)
+    case MergeConflict(branch, details)            => makeMergeConflictResponse(branch, details)
+  }
+
+  /** Exhaustive match on IrminError — compiler-enforced coverage (ADR-008). */
+  private def encodeIrminError(error: IrminError): (StatusCode, ErrorResponse) = error match {
+    case IrminUnavailable(reason)            => makeServiceUnavailableResponse(reason)
+    case NetworkTimeout(operation, duration) => makeNetworkTimeoutResponse(operation, duration)
+    case IrminHttpError(status, body)        => makeIrminHttpErrorResponse(status, body)
+    case IrminGraphQLError(messages, path)   => makeIrminGraphQlErrorResponse(messages, path)
   }
 
   // ============================================================================
@@ -174,12 +189,6 @@ object ErrorResponse {
     val field = path.filter(_.nonEmpty).map(_.mkString(".")).getOrElse("graphql")
     response(StatusCode.BadGateway, field, ValidationErrorCode.DEPENDENCY_FAILED,
       messages.mkString("; "), domain, requestId)
-
-  private def makeIrminErrorResponse(error: IrminError): (StatusCode, ErrorResponse) = error match
-    case IrminUnavailable(reason)            => makeServiceUnavailableResponse(reason)
-    case NetworkTimeout(operation, duration) => makeNetworkTimeoutResponse(operation, duration)
-    case IrminHttpError(status, body)        => makeIrminHttpErrorResponse(status, body)
-    case IrminGraphQLError(messages, path)   => makeIrminGraphQlErrorResponse(messages, path)
 
   def makeVersionConflictResponse(nodeId: String, expected: String, actual: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.Conflict, "version", ValidationErrorCode.CONSTRAINT_VIOLATION,

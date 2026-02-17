@@ -9,7 +9,7 @@ import zio.stream.*
 
 import com.risquanter.register.http.endpoints.BaseEndpoint
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
 
 /**
   * SSE endpoint definitions for real-time updates.
@@ -60,7 +60,7 @@ trait SSEEndpoints extends BaseEndpoint {
           |```
           |""".stripMargin
       )
-      .in("w" / path[WorkspaceKey]("key") / "events" / "tree" / path[TreeId]("treeId"))
+      .in("w" / path[WorkspaceKeySecret]("key") / "events" / "tree" / path[TreeId]("treeId"))
       .get
       .out(
         streamBody(ZioStreams)(

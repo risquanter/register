@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
-import com.risquanter.register.domain.data.iron.WorkspaceKey
+import com.risquanter.register.domain.data.iron.WorkspaceKeySecret
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
@@ -34,26 +34,28 @@ final class WorkspaceState extends WorkspaceEndpoints:
   private val workspacePathPattern = "^/w/([A-Za-z0-9_-]{22})(?:/.*)?$".r
 
   /** The active workspace key. None until bootstrap or pre-validation succeeds. */
-  val workspaceKey: Var[Option[WorkspaceKey]] = Var(extractKeyFromURL())
+  val workspaceKey: Var[Option[WorkspaceKeySecret]] = Var(extractKeyFromURL())
 
   /** Read-only signal for downstream state objects. */
-  def keySignal: StrictSignal[Option[WorkspaceKey]] = workspaceKey.signal
+  def keySignal: StrictSignal[Option[WorkspaceKeySecret]] = workspaceKey.signal
 
   /** Synchronous accessor for the current key. */
-  def currentKey: Option[WorkspaceKey] = workspaceKey.now()
+  def currentKey: Option[WorkspaceKeySecret] = workspaceKey.now()
 
   /** Whether a workspace is currently active. */
   def hasWorkspace: Boolean = currentKey.isDefined
 
-  /** Extract workspace key from the current browser URL path. */
-  private def extractKeyFromURL(): Option[WorkspaceKey] =
+  /** Extract workspace key from the current browser URL path.
+    * Uses fromString for Iron-validated construction (ADR-022 R5, R7).
+    */
+  private def extractKeyFromURL(): Option[WorkspaceKeySecret] =
     dom.window.location.pathname match
-      case workspacePathPattern(key) => Some(WorkspaceKey(key))
+      case workspacePathPattern(key) => WorkspaceKeySecret.fromString(key).toOption
       case _                         => None
 
   /** Push workspace key into the browser URL (no page reload). */
-  private def pushKeyToURL(key: WorkspaceKey): Unit =
-    dom.window.history.replaceState(null, "", s"/w/${key.value}")
+  private def pushKeyToURL(key: WorkspaceKeySecret): Unit =
+    dom.window.history.replaceState(null, "", s"/w/${key.reveal}")
 
   /** Reset URL to root (used when clearing a stale key). */
   private def clearURL(): Unit =

@@ -9,7 +9,7 @@ import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, Works
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.{WorkspaceStore, RateLimiter}
-import com.risquanter.register.domain.data.iron.{WorkspaceKey, TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId}
 import com.risquanter.register.domain.errors.TreeNotInWorkspace
 
 /** Workspace controller.
@@ -43,7 +43,7 @@ class WorkspaceController private (
     * Fails with TreeNotInWorkspace (opaque 404 via A13) if the tree
     * does not belong to the workspace.
     */
-  private def resolveTree(key: WorkspaceKey, treeId: TreeId): IO[Throwable, Unit] =
+  private def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[Throwable, Unit] =
     for
       _       <- workspaceStore.resolve(key)
       belongs <- workspaceStore.belongsTo(key, treeId)
@@ -85,7 +85,7 @@ class WorkspaceController private (
       yield SimulationResponse.fromRiskTree(tree)).either
   }
 
-  val rotateWorkspace: ServerEndpoint[Any, Task] = rotateWorkspaceKeyEndpoint.serverLogic { key =>
+  val rotateWorkspace: ServerEndpoint[Any, Task] = rotateWorkspaceKeySecretEndpoint.serverLogic { key =>
     (for
       newKey <- workspaceStore.rotate(key)
       ws     <- workspaceStore.resolve(newKey)
