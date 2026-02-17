@@ -33,7 +33,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         assertTrue(
           status == StatusCode.InternalServerError,
           response.error.code == 500,
-          response.error.errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
+          response.error.errors.head.code == ValidationErrorCode.INTERNAL_ERROR,
           response.error.message == "Internal server error"
         )
       },
@@ -189,7 +189,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("decodes 409 with version field to VersionConflict") {
         val response = ErrorResponse(
           JsonHttpError(409, "Version conflict", List(
-            ErrorDetail("risk-trees", "version", ValidationErrorCode.CONSTRAINT_VIOLATION, "Version conflict on node-123")
+            ErrorDetail("risk-trees", "version", ValidationErrorCode.VERSION_CONFLICT, "Version conflict on node-123")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
@@ -199,7 +199,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("decodes 409 with branch field to MergeConflict") {
         val response = ErrorResponse(
           JsonHttpError(409, "Merge conflict", List(
-            ErrorDetail("scenarios", "branch", ValidationErrorCode.CONSTRAINT_VIOLATION, "Merge conflict on feature-1")
+            ErrorDetail("scenarios", "branch", ValidationErrorCode.MERGE_CONFLICT, "Merge conflict on feature-1")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
@@ -229,7 +229,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("decodes 403 to AccessDenied") {
         val response = ErrorResponse(
           JsonHttpError(403, "Forbidden", List(
-            ErrorDetail("risk-trees", "authorization", ValidationErrorCode.CONSTRAINT_VIOLATION, "Forbidden")
+            ErrorDetail("risk-trees", "authorization", ValidationErrorCode.ACCESS_DENIED, "Forbidden")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.Forbidden, response))
@@ -239,7 +239,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("decodes 429 to RateLimitExceeded") {
         val response = ErrorResponse(
           JsonHttpError(429, "Too many requests", List(
-            ErrorDetail("risk-trees", "rate-limit", ValidationErrorCode.CONSTRAINT_VIOLATION, "Too many requests")
+            ErrorDetail("risk-trees", "rate-limit", ValidationErrorCode.RATE_LIMIT_EXCEEDED, "Too many requests")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.TooManyRequests, response))
@@ -269,7 +269,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("decodes 500 with simulation field to SimulationFailure") {
         val response = ErrorResponse(
           JsonHttpError(500, "Simulation failed", List(
-            ErrorDetail("risk-trees", "simulation", ValidationErrorCode.CONSTRAINT_VIOLATION, "Simulation sim-1 failed")
+            ErrorDetail("risk-trees", "simulation", ValidationErrorCode.INTERNAL_ERROR, "Simulation sim-1 failed")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.InternalServerError, response))
@@ -279,7 +279,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("decodes 500 with generic field to RepositoryFailure") {
         val response = ErrorResponse(
           JsonHttpError(500, "Error", List(
-            ErrorDetail("risk-trees", "unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "DB connection failed")
+            ErrorDetail("risk-trees", "unknown", ValidationErrorCode.INTERNAL_ERROR, "DB connection failed")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.InternalServerError, response))
@@ -330,7 +330,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("ErrorResponse can be serialized to JSON") {
         val response = ErrorResponse(
           JsonHttpError(400, "Test error", List(
-            ErrorDetail("test", "field", ValidationErrorCode.CONSTRAINT_VIOLATION, "message")
+            ErrorDetail("test", "field", ValidationErrorCode.INVALID_FORMAT, "message")
           ))
         )
         
@@ -356,7 +356,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       
       test("JsonHttpError can be serialized to JSON") {
         val httpError = JsonHttpError(500, "Error", List(
-          ErrorDetail("test", "field", ValidationErrorCode.CONSTRAINT_VIOLATION, "test message")
+          ErrorDetail("test", "field", ValidationErrorCode.INTERNAL_ERROR, "test message")
         ))
         
         val json = httpError.toJson

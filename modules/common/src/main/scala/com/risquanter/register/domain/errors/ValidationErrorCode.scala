@@ -31,6 +31,18 @@ enum ValidationErrorCode(val code: String, val description: String):
   case AMBIGUOUS_REFERENCE extends ValidationErrorCode("AMBIGUOUS_REFERENCE", "Reference matched multiple entities; must be unique")
   case INVALID_NODE_TYPE extends ValidationErrorCode("INVALID_NODE_TYPE", "Referenced node is of the wrong type for this operation")
 
+  // ── Resource & access codes ───────────────────────────────────────────────
+  case NOT_FOUND extends ValidationErrorCode("NOT_FOUND", "Requested resource does not exist")
+  case ACCESS_DENIED extends ValidationErrorCode("ACCESS_DENIED", "Insufficient permissions for this operation")
+  case RATE_LIMIT_EXCEEDED extends ValidationErrorCode("RATE_LIMIT_EXCEEDED", "Too many requests in the current window")
+
+  // ── Concurrency codes ─────────────────────────────────────────────────────
+  case VERSION_CONFLICT extends ValidationErrorCode("VERSION_CONFLICT", "Optimistic concurrency conflict on resource version")
+  case MERGE_CONFLICT extends ValidationErrorCode("MERGE_CONFLICT", "Branch merge conflict")
+
+  // ── Infrastructure codes ──────────────────────────────────────────────────
+  case INTERNAL_ERROR extends ValidationErrorCode("INTERNAL_ERROR", "Unexpected server-side error")
+
 object ValidationErrorCode:
   given encoder: JsonEncoder[ValidationErrorCode] = 
     JsonEncoder[String].contramap(_.code)

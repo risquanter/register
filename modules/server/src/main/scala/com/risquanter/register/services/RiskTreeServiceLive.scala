@@ -50,7 +50,7 @@ class RiskTreeServiceLive private (
       case None =>
         ZIO.fail(ValidationFailed(List(ValidationError(
           field = "treeId",
-          code = ValidationErrorCode.REQUIRED_FIELD,
+          code = ValidationErrorCode.NOT_FOUND,
           message = s"Tree not found: $treeId"
         ))))
     }
@@ -61,7 +61,7 @@ class RiskTreeServiceLive private (
       tree <- getTreeOrFail(treeId)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
         field = "nodeId",
-        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        code = ValidationErrorCode.NOT_FOUND,
         message = s"Node ${nodeId.value} not found in tree ${tree.id}"
       ))))
     yield (tree, node)
@@ -73,7 +73,7 @@ class RiskTreeServiceLive private (
       missing = nodeIds.filterNot(tree.index.nodes.contains)
       _ <- if missing.isEmpty then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
         field = "nodeIds",
-        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        code = ValidationErrorCode.NOT_FOUND,
         message = s"Node ${id.value} not found in tree ${tree.id}"
       ))))
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
@@ -173,7 +173,7 @@ class RiskTreeServiceLive private (
     case ValidationFailed(errors) =>
       // Use first error for primary context (could extend to aggregate all)
       val primaryError = errors.headOption.getOrElse(
-        ValidationError("unknown", ValidationErrorCode.CONSTRAINT_VIOLATION, "Unknown validation error")
+        ValidationError("unknown", ValidationErrorCode.INTERNAL_ERROR, "Unknown validation error")
       )
       ErrorContext(
         errorType = "ValidationFailed",

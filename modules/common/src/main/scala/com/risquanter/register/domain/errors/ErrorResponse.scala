@@ -29,7 +29,7 @@ object ErrorResponse {
     val details = response.error.errors
     val message = details.map(_.message).mkString("; ")
     val firstField = details.headOption.map(_.field).getOrElse("unknown")
-    val firstCode = details.headOption.map(_.code).getOrElse(ValidationErrorCode.CONSTRAINT_VIOLATION)
+    val firstCode = details.headOption.map(_.code).getOrElse(ValidationErrorCode.INTERNAL_ERROR)
 
     status.code match
       // 400 → ValidationFailed (only source for this status code)
@@ -134,7 +134,7 @@ object ErrorResponse {
     (status, ErrorResponse(JsonHttpError(status.code, message, errors)))
 
   def makeGeneralResponse(domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.InternalServerError, "unknown", ValidationErrorCode.CONSTRAINT_VIOLATION,
+    response(StatusCode.InternalServerError, "unknown", ValidationErrorCode.INTERNAL_ERROR,
       "General server error, please check the logs...", domain, requestId)
 
   /** Validation responses carry multiple `ErrorDetail` entries (one per `ValidationError`),
@@ -149,25 +149,25 @@ object ErrorResponse {
     response(StatusCode.Conflict, "unknown", ValidationErrorCode.DUPLICATE_VALUE, message, domain, requestId)
 
   def makeAccessDeniedResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.Forbidden, "authorization", ValidationErrorCode.CONSTRAINT_VIOLATION,
+    response(StatusCode.Forbidden, "authorization", ValidationErrorCode.ACCESS_DENIED,
       "Forbidden", domain, requestId)
 
   def makeRateLimitExceededResponse(ip: String, limit: Int, window: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.TooManyRequests, "rate-limit", ValidationErrorCode.CONSTRAINT_VIOLATION,
+    response(StatusCode.TooManyRequests, "rate-limit", ValidationErrorCode.RATE_LIMIT_EXCEEDED,
       "Too many requests", domain, requestId)
 
   /** A13: constant opaque 404 to avoid not-found vs expired distinction leaks. */
   def makeWorkspaceOpaqueNotFoundResponse(domain: String = "workspaces", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.NotFound, "workspace", ValidationErrorCode.CONSTRAINT_VIOLATION,
+    response(StatusCode.NotFound, "workspace", ValidationErrorCode.NOT_FOUND,
       "Workspace not found", domain, requestId)
 
   def makeRepositoryFailureResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     // A25: do not leak repository internals in client responses
-    response(StatusCode.InternalServerError, "unknown", ValidationErrorCode.CONSTRAINT_VIOLATION,
+    response(StatusCode.InternalServerError, "unknown", ValidationErrorCode.INTERNAL_ERROR,
       "Internal server error", domain, requestId)
 
   def makeSimulationFailureResponse(simulationId: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.InternalServerError, "simulation", ValidationErrorCode.CONSTRAINT_VIOLATION,
+    response(StatusCode.InternalServerError, "simulation", ValidationErrorCode.INTERNAL_ERROR,
       s"Simulation $simulationId failed", domain, requestId)
 
   // ── Infrastructure Error Responses (ADR-008) ───────────────────────────────
@@ -191,10 +191,10 @@ object ErrorResponse {
       messages.mkString("; "), domain, requestId)
 
   def makeVersionConflictResponse(nodeId: String, expected: String, actual: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.Conflict, "version", ValidationErrorCode.CONSTRAINT_VIOLATION,
+    response(StatusCode.Conflict, "version", ValidationErrorCode.VERSION_CONFLICT,
       s"Version conflict on node $nodeId: expected $expected, found $actual", domain, requestId)
 
   def makeMergeConflictResponse(branch: String, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.Conflict, "branch", ValidationErrorCode.CONSTRAINT_VIOLATION,
+    response(StatusCode.Conflict, "branch", ValidationErrorCode.MERGE_CONFLICT,
       s"Merge conflict on branch $branch: $details", domain, requestId)
 }
