@@ -156,10 +156,12 @@ object ErrorResponse {
     response(StatusCode.TooManyRequests, "rate-limit", ValidationErrorCode.RATE_LIMIT_EXCEEDED,
       "Too many requests", domain, requestId)
 
-  /** A13: constant opaque 404 to avoid not-found vs expired distinction leaks. */
+  /** A13: constant opaque 404 — intentionally resource-neutral to avoid leaking
+    * whether the workspace key, tree association, or TTL caused the failure.
+    */
   def makeWorkspaceOpaqueNotFoundResponse(domain: String = "workspaces", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.NotFound, "workspace", ValidationErrorCode.NOT_FOUND,
-      "Workspace not found", domain, requestId)
+    response(StatusCode.NotFound, "resource", ValidationErrorCode.NOT_FOUND,
+      "Not found", domain, requestId)
 
   def makeRepositoryFailureResponse(reason: String, domain: String = "risk-trees", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     // A25: do not leak repository internals in client responses

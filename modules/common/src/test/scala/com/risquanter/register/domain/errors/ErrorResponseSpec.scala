@@ -67,7 +67,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         assertTrue(
           status == StatusCode.NotFound,
           response.error.code == 404,
-          response.error.message == "Workspace not found"
+          response.error.message == "Not found"
         )
       },
 
@@ -80,7 +80,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         assertTrue(
           status == StatusCode.NotFound,
           response.error.code == 404,
-          response.error.message == "Workspace not found"
+          response.error.message == "Not found"
         )
       },
       

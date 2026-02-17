@@ -217,7 +217,7 @@ The ZIO error channel in each `serverLogic` block calls `.either`, which passes 
 
 Exception `getMessage` must never include credentials or tokens:
 - `RepositoryFailure(reason)` — `reason` is an internal diagnostic string, sanitised to `"Internal server error"` by `encode`
-- Workspace errors (A13) — opaque `"Workspace not found"` regardless of variant
+- Workspace errors (A13) — opaque `"Not found"` regardless of variant (resource-neutral)
 - `WorkspaceNotFound(key)` and `WorkspaceExpired(key, ...)` include the key in `getMessage` for server-side diagnostics — this is safe because `getMessage` is logged (ADR-002), not serialised to clients (A13 collapses all workspace errors to opaque 404). After Decision 2, these messages will print `WorkspaceKeySecret(***)` instead of the raw token (R3)
 
 ---
