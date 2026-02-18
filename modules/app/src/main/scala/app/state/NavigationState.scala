@@ -9,8 +9,9 @@ import com.raquo.laminar.api.L.{*, given}
   * is introduced; the workspace key in the URL is orthogonal to
   * the active section.
   */
-enum Section:
-  case Design, Analyze
+enum Section(val label: String):
+  case Design  extends Section("Design")
+  case Analyze extends Section("Analyze")
 
 /** Reactive navigation state — owns the currently active section.
   *

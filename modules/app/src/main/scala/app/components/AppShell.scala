@@ -3,40 +3,28 @@ package app.components
 import com.raquo.laminar.api.L.{*, given}
 import app.state.{NavigationState, Section, GlobalError}
 import app.views.ErrorBanner
-import app.core.ZJS.*
-import com.risquanter.register.http.endpoints.RiskTreeEndpoints
 
 /** Top-level application shell: Sidebar | (TopBar + ErrorBanner + content).
   *
-  * Replaces the previous `Layout` (Header → content → Footer) with
-  * a sidebar-driven layout that switches between Design and Analyze views.
+  * Pure structural layout — arranges Sidebar, TopBar, ErrorBanner, and
+  * routed view containers. Owns no state and fires no effects.
   *
-  * Structural responsibilities only — all visual styling is in `app.css`.
   * Follows ADR-019 Pattern 1 (composable function) and Pattern 2
-  * (state passed as parameter, not inherited).
+  * (all state received as signals — never created internally).
   */
-object AppShell extends RiskTreeEndpoints:
+object AppShell:
 
   def apply(
     navState: NavigationState,
     globalError: Signal[Option[GlobalError]],
     onDismissError: () => Unit,
+    healthStatus: Signal[Option[Boolean]],
     workspaceBadge: Signal[String],
     designView: HtmlElement,
     analyzeView: HtmlElement
   ): HtmlElement =
-
-    // Health indicator — fires GET /health on mount (migrated from Header)
-    val healthStatus: Var[Option[Boolean]] = Var(None)
-
     div(
       cls := "app-shell",
-      onMountCallback { _ =>
-        healthEndpoint(())
-          .tap(_ => zio.ZIO.succeed(healthStatus.set(Some(true))))
-          .tapError(_ => zio.ZIO.succeed(healthStatus.set(Some(false))))
-          .runJs
-      },
       // ── Left sidebar ──
       Sidebar(navState),
       // ── Main area (topbar + error banner + routed content) ──
@@ -49,18 +37,12 @@ object AppShell extends RiskTreeEndpoints:
             cls := "topbar-left",
             span(
               cls := "section-title",
-              child.text <-- navState.activeSection.signal.map:
-                case Section.Design  => "Design"
-                case Section.Analyze => "Analyze"
+              child.text <-- navState.activeSection.signal.map(_.label)
             )
           ),
           div(
             cls := "topbar-right",
-            span(cls <-- healthStatus.signal.map:
-              case None        => "health-dot health-checking"
-              case Some(true)  => "health-dot health-ok"
-              case Some(false) => "health-dot health-error"
-            ),
+            healthDot(healthStatus),
             span(
               cls := "topbar-badge",
               child.text <-- workspaceBadge
@@ -72,16 +54,8 @@ object AppShell extends RiskTreeEndpoints:
         // Routed content area
         mainTag(
           cls := "main-content",
-          div(
-            cls := "view-container",
-            display <-- navState.isActive(Section.Design).map(if _ then "flex" else "none"),
-            designView
-          ),
-          div(
-            cls := "view-container",
-            display <-- navState.isActive(Section.Analyze).map(if _ then "flex" else "none"),
-            analyzeView
-          )
+          routableView(Section.Design, navState, designView),
+          routableView(Section.Analyze, navState, analyzeView)
         ),
         // Footer
         footerTag(
@@ -89,4 +63,24 @@ object AppShell extends RiskTreeEndpoints:
           p("© 2026 Risquanter")
         )
       )
+    )
+
+  /** View container with reactive show/hide driven by navigation state. */
+  private def routableView(
+    section: Section,
+    navState: NavigationState,
+    view: HtmlElement
+  ): HtmlElement =
+    div(
+      cls := "view-container",
+      display <-- navState.isActive(section).map(if _ then "flex" else "none"),
+      view
+    )
+
+  /** Health indicator dot — tri-state: checking → ok | error. */
+  private def healthDot(status: Signal[Option[Boolean]]): HtmlElement =
+    span(cls <-- status.map:
+      case None        => "health-dot health-checking"
+      case Some(true)  => "health-dot health-ok"
+      case Some(false) => "health-dot health-error"
     )

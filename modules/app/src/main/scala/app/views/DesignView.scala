@@ -2,7 +2,7 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import app.components.SplitPane
-import app.state.{TreeBuilderState, TreeViewState, WorkspaceState, LoadState}
+import app.state.{TreeBuilderState, TreeViewState, WorkspaceState}
 
 /** Design view — tree creation and editing workflow.
   *
