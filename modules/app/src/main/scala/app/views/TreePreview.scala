@@ -2,12 +2,13 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft}
+import app.components.Icons
 
 /**
  * Hierarchical tree preview rendered from TreeBuilderState signals.
  *
  * Displays an ASCII-style tree structure with box-drawing characters (├── └──)
- * showing portfolios (📁) and leaves (🍃) in their parent-child hierarchy.
+ * showing portfolios and leaves in their parent-child hierarchy.
  * Each node has a remove button that triggers cascade deletion.
  *
  * Pure derived view — owns no state (ADR-019 Pattern 4).
@@ -19,9 +20,9 @@ object TreePreview:
     case Portfolio(n: String) extends TreeNode(n)
     case Leaf(n: String, distType: String, probability: Double) extends TreeNode(n)
 
-    def icon: String = this match
-      case _: Portfolio => "📁"
-      case _: Leaf => "🍃"
+    def iconSvg: SvgElement = this match
+      case _: Portfolio => Icons.portfolio("tree-icon")
+      case _: Leaf      => Icons.leaf("tree-icon")
 
     def label: String = this match
       case Portfolio(n) => n
@@ -67,7 +68,11 @@ object TreePreview:
       allNodes.groupMap(_._2)(_._1)
 
     // Root line
-    val rootLine = div(cls := "tree-node tree-root", span(s"🌳 $displayName"))
+    val rootLine = div(
+      cls := "tree-node tree-root",
+      Icons.treeRoot("tree-root-icon"),
+      span(displayName)
+    )
 
     // Render children of root (parent = None)
     val rootChildren = childrenOf.getOrElse(None, Nil)
@@ -90,7 +95,7 @@ object TreePreview:
       val nodeLine = div(
         cls := "tree-node",
         span(cls := "tree-branch", s"$prefix$connector"),
-        span(cls := s"tree-icon", node.icon),
+        node.iconSvg,
         span(cls := "tree-label", s" ${node.label} "),
         button(
           cls := "remove-btn",

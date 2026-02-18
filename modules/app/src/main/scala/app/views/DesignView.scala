@@ -13,7 +13,7 @@ import app.state.{TreeBuilderState, TreeViewState, WorkspaceState}
   *   ├── LEFT:  TreeBuilderView (forms)
   *   └── RIGHT: SplitPane.vertical(60% | 40%)
   *       ├── TOP:    TreePreview (live ASCII preview)
-  *       └── BOTTOM: LECChartView (chart for the currently-edited tree)
+  *       └── BOTTOM: Placeholder panel for future distribution modelling chart
   *
   * Pure structural component — owns no state (ADR-019 Pattern 1).
   */
@@ -30,7 +30,7 @@ object DesignView:
         left = TreeBuilderView(builderState, treeViewState, wsState),
         right = SplitPane.vertical(
           top = TreePreview(builderState),
-          bottom = LECChartView(treeViewState.lecChartSpec),
+          bottom = DistributionChartPlaceholder(),
           topPercent = 60
         ),
         leftPercent = 40

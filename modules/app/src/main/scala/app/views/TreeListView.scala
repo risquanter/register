@@ -3,6 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{TreeViewState, LoadState}
+import app.components.Icons
 import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.http.responses.SimulationResponse
 
@@ -67,7 +68,7 @@ object TreeListView:
       ),
       button(
         cls := "refresh-btn",
-        "↻",
+        Icons.refresh("refresh-icon"),
         title := "Refresh tree list and selected tree",
         onClick --> { _ =>
           state.loadTreeList()

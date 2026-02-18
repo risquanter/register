@@ -73,13 +73,39 @@ object Icons:
       svg.path(svg.d := "m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2")
     )
 
-  /** Lucide `file-chart-line` — leaf (risk observation) node. */
+  /** Lucide `file-chart-column-increasing` — leaf (risk observation) node. */
   def leaf(cls: String = "node-icon"): SvgElement =
     icon24(
       svg.cls := cls,
       svg.path(svg.d := "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"),
       svg.path(svg.d := "M14 2v5a1 1 0 0 0 1 1h5"),
-      svg.path(svg.d := "m16 13-3.5 3.5-2-2L8 17")
+      svg.path(svg.d := "M8 18v-2"),
+      svg.path(svg.d := "M12 18v-4"),
+      svg.path(svg.d := "M16 18v-6")
+    )
+
+  /** Lucide `chevron-right` — collapsed tree branch indicator. */
+  def chevronRight(cls: String = "toggle-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "m9 18 6-6-6-6")
+    )
+
+  /** Lucide `chevron-down` — expanded tree branch indicator. */
+  def chevronDown(cls: String = "toggle-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "m6 9 6 6 6-6")
+    )
+
+  /** Lucide `refresh-cw` — refresh action icon. */
+  def refresh(cls: String = "refresh-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"),
+      svg.path(svg.d := "M21 3v5h-5"),
+      svg.path(svg.d := "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"),
+      svg.path(svg.d := "M3 21v-5h5")
     )
 
   // ── Danago Systems signet (logo) ──────────────────────────────

@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.AppShell
-import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState}
+import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -18,6 +18,7 @@ object Main:
 
     val builderState = new TreeBuilderState
     val treeViewState = new TreeViewState(wsState.keySignal)
+    val analyzeQueryState = new AnalyzeQueryState
 
     // Global error state — safety net for errors with no per-view handler
     val globalError: Var[Option[GlobalError]] = Var(None)
@@ -63,7 +64,7 @@ object Main:
       healthStatus = healthState.status.signal,
       workspaceBadge = workspaceBadge,
       designView = DesignView(builderState, treeViewState, wsState),
-      analyzeView = AnalyzeView(treeViewState)
+      analyzeView = AnalyzeView(treeViewState, analyzeQueryState)
     )
 
     render(container, appElement)

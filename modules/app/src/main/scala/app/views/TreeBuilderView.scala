@@ -71,7 +71,7 @@ object TreeBuilderView extends WorkspaceEndpoints:
         placeholderText = "e.g., Enterprise Risk Tree"
       ),
       div(
-        cls := "forms-grid",
+        cls := "forms-stack",
         PortfolioFormView(state),
         RiskLeafFormView(state)
       ),

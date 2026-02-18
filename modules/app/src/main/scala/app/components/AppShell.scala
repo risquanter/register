@@ -73,7 +73,7 @@ object AppShell:
   ): HtmlElement =
     div(
       cls := "view-container",
-      display <-- navState.isActive(section).map(if _ then "flex" else "none"),
+      display <-- navState.isActive(section).map(if _ then "block" else "none"),
       view
     )
 

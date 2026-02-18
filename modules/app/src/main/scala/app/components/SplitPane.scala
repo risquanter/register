@@ -15,16 +15,34 @@ object SplitPane:
 
   /** Side-by-side split: left | right */
   def horizontal(left: HtmlElement, right: HtmlElement, leftPercent: Int = 50): HtmlElement =
+    val rightPercent = 100 - leftPercent
     div(
       cls := "split-pane split-horizontal",
-      div(cls := "split-panel split-left", styleAttr := s"--split-size: ${leftPercent}%", left),
-      div(cls := "split-panel split-right", styleAttr := s"--split-size: ${100 - leftPercent}%", right)
+      div(
+        cls := "split-panel split-left",
+        styleAttr := s"flex: ${leftPercent} 1 0%;",
+        left
+      ),
+      div(
+        cls := "split-panel split-right",
+        styleAttr := s"flex: ${rightPercent} 1 0%;",
+        right
+      )
     )
 
   /** Stacked split: top / bottom */
   def vertical(top: HtmlElement, bottom: HtmlElement, topPercent: Int = 50): HtmlElement =
+    val bottomPercent = 100 - topPercent
     div(
       cls := "split-pane split-vertical",
-      div(cls := "split-panel split-top", styleAttr := s"--split-size: ${topPercent}%", top),
-      div(cls := "split-panel split-bottom", styleAttr := s"--split-size: ${100 - topPercent}%", bottom)
+      div(
+        cls := "split-panel split-top",
+        styleAttr := s"flex: ${topPercent} 1 0%;",
+        top
+      ),
+      div(
+        cls := "split-panel split-bottom",
+        styleAttr := s"flex: ${bottomPercent} 1 0%;",
+        bottom
+      )
     )

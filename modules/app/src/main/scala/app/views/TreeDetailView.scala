@@ -3,6 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{TreeViewState, LoadState}
+import app.components.Icons
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
 
@@ -19,9 +20,9 @@ object TreeDetailView:
 
   // ── Node display helpers (mirrors TreePreview.TreeNode pattern) ──
 
-  private def nodeIcon(node: RiskNode): String = node match
-    case _: RiskPortfolio => "📁"
-    case _: RiskLeaf      => "🍃"
+  private def nodeIcon(node: RiskNode): SvgElement = node match
+    case _: RiskPortfolio => Icons.portfolio("node-icon")
+    case _: RiskLeaf      => Icons.leaf("node-icon")
 
   private def nodeLabel(node: RiskNode): String = node match
     case leaf: RiskLeaf =>
@@ -64,7 +65,7 @@ object TreeDetailView:
       cls := "tree-detail-container",
       div(
         cls := "tree-detail-header",
-        span(cls := "tree-icon", "🌳"),
+        Icons.treeRoot("tree-root-icon"),
         span(cls := "tree-name", tree.name.value.toString)
       ),
       rootNode match
@@ -111,13 +112,16 @@ object TreeDetailView:
           span(
             cls := "node-toggle",
             cursor.pointer,
-            child.text <-- isExpanded.map(if _ then "▼ " else "▶ "),
+            child <-- isExpanded.map {
+              case true  => Icons.chevronDown("toggle-icon")
+              case false => Icons.chevronRight("toggle-icon")
+            },
             onClick --> (_ => state.toggleExpanded(nodeId))
           )
         else
-          span(cls := "node-toggle node-toggle-spacer", "  "),
+          span(cls := "node-toggle node-toggle-spacer", Icons.chevronRight("toggle-icon")),
         // Icon + Label
-        span(cls := "node-icon", nodeIcon(node)),
+        nodeIcon(node),
         span(
           cls := "node-label",
           cursor.pointer,
