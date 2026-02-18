@@ -3,9 +3,9 @@ package app
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
-import app.components.{Layout, SplitPane}
-import app.state.{TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState}
-import app.views.{TreeBuilderView, TreePreview, TreeListView, TreeDetailView, LECChartView}
+import app.components.AppShell
+import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState}
+import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
 object Main:
@@ -44,29 +44,21 @@ object Main:
         )))
     )
 
-    val savedTreePanel = div(
-      cls := "saved-tree-panel",
-      TreeListView(treeViewState),
-      TreeDetailView(treeViewState)
-    )
+    // ── Navigation state ────────────────────────────────────────
+    val navState = new NavigationState
 
-    val appElement = Layout(
+    // Workspace badge — shows short key or fallback text
+    val workspaceBadge: Signal[String] = wsState.keySignal.map:
+      case Some(key) => key.take(8)
+      case None      => "no workspace"
+
+    val appElement = AppShell(
+      navState = navState,
       globalError = globalError.signal,
       onDismissError = () => globalError.set(None),
-      SplitPane.horizontal(
-        left = TreeBuilderView(builderState, treeViewState, wsState),
-        right = SplitPane.vertical(
-          top = SplitPane.horizontal(
-            left = TreePreview(builderState),
-            right = savedTreePanel,
-            leftPercent = 50
-          ),
-          // LEC chart panel — wired to real chart selection state
-          bottom = LECChartView(treeViewState.lecChartSpec),
-          topPercent = 60
-        ),
-        leftPercent = 40
-      )
+      workspaceBadge = workspaceBadge,
+      designView = DesignView(builderState, treeViewState, wsState),
+      analyzeView = AnalyzeView(treeViewState)
     )
 
     render(container, appElement)
