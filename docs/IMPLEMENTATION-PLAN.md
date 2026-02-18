@@ -1017,10 +1017,11 @@ trait WorkspaceStore:
   /** Check if a tree belongs to a workspace. Lazy TTL check included. */
   def belongsTo(key: WorkspaceKey, treeId: TreeId): IO[WorkspaceError, Boolean]
 
-  /** Evict all expired workspaces (absolute + idle). Returns count evicted.
+  /** Evict all expired workspaces (absolute + idle). Returns evicted entries.
+    * Callers (e.g. WorkspaceReaper) use the returned map to cascade-delete trees.
     * Called by both the background reaper fiber and the admin endpoint.
     */
-  def evictExpired: UIO[Int]
+  def evictExpired: UIO[Map[WorkspaceKeySecret, Workspace]]
 
   /** Hard delete. Removes workspace AND cascade-deletes all associated trees
     * from RiskTreeRepository. Preview feature — no data preservation.
@@ -1251,7 +1252,7 @@ distinction for internal logging (A30). Deleted workspaces simply don't exist �
 2. Returns 204 No Content
 3. All trees cascade-deleted from `RiskTreeRepository`
 4. SSE connections on deleted workspace are dropped
-5. Worst case (crash mid-delete): orphaned trees — reaper can clean up
+5. Worst case (crash mid-delete): orphaned trees — reaper cascade-deletes on next cycle
 
 **Existing `GET /risk-trees` (list-all):**
 - Frontend: unwired (no longer called)
@@ -1317,8 +1318,14 @@ object WorkspaceReaper:
   private def isNoOp(c: WorkspaceConfig): Boolean =
     (c.ttl.isZero || c.ttl.isNegative) && (c.idleTimeout.isZero || c.idleTimeout.isNegative)
 
-  private def reapLoop(store: WorkspaceStore, interval: Duration): UIO[Nothing] =
-    (ZIO.sleep(interval) *> store.evictExpired).forever
+  private def reapLoop(store: WorkspaceStore, treeService: RiskTreeService, interval: Duration): UIO[Nothing] =
+    val cycle =
+      for
+        evicted <- store.evictExpired
+        treeIds  = evicted.values.flatMap(_.trees)
+        _       <- treeService.cascadeDeleteTrees(treeIds)
+      yield ()
+    (ZIO.sleep(interval) *> cycle).forever
 ```
 
 **Key design decisions:**
@@ -1340,8 +1347,11 @@ object WorkspaceReaper:
    `Workspace.isExpired` fires on *either* absolute or idle timeout. The
    reaper is only truly a no-op when both are disabled (zero/negative).
 
-4. **No changes to `WorkspaceStore` trait.** The existing `evictExpired: UIO[Int]`
-   is sufficient. No interface change required.
+4. **`evictExpired` returns `Map[WorkspaceKeySecret, Workspace]`** (not just count).
+   This allows the reaper to extract tree IDs from evicted workspaces and
+   cascade-delete them via `RiskTreeService.cascadeDeleteTrees`. The extension
+   method on `RiskTreeService` is the single source of truth for best-effort
+   cascade semantics, shared with `WorkspaceController.deleteWorkspace`.
 
 5. **Application.scala:** Only change is adding `WorkspaceReaper.layer` to
    `appLayer`. No changes to `program` — the reaper is purely a layer concern.
@@ -1366,6 +1376,8 @@ connection state and requires no server-side changes beyond what already exists.
 - [ ] Rate limiter covers resolve attempts per IP (A28)
 - [x] Rate-limit trigger events logged (A32) ✅
 - [x] Reaper fiber shuts down gracefully with application (automatic via `forkScoped`) ✅
+- [x] Reaper cascade-deletes trees from evicted workspaces (orphan bug fix) ✅
+- [x] Opaque 404 uses resource-neutral message "Not found" (not "Workspace not found") ✅
 - [ ] Client handles `WorkspaceExpired` errors as first-class concern
 
 **A16 status (SSE lifecycle on eviction):** Deferred. The reaper does **not**
