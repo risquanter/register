@@ -12,8 +12,8 @@ import app.state.{TreeViewState, AnalyzeQueryState}
   *
   *   SplitPane.horizontal(75% | 25%)
   *   ├── LEFT:  analysis-panel
-  *   │   ├── Query input + textual response area
-  *   │   └── LECChartView in a fixed-height panel
+  *   │   ├── Query input + read-only textual response area
+  *   │   └── LECChartView in an adaptive panel (page-level scroll)
   *   └── RIGHT: saved-tree-panel
   *       ├── TreeListView  (dropdown selector)
   *       └── TreeDetailView (expandable hierarchy)

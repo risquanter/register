@@ -72,7 +72,7 @@ object TreeDetailView:
         case Some(root) =>
           div(
             cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, state, depth = 0)
+            renderNode(root, childrenOf, state, prefix = "", isLast = true, isRoot = true)
           )
         case None =>
           div(cls := "tree-detail-error", p("Root node not found"))
@@ -83,7 +83,9 @@ object TreeDetailView:
     node: RiskNode,
     childrenOf: Map[Option[NodeId], Seq[RiskNode]],
     state: TreeViewState,
-    depth: Int
+    prefix: String,
+    isLast: Boolean,
+    isRoot: Boolean
   ): HtmlElement =
     val nodeId   = node.id
     val children = childrenOf.getOrElse(Some(nodeId), Seq.empty)
@@ -93,46 +95,58 @@ object TreeDetailView:
     val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeId))
     val isChartSelected: Signal[Boolean] = state.chartNodeIds.map(_.contains(nodeId))
 
-    val rowCls: Signal[String] = isSelected.combineWith(isChartSelected).map { (sel, chart) =>
+    val lineCls: Signal[String] = isSelected.combineWith(isChartSelected).map { (sel, chart) =>
       (sel, chart) match
-        case (true, true)   => "node-row node-selected node-chart-selected"
-        case (true, false)  => "node-row node-selected"
-        case (false, true)  => "node-row node-chart-selected"
-        case (false, false) => "node-row"
+        case (true, true)   => "tree-detail-inline node-selected node-chart-selected"
+        case (true, false)  => "tree-detail-inline node-selected"
+        case (false, true)  => "tree-detail-inline node-chart-selected"
+        case (false, false) => "tree-detail-inline"
     }
+
+    val connector = if isRoot then "" else if isLast then "└── " else "├── "
+    val branchText = s"$prefix$connector"
+    val childPrefix =
+      if isRoot then ""
+      else prefix + (if isLast then "    " else "│   ")
+
+    def handleNodeClick(ev: org.scalajs.dom.MouseEvent): Unit =
+      if ev.ctrlKey || ev.metaKey then
+        ev.preventDefault()
+        state.toggleChartSelection(nodeId)
+      else
+        state.selectNode(nodeId)
 
     div(
       cls := "tree-detail-node",
-      // Node row
       div(
-        cls <-- rowCls,
-        paddingLeft := s"${depth * 20}px",
-        // Expand/collapse toggle (only for portfolios with children)
-        if hasChildren then
+        cls := "tree-node",
+        span(cls := "tree-branch", branchText),
+        div(
+          cls <-- lineCls,
+          if hasChildren then
+            span(
+              cls := "node-toggle",
+              cursor.pointer,
+              child <-- isExpanded.map {
+                case true  => Icons.chevronDown("toggle-icon")
+                case false => Icons.chevronRight("toggle-icon")
+              },
+              onClick --> (_ => state.toggleExpanded(nodeId))
+            )
+          else
+            span(cls := "node-toggle node-toggle-spacer", Icons.chevronRight("toggle-icon")),
           span(
-            cls := "node-toggle",
+            cls := "node-icon-click-target",
             cursor.pointer,
-            child <-- isExpanded.map {
-              case true  => Icons.chevronDown("toggle-icon")
-              case false => Icons.chevronRight("toggle-icon")
-            },
-            onClick --> (_ => state.toggleExpanded(nodeId))
+            nodeIcon(node),
+            onClick --> handleNodeClick
+          ),
+          span(
+            cls := "node-label",
+            cursor.pointer,
+            nodeLabel(node),
+            onClick --> handleNodeClick
           )
-        else
-          span(cls := "node-toggle node-toggle-spacer", Icons.chevronRight("toggle-icon")),
-        // Icon + Label
-        nodeIcon(node),
-        span(
-          cls := "node-label",
-          cursor.pointer,
-          nodeLabel(node),
-          onClick --> { ev =>
-            if ev.ctrlKey || ev.metaKey then
-              ev.preventDefault()
-              state.toggleChartSelection(nodeId)
-            else
-              state.selectNode(nodeId)
-          }
         )
       ),
       // Children (only rendered when expanded)
@@ -140,7 +154,10 @@ object TreeDetailView:
         div(
           cls := "node-children",
           display <-- isExpanded.map(if _ then "block" else "none"),
-          children.toList.map(c => renderNode(c, childrenOf, state, depth + 1))
+          children.toList.zipWithIndex.map { case (c, idx) =>
+            val childIsLast = idx == children.size - 1
+            renderNode(c, childrenOf, state, childPrefix, childIsLast, isRoot = false)
+          }
         )
       else
         emptyNode

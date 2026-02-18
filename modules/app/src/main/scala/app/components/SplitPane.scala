@@ -8,8 +8,8 @@ import com.raquo.laminar.api.L.{*, given}
  * Provides horizontal (left | right) and vertical (top / bottom) splits
  * with configurable proportions. Pure layout — no state or backend dependency.
  *
- * Scala sets only a `--split-size` CSS custom property per panel;
- * all layout rules (flex, overflow, borders) live in app.css.
+ * Scala sets inline flex weights per panel (`flex: n 1 0%`);
+ * shared layout rules (overflow, borders, direction) live in app.css.
  */
 object SplitPane:
 

@@ -1,6 +1,7 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
+import app.components.Icons
 
 /** Placeholder for future distribution-modelling chart in Design view.
   *
@@ -14,7 +15,7 @@ object DistributionChartPlaceholder:
       h3("Distribution Modelling") ,
       div(
         cls := "placeholder-content",
-        span(cls := "placeholder-icon", "📈"),
+        Icons.fileChartLine("placeholder-icon"),
         p("Distribution chart will appear here"),
         p(
           cls := "placeholder-hint",

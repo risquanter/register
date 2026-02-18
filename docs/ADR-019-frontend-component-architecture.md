@@ -189,10 +189,10 @@ val parentOptions: Signal[List[String]] =
 | `FormState.hasErrors` | Derived Signal from `errorSignals` (Pattern 4) |
 | `TreeBuilderView` | Receives shared state, owns submit lifecycle (Pattern 2 consumer) |
 | `TreePreview` | Pure derived view: Signal → HtmlElement (Pattern 4) |
-| `SplitPane` | Stateless layout — CSS custom property bridge, no state (Pattern 5) |
+| `SplitPane` | Stateless layout — inline flex-weight bridge, no state (Pattern 5) |
 | `AppShell` | Pure structural shell — receives all state as signals, owns no effects (Pattern 1/2) |
 | `HealthState` + `Main` | Health probe state extracted from view; `Main` orchestrates one-shot startup probe |
-| `LECChartPlaceholder` | Stateless placeholder (Pattern 5) |
+| `DistributionChartPlaceholder` | Stateless placeholder in Design view for future modelling chart (Pattern 5) |
 
 ---
 

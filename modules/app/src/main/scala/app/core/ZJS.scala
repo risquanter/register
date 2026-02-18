@@ -45,16 +45,22 @@ object ZJS:
     * All public extension methods delegate here to avoid duplicating the
     * Unsafe / Runtime / provide boilerplate.
     *
-    * If an `ErrorObserver` is registered, every fork automatically:
+    * If an `ErrorObserver` is registered and `notifyObserver = true`,
+    * every fork automatically:
     *  - reports errors via `onError` (surfaces in global banner)
     *  - clears stale errors via `onSuccess` (auto-dismiss on recovery)
     */
-  private def forkProvided[E <: Throwable, A](zio: ZIO[BackendClient, E, A]): Unit =
+  private def forkProvided[E <: Throwable, A](zio: ZIO[BackendClient, E, A], notifyObserver: Boolean = true): Unit =
     Unsafe.unsafe { implicit unsafe =>
+      val withObserver =
+        if notifyObserver then
+          zio
+            .tapError(e => ZIO.succeed(errorObserver.foreach(_.onError(e))))
+            .tap(_ => ZIO.succeed(errorObserver.foreach(_.onSuccess())))
+        else zio
+
       Runtime.default.unsafe.fork(
-        zio
-          .tapError(e => ZIO.succeed(errorObserver.foreach(_.onError(e))))
-          .tap(_ => ZIO.succeed(errorObserver.foreach(_.onSuccess())))
+        withObserver
           .provide(BackendClientLive.configuredLayer)
       )
     }
@@ -79,6 +85,14 @@ object ZJS:
     /** Fork the ZIO for its side-effects only (fire-and-forget). */
     def runJs: Unit =
       forkProvided(zio)
+
+    /** Fork the ZIO for side-effects without notifying the global ErrorObserver.
+      *
+      * Use for ambient telemetry/probes that should not surface in the
+      * global user-facing error banner.
+      */
+    def runJsQuiet: Unit =
+      forkProvided(zio, notifyObserver = false)
 
     /** Fork the ZIO and return its result as a one-shot Laminar EventStream. */
     def toEventStream: EventStream[A] =

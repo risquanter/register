@@ -23,4 +23,4 @@ final class HealthState extends RiskTreeEndpoints:
     healthEndpoint(())
       .tap(_ => ZIO.succeed(status.set(Some(true))))
       .tapError(_ => ZIO.succeed(status.set(Some(false))))
-      .runJs
+      .runJsQuiet

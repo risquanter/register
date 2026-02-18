@@ -1110,33 +1110,34 @@ select.form-input option {
   line-height: var(--leading-normal);
 }
 
-.node-row {
-  display: flex;
+.tree-detail-inline {
+  display: inline-flex;
   align-items: center;
+  gap: var(--sp-1);
   padding: var(--sp-0-5) var(--sp-1);
   border-radius: var(--radius-sm);
   transition: background-color 0.1s;
 }
 
-.node-row:hover {
+.tree-detail-inline:hover {
   background-color: var(--surface-overlay-hover);
 }
 
-.node-row.node-selected {
+.tree-detail-inline.node-selected {
   background-color: var(--surface-overlay-active);
 }
 
-.node-row.node-chart-selected {
+.tree-detail-inline.node-chart-selected {
   border-left: 3px solid var(--accent);
   padding-left: calc(var(--sp-1) - 3px); /* compensate for border width */
   background-color: rgba(184, 187, 188, 0.06);
 }
 
-.node-row.node-chart-selected .node-label {
+.tree-detail-inline.node-chart-selected .node-label {
   color: var(--foreground);
 }
 
-.node-row.node-selected.node-chart-selected {
+.tree-detail-inline.node-selected.node-chart-selected {
   background-color: var(--surface-overlay-active);
 }
 
@@ -1212,7 +1213,9 @@ select.form-input option {
 }
 
 .distribution-chart-placeholder .placeholder-icon {
-  font-size: 2rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
   opacity: 0.6;
 }
 
