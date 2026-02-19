@@ -21,6 +21,168 @@
   --success:                   #4ade80;
   --success-surface:           rgba(74, 222, 128, 0.08);
 
+  /* Curve color palettes (array-like, light -> dark)
+     Usage from JS/TS/Scala.js:
+     getComputedStyle(document.documentElement)
+       .getPropertyValue('--curve-palette-yellow')
+       .split(',')
+       .map(c => c.trim())
+  */
+  --curve-palette-yellow:      #fefdf0, #fefbdd, #fef9c3, #fef08a, #fde047, #facc15, #eab308, #ca8a04, #a16207, #73430c, #542f0d, #331905, #1c0e03;
+
+  /* Yellow shades (explicit named stops) */
+  --curve-yellow-25:           #fefdf0;
+  --curve-yellow-50:           #fefbdd;
+  --curve-yellow-100:          #fef9c3;
+  --curve-yellow-200:          #fef08a;
+  --curve-yellow-300:          #fde047;
+  --curve-yellow-400:          #facc15;
+  --curve-yellow-500:          #eab308;
+  --curve-yellow-600:          #ca8a04;
+  --curve-yellow-700:          #a16207;
+  --curve-yellow-800:          #73430c;
+  --curve-yellow-900:          #542f0d;
+  --curve-yellow-950:          #331905;
+  --curve-yellow-975:          #1c0e03;
+
+  --curve-palette-green:       #f1fdf5, #e4fbec, #d5fbe2, #bbf7d0, #86efac, #4ade80, #22c55e, #16a34a, #15803d, #145c2f, #0f3e21, #052914, #03170b;
+
+  /* Green shades (explicit named stops) */
+  --curve-green-25:            #f1fdf5;
+  --curve-green-50:            #e4fbec;
+  --curve-green-100:           #d5fbe2;
+  --curve-green-200:           #bbf7d0;
+  --curve-green-300:           #86efac;
+  --curve-green-400:           #4ade80;
+  --curve-green-500:           #22c55e;
+  --curve-green-600:           #16a34a;
+  --curve-green-700:           #15803d;
+  --curve-green-800:           #145c2f;
+  --curve-green-900:           #0f3e21;
+  --curve-green-950:           #052914;
+  --curve-green-975:           #03170b;
+
+  --curve-palette-red:         #fff5f5, #fdeaea, #fee2e2, #fecaca, #fca5a5, #f87171, #ef4444, #da2828, #a81a1a, #6e1111, #4f0c0c, #2d060a, #170304;
+
+  /* Red shades (explicit named stops) */
+  --curve-red-25:              #fff5f5;
+  --curve-red-50:              #fdeaea;
+  --curve-red-100:             #fee2e2;
+  --curve-red-200:             #fecaca;
+  --curve-red-300:             #fca5a5;
+  --curve-red-400:             #f87171;
+  --curve-red-500:             #ef4444;
+  --curve-red-600:             #da2828;
+  --curve-red-700:             #a81a1a;
+  --curve-red-800:             #6e1111;
+  --curve-red-900:             #4f0c0c;
+  --curve-red-950:             #2d060a;
+  --curve-red-975:             #170304;
+
+  --curve-palette-purple:      #faf5ff, #f2e6ff, #ecdbff, #e5ccff, #dab2ff, #c27aff, #ad46ff, #9810fa, #7b0acd, #5a1094, #3e0f61, #23023b, #11011e;
+
+  /* Purple shades (explicit named stops) */
+  --curve-purple-25:           #faf5ff;
+  --curve-purple-50:           #f2e6ff;
+  --curve-purple-100:          #ecdbff;
+  --curve-purple-200:          #e5ccff;
+  --curve-purple-300:          #dab2ff;
+  --curve-purple-400:          #c27aff;
+  --curve-purple-500:          #ad46ff;
+  --curve-purple-600:          #9810fa;
+  --curve-purple-700:          #7b0acd;
+  --curve-purple-800:          #5a1094;
+  --curve-purple-900:          #3e0f61;
+  --curve-purple-950:          #23023b;
+  --curve-purple-975:          #11011e;
+
+  --curve-palette-pink:        #fef6fa, #fce9f3, #fadbed, #fbcfe8, #f9a8d4, #f472b6, #ec4899, #db2777, #be185d, #8e1546, #5b112e, #380519, #1c020d;
+
+  /* Pink shades (explicit named stops) */
+  --curve-pink-25:             #fef6fa;
+  --curve-pink-50:             #fce9f3;
+  --curve-pink-100:            #fadbed;
+  --curve-pink-200:            #fbcfe8;
+  --curve-pink-300:            #f9a8d4;
+  --curve-pink-400:            #f472b6;
+  --curve-pink-500:            #ec4899;
+  --curve-pink-600:            #db2777;
+  --curve-pink-700:            #be185d;
+  --curve-pink-800:            #8e1546;
+  --curve-pink-900:            #5b112e;
+  --curve-pink-950:            #380519;
+  --curve-pink-975:            #1c020d;
+
+  --curve-palette-orange:      #fffbeb, #fff8db, #fef3c7, #fde68a, #fcd34d, #fbbf24, #f59e0b, #d97706, #b45309, #7e370c, #56260b, #361402, #1d0b01;
+
+  /* Orange shades (explicit named stops) */
+  --curve-orange-25:           #fffbeb;
+  --curve-orange-50:           #fff8db;
+  --curve-orange-100:          #fef3c7;
+  --curve-orange-200:          #fde68a;
+  --curve-orange-300:          #fcd34d;
+  --curve-orange-400:          #fbbf24;
+  --curve-orange-500:          #f59e0b;
+  --curve-orange-600:          #d97706;
+  --curve-orange-700:          #b45309;
+  --curve-orange-800:          #7e370c;
+  --curve-orange-900:          #56260b;
+  --curve-orange-950:          #361402;
+  --curve-orange-975:          #1d0b01;
+
+  --curve-palette-aqua:        #f0fcff, #e0f9ff, #d4f5fc, #aee9f8, #7bdaf3, #42c9ed, #00b3e6, #0094bf, #007299, #005370, #003a52, #002533, #00121a;
+
+  /* Aqua shades (explicit named stops) */
+  --curve-aqua-25:             #f0fcff;
+  --curve-aqua-50:             #e0f9ff;
+  --curve-aqua-100:            #d4f5fc;
+  --curve-aqua-200:            #aee9f8;
+  --curve-aqua-300:            #7bdaf3;
+  --curve-aqua-400:            #42c9ed;
+  --curve-aqua-500:            #00b3e6;
+  --curve-aqua-600:            #0094bf;
+  --curve-aqua-700:            #007299;
+  --curve-aqua-800:            #005370;
+  --curve-aqua-900:            #003a52;
+  --curve-aqua-950:            #002533;
+  --curve-aqua-975:            #00121a;
+
+  --curve-palette-emerald:     #f2fbf7, #dff6ed, #d1fae5, #a7f3d0, #6ee7b7, #34d399, #10b981, #0e8b63, #0b5b46, #093f34, #072e27, #041f1b, #021411;
+
+  /* Emerald shades (explicit named stops) */
+  --curve-emerald-25:          #f2fbf7;
+  --curve-emerald-50:          #dff6ed;
+  --curve-emerald-100:         #d1fae5;
+  --curve-emerald-200:         #a7f3d0;
+  --curve-emerald-300:         #6ee7b7;
+  --curve-emerald-400:         #34d399;
+  --curve-emerald-500:         #10b981;
+  --curve-emerald-600:         #0e8b63;
+  --curve-emerald-700:         #0b5b46;
+  --curve-emerald-800:         #093f34;
+  --curve-emerald-900:         #072e27;
+  --curve-emerald-950:         #041f1b;
+  --curve-emerald-975:         #021411;
+
+  --curve-palette-neutral:     #ffffff, #f3f5f5, #e6e8e8, #dcdede, #b8bbbc, #a1a4a5, #7e8385, #5b5f61, #404647, #2d3335, #1c2225, #141b1d, #101618, #060f11, #04090a;
+
+  /* Neutral shades (explicit named stops) */
+  --curve-neutral-0:           #ffffff;
+  --curve-neutral-25:          #f3f5f5;
+  --curve-neutral-50:          #e6e8e8;
+  --curve-neutral-100:         #dcdede;
+  --curve-neutral-200:         #b8bbbc;
+  --curve-neutral-300:         #a1a4a5;
+  --curve-neutral-400:         #7e8385;
+  --curve-neutral-500:         #5b5f61;
+  --curve-neutral-600:         #404647;
+  --curve-neutral-700:         #2d3335;
+  --curve-neutral-800:         #1c2225;
+  --curve-neutral-900:         #141b1d;
+  --curve-neutral-950:         #101618;
+  --curve-neutral-975:         #060f11;
+  --curve-neutral-1000:        #04090a;
+
   /* Typography */
   --font-sans:  'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono:  'Geist Mono', ui-monospace, 'SFMono-Regular', monospace;
@@ -199,6 +361,9 @@ body {
   width: 28px;
   height: 28px;
   flex-shrink: 0;
+  border-radius: var(--radius-sm);
+  /* Filled brand mark — isolate from stroke-icon inheritance */
+  stroke: none;
 }
 
 .sidebar-logo .brand-name {

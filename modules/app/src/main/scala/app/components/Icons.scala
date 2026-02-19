@@ -119,18 +119,29 @@ object Icons:
 
   // ── Danago Systems signet (logo) ──────────────────────────────
 
-  /** The Danago Systems two-chevron signet mark. */
+  /** The Danago Systems app logo (rounded square + two chevrons).
+    *
+    * Unlike the Lucide icons this is a filled mark — it carries its own
+    * brand colours and must NOT inherit stroke-based styling.
+    */
   def signet(cls: String = "sidebar-signet"): SvgElement =
     svg.svg(
-      svg.cls     := cls,
-      svg.viewBox := "0 0 1920 1866.59",
-      svg.xmlns   := "http://www.w3.org/2000/svg",
-      svg.polygon(
-        svg.fill   := "#10b981",
-        svg.points := "0 349.12 0 933.29 348.23 933.29 932.66 349.12 1920 349.12 1920 0 349.12 0 0 349.12"
+      svg.cls          := cls,
+      svg.viewBox      := "0 0 256 256",
+      svg.fill         := "none",
+      svg.stroke       := "none",
+      svg.rect(
+        svg.width  := "256",
+        svg.height := "256",
+        svg.rx     := "32",
+        svg.fill   := "#10B981"
       ),
-      svg.polygon(
-        svg.fill   := "#10b981",
-        svg.points := "987.34 1517.47 0 1517.47 0 1866.59 1570.88 1866.59 1920 1517.47 1920 933.29 1571.77 933.29 987.34 1517.47"
+      svg.path(
+        svg.d    := "M56.4941 84.2769V127.793H82.4337L125.962 84.2769H199.505V58.2744H82.4966L56.4941 84.2769Z",
+        svg.fill := "#141B1D"
+      ),
+      svg.path(
+        svg.d    := "M130.038 171.302H56.4956V197.304H173.504L199.506 171.302V127.792H173.567L130.038 171.302Z",
+        svg.fill := "#141B1D"
       )
     )

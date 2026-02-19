@@ -18,9 +18,11 @@ object Sidebar:
       cls := "sidebar",
       // ── Brand ──
       div(
-        cls := "sidebar-logo",
+        cls       := "sidebar-logo",
+        role      := "img",
+        aria.label := "Risquanter logo",
         Icons.signet(),
-        span(cls := "brand-name", "Risquanter")
+        span(cls := "brand-name", aria.hidden := true, "Risquanter")
       ),
       // ── Section label ──
       div(cls := "sidebar-section-label", "Tool"),
