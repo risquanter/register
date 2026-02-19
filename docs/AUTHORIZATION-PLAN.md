@@ -1,6 +1,6 @@
 # Authorization Plan — Layers 1 & 2
 
-**Date:** February 13, 2026
+**Date:** February 19, 2026
 **Status:** Planning (not yet scheduled for implementation)
 **Related:** [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) (Tier 1.5 = Layer 0)
 **ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs)
@@ -75,6 +75,92 @@ The URL scheme is **identical** in free-tier and enterprise deployments: `/#/{wo
 This design addresses the "leaked URL" concern progressively:
 - **Layer 0+1:** The key acts as an invitation link. A leaked URL grants access only to users with a valid session in the right Keycloak realm — analogous to Google Docs "anyone with the link who is signed in."
 - **Layer 0+1+2:** The key is purely a routing token. Access is determined by explicit SpiceDB relationships. A leaked URL grants nothing — the user must be explicitly added as a workspace member by the owner.
+
+---
+
+## Infrastructure Foundation (Phase K, k3s-first)
+
+This section defines the dedicated infrastructure bootstrap needed before Layer 1 implementation.
+
+### Deployment Baseline
+
+- **Cluster:** k3s (single-node dev first, multi-node optional later)
+- **Packaging:** Helm charts for stateful/system components
+- **TLS:** cert-manager for local dev certificates (self-signed CA)
+- **Persistence:** PostgreSQL as the primary state store (workspace + Keycloak)
+- **Mesh/Auth edge:** Istio ambient mode + Keycloak
+- **CI/CD (slim):** GitHub Actions + GHCR + Helm deploy jobs (no separate CD platform initially)
+- **IaC boundary:** Start with Helm + Kubernetes manifests; add Terraform later only when provisioning managed cloud infra resources
+
+### Phase Plan (Aligned)
+
+#### Phase K.1 — Local K8s Bootstrap (k3s)
+
+- Install k3s with reproducible bootstrap script
+- Define base namespaces (`register`, `infra`, `observability`)
+- Install baseline controllers/operators needed by later phases
+- Add storage class and persistent volume policy for dev
+
+#### Phase K.2 — Container Registry + Image Pipeline
+
+- Choose registry strategy:
+  - local dev: k3s embedded registry mirror or local OCI registry container
+  - shared/dev-prod-like: GHCR (or other OCI registry)
+- Define image naming/tagging policy (`:git-sha`, `:semver`, `:latest` for dev only)
+- Configure pull secrets for private images if needed
+- Wire build-and-push in CI
+
+#### Phase K.3 — PostgreSQL on K8s (Helm chart)
+
+- Deploy PostgreSQL via Helm (single instance is acceptable initially)
+- Create separate DBs/schemas for app data and Keycloak
+- Enable persistent storage, backup hooks, and health checks
+- Add migration job path for schema changes
+
+#### Phase K.4 — Keycloak on K8s (Helm chart + realm config)
+
+- Deploy Keycloak with PostgreSQL backing store
+- Provision realm (`register`), clients (`register-api`, `register-web`), roles, and mappers
+- Export/import realm config as code (versioned)
+- Validate OIDC login flow over HTTPS
+
+#### Phase K.5 — Istio Ambient Mode Install
+
+- Install Istio in ambient mode for cluster
+- Configure waypoint(s), `RequestAuthentication`, and `AuthorizationPolicy`
+- Verify JWT validation path and claim forwarding (`x-jwt-claims`)
+- Keep app-side JWT parsing only (no duplicate signature validation)
+
+#### Phase K.6 — CI/CD Pipeline (GitHub Actions, minimal)
+
+- Implement CI workflow on pull requests: format/lint/test + SCA/dependency scan
+- Implement image build workflow on main: build OCI image and push to GHCR (`:git-sha`, optional `:latest` for dev)
+- Implement deployment workflow with Helm:
+  - target `local-dev` (k3s) via manual dispatch or protected branch
+  - keep manifests/charts provider-neutral for future managed Kubernetes
+- Add minimal release controls: GitHub Environments, required approvals for non-dev deploys
+- Add rollback command path (`helm rollback`) and one smoke-check step post-deploy
+
+#### Phase K.7 — Managed Kubernetes Readiness (future)
+
+- Add Terraform only for provider resources (cluster, network, DNS, load balancer, secret store)
+- Reuse existing Helm charts and image pipeline unchanged
+- Add environment matrix in GitHub Actions (`local-dev`, `staging`, `prod`)
+
+### Explicit Infrastructure Tasks and Priorities
+
+| Item | Why | Priority | Planned Phase |
+|------|-----|----------|---------------|
+| Container registry | K8s must pull images from a reachable OCI registry. | **High** — blocks deployment | K.2 |
+| TLS certificates | Keycloak OIDC and secure cookies require HTTPS. | **High** — blocks Layer 1 auth flow | K.1 + K.4 |
+| PostgreSQL instance | Required for Keycloak persistence and durable workspace storage. | **High** — blocks Layer 1 | K.3 |
+| Config endpoint | Frontend must read `auth.mode` and feature flags. | **Medium** — blocks L1.3 | L1.3 |
+| Anonymous → authenticated migration | Needed to claim existing capability-only workspaces after upgrade. | **Medium** — design decision | L1.2 + Migration |
+| SpiceDB foundation setup | Layer 2 implementation requires schema, deployment, and integration baseline. | **Medium** — blocks L2.1+ | L2.0 |
+| Observability for auth | Need traces/metrics for JWT/authz failures and debugging. | **Medium** — testing aid | K.5 + L1.6 |
+| Security scanning in CI | Supports supply-chain controls and dependency hygiene from day one. | **Medium** — should be baseline | K.6 |
+| Load testing auth middleware | Validate mesh JWT overhead is acceptable before scale-out. | **Low** — post-L1 hardening | Post L1 |
+| Backup/restore | Needed for PostgreSQL + Keycloak disaster recovery readiness. | **Low** — production concern | K.3 + K.7 |
 
 ---
 
@@ -274,24 +360,25 @@ spec:
 ### Prerequisites
 
 - Layer 1 complete (user identity exists)
-- SpiceDB or OpenFGA instance available
+- SpiceDB selected and baseline instance available
 
-### Technology Decision: SpiceDB vs OpenFGA
+### Phase L2.0 — SpiceDB Foundation (Decision Closed)
 
-| Criterion | SpiceDB | OpenFGA |
-|-----------|---------|---------|
-| **Model** | Google Zanzibar | Google Zanzibar (simplified) |
-| **Maintainer** | AuthZed | Okta/Auth0 |
-| **Protocol** | gRPC + HTTP | HTTP + gRPC |
-| **CNCF** | Not CNCF | CNCF Sandbox |
-| **Backing store** | PostgreSQL, CockroachDB, Spanner | PostgreSQL, MySQL |
-| **Kubernetes** | Official Helm chart | Official Helm chart |
-| **ZIO integration** | gRPC client via scalapb | HTTP client via sttp |
-| **Schema language** | `.zed` (rich, typed) | JSON model (simpler) |
-| **Playground** | play.authzed.com | playground.fga.dev |
-| **Ecosystem fit** | Standalone, works with any IdP | Tighter Auth0 integration |
+SpiceDB is the selected Layer 2 backend. This phase establishes the implementation baseline before L2.1.
 
-**Recommendation:** SpiceDB — richer schema language, better standalone story (not tied to Auth0 ecosystem), PostgreSQL backing (same as workspace store). But evaluate both playgrounds before committing.
+### Decision Outcome
+
+- **Selected backend:** SpiceDB
+- **Rationale:** Best fit for inherited workspace/tree permissions, explicit relationship modeling, and expected collaboration growth (Tier 3/4)
+- **Integration mode:** Start with HTTP client path for simplicity; move to gRPC later only if needed
+
+### L2.0 Exit Criteria
+
+- Deploy SpiceDB on k3s (Helm) with persistent storage
+- Apply initial `.zed` schema (`workspace`, `risk_tree`, inherited permissions)
+- Implement `AuthorizationServiceSpiceDB` with `check/grant/revoke/listAccessible`
+- Verify latency budget for `check` on representative workspace/tree paths
+- Record operational runbook (backup, upgrade, health checks)
 
 ### Task L2.1: Authorization Schema
 
@@ -473,20 +560,23 @@ When upgrading a free-tier deployment to enterprise:
 
 ### From Layer 1 → Layer 2
 
-1. Deploy SpiceDB with PostgreSQL
-2. Migrate ownership data: `workspace.owner_id → SpiceDB relation`
+1. Complete Phase L2.0 SpiceDB foundation setup
+2. Deploy selected authorization backend with required persistence
+3. Migrate ownership data: `workspace.owner_id → authorization relation`
+  - SpiceDB example: `workspace:ID#owner@user:ID`
 3. Set `register.auth.mode = "fine-grained"`
-4. Existing owner-based access continues via SpiceDB `owner` relation
+4. Existing owner-based access continues via backend `owner` relation
 5. New sharing features become available
 
 ---
 
 ## Open Questions
 
-1. **SpiceDB vs OpenFGA:** Evaluate both playgrounds before committing. Decision point: before Layer 2 implementation starts.
-2. **OPA as intermediate:** Should OPA (already in mesh) be Layer 1.5 before SpiceDB? Simpler but less expressive.
-3. **Anonymous workspace claiming:** When a free-tier user upgrades, how do they prove they "own" a capability-only workspace? Options: (a) login while URL has workspace key, (b) email verification, (c) just create new.
-4. **Feature gating UI:** How does the frontend know which features are available? `/config` endpoint? HTML-embedded config?
+1. **OPA as intermediate:** Should OPA (already in mesh) be Layer 1.5 before Zanzibar-style backend? Simpler but less expressive.
+2. **Anonymous workspace claiming:** When a free-tier user upgrades, how do they prove they "own" a capability-only workspace? Options: (a) login while URL has workspace key, (b) email verification, (c) just create new.
+3. **Feature gating UI:** How does the frontend know which features are available? `/config` endpoint? HTML-embedded config?
+4. **Terraform adoption trigger:** At what point do we need provider-level IaC (managed cluster/network/DNS/secrets), beyond Helm + manifests?
+5. **SpiceDB integration details:** HTTP vs gRPC client path for initial implementation; tuple write-through strategy vs batched sync for ownership migration.
 
 ---
 
@@ -504,6 +594,6 @@ When upgrading a free-tier deployment to enterprise:
 
 ---
 
-*Document created: February 13, 2026*
+*Document created: February 13, 2026; updated February 19, 2026*
 *Covers: Authorization Layers 1 (Identity + Ownership) and 2 (Fine-Grained RBAC)*
 *Layer 0 (Workspace Capability) is in IMPLEMENTATION-PLAN.md, Tier 1.5*
