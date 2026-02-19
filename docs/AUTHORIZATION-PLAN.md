@@ -3,7 +3,7 @@
 **Date:** February 19, 2026
 **Status:** Planning (not yet scheduled for implementation)
 **Related:** [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) (Tier 1.5 = Layer 0)
-**ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs), [ADR-023](./ADR-023-local-dev-tls-and-trust-material-policy.md) (Local Dev TLS & Trust Policy)
+**ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs), [ADR-023](./ADR-023-local-dev-tls-and-trust-material-policy.md) (Local Dev TLS & Trust Policy), [ADR-024](./ADR-024-externalized-authorization-pep-pattern.md) (Externalized Authorization / PEP Pattern)
 
 ---
 
@@ -31,9 +31,8 @@ Layer 1 — Identity + Ownership (this document)
 Layer 2 — Fine-Grained Authorization (this document)
   │  Key role: ROUTING TOKEN only (no authorization power)
   │  Key + JWT + explicit SpiceDB relationship = access
-  │  Pattern: explicit ACL — user must be granted access by owner
-  │  Per-tree roles: editor, viewer, admin
-  │  Workspace sharing: invite user Y as viewer of workspace W
+  │  Pattern: explicit ACL — relationships administered externally via ops path
+  │  Per-resource roles: editor, analyst, viewer, admin
   │  Inheritance: org → team → workspace → tree
   │
   ▼
@@ -385,9 +384,9 @@ SpiceDB is the selected Layer 2 backend. This phase establishes the implementati
 
 - Deploy SpiceDB on k3s (Helm) with persistent storage
 - Apply initial `.zed` schema (`workspace`, `risk_tree`, inherited permissions)
-- Implement `AuthorizationServiceSpiceDB` with `check/grant/revoke/listAccessible`
+- Implement `AuthorizationServiceSpiceDB` with `check` and `listAccessible` only — app is a pure PEP, never writes tuples (see ADR-024)
 - Implement `AuthzProvisioning` job in CI/CD (idempotent reconcile, drift detection, audit logs)
-- Ensure app runtime is read-only toward provisioning concerns (check/grant/revoke by authorized API paths only; no startup seeding)
+- Ensure app runtime never writes authorization data — no `grant`/`revoke`/tuple writes in application code (see ADR-024)
 - Verify latency budget for `check` on representative workspace/tree paths
 - Record operational runbook (backup, upgrade, health checks)
 
@@ -433,10 +432,12 @@ server/.../auth/AuthorizationServiceSpiceDB.scala
 **Trait:**
 ```scala
 trait AuthorizationService:
-  def check(user: UserId, permission: String, resource: ResourceRef): IO[AuthError, Boolean]
-  def grant(user: UserId, relation: String, resource: ResourceRef): IO[AuthError, Unit]
-  def revoke(user: UserId, relation: String, resource: ResourceRef): IO[AuthError, Unit]
-  def listAccessible(user: UserId, resourceType: String, permission: String): IO[AuthError, List[String]]
+  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]
+  // Fails with AuthError.Forbidden if SpiceDB returns false — fail-closed by design.
+  // No grant() / revoke() — app is a pure PEP; tuple writes are ops-path only (see ADR-024).
+
+  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
+  // For "show my workspaces" queries — reads from SpiceDB, no local DB join needed.
 ```
 
 **ResourceRef:**
@@ -445,12 +446,16 @@ case class ResourceRef(resourceType: String, resourceId: String)
 // e.g., ResourceRef("workspace", "01HXY..."), ResourceRef("risk_tree", "01HAB...")
 ```
 
-### Task L2.3: Sharing UI
+### Task L2.3: Access Administration (Ops Path — Not App Logic)
 
-- Invite user to workspace (by email)
-- Set per-tree permissions (editor/viewer)
-- Revoke access
-- Show who has access to workspace/tree
+Access grant and revoke operations are **not implemented in the application**. The app is a pure PEP (see ADR-024): it calls `check()` and `listAccessible()` only; it never writes authorization data.
+
+Access administration paths:
+- **Org/team-level provisioning:** CI/CD job (K.6) — idempotent reconcile from config, Keycloak groups → SpiceDB team relations
+- **Individual workspace access changes:** `zed` CLI or SpiceDB HTTP API, gated behind ops service account with audit logging to SIEM
+- **Emergency bulk revocation (M3 break-glass):** disable account in Keycloak (stops token issuance) + audited tuple bulk-delete via `zed` CLI per ops runbook
+
+Any future self-service access management UI would be a dedicated administrative service (a separate PAP), distinct from this application's codebase and deployment, and is explicitly out of scope for this project.
 
 ### Task L2.4: OPA Integration (Alternative Path)
 
@@ -496,7 +501,7 @@ allow {
 - Permission check: owner can edit, viewer cannot
 - Inheritance: workspace member can access tree in workspace
 - Per-tree override: tree-level viewer cannot edit
-- Revocation: removed member loses access immediately
+- Ops-path revocation: after tuple deletion via `zed` CLI or CI job, `check()` returns forbidden immediately — no app-level revocation endpoint involved
 
 ### Estimated Effort: ~2–4 weeks
 
@@ -548,11 +553,10 @@ register.features {
   scenario-branching = false   # Tier 3 feature — tier placement under review (see scenario analysis planning)
   collaboration = false        # Tier 3 feature — enterprise only
   websocket = false            # Tier 4 feature — enterprise only
-  workspace-sharing = false    # Layer 2 feature
 }
 ```
 
-Free-tier shows a sneak-peak: tree building, LEC visualization, workspace grouping. Enterprise unlocks collaboration, scenarios, fine-grained sharing.
+Free-tier shows a sneak-peak: tree building, LEC visualization, workspace grouping. Enterprise unlocks collaboration, scenarios, and fine-grained access control (governed externally via ops path).
 
 ---
 
@@ -577,7 +581,7 @@ When upgrading a free-tier deployment to enterprise:
   - SpiceDB example: `workspace:ID#owner@user:ID`
 3. Set `register.auth.mode = "fine-grained"`
 4. Existing owner-based access continues via backend `owner` relation
-5. New sharing features become available
+5. Fine-grained access control becomes active — access relationships are now governed by SpiceDB, managed via ops path (CI job + `zed` CLI)
 
 ---
 
@@ -587,8 +591,8 @@ When upgrading a free-tier deployment to enterprise:
 2. **Anonymous workspace claiming:** When a free-tier user upgrades, how do they prove they "own" a capability-only workspace? Options: (a) login while URL has workspace key, (b) email verification, (c) just create new.
 3. **Feature gating UI:** How does the frontend know which features are available? `/config` endpoint? HTML-embedded config?
 4. **Terraform adoption trigger:** At what point do we need provider-level IaC (managed cluster/network/DNS/secrets), beyond Helm + manifests?
-5. **SpiceDB integration details:** HTTP vs gRPC client path for initial implementation; tuple write-through strategy vs batched sync for ownership migration.
-6. **Workspace override governance:** For direct user-owned workspaces, confirm final override policy (org-admin only vs configurable delegation).
+5. **SpiceDB integration details:** HTTP vs gRPC client path for initial implementation; ownership migration strategy (one-time CI job writes existing `owner_id` values as SpiceDB `owner` relation tuples during L0→L2 upgrade — app never writes tuples in steady state).
+6. ~~**Workspace override governance (closed):**~~ Resolved: user-owned workspaces grant override only to the `owner_user` SpiceDB relation and the M3 break-glass ops path. No in-product override delegation. Policy recorded in ops runbook, not app code.
 
 ---
 
@@ -598,6 +602,7 @@ When upgrading a free-tier deployment to enterprise:
 - [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — Layer 0 capability model
 - [ADR-022: Secret Handling](./ADR-022-secret-handling.md) — WorkspaceKeySecret credential hardening
 - [ADR-023: Local Development TLS and Trust Material Policy](./ADR-023-local-dev-tls-and-trust-material-policy.md) — TLS-by-default local posture, trust material handling
+- [ADR-024: Externalized Authorization — Application as Pure PEP](./ADR-024-externalized-authorization-pep-pattern.md) — no grant/revoke in app; PAP is ops tooling
 - [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) — Tier 1.5 (Layer 0 implementation)
 - Cheleb reference architecture — ZIO + PostgreSQL layer patterns (review before Tier 1.5 Phase W.2, **not** relevant for Keycloak/OAuth2)
 - SpiceDB: https://authzed.com/spicedb
