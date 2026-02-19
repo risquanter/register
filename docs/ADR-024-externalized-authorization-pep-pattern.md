@@ -18,7 +18,7 @@
 
 ## Decision
 
-### 1. App is PEP Only — No Tuple Writes
+### 1. App is PEP Only
 
 The application calls SpiceDB to **read** authorization state. It never writes authorization data.
 
@@ -55,7 +55,7 @@ Keycloak admin: disable user bob
   → For immediate effect: zed CLI bulk-delete per ops runbook (M3 break-glass)
 ```
 
-### 4. SpiceDB Receives `userId` Only — Not JWT Roles
+### 4. SpiceDB Receives `userId` Only
 
 SpiceDB evaluates the relationship graph. It has no knowledge of JWT role claims and needs none. The only identifier the app passes to `check()` is the `userId` (JWT `sub` claim).
 

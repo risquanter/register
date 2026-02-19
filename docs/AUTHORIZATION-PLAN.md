@@ -127,8 +127,9 @@ This section defines the dedicated infrastructure bootstrap needed before Layer 
 
 - Install Istio in ambient mode for cluster
 - Configure waypoint(s), `RequestAuthentication`, and `AuthorizationPolicy`
-- Verify JWT validation path and claim forwarding (`x-jwt-claims`)
-- Keep app-side JWT parsing only (no duplicate signature validation)
+- Verify JWT validation and claim header injection (`outputClaimToHeaders` in `RequestAuthentication`)
+- Confirm app reads only mesh-injected `x-user-id` header — zero JWT code in application
+- Verify waypoint strips external `x-user-*` headers before claim injection (see [ADR-012: Claim Header Injection](./ADR-012.md#6-claim-header-injection))
 
 #### Phase K.6 — CI/CD Pipeline (GitHub Actions, minimal)
 
@@ -183,8 +184,8 @@ This section defines the dedicated infrastructure bootstrap needed before Layer 
 ┌──────────┐     ┌───────────┐     ┌──────────────┐     ┌──────────────┐
 │  Browser │────▶│  Keycloak │────▶│ Istio Waypoint│────▶│ ZIO Backend  │
 │          │     │  (login)  │     │ (JWT verify)  │     │              │
-│  JWT in  │     │  JWT      │     │ x-jwt-claims  │     │ UserContext  │
-│  cookie  │     │  issued   │     │ header added  │     │ extracted    │
+│  JWT in  │     │  JWT      │     │ x-user-id     │     │ UserContext  │
+│  cookie  │     │  issued   │     │ injected      │     │ extracted    │
 └──────────┘     └───────────┘     └──────────────┘     └──────────────┘
 ```
 
@@ -216,17 +217,19 @@ object Role:
 **UserContext:**
 ```scala
 final case class UserContext(
-  userId: UserId,       // from JWT `sub` — the ONLY field passed to SpiceDB check()
-  email: Option[Email], // from JWT `email` — display only, never used for authorization
-  roles: Set[Role]      // from JWT `realm_access.roles` — OPA coarse gate only (see ADR-012 §3, ADR-024 §4)
+  userId: UserId,       // from `x-user-id` header (mesh-injected JWT `sub`) — the ONLY field passed to SpiceDB check()
+  email: Option[Email], // from `x-user-email` header (mesh-injected JWT `email`) — display only, never used for authorization
+  roles: Set[Role]      // from `x-user-roles` header (mesh-injected JWT `realm_access.roles`) — OPA coarse gate only (see [ADR-012: OPA for Authorization](./ADR-012.md#3-opa-for-authorization), [ADR-024: SpiceDB Receives userId Only](./ADR-024-externalized-authorization-pep-pattern.md#4-spicedb-receives-userid-only))
                         // SpiceDB does NOT receive roles; the relationship graph is authoritative
 )
 ```
 
-**Extraction pattern (from ADR-012 §5):**
-- Mesh validates JWT signature, expiry, issuer
-- App extracts claims from `x-jwt-claims` header (Istio-injected)
-- No manual JWT validation in app code
+**Extraction pattern (from [ADR-012: Minimal Service Code for Auth](./ADR-012.md#5-minimal-service-code-for-auth)):**
+- Mesh validates JWT signature, expiry, issuer (via `RequestAuthentication` + JWKS endpoint)
+- Istio injects validated claims as plain HTTP headers via `outputClaimToHeaders` — app never sees the raw JWT
+- App reads `x-user-id` header (mesh-injected UUID string from JWT `sub`) → UUID format validation → `UserId`
+- App contains zero JWT code — no base64 decode, no claim extraction, no JWT library dependency
+- Security: waypoint strips external `x-user-*` headers before injection (see [ADR-012: Claim Header Injection](./ADR-012.md#6-claim-header-injection)); header presence is an infrastructure assertion, not a client claim
 
 **Dev mode (no mesh):**
 - Config: `register.auth.dev-mode.enabled = true`
@@ -346,7 +349,14 @@ spec:
     jwksUri: "https://keycloak.example.com/realms/register/protocol/openid-connect/certs"
     audiences:
     - "register-api"
-    forwardOriginalToken: true
+    outputClaimToHeaders:
+    - header: x-user-id
+      claim: sub
+    - header: x-user-email
+      claim: email
+    - header: x-user-roles
+      claim: realm_access.roles
+    # forwardOriginalToken is NOT set — the app never receives the raw JWT
 ```
 
 **AuthorizationPolicy (protect non-public routes):**
@@ -502,14 +512,14 @@ server/.../auth/AuthorizationServiceSpiceDB.scala   — live HTTP adapter (Spice
 server/.../auth/AuthorizationServiceNoOp.scala      — always-allow stub (capability-only / identity modes)
 server/.../auth/AuthorizationServiceStub.scala      — configurable stub for unit tests
 server/.../configs/SpiceDbConfig.scala              — connectivity + consistency config
-common/.../domain/data/iron/OpaqueTypes.scala       — add UserId, WorkspaceId, BearerToken
+common/.../domain/data/iron/OpaqueTypes.scala       — add UserId, WorkspaceId
 common/.../domain/errors/AppError.scala             — add AuthError sealed trait + variants
-common/.../http/codecs/AuthTapirCodecs.scala        — Tapir codec for BearerToken (separate from IronTapirCodecs — not an Iron type)
+common/.../http/codecs/AuthTapirCodecs.scala        — Tapir codec for UserId (UUID header codec for `x-user-id` claim header; separate from IronTapirCodecs)
 ```
 
 #### Type Inventory
 
-**`UserId`** — redacted `final class` wrapping the JWT `sub` claim, validated as RFC 4122 UUID.
+**`UserId`** — redacted `final class` wrapping the `x-user-id` claim header value (mesh-injected JWT `sub`), validated as RFC 4122 UUID.
 
 **Format rationale — UUID, not ULID:** The format is an **external constraint**. Keycloak issues `sub` as UUID v4; we consume it verbatim. SpiceDB imposes no format requirement on `objectId`. If the IdP were swapped, the regex constraint would change here. A looser `NonBlank` constraint would be more IdP-agnostic but less correct for our Keycloak setup.
 
@@ -536,42 +546,6 @@ object UserId:
   given JsonEncoder[UserId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[UserId] = JsonDecoder[String].mapOrFail(s =>
     UserId.fromString(s).left.map(_.mkString(", ")))
-```
-
-**`BearerToken`** — redacted `final class` wrapping the JWT string extracted from the `Authorization: Bearer <jwt>` HTTP header. Follows the `WorkspaceKeySecret`/`SpiceDbToken` ADR-022 credential pattern: private raw value, `.reveal` for explicit opt-in, `toString` redacted. A bearer token is a **credential** (proof of identity, not merely PII) — `.reveal` naming is correct (cf. `UserId.value` which is PII-not-secret).
-
-Validation is enforced at the **Tapir codec boundary** (`AuthTapirCodecs`) — not inside the class, not in `serverLogic`. If the `Authorization` header is present but lacks the `"Bearer "` prefix, Tapir returns `DecodeResult.Error` → 400 before `serverLogic` is reached. The controller can therefore never receive a structurally invalid credential.
-
-```scala
-// In OpaqueTypes.scala — follows SpiceDbToken pattern.
-// Lives in common module so WorkspaceEndpoints (common) can reference the type.
-final class BearerToken private (private val token: String):
-  def reveal: String = token                    // explicit opt-in — used only in JwtDecoder call site
-  override def toString: String = "BearerToken(***)"
-  override def hashCode: Int = token.hashCode
-  override def equals(that: Any): Boolean = that match
-    case b: BearerToken => token == b.token
-    case _              => false
-
-object BearerToken:
-  /** Strip "Bearer " prefix and validate. Called by the Tapir codec, not by controllers directly. */
-  def fromHeader(headerValue: String): Either[String, BearerToken] =
-    if headerValue.startsWith("Bearer ") then
-      val t = headerValue.drop(7)
-      if t.nonEmpty then Right(new BearerToken(t))
-      else Left("Bearer token must not be empty")
-    else Left("Authorization header must start with 'Bearer '")
-
-// In AuthTapirCodecs.scala — codec keeps parsing logic out of the domain class.
-// AuthTapirCodecs is separate from IronTapirCodecs: BearerToken is a final class, not an Iron opaque type.
-given Schema[BearerToken] = Schema.string.description("JWT bearer token (Authorization: Bearer <jwt>)")
-given Codec[String, BearerToken, CodecFormat.TextPlain] =
-  Codec.string.mapDecode { headerValue =>
-    BearerToken.fromHeader(headerValue).fold(
-      err => DecodeResult.Error(headerValue, new IllegalArgumentException(err)),
-      DecodeResult.Value(_)
-    )
-  }(token => s"Bearer ${token.reveal}")
 ```
 
 **`WorkspaceId`** — stable non-secret ULID identifier for SpiceDB resource references. **Does not yet exist in the codebase.** The current `Workspace` domain model uses only `WorkspaceKeySecret` as its identity, which was intentional at Layer 0.
@@ -672,10 +646,10 @@ trait AuthorizationService:
     permission: Permission,
     resource:   ResourceRef
   ): IO[AuthError, Unit]
-  // Fails the ZIO effect — callers use flatMap, never fold/map (fail-closed, ADR-024 §5).
+  // Fails the ZIO effect — callers use flatMap, never fold/map (fail-closed, [ADR-024: Fail-Closed by Default](./ADR-024-externalized-authorization-pep-pattern.md#5-fail-closed-by-default)).
   // PERMISSIONSHIP_NO_PERMISSION  → AuthForbidden
   // Connectivity failure          → AuthServiceUnavailable (mapped to 403 at HTTP layer)
-  // No grant() / revoke() — pure PEP; tuple writes are ops-path only (ADR-024 §1).
+  // No grant() / revoke() — pure PEP; tuple writes are ops-path only ([ADR-024: App is PEP Only](./ADR-024-externalized-authorization-pep-pattern.md#1-app-is-pep-only)).
 
   def listAccessible(
     user:         UserId,
@@ -755,11 +729,11 @@ Start with `minimize_latency`. Add `fully_consistent` as a config option for env
 | SpiceDB: HTTP 4xx (config/auth) | 403 Forbidden | Fail-closed; don't reveal infra |
 | SpiceDB: HTTP 5xx / timeout | 403 Forbidden | Fail-closed; 503 would reveal SpiceDB is down |
 | SpiceDB: network error | 403 Forbidden | Fail-closed |
-| Caller uses `.fold(_ => (), ...)` on `check()` | Compile succeeds; auth bypassed | Code smell — ADR-024 §5; catch in PR review |
+| Caller uses `.fold(_ => (), ...)` on `check()` | Compile succeeds; auth bypassed | Code smell — [ADR-024: Fail-Closed by Default](./ADR-024-externalized-authorization-pep-pattern.md#5-fail-closed-by-default); catch in PR review |
 
 #### Observability
 
-Every `check()` emits a structured log event at INFO level. `UserId.toString` is redacted — audit log calls must use `user.value` explicitly (same pattern as `WorkspaceKeySecret.reveal`). `email` is never logged (display only, per ADR-024 §4).
+Every `check()` emits a structured log event at INFO level. `UserId.toString` is redacted — audit log calls must use `user.value` explicitly (same pattern as `WorkspaceKeySecret.reveal`). `email` is never logged (display only, per [ADR-024: SpiceDB Receives userId Only](./ADR-024-externalized-authorization-pep-pattern.md#4-spicedb-receives-userid-only)).
 
 ```scala
 // In AuthorizationServiceSpiceDB — correct pattern:
@@ -901,7 +875,7 @@ Request → Istio Waypoint
            → deny → 403 immediately (SpiceDB never queried)
                ↓ allow
            ZIO Application
-           ✓ Extract UserContext from x-jwt-claims header
+           ✓ Extract UserContext from `x-user-id` header (mesh-injected JWT `sub` — no JWT parsing in app)
            ✓ authorizationService.check(user, "design_write", resource)
            → SpiceDB evaluates relationship graph
            → deny → 403 Forbidden
@@ -1024,14 +998,15 @@ Authorization is embedded directly in `serverLogic`, not in a global interceptor
 
 ```scala
 // In BaseEndpoint (or a new AuthedEndpoint mixin)
-// Option[BearerToken] — not Option[String]:
-//   - None:               Authorization header absent      → allowed (capability-only passes through NoOp)
-//   - Some(token):        header present, "Bearer " prefix validated by codec → typed credential
-//   - DecodeResult.Error: header present but malformed prefix → 400 before serverLogic, never reaches controller
-// Mode enforcement (is a JWT *required*?) happens in UserContextExtractor.extract, not here.
+// Option[UserId] — mesh-injected claim header:
+//   - None:               x-user-id header absent → allowed (capability-only passes through NoOp)
+//   - Some(userId):       header present, UUID format validated at Tapir codec boundary → typed identity
+//   - DecodeResult.Error: header present but not a valid UUID → 400 before serverLogic, never reaches controller
+// The mesh guarantees this header is either absent (unauthenticated) or contains the Keycloak sub claim.
+// Mode enforcement (is a user identity *required*?) happens in UserContextExtractor.extract, not here.
 val authedBaseEndpoint =
   baseEndpoint
-    .in(header[Option[BearerToken]]("Authorization"))
+    .in(header[Option[UserId]]("x-user-id"))
 ```
 
 All workspace-scoped endpoints switch from `baseEndpoint` to `authedBaseEndpoint`. The path and query parameters are unchanged. The auth header becomes the first input tuple element.
@@ -1053,7 +1028,7 @@ val listWorkspaceTreesEndpoint =
     .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
     .get
     .out(jsonBody[List[SimulationResponse]])
-// Input tuple: (Option[BearerToken], WorkspaceKeySecret)
+// Input tuple: (Option[UserId], WorkspaceKeySecret)
 ```
 
 **Step 3 — Controller serverLogic pattern:**
@@ -1063,10 +1038,10 @@ val listWorkspaceTreesEndpoint =
 // resolveTree() (Layer 0 capability check) runs before check() for tree-scoped routes
 // to avoid leaking tree existence to unauthenticated callers.
 val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.serverLogic {
-  case (maybeToken, key) =>    // maybeToken: Option[BearerToken] — structurally validated by Tapir codec
+  case (maybeUserId, key) =>    // maybeUserId: Option[UserId] — mesh-injected, UUID-validated at Tapir boundary
     (for
-      ws     <- workspaceStore.resolve(key)                                 // Layer 0: capability
-      userId <- userCtx.extract(maybeToken)                                 // Layer 1: JWT (calls token.reveal internally)
+      ws     <- workspaceStore.resolve(key)                                     // Layer 0: capability
+      userId <- userCtx.extract(maybeUserId)                                    // Layer 1: identity (NoOp or require-present)
       _      <- authz.check(userId, Permission.ViewWorkspace, ws.id.asResource) // Layer 2: SpiceDB (NoOp or live)
       trees  <- workspaceStore.listTrees(key).map(_.map(SimulationResponse.fromRiskTree))
     yield trees).either
@@ -1075,12 +1050,12 @@ val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.s
 // Tree-scoped route: resolveTree ensures tree belongs to this workspace,
 // then check() verifies fine-grained permission on the tree itself.
 val getTreeById: ServerEndpoint[Any, Task] = getWorkspaceTreeByIdEndpoint.serverLogic {
-  case (maybeToken, key, treeId) =>    // maybeToken: Option[BearerToken]
+  case (maybeUserId, key, treeId) =>    // maybeUserId: Option[UserId] — mesh-injected, UUID-validated at Tapir boundary
     (for
       ws     <- workspaceStore.resolve(key)
       _      <- resolveTree(key, treeId)                                    // Layer 0: workspace capability + tree ownership
-      userId <- userCtx.extract(maybeToken)                                 // Layer 1: JWT (calls token.reveal internally)
-      _      <- authz.check(userId, Permission.ViewTree, treeId.asResource)    // Layer 2: SpiceDB on tree
+      userId <- userCtx.extract(maybeUserId)                                // Layer 1: identity (NoOp or require-present)
+      _      <- authz.check(userId, Permission.ViewTree, treeId.asResource) // Layer 2: SpiceDB on tree
       result <- riskTreeService.getById(treeId).map(_.map(SimulationResponse.fromRiskTree))
     yield result).either
 }
@@ -1094,38 +1069,35 @@ val getTreeById: ServerEndpoint[Any, Task] = getWorkspaceTreeByIdEndpoint.server
 
 ```scala
 trait UserContextExtractor:
-  /** Extract UserId from the Authorization header, respecting the configured auth mode.
+  /** Extract UserId from the mesh-injected `x-user-id` claim header.
     *
-    * The parameter type is Option[BearerToken], not Option[String]:
-    * - Structural validation ("Bearer " prefix) has already passed at the Tapir codec boundary.
-    * - Controllers cannot pass a raw un-parsed string here — the type prevents it.
-    * - In the NoOp implementation the token is ignored entirely (no .reveal call).
-    * - In fromJwt the token is unwrapped with .reveal — same explicit opt-in as WorkspaceKeySecret.reveal.
+    * The parameter type is Option[UserId] — Tapir codec has already validated the UUID format:
+    * - None:         `x-user-id` header absent → NoOp passes through; `requirePresent` fails closed
+    * - Some(userId): header present, UUID-validated at Tapir boundary — value is trusted
     *
-    * capability-only: returns UserId.anonymous — JWT not required, check() is NoOp
-    * identity:        JWT required; extract `sub` claim; fail with AuthForbidden if absent/invalid
+    * The mesh guarantees that if `x-user-id` is present, it is the `sub` claim from a Keycloak-validated
+    * JWT. The app contains zero JWT code — no base64 decode, no claim extraction, no JWT library.
+    * See [ADR-012: Claim Header Injection](./ADR-012.md#6-claim-header-injection) for the required external header stripping configuration.
+    *
+    * capability-only: returns UserId.anonymous — header not required, check() is NoOp
+    * identity:        header required; fail with AuthForbidden if absent
     * fine-grained:    same as identity; check() then uses real SpiceDB
     */
-  def extract(token: Option[BearerToken]): IO[AppError, UserId]
+  def extract(maybeUserId: Option[UserId]): IO[AppError, UserId]
 
 object UserContextExtractor:
   val anonymous: UserId = UserId.fromString("00000000-0000-0000-0000-000000000000")
     // sentinel value used only in NoOp/capability-only mode; never reaches SpiceDB
 
-  // capability-only implementation — token is ignored; no .reveal call, no JWT parsed
+  // capability-only — x-user-id header value is ignored entirely
   val noOp: UserContextExtractor = _ => ZIO.succeed(anonymous)
 
-  // identity / fine-grained implementation.
-  // JWT signature validation is mesh-side (Istio RequestAuthentication).
-  // App only extracts and validates the `sub` claim format.
-  val fromJwt: UserContextExtractor = {
-    case None        => ZIO.fail(AuthForbidden("Missing Authorization header"))
-    case Some(token) =>
-      ZIO.fromEither(
-        JwtDecoder.decodeSub(token.reveal)    // .reveal is the explicit opt-in — same as WorkspaceKeySecret.reveal
-          .flatMap(UserId.fromString)          // validate UUID format against UuidStr Iron constraint
-          .left.map(msg => AuthForbidden(msg))
-      )
+  // identity / fine-grained — header must be present.
+  // If absent: request did not pass through an authenticated waypoint, or user is unauthenticated.
+  // Both cases fail closed. No JWT parsing needed; the mesh has already done all validation.
+  val requirePresent: UserContextExtractor = {
+    case None         => ZIO.fail(AuthForbidden("Missing x-user-id header — unauthenticated request or mesh bypass"))
+    case Some(userId) => ZIO.succeed(userId)
   }
 ```
 
@@ -1164,8 +1136,8 @@ _Regression gate:_ All existing `RouteSecurityRegressionSpec` and unit tests pas
 _Deliverables:_
 - `authedBaseEndpoint` added to `BaseEndpoint` (or new `AuthedEndpoint` mixin)
 - All workspace-scoped endpoints in `WorkspaceEndpoints.scala` and `SSEEndpoints.scala` switch to `authedBaseEndpoint`
-- All workspace-scoped `serverLogic` calls updated to destructure the new `(Option[BearerToken], ...)` tuple
-- `UserContextExtractor.noOp` wired — `extract()` always returns anonymous userId, no JWT parsed
+- All workspace-scoped `serverLogic` calls updated to destructure the new `(Option[UserId], ...)` tuple
+- `UserContextExtractor.noOp` wired — `extract()` always returns anonymous userId, `x-user-id` header ignored
 - `authz.check()` called in every workspace-scoped `serverLogic` — still hits `AuthorizationServiceNoOp`
 
 _Behavior change:_ None. NoOp always allows. Anonymous userId never reaches SpiceDB.
@@ -1178,29 +1150,27 @@ _Diff scope:_ `WorkspaceEndpoints.scala`, `SSEEndpoints.scala`, `WorkspaceContro
 
 ---
 
-**Wave 2 — Identity mode: JWT extraction required**
+**Wave 2 — Identity mode: claim header required**
 
 _Deliverables:_
-- `UserContextExtractor.fromJwt` implemented (JWT decode, `sub` claim extraction, UUID validation)
-- `AuthConfig.mode = "identity"` activates `fromJwt` in ZLayer selection:
+- `UserContextExtractor.requirePresent` implemented (header presence check — no JWT parsing)
+- `AuthConfig.mode = "identity"` activates `requirePresent` in ZLayer selection:
   ```scala
   val userCtxLayer: ULayer[UserContextExtractor] =
     ZLayer.fromZIO(ZIO.config(AuthConfig.descriptor).map {
       case AuthConfig("capability-only", _) => UserContextExtractor.noOp
-      case _                                => UserContextExtractor.fromJwt
+      case _                                => UserContextExtractor.requirePresent
     })
   ```
 - No `authz.check()` behaviour changes — still NoOp
 
-_Behavior change:_ In `identity` mode only, missing/invalid JWT → `AuthForbidden` → 403. In `capability-only` mode, unchanged.
+_Behavior change:_ In `identity` mode only, missing `x-user-id` header → `AuthForbidden` → 403. In `capability-only` mode, unchanged.
 
 _New tests:_
-  - `BearerToken.fromHeader` (unit): valid `"Bearer <jwt>"` → `Right(BearerToken)`; missing prefix → `Left`; empty token → `Left`
-  - Tapir codec (integration): `Authorization: notbearer xyz` request → 400 before `serverLogic` reached (`DecodeResult.Error`)
-  - `UserContextExtractor.fromJwt` parses a valid test JWT via `.reveal` and extracts a known `UserId`
-  - Missing header (`None`) → `AuthForbidden` (from `fromJwt` — not from Tapir: absent header is `None`, not an error)
-  - Malformed JWT payload (invalid `sub`) → `AuthForbidden`
-  - Wrong claim type (non-UUID `sub`) → `AuthForbidden`
+  - Tapir codec (unit): valid UUID string in `x-user-id` header → `Some(UserId)`; malformed UUID → 400 (`DecodeResult.Error`) before `serverLogic` reached
+  - `UserContextExtractor.requirePresent`: `Some(validUserId)` → `Right(userId)`; `None` → `AuthForbidden`
+  - Missing `x-user-id` header → `AuthForbidden` (from `requirePresent` — not from Tapir: absent optional header is `None`, not an error)
+  - Valid `x-user-id` header → userId extracted with zero JWT code involved
 
 ---
 
@@ -1269,9 +1239,9 @@ _Flow in `fine-grained` mode:_
 
 ```scala
 val bootstrapWorkspace: ServerEndpoint[Any, Task] = bootstrapWorkspaceEndpoint.serverLogic {
-  case (maybeForwardedFor, maybeToken, req) =>          // maybeToken: Option[BearerToken]
+  case (maybeForwardedFor, maybeUserId, req) =>          // maybeUserId: Option[UserId] — mesh-injected
     (for
-      userId  <- userCtx.extract(maybeToken)            // Layer 1: JWT required in fine-grained (calls token.reveal)
+      userId  <- userCtx.extract(maybeUserId)            // Layer 1: identity required in fine-grained
       tree    <- riskTreeService.create(req)
       ws      <- workspaceStore.bootstrap(tree.id, ...)
       _       <- authz.seed(userId, ws.id)             // writes SpiceDB tuple: workspace:ID#owner_user@user:UID
@@ -1357,7 +1327,7 @@ test("authz.check() is called exactly once per protected request") { ... }
 |------|--------------|-----------------|----------------|
 | 0 | New files: AuthTypes, AuthorizationService, UserContextExtractor | None | Unit tests for new types |
 | 1 | WorkspaceEndpoints, SSEEndpoints, WorkspaceController, SSEController | None (NoOp) | Compilation + regression |
-| 2 | AppLayer (ZLayer wiring) + UserContextExtractor.fromJwt | Identity mode: JWT required | JWT decode tests |
+| 2 | AppLayer (ZLayer wiring) + UserContextExtractor.requirePresent | Identity mode: x-user-id header required | Header presence tests |
 | 3 | AppLayer (SpiceDB wiring) | Fine-grained: read routes enforced | Stub-based 200/403 read tests |
 | 4 | WorkspaceController (write routes) | Fine-grained: write routes enforced | Stub-based 200/403 write tests |
 | 5 | WorkspaceController (admin routes) | Fine-grained: admin routes enforced | Stub-based 200/403 admin tests |
@@ -1447,7 +1417,7 @@ When upgrading a free-tier deployment to enterprise:
 
 ## Open Questions
 
-~~1. **OPA as intermediate:** Should OPA (already in mesh) be Layer 1.5 before Zanzibar-style backend?~~ **Closed:** OPA is a permanent AND-logic co-gate at the mesh layer — not a sequential stepping stone. Both OPA and SpiceDB are always active in fine-grained mode; neither replaces the other. See Task L2.4 and ADR-012 §3.
+~~1. **OPA as intermediate:** Should OPA (already in mesh) be Layer 1.5 before Zanzibar-style backend?~~ **Closed:** OPA is a permanent AND-logic co-gate at the mesh layer — not a sequential stepping stone. Both OPA and SpiceDB are always active in fine-grained mode; neither replaces the other. See Task L2.4 and [ADR-012: OPA for Authorization](./ADR-012.md#3-opa-for-authorization).
 2. **Anonymous workspace claiming:** When a free-tier user upgrades, how do they prove they "own" a capability-only workspace? Options: (a) login while URL has workspace key, (b) email verification, (c) just create new.
 3. **Feature gating UI:** How does the frontend know which features are available? `/config` endpoint? HTML-embedded config?
 4. **Terraform adoption trigger:** At what point do we need provider-level IaC (managed cluster/network/DNS/secrets), beyond Helm + manifests?
