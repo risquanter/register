@@ -3,7 +3,7 @@
 **Date:** February 19, 2026
 **Status:** Planning (not yet scheduled for implementation)
 **Related:** [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) (Tier 1.5 = Layer 0)
-**ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs)
+**ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs), [ADR-023](./ADR-023-local-dev-tls-and-trust-material-policy.md) (Local Dev TLS & Trust Policy)
 
 ---
 
@@ -138,6 +138,11 @@ This section defines the dedicated infrastructure bootstrap needed before Layer 
 - Implement deployment workflow with Helm:
   - target `local-dev` (k3s) via manual dispatch or protected branch
   - keep manifests/charts provider-neutral for future managed Kubernetes
+- Implement **authorization graph provisioning job** (CI/CD one-shot):
+  - fetch org/team mapping config from configurable Git source
+  - resolve Keycloak groups → internal team grants
+  - upsert SpiceDB relationships idempotently
+  - fail pipeline on drift/validation errors (no runtime auto-bootstrap in app)
 - Add minimal release controls: GitHub Environments, required approvals for non-dev deploys
 - Add rollback command path (`helm rollback`) and one smoke-check step post-deploy
 
@@ -157,6 +162,7 @@ This section defines the dedicated infrastructure bootstrap needed before Layer 
 | Config endpoint | Frontend must read `auth.mode` and feature flags. | **Medium** — blocks L1.3 | L1.3 |
 | Anonymous → authenticated migration | Needed to claim existing capability-only workspaces after upgrade. | **Medium** — design decision | L1.2 + Migration |
 | SpiceDB foundation setup | Layer 2 implementation requires schema, deployment, and integration baseline. | **Medium** — blocks L2.1+ | L2.0 |
+| Auth graph provisioning pipeline | SpiceDB tuples must be managed outside app runtime with auditable CI/CD flow. | **Medium** — blocks secure L2 operations | K.6 + L2.0 |
 | Observability for auth | Need traces/metrics for JWT/authz failures and debugging. | **Medium** — testing aid | K.5 + L1.6 |
 | Security scanning in CI | Supports supply-chain controls and dependency hygiene from day one. | **Medium** — should be baseline | K.6 |
 | Load testing auth middleware | Validate mesh JWT overhead is acceptable before scale-out. | **Low** — post-L1 hardening | Post L1 |
@@ -371,12 +377,17 @@ SpiceDB is the selected Layer 2 backend. This phase establishes the implementati
 - **Selected backend:** SpiceDB
 - **Rationale:** Best fit for inherited workspace/tree permissions, explicit relationship modeling, and expected collaboration growth (Tier 3/4)
 - **Integration mode:** Start with HTTP client path for simplicity; move to gRPC later only if needed
+- **Provisioning mode:** **B) CI/CD one-shot task** (application runtime does not bootstrap/seed authorization data)
+- **Identity mapping now:** Keycloak groups map to team grants automatically
+- **Indirection requirement:** Keep mapping/provisioning behind an adapter boundary so source can switch later to config-driven or hybrid without service API changes
 
 ### L2.0 Exit Criteria
 
 - Deploy SpiceDB on k3s (Helm) with persistent storage
 - Apply initial `.zed` schema (`workspace`, `risk_tree`, inherited permissions)
 - Implement `AuthorizationServiceSpiceDB` with `check/grant/revoke/listAccessible`
+- Implement `AuthzProvisioning` job in CI/CD (idempotent reconcile, drift detection, audit logs)
+- Ensure app runtime is read-only toward provisioning concerns (check/grant/revoke by authorized API paths only; no startup seeding)
 - Verify latency budget for `check` on representative workspace/tree paths
 - Record operational runbook (backup, upgrade, health checks)
 
@@ -577,6 +588,7 @@ When upgrading a free-tier deployment to enterprise:
 3. **Feature gating UI:** How does the frontend know which features are available? `/config` endpoint? HTML-embedded config?
 4. **Terraform adoption trigger:** At what point do we need provider-level IaC (managed cluster/network/DNS/secrets), beyond Helm + manifests?
 5. **SpiceDB integration details:** HTTP vs gRPC client path for initial implementation; tuple write-through strategy vs batched sync for ownership migration.
+6. **Workspace override governance:** For direct user-owned workspaces, confirm final override policy (org-admin only vs configurable delegation).
 
 ---
 
@@ -585,6 +597,7 @@ When upgrading a free-tier deployment to enterprise:
 - [ADR-012: Service Mesh Strategy](./ADR-012.md) — Istio + Keycloak + OPA architecture
 - [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — Layer 0 capability model
 - [ADR-022: Secret Handling](./ADR-022-secret-handling.md) — WorkspaceKeySecret credential hardening
+- [ADR-023: Local Development TLS and Trust Material Policy](./ADR-023-local-dev-tls-and-trust-material-policy.md) — TLS-by-default local posture, trust material handling
 - [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) — Tier 1.5 (Layer 0 implementation)
 - Cheleb reference architecture — ZIO + PostgreSQL layer patterns (review before Tier 1.5 Phase W.2, **not** relevant for Keycloak/OAuth2)
 - SpiceDB: https://authzed.com/spicedb
