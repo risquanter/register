@@ -31,7 +31,7 @@
 **Risk Register** is a functional Scala application for hierarchical Monte Carlo risk simulation. It enables users to model complex risk portfolios as trees, execute simulations, and analyze Loss Exceedance Curves (LECs).
 
 **Current State:**
-- ✅ 512 tests passing (289 common + 223 server)
+- ✅ 657 tests passing (356 common + 301 server)
 - ✅ Core simulation engine functional with parallel execution
 - ✅ Type-safe domain model using Iron refinement types
 - ✅ Clean separation of concerns (domain/service/HTTP layers)

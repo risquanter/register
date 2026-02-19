@@ -103,22 +103,36 @@ Authorization layers beyond workspace capability are documented in [AUTHORIZATIO
 ### UI Layout Target
 
 ```
-┌──────────────────────────────┬──────────────────────────────┐
-│                              │                              │
-│                              │    TREE VIEW (Laminar)       │
-│                              │    ├─ Portfolio A            │
-│     FORM PANEL               │    │  ├─ Risk 1 [selected]  │
-│     (RiskLeafFormView)       │    │  └─ Risk 2             │
-│                              │    └─ Portfolio B            │
-│                              │       └─ Risk 3             │
-│                              ├──────────────────────────────┤
-│                              │                              │
-│                              │    LEC CHART (Vega-Lite)     │
-│                              │    [Multi-curve diagram]     │
-│                              │    - Selected node (bold)    │
-│                              │    - Children curves         │
-│                              │                              │
-└──────────────────────────────┴──────────────────────────────┘
+┌────────┬──────────────────────────────────────────────────────────┐
+│        │ TopBar: Section Title         Health ● workspace active  │
+│ Design │──────────────────────────────────────────────────────────│
+│        │                              │                           │
+│Analyze │  FORM PANEL                  │    TREE PREVIEW           │
+│        │  (TreeBuilderView)           │    (Box-drawing ASCII)    │
+│        │                              │                           │
+│        │                              ├───────────────────────────│
+│        │                              │                           │
+│        │                              │    LEC CHART (Vega-Lite)  │
+│        │                              │    [Multi-curve diagram]  │
+│        │                              │                           │
+│  v0.3  │                              │                           │
+└────────┴──────────────────────────────┴───────────────────────────┘
+  Sidebar                Design View (active)
+```
+
+**Analyze View** (activated via sidebar):
+```
+┌────────┬──────────────────────────────────────────────────────────┐
+│        │ TopBar: Analyze               Health ● workspace active  │
+│ Design │──────────────────────────────────────────────────────────│
+│        │                                      │                   │
+│Analyze │  LEC CHART (Vega-Lite)               │  Saved Trees      │
+│        │  [Full-width multi-curve]             │  ├─ Tree list     │
+│        │                                      │  └─ Tree detail   │
+│        │                                      │                   │
+│  v0.3  │                                      │                   │
+└────────┴──────────────────────────────────────┴───────────────────┘
+  Sidebar                Analyze View (active)
 ```
 
 ### Key Design Decisions (Confirmed)
@@ -181,13 +195,13 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 
 ## Current State
 
-### Test Counts (as of Feb 16, 2026)
+### Test Counts (as of Feb 19, 2026)
 
 | Module | Tests | Status |
 |--------|-------|--------|
-| commonJVM | 349 | ✅ Passing |
-| server | 267 | ✅ Passing |
-| **Total** | **616** | ✅ |
+| commonJVM | 356 | ✅ Passing |
+| server | 301 | ✅ Passing |
+| **Total** | **657** | ✅ |
 
 ### Backend Endpoints (Implemented)
 
@@ -231,11 +245,11 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 | `ConflictDetector` | `EventHub` | Tier 3 |
 | `ScenarioService` | Irmin branches | Tier 3 |
 
-### Frontend (31 Source Files)
+### Frontend (38 Source Files)
 
 | File | Purpose | Phase |
 |------|---------|-------|
-| `Main.scala` | Entry point, routing, workspace bootstrap | B/W.6 |
+| `Main.scala` | Entry point, routing, workspace bootstrap, health probe | B/W.6/UI |
 | `BackendClient.scala` | Tapir client with FetchBackend | B |
 | `ZJS.scala` | ZIO-to-Laminar bridge (extension methods) | B |
 | `Constants.scala` | App constants (base URL) | B |
@@ -254,8 +268,15 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 | `RiskLeafFormView.scala` | "Add Leaf" sub-form | A |
 | `TreePreview.scala` | Live preview with box-drawing + remove buttons | A |
 | `SplitPane.scala` | CSS-based split-pane layout | C |
-| `Layout.scala` | App layout wrapper | C |
-| `Header.scala` | App header with health check | C |
+| `AppShell.scala` | Top-level shell: Sidebar \| (TopBar + content). Pure structural. | UI |
+| `Sidebar.scala` | Left nav: brand + Design/Analyze section switching | UI |
+| `Icons.scala` | Lucide SVG icons as Laminar SvgElements (ISC license) | UI |
+| `NavigationState.scala` | `Section` enum + reactive nav state | UI |
+| `DesignView.scala` | Design section layout (tree builder + preview + chart) | UI |
+| `AnalyzeView.scala` | Analyze section layout (chart + saved tree panel) | UI |
+| `HealthState.scala` | Health probe state (extracted from old Header) | UI |
+| `AnalyzeQueryState.scala` | Analyze view query state | UI |
+| `DistributionChartPlaceholder.scala` | Placeholder for future modelling chart | UI |
 | `TreeViewState.scala` | Tree navigation state (expand/collapse/select) | D |
 | `LECChartState.scala` | Chart selection + LEC spec lifecycle | D/F |
 | `TreeListView.scala` | Tree list dropdown | D |
