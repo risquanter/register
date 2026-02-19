@@ -494,28 +494,338 @@ This gives:
 
 ### Task L2.2: Authorization Service
 
-**Files:**
+#### Files
+
 ```
-server/.../auth/AuthorizationService.scala
-server/.../auth/AuthorizationServiceSpiceDB.scala
+server/.../auth/AuthorizationService.scala          — trait, enums (Permission, ResourceType, ResourceRef, AuthError)
+server/.../auth/AuthorizationServiceSpiceDB.scala   — live HTTP adapter (SpiceDB)
+server/.../auth/AuthorizationServiceNoOp.scala      — always-allow stub (capability-only / identity modes)
+server/.../auth/AuthorizationServiceStub.scala      — configurable stub for unit tests
+server/.../configs/SpiceDbConfig.scala              — connectivity + consistency config
+common/.../domain/data/iron/OpaqueTypes.scala       — add UserId, WorkspaceId
+common/.../domain/errors/AppError.scala             — add AuthError sealed trait + variants
 ```
 
-**Trait:**
+#### Type Inventory
+
+**`UserId`** — redacted `final class` wrapping the JWT `sub` claim, validated as RFC 4122 UUID.
+
+**Format rationale — UUID, not ULID:** The format is an **external constraint**. Keycloak issues `sub` as UUID v4; we consume it verbatim. SpiceDB imposes no format requirement on `objectId`. If the IdP were swapped, the regex constraint would change here. A looser `NonBlank` constraint would be more IdP-agnostic but less correct for our Keycloak setup.
+
+**Not a secret, but PII:** `userId` is a pseudonymous stable identifier, not a credential. However it links to a natural person via Keycloak (GDPR personal data). Accidental inclusion in a log interpolation (`s"failed for $user"`) must produce `UserId(***)` — not the raw UUID. This enforcement requires `final class` + `toString` override, identical to `WorkspaceKeySecret`. Unlike that type, the extraction method is `.value` (standard Iron convention) rather than `.reveal` — the name signals this is not a secret, but explicit extraction is still required.
+
+```scala
+// In OpaqueTypes.scala — follows WorkspaceKeySecret pattern, not the opaque-type pattern.
+// Opaque types cannot override toString; final class can.
+type UuidStr = String :| Match["^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]
+
+final class UserId private (private val raw: UuidStr):
+  def value: String = raw           // explicit extraction — use in SpiceDB calls and audit logs only
+  override def toString: String = "UserId(***)"    // prevents accidental PII in log interpolations
+  override def hashCode: Int = raw.hashCode
+  override def equals(that: Any): Boolean = that match
+    case u: UserId => raw == u.raw
+    case _         => false
+
+object UserId:
+  def apply(s: UuidStr): UserId = new UserId(s)
+  def fromString(s: String): Either[List[ValidationError], UserId] =
+    ValidationUtil.refineUserId(s)  // delegates to Iron refineEither[UuidStr]
+
+  given JsonEncoder[UserId] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[UserId] = JsonDecoder[String].mapOrFail(s =>
+    UserId.fromString(s).left.map(_.mkString(", ")))
+```
+
+**`WorkspaceId`** — stable non-secret ULID identifier for SpiceDB resource references. **Does not yet exist in the codebase.** The current `Workspace` domain model uses only `WorkspaceKeySecret` as its identity, which was intentional at Layer 0.
+
+`WorkspaceKeySecret` cannot serve as the SpiceDB `objectId` for two reasons:
+- It is a **secret credential** — SpiceDB logs relationship tuples for auditing; logging the capability key would be a security incident
+- It **changes on `rotate()`** — `WorkspaceStore.rotate()` exists; using the key as a stable resource ID would invalidate all SpiceDB tuples on rotation
+
+This type mirrors `TreeId` exactly: nominal `case class` wrapper over `SafeId` (ULID), compiler-distinct, non-secret, stable for the workspace's lifetime.
+
+```scala
+// Nominal case class wrapper over SafeId (ULID) — compiler-distinct from TreeId.
+// Mirrors TreeId pattern exactly.
+case class WorkspaceId(toSafeId: SafeId.SafeId):
+  def value: String = toSafeId.value.toString
+
+object WorkspaceId:
+  def fromString(s: String): Either[List[ValidationError], WorkspaceId] =
+    SafeId.fromString(s).map(WorkspaceId(_))
+  given JsonEncoder[WorkspaceId] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[WorkspaceId] = JsonDecoder[String].mapOrFail(s =>
+    WorkspaceId.fromString(s).left.map(_.mkString(", ")))
+```
+
+**Implementation note:** `workspaceId: WorkspaceId` should be added to `Workspace` at **Layer 1** implementation time (generated alongside the capability key at creation), not Layer 2. This avoids a data migration — workspaces created before Layer 2 will already have a stable non-secret ID when SpiceDB integration is added.
+
+**`ResourceType`** — sealed enum. Values match Zed schema `definition` names exactly. Used to construct the `objectType` field in SpiceDB requests.
+
+```scala
+enum ResourceType(val zedType: String):
+  case Organization extends ResourceType("organization")
+  case Team         extends ResourceType("team")
+  case Workspace    extends ResourceType("workspace")
+  case RiskTree     extends ResourceType("risk_tree")
+```
+
+**`Permission`** — sealed enum. Values match Zed schema `permission` names exactly. The `zedName` field is the only source of truth for the wire value — a schema rename that doesn't update this enum fails CI immediately at the `check("old_name", ...)` call sites.
+
+```scala
+enum Permission(val zedName: String):
+  case DesignWrite   extends Permission("design_write")
+  case AnalyzeRun    extends Permission("analyze_run")
+  case ViewWorkspace extends Permission("view_workspace")
+  case ViewTree      extends Permission("view_tree")
+  case ViewOrg       extends Permission("view_org")
+  case ViewTeam      extends Permission("view_team")
+  case ManageTeam    extends Permission("manage_team")
+```
+
+**`ResourceRef`** — typed resource reference for `check()` calls. `resourceId` reuses `SafeId` (ULID) since all our resources (Workspace, RiskTree) are identified by ULIDs.
+
+```scala
+case class ResourceRef(resourceType: ResourceType, resourceId: SafeId.SafeId)
+
+object ResourceRef:
+  extension (id: TreeId)
+    def asResource: ResourceRef = ResourceRef(ResourceType.RiskTree, id.toSafeId)
+
+  extension (id: WorkspaceId)
+    def asResource: ResourceRef = ResourceRef(ResourceType.Workspace, id.toSafeId)
+```
+
+**`ResourceId`** — return element type of `listAccessible`. Alias for `SafeId`; caller promotes to `TreeId` / `WorkspaceId` as needed.
+
+```scala
+type ResourceId = SafeId.SafeId
+```
+
+**`AuthError`** — sealed authorization error hierarchy, extending the existing `AppError` sealed trait (ADR-010). Lives in `common/.../domain/errors/AppError.scala`.
+
+```scala
+sealed trait AuthError extends AppError
+
+// SpiceDB returned PERMISSIONSHIP_NO_PERMISSION — explicit deny.
+case class AuthForbidden(
+  userId:       String,  // sub claim — not email, not PII-sensitive in audit logs
+  permission:   String,
+  resourceType: String,
+  resourceId:   String
+) extends AuthError:
+  override def getMessage: String =
+    s"Access denied: user=$userId permission=$permission resource=$resourceType:$resourceId"
+
+// SpiceDB unreachable, timeout, or unexpected response — fail-closed.
+// HTTP response is 403 (not 503) — returning 503 would reveal infrastructure state.
+case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = None) extends AuthError:
+  override def getMessage: String = s"Authorization service unavailable: $reason"
+  override def getCause: Throwable = cause.orNull
+```
+
+#### Trait
+
 ```scala
 trait AuthorizationService:
-  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]
-  // Fails with AuthError.Forbidden if SpiceDB returns false — fail-closed by design.
-  // No grant() / revoke() — app is a pure PEP; tuple writes are ops-path only (see ADR-024).
 
-  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
-  // For "show my workspaces" queries — reads from SpiceDB, no local DB join needed.
+  def check(
+    user:       UserId,
+    permission: Permission,
+    resource:   ResourceRef
+  ): IO[AuthError, Unit]
+  // Fails the ZIO effect — callers use flatMap, never fold/map (fail-closed, ADR-024 §5).
+  // PERMISSIONSHIP_NO_PERMISSION  → AuthForbidden
+  // Connectivity failure          → AuthServiceUnavailable (mapped to 403 at HTTP layer)
+  // No grant() / revoke() — pure PEP; tuple writes are ops-path only (ADR-024 §1).
+
+  def listAccessible(
+    user:         UserId,
+    resourceType: ResourceType,
+    permission:   Permission
+  ): IO[AuthError, List[ResourceId]]
+  // Calls SpiceDB LookupResources API.
+  // Used for "show my workspaces" — returns IDs of all resources where the user
+  // has the given permission; no local DB join required.
 ```
 
-**ResourceRef:**
+#### SpiceDB HTTP API Mapping
+
+**Check — POST `/v1/permissions/check`:**
+
+```json
+// Request (field names are camelCase in SpiceDB v1 REST API)
+{
+  "resource":    { "objectType": "risk_tree", "objectId": "01HXY..." },
+  "permission":  "design_write",
+  "subject":     { "object": { "objectType": "user", "objectId": "8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf" } },
+  "consistency": { "minimizeLatency": {} }
+}
+
+// Response — allowed
+{ "permissionship": "PERMISSIONSHIP_HAS_PERMISSION" }
+
+// Response — denied
+{ "permissionship": "PERMISSIONSHIP_NO_PERMISSION" }
+```
+
+Scala mapping table:
+
+| SpiceDB response | ZIO effect result | Notes |
+|-----------------|-------------------|-------|
+| `PERMISSIONSHIP_HAS_PERMISSION` | `ZIO.unit` | Check passes |
+| `PERMISSIONSHIP_NO_PERMISSION` | `ZIO.fail(AuthForbidden(...))` | Hard deny |
+| `PERMISSIONSHIP_UNSPECIFIED` | `ZIO.fail(AuthForbidden(...))` | Treat as deny — safe default |
+| HTTP 4xx | `ZIO.fail(AuthServiceUnavailable(...))` | Config/auth error |
+| HTTP 5xx / timeout | `ZIO.fail(AuthServiceUnavailable(...))` | Fail-closed |
+| Network error | `ZIO.fail(AuthServiceUnavailable(...))` | Fail-closed |
+
+**List Accessible — POST `/v1/permissions/resources`:**
+
+```json
+{
+  "resourceObjectType": "workspace",
+  "permission":         "view_workspace",
+  "subject":            { "object": { "objectType": "user", "objectId": "..." } },
+  "consistency":        { "minimizeLatency": {} }
+}
+// Response: streamed list — collect into List[ResourceId]
+```
+
+#### ZedToken Consistency Strategy
+
+The app is a pure PEP — it never writes tuples. The CI provisioning job is external. There is no "write then immediately check" pattern in app code, so `at_least_as_fresh` semantics are not needed.
+
+| Mode | Config value | Behaviour | Latency |
+|------|-------------|-----------|---------|
+| Default | `minimize_latency` | SpiceDB uses cache (NewEnemy) | ~1ms overhead |
+| High-compliance | `fully_consistent` | Always reads PostgreSQL snapshot | ~5ms overhead |
+
+```hocon
+register.authz.spicedb {
+  consistency = "minimize_latency"  # default; set "fully_consistent" for high-compliance environments
+}
+```
+
+Start with `minimize_latency`. Add `fully_consistent` as a config option for environments with strict audit requirements.
+
+#### Failure Modes
+
+| Failure | HTTP response | Rationale |
+|---------|--------------|-----------|
+| SpiceDB: `NO_PERMISSION` / `UNSPECIFIED` | 403 Forbidden | Explicit deny |
+| SpiceDB: HTTP 4xx (config/auth) | 403 Forbidden | Fail-closed; don't reveal infra |
+| SpiceDB: HTTP 5xx / timeout | 403 Forbidden | Fail-closed; 503 would reveal SpiceDB is down |
+| SpiceDB: network error | 403 Forbidden | Fail-closed |
+| Caller uses `.fold(_ => (), ...)` on `check()` | Compile succeeds; auth bypassed | Code smell — ADR-024 §5; catch in PR review |
+
+#### Observability
+
+Every `check()` emits a structured log event at INFO level. `UserId.toString` is redacted — audit log calls must use `user.value` explicitly (same pattern as `WorkspaceKeySecret.reveal`). `email` is never logged (display only, per ADR-024 §4).
+
 ```scala
-case class ResourceRef(resourceType: String, resourceId: String)
-// e.g., ResourceRef("workspace", "01HXY..."), ResourceRef("risk_tree", "01HAB...")
+// In AuthorizationServiceSpiceDB — correct pattern:
+ZIO.logInfo(s"authz.check user=${user.value} permission=${permission.zedName} resource=${resource.resourceType.zedType}:${resource.resourceId.value} result=$result latency_ms=$latencyMs")
+// user.value = explicit opt-in to emit PII in audit log
+// user alone (toString) would produce: user=UserId(***)
 ```
+
+Formatted output:
+```
+authz.check user=8f14e45f-... permission=design_write resource=risk_tree:01HXY result=allowed latency_ms=7
+authz.check user=8f14e45f-... permission=design_write resource=risk_tree:01HXY result=denied latency_ms=4
+authz.check user=8f14e45f-... permission=design_write resource=risk_tree:01HXY result=error reason=spicedb_unavailable latency_ms=5002
+```
+
+**Metrics** (via existing OTel `Meter` pattern from `RiskTreeServiceLive`):
+- Counter: `authz.check.total` — labels: `result={allowed,denied,error}`, `permission`, `resource_type`
+- Histogram: `authz.check.latency_ms` — SpiceDB HTTP round-trip latency
+
+**Traces:** One child span per `check()` call, named `spicedb.check`. Attributes: `permission`, `resource_type`, `resource_id`. **No `userId` in trace attributes** — avoid PII in trace backends that may not be access-controlled.
+
+#### `SpiceDbConfig`
+
+```scala
+final case class SpiceDbConfig(
+  url:            SafeUrl,                  // SpiceDB HTTP endpoint (e.g., "https://spicedb.infra:50051")
+  token:          SpiceDbToken,             // API bearer token — redacted in toString (WorkspaceKeySecret pattern)
+  consistency:    SpiceDbConsistency = SpiceDbConsistency.MinimizeLatency,
+  timeoutSeconds: Int = 10
+)
+
+enum SpiceDbConsistency:
+  case MinimizeLatency  // default — SpiceDB uses cached NewEnemy resolver
+  case FullyConsistent  // always reads PostgreSQL snapshot
+
+// SpiceDbToken: redacted credential (follows WorkspaceKeySecret pattern — no unapply, toString redacted)
+final class SpiceDbToken private (private val raw: String):
+  def reveal: String = raw
+  override def toString: String = "SpiceDbToken(***)"
+```
+
+#### `AuthorizationServiceSpiceDB` — Layer Signature
+
+```scala
+final class AuthorizationServiceSpiceDB private (
+  config:       SpiceDbConfig,
+  backend:      SttpBackend[Task, Any],
+  tracing:      Tracing,
+  checkCounter: Counter[Long],
+  checkLatency: Histogram[Double]
+) extends AuthorizationService:
+  // Instruments created once at layer construction — same pattern as RiskTreeServiceLive.
+  ...
+
+object AuthorizationServiceSpiceDB:
+  val layer: ZLayer[SpiceDbConfig & SttpBackend[Task, Any] & Tracing & Meter, Throwable, AuthorizationService] =
+    ZLayer {
+      for
+        config   <- ZIO.service[SpiceDbConfig]
+        backend  <- ZIO.service[SttpBackend[Task, Any]]
+        tracing  <- ZIO.service[Tracing]
+        meter    <- ZIO.service[Meter]
+        counter  <- meter.counter("authz.check.total", Some("1"), Some("Authorization check results"))
+        latency  <- meter.histogram("authz.check.latency_ms", Some("ms"), Some("SpiceDB check latency"))
+      yield new AuthorizationServiceSpiceDB(config, backend, tracing, counter, latency)
+    }
+```
+
+#### Dev/Test Stubs
+
+```scala
+// Wired when register.auth.mode = "capability-only" or "identity" — no SpiceDB needed.
+// All checks pass; listAccessible returns Nil (no fine-grained filtering in those modes).
+object AuthorizationServiceNoOp extends AuthorizationService:
+  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit] =
+    ZIO.unit
+  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]] =
+    ZIO.succeed(Nil)
+
+// For unit tests — allow/deny by explicit (user, permission, resource) set.
+// No live SpiceDB required; injected via ZLayer in test scope.
+class AuthorizationServiceStub(
+  allowed: Set[(UserId, Permission, ResourceRef)]
+) extends AuthorizationService:
+  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit] =
+    if allowed.contains((user, permission, resource)) then ZIO.unit
+    else ZIO.fail(AuthForbidden(user.value, permission.zedName, resource.resourceType.zedType, resource.resourceId.value))
+  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]] =
+    ZIO.succeed(allowed.collect {
+      case (u, p, ResourceRef(rt, id)) if u == user && p == permission && rt == resourceType => id
+    }.toList)
+```
+
+#### Adapter Boundary — gRPC Migration Path
+
+The trait hides transport entirely. When gRPC is needed:
+
+1. Add `scalapb` + SpiceDB gRPC stubs as dependencies
+2. Create `AuthorizationServiceSpiceDbGrpc extends AuthorizationService`
+3. Wire via config: `register.authz.spicedb.transport = http | grpc`
+4. Zero changes to any `check()` call site — the trait is the stable interface
+
+HTTP first; gRPC only if latency profiling shows the HTTP overhead exceeds budget under load.
 
 ### Task L2.3: Access Administration (Ops Path — Not App Logic)
 
@@ -698,7 +1008,7 @@ When upgrading a free-tier deployment to enterprise:
 2. **Anonymous workspace claiming:** When a free-tier user upgrades, how do they prove they "own" a capability-only workspace? Options: (a) login while URL has workspace key, (b) email verification, (c) just create new.
 3. **Feature gating UI:** How does the frontend know which features are available? `/config` endpoint? HTML-embedded config?
 4. **Terraform adoption trigger:** At what point do we need provider-level IaC (managed cluster/network/DNS/secrets), beyond Helm + manifests?
-5. **SpiceDB integration details:** HTTP vs gRPC client path for initial implementation; ownership migration strategy (one-time CI job writes existing `owner_id` values as SpiceDB `owner_user` relation tuples during L0→L2 upgrade — app never writes tuples in steady state).
+~~5. **SpiceDB integration details:**~~ **Closed:** HTTP client path for initial implementation (sttp, same as IrminClient). gRPC migration = swap `AuthorizationServiceSpiceDB` implementation only — trait is the stable interface (see Task L2.2 Adapter Boundary). Ownership migration: one-time CI job writes existing `owner_id` values as SpiceDB `owner_user` relation tuples during L0→L2 upgrade — app never writes tuples in steady state. `WorkspaceId` generated from Layer 1 onward to avoid this migration needing a data backfill.
 6. ~~**Workspace override governance (closed):**~~ Resolved: user-owned workspaces grant override only to the `owner_user` SpiceDB relation and the M3 break-glass ops path. No in-product override delegation. Policy recorded in ops runbook, not app code.
 
 ---
