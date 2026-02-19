@@ -502,8 +502,9 @@ server/.../auth/AuthorizationServiceSpiceDB.scala   — live HTTP adapter (Spice
 server/.../auth/AuthorizationServiceNoOp.scala      — always-allow stub (capability-only / identity modes)
 server/.../auth/AuthorizationServiceStub.scala      — configurable stub for unit tests
 server/.../configs/SpiceDbConfig.scala              — connectivity + consistency config
-common/.../domain/data/iron/OpaqueTypes.scala       — add UserId, WorkspaceId
+common/.../domain/data/iron/OpaqueTypes.scala       — add UserId, WorkspaceId, BearerToken
 common/.../domain/errors/AppError.scala             — add AuthError sealed trait + variants
+common/.../http/codecs/AuthTapirCodecs.scala        — Tapir codec for BearerToken (separate from IronTapirCodecs — not an Iron type)
 ```
 
 #### Type Inventory
@@ -535,6 +536,42 @@ object UserId:
   given JsonEncoder[UserId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[UserId] = JsonDecoder[String].mapOrFail(s =>
     UserId.fromString(s).left.map(_.mkString(", ")))
+```
+
+**`BearerToken`** — redacted `final class` wrapping the JWT string extracted from the `Authorization: Bearer <jwt>` HTTP header. Follows the `WorkspaceKeySecret`/`SpiceDbToken` ADR-022 credential pattern: private raw value, `.reveal` for explicit opt-in, `toString` redacted. A bearer token is a **credential** (proof of identity, not merely PII) — `.reveal` naming is correct (cf. `UserId.value` which is PII-not-secret).
+
+Validation is enforced at the **Tapir codec boundary** (`AuthTapirCodecs`) — not inside the class, not in `serverLogic`. If the `Authorization` header is present but lacks the `"Bearer "` prefix, Tapir returns `DecodeResult.Error` → 400 before `serverLogic` is reached. The controller can therefore never receive a structurally invalid credential.
+
+```scala
+// In OpaqueTypes.scala — follows SpiceDbToken pattern.
+// Lives in common module so WorkspaceEndpoints (common) can reference the type.
+final class BearerToken private (private val token: String):
+  def reveal: String = token                    // explicit opt-in — used only in JwtDecoder call site
+  override def toString: String = "BearerToken(***)"
+  override def hashCode: Int = token.hashCode
+  override def equals(that: Any): Boolean = that match
+    case b: BearerToken => token == b.token
+    case _              => false
+
+object BearerToken:
+  /** Strip "Bearer " prefix and validate. Called by the Tapir codec, not by controllers directly. */
+  def fromHeader(headerValue: String): Either[String, BearerToken] =
+    if headerValue.startsWith("Bearer ") then
+      val t = headerValue.drop(7)
+      if t.nonEmpty then Right(new BearerToken(t))
+      else Left("Bearer token must not be empty")
+    else Left("Authorization header must start with 'Bearer '")
+
+// In AuthTapirCodecs.scala — codec keeps parsing logic out of the domain class.
+// AuthTapirCodecs is separate from IronTapirCodecs: BearerToken is a final class, not an Iron opaque type.
+given Schema[BearerToken] = Schema.string.description("JWT bearer token (Authorization: Bearer <jwt>)")
+given Codec[String, BearerToken, CodecFormat.TextPlain] =
+  Codec.string.mapDecode { headerValue =>
+    BearerToken.fromHeader(headerValue).fold(
+      err => DecodeResult.Error(headerValue, new IllegalArgumentException(err)),
+      DecodeResult.Value(_)
+    )
+  }(token => s"Bearer ${token.reveal}")
 ```
 
 **`WorkspaceId`** — stable non-secret ULID identifier for SpiceDB resource references. **Does not yet exist in the codebase.** The current `Workspace` domain model uses only `WorkspaceKeySecret` as its identity, which was intentional at Layer 0.
@@ -919,6 +956,412 @@ SpiceDB then handles the instance-level question: does this editor's JWT corresp
 - Inheritance: workspace member can access tree in workspace
 - Per-tree override: tree-level viewer cannot edit
 - Ops-path revocation: after tuple deletion via `zed` CLI or CI job, `check()` returns forbidden immediately — no app-level revocation endpoint involved
+
+---
+
+### Task L2.6: Route Protection Rollout
+
+Incremental plan for wiring `AuthorizationService.check()` into every HTTP route that requires it. Each wave is independently deployable and leaves existing tests passing. Activation is controlled entirely by the `register.auth.mode` config value; no wave requires a code-flag branch.
+
+#### Route Inventory and Permission Matrix
+
+Complete route census as of the current codebase. Every route is assigned a `Permission` enum value (or explicitly declared as exempt) before any code changes begin.
+
+| # | Method | Path | Controller | Permission | Resource type | Auth mode | Notes |
+|---|--------|------|-----------|-----------|--------------|-----------|-------|
+| 1 | GET | `/health` | RiskTree | **None** | — | All | Always public — no auth ever |
+| 2 | GET | `/risk-trees` | RiskTree | **None** | — | Config-gate | Default disabled (A17); admin debug only; no SpiceDB check |
+| 3 | POST | `/workspaces/bootstrap` | Workspace | **None (pre-resource)** | — | L0+ | Creates workspace; no prior resource to check; see Wave 5 for post-create grant |
+| 4 | GET | `/w/{key}/risk-trees` | Workspace | `ViewWorkspace` | Workspace | L0+ | Lists trees — coarse read of workspace membership |
+| 5 | POST | `/w/{key}/risk-trees` | Workspace | `DesignWrite` | Workspace | L0+ | Creates tree inside workspace |
+| 6 | POST | `/w/{key}/rotate` | Workspace | `AdminWorkspace` | Workspace | L0+ | Key rotation — sensitive, admin-level |
+| 7 | DELETE | `/w/{key}` | Workspace | `AdminWorkspace` | Workspace | L0+ | Hard-delete workspace + all trees |
+| 8 | DELETE | `/admin/workspaces/expired` | Workspace | `AdminSystem` | System | L0+ | Server-wide eviction — system admin only |
+| 9 | GET | `/w/{key}/risk-trees/{treeId}` | Workspace | `ViewTree` | RiskTree | L0+ | Tree summary |
+| 10 | GET | `/w/{key}/risk-trees/{treeId}/structure` | Workspace | `ViewTree` | RiskTree | L0+ | Full tree structure |
+| 11 | PUT | `/w/{key}/risk-trees/{treeId}` | Workspace | `DesignWrite` | RiskTree | L0+ | Full tree replacement |
+| 12 | DELETE | `/w/{key}/risk-trees/{treeId}` | Workspace | `DesignWrite` | RiskTree | L0+ | Tree deletion |
+| 13 | POST | `/w/{key}/risk-trees/{treeId}/invalidate/{nodeId}` | Workspace | `AdminTree` | RiskTree | L0+ | Cache invalidation — operational action on tree |
+| 14 | GET | `/w/{key}/risk-trees/{treeId}/nodes/{nodeId}/lec` | Workspace | `ViewTree` | RiskTree | L0+ | LEC curve for one node |
+| 15 | GET | `/w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance` | Workspace | `ViewTree` | RiskTree | L0+ | Probability of exceedance query |
+| 16 | POST | `/w/{key}/risk-trees/{treeId}/nodes/lec-multi` | Workspace | `ViewTree` | RiskTree | L0+ | Multi-node LEC batch |
+| 17 | POST | `/w/{key}/risk-trees/{treeId}/lec-chart` | Workspace | `ViewTree` | RiskTree | L0+ | Vega-Lite chart spec |
+| 18 | GET | `/w/{key}/events/tree/{treeId}` | SSE | `ViewTree` | RiskTree | L0+ | SSE stream — same gate as the REST read |
+| 19 | GET | `/risk-trees/{treeId}/cache/stats` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
+| 20 | GET | `/risk-trees/{treeId}/cache/nodes` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
+| 21 | DELETE | `/risk-trees/{treeId}/cache` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
+| 22 | DELETE | `/cache/clear-all` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
+
+**Cache endpoints (19–22) remain mesh-only.** They are not under `/w/{key}/...` — no workspace key in the path — so `AuthorizationService.check()` has no workspace-scoped context. Istio `AuthorizationPolicy` with `roles[admin]` OPA claim is the correct enforcement point (already documented in `CacheEndpoints.scala`). This is consistent with ADR-024: the app does not implement admin-role logic.
+
+---
+
+#### Prerequisite: `WorkspaceId` must exist before Wave 0
+
+`ws.asResource` requires a stable, non-secret identifier for the workspace (see Task L2.2 design questions). `WorkspaceId` does not yet exist in the codebase. Before any wave can write or check SpiceDB workspace relations, the following changes must land as a separate atomic commit:
+
+1. Add `WorkspaceId` to `OpaqueTypes.scala` — mirrors `TreeId` exactly:
+   ```scala
+   // OpaqueTypes.scala — in com.risquanter.register.domain.data.iron
+   final case class WorkspaceId(value: SafeId.SafeId)
+   object WorkspaceId:
+     def generate(): WorkspaceId = WorkspaceId(SafeId.generate())
+   ```
+2. Add `id: WorkspaceId` field to `Workspace` case class (generated on bootstrap, persisted alongside `key`).
+3. Add `.asResource` extension method on `WorkspaceId` (mirrors `TreeId.asResource`).
+4. Update `WorkspaceStore` to store and retrieve `WorkspaceId`.
+5. Update `IrminClient` persistence for `WorkspaceId`.
+
+This is a **Layer 1 task**, not Layer 2 — blocking the entire rollout. No fine-grained check on a workspace resource is possible without it.
+
+---
+
+#### Tapir Integration Pattern
+
+Authorization is embedded directly in `serverLogic`, not in a global interceptor. This is explicit, testable, and does not require Tapir interceptor machinery.
+
+**Step 1 — New endpoint base for authenticated routes:**
+
+```scala
+// In BaseEndpoint (or a new AuthedEndpoint mixin)
+// Option[BearerToken] — not Option[String]:
+//   - None:               Authorization header absent      → allowed (capability-only passes through NoOp)
+//   - Some(token):        header present, "Bearer " prefix validated by codec → typed credential
+//   - DecodeResult.Error: header present but malformed prefix → 400 before serverLogic, never reaches controller
+// Mode enforcement (is a JWT *required*?) happens in UserContextExtractor.extract, not here.
+val authedBaseEndpoint =
+  baseEndpoint
+    .in(header[Option[BearerToken]]("Authorization"))
+```
+
+All workspace-scoped endpoints switch from `baseEndpoint` to `authedBaseEndpoint`. The path and query parameters are unchanged. The auth header becomes the first input tuple element.
+
+**Step 2 — Updated endpoint signature (example):**
+
+```scala
+// Before:
+val listWorkspaceTreesEndpoint =
+  baseEndpoint
+    .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
+    .get
+    .out(jsonBody[List[SimulationResponse]])
+// Input tuple: WorkspaceKeySecret
+
+// After:
+val listWorkspaceTreesEndpoint =
+  authedBaseEndpoint
+    .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
+    .get
+    .out(jsonBody[List[SimulationResponse]])
+// Input tuple: (Option[BearerToken], WorkspaceKeySecret)
+```
+
+**Step 3 — Controller serverLogic pattern:**
+
+```scala
+// check() is the FIRST effectful call after extracting the userId.
+// resolveTree() (Layer 0 capability check) runs before check() for tree-scoped routes
+// to avoid leaking tree existence to unauthenticated callers.
+val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.serverLogic {
+  case (maybeToken, key) =>    // maybeToken: Option[BearerToken] — structurally validated by Tapir codec
+    (for
+      ws     <- workspaceStore.resolve(key)                                 // Layer 0: capability
+      userId <- userCtx.extract(maybeToken)                                 // Layer 1: JWT (calls token.reveal internally)
+      _      <- authz.check(userId, Permission.ViewWorkspace, ws.id.asResource) // Layer 2: SpiceDB (NoOp or live)
+      trees  <- workspaceStore.listTrees(key).map(_.map(SimulationResponse.fromRiskTree))
+    yield trees).either
+}
+
+// Tree-scoped route: resolveTree ensures tree belongs to this workspace,
+// then check() verifies fine-grained permission on the tree itself.
+val getTreeById: ServerEndpoint[Any, Task] = getWorkspaceTreeByIdEndpoint.serverLogic {
+  case (maybeToken, key, treeId) =>    // maybeToken: Option[BearerToken]
+    (for
+      ws     <- workspaceStore.resolve(key)
+      _      <- resolveTree(key, treeId)                                    // Layer 0: workspace capability + tree ownership
+      userId <- userCtx.extract(maybeToken)                                 // Layer 1: JWT (calls token.reveal internally)
+      _      <- authz.check(userId, Permission.ViewTree, treeId.asResource)    // Layer 2: SpiceDB on tree
+      result <- riskTreeService.getById(treeId).map(_.map(SimulationResponse.fromRiskTree))
+    yield result).either
+}
+```
+
+**Order invariant:** `ws.resolve(key)` → `resolveTree(key, treeId)` → `userCtx.extract` → `authz.check` → handler body. The Layer 0 check always precedes Layer 2 — this ensures that workspace-key errors return the same opaque 404 regardless of auth mode (no information about valid workspace IDs is revealed to unauthenticated callers).
+
+---
+
+#### `UserContextExtractor` Design
+
+```scala
+trait UserContextExtractor:
+  /** Extract UserId from the Authorization header, respecting the configured auth mode.
+    *
+    * The parameter type is Option[BearerToken], not Option[String]:
+    * - Structural validation ("Bearer " prefix) has already passed at the Tapir codec boundary.
+    * - Controllers cannot pass a raw un-parsed string here — the type prevents it.
+    * - In the NoOp implementation the token is ignored entirely (no .reveal call).
+    * - In fromJwt the token is unwrapped with .reveal — same explicit opt-in as WorkspaceKeySecret.reveal.
+    *
+    * capability-only: returns UserId.anonymous — JWT not required, check() is NoOp
+    * identity:        JWT required; extract `sub` claim; fail with AuthForbidden if absent/invalid
+    * fine-grained:    same as identity; check() then uses real SpiceDB
+    */
+  def extract(token: Option[BearerToken]): IO[AppError, UserId]
+
+object UserContextExtractor:
+  val anonymous: UserId = UserId.fromString("00000000-0000-0000-0000-000000000000")
+    // sentinel value used only in NoOp/capability-only mode; never reaches SpiceDB
+
+  // capability-only implementation — token is ignored; no .reveal call, no JWT parsed
+  val noOp: UserContextExtractor = _ => ZIO.succeed(anonymous)
+
+  // identity / fine-grained implementation.
+  // JWT signature validation is mesh-side (Istio RequestAuthentication).
+  // App only extracts and validates the `sub` claim format.
+  val fromJwt: UserContextExtractor = {
+    case None        => ZIO.fail(AuthForbidden("Missing Authorization header"))
+    case Some(token) =>
+      ZIO.fromEither(
+        JwtDecoder.decodeSub(token.reveal)    // .reveal is the explicit opt-in — same as WorkspaceKeySecret.reveal
+          .flatMap(UserId.fromString)          // validate UUID format against UuidStr Iron constraint
+          .left.map(msg => AuthForbidden(msg))
+      )
+  }
+```
+
+`UserContextExtractor` is provided as a ZLayer. The layer selection follows the same `register.auth.mode` switch as `AuthorizationService`.
+
+---
+
+#### Rollout Waves
+
+Each wave is a single PR. The PR passes all existing tests before merge. No wave requires a feature flag branch — mode is config-only at runtime.
+
+---
+
+**Wave 0 — Infrastructure (no user-visible change)**
+
+_Deliverables:_
+- `WorkspaceId` added to domain model (prerequisite — see above)
+- `UserId` final class (`OpaqueTypes.scala` or new `AuthTypes.scala`)
+- `Permission` enum with `zedName: String`
+- `ResourceType` enum with `zedType: String`
+- `ResourceRef` case class; `.asResource` extension methods on `WorkspaceId` and `TreeId`
+- `AuthError` sealed trait added to `AppError` hierarchy
+- `AuthorizationService` trait (see Task L2.2)
+- `AuthorizationServiceNoOp` (always allow — all modes initially)
+- `AuthorizationServiceStub` (Set-backed — for tests)
+- `UserContextExtractor` trait + `noOp` implementation
+- `AuthConfig` case class: `mode: String` (validated: `capability-only | identity | fine-grained`)
+- ZLayer wiring: `AuthorizationServiceNoOp` bound by default in all modes
+
+_Regression gate:_ All existing `RouteSecurityRegressionSpec` and unit tests pass unchanged. No endpoint definitions modified yet.
+
+---
+
+**Wave 1 — Auth header declared on workspace-scoped endpoints**
+
+_Deliverables:_
+- `authedBaseEndpoint` added to `BaseEndpoint` (or new `AuthedEndpoint` mixin)
+- All workspace-scoped endpoints in `WorkspaceEndpoints.scala` and `SSEEndpoints.scala` switch to `authedBaseEndpoint`
+- All workspace-scoped `serverLogic` calls updated to destructure the new `(Option[BearerToken], ...)` tuple
+- `UserContextExtractor.noOp` wired — `extract()` always returns anonymous userId, no JWT parsed
+- `authz.check()` called in every workspace-scoped `serverLogic` — still hits `AuthorizationServiceNoOp`
+
+_Behavior change:_ None. NoOp always allows. Anonymous userId never reaches SpiceDB.
+
+_Regression gate:_
+- `RouteSecurityRegressionSpec` still passes (path templates unchanged, only input tuple extended)
+- New test: for every workspace-scoped route, `serverLogic` compiles and all tests pass with `NoOp` layers
+
+_Diff scope:_ `WorkspaceEndpoints.scala`, `SSEEndpoints.scala`, `WorkspaceController.scala`, `SSEController.scala` — mechanical, no logic changes.
+
+---
+
+**Wave 2 — Identity mode: JWT extraction required**
+
+_Deliverables:_
+- `UserContextExtractor.fromJwt` implemented (JWT decode, `sub` claim extraction, UUID validation)
+- `AuthConfig.mode = "identity"` activates `fromJwt` in ZLayer selection:
+  ```scala
+  val userCtxLayer: ULayer[UserContextExtractor] =
+    ZLayer.fromZIO(ZIO.config(AuthConfig.descriptor).map {
+      case AuthConfig("capability-only", _) => UserContextExtractor.noOp
+      case _                                => UserContextExtractor.fromJwt
+    })
+  ```
+- No `authz.check()` behaviour changes — still NoOp
+
+_Behavior change:_ In `identity` mode only, missing/invalid JWT → `AuthForbidden` → 403. In `capability-only` mode, unchanged.
+
+_New tests:_
+  - `BearerToken.fromHeader` (unit): valid `"Bearer <jwt>"` → `Right(BearerToken)`; missing prefix → `Left`; empty token → `Left`
+  - Tapir codec (integration): `Authorization: notbearer xyz` request → 400 before `serverLogic` reached (`DecodeResult.Error`)
+  - `UserContextExtractor.fromJwt` parses a valid test JWT via `.reveal` and extracts a known `UserId`
+  - Missing header (`None`) → `AuthForbidden` (from `fromJwt` — not from Tapir: absent header is `None`, not an error)
+  - Malformed JWT payload (invalid `sub`) → `AuthForbidden`
+  - Wrong claim type (non-UUID `sub`) → `AuthForbidden`
+
+---
+
+**Wave 3 — Fine-grained mode: read route protection**
+
+_Deliverables:_
+- `AuthorizationServiceSpiceDB` implemented (see Task L2.2)
+- `AuthConfig.mode = "fine-grained"` activates `AuthorizationServiceSpiceDB` in ZLayer selection
+- `check()` calls in read routes now hit SpiceDB when in `fine-grained` mode:
+  - Route 4: `check(userId, Permission.ViewWorkspace, ws.id.asResource)`
+  - Routes 9, 10, 14, 15, 16, 17, 18: `check(userId, Permission.ViewTree, treeId.asResource)`
+
+_Behavior change:_ In `fine-grained` mode, users without a SpiceDB `view_workspace` or `view_tree` grant receive 403. In `capability-only` and `identity` modes, still NoOp.
+
+_New tests (using `AuthorizationServiceStub`):_
+  - `listWorkspaceTrees`: stub with `ViewWorkspace` grant → 200; stub without → 403
+  - `getTreeById`: stub with `ViewTree` grant → 200; stub without → 403
+  - Inheritance: workspace-level `ViewTree` grant covers tree-level read (SpiceDB schema inheritance)
+  - All read routes: property test — every route with `ViewTree` in permission matrix returns 403 when stub grants are empty
+
+---
+
+**Wave 4 — Fine-grained mode: write route protection**
+
+_Deliverables:_
+- `check()` calls added to write routes:
+  - Route 5: `check(userId, Permission.DesignWrite, ws.id.asResource)`
+  - Routes 11, 12: `check(userId, Permission.DesignWrite, treeId.asResource)`
+  - Route 13: `check(userId, Permission.AdminTree, treeId.asResource)`
+
+_Behavior change:_ In `fine-grained` mode, users without `design_write` grant cannot create/update/delete trees.
+
+_New tests:_
+  - `createWorkspaceTree`: stub with `DesignWrite` on workspace → 200; without → 403
+  - `updateTree`, `deleteTree`: stub with `DesignWrite` on tree → 200; without → 403
+  - `invalidateCache`: stub with `AdminTree` → 200; without → 403
+
+---
+
+**Wave 5 — Fine-grained mode: admin route protection**
+
+_Deliverables:_
+- `check()` calls added to admin routes:
+  - Route 6: `check(userId, Permission.AdminWorkspace, ws.id.asResource)`
+  - Route 7: `check(userId, Permission.AdminWorkspace, ws.id.asResource)`
+  - Route 8: `check(userId, Permission.AdminSystem, ResourceRef.system)`
+- `ResourceRef.system` sentinel added for system-level checks (no specific resource ID):
+  ```scala
+  object ResourceRef:
+    val system: ResourceRef = ResourceRef(ResourceType.Organization, SafeId("00000000000000000000000000"))
+    // SpiceDB will evaluate against the org-level admin_system permission in the schema
+  ```
+
+_New tests:_
+  - `rotateWorkspace`: `AdminWorkspace` grant → 200; without → 403
+  - `deleteWorkspace`: `AdminWorkspace` grant → 200; without → 403
+  - `evictExpired`: `AdminSystem` grant → 200; without → 403
+
+---
+
+**Wave 6 — Bootstrap seeding: post-create ownership write (fine-grained mode)**
+
+`POST /workspaces/bootstrap` has no resource to check before the workspace is created (no prior `WorkspaceId` to look up). This is the only route that writes to SpiceDB instead of reading. It is also the only justified exception to ADR-024's "no grant/revoke in app" principle — this is initial provisioning, not an admin delegation action.
+
+_Flow in `fine-grained` mode:_
+
+```scala
+val bootstrapWorkspace: ServerEndpoint[Any, Task] = bootstrapWorkspaceEndpoint.serverLogic {
+  case (maybeForwardedFor, maybeToken, req) =>          // maybeToken: Option[BearerToken]
+    (for
+      userId  <- userCtx.extract(maybeToken)            // Layer 1: JWT required in fine-grained (calls token.reveal)
+      tree    <- riskTreeService.create(req)
+      ws      <- workspaceStore.bootstrap(tree.id, ...)
+      _       <- authz.seed(userId, ws.id)             // writes SpiceDB tuple: workspace:ID#owner_user@user:UID
+    yield WorkspaceBootstrapResponse(ws.key, tree)).either
+}
+```
+
+`AuthorizationService.seed(userId, workspaceId)` is a new method, **separate from `check()`**, which writes a single SpiceDB relationship tuple:
+```
+workspace:{workspaceId}#owner_user@user:{userId}
+```
+
+In `capability-only` and `identity` modes, `seed()` is a no-op (the NoOp implementation does nothing).
+
+_Decision record (inline, no new ADR):_ This is the minimal exception to ADR-024. The app writes exactly one tuple, at exactly one point in time, scoped to workspace creation. No tuple writes occur anywhere else in the app. If the `seed()` call fails, workspace creation is rolled back (the ZIO for-comprehension ensures atomicity at the service level). The alternative — an async provisioning sidecar — is a valid future migration target but adds infrastructure complexity disproportionate to a single tuple write.
+
+_New tests:_
+  - `bootstrapWorkspace` in fine-grained mode: stub records one `seed()` call with correct `(userId, workspaceId)`
+  - `seed()` failure → workspace creation returns error (no orphaned workspace)
+  - `bootstrapWorkspace` in capability-only mode: stub records zero `seed()` calls
+
+---
+
+#### ZLayer Selection — Mode-Driven Service Wiring
+
+All mode selection is centralised in one ZLayer definition. Individual controllers receive `AuthorizationService` and `UserContextExtractor` via normal ZIO dependency injection — they do not inspect the config themselves.
+
+```scala
+// In AppLayer (modules/app/.../AppLayer.scala or similar):
+
+val authModeLayer: TaskLayer[AuthorizationService & UserContextExtractor] =
+  ZLayer.fromZIO(
+    ZIO.config(AuthConfig.descriptor).flatMap {
+      case AuthConfig("fine-grained", spicedb) =>
+        ZIO.succeed(
+          AuthorizationServiceSpiceDB.layer(spicedb) ++
+          UserContextExtractor.jwtLayer
+        )
+      case AuthConfig("identity", _) =>
+        ZIO.succeed(
+          ZLayer.succeed(AuthorizationServiceNoOp) ++
+          UserContextExtractor.jwtLayer
+        )
+      case _ => // capability-only
+        ZIO.succeed(
+          ZLayer.succeed(AuthorizationServiceNoOp) ++
+          ZLayer.succeed(UserContextExtractor.noOp)
+        )
+    }
+  ).flatten
+```
+
+**No controller contains a `config.auth.mode match` expression.** Mode switching is purely an infrastructure concern — this enforces ADR-024's "app as pure PEP" posture.
+
+---
+
+#### Regression Test Invariants
+
+Extend `RouteSecurityRegressionSpec` with the following invariants (verified with `AuthorizationServiceStub`):
+
+```scala
+// Invariant 1: No workspace-scoped route returns 200 when stub grants are empty (fine-grained mode)
+// (Health and /risk-trees are exempt — they are not workspace-scoped)
+test("all workspace-scoped routes are 403 when stub has no grants") { ... }
+
+// Invariant 2: Every workspace-scoped route returns 200 when stub grants match expected permission
+// Verifies that the correct Permission enum value is used at each call site
+test("stub with correct grant passes all workspace-scoped routes") { ... }
+
+// Invariant 3: No workspace-scoped route short-circuits past check() — AuthorizationServiceStub
+// records every check() call; test verifies call count == 1 per request
+test("authz.check() is called exactly once per protected request") { ... }
+
+// Invariant 4: Cache endpoints are NOT tested for SpiceDB permission — they are mesh-only
+// Document this explicitly so future contributors don't add spurious check() calls
+```
+
+---
+
+#### Summary Table: What Changes Per Wave
+
+| Wave | Changed files | Behavior change? | Test additions |
+|------|--------------|-----------------|----------------|
+| 0 | New files: AuthTypes, AuthorizationService, UserContextExtractor | None | Unit tests for new types |
+| 1 | WorkspaceEndpoints, SSEEndpoints, WorkspaceController, SSEController | None (NoOp) | Compilation + regression |
+| 2 | AppLayer (ZLayer wiring) + UserContextExtractor.fromJwt | Identity mode: JWT required | JWT decode tests |
+| 3 | AppLayer (SpiceDB wiring) | Fine-grained: read routes enforced | Stub-based 200/403 read tests |
+| 4 | WorkspaceController (write routes) | Fine-grained: write routes enforced | Stub-based 200/403 write tests |
+| 5 | WorkspaceController (admin routes) | Fine-grained: admin routes enforced | Stub-based 200/403 admin tests |
+| 6 | WorkspaceController (bootstrap) + AuthorizationService (seed) | Fine-grained: bootstrap writes ownership tuple | seed() call count tests |
 
 ### Estimated Effort: ~2–4 weeks
 
