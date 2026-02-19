@@ -865,7 +865,7 @@ Tier 1.5 implements workspace-scoped capability-based access control. This is **
 
 - **Layer 0 (this tier):** Workspace key in URL = access to all trees in workspace. Free-tier: TTL-limited. Enterprise: same URLs, same keys.
 - **Layer 0+1 (AUTHORIZATION-PLAN.md):** Keycloak identity **added on top**. Key + valid JWT from the right realm = access (**invitation-link pattern** — sharing the URL *is* sharing access, but only to authenticated users).
-- **Layer 0+1+2 (AUTHORIZATION-PLAN.md):** SpiceDB/OpenFGA. Key + JWT + explicit membership/role (**ACL pattern** — the user must be explicitly granted access; the key is just a routing token).
+- **Layer 0+1+2 (AUTHORIZATION-PLAN.md):** SpiceDB. Key + JWT + explicit membership/role (**ACL pattern** — the user must be explicitly granted access; the key is just a routing token).
 
 The URL scheme is **the same across all layers** — `/#/{workspaceKey}/...`. The workspace key's **semantic role shifts** as layers are added:
 
@@ -2709,7 +2709,7 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 | — | Irmin dev image | Alpine (distroless deferred) | 2026-01-17 | ~650 MB dev image; <50 MB target for prod |
 | — | Repository selection | Config-driven (`repositoryType`) | 2026-01-20 | Default `in-memory`; `irmin` available |
 | DP-6 | Demo access model | Workspace capability (updated) | 2026-02-13 | `WorkspaceKey` (128-bit SecureRandom); workspace groups trees; TTL + reaper; replaces Phase X `ShareToken` model |
-| DP-7 | Layered authorization | Three layers, single codebase | 2026-02-13 | Layer 0: workspace capability (Tier 1.5). Layer 1: Keycloak + OPA (AUTHORIZATION-PLAN.md). Layer 2: SpiceDB/OpenFGA (AUTHORIZATION-PLAN.md). Config-driven mode switching. |
+| DP-7 | Layered authorization | Three layers, single codebase | 2026-02-13 | Layer 0: workspace capability (Tier 1.5). Layer 1: Keycloak + OPA (AUTHORIZATION-PLAN.md). Layer 2: SpiceDB (AUTHORIZATION-PLAN.md — selected, decision closed in L2.0). Config-driven mode switching. |
 | DP-8 | Reaping strategy | Combined (lazy check + reaper fiber) | 2026-02-13 | Lazy TTL check on access → "expired" UX. Background ZIO fiber → storage hygiene. Admin endpoint for external CronJob. |
 | DP-9 | Workspace persistence | PostgreSQL (planned) | 2026-02-13 | In-memory TrieMap initially. PG implementation follows cheleb demo patterns. Config-selectable. |
 | DP-10 | `GET /risk-trees` (list-all) | Configurable auth gate | 2026-02-13 | Default deny. Config: `register.api.list-all-trees.enabled = false`. Frontend unwired. |

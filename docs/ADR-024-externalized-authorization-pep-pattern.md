@@ -55,7 +55,24 @@ Keycloak admin: disable user bob
   → For immediate effect: zed CLI bulk-delete per ops runbook (M3 break-glass)
 ```
 
-### 4. Fail-Closed by Default
+### 4. SpiceDB Receives `userId` Only — Not JWT Roles
+
+SpiceDB evaluates the relationship graph. It has no knowledge of JWT role claims and needs none. The only identifier the app passes to `check()` is the `userId` (JWT `sub` claim).
+
+```scala
+// SpiceDB check: userId + permission name + resource reference
+// JWT role claims are NOT an input — the relationship graph is authoritative
+authorizationService.check(
+  user    = userContext.userId,           // ← only this from UserContext
+  permission = Permission.DesignWrite,
+  resource   = ResourceRef("risk_tree", treeId)
+)
+// userContext.roles is NOT passed here — that is OPA's domain
+```
+
+JWT role claims (`userContext.roles`) are a coarse signal consumed exclusively by OPA at the mesh layer. If a user has an `editor` role claim but no SpiceDB `editor` relation on a specific resource, they are denied. The relationship graph wins at the instance level.
+
+### 5. Fail-Closed by Default
 
 `check()` fails the ZIO effect with `AuthError.Forbidden` (not returns `false`) so callers cannot accidentally grant access by ignoring the return value. SpiceDB connectivity failure also fails with `AuthError.ServiceUnavailable` — deny, not allow.
 
@@ -65,7 +82,7 @@ authorizationService.check(user.userId, Permission.DesignWrite, resource)
   .flatMap(_ => handleRequest(...))   // only reached if check() succeeds (= allowed)
 ```
 
-### 5. No App Endpoints for Grant/Revoke
+### 6. No App Endpoints for Grant/Revoke
 
 No HTTP route in the application exposes tuple write operations. Any future self-service access management capability is a separate administrative service (a dedicated PAP), distinct from this application's codebase and deployment.
 

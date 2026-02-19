@@ -196,12 +196,30 @@ server/.../auth/UserContext.scala
 server/.../auth/UserContextExtractor.scala
 ```
 
+**Role enum:**
+```scala
+// Values mirror OPA Rego recognized role names exactly.
+// Unknown claim strings are dropped — never fail on unrecognised claims.
+enum Role:
+  case Analyst    // may run analysis, create scenario branches; cannot mutate canonical design
+  case Editor     // ⊇ Analyst: may also mutate canonical design
+  case TeamAdmin  // may manage team structure
+
+object Role:
+  def fromClaim(s: String): Option[Role] = s match
+    case "analyst"    => Some(Analyst)
+    case "editor"     => Some(Editor)
+    case "team_admin" => Some(TeamAdmin)
+    case _            => None
+```
+
 **UserContext:**
 ```scala
 final case class UserContext(
-  userId: UserId,          // from JWT `sub` claim
-  email: Option[Email],    // from JWT `email` claim
-  roles: Set[String]       // from JWT `realm_access.roles`
+  userId: UserId,       // from JWT `sub` — the ONLY field passed to SpiceDB check()
+  email: Option[Email], // from JWT `email` — display only, never used for authorization
+  roles: Set[Role]      // from JWT `realm_access.roles` — OPA coarse gate only (see ADR-012 §3, ADR-024 §4)
+                        // SpiceDB does NOT receive roles; the relationship graph is authoritative
 )
 ```
 
@@ -392,34 +410,87 @@ SpiceDB is the selected Layer 2 backend. This phase establishes the implementati
 
 ### Task L2.1: Authorization Schema
 
-**SpiceDB schema (`.zed`):**
+#### Schema Location
+
+The schema lives in the application repository at `infra/spicedb/schema.zed`, versioned alongside the application code that references its permission names. This ensures:
+- Schema changes and Scala code changes (permission name references) are atomic — same PR, same CI run, same git SHA deployed
+- A schema rename (e.g. `design_write` → `write`) that breaks `check("design_write", ...)` call sites fails CI immediately, not silently at runtime
+- Commit signing (ADR-020) covers schema changes automatically
+- No additional credentials or fetch infrastructure for schema apply
+
+The CI provisioning job accepts a configurable schema source for enterprise deployers with a dedicated policy team:
+
+```hocon
+register.authz.provisioning {
+  schema-source = "classpath:/spicedb/schema.zed"  # default: in-repo
+  # schema-source = "https://policy.internal/schemas/register/v2.zed"  # enterprise override
+}
 ```
+
+#### Schema Decisions
+
+- **No `org_admin` in Zed (M3):** Org-wide emergency operations use Keycloak account disable + audited `zed` CLI bulk-delete per ops runbook. No escape-hatch relation in the schema.
+- **Explicit grants only:** No org-default inheritance. A user must be explicitly related to a team or workspace to receive any permission.
+- **Action-oriented permissions:** `design_write`, `analyze_run`, `view_*` — named for what they allow, not for a role title.
+- **`editor` ⊇ `analyst`:** An editor can do everything an analyst can. An analyst can run analysis and create scenario branches but cannot mutate the canonical design.
+- **Dual ownership model:** Workspaces may be owned by a team (`owner_team`) or directly by a user (`owner_user`) for team-less workspaces. Explicit, not inherited from org.
+
+#### SpiceDB Schema (`infra/spicedb/schema.zed`)
+
+```zed
 definition user {}
 
-definition workspace {
-    relation owner: user
-    relation member: user
-    relation viewer: user
+definition organization {
+  relation org_member: user
+  // No org_admin in Zed — M3: org-wide emergency ops use Keycloak disable
+  // + audited zed CLI bulk-delete per ops runbook. No schema escape hatch.
 
-    permission admin = owner
-    permission edit = owner + member
-    permission view = owner + member + viewer
+  permission view_org = org_member
+}
+
+definition team {
+  relation organization: organization
+  relation team_admin:   user
+  relation editor:       user  // editor ⊇ analyst: may mutate canonical design
+  relation analyst:      user  // may create scenario branches; cannot mutate canonical design
+  relation viewer:       user
+
+  permission manage_team  = team_admin
+  permission design_write = editor + team_admin
+  permission analyze_run  = analyst + editor + team_admin
+  permission view_team    = viewer + analyst + editor + team_admin
+}
+
+definition workspace {
+  relation organization: organization
+  relation owner_team:   team
+  relation owner_user:   user  // direct ownership for team-less workspaces
+  relation editor:       user
+  relation analyst:      user
+  relation viewer:       user
+
+  permission design_write   = editor + owner_user + owner_team->design_write
+  permission analyze_run    = analyst + editor + owner_user + owner_team->analyze_run
+  permission view_workspace = viewer + analyst + editor + owner_user + owner_team->view_team
 }
 
 definition risk_tree {
-    relation workspace: workspace
-    relation editor: user
-    relation viewer: user
+  relation workspace: workspace
+  relation editor:    user
+  relation analyst:   user
+  relation viewer:    user
 
-    permission edit = editor + workspace->edit
-    permission view = viewer + editor + workspace->view
+  permission design_write = editor + workspace->design_write
+  permission analyze_run  = analyst + editor + workspace->analyze_run
+  permission view_tree    = viewer + analyst + editor + workspace->view_workspace
 }
 ```
 
 This gives:
-- Workspace-level roles (owner, member, viewer)
-- Per-tree role overrides (editor, viewer)
-- Inheritance: workspace membership flows to tree access unless overridden
+- **Org layer:** membership only; no admin escape hatch in the schema
+- **Team layer:** four roles with explicit permission hierarchy; team owns workspaces via `owner_team`
+- **Workspace layer:** team permissions flow in via `owner_team->*`; direct user ownership via `owner_user`; per-workspace role overrides for individual users
+- **Risk tree layer:** workspace permissions flow in via `workspace->*`; per-tree role overrides for individual users
 
 ### Task L2.2: Authorization Service
 
@@ -457,44 +528,80 @@ Access administration paths:
 
 Any future self-service access management UI would be a dedicated administrative service (a separate PAP), distinct from this application's codebase and deployment, and is explicitly out of scope for this project.
 
-### Task L2.4: OPA Integration (Alternative Path)
+### Task L2.4: OPA and SpiceDB — Complementary Layers
 
-If SpiceDB is deemed too complex for initial deployment, OPA can serve as an intermediate step:
+OPA and SpiceDB are **not alternatives**. They are complementary and both remain active in the stack (ADR-012). They answer fundamentally different questions at different layers.
 
-**OPA Rego policy:**
+#### Responsibility Split
+
+| Concern | OPA (mesh layer — Istio ext_authz) | SpiceDB (app layer — `AuthorizationService`) |
+|---------|-------------------------------------|----------------------------------------------|
+| Input | JWT claims + HTTP method/path | User ID + permission name + resource ID |
+| State | None — purely claim-based | Relationship graph (PostgreSQL-backed) |
+| Speed | Sub-millisecond (sidecar/in-process) | Network hop + DB query (~5–20ms) |
+| Question | "Does this role claim permit attempting this operation type?" | "Can this user do X on this specific resource instance?" |
+| Policy author | Security team (Rego) | Engineering (Zed schema + CI provisioning) |
+
+#### Request Flow
+
+```
+Request → Istio Waypoint
+               ↓
+           OPA (ext_authz — claim-based only)
+           ✓ JWT has required role claim (analyst | editor | team_admin)?
+           ✓ Method/path combination is valid for this role?
+           ✓ No active emergency security override?
+           → deny → 403 immediately (SpiceDB never queried)
+               ↓ allow
+           ZIO Application
+           ✓ Extract UserContext from x-jwt-claims header
+           ✓ authorizationService.check(user, "design_write", resource)
+           → SpiceDB evaluates relationship graph
+           → deny → 403 Forbidden
+               ↓ allow
+           Handle request
+```
+
+Both layers use AND logic: OPA allow **and** SpiceDB allow = proceed. Either deny = 403.
+
+#### OPA's Role: Coarse Gate + Security Team Override Layer
+
+OPA policies are **purely claim-based** — they read only the JWT and HTTP context. They never read relationship data (no bundle sync from the workspace store or SpiceDB). The moment relationship data is needed, that is SpiceDB's responsibility.
+
+OPA is also the **defense-in-depth layer** for the security team: policy changes can be pushed without an application deployment. Appropriate OPA-only operations:
+- Emergency write block: `deny all POST/PUT/DELETE for a specific sub claim during incident`
+- Compliance mandate: `require X-Audit-Reason header on all DELETE operations`
+- Coarse role gate: `deny if JWT has no analyst or editor role claim at all` (fast path before SpiceDB)
+- Temporal restriction: `deny design_write outside approved hours`
+
+**Anti-pattern to avoid:** Do not sync relationship data (workspace members, tree assignments) into OPA data bundles. This creates staleness, sync complexity, and defeats SpiceDB's purpose. A revoked tuple would remain "allowed" by OPA until the next bundle push.
+
+#### OPA Policies (`infra/opa/policies/`)
+
 ```rego
 package register.authz
 
+import future.keywords.if
+
+# Coarse role gate — purely from JWT claims, no data bundle
 default allow = false
 
-allow {
-    input.method == "GET"
-    input.path[0] == "w"
-    workspace_key := input.path[1]
-    data.workspaces[workspace_key].owner == input.user
+# Allow if user has at least one recognized role
+allow if {
+    some role in input.jwt.realm_access.roles
+    role in {"analyst", "editor", "team_admin"}
 }
 
-allow {
-    input.method == "GET"
-    input.path[0] == "w"
-    workspace_key := input.path[1]
-    input.user in data.workspaces[workspace_key].members
-}
-```
-
-**OPA data bundle** (synced from workspace store):
-```json
-{
-  "workspaces": {
-    "abc123...": {
-      "owner": "user-uuid-1",
-      "members": ["user-uuid-2", "user-uuid-3"]
+# Deny writes for users with viewer-only claim
+deny if {
+    input.request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    every role in input.jwt.realm_access.roles {
+        role == "viewer"
     }
-  }
 }
 ```
 
-**Trade-off:** OPA is already in the mesh stack (ADR-012) — no new service to operate. But OPA policies are less expressive than Zanzibar for relationship-based access (no transitive inheritance, manual data sync required).
+SpiceDB then handles the instance-level question: does this editor's JWT correspond to a user who actually has `design_write` on this specific `risk_tree`?
 
 ### Task L2.5: Tests
 
@@ -540,7 +647,7 @@ def authorize(request: Request): IO[AuthError, AuthContext] =
       for
         ws   <- layer0                                    // must have valid workspace key
         user <- extractUserContext(request.headers)       // must have valid JWT
-        _    <- authorizationService.check(user.userId, "view", ws.asResource)  // must have explicit permission
+        _    <- authorizationService.check(user.userId, Permission.ViewWorkspace, ws.asResource)  // Permission is a sealed enum — see Task L2.2
       yield AuthContext.FineGrained(user, ws)
 ```
 
@@ -578,7 +685,7 @@ When upgrading a free-tier deployment to enterprise:
 1. Complete Phase L2.0 SpiceDB foundation setup
 2. Deploy selected authorization backend with required persistence
 3. Migrate ownership data: `workspace.owner_id → authorization relation`
-  - SpiceDB example: `workspace:ID#owner@user:ID`
+  - SpiceDB example: `workspace:ID#owner_user@user:ID` (matches `owner_user` relation in schema)
 3. Set `register.auth.mode = "fine-grained"`
 4. Existing owner-based access continues via backend `owner` relation
 5. Fine-grained access control becomes active — access relationships are now governed by SpiceDB, managed via ops path (CI job + `zed` CLI)
@@ -587,11 +694,11 @@ When upgrading a free-tier deployment to enterprise:
 
 ## Open Questions
 
-1. **OPA as intermediate:** Should OPA (already in mesh) be Layer 1.5 before Zanzibar-style backend? Simpler but less expressive.
+~~1. **OPA as intermediate:** Should OPA (already in mesh) be Layer 1.5 before Zanzibar-style backend?~~ **Closed:** OPA is a permanent AND-logic co-gate at the mesh layer — not a sequential stepping stone. Both OPA and SpiceDB are always active in fine-grained mode; neither replaces the other. See Task L2.4 and ADR-012 §3.
 2. **Anonymous workspace claiming:** When a free-tier user upgrades, how do they prove they "own" a capability-only workspace? Options: (a) login while URL has workspace key, (b) email verification, (c) just create new.
 3. **Feature gating UI:** How does the frontend know which features are available? `/config` endpoint? HTML-embedded config?
 4. **Terraform adoption trigger:** At what point do we need provider-level IaC (managed cluster/network/DNS/secrets), beyond Helm + manifests?
-5. **SpiceDB integration details:** HTTP vs gRPC client path for initial implementation; ownership migration strategy (one-time CI job writes existing `owner_id` values as SpiceDB `owner` relation tuples during L0→L2 upgrade — app never writes tuples in steady state).
+5. **SpiceDB integration details:** HTTP vs gRPC client path for initial implementation; ownership migration strategy (one-time CI job writes existing `owner_id` values as SpiceDB `owner_user` relation tuples during L0→L2 upgrade — app never writes tuples in steady state).
 6. ~~**Workspace override governance (closed):**~~ Resolved: user-owned workspaces grant override only to the `owner_user` SpiceDB relation and the M3 break-glass ops path. No in-product override delegation. Policy recorded in ops runbook, not app code.
 
 ---

@@ -1,6 +1,6 @@
 # ADR-023: Local Development TLS and Trust Material Policy
 
-**Status:** Proposed  
+**Status:** Accepted  
 **Date:** 2026-02-19  
 **Tags:** security, tls, local-dev, kubernetes, operations
 
