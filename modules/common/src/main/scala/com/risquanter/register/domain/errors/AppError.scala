@@ -100,3 +100,33 @@ case class VersionConflict(nodeId: String, expected: String, actual: String) ext
 case class MergeConflict(branch: String, details: String) extends SimError {
   override def getMessage: String = s"Merge conflict on branch $branch: $details"
 }
+
+// ============================================================================
+// Authorization Errors (ADR-024: Externalized Authorization / PEP Pattern)
+// ============================================================================
+
+sealed trait AuthError extends AppError
+
+/** SpiceDB returned PERMISSIONSHIP_NO_PERMISSION — explicit deny.
+  * HTTP layer maps this to 403 Forbidden.
+  * userId is the JWT sub claim value (UUID string), safe for structured audit logs.
+  *
+  * @see ADR-024: Fail-Closed by Default
+  */
+case class AuthForbidden(
+  userId:       String,
+  permission:   String,
+  resourceType: String,
+  resourceId:   String
+) extends AuthError:
+  override def getMessage: String =
+    s"Access denied: user=$userId permission=$permission resource=$resourceType:$resourceId"
+
+/** SpiceDB unreachable, timed out, or returned an unexpected response — fail-closed.
+  * HTTP layer maps this to 403 Forbidden (not 503 — avoids revealing infrastructure state).
+  *
+  * @see ADR-024: Fail-Closed by Default
+  */
+case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = None) extends AuthError:
+  override def getMessage: String = s"Authorization service unavailable: $reason"
+  override def getCause: Throwable = cause.orNull

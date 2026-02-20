@@ -57,6 +57,11 @@ object ValidationMessages:
   val workspaceKeyInvalid: String = "Invalid workspace key (expected 22-character base64url token)"
 
   // ══════════════════════════════════════════════════════════════════
+  // User ID (UUID v4 — from Keycloak JWT sub claim via x-user-id header)
+  // ══════════════════════════════════════════════════════════════════
+  val userIdInvalid: String = "User ID must be a valid UUID (e.g. 8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6cf)"
+
+  // ══════════════════════════════════════════════════════════════════
   // Short optional text (MaxLength[20])
   // ══════════════════════════════════════════════════════════════════
   val shortTextTooLong: String  =

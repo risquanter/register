@@ -7,6 +7,7 @@ import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, ApiConfig, WorkspaceConfig}
+import com.risquanter.register.auth.AuthorizationServiceNoOp
 import com.risquanter.register.http.{HttpApi, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
 import com.risquanter.register.http.sse.SSEController
@@ -110,6 +111,10 @@ object Application extends ZIOAppDefault {
       WorkspaceStoreLive.layer,
       RateLimiterLive.layer,
       WorkspaceReaper.layer,
+      // Authorization — NoOp stub (always-allow) wired in all modes at Wave 0.
+      // Replaced with AuthorizationServiceSpiceDB at Wave 3 when fine-grained mode is activated.
+      // @see AUTHORIZATION-PLAN.md — Wave 0: Infrastructure bootstrap
+      AuthorizationServiceNoOp.layer,
       SSEController.layer,
       CacheController.layer,
       ZLayer.fromZIO(RiskTreeController.makeZIO),

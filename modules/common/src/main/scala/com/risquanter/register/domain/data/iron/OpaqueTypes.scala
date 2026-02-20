@@ -255,3 +255,64 @@ object WorkspaceKeySecret:
   given JsonEncoder[WorkspaceKeySecret] = JsonEncoder[String].contramap(_.reveal)
   given JsonDecoder[WorkspaceKeySecret] = JsonDecoder[String].mapOrFail(s =>
     WorkspaceKeySecret.fromString(s).left.map(_.mkString(", ")))
+
+// ============================================================================
+// Auth Identity Types (ADR-012, ADR-024)
+// ============================================================================
+
+// UUID v4 constraint (RFC 4122 variant 1 — lowercase hex, 8-4-4-4-12 hyphens).
+// Defined as a named constraint alias (mirrors UrlConstraint) so ValidationUtil can call
+// .refineEither[UuidConstraint] without duplicating the regex string.
+// External constraint: Keycloak issues `sub` claims in exactly this format.
+type UuidConstraint = Match["^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"]
+
+// UUID v4 string — the full refined type used for UserId.raw.
+type UuidStr = String :| UuidConstraint
+
+// UserId: final class wrapping a validated UUID string (JWT sub claim from Keycloak via Istio x-user-id header).
+// PII (pseudonymous, links to natural person via Keycloak), NOT a secret credential.
+// toString is redacted to prevent accidental PII in log interpolations (same mechanism as WorkspaceKeySecret).
+// Extraction is `.value` (not `.reveal`) — signals "not a secret, but explicit extraction required".
+//
+// @see ADR-012: Claim Header Injection — mesh-injected; app contains zero JWT code.
+// @see AUTHORIZATION-PLAN.md — UserId design rationale and PII classification.
+final class UserId private (private val raw: UuidStr):
+  /** Extract the raw UUID string. Use only in SpiceDB calls, audit logs, and serialisation. */
+  def value: String = raw
+  override def toString: String = "UserId(***)"
+  override def hashCode: Int = raw.hashCode
+  override def equals(that: Any): Boolean = that match
+    case u: UserId => raw == u.raw
+    case _         => false
+
+object UserId:
+  def apply(s: UuidStr): UserId = new UserId(s)
+  def fromString(s: String): Either[List[ValidationError], UserId] =
+    ValidationUtil.refineUserId(s)
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[UserId] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[UserId] = JsonDecoder[String].mapOrFail(s =>
+    UserId.fromString(s).left.map(_.mkString(", ")))
+
+// WorkspaceId: Nominal case class wrapper over SafeId (ULID) for workspace identity.
+// Compiler-distinct from TreeId, NodeId, and raw SafeId.
+// Stable, non-secret identifier for SpiceDB resource references.
+//
+// Why not WorkspaceKeySecret? The key is a mutable credential (rotatable), PII-adjacent,
+// and must never appear in SpiceDB audit logs. WorkspaceId is a stable, non-secret ULID
+// generated once at workspace creation and never changed (survives key rotation).
+// @see AUTHORIZATION-PLAN.md — WorkspaceId design rationale.
+case class WorkspaceId(toSafeId: SafeId.SafeId):
+  /** Extract the canonical ULID string. */
+  def value: String = toSafeId.value.toString
+
+object WorkspaceId:
+  /** Smart constructor: delegates validation to SafeId.fromString, wraps result. */
+  def fromString(s: String): Either[List[ValidationError], WorkspaceId] =
+    SafeId.fromString(s).map(WorkspaceId(_))
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[WorkspaceId] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[WorkspaceId] = JsonDecoder[String].mapOrFail(s =>
+    WorkspaceId.fromString(s).left.map(_.mkString(", ")))

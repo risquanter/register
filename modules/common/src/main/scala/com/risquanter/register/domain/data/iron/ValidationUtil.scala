@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
-import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId, NodeId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId, NodeId, WorkspaceKeySecret, UserId}
 import com.bilalfazlani.zioUlid.ULID
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
@@ -163,6 +163,21 @@ object ValidationUtil {
         field = fieldPath,
         code = ValidationErrorCode.INVALID_FORMAT,
         message = ValidationMessages.workspaceKeyInvalid
+      )))
+  }
+
+  // Refinement for user IDs (UUID v4 format — as issued by Keycloak JWT sub claim via Istio x-user-id header injection).
+  // Validates verbatim: Keycloak sub claims are lowercase UUID v4, 8-4-4-4-12 hex format.
+  def refineUserId(value: String, fieldPath: String = "userId"): Either[List[ValidationError], UserId] = {
+    val sanitized = nonEmpty(value)
+    sanitized
+      .refineEither[UuidConstraint]
+      .map(UserId(_))
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_FORMAT,
+        message = ValidationMessages.userIdInvalid
       )))
   }
 
