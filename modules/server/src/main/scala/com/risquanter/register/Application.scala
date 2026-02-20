@@ -7,7 +7,7 @@ import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, ApiConfig, WorkspaceConfig}
-import com.risquanter.register.auth.AuthorizationServiceNoOp
+import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
 import com.risquanter.register.http.{HttpApi, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
 import com.risquanter.register.http.sse.SSEController
@@ -76,8 +76,8 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig & WorkspaceReaper] =
-    ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig & WorkspaceReaper](
+  val appLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor] =
+    ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
@@ -115,6 +115,10 @@ object Application extends ZIOAppDefault {
       // Replaced with AuthorizationServiceSpiceDB at Wave 3 when fine-grained mode is activated.
       // @see AUTHORIZATION-PLAN.md — Wave 0: Infrastructure bootstrap
       AuthorizationServiceNoOp.layer,
+      // UserContextExtractor — noOp returns anonymous sentinel (Wave 1).
+      // Replaced with UserContextExtractor.requirePresent at Wave 2 when identity mode is activated.
+      // @see AUTHORIZATION-PLAN.md — Wave 1: Header plumbing
+      ZLayer.succeed(UserContextExtractor.noOp),
       SSEController.layer,
       CacheController.layer,
       ZLayer.fromZIO(RiskTreeController.makeZIO),
@@ -124,8 +128,12 @@ object Application extends ZIOAppDefault {
   def startServer = for {
     cfg        <- ZIO.service[ServerConfig]
     corsConfig <- ZIO.service[CorsConfig]
+    userCtx    <- ZIO.service[UserContextExtractor]
     _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
     _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.normalised.mkString(", ")}")
+    // Auth mode startup log — operators should alert on capability-only in production namespaces.
+    // @see ADR-012 §7 — Trust Assumption T3/Attack 3: silent mode mismatch detection
+    _          <- UserContextExtractor.logStartupMode("capability-only", userCtx)
     endpoints  <- HttpApi.endpointsZIO
     _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
 

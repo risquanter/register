@@ -17,6 +17,7 @@ import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.util.IdGenerators
+import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
 
 /** Failsafe regression tests: old unscoped `/risk-trees/{id}/...` paths
   * must NOT appear in any controller's route table.
@@ -62,6 +63,8 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
     InvalidationHandler.live,
     WorkspaceStoreLive.layer,
     RateLimiterLive.layer,
+    AuthorizationServiceNoOp.layer,
+    ZLayer.succeed(UserContextExtractor.noOp),
     ZLayer.fromZIO(RiskTreeController.makeZIO),
     ZLayer.fromZIO(WorkspaceController.makeZIO)
   )

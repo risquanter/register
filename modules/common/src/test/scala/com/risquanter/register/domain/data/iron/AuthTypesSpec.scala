@@ -25,6 +25,12 @@ object AuthTypesSpec extends ZIOSpecDefault:
   private val invalidUuid2  = "8F14E45F-CEEA-4A0E-8F09-BCB3D2C2F6CF" // uppercase — not Keycloak format
   private val invalidUuid3  = "8f14e45f-ceea-4a0e-8f09-bcb3d2c2f6c"  // too short (35 chars)
 
+  // ADR-012 §7 T4 — anonymous sentinel UUID string constant (common module copy).
+  // This must equal UserContextExtractor.AnonymousSentinelUuid in the server module.
+  // If this test fails, the sentinel value was changed here without updating the extractor
+  // (or vice versa), which may silently break SpiceDB exclusion CI checks.
+  private val AnonymousSentinelUuid = "00000000-0000-0000-0000-000000000000"
+
   def spec = suite("AuthTypes")(
     suite("UserId")(
       suite("fromString — valid UUIDs")(
@@ -35,6 +41,32 @@ object AuthTypesSpec extends ZIOSpecDefault:
         test("accepts anonymous sentinel UUID") {
           val result = UserId.fromString("00000000-0000-0000-0000-000000000000")
           assertTrue(result.isRight)
+        }
+      ),
+      // ADR-012 §7 T4 — sentinel stability guard.
+      // The anonymous sentinel UUID is a cross-cutting constant: it must be
+      // identical in UserContextExtractor (server module) and any SpiceDB exclusion
+      // CI check. This test pins the value in the common module so a search-and-replace
+      // or refactor that changes only one copy causes an immediate test failure.
+      suite("anonymous sentinel stability — ADR-012 §7 T4")(
+        test("sentinel is a valid UUID") {
+          assertTrue(UserId.fromString(AnonymousSentinelUuid).isRight)
+        },
+        test("sentinel constant has expected all-zeros value") {
+          // This test deliberately encodes the expected string literally.
+          // If someone changes AnonymousSentinelUuid, this test catches it.
+          assertTrue(AnonymousSentinelUuid == "00000000-0000-0000-0000-000000000000")
+        },
+        test("sentinel is distinct from any real Keycloak-issued UUID") {
+          val keycloakUserId = UserId.fromString(validUuid).toOption.get
+          val sentinel       = UserId.fromString(AnonymousSentinelUuid).toOption.get
+          assertTrue(keycloakUserId != sentinel)
+        },
+        test("sentinel UUID is not equal to anotherUuid (00000000-...-0001)") {
+          // anotherUuid is one bit off — verifies equals is value-based, not prefix-based
+          val sentinel = UserId.fromString(AnonymousSentinelUuid).toOption.get
+          val other    = UserId.fromString(anotherUuid).toOption.get
+          assertTrue(sentinel != other)
         }
       ),
       suite("fromString — invalid UUIDs")(

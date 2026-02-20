@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, TreeId, NodeId, WorkspaceKeySecret, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -126,4 +126,25 @@ object IronTapirCodecs {
     )(_.reveal)
 
   given Schema[WorkspaceKeySecret] = Schema.string
+
+  /** Codec for UserId (UUID string wrapped in a final class with PII redaction).
+    * Used for the x-user-id claim header injected by the service mesh (Istio).
+    * Validates UUID format at the HTTP boundary via UserId.fromString.
+    *
+    * The header is decoded to Option[UserId] in authedBaseEndpoint — absent header
+    * decodes to None (not an error), allowing capability-only mode to work without
+    * the header present.
+    *
+    * @see ADR-012: Claim Header Injection
+    * @see ADR-022: PII handling (toString redacted in UserId)
+    */
+  given Codec[String, UserId, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[UserId](raw =>
+      UserId.fromString(raw).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.value)
+
+  given Schema[UserId] = Schema.string
 }

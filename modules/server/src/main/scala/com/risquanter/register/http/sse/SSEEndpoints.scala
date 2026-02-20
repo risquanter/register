@@ -37,7 +37,7 @@ trait SSEEndpoints extends BaseEndpoint {
     * Response format: text/event-stream with newline-delimited JSON events
     */
   val treeEventsEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("events")
       .name("treeEvents")
       .summary("Subscribe to real-time tree updates (workspace-scoped)")

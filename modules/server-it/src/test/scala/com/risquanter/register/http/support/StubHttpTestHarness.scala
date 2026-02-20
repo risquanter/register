@@ -21,6 +21,7 @@ import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimit
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
 import com.risquanter.register.infra.irmin.IrminClientLive
+import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
 import io.github.iltotore.iron.*
 
 object StubHttpTestHarness {
@@ -68,6 +69,8 @@ object StubHttpTestHarness {
         InvalidationHandler.live,
         WorkspaceStoreLive.layer,
         RateLimiterLive.layer,
+        AuthorizationServiceNoOp.layer,
+        ZLayer.succeed(UserContextExtractor.noOp),
         SSEController.layer,
         CacheController.layer,
         ZLayer.fromZIO(RiskTreeController.makeZIO),

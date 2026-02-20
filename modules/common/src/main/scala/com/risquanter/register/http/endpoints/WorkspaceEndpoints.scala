@@ -39,7 +39,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[WorkspaceBootstrapResponse])
 
   val listWorkspaceTreesEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("listWorkspaceTrees")
       .description("List trees in workspace")
@@ -48,7 +48,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[List[SimulationResponse]])
 
   val createWorkspaceTreeEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("createWorkspaceTree")
       .description("Create tree in workspace")
@@ -58,7 +58,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[SimulationResponse])
 
   val rotateWorkspaceKeySecretEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("rotateWorkspace")
       .description("Rotate workspace key (instant revocation)")
@@ -67,7 +67,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[WorkspaceRotateResponse])
 
   val deleteWorkspaceEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("deleteWorkspace")
       .description("Hard delete workspace + all associated trees")
@@ -87,7 +87,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
   // ── Workspace-scoped tree operations ──────────────────────────────
 
   val getWorkspaceTreeByIdEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceTreeById")
       .description("Get tree summary (workspace-scoped)")
@@ -96,7 +96,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[Option[SimulationResponse]])
 
   val getWorkspaceTreeStructureEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceTreeStructure")
       .description("Get full tree structure (workspace-scoped)")
@@ -105,7 +105,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[Option[RiskTree]])
 
   val updateWorkspaceTreeEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("updateWorkspaceTree")
       .description("Full replacement update of tree (workspace-scoped)")
@@ -115,7 +115,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[SimulationResponse])
 
   val deleteWorkspaceTreeEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("deleteWorkspaceTree")
       .description("Delete a single tree from workspace")
@@ -124,7 +124,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[SimulationResponse])
 
   val invalidateWorkspaceCacheEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("invalidateWorkspaceCache")
       .description("Invalidate cache for a node (workspace-scoped)")
@@ -135,7 +135,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
   // ── Workspace-scoped LEC queries ──────────────────────────────────
 
   val getWorkspaceLECCurveEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceLECCurve")
       .description("Get LEC curve for a node (workspace-scoped)")
@@ -145,7 +145,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[LECCurveResponse])
 
   val getWorkspaceProbOfExceedanceEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceProbOfExceedance")
       .description("Get probability of exceeding a loss threshold (workspace-scoped)")
@@ -156,7 +156,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[BigDecimal])
 
   val getWorkspaceLECCurvesMultiEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceLECCurvesMulti")
       .description("Get LEC curves for multiple nodes (workspace-scoped)")
@@ -167,7 +167,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .out(jsonBody[Map[String, LECNodeCurve]])
 
   val getWorkspaceLECChartEndpoint =
-    baseEndpoint
+    authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceLECChart")
       .description("Get Vega-Lite chart spec for LEC visualization (workspace-scoped)")

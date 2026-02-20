@@ -6,10 +6,11 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.capabilities.zio.ZioStreams
 import zio.json.*
 
+import com.risquanter.register.auth.{AuthorizationService, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.controllers.BaseController
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStore
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, UserId}
 import com.risquanter.register.domain.errors.TreeNotInWorkspace
 
 /**
@@ -34,7 +35,7 @@ import com.risquanter.register.domain.errors.TreeNotInWorkspace
   *
   * ```
   */
-class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore)
+class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, authzService: AuthorizationService, userCtx: UserContextExtractor)
     extends BaseController
     with SSEEndpoints {
 
@@ -56,8 +57,10 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore)
     * to the client. Includes periodic heartbeat to keep connection alive.
     */
   val treeEvents: ServerEndpoint[ZioStreams, Task] =
-    treeEventsEndpoint.serverLogic { case (key, treeId) =>
+    treeEventsEndpoint.serverLogic { case (maybeUserId, key, treeId) =>
       (for
+        userId      <- userCtx.extract(maybeUserId)
+        _           <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         _           <- resolveTree(key, treeId)
         eventStream <- sseHub.subscribe(treeId)
         sseStream    = eventStream.map(formatAsSSE)
@@ -108,17 +111,19 @@ object SSEController {
     * Create SSEController with SSEHub + WorkspaceStore dependencies.
     * A15: WorkspaceStore needed for workspace ownership validation.
     */
-  val layer: ZLayer[SSEHub & WorkspaceStore, Nothing, SSEController] =
+  val layer: ZLayer[SSEHub & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, SSEController] =
     ZLayer.fromZIO {
       for
-        hub <- ZIO.service[SSEHub]
-        ws  <- ZIO.service[WorkspaceStore]
-      yield new SSEController(hub, ws)
+        hub          <- ZIO.service[SSEHub]
+        ws           <- ZIO.service[WorkspaceStore]
+        authzService <- ZIO.service[AuthorizationService]
+        userCtx      <- ZIO.service[UserContextExtractor]
+      yield new SSEController(hub, ws, authzService, userCtx)
     }
 
   /**
     * Create SSEController directly (for tests).
     */
-  def make(hub: SSEHub, workspaceStore: WorkspaceStore): SSEController =
-    new SSEController(hub, workspaceStore)
+  def make(hub: SSEHub, workspaceStore: WorkspaceStore, authzService: AuthorizationService, userCtx: UserContextExtractor): SSEController =
+    new SSEController(hub, workspaceStore, authzService, userCtx)
 }
