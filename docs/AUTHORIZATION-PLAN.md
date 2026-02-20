@@ -1,7 +1,7 @@
 # Authorization Plan — Layers 1 & 2
 
 **Date:** February 19, 2026
-**Status:** Planning (not yet scheduled for implementation)
+**Status:** In progress (Phase K preparation + Layer 1 Wave 1 plumbing landed; infra rollout pending)
 **Related:** [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) (Tier 1.5 = Layer 0)
 **ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs), [ADR-023](./ADR-023-local-dev-tls-and-trust-material-policy.md) (Local Dev TLS & Trust Policy), [ADR-024](./ADR-024-externalized-authorization-pep-pattern.md) (Externalized Authorization / PEP Pattern)
 
