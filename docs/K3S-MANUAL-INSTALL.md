@@ -16,7 +16,7 @@ This document is still command-first, but now includes explicit secure-by-defaul
 2. **No plaintext secrets on CLI history** (use `read -s`, files with `0600`, stdin pipes).
 3. **Namespace scoping** for secrets and service accounts (no cluster-wide default patching).
 4. **Defense in depth**: Pod Security labels, RBAC, network policies, secret encryption at rest.
-5. **Explicit limitations** documented at the end.
+5. **Security limitations** documented at the end.
 
 ---
 
@@ -81,11 +81,19 @@ docker info >/dev/null
 # install k3s server with:
 # - secrets encryption at rest enabled
 # - kubeconfig mode 600 (owner-only)
-# - traefik disabled (optional; if you use another ingress stack)
+# - traefik disabled (we use a separate ingress)
+# - flannel disabled + network-policy controller disabled — Cilium replaces both (see §1.3a)
 curl -sfL https://get.k3s.io | \
-  INSTALL_K3S_EXEC="server --secrets-encryption --write-kubeconfig-mode=600 --disable traefik" \
+  INSTALL_K3S_EXEC="server \
+    --secrets-encryption \
+    --write-kubeconfig-mode=600 \
+    --disable traefik \
+    --flannel-backend=none \
+    --disable-network-policy" \
   sh -
 ```
+
+> **Why disable flannel?** Flannel has no native `NetworkPolicy` enforcement. Cilium replaces it with full NetworkPolicy support + better eBPF integration with Istio ambient mode's ztunnel. The node will show `NotReady` until Cilium is installed in §1.3a — this is expected.
 
 ### 1.2 Verify secret encryption status
 
@@ -110,6 +118,45 @@ sed -i 's/127.0.0.1/localhost/g' ~/.kube/config
 
 # verify cluster reachability
 kubectl get nodes -o wide
+```
+
+### 1.3a Install Cilium (CNI — required before namespaces)
+
+The node remains `NotReady` until a CNI is present. Install Cilium now.
+
+```bash
+# install Cilium CLI (pinned to latest stable)
+CILIUM_CLI_VERSION=$(curl -fsSL https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+curl -fsSLO "https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz"
+curl -fsSLO "https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz.sha256sum"
+sha256sum --check cilium-linux-amd64.tar.gz.sha256sum
+sudo tar xzvfC cilium-linux-amd64.tar.gz /usr/local/bin
+rm -f cilium-linux-amd64.tar.gz cilium-linux-amd64.tar.gz.sha256sum
+
+cilium version --client
+```
+
+```bash
+# install Cilium into the cluster
+# --set cni.exclusive=false is required: Istio ambient installs its own istio-cni DaemonSet
+# alongside Cilium; without this flag Cilium marks itself as the sole CNI and istio-cni fails
+# to register when Istio is installed later.
+cilium install --version 1.17.0 \
+  --set cni.exclusive=false
+
+# wait for all Cilium components to be ready
+cilium status --wait
+
+# verify node is now Ready
+kubectl get nodes -o wide
+```
+
+```bash
+# run Cilium connectivity test (optional but recommended first time)
+# Note: partial failures are expected at this stage — Istio ambient is not yet installed.
+# Tests involving L7 policy or encrypted traffic paths are skipped/failed until §5.
+# The || true prevents this from blocking the tutorial.
+cilium connectivity test --test-concurrency 1 || true
 ```
 
 ### 1.4 Create base namespaces + baseline labels
@@ -163,7 +210,56 @@ kubectl top nodes || true
 
 ---
 
-## 2) Phase K.2 — GHCR pull path (least privilege + no CLI secret leakage)
+## 2) Phase K.2 — Istio ambient + auth hardening
+
+Istio is installed immediately after the cluster bootstrap so ztunnel is running before any workload pods are created. This ensures mesh interception applies from each pod's first packet. PostgreSQL and Keycloak (installed next in the `infra` namespace) are unaffected — that namespace is never enrolled in the mesh.
+
+### 2.1 Install Istio CLI
+
+```bash
+curl -L https://istio.io/downloadIstio | sh -
+ISTIO_DIR=$(ls -d istio-*/ | head -n1)
+export PATH="$PWD/${ISTIO_DIR}bin:$PATH"
+istioctl version --remote=false
+```
+
+### 2.2 Install ambient profile
+
+```bash
+istioctl install -y --set profile=ambient
+kubectl -n istio-system get pods
+```
+
+### 2.3 Enroll namespace + waypoint
+
+```bash
+kubectl label namespace register istio.io/dataplane-mode=ambient --overwrite
+istioctl waypoint apply -n register --enroll-namespace
+kubectl -n register get gateway
+```
+
+### 2.4 Apply JWT + policy resources
+
+```bash
+kubectl apply -f infra/k8s/istio/request-authentication.yaml
+kubectl apply -f infra/k8s/istio/authorization-policy.yaml
+```
+
+### 2.5 Mesh trust checks
+
+```bash
+# invalid JWT should fail before app logic
+curl -i -H "Authorization: Bearer INVALID" https://<INGRESS>/w/<key>/risk-trees
+
+# forged identity header must not grant access
+curl -i -H "x-user-id: 00000000-0000-0000-0000-000000000001" https://<INGRESS>/w/<key>/risk-trees
+```
+
+Expected: invalid JWT `401`; forged identity rejected/ignored.
+
+---
+
+## 3) Phase K.3 — GHCR pull path (least privilege + no CLI secret leakage)
 
 ### 2.0 GitHub token requirements
 
@@ -172,7 +268,7 @@ kubectl top nodes || true
 - Short expiry and regular rotation.
 - Do not store token in shell startup files.
 
-### 2.1 Read credentials securely (non-export, one-time shell vars)
+### 3.1 Read credentials securely (non-export, one-time shell vars)
 
 ```bash
 # disable command echo for secret entry; do not export variables
@@ -183,7 +279,7 @@ read -r -s -p "GHCR token (read-only): " GHCR_PAT; echo
 test -n "$GHCR_PAT"
 ```
 
-### 2.2 Create a dedicated runtime service account (do NOT patch default SA)
+### 3.2 Create a dedicated runtime service account (do NOT patch default SA)
 
 ```bash
 # create dedicated SA used by app pods
@@ -191,7 +287,7 @@ kubectl -n register create serviceaccount register-runtime \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### 2.3 Create namespace-scoped imagePullSecret idempotently
+### 3.3 Create namespace-scoped imagePullSecret idempotently
 
 ```bash
 # create/update pull secret in register namespace only
@@ -202,7 +298,7 @@ kubectl -n register create secret docker-registry ghcr-pull \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### 2.4 Attach imagePullSecret to dedicated SA only
+### 3.4 Attach imagePullSecret to dedicated SA only
 
 ```bash
 # idempotent patch: service account used by your deployment only
@@ -213,7 +309,7 @@ kubectl -n register patch serviceaccount register-runtime --type='merge' \
 kubectl -n register get sa register-runtime -o yaml | grep -A3 imagePullSecrets
 ```
 
-### 2.5 Immediately remove local secret material
+### 3.5 Immediately remove local secret material
 
 ```bash
 # clear in-memory vars from current shell
@@ -228,9 +324,9 @@ test -f ~/.docker/config.json && chmod 600 ~/.docker/config.json || true
 
 ---
 
-## 3) Phase K.3 — PostgreSQL (hardened install pattern)
+## 4) Phase K.4 — PostgreSQL (hardened install pattern)
 
-### 3.1 Create a local values file with strict permissions
+### 4.1 Create a local values file with strict permissions
 
 ```bash
 # create temp values file with owner-only permissions
@@ -248,7 +344,7 @@ primary:
 YAML
 ```
 
-### 3.2 Install/upgrade chart idempotently
+### 4.2 Install/upgrade chart idempotently
 
 ```bash
 helm repo add bitnami https://charts.bitnami.com/bitnami --force-update
@@ -263,7 +359,7 @@ kubectl -n infra rollout status statefulset/register-postgres-postgresql --timeo
 kubectl -n infra get pvc
 ```
 
-### 3.3 Create databases idempotently
+### 4.3 Create databases idempotently
 
 ```bash
 # create DBs only if missing
@@ -273,14 +369,14 @@ kubectl -n infra exec register-postgres-postgresql-0 -- bash -lc '
 '
 ```
 
-### 3.4 Validate connectivity
+### 4.4 Validate connectivity
 
 ```bash
 kubectl -n infra exec register-postgres-postgresql-0 -- bash -lc "psql -U postgres -d register_app -c 'SELECT 1;'"
 kubectl -n infra exec register-postgres-postgresql-0 -- bash -lc "psql -U postgres -d keycloak -c 'SELECT 1;'"
 ```
 
-### 3.5 Cleanup temporary secret file
+### 4.5 Cleanup temporary secret file
 
 ```bash
 shred -u /tmp/register-postgres-values.yaml
@@ -288,9 +384,9 @@ shred -u /tmp/register-postgres-values.yaml
 
 ---
 
-## 4) Phase K.4 — Keycloak (external DB, hardened secret flow)
+## 5) Phase K.5 — Keycloak (external DB, hardened secret flow)
 
-### 4.1 Create values file with minimal secret exposure
+### 5.1 Create values file with minimal secret exposure
 
 ```bash
 umask 077
@@ -312,7 +408,7 @@ containerSecurityContext:
 YAML
 ```
 
-### 4.2 Install Keycloak idempotently
+### 5.2 Install Keycloak idempotently
 
 ```bash
 helm upgrade --install keycloak bitnami/keycloak \
@@ -322,7 +418,7 @@ helm upgrade --install keycloak bitnami/keycloak \
 kubectl -n infra rollout status statefulset/keycloak --timeout=300s
 ```
 
-### 4.3 Bootstrap realm locally
+### 5.3 Bootstrap realm locally
 
 ```bash
 kubectl -n infra port-forward svc/keycloak 8081:80
@@ -334,65 +430,18 @@ Then configure:
 - clients: `register-api` (confidential), `register-web` (public + PKCE)
 - mappers: `sub -> x-user-id`, `email -> x-user-email`, roles claim
 
-### 4.4 Verify OIDC metadata
+### 5.4 Verify OIDC metadata
 
 ```bash
 curl -s http://localhost:8081/realms/register/.well-known/openid-configuration | jq .issuer
 curl -s http://localhost:8081/realms/register/protocol/openid-connect/certs | jq .keys[0].kid
 ```
 
-### 4.5 Cleanup temp values
+### 5.5 Cleanup temp values
 
 ```bash
 shred -u /tmp/keycloak-values.yaml
 ```
-
----
-
-## 5) Phase K.5 — Istio ambient + auth hardening
-
-### 5.1 Install Istio CLI
-
-```bash
-curl -L https://istio.io/downloadIstio | sh -
-ISTIO_DIR=$(ls -d istio-*/ | head -n1)
-export PATH="$PWD/${ISTIO_DIR}bin:$PATH"
-istioctl version --remote=false
-```
-
-### 5.2 Install ambient profile
-
-```bash
-istioctl install -y --set profile=ambient
-kubectl -n istio-system get pods
-```
-
-### 5.3 Enroll namespace + waypoint
-
-```bash
-kubectl label namespace register istio.io/dataplane-mode=ambient --overwrite
-istioctl waypoint apply -n register --enroll-namespace
-kubectl -n register get gateway
-```
-
-### 5.4 Apply JWT + policy resources
-
-```bash
-kubectl apply -f infra/k8s/istio/request-authentication.yaml
-kubectl apply -f infra/k8s/istio/authorization-policy.yaml
-```
-
-### 5.5 Mesh trust checks
-
-```bash
-# invalid JWT should fail before app logic
-curl -i -H "Authorization: Bearer INVALID" https://<INGRESS>/w/<key>/risk-trees
-
-# forged identity header must not grant access
-curl -i -H "x-user-id: 00000000-0000-0000-0000-000000000001" https://<INGRESS>/w/<key>/risk-trees
-```
-
-Expected: invalid JWT `401`; forged identity rejected/ignored.
 
 ---
 
@@ -471,9 +520,191 @@ helm -n register rollback <release-name> <revision>
 
 ---
 
-## 8) Operational hygiene (rotate/revoke/audit)
+## 8) Phase K.7 — ArgoCD GitOps + Image Updater
 
-### 8.1 Rotate GHCR token quickly
+ArgoCD watches the Git repo for Helm chart changes and syncs them to the cluster. ArgoCD Image Updater closes the loop by detecting new GHCR image tags and committing the updated tag back to the repo — fully automated, no manual steps.
+
+### 8.1 Install ArgoCD
+
+```bash
+kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+
+helm repo add argo https://argoproj.github.io/argo-helm --force-update
+helm repo update
+
+helm upgrade --install argocd argo/argo-cd \
+  --namespace argocd \
+  --set configs.params."server\.insecure"=true \
+  --set server.service.type=ClusterIP
+
+kubectl -n argocd rollout status deploy/argocd-server --timeout=180s
+kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=180s
+kubectl -n argocd rollout status deploy/argocd-application-controller --timeout=180s
+```
+
+### 8.2 Install ArgoCD CLI
+
+```bash
+ARGOCD_VERSION=$(curl -fsSL https://api.github.com/repos/argoproj/argo-cd/releases/latest | jq -r .tag_name)
+curl -fsSLO "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/argocd-linux-amd64"
+curl -fsSLO "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/cli_checksums.txt"
+grep argocd-linux-amd64 cli_checksums.txt | sha256sum --check
+chmod +x argocd-linux-amd64
+sudo mv argocd-linux-amd64 /usr/local/bin/argocd
+rm -f cli_checksums.txt
+argocd version --client
+```
+
+### 8.3 First login + change admin password
+
+```bash
+# port-forward ArgoCD API server
+kubectl -n argocd port-forward svc/argocd-server 8080:80 &
+PF_PID=$!
+sleep 3
+
+# retrieve generated admin password
+ARGOCD_PASS=$(kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d)
+
+# login
+argocd login localhost:8080 \
+  --username admin \
+  --password "$ARGOCD_PASS" \
+  --insecure
+
+# rotate immediately — do not keep the generated password
+read -r -s -p "New ArgoCD admin password: " NEW_ARGOCD_PASS; echo
+argocd account update-password \
+  --account admin \
+  --current-password "$ARGOCD_PASS" \
+  --new-password "$NEW_ARGOCD_PASS"
+
+unset ARGOCD_PASS NEW_ARGOCD_PASS
+kill $PF_PID 2>/dev/null || true
+
+# delete the bootstrap secret — no longer needed
+kubectl -n argocd delete secret argocd-initial-admin-secret
+```
+
+### 8.4 Connect GitHub repository
+
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8080:80 &
+PF_PID=$!
+sleep 3
+
+read -r -p "GitHub repo URL (https://github.com/org/repo): " GH_REPO
+read -r -p "GitHub username: " GH_USER
+read -r -s -p "GitHub PAT (repo read): " GH_PAT; echo
+
+argocd repo add "$GH_REPO" \
+  --username "$GH_USER" \
+  --password "$GH_PAT" \
+  --insecure
+
+unset GH_USER GH_PAT
+kill $PF_PID 2>/dev/null || true
+```
+
+### 8.5 Create the Application
+
+This assumes your Helm chart is at `infra/helm/register/` in the repo, with `values.yaml` as the base values file.
+
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8080:80 &
+PF_PID=$!
+sleep 3
+
+argocd app create register \
+  --repo "$GH_REPO" \
+  --path infra/helm/register \
+  --dest-server https://kubernetes.default.svc \
+  --dest-namespace register \
+  --revision HEAD \
+  --values values.yaml \
+  --sync-policy automated \
+  --auto-prune \
+  --self-heal
+
+# trigger immediate sync and wait
+argocd app sync register
+argocd app wait register --health --timeout 120
+
+kill $PF_PID 2>/dev/null || true
+unset GH_REPO
+```
+
+### 8.6 Install ArgoCD Image Updater
+
+```bash
+helm upgrade --install argocd-image-updater argo/argocd-image-updater \
+  --namespace argocd \
+  --set config.argocd.insecure=true
+
+kubectl -n argocd rollout status deploy/argocd-image-updater --timeout=120s
+```
+
+### 8.7 Give Image Updater GHCR read access
+
+```bash
+read -r -p "GitHub username: " GH_USER
+read -r -s -p "GHCR token (read:packages): " GH_PAT; echo
+
+kubectl -n argocd create secret generic ghcr-image-updater \
+  --from-literal=username="$GH_USER" \
+  --from-literal=password="$GH_PAT" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+unset GH_USER GH_PAT
+```
+
+### 8.8 Annotate Application for automated image tag commits
+
+Replace `<org>/<image>` with your actual GHCR image path.
+
+```bash
+kubectl -n argocd annotate application register \
+  "argocd-image-updater.argoproj.io/image-list=register=ghcr.io/<org>/<image>" \
+  "argocd-image-updater.argoproj.io/register.update-strategy=digest" \
+  "argocd-image-updater.argoproj.io/register.helm.image-name=image.repository" \
+  "argocd-image-updater.argoproj.io/register.helm.image-tag=image.tag" \
+  "argocd-image-updater.argoproj.io/write-back-method=git" \
+  "argocd-image-updater.argoproj.io/git-branch=main" \
+  "argocd-image-updater.argoproj.io/register.pull-secret=secret:argocd/ghcr-image-updater#username" \
+  --overwrite
+```
+
+Image Updater will write detected tag changes to `infra/helm/register/.argocd-source-register.yaml` and commit them. ArgoCD then detects the git drift and syncs.
+
+### 8.9 Verify the full automated loop
+
+```bash
+# watch Image Updater detect a new image push
+kubectl -n argocd logs -l app.kubernetes.io/name=argocd-image-updater -f
+
+# inspect sync history
+argocd app history register
+
+# confirm running pod image digest
+kubectl -n register get pods -o jsonpath='{range .items[*]}{.spec.containers[*].image}{"\n"}{end}'
+```
+
+The full automated loop:
+
+```
+git push
+  → GitHub Actions: sbt test → docker build → push ghcr.io/<org>/<image>:<sha>
+  → Image Updater: detects new digest, commits updated tag to infra/helm/register/
+  → ArgoCD: detects git drift, runs helm upgrade on cluster
+  → kubectl -n register get pods   ← new pod running within ~60s
+```
+
+---
+
+## 9) Operational hygiene (rotate/revoke/audit)
+
+### 9.1 Rotate GHCR token quickly
 
 1. Revoke old token in GitHub.
 2. Create new least-privilege token.
@@ -492,7 +723,7 @@ kubectl -n register create secret docker-registry ghcr-pull \
 unset GHCR_USER GHCR_PAT
 ```
 
-### 8.2 Audit checkpoints
+### 9.2 Audit checkpoints
 
 ```bash
 kubectl -n register get events --sort-by=.lastTimestamp | tail -n 40
@@ -502,7 +733,7 @@ kubectl auth can-i get secrets -n register --as=<subject>
 
 ---
 
-## 9) Fast health-check bundle
+## 10) Fast health-check bundle
 
 ```bash
 kubectl get nodes
@@ -511,12 +742,13 @@ kubectl -n infra get pods
 kubectl -n register get pods
 kubectl -n cert-manager get pods
 kubectl -n istio-system get pods
+kubectl -n argocd get pods
 kubectl top nodes || true
 ```
 
 ---
 
-## 10) Security limitations / operational assumptions (must-read)
+## 11) Security limitations / operational assumptions (must-read)
 
 This setup is intentionally simple and does **not** eliminate all risk.
 
