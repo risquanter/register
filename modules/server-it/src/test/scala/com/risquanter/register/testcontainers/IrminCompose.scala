@@ -64,7 +64,7 @@ object IrminCompose:
           "-f", composeFile.getAbsolutePath,
           "-p", projectName,
           "--profile", "persistence",
-          "up", "-d", "--wait",
+          "up", "-d", "--wait", "--no-build",
           "irmin"  // Only start the irmin service
         )
 
