@@ -415,10 +415,10 @@ extension [I, E <: Throwable, O](endpoint: Endpoint[Unit, I, E, O, Any])
 **BackendClient pattern:**
 - Uses `sttp-client3` with Fetch backend (JS)
 - Interprets shared Tapir endpoints from common module
-- Base URL configurable (default `http://localhost:8080`)
+- Base URL configurable (default `http://localhost:8090`)
 - No authentication (deferred)
 
-**CORS note:** Backend may need CORS headers for `localhost:5173` → `localhost:8080`.
+**CORS note:** Backend may need CORS headers for `localhost:5173` → `localhost:8090`.
 
 **Reference implementations:**
 - `temp/business-case-generator/` — simpler ZJS, no session

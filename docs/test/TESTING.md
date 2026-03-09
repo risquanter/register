@@ -25,12 +25,23 @@ This document provides comprehensive testing procedures for the Risk Register ap
 
 ## Prerequisites
 
-```bash
+
 # Clean environment
 docker compose down -v
 docker system prune -f
 
-# Build and start services
+> **One-time setup:** `local/irmin:3.11` is not available from any public registry
+> and must be built locally before the first run. This takes 15–40 minutes:
+>
+> ```bash
+> docker build -f dev/Dockerfile.irmin -t local/irmin:3.11 dev/
+> ```
+>
+> Re-run this only when `dev/Dockerfile.irmin` changes.
+
+```bash
+
+# Build and start services (uses pre-built local/irmin:3.11)
 docker compose --profile persistence up -d --build
 
 # Wait for startup
@@ -38,7 +49,7 @@ sleep 2
 ```
 
 **Services:**
-- Register Server: `http://localhost:8080`
+- Register Server: `http://localhost:8090`
 - Irmin GraphQL: `http://localhost:9080/graphql`
 
 ---
@@ -58,6 +69,9 @@ sbt 'commonJVM/test; server/test' 2>&1 | grep -E 'tests passed|tests failed|FAIL
 
 # Server tests only
 sbt server/test 2>&1 | grep -E 'tests passed|tests failed|FAILED|FAIL|error.*Tests|\[error\]|success|Executed in'
+
+#Integration tests only
+sbt 'serverIt/test' 2>&1 | grep -E 'tests passed|tests failed|FAILED|Failed|PASS|\+.*test|\-.*test|error.*Tests|\[error\]|success|Executed in' | head -40
 ```
 
 ### Docker Cleanup
@@ -68,14 +82,14 @@ When integration tests leave stale containers or the Docker namespace fills up:
 docker compose down --remove-orphans --volumes && docker network prune -f
 ```
 
-### Expected Counts (as of 2026-02-09)
+### Expected Counts (as of 2026-03-09)
 
 | Project | Tests | Notes |
 |---------|-------|-------|
 | `commonJVM` | 289 | Domain model, Iron types, tree operations |
 | `server` | 219 | Service layer, simulation, controllers |
-| `serverIt` | 14 | Integration (Irmin via Docker Compose) |
-| **Total** | **522** | |
+| `serverIt` | 19 | Integration (Irmin via Docker Compose) + A17 config gate |
+| **Total** | **527** | |
 
 ---
 
@@ -84,7 +98,7 @@ docker compose down --remove-orphans --volumes && docker network prune -f
 ### Test Environment
 
 **Image:** `register-server:native` (118MB, distroless, static binary)  
-**Base URL:** `http://localhost:8080`  
+**Base URL:** `http://localhost:8090`  
 **Deployment:** Docker Compose with production configuration
 
 ### Payload Fixtures (New API Shapes)
@@ -109,7 +123,7 @@ docker compose down --remove-orphans --volumes && docker network prune -f
 **Purpose:** Verify service is running and responding
 
 ```bash
-curl -X GET http://localhost:8080/health
+curl -X GET http://localhost:8090/health
 ```
 
 **Expect:** HTTP 200 with `status=healthy`; latency < 50ms
@@ -121,7 +135,7 @@ curl -X GET http://localhost:8080/health
 **Purpose:** POST a multi-node tree using the new DTO shape
 
 ```bash
-curl -i -X POST http://localhost:8080/api/risk-trees \
+curl -i -X POST http://localhost:8090/api/risk-trees \
   -H "Content-Type: application/json" \
   -d @docs/test/create-risk-tree.json -o /tmp/create-complex.json
 ```
@@ -135,7 +149,7 @@ curl -i -X POST http://localhost:8080/api/risk-trees \
 **Purpose:** POST a minimal tree (one leaf under a root portfolio)
 
 ```bash
-curl -i -X POST http://localhost:8080/api/risk-trees \
+curl -i -X POST http://localhost:8090/api/risk-trees \
   -H "Content-Type: application/json" \
   -d @docs/test/create-simple-risk.json -o /tmp/create-simple.json
 ```
@@ -149,7 +163,7 @@ curl -i -X POST http://localhost:8080/api/risk-trees \
 **Purpose:** Verify list endpoint returns created trees
 
 ```bash
-curl -s http://localhost:8080/api/risk-trees | jq '.'
+curl -s http://localhost:8090/api/risk-trees | jq '.'
 ```
 
 **Expect:** HTTP 200; contains both tree IDs created above; latency < 50ms.
@@ -162,7 +176,7 @@ curl -s http://localhost:8080/api/risk-trees | jq '.'
 
 ```bash
 COMPLEX_ID=$(jq -r '.id' /tmp/create-complex.json)
-curl -s http://localhost:8080/api/risk-trees/$COMPLEX_ID | jq '.'
+curl -s http://localhost:8090/api/risk-trees/$COMPLEX_ID | jq '.'
 ```
 
 **Expect:** HTTP 200; response echoes portfolios/leaves with ULIDs and parent relationships.
@@ -179,7 +193,7 @@ APPS_ID=$(jq -r '.nodes[] | select(.name=="Applications") | .id' /tmp/create-com
 REVENUE_ID=$(jq -r '.nodes[] | select(.name=="Revenue Loss") | .id' /tmp/create-complex.json)
 sed "s/REPLACE_ROOT_ID/$ROOT_ID/g; s/REPLACE_APPS_ID/$APPS_ID/g; s/REPLACE_REVENUE_ID/$REVENUE_ID/g" \
   docs/test/update-risk-tree-template.json > /tmp/update-risk-tree.json
-curl -i -X PUT http://localhost:8080/api/risk-trees/$COMPLEX_ID \
+curl -i -X PUT http://localhost:8090/api/risk-trees/$COMPLEX_ID \
   -H "Content-Type: application/json" \
   -d @/tmp/update-risk-tree.json -o /tmp/update-response.json
 ```
@@ -193,7 +207,7 @@ curl -i -X PUT http://localhost:8080/api/risk-trees/$COMPLEX_ID \
 **Purpose:** Verify targeted distribution update without full PUT
 
 ```bash
-curl -i -X PATCH http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$REVENUE_ID/distribution \
+curl -i -X PATCH http://localhost:8090/api/risk-trees/$COMPLEX_ID/nodes/$REVENUE_ID/distribution \
   -H "Content-Type: application/json" \
   -d '{"distributionType":"lognormal","probability":0.9,"minLoss":45000,"maxLoss":350000}'
 ```
@@ -207,7 +221,7 @@ curl -i -X PATCH http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$REVENUE
 **Purpose:** Rename a node using PATCH
 
 ```bash
-curl -i -X PATCH http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$APPS_ID \
+curl -i -X PATCH http://localhost:8090/api/risk-trees/$COMPLEX_ID/nodes/$APPS_ID \
   -H "Content-Type: application/json" \
   -d '{"name":"Applications and Services"}'
 ```
@@ -221,7 +235,7 @@ curl -i -X PATCH http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$APPS_ID
 **Purpose:** Delete a non-root leaf while honoring the only-child guard
 
 ```bash
-curl -i -X DELETE http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$REVENUE_ID -o /tmp/delete-leaf.json
+curl -i -X DELETE http://localhost:8090/api/risk-trees/$COMPLEX_ID/nodes/$REVENUE_ID -o /tmp/delete-leaf.json
 ```
 
 **Expect:** HTTP 200; leaf removed; portfolio still has at least one child; root unchanged.
@@ -233,7 +247,7 @@ curl -i -X DELETE http://localhost:8080/api/risk-trees/$COMPLEX_ID/nodes/$REVENU
 **Purpose:** Full cleanup of the complex tree
 
 ```bash
-curl -i -X DELETE http://localhost:8080/api/risk-trees/$COMPLEX_ID
+curl -i -X DELETE http://localhost:8090/api/risk-trees/$COMPLEX_ID
 ```
 
 **Expect:** HTTP 204 No Content; subsequent GET by id returns 200 with `null` body.
@@ -246,7 +260,7 @@ curl -i -X DELETE http://localhost:8080/api/risk-trees/$COMPLEX_ID
 
 ```bash
 SIMPLE_ID=$(jq -r '.id' /tmp/create-simple.json)
-curl -s "http://localhost:8080/api/risk-trees/$SIMPLE_ID/lec?depth=0&nTrials=5000" | jq '.'
+curl -s "http://localhost:8090/api/risk-trees/$SIMPLE_ID/lec?depth=0&nTrials=5000" | jq '.'
 ```
 
 **Expect:** HTTP 200; `lec.quantiles` present and ordered; response < 2000ms for 5k trials.
@@ -276,7 +290,7 @@ Verify Docker container functionality, resource usage, and security posture.
 **Purpose:** Verify container starts successfully
 
 ```bash
-docker run --rm -d --name register-test -p 8080:8080 register-server:latest
+docker run --rm -d --name register-test -p 8090:8090 register-server:latest
 ```
 
 **Expected Output:**
@@ -286,7 +300,7 @@ docker run --rm -d --name register-test -p 8080:8080 register-server:latest
 
 **Success Criteria:**
 - Container starts without errors
-- Port 8080 is mapped
+- Port 8090 is mapped
 - Container reaches healthy state within 10s
 
 ---
@@ -305,7 +319,7 @@ timestamp=2026-01-17T... level=INFO message="Bootstrapping Risk Register applica
 timestamp=2026-01-17T... level=INFO message="Server config: host=0.0.0.0, port=8080"
 timestamp=2026-01-17T... level=INFO message="CORS allowed origins: ..."
 timestamp=2026-01-17T... level=INFO message="Registered 10 HTTP endpoints"
-timestamp=2026-01-17T... level=INFO message="Starting HTTP server on 0.0.0.0:8080..."
+timestamp=2026-01-17T... level=INFO message="Starting HTTP server on 0.0.0.0:8090..."
 timestamp=2026-01-17T... level=INFO message="Server started"
 ```
 
@@ -438,7 +452,7 @@ docker restart register-test
 sleep 3
 
 # Check health
-curl -s http://localhost:8080/health
+curl -s http://localhost:8090/health
 ```
 
 **Expected:**
@@ -458,17 +472,17 @@ docker port register-test
 
 **Expected Output:**
 ```
-8080/tcp -> 0.0.0.0:8080
-8080/tcp -> [::]:8080
+8090/tcp -> 0.0.0.0:8090
+8090/tcp -> [::]:8090
 ```
 
 **Test Access:**
 ```bash
 # From host
-curl http://localhost:8080/health
+curl http://localhost:8090/health
 
 # From another container
-docker run --rm --network container:register-test alpine wget -qO- http://localhost:8080/health
+docker run --rm --network container:register-test alpine wget -qO- http://localhost:8090/health
 ```
 
 ---
@@ -527,15 +541,15 @@ docker images register-server:native
 
 ```bash
 # Baseline (health check)
-time curl -X GET http://localhost:8080/health
+time curl -X GET http://localhost:8090/health
 # Expected: < 50ms
 
 # Simple simulation (5,000 trials)
-time curl -X GET "http://localhost:8080/api/risk-trees/1/lec?nTrials=5000"
+time curl -X GET "http://localhost:8090/api/risk-trees/1/lec?nTrials=5000"
 # Expected: < 1000ms
 
 # Complex simulation (25,000 trials, depth=1)
-time curl -X GET "http://localhost:8080/api/risk-trees/0/lec?depth=1&nTrials=25000"
+time curl -X GET "http://localhost:8090/api/risk-trees/0/lec?depth=1&nTrials=25000"
 # Expected: < 3000ms
 ```
 
@@ -547,7 +561,7 @@ time curl -X GET "http://localhost:8080/api/risk-trees/0/lec?depth=1&nTrials=250
 #!/bin/bash
 set -e
 
-BASE_URL="http://localhost:8080"
+BASE_URL="http://localhost:8090"
 PASS=0
 FAIL=0
 

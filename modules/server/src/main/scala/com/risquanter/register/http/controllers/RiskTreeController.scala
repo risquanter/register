@@ -22,7 +22,7 @@ class RiskTreeController private (
     with RiskTreeEndpoints:
 
   val health: ServerEndpoint[Any, Task] = healthEndpoint.serverLogicSuccess { _ =>
-    ZIO.succeed(Map("status" -> "healthy", "service" -> "risk-register"))
+    ZIO.succeed(com.risquanter.register.http.ProbeResponses.healthy)
   }
 
   /** List all risk trees.

@@ -4,8 +4,9 @@
 # This is a development image with full toolchain for debugging.
 # For production, this will be converted to a multi-stage distroless build.
 #
-# Build:   docker build -f dev/Dockerfile.irmin -t irmin-graphql:dev dev/
-# Run:     docker run -p 8080:8080 -v irmin-data:/data irmin-graphql:dev
+# Build:   docker build -f dev/Dockerfile.irmin -t local/irmin:3.11 dev/
+#          (Use the tag docker-compose.yml expects — takes 15-40 min first run)
+# Run:     docker run -p 8080:8080 -v irmin-data:/data local/irmin:3.11
 # ============================================================================
 
 FROM ocaml/opam:alpine-ocaml-5.2

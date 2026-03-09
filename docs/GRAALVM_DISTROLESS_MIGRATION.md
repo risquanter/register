@@ -90,7 +90,7 @@ docker build -f Dockerfile.native -t register-native-test .
 **Evidence:**
 ```bash
 # Start container
-docker run --rm -d -p 8080:8080 --name register-native-test register-native-test:latest
+docker run --rm -d -p 8090:8090 --name register-native-test register-native-test:latest
 # Container ID: 95ef36b9397b
 
 # Check startup time (< 3 seconds to "Server started")
@@ -100,7 +100,7 @@ docker logs register-native-test
 # Startup time: ~0.01 seconds (10ms)
 
 # Test health endpoint
-curl http://localhost:8080/api/health
+curl http://localhost:8090/api/health
 # Response: OK - Risk Register 0.1.0
 # HTTP 200
 
@@ -277,13 +277,13 @@ COPY --from=builder --chown=nonroot:nonroot /app/modules/server/target/register-
 
 1. **Container Startup:**
 ```bash
-docker run --rm -d --name register-distroless-test -p 8080:8080 register-distroless-static:test
+docker run --rm -d --name register-distroless-test -p 8090:8090 register-distroless-static:test
 # Status: ✅ Started successfully
 ```
 
 2. **Health Check:**
 ```bash
-curl -s http://localhost:8080/health
+curl -s http://localhost:8090/health
 # Response: {"status":"healthy","service":"risk-register"}
 # Status: ✅ PASS
 ```

@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 import com.risquanter.register.http.responses.SimulationResponse
 
@@ -21,9 +21,13 @@ import com.risquanter.register.http.responses.SimulationResponse
   * Extends `WorkspaceEndpoints` to access workspace-scoped Tapir endpoint
   * definitions for ZJS bridge calls.
   *
-  * @param keySignal Read-only signal providing the active workspace key.
+  * @param keySignal      Read-only signal providing the active workspace key.
+  * @param userIdAccessor  Returns the current user identity (None in capability-only mode).
   */
-final class TreeViewState(keySignal: StrictSignal[Option[WorkspaceKeySecret]]) extends WorkspaceEndpoints:
+final class TreeViewState(
+  keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  userIdAccessor: () => Option[UserId] = () => None
+) extends WorkspaceEndpoints:
 
   // ── Available trees (summary list) ────────────────────────────
   val availableTrees: Var[LoadState[List[SimulationResponse]]] = Var(LoadState.Idle)
@@ -37,7 +41,7 @@ final class TreeViewState(keySignal: StrictSignal[Option[WorkspaceKeySecret]]) e
   val selectedNodeId: Var[Option[NodeId]] = Var(None)
 
   // ── Chart state (delegated) ───────────────────────────────────
-  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal)
+  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, userIdAccessor)
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.
@@ -54,7 +58,7 @@ final class TreeViewState(keySignal: StrictSignal[Option[WorkspaceKeySecret]]) e
   /** Fetch all trees from the backend (summary only). */
   def loadTreeList(): Unit =
     keySignal.now() match
-      case Some(key) => listWorkspaceTreesEndpoint(key).loadInto(availableTrees)
+      case Some(key) => listWorkspaceTreesEndpoint((userIdAccessor(), key)).loadInto(availableTrees)
       case None      => () // No workspace yet — nothing to load
 
   /** Fetch the full tree structure for the given id. */
@@ -64,7 +68,7 @@ final class TreeViewState(keySignal: StrictSignal[Option[WorkspaceKeySecret]]) e
     chartState.reset()
     keySignal.now() match
       case Some(key) =>
-        getWorkspaceTreeStructureEndpoint((key, id)).loadOptionInto(selectedTree, "Tree not found")
+        getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id)).loadOptionInto(selectedTree, "Tree not found")
       case None => ()
 
   /** Select a tree by id — sets `selectedTreeId` and triggers structure fetch. */

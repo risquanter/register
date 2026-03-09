@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
-import com.risquanter.register.domain.data.iron.WorkspaceKeySecret
+import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
@@ -45,6 +45,13 @@ final class WorkspaceState extends WorkspaceEndpoints:
   /** Whether a workspace is currently active. */
   def hasWorkspace: Boolean = currentKey.isDefined
 
+  /** Current user identity for API calls.
+    * Layer 0 (capability-only): always None — x-user-id header absent.
+    * Layer 1+ (Task L1.3): replace with AuthState.currentUserId signal.
+    * @see AUTHORIZATION-PLAN.md Wave 1
+    */
+  def currentUserId: Option[UserId] = None
+
   /** Extract workspace key from the current browser URL path.
     * Uses fromString for Iron-validated construction (ADR-022 R5, R7).
     */
@@ -84,7 +91,7 @@ final class WorkspaceState extends WorkspaceEndpoints:
     currentKey match
       case None => () // Scenario 1 — nothing to validate
       case Some(key) =>
-        listWorkspaceTreesEndpoint(key)
+        listWorkspaceTreesEndpoint((currentUserId, key))
           .tap(trees => zio.ZIO.succeed(onTreesLoaded(trees)))
           .tapError { _ =>
             zio.ZIO.succeed {

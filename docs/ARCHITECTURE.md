@@ -720,7 +720,8 @@ Performance:
 │ Risk Register Service (Deployment)               │
 │  - Replicas: 3 (horizontal scaling)             │
 │  - Resources: 1 CPU, 2Gi memory per pod         │
-│  - Health checks: /health endpoint              │
+│  - Health probes: /health, /ready on port 8091  │
+│  - API: port 8090 (mTLS STRICT)                 │
 │  - Stateless (can scale horizontally)           │
 │  - Trusts service mesh for auth                 │
 └─────────────────────────────────────────────────┘

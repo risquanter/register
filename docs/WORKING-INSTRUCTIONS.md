@@ -227,10 +227,10 @@ After implementation, verify that new components are **actually connected** to t
 #### Verification Commands:
 ```bash
 # List registered endpoints (after server starts)
-curl http://localhost:8080/docs/openapi.json | jq '.paths | keys'
+curl http://localhost:8090/docs/openapi.json | jq '.paths | keys'
 
 # Verify specific endpoint exists
-curl -I http://localhost:8080/w/{key}/events/tree/1
+curl -I http://localhost:8090/w/{key}/events/tree/1
 
 # Run all tests including integration
 sbt test

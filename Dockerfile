@@ -57,7 +57,7 @@ RUN chown -R register:register /app && \
 USER register
 
 # Expose application port
-EXPOSE 8080
+EXPOSE 8090
 
 # Set JVM options for container environment
 ENV JAVA_OPTS="-Xms512m -Xmx2g -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"

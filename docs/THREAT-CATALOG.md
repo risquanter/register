@@ -57,6 +57,7 @@ ci_gate:
   must_pass_before: requirePresent-activation
 mitigations:
   - "NetworkPolicy: deny all ingress to register-server pod except from Istio waypoint service account"
+  - "NetworkPolicy: port 8081 (health probes) restricted to kubelet/ztunnel source only (PERMISSIVE mTLS)"
   - "No NodePort or HostPort exposure on app services"
   - "mesh-bypass-probe CI job: kubectl run against pod IP, expect connection refused"
 todo: >
@@ -72,8 +73,13 @@ test:
   command: |
     kubectl run mesh-bypass-probe --rm -it --restart=Never \
       --image=curlimages/curl -- \
-      curl -sf --max-time 3 http://<POD_IP>:8080/health
+      curl -sf --max-time 3 http://<POD_IP>:8090/health
     # Expected: non-zero exit (refused/timeout). Exit 0 = FAIL.
+    # Also verify health probe port is unreachable from non-kubelet sources:
+    kubectl run mesh-bypass-probe-health --rm -it --restart=Never \
+      --image=curlimages/curl -- \
+      curl -sf --max-time 3 http://<POD_IP>:8091/health
+    # Expected: non-zero exit. Exit 0 = NetworkPolicy misconfiguration.
 related_code: []
 ```
 

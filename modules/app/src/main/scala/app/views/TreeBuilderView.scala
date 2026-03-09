@@ -41,7 +41,7 @@ object TreeBuilderView extends WorkspaceEndpoints:
             case Some(key) =>
               state.toUpdateRequest() match
                 case Validation.Success(_, request) =>
-                  updateWorkspaceTreeEndpoint((key, treeId, request)).submitInto(submitState)(onSuccess)
+                  updateWorkspaceTreeEndpoint((wsState.currentUserId, key, treeId, request)).submitInto(submitState)(onSuccess)
                 case Validation.Failure(_, errors) => validationFailed(errors)
 
         // ── Create mode ──
@@ -50,7 +50,7 @@ object TreeBuilderView extends WorkspaceEndpoints:
             case Validation.Success(_, request) =>
               wsState.currentKey match
                 case Some(key) =>
-                  createWorkspaceTreeEndpoint((key, request)).submitInto(submitState)(onSuccess)
+                  createWorkspaceTreeEndpoint((wsState.currentUserId, key, request)).submitInto(submitState)(onSuccess)
                 case None =>
                   submitState.set(SubmitState.Submitting)
                   wsState.bootstrap(request, onSuccess, msg => submitState.set(SubmitState.Failed(msg)))

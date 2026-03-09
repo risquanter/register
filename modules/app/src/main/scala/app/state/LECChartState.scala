@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 
 /** Chart selection and LEC spec state, separated from tree navigation.
@@ -23,11 +23,13 @@ import com.risquanter.register.http.endpoints.WorkspaceEndpoints
   * @param keySignal      Read-only signal providing the active workspace key.
   * @param selectedTreeId Signal for the currently selected tree ID.
   * @param selectedTree   Signal for the currently loaded tree structure.
+  * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   */
 final class LECChartState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
-  selectedTree: StrictSignal[LoadState[RiskTree]]
+  selectedTree: StrictSignal[LoadState[RiskTree]],
+  userIdAccessor: () => Option[UserId] = () => None
 ) extends WorkspaceEndpoints:
 
   // ── Chart selection state ─────────────────────────────────────
@@ -69,5 +71,5 @@ final class LECChartState(
   private def loadLECChart(nodeIds: Set[NodeId]): Unit =
     (keySignal.now(), selectedTreeId.now()) match
       case (Some(key), Some(treeId)) =>
-        getWorkspaceLECChartEndpoint((key, treeId, nodeIds.toList)).loadInto(lecChartSpec)
+        getWorkspaceLECChartEndpoint((userIdAccessor(), key, treeId, nodeIds.toList)).loadInto(lecChartSpec)
       case _ => () // No workspace or tree selected — nothing to do

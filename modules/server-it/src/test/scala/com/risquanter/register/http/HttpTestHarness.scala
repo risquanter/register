@@ -56,7 +56,8 @@ object HttpTestHarness:
     simulation: SimulationConfig = defaultSimulationConfig,
     telemetry: TelemetryConfig = defaultTelemetryConfig,
     cors: CorsConfig = defaultCorsConfig,
-    workspace: WorkspaceConfig = defaultWorkspaceConfig
+    workspace: WorkspaceConfig = defaultWorkspaceConfig,
+    api: ApiConfig = ApiConfig()
   )
 
   /** In-memory HTTP server (useful for lightweight component tests). */
@@ -115,12 +116,12 @@ object HttpTestHarness:
     ZLayer.make[
       Server & CorsConfig & RiskTreeController & WorkspaceController & SSEController & CacheController
     ](
-      ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port)),
+      ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port, healthPort = port + 1)),
       ZLayer.succeed(cfg.simulation),
       ZLayer.succeed(cfg.telemetry),
       ZLayer.succeed(cfg.cors),
       ZLayer.succeed(cfg.workspace),
-      ZLayer.succeed(ApiConfig()),
+      ZLayer.succeed(cfg.api),
       ZLayer.fromZIO(
         ZIO.service[ServerConfig].map(sc => Server.Config.default.binding(sc.host, sc.port))
       ) >>> Server.live,

@@ -147,7 +147,7 @@ object RiskTreeControllerWiringSpec extends ZIOSpecDefault {
     test("health endpoint is accessible") {
       for {
         response <- Client.request(
-          Request.get(URL.decode("http://localhost:8080/health").toOption.get)
+          Request.get(URL.decode("http://localhost:8090/health").toOption.get)
         )
         body <- response.body.asString
       } yield assertTrue(
@@ -159,7 +159,7 @@ object RiskTreeControllerWiringSpec extends ZIOSpecDefault {
     test("SSE endpoint is accessible") {
       for {
         response <- Client.request(
-          Request.get(URL.decode("http://localhost:8080/w/{key}/events/tree/1").toOption.get)
+          Request.get(URL.decode("http://localhost:8090/w/{key}/events/tree/1").toOption.get)
         )
       } yield assertTrue(response.status != Status.NotFound)
     }
@@ -218,7 +218,7 @@ Format in TESTING.md:
 
 **Steps:**
 1. Start server: `docker compose up -d`
-2. Open browser to `http://localhost:8080/w/{key}/events/tree/1`
+2. Open browser to `http://localhost:8090/w/{key}/events/tree/1`
 3. Open DevTools → Network tab
 4. Verify EventSource connection established
 5. Trigger event via `POST /risk-trees/1/invalidate/node-id`

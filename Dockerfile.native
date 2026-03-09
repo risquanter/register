@@ -27,7 +27,10 @@ WORKDIR /app
 # Copy config files (provides defaults and documents available configs)
 COPY --from=builder --chown=nonroot:nonroot /app/modules/server/src/main/resources/application.conf /app/application.conf
 
-EXPOSE 8080
+EXPOSE 8090
+# Dedicated health-probe port for kubelet liveness/readiness probes.
+# Separated from API port to allow per-port mTLS policy (STRICT on 8090, PERMISSIVE on 8091).
+EXPOSE 8091
 
 # Explicitly set non-root user by numeric UID (65532 = nonroot in distroless).
 # Kubernetes runAsNonRoot enforcement requires a numeric UID — it cannot verify

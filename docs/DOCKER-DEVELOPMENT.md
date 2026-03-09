@@ -17,6 +17,23 @@ This guide covers containerization, deployment, and development environment setu
 
 ## Quick Start
 
+
+#### One-Time Setup: Irmin Image
+
+`local/irmin:3.11` is not pushed to any registry — it must be built locally
+before starting the `persistence` profile for the first time:
+
+```bash
+docker build -f dev/Dockerfile.irmin -t local/irmin:3.11 dev/
+```
+
+> **Note:** This build installs the OCaml toolchain and compiles several opam
+> packages from source. Expect **15–40 minutes** on a first run. Subsequent
+> builds use the Docker layer cache and are much faster unless `dev/Dockerfile.irmin`
+> changes.
+
+Rebuild only when `dev/Dockerfile.irmin` changes (e.g. an Irmin version bump).
+
 ### Start / Run Modes
 
 ```bash
@@ -61,11 +78,15 @@ docker compose ps irmin
 ### Risk Register Server (Native Image)
 
 **Image:** GraalVM native binary on distroless  
-**Port:** 8080  
+**Ports:**
+- 8090 — Main API (mTLS STRICT in mesh)
+- 8091 — Health probes (mTLS PERMISSIVE in mesh)
+
 **Endpoints:**
-- Health: `http://localhost:8080/health`
-- API: `http://localhost:8080/api`
-- Swagger: `http://localhost:8080/docs`
+- Health (API): `http://localhost:8090/health`
+- Health (probe): `http://localhost:8091/health`
+- Readiness (probe): `http://localhost:8091/ready`
+- Swagger: `http://localhost:8090/docs`
 
 **Performance:**
 - Startup: ~5-10ms
@@ -87,10 +108,11 @@ The native image build uses a **two-layer strategy** to minimise rebuild times:
 
 The production image (stage 2) remains `gcr.io/distroless/static-debian12:nonroot`.
 
+
 #### One-Time Setup: Builder Base Image
 
-Before the first build (or after bumping GraalVM/sbt versions), build the
-toolchain image:
+Before the first native-image build (or after bumping GraalVM/sbt versions),
+build the toolchain image:
 
 ```bash
 docker build -f dev/Dockerfile.graalvm-builder -t local/graalvm-builder:21 dev/
@@ -120,7 +142,7 @@ docker compose up --build register-server -d
 docker build -t register-server:latest .
 
 # Run
-docker run -p 8080:8080 --name register-server register-server:latest
+docker run -p 8090:8090 --name register-server register-server:latest
 ```
 
 ---
@@ -176,7 +198,8 @@ Configure via `docker-compose.yml`, `.env`, or CLI overrides:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REGISTER_SERVER_HOST` | `0.0.0.0` | Server bind address |
-| `REGISTER_SERVER_PORT` | `8080` | Server port |
+| `REGISTER_SERVER_PORT` | `8090` | Main API server port |
+| `REGISTER_HEALTH_PORT` | `8091` | Health probe port (kubelet liveness/readiness) |
 | `REGISTER_DEFAULT_NTRIALS` | `10000` | Default simulation trials |
 | `REGISTER_MAX_TREE_DEPTH` | `5` | Maximum risk tree depth |
 | `REGISTER_PARALLELISM` | `8` | Parallel processing threads |
@@ -298,7 +321,7 @@ Serves the frontend at `http://localhost:5173` with hot module replacement. Vite
 **Verify the full stack:**
 1. Open `http://localhost:5173` — the frontend should load
 2. The header should show "Connected" (health check to backend)
-3. Open `http://localhost:8080/docs` — Swagger UI for API exploration
+3. Open `http://localhost:8090/docs` — Swagger UI for API exploration
 
 ### Backend Development (sbt, no Docker)
 
@@ -450,7 +473,7 @@ docker compose logs register-server
 docker compose logs irmin
 
 # Check if port is in use
-lsof -i :8080
+lsof -i :8090
 lsof -i :9080
 
 # Rebuild without cache
@@ -524,7 +547,7 @@ docker compose up -d
 
 ```bash
 # HTTP health endpoint
-curl http://localhost:8080/health
+curl http://localhost:8090/health
 
 # Docker health status
 docker inspect --format='{{.State.Health.Status}}' register-server
@@ -620,7 +643,7 @@ docker compose --profile persistence up -d
 docker compose logs -f
 
 # Check health
-curl http://localhost:8080/health
+curl http://localhost:8090/health
 curl -X POST http://localhost:9080/graphql -H "Content-Type: application/json" -d '{"query": "{ __typename }"}'
 
 # Run tests

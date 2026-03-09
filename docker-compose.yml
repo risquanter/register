@@ -33,11 +33,13 @@ services:
       dockerfile: Dockerfile.native
     container_name: register-server
     ports:
-      - "8080:8080"
+      - "8090:8090"
+      - "8091:8091"  # Health probe port (kubelet liveness/readiness)
     environment:
       # Server configuration
       REGISTER_SERVER_HOST: "0.0.0.0"
-      REGISTER_SERVER_PORT: "8080"
+      REGISTER_SERVER_PORT: "8090"
+      REGISTER_HEALTH_PORT: "8091"
       
       # Simulation configuration
       REGISTER_DEFAULT_NTRIALS: "10000"
@@ -69,8 +71,11 @@ services:
         reservations:
           cpus: '0.5'
           memory: 64M
-    # Healthcheck disabled: distroless has no curl/shell
-    # Use external monitoring: curl http://localhost:8080/health
+    # Docker-level healthcheck disabled: distroless has no curl/wget/shell.
+    # The dedicated health port (8091) serves /health and /ready for kubelet
+    # probes in k8s. For local docker-compose, use external monitoring:
+    #   curl http://localhost:8090/health  (API port, always available)
+    #   curl http://localhost:8091/health  (probe port, same response)
     restart: unless-stopped
     networks:
       - register-network

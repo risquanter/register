@@ -17,7 +17,7 @@ object Main:
     val wsState = new WorkspaceState
 
     val builderState = new TreeBuilderState
-    val treeViewState = new TreeViewState(wsState.keySignal)
+    val treeViewState = new TreeViewState(wsState.keySignal, () => wsState.currentUserId)
     val analyzeQueryState = new AnalyzeQueryState
 
     // Global error state — safety net for errors with no per-view handler

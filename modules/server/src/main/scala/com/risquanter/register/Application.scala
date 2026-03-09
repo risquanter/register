@@ -8,7 +8,7 @@ import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirC
 
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, ApiConfig, WorkspaceConfig}
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
-import com.risquanter.register.http.{HttpApi, SecurityHeadersInterceptor}
+import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
@@ -153,8 +153,11 @@ object Application extends ZIOAppDefault {
       .options
     httpApp = ZioHttpInterpreter(serverOptions).toHttp(endpoints)
 
-    _          <- ZIO.logInfo(s"Starting HTTP server on ${cfg.host}:${cfg.port}...")
-    _          <- Server.serve(httpApp)
+    _          <- ZIO.logInfo(s"Starting health probe server on ${cfg.host}:${cfg.healthPort}...")
+    _          <- ZIO.logInfo(s"Starting API server on ${cfg.host}:${cfg.port}...")
+    // Run both servers concurrently — shared lifecycle: if either fails or the
+    // application shuts down, both are interrupted. @see FR-5 in spec.
+    _          <- HealthProbeServer.serve(cfg.host, cfg.healthPort) <&> Server.serve(httpApp)
   } yield ()
 
   def program = for {

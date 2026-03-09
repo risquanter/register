@@ -121,11 +121,14 @@ Quick smoke test:
 # Start the backend
 docker compose up -d
 
-# Check health
-curl http://localhost:8080/health
+# Check health (API port)
+curl http://localhost:8090/health
+
+# Check health (probe port — same response, used by kubelet in k8s)
+curl http://localhost:8091/health
 
 # API docs
-open http://localhost:8080/docs
+open http://localhost:8090/docs
 ```
 
 ## License
