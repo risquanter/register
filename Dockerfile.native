@@ -29,7 +29,10 @@ COPY --from=builder --chown=nonroot:nonroot /app/modules/server/src/main/resourc
 
 EXPOSE 8080
 
-# Explicitly set non-root user (inherited from base, but explicit for clarity)
-USER nonroot
+# Explicitly set non-root user by numeric UID (65532 = nonroot in distroless).
+# Kubernetes runAsNonRoot enforcement requires a numeric UID — it cannot verify
+# that a symbolic username like "nonroot" isn't UID 0. Same identity as the
+# distroless base image default; this just makes it explicit and K8s-verifiable.
+USER 65532
 
 ENTRYPOINT ["/app/register-server"]
