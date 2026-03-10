@@ -1389,6 +1389,36 @@ first-class concerns in its error handling layer:
 This is more reliable than SSE notification because it works regardless of
 connection state and requires no server-side changes beyond what already exists.
 
+**Current implementation status (Mar 2026):**
+
+The **startup** path is fully implemented: `WorkspaceState.preValidate()` detects
+expired/missing workspaces on mount and triggers the dedicated
+`GlobalError.WorkspaceExpired` blue info banner (Scenario 3 in ADR-025). Key
+clearance and URL reset (`clearURL()`) also work.
+
+The **mid-session** path is **not yet implemented.** When the reaper evicts a
+workspace while the user is actively using it, subsequent API calls return an
+A13 opaque 404. The `GlobalError.fromThrowable` classifier sees this as an
+untyped error and routes it to `ServerError` (red banner) — not the dedicated
+`WorkspaceExpired` treatment (blue info banner). This happens because A13
+deliberately strips the error discriminator from the HTTP response, so
+`fromThrowable` cannot distinguish a workspace 404 from a generic 404.
+
+What's needed for mid-session handling:
+1. **Call-site error classification:** Since A13 makes the error opaque at the
+   HTTP level, classification must happen at the call site where we *know* the
+   request was workspace-scoped. The `fromThrowable` classifier is the wrong
+   place — it has no call-site context.
+2. **Interception in workspace-scoped API calls:** Each workspace-scoped call
+   (tree list refresh, tree create, simulation run) should catch 404 errors and
+   route them to `GlobalError.WorkspaceExpired` with a "workspace expired" modal
+   and a "Create New Workspace" action, instead of the generic red error banner.
+3. **Workspace state cleanup:** Clear `WorkspaceState.workspaceKey`, call
+   `clearURL()`, same as the startup `preValidate` failure path.
+
+This is a frontend-only change. The server-side A13 opaque 404 behaviour is
+correct and should not be modified.
+
 **Checkpoint:**
 - [x] Reaper fiber runs at configured interval in free-tier mode ✅
 - [x] Reaper is no-op when both `ttl` and `idleTimeout` are zero/negative ✅
@@ -1399,7 +1429,8 @@ connection state and requires no server-side changes beyond what already exists.
 - [x] Reaper fiber shuts down gracefully with application (automatic via `forkScoped`) ✅
 - [x] Reaper cascade-deletes trees from evicted workspaces (orphan bug fix) ✅
 - [x] Opaque 404 uses resource-neutral message "Not found" (not "Workspace not found") ✅
-- [ ] Client handles `WorkspaceExpired` errors as first-class concern
+- [x] Client handles `WorkspaceExpired` on startup (`preValidate`) ✅
+- [ ] Client handles `WorkspaceExpired` mid-session (call-site interception)
 
 **A16 status (SSE lifecycle on eviction):** Deferred. The reaper does **not**
 send SSE events on eviction — client-side error handling is the reliability
@@ -1489,8 +1520,15 @@ app/.../views/WorkspaceBanner.scala
 app/.../Main.scala  (modify: routing + workspace state)
 ```
 
-**Router (client-side hash routing):**
+**Router (original design — hash routing, superseded):**
+
+> ⚠️ **Superseded (Mar 2026).** The implementation uses path-based routing
+> (`/w/{key}`) with `history.replaceState` instead of hash routing (`/#/{key}`)
+> with `location.hash`. See ADR-025 for rationale. The original design is
+> preserved below for context; the actual implementation follows.
+
 ```scala
+// SUPERSEDED — original hash-routing design
 object Router:
   /** Parse workspace key from URL hash.
     * `/#/{workspaceKey}`          → Some(workspaceKey)
@@ -1504,24 +1542,53 @@ object Router:
     dom.window.location.hash = route.toHash
 ```
 
+**Router (actual design — path routing via WorkspaceState):**
+
+No separate `Router.scala` was created. Routing logic lives inline in
+`WorkspaceState`, using `location.pathname` and `history.replaceState`:
+
+```scala
+// Actual implementation — path-based routing
+private val workspacePathPattern = "^/w/([A-Za-z0-9_-]{22})(?:/.*)?$".r
+
+private def extractKeyFromURL(): Option[WorkspaceKeySecret] =
+  dom.window.location.pathname match
+    case workspacePathPattern(key) => WorkspaceKeySecret.fromString(key).toOption
+    case _                         => None
+
+private def pushKeyToURL(key: WorkspaceKeySecret): Unit =
+  dom.window.history.replaceState(null, "", s"/w/${key.reveal}")
+
+private def clearURL(): Unit =
+  dom.window.history.replaceState(null, "", "/")
+```
+
+A dedicated `Router.scala` extracting this logic from `WorkspaceState` is a
+future option if the app grows to need deep-linking (`/w/{key}/tree/{treeId}`),
+back/forward navigation (`popstate` listener), or route-driven view selection.
+The path-routing approach supports all of these — the `Route` ADT and parsing
+logic would be structurally identical to the hash-routing version, using
+`location.pathname` and `pushState` instead of `location.hash`.
+
 **WorkspaceState:**
 ```scala
-final class WorkspaceState:
-  val workspaceKey: Var[Option[WorkspaceKey]] = Var(None)
-  val expiresAt: Var[Option[Instant]] = Var(None)
+final class WorkspaceState extends WorkspaceEndpoints:
+  val workspaceKey: Var[Option[WorkspaceKeySecret]] = Var(extractKeyFromURL())
+  def keySignal: StrictSignal[Option[WorkspaceKeySecret]] = workspaceKey.signal
+  def currentUserId: Option[UserId] = None  // Layer 0; Layer 1+ via AuthState
 ```
 
 **User flow:**
 
-1. **Landing page (`/#/`):** User sees tree builder form. No workspace key yet.
-2. **First submit:** Frontend calls `POST /workspaces` (bootstrap). Receives `WorkspaceResponse` with workspace key.
-3. **Redirect:** Frontend navigates to `/#/{workspaceKey}`. URL now contains the capability.
+1. **Landing page (`/`):** User sees tree builder form. No workspace key yet.
+2. **First submit:** Frontend calls `POST /workspaces` (bootstrap). Receives `WorkspaceBootstrapResponse` with workspace key.
+3. **URL update:** Frontend calls `history.replaceState` → URL becomes `/w/{workspaceKey}`. No page reload.
 4. **Workspace loaded:** Tree list dropdown appears (populated via `GET /w/{key}/risk-trees`). The just-created tree is shown.
 5. **Subsequent creates:** Frontend calls `POST /w/{key}/risk-trees`. Tree added to existing workspace.
-6. **Sharing:** User copies URL. Recipient opens `/#/{workspaceKey}` → sees the same workspace.
-7. **Return visit:** User bookmarks URL. On return, workspace loads from URL hash.
+6. **Sharing:** User copies URL. Recipient opens `/w/{workspaceKey}` → SPA boots, `preValidate()` loads workspace.
+7. **Return visit:** User bookmarks URL. On return, `extractKeyFromURL()` restores key from path.
 
-**WorkspaceBanner:**
+**WorkspaceBanner:** (not yet implemented)
 - Displays workspace key (truncated) and expiry countdown: "Workspace expires in 71h 42m"
 - Copy-link button for sharing
 - In enterprise mode (no TTL): no banner shown
@@ -1533,18 +1600,21 @@ final class WorkspaceState:
 
 **TreeBuilderView changes:**
 - Submit flow branched:
-  - No workspace key → call `POST /workspaces` (bootstrap) → navigate to `/#/{key}`
+  - No workspace key → call `POST /workspaces` (bootstrap) → `replaceState` to `/w/{key}`
   - Has workspace key → call `POST /w/{key}/risk-trees` → refresh tree list
 
 **Checkpoint:**
-- [ ] Landing page renders tree builder (no workspace key)
-- [ ] First submit creates workspace + tree, redirects to `/#/{workspaceKey}`
-- [ ] URL contains workspace key after creation
-- [ ] Tree list loads workspace-scoped trees
-- [ ] Subsequent tree creates add to existing workspace
-- [ ] Return visits restore workspace from URL hash
+- [x] Landing page renders tree builder (no workspace key) ✅
+- [x] First submit creates workspace + tree, URL updated to `/w/{workspaceKey}` ✅
+- [x] URL contains workspace key after creation ✅
+- [x] Tree list loads workspace-scoped trees ✅
+- [x] Subsequent tree creates add to existing workspace ✅
+- [x] Return visits restore workspace from URL path ✅
 - [ ] Workspace banner shows expiry countdown
-- [ ] Sharing URL gives recipient full workspace access
+- [x] Sharing URL gives recipient full workspace access ✅
+
+> **Note:** Sharing and return visits require an SPA-aware reverse proxy in
+> production (browser `GET /w/{key}` must serve `index.html`). See ADR-025.
 
 ---
 
