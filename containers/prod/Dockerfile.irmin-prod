@@ -28,11 +28,11 @@ LABEL version="3.11"
 # libffi: Foreign Function Interface (required by ctypes/OCaml FFI)
 # No compiler, no opam, no git, no shell-heavy tooling.
 RUN apk add --no-cache \
-    libgmp \
+    gmp \
     libffi
 
 # Copy the compiled irmin binary from the builder base
-COPY --from=builder /home/opam/.opam/default/bin/irmin /usr/local/bin/irmin
+COPY --from=builder /home/opam/.opam/5.2/bin/irmin /usr/local/bin/irmin
 
 # Verify the binary runs (catches missing shared libs at build time, not deploy time)
 RUN irmin --version

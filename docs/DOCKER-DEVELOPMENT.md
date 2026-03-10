@@ -41,6 +41,32 @@ available:
 docker build -f containers/dev/Dockerfile.irmin-dev -t local/irmin-dev:3.11 .
 ```
 
+### Full Clean Build (all images from scratch)
+
+When building from a clean state (no pre-existing images), execute in this
+order. Steps 1 and 3 are independent builders; steps 2 and 4 depend on them.
+
+```bash
+# 1. Irmin builder base (opam + irmin packages) — ~15-40 min first run
+docker build -f containers/builders/Dockerfile.irmin-builder \
+  -t local/irmin-builder:3.11 containers/builders/
+
+# 2. Irmin production image (slim Alpine runtime) — ~10s (copies from builder)
+docker build -f containers/prod/Dockerfile.irmin-prod \
+  -t local/irmin-prod:3.11 containers/prod/
+
+# 3. GraalVM builder base (native-image + sbt) — ~1-2 min
+docker build -f containers/builders/Dockerfile.graalvm-builder \
+  -t local/graalvm-builder:21 containers/builders/
+
+# 4. Register server production (native binary on distroless) — ~5-10 min
+docker build -f containers/prod/Dockerfile.register-prod \
+  -t register-server:prod .
+
+# Verify all images
+docker images | grep -E 'irmin|register|graalvm'
+```
+
 ### Start / Run Modes
 
 ```bash
@@ -167,7 +193,7 @@ Irmin is a versioned key-value store with Git-like semantics. It provides conten
 **Performance (prod image):**
 - Startup: ~500ms
 - Memory: ~100-150 MB
-- Image size: ~20-30 MB (prod, slim Alpine) / ~650-700 MB (dev with OCaml toolchain)
+- Image size: ~87 MB (prod, slim Alpine) / ~650-700 MB (dev with OCaml toolchain)
 
 #### Quick Start
 
@@ -400,7 +426,7 @@ The native image build takes several minutes (GraalVM compilation inside Docker)
 2. **Runtime Stage**: `alpine:3.21` — slim Alpine with only `libgmp` + `libffi`
 
 **Image sizes:**
-- Prod (`local/irmin-prod:3.11`): ~20-30 MB
+- Prod (`local/irmin-prod:3.11`): ~87 MB
 - Dev (`local/irmin-dev:3.11`): ~650-700 MB (full opam toolchain + irmin-git)
 
 See [ADR-026](ADR-026-container-image-strategy.md) for the container image strategy.
@@ -603,7 +629,7 @@ docker inspect --format='{{.State.Health.Status}}' irmin-graphql
 | Memory (idle) | 100-150 MB |
 | Write Latency | < 200ms |
 | Read Latency | < 100ms |
-| Image Size | ~650 MB (dev) / ~20-30 MB (prod) |
+| Image Size | ~650 MB (dev) / ~87 MB (prod) |
 
 ---
 

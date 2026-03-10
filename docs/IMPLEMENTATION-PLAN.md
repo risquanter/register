@@ -2776,7 +2776,7 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 | — | Split pane approach | Fixed proportions first | 2026-01-13 | CSS Flexbox, draggable later |
 | — | Session/auth | Workspace capability first | 2026-02-13 | Originally "skip entirely" (2026-01-13). Updated: workspace-key capability for free-tier; identity-based auth for enterprise. See DP-7. |
 | — | Irmin resilience | Service mesh (ADR-012) | 2026-01-17 | No app-level retries; Istio handles |
-| — | Irmin container images | Builder / Prod / Dev split (ADR-026) | 2026-01-17 | Prod ~20-30 MB (slim Alpine); Dev ~650 MB (full toolchain). See `containers/`. |
+| — | Irmin container images | Builder / Prod / Dev split (ADR-026) | 2026-01-17 | Prod ~87 MB (slim Alpine); Dev ~650 MB (full toolchain). See `containers/`. |
 | — | Repository selection | Config-driven (`repositoryType`) | 2026-01-20 | Default `in-memory`; `irmin` available |
 | DP-6 | Demo access model | Workspace capability (updated) | 2026-02-13 | `WorkspaceKey` (128-bit SecureRandom); workspace groups trees; TTL + reaper; replaces Phase X `ShareToken` model |
 | DP-7 | Layered authorization | Three layers, single codebase | 2026-02-13 | Layer 0: workspace capability (Tier 1.5). Layer 1: Keycloak + OPA (AUTHORIZATION-PLAN.md). Layer 2: SpiceDB (AUTHORIZATION-PLAN.md — selected, decision closed in L2.0). Config-driven mode switching. |

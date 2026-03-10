@@ -25,7 +25,7 @@ containers/
 │   └── Dockerfile.irmin-dev         # was: dev/Dockerfile.irmin
 └── prod/
     ├── Dockerfile.register-prod     # was: Dockerfile.native
-    └── Dockerfile.irmin-prod        # NEW — slim Alpine runtime (~20-30 MB)
+    └── Dockerfile.irmin-prod        # NEW — slim Alpine runtime (~87 MB)
 ```
 
 ### Image Names

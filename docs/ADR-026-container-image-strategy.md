@@ -105,7 +105,7 @@ ENTRYPOINT ["opam", "exec", "--", "irmin", "graphql"]
 ```
 
 ```dockerfile
-# GOOD: only the binary + minimal shared libs (~20-30 MB)
+# GOOD: only the binary + minimal shared libs (~87 MB)
 FROM local/irmin-builder:3.11 AS builder
 FROM alpine:3.21
 COPY --from=builder /home/opam/.opam/default/bin/irmin /usr/local/bin/irmin
