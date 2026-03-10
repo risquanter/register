@@ -10,16 +10,16 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPor
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.http.support.SttpClientFixture
 
-/** A17 config gate tests for `GET /risk-trees` (list-all endpoint).
-  *
-  * The unscoped `GET /risk-trees` endpoint is sealed by ADR-017 action item A17:
+/** The unscoped `GET /risk-trees` endpoint is sealed by ADR-017 action item A17:
   * it returns 403 Forbidden when `listAllTreesEnabled = false` (the production default)
   * and is only active when explicitly opted in via configuration.
   *
-  * These tests verify both branches of the config gate using in-memory servers
-  * with different `ApiConfig` settings, ensuring that:
-  *   - The default (deny) path returns 403 with an `AccessDenied` error body
-  *   - The enabled path returns 200 with a valid list of trees
+  * The deny suite uses `ApiConfig()` with no arguments — intentionally relying on the
+  * default field value — so that any change to that default will cause these tests to
+  * fail and block the build before reaching production.
+  *
+  * The allow suite uses `ApiConfig(listAllTreesEnabled = true)` to verify the gate can
+  * be opened for admin/debug use, and returns a valid list when enabled.
   *
   * Uses `HttpTestHarness.inMemoryServer` (no Docker/Irmin required).
   *
@@ -27,7 +27,7 @@ import com.risquanter.register.http.support.SttpClientFixture
   * @see RouteSecurityRegressionSpec (structural route checks)
   * @see ADR-017, ADR-021 §3
   */
-object A17ConfigGateSpec extends ZIOSpecDefault:
+object ConfigGateSpec extends ZIOSpecDefault:
 
   private def sampleRequest: RiskTreeDefinitionRequest =
     RiskTreeDefinitionRequest(
@@ -49,12 +49,16 @@ object A17ConfigGateSpec extends ZIOSpecDefault:
       )
     )
 
-  // ── Layer: default config (listAllTreesEnabled = false) ───────────
+  // ── Layer: default config — NO explicit ApiConfig override ───────
+  // Intentionally uses ApiConfig() with no arguments to prove the
+  // production default seals the endpoint.  If someone changes
+  // ApiConfig.listAllTreesEnabled's default to `true`, these tests
+  // will fail and block the build before it reaches production.
 
   private val deniedLayer =
     ZLayer.makeSome[Scope, SttpClientFixture.Client](
       HttpTestHarness.inMemoryServer(
-        HttpTestHarness.HarnessConfig(api = ApiConfig(listAllTreesEnabled = false))
+        HttpTestHarness.HarnessConfig(api = ApiConfig())
       ),
       SttpClientFixture.layer
     )
@@ -71,7 +75,7 @@ object A17ConfigGateSpec extends ZIOSpecDefault:
 
   override def spec = suite("A17 config gate — GET /risk-trees")(
 
-    suite("listAllTreesEnabled = false (production default)")(
+    suite("default ApiConfig seals the endpoint (listAllTreesEnabled must default to false)")(
       test("returns 403 Forbidden") {
         for
           client   <- ZIO.service[SttpClientFixture.Client]

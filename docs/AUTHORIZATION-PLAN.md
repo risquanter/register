@@ -1147,7 +1147,7 @@ _Regression gate:_
 - New test: for every workspace-scoped route, `serverLogic` compiles and all tests pass with `NoOp` layers
 - `HttpApiIntegrationSpec` updated to use workspace-scoped API only (`POST /workspaces` → `GET /w/{key}/risk-trees` → `GET /w/{key}/risk-trees/{treeId}/structure`); no unscoped tree endpoints exercised
 
-_Diff scope:_ `WorkspaceEndpoints.scala`, `SSEEndpoints.scala`, `WorkspaceController.scala`, `SSEController.scala`, `app/Main.scala`, `app/state/WorkspaceState.scala`, `app/state/TreeViewState.scala`, `app/state/LECChartState.scala`, `app/views/TreeBuilderView.scala`, `server-it/HttpApiIntegrationSpec.scala` — mechanical, no logic changes. Frontend files add `currentUserId` accessor (returns `None` in Layer 0; replaced by `AuthState` in L1.3).
+_Diff scope:_ `WorkspaceEndpoints.scala`, `SSEEndpoints.scala`, `WorkspaceController.scala`, `SSEController.scala`, `app/Main.scala`, `app/state/WorkspaceState.scala`, `app/state/TreeViewState.scala`, `app/state/LECChartState.scala`, `app/views/TreeBuilderView.scala`, `server-it/HttpApiIntegrationSpec.scala`, `server-it/A17ConfigGateSpec.scala`, `server-it/HttpTestHarness.scala` — mechanical, no logic changes. Frontend files add `currentUserId` accessor (returns `None` in Layer 0; replaced by `AuthState` in L1.3). `HarnessConfig` gains `api: ApiConfig` field for config-gate test parameterization.
 
 ---
 

@@ -1593,12 +1593,12 @@ These are currently verified indirectly (unit tests on `ErrorResponse.encode`, `
 
 **Approach:** Use the existing `server-it` module's `HttpTestHarness` (random-port test server) to add HTTP-level assertions:
 
-| Test | Asserts |
-|------|---------|
-| `GET /risk-trees` with gate=false | 403 Forbidden, body matches `ErrorResponse` |
-| `DELETE /w/{key}` cascade | 204 No Content; subsequent `GET /w/{key}/risk-trees` → 404 |
-| Expired workspace → 404 | Same status + body as non-existent workspace |
-| Cross-workspace tree access → 404 | Tree exists but wrong workspace key → 404 |
+| Test | Asserts | Status |
+|------|---------|--------|
+| `GET /risk-trees` with gate=false | 403 Forbidden, body matches `ErrorResponse` | ✅ `A17ConfigGateSpec` |
+| `DELETE /w/{key}` cascade | 204 No Content; subsequent `GET /w/{key}/risk-trees` → 404 | ⬜ |
+| Expired workspace → 404 | Same status + body as non-existent workspace | ⬜ |
+| Cross-workspace tree access → 404 | Tree exists but wrong workspace key → 404 | ⬜ |
 
 **Priority:** Low — the unit tests cover the logic. This is a defence-in-depth measure.
 Implement opportunistically when adding `WorkspaceController` HTTP wiring in W.3.

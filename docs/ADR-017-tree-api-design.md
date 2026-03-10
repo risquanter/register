@@ -10,11 +10,11 @@
 
 ## 1. Context
 
-- Risk trees grow large; **full resubmission** becomes impractical and error-prone
-- Current DTOs mix client and server concerns (IDs present/absent ambiguity)
-- **Create** semantics differ from **update** semantics (server-generated vs client-referenced IDs)
-- Structural constraints (single root, no cycles, leaves can't be parents) need compile-time or validation-time enforcement
-- Future requirements: undo/redo, collaborative editing, WebSocket sync
+- Risk trees grow large; transmitting the full structure on every write becomes bloated, bandwidth-intensive, and error-prone
+- A single DTO shape that serves both create and update operations creates ambiguity: IDs are absent on creation (server-assigned) but required on update (client-referenced), so a unified structure forces nullable fields whose intent is unclear at the call site
+- **Create** semantics differ fundamentally from **update** semantics — the server generates stable identifiers on creation, while updates must reference those identifiers for precise targeting
+- Structural constraints (single root, no cycles, leaves cannot be parents) are best enforced through schema shape rather than runtime validation alone
+- Anticipated requirements — undo/redo, collaborative editing, WebSocket sync — call for an operation model that is serialisable and invertible from the outset
 
 ## 2. Decision
 
