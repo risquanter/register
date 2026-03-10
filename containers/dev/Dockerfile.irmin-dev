@@ -1,12 +1,16 @@
 # ============================================================================
 # Irmin GraphQL Server - Development Image (Alpine)
 # ============================================================================
-# This is a development image with full toolchain for debugging.
-# For production, this will be converted to a multi-stage distroless build.
+# Full opam toolchain for local debugging. Includes irmin-git for
+# inspecting data with git CLI. Self-contained — does NOT depend on
+# the irmin-builder base image.
 #
-# Build:   docker build -f dev/Dockerfile.irmin -t local/irmin:3.11 dev/
-#          (Use the tag docker-compose.yml expects — takes 15-40 min first run)
-# Run:     docker run -p 8080:8080 -v irmin-data:/data local/irmin:3.11
+# For production, use containers/prod/Dockerfile.irmin-prod (slim Alpine,
+# no toolchain, FROM local/irmin-builder:3.11).
+#
+# Build:   docker build -f containers/dev/Dockerfile.irmin-dev -t local/irmin-dev:3.11 .
+#          (Takes 15-40 min first run; cached thereafter)
+# Run:     docker run -p 8080:8080 -v irmin-data:/data local/irmin-dev:3.11
 # ============================================================================
 
 FROM ocaml/opam:alpine-ocaml-5.2
@@ -16,7 +20,7 @@ LABEL description="Irmin GraphQL server for development"
 LABEL version="dev"
 
 # ============================================================================
-# Build Stage (will become separate stage in distroless version)
+# Build + Runtime (self-contained dev image)
 # ============================================================================
 
 USER root

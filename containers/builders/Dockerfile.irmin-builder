@@ -1,0 +1,50 @@
+# ============================================================================
+# Irmin Builder Base Image (opam + irmin packages)
+# ============================================================================
+# Pre-built toolchain image containing the compiled irmin binary.
+# Consumed by: containers/prod/Dockerfile.irmin-prod
+# Rebuild only when Irmin or OCaml versions change.
+#
+# Build:  docker build -f containers/builders/Dockerfile.irmin-builder \
+#           -t local/irmin-builder:3.11 containers/builders/
+#         (Takes 15-40 min first run; cached thereafter)
+#
+# This image is a named tagged image — it survives `docker builder prune`
+# and `docker image prune`. Only `docker rmi local/irmin-builder:3.11`
+# removes it. This ensures prod image rebuilds are fast (<10s) even after
+# purging deployed images.
+# ============================================================================
+
+FROM ocaml/opam:alpine-ocaml-5.2
+
+LABEL maintainer="risquanter"
+LABEL description="Irmin opam builder base — toolchain + compiled packages"
+
+USER root
+
+# Install system dependencies required by Irmin/OCaml packages
+RUN apk add --no-cache \
+    gmp-dev \
+    libffi-dev
+
+USER opam
+WORKDIR /home/opam
+
+# Update opam repository
+RUN opam update
+
+# Install Irmin with GraphQL support (production packages only)
+# - irmin-cli: Command-line interface with `irmin graphql` command
+# - irmin-graphql: GraphQL server implementation (queries, mutations, subscriptions)
+# - irmin-pack: Optimized on-disk content-addressed storage backend
+#
+# Note: irmin-git is NOT installed here — it's only in the dev image
+# (containers/dev/Dockerfile.irmin-dev) for debugging with git CLI.
+RUN opam install -y \
+    irmin-cli \
+    irmin-graphql \
+    irmin-pack
+
+# Verify installation and record binary location
+RUN opam exec -- irmin --version && \
+    echo "Binary: $(opam var bin)/irmin"

@@ -1,5 +1,12 @@
 # GraalVM Native Image on Distroless Migration
 
+> **Note (ADR-026):** Dockerfiles have been reorganised under `containers/`.
+> `Dockerfile.native` → `containers/prod/Dockerfile.register-prod`;
+> `Dockerfile` (JVM) → `containers/dev/Dockerfile.register-dev`;
+> `dev/Dockerfile.graalvm-builder` → `containers/builders/Dockerfile.graalvm-builder`.
+> Path references below are historical and reflect names at the time each step
+> was executed.
+
 ## Migration Tracking Document
 
 **Goal:** Migrate from JVM-based Docker image to GraalVM native binary on distroless base image.
@@ -562,9 +569,9 @@ _This section documents approaches that were tried but did not work, to prevent 
 
 If migration fails and rollback is needed:
 
-1. Revert `Dockerfile.native` changes
-2. Use existing `Dockerfile` (JVM-based)
-3. `docker-compose.yml` already uses `Dockerfile` by default
+1. Revert `containers/prod/Dockerfile.register-prod` changes
+2. Use existing `containers/dev/Dockerfile.register-dev` (JVM-based)
+3. `docker-compose.yml` already uses `containers/dev/Dockerfile.register-dev` for dev profile
 
 ---
 

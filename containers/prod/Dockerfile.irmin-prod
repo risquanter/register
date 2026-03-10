@@ -1,0 +1,71 @@
+# ============================================================================
+# Irmin GraphQL Server - Production Image (slim Alpine)
+# ============================================================================
+# Multi-stage build: copies the pre-compiled irmin binary from the builder
+# base image into a minimal Alpine runtime. No opam, no compiler, no git.
+#
+# Requires builder base (one-time):
+#   docker build -f containers/builders/Dockerfile.irmin-builder \
+#     -t local/irmin-builder:3.11 containers/builders/
+#
+# Build:   docker compose build irmin
+#   or:    docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11 .
+# Run:     docker run -p 8080:8080 -v irmin-data:/data local/irmin-prod:3.11
+# ============================================================================
+
+# Stage 1: Reference the pre-built builder base
+FROM local/irmin-builder:3.11 AS builder
+
+# Stage 2: Minimal Alpine runtime ("distroless in spirit")
+FROM alpine:3.21
+
+LABEL maintainer="risquanter"
+LABEL description="Irmin GraphQL server — production (slim)"
+LABEL version="3.11"
+
+# Install only the shared libraries the irmin binary links against.
+# gmp: GNU Multiple Precision Arithmetic (required by irmin-pack)
+# libffi: Foreign Function Interface (required by ctypes/OCaml FFI)
+# No compiler, no opam, no git, no shell-heavy tooling.
+RUN apk add --no-cache \
+    libgmp \
+    libffi
+
+# Copy the compiled irmin binary from the builder base
+COPY --from=builder /home/opam/.opam/default/bin/irmin /usr/local/bin/irmin
+
+# Verify the binary runs (catches missing shared libs at build time, not deploy time)
+RUN irmin --version
+
+# Create non-root user matching the register-server convention (UID 65532)
+RUN addgroup -g 65532 -S irmin && \
+    adduser -u 65532 -S -G irmin -h /nonexistent -s /sbin/nologin irmin
+
+# Create data directory (PVC mount point — the only writable path)
+RUN mkdir -p /data && chown irmin:irmin /data
+
+# Switch to non-root user
+USER 65532
+
+WORKDIR /data
+
+# Expose GraphQL port
+EXPOSE 8080
+
+# Health check using wget (Alpine provides busybox wget)
+# Note: Using 127.0.0.1 instead of localhost to ensure IPv4
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD wget -q -O - --post-data='{"query":"{ __typename }"}' \
+        --header='Content-Type: application/json' \
+        http://127.0.0.1:8080/graphql | grep -q data || exit 1
+
+# ============================================================================
+# Entrypoint — direct binary invocation (no opam exec wrapper)
+# ============================================================================
+# --root: Data directory (persistent via PVC / Docker volume)
+# --port: GraphQL server port
+# --address: Bind to all interfaces for container access
+# Default backend is irmin-pack (content-addressed on-disk storage)
+
+ENTRYPOINT ["/usr/local/bin/irmin", "graphql"]
+CMD ["--port", "8080", "--address", "0.0.0.0", "--root", "/data"]

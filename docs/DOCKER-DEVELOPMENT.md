@@ -18,21 +18,28 @@ This guide covers containerization, deployment, and development environment setu
 ## Quick Start
 
 
-#### One-Time Setup: Irmin Image
+#### One-Time Setup: Irmin Builder Base Image
 
-`local/irmin:3.11` is not pushed to any registry — it must be built locally
-before starting the `persistence` profile for the first time:
+`local/irmin-builder:3.11` is not pushed to any registry — it must be built
+locally before building the Irmin production image for the first time:
 
 ```bash
-docker build -f dev/Dockerfile.irmin -t local/irmin:3.11 dev/
+docker build -f containers/builders/Dockerfile.irmin-builder \
+  -t local/irmin-builder:3.11 containers/builders/
 ```
 
 > **Note:** This build installs the OCaml toolchain and compiles several opam
-> packages from source. Expect **15–40 minutes** on a first run. Subsequent
-> builds use the Docker layer cache and are much faster unless `dev/Dockerfile.irmin`
-> changes.
+> packages from source. Expect **15–40 minutes** on a first run. The resulting
+> image is a named tagged image that survives `docker builder prune`.
 
-Rebuild only when `dev/Dockerfile.irmin` changes (e.g. an Irmin version bump).
+Rebuild only when Irmin or OCaml versions change.
+
+For local development/debugging, a separate dev image with full toolchain is
+available:
+
+```bash
+docker build -f containers/dev/Dockerfile.irmin-dev -t local/irmin-dev:3.11 .
+```
 
 ### Start / Run Modes
 
@@ -99,8 +106,8 @@ The native image build uses a **two-layer strategy** to minimise rebuild times:
 
 1. **Pre-built builder base image** (`local/graalvm-builder:21`) — contains
    GraalVM, native-image, OS packages, and sbt. Built once from
-   `dev/Dockerfile.graalvm-builder`. Rebuild only when GraalVM or sbt versions
-   change.
+   `containers/builders/Dockerfile.graalvm-builder`. Rebuild only when GraalVM
+   or sbt versions change.
 2. **Dependency layer** — resolves sbt dependencies from `build.sbt` and
    `project/`. Cached as long as build definitions don't change.
 3. **Source layer** — compiles application code and produces the native binary.
@@ -115,11 +122,12 @@ Before the first native-image build (or after bumping GraalVM/sbt versions),
 build the toolchain image:
 
 ```bash
-docker build -f dev/Dockerfile.graalvm-builder -t local/graalvm-builder:21 dev/
+docker build -f containers/builders/Dockerfile.graalvm-builder \
+  -t local/graalvm-builder:21 containers/builders/
 ```
 
 This takes ~1–2 minutes and only needs to be repeated when:
-- GraalVM version changes (update the `FROM` in `dev/Dockerfile.graalvm-builder`)
+- GraalVM version changes (update the `FROM` in `containers/builders/Dockerfile.graalvm-builder`)
 - sbt version changes (update `SBT_VERSION` arg to match `project/build.properties`)
 
 #### Build Options
@@ -138,11 +146,11 @@ docker compose up --build register-server -d
 #### Standalone Docker
 
 ```bash
-# Build
-docker build -t register-server:latest .
+# Build prod image
+docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod .
 
 # Run
-docker run -p 8090:8090 --name register-server register-server:latest
+docker run -p 8090:8090 --name register-server register-server:prod
 ```
 
 ---
@@ -156,10 +164,10 @@ Irmin is a versioned key-value store with Git-like semantics. It provides conten
 **GraphiQL UI:** `http://localhost:9080/graphql` (GET in browser)  
 **Schema:** `dev/irmin-schema.graphql`
 
-**Performance:**
+**Performance (prod image):**
 - Startup: ~500ms
 - Memory: ~100-150 MB
-- Image size: ~650-700 MB (dev with OCaml toolchain)
+- Image size: ~20-30 MB (prod, slim Alpine) / ~650-700 MB (dev with OCaml toolchain)
 
 #### Quick Start
 
@@ -388,13 +396,14 @@ The native image build takes several minutes (GraalVM compilation inside Docker)
 
 ### Multi-Stage Build (Irmin Server)
 
-1. **Builder Stage**: `ocaml/opam:alpine-ocaml-5.2` - compiles OCaml packages
-2. **Runtime Stage**: `alpine:3.21` - runs Irmin server
+1. **Builder Base**: `local/irmin-builder:3.11` — pre-compiled opam packages (one-time build)
+2. **Runtime Stage**: `alpine:3.21` — slim Alpine with only `libgmp` + `libffi`
 
-**Future Migration:**
-- Structured for distroless runtime
-- Will reduce from ~700 MB to ~100-150 MB
-- Static linking with musl libc prepared
+**Image sizes:**
+- Prod (`local/irmin-prod:3.11`): ~20-30 MB
+- Dev (`local/irmin-dev:3.11`): ~650-700 MB (full opam toolchain + irmin-git)
+
+See [ADR-026](ADR-026-container-image-strategy.md) for the container image strategy.
 
 ---
 
@@ -455,10 +464,10 @@ services:
 
 ```bash
 # Scan for vulnerabilities
-docker scan register-server:latest
+docker scan register-server:prod
 
 # Or use Trivy
-trivy image register-server:latest
+trivy image register-server:prod
 ```
 
 ---
@@ -594,7 +603,7 @@ docker inspect --format='{{.State.Health.Status}}' irmin-graphql
 | Memory (idle) | 100-150 MB |
 | Write Latency | < 200ms |
 | Read Latency | < 100ms |
-| Image Size | ~650 MB (dev) |
+| Image Size | ~650 MB (dev) / ~20-30 MB (prod) |
 
 ---
 
@@ -619,7 +628,7 @@ docker exec -it register-server /bin/sh
 docker exec register-server id 2>/dev/null || echo "Cannot exec (distroless)"
 
 # Scan for CVEs
-trivy image register-server:latest
+trivy image register-server:prod
 ```
 
 ---
@@ -628,6 +637,7 @@ trivy image register-server:latest
 
 - [Testing Guide](test/TESTING.md) - Comprehensive test procedures
 - [ADR-012: Service Mesh Strategy](ADR-012.md)
+- [ADR-026: Container Image Strategy](ADR-026-container-image-strategy.md)
 - [Implementation Plan](IMPLEMENTATION-PLAN-PROPOSALS.md)
 - [Authorization Plan](AUTHORIZATION-PLAN.md)
 

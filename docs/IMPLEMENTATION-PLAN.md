@@ -298,7 +298,7 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| `dev/Dockerfile.irmin` | ✅ | Alpine dev image, port 9080 |
+| `containers/dev/Dockerfile.irmin-dev` | ✅ | Alpine dev image, port 9080 (see also `containers/prod/Dockerfile.irmin-prod`) |
 | `docker-compose.yml` (Irmin service) | ✅ | `--profile persistence` |
 | `dev/irmin-schema.graphql` | ✅ | 180 lines, extracted schema |
 | `IrminConfig` | ✅ | `SafeUrl`, timeout, health check |
@@ -2116,7 +2116,7 @@ Tier 2 connects Irmin watch notifications to cache invalidation and SSE broadcas
 | Phase | Description | Status |
 |-------|-------------|--------|
 | Error Domain Model | `SimulationError` extended with `IrminUnavailable`, `NetworkTimeout`, `VersionConflict`, `MergeConflict` | ✅ Complete |
-| Irmin Dev Environment | `dev/Dockerfile.irmin`, docker-compose, schema extraction | ✅ Complete |
+| Irmin Dev Environment | `containers/dev/Dockerfile.irmin-dev`, `containers/prod/Dockerfile.irmin-prod`, docker-compose, schema extraction | ✅ Complete |
 | Irmin GraphQL Client | `IrminClient` with get/set/remove/list/branches/healthCheck | ✅ Complete |
 | Tree Index & Cache | `TreeIndex`, `RiskResultCache`, `TreeCacheManager`, `TreeIndexService` | ✅ Complete |
 | SSE Infrastructure | `SSEHub`, `SSEEndpoints`, `SSEController`, heartbeat, event types | ✅ Complete |
@@ -2776,7 +2776,7 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 | — | Split pane approach | Fixed proportions first | 2026-01-13 | CSS Flexbox, draggable later |
 | — | Session/auth | Workspace capability first | 2026-02-13 | Originally "skip entirely" (2026-01-13). Updated: workspace-key capability for free-tier; identity-based auth for enterprise. See DP-7. |
 | — | Irmin resilience | Service mesh (ADR-012) | 2026-01-17 | No app-level retries; Istio handles |
-| — | Irmin dev image | Alpine (distroless deferred) | 2026-01-17 | ~650 MB dev image; <50 MB target for prod |
+| — | Irmin container images | Builder / Prod / Dev split (ADR-026) | 2026-01-17 | Prod ~20-30 MB (slim Alpine); Dev ~650 MB (full toolchain). See `containers/`. |
 | — | Repository selection | Config-driven (`repositoryType`) | 2026-01-20 | Default `in-memory`; `irmin` available |
 | DP-6 | Demo access model | Workspace capability (updated) | 2026-02-13 | `WorkspaceKey` (128-bit SecureRandom); workspace groups trees; TTL + reaper; replaces Phase X `ShareToken` model |
 | DP-7 | Layered authorization | Three layers, single codebase | 2026-02-13 | Layer 0: workspace capability (Tier 1.5). Layer 1: Keycloak + OPA (AUTHORIZATION-PLAN.md). Layer 2: SpiceDB (AUTHORIZATION-PLAN.md — selected, decision closed in L2.0). Config-driven mode switching. |

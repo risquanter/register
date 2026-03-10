@@ -1,5 +1,6 @@
 # Stage 1: Build native image with GraalVM
-# Requires: docker build -f dev/Dockerfile.graalvm-builder -t local/graalvm-builder:21 dev/
+# Requires: docker build -f containers/builders/Dockerfile.graalvm-builder \
+#             -t local/graalvm-builder:21 containers/builders/
 FROM local/graalvm-builder:21 AS builder
 
 WORKDIR /app
