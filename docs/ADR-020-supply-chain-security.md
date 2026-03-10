@@ -8,10 +8,10 @@
 
 ## Context
 
-- The frontend depends on npm packages (Vite, Scala.js plugin, Geist font) — **142 transitive packages** total
+- The frontend depends on npm packages (Vite, Scala.js plugin, Geist font); the transitive dependency tree grows with each direct dependency added
 - npm's default behaviour runs arbitrary install scripts (`postinstall`, `preinstall`) from any package in the dependency tree
 - Supply chain attacks via install scripts are a proven vector (event-stream 2018, ua-parser-js 2021, Shai-Hulud worm 2025)
-- Our dependency count is small (3 direct) but each carries a transitive tree that changes on `npm install`
+- Keeping direct dependencies minimal reduces attack surface, but each direct dependency still carries a transitive tree that changes on every `npm install`
 - SemVer range specifiers (`^`, `~`) allow silent version drift — a compromised patch release installs automatically
 
 ---

@@ -12,8 +12,8 @@
 - Secrets (API keys, tokens, infrastructure credentials) must never appear in logs, serialised responses, or error messages
 - The JVM `String` type is **hostile to secrets**: immutable, interned, persists in heap until GC
 - Leakage vectors: `toString`, JSON serialisation, string interpolation, `getMessage`, stack traces, heap dumps
-- `WorkspaceKey` is the only credential that lives in application code today — it is a `case class` whose auto-generated `toString` prints the full 128-bit capability token
-- Current defence (A25/A26): `ErrorResponse.encode` sanitises at the HTTP boundary — effective but **convention-enforced**, not **type-enforced**
+- Any credential type that traverses application code must make leakage **structurally impossible** — auto-generated `toString`, `copy`, and `unapply` on a `case class` silently defeat this requirement regardless of review discipline
+- Convention-enforced sanitisation at the HTTP boundary (scrubbing before serialisation) is insufficient: a new `AppError` subtype added without a corresponding sanitisation clause bypasses the defence entirely, and no compiler or linter catches the omission
 - OWASP Top Ten 2025 A10 (Mishandling of Exceptional Conditions) and CWE-209 (Information Exposure Through Error Messages) apply directly
 
 ### Scope — What This ADR Covers (and What It Doesn't)

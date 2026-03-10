@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** 2026-01-27  
-**Context:** Redesign of risk tree creation and update APIs with name-based topology, ULID identification, and separated DTOs.
+**Tags:** api-design, rest, dto, ulid, risk-trees
 
 ---
 

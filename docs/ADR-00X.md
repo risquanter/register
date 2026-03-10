@@ -17,7 +17,7 @@ This meta-ADR defines the structure, style, and content depth for all ADRs.
 ```markdown
 # ADR-NNN: [Concise Decision Title]
 
-**Status:** [Proposed | Accepted | Deprecated | Superseded by ADR-XXX]  
+**Status:** [Proposed | Accepted | Accepted (awaiting implementation)| Deprecated | Superseded by ADR-XXX]  
 **Date:** YYYY-MM-DD  
 **Tags:** [3-5 relevant tags]
 ```
@@ -25,6 +25,15 @@ This meta-ADR defines the structure, style, and content depth for all ADRs.
 ### Context (3-5 bullet points)
 **Purpose:** Establish the problem space and constraints.  
 **Style:** Bullet points, not paragraphs. Each point states a core principle or constraint.
+
+**Phrasing:** Describe the inherent trade-offs and constraints that make the problem exist — not the state of any prior or existing implementation. Context must remain valid regardless of what code came before or after.
+
+- ❌ `Current DTOs mix client and server concerns` — describes an implementation snapshot
+- ❌ `The existing approach requires full resubmission` — describes prior code
+- ✅ `A single DTO shape that serves both create and update creates nullable-field ambiguity` — states the principle
+- ✅ `Transmitting full structures on every write is bandwidth-intensive and error-prone` — states the trade-off
+
+Avoid: *current*, *existing*, *previously*, *old approach*, *the old X*. Express the underlying quality attribute or constraint instead.
 
 **Example (from ADR-001):**
 ```markdown
@@ -144,6 +153,7 @@ def computeLEC(nTrials: PositiveInt, depth: NonNegativeInt) = {
 - **Bullets over paragraphs** - Easy scanning
 - **Concrete over abstract** - Use actual types from codebase
 - **Prescriptive over descriptive** - State what to do, not why it's better
+- **Timeless over historical** - Context states enduring constraints, not implementation snapshots; never reference "current", "existing", or "old" code states
 
 ---
 
