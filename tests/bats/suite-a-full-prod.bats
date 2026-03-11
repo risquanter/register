@@ -13,12 +13,6 @@
 # Run:     bats tests/bats/suite-a-full-prod.bats
 # Prereq:  Images built: register-server:prod, local/frontend:dev,
 #          local/irmin-prod:3.11 (and local/irmin-builder:3.11)
-#
-# KNOWN ISSUE: This suite currently fails at startup because IrminConfig's
-# ZIO DeriveConfig applies the SafeUrl validator to ALL string fields
-# (including 'branch'), causing: "URL 'main' is invalid". The server crashes
-# before binding its port. Fix required in IrminConfig.scala — provide an
-# explicit Config descriptor instead of relying on Magnolia derivation.
 # ============================================================================
 
 # Irmin host port — matches docker-compose.yml: "9080:8080"
