@@ -1,0 +1,240 @@
+# ============================================================================
+# Frontend SPA — Production Image
+# ============================================================================
+# Multi-stage build:
+#   Stage 1 (builder): node:22-alpine + OpenJDK 21 + sbt
+#                      → sbt compiles Scala.js (app/fullLinkJS)
+#                      → vite bundles SPA assets → modules/app/dist/
+#   Stage 2 (runtime): nginx:1.27-alpine-slim, uid 101, port 8080
+#                      nginx.conf baked in — no runtime ConfigMap dependency
+#
+# Implements ADR-INFRA-007: nginx SPA file server + Accept-header router.
+#
+# Upstream resolver:
+#   nginx resolves proxy_pass upstreams using a runtime-extracted DNS address
+#   from /etc/resolv.conf. In Kubernetes, kubelet populates /etc/resolv.conf
+#   with the CoreDNS ClusterIP; in Docker the host DNS is used. This avoids
+#   a build-time assumption about the cluster DNS IP while keeping the config
+#   baked into the image (no ConfigMap required).
+#
+# Build:  docker build -f containers/prod/Dockerfile.frontend-prod \
+#           -t local/frontend:dev .
+# Run:    docker run --rm -p 18080:8080 local/frontend:dev
+# Test:   curl -s http://localhost:18080/ | grep -q '<html' && echo OK
+# ============================================================================
+
+# ============================================================================
+# Stage 1: Build — Scala.js compilation (sbt) + asset bundling (Vite)
+# ============================================================================
+FROM node:22-alpine AS builder
+
+# OpenJDK 21 is required by sbt / Scala.js compiler
+RUN apk add --no-cache openjdk21-jdk wget bash
+
+# Install sbt — must match project/build.properties exactly.
+# wget over curl: consistent with graalvm-builder convention in this repo.
+ARG SBT_VERSION=1.12.0-RC1
+RUN wget -q "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" \
+        -O /tmp/sbt.tgz && \
+    tar -xzf /tmp/sbt.tgz -C /opt && \
+    ln -s /opt/sbt/bin/sbt /usr/local/bin/sbt && \
+    rm /tmp/sbt.tgz
+
+WORKDIR /app
+
+# --------------------------------------------------------------------------
+# Dependency layer — sbt resolution (cached unless build.sbt / project/ change)
+# Matches the pattern in containers/prod/Dockerfile.register-prod.
+# app/update resolves app + common.js (app.dependsOn(common.js)).
+# --------------------------------------------------------------------------
+COPY build.sbt build.sbt
+COPY project/ project/
+RUN sbt "app/update; commonJS/update"
+
+# --------------------------------------------------------------------------
+# npm dependency layer (cached unless package.json changes)
+# .npmrc enforces ignore-scripts=true and save-exact=true (ADR-020).
+# No package-lock.json in repo → npm install; --ignore-scripts is belt-
+# and-suspenders in addition to the .npmrc setting.
+# --------------------------------------------------------------------------
+COPY modules/app/package.json modules/app/package.json
+COPY modules/app/.npmrc       modules/app/.npmrc
+RUN cd modules/app && npm install --ignore-scripts
+
+# --------------------------------------------------------------------------
+# Source layer — compile and bundle
+# vite build invokes sbt app/fullLinkJS internally via the
+# @scala-js/vite-plugin-scalajs plugin (cwd: '../..' points to build.sbt).
+# Output: modules/app/dist/
+# --------------------------------------------------------------------------
+COPY modules/common/src/main/ modules/common/src/main/
+COPY modules/app/src/main/    modules/app/src/main/
+COPY modules/app/styles/      modules/app/styles/
+COPY modules/app/index.html   modules/app/index.html
+COPY modules/app/main.js      modules/app/main.js
+COPY modules/app/vite.config.js modules/app/vite.config.js
+
+RUN cd modules/app && npm run build
+
+# ============================================================================
+# Stage 2: Runtime — nginx serving static assets
+# ============================================================================
+FROM nginx:1.27-alpine-slim
+
+LABEL maintainer="risquanter"
+LABEL description="Risk Register SPA — nginx frontend (production)"
+
+# Copy built SPA assets from builder stage
+COPY --from=builder /app/modules/app/dist/ /srv/app/
+
+# --------------------------------------------------------------------------
+# nginx.conf template (baked in — no ConfigMap dependency, ADR-INFRA-007 §4)
+#
+# Written as a template with __RESOLVER__ substituted at container startup
+# by the entrypoint script below. The resolver comes from /etc/resolv.conf,
+# which Docker and Kubernetes both populate correctly:
+#   Docker:     host DNS or embedded Docker DNS (127.0.0.11)
+#   Kubernetes: CoreDNS ClusterIP (set by kubelet in pod /etc/resolv.conf)
+#
+# proxy_pass uses variables (set $backend ...) so nginx defers DNS lookup to
+# request time and does NOT fail at startup if the backend is unavailable.
+#
+# Routing rules (ADR-INFRA-007 §Decision 1):
+#   *.js|css|woff2|svg|png|ico  → static, Cache-Control: public immutable 1y
+#   /w/*  + Accept: application/json → proxy to register-server:8090
+#   /w/*  + Accept: text/html        → try_files → index.html (SPA shell)
+#   /workspaces, /health, /docs      → proxy unconditionally
+#   / and everything else            → try_files → index.html (SPA fallback)
+#
+# Security headers:
+#   X-Content-Type-Options: nosniff only on nginx-generated responses
+#   (static assets + SPA fallback). NOT on proxied responses — the backend
+#   sets X-Frame-Options, HSTS, CSP, Referrer-Policy itself.
+# --------------------------------------------------------------------------
+RUN cat <<'EOF' > /etc/nginx/nginx.conf.template
+pid /tmp/nginx.pid;
+worker_processes auto;
+error_log /dev/stderr warn;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include       /etc/nginx/mime.types;
+    default_type  application/octet-stream;
+    access_log    /dev/stdout;
+    sendfile      on;
+
+    # Resolver is injected at startup from /etc/resolv.conf.
+    # Using set $backend + proxy_pass $backend defers DNS lookup to request
+    # time so nginx starts successfully even when the backend is unavailable.
+    resolver __RESOLVER__ valid=30s ipv6=off;
+
+    # Worker temp paths writable by nginx user (uid 101) without root.
+    client_body_temp_path /tmp/nginx-client-body;
+    proxy_temp_path       /tmp/nginx-proxy;
+    fastcgi_temp_path     /tmp/nginx-fastcgi;
+    uwsgi_temp_path       /tmp/nginx-uwsgi;
+    scgi_temp_path        /tmp/nginx-scgi;
+
+    server {
+        listen      8080;
+        server_name _;
+        root        /srv/app;
+
+        # ----------------------------------------------------------------
+        # Static assets — longest-prefix regex wins over location / below.
+        # Cache-Control and X-Content-Type-Options on nginx-generated responses.
+        # ----------------------------------------------------------------
+        location ~* \.(js|css|woff2|svg|png|ico)$ {
+            add_header Cache-Control "public, immutable, max-age=31536000";
+            add_header X-Content-Type-Options nosniff;
+            try_files $uri =404;
+        }
+
+        # ----------------------------------------------------------------
+        # /w/* — dual-purpose capability URL path (ADR-021, ADR-INFRA-007).
+        # Fetch/XHR from SPA carries Accept: application/json → proxy.
+        # Browser navigation carries Accept: text/html → SPA shell.
+        # ----------------------------------------------------------------
+        location /w/ {
+            if ($http_accept ~* "application/json") {
+                set $backend "http://register.register.svc.cluster.local:8090";
+                proxy_pass $backend;
+                break;
+            }
+            # Browser navigation — nginx generates this response.
+            add_header X-Content-Type-Options nosniff;
+            try_files $uri /index.html;
+        }
+
+        # ----------------------------------------------------------------
+        # API endpoints — unconditionally proxied.
+        # Backend sets its own security and cache headers; add none here.
+        # ----------------------------------------------------------------
+        location /workspaces {
+            set $backend "http://register.register.svc.cluster.local:8090";
+            proxy_pass $backend;
+        }
+        location /health {
+            set $backend "http://register.register.svc.cluster.local:8090";
+            proxy_pass $backend;
+        }
+        location /docs {
+            set $backend "http://register.register.svc.cluster.local:8090";
+            proxy_pass $backend;
+        }
+
+        # ----------------------------------------------------------------
+        # Everything else — SPA fallback. nginx generates this response.
+        # ----------------------------------------------------------------
+        location / {
+            add_header X-Content-Type-Options nosniff;
+            try_files $uri /index.html;
+        }
+    }
+}
+EOF
+
+# --------------------------------------------------------------------------
+# Startup entrypoint — injects the DNS resolver and generates /tmp/nginx.conf.
+# Runs as uid 101; writes to /tmp (world-writable).
+# --------------------------------------------------------------------------
+RUN cat <<'EOF' > /usr/local/bin/docker-entrypoint-frontend.sh
+#!/bin/sh
+set -e
+
+# Extract the first nameserver from /etc/resolv.conf:
+#   Docker:     embedded DNS (127.0.0.11) or the host's configured DNS
+#   Kubernetes: CoreDNS ClusterIP (kubelet writes pod /etc/resolv.conf)
+RESOLVER=$(grep -m1 '^nameserver' /etc/resolv.conf | awk '{print $2}')
+RESOLVER=${RESOLVER:-127.0.0.11}
+
+# Generate /tmp/nginx.conf from the baked-in template.
+# /tmp is writable by uid 101; /etc/nginx/ is read-only at runtime.
+sed "s/__RESOLVER__/${RESOLVER}/g" /etc/nginx/nginx.conf.template > /tmp/nginx.conf
+
+exec nginx -c /tmp/nginx.conf -g "daemon off;"
+EOF
+RUN chmod +x /usr/local/bin/docker-entrypoint-frontend.sh
+
+# Create writable temp directories for nginx worker processes (during build,
+# still root; nginx user can write to /tmp after switching).
+RUN mkdir -p \
+        /tmp/nginx-client-body \
+        /tmp/nginx-proxy \
+        /tmp/nginx-fastcgi \
+        /tmp/nginx-uwsgi \
+        /tmp/nginx-scgi && \
+    chown -R nginx:nginx /tmp/nginx-*
+
+# Run as nginx user (uid 101) — non-privileged port, no new privileges
+USER 101
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=3s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint-frontend.sh"]

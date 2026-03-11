@@ -7,6 +7,15 @@
 !modules/common/src/main/
 !modules/server/src/main/
 
+# Frontend (SPA) build sources — Dockerfile.frontend-prod
+!modules/app/package.json
+!modules/app/.npmrc
+!modules/app/src/main/
+!modules/app/styles/
+!modules/app/index.html
+!modules/app/main.js
+!modules/app/vite.config.js
+
 # Exclude nested build artifacts even from allowed dirs
 project/target/
 project/project/target/
