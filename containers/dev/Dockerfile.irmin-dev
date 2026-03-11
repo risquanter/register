@@ -13,7 +13,8 @@
 # Run:     docker run -p 8080:8080 -v irmin-data:/data local/irmin-dev:3.11
 # ============================================================================
 
-FROM ocaml/opam:alpine-ocaml-5.2
+# alpine-3.21-ocaml-5.2 pins both the Alpine and OCaml minor versions (ADR-020 §1).
+FROM ocaml/opam:alpine-3.21-ocaml-5.2
 
 LABEL maintainer="risquanter"
 LABEL description="Irmin GraphQL server for development"
@@ -36,16 +37,17 @@ WORKDIR /home/opam
 # Update opam repository
 RUN opam update
 
-# Install Irmin with GraphQL support
-# - irmin-cli: Command-line interface with `irmin graphql` command
+# Install Irmin with GraphQL support.
+# Versions EXPLICITLY PINNED — matches containers/builders/Dockerfile.irmin-builder (ADR-020 §1).
+# - irmin-cli:     Command-line interface with `irmin graphql` command
 # - irmin-graphql: GraphQL server implementation
-# - irmin-pack: Optimized on-disk storage backend (default)
-# - irmin-git: Git-compatible storage (for debugging with git CLI)
+# - irmin-pack:    Optimized on-disk storage backend (default)
+# - irmin-git:     Git-compatible storage (for debugging with git CLI — dev only)
 RUN opam install -y \
-    irmin-cli \
-    irmin-graphql \
-    irmin-pack \
-    irmin-git
+    irmin-cli.3.11.0 \
+    irmin-graphql.3.11.0 \
+    irmin-pack.3.11.0 \
+    irmin-git.3.11.0
 
 # Verify installation
 RUN opam exec -- irmin --version

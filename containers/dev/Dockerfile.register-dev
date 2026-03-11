@@ -6,6 +6,8 @@
 # ============================================
 
 # Stage 1: Build the application using sbt
+# eclipse-temurin:21-jdk-jammy pins the Java LTS major; Ubuntu Jammy patch floats.
+# For release builds, pin to a digest (ADR-020 §1).
 FROM eclipse-temurin:21-jdk-jammy AS builder
 
 # Install sbt
@@ -28,6 +30,7 @@ COPY . .
 RUN sbt server/compile
 
 # Stage 2: Create runtime image
+# Same tag as builder — patch version floats; pin to digest for reproducibility (ADR-020 §1).
 FROM eclipse-temurin:21-jdk-jammy
 
 # Install necessary runtime dependencies including sbt

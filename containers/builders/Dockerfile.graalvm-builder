@@ -9,6 +9,8 @@
 #           -t local/graalvm-builder:21 containers/builders/
 # ============================================================================
 
+# 21-muslib pins the major Java version; the underlying GraalVM patch version
+# moves on upstream rebuilds. For release builds, pin to a digest (ADR-020 §1).
 FROM ghcr.io/graalvm/native-image-community:21-muslib
 
 LABEL maintainer="risquanter"
@@ -19,8 +21,13 @@ RUN microdnf install -y wget tar gzip findutils zlib-static && \
 
 # Match project/build.properties — sbt launcher will use this directly
 # without downloading a second copy at build time.
+# SHA256 verified against the official release checksum published at:
+#   https://github.com/sbt/sbt/releases/download/v<VERSION>/sbt-<VERSION>.tgz.sha256
+# Update both SBT_VERSION and SBT_SHA256 together when bumping (ADR-020 §2).
 ARG SBT_VERSION=1.12.0-RC1
+ARG SBT_SHA256=16a47628ac572108374d2443e66482c245b80b3e825873fbe96de4f7bf2e6483
 RUN wget -q "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" -O sbt.tgz && \
+    echo "${SBT_SHA256}  sbt.tgz" | sha256sum -c - && \
     tar -xzf sbt.tgz -C /opt && \
     ln -s /opt/sbt/bin/sbt /usr/local/bin/sbt && \
     rm sbt.tgz

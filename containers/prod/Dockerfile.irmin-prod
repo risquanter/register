@@ -17,6 +17,7 @@
 FROM local/irmin-builder:3.11 AS builder
 
 # Stage 2: Minimal Alpine runtime ("distroless in spirit")
+# alpine:3.21 pins major.minor; patch floats. Use alpine:3.21.x for full pinning (ADR-020 §1).
 FROM alpine:3.21
 
 LABEL maintainer="risquanter"

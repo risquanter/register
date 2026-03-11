@@ -5,7 +5,7 @@
 #   Stage 1 (builder): node:22-alpine + OpenJDK 21 + sbt
 #                      → sbt compiles Scala.js (app/fullLinkJS)
 #                      → vite bundles SPA assets → modules/app/dist/
-#   Stage 2 (runtime): nginx:1.27-alpine-slim, uid 101, port 8080
+#   Stage 2 (runtime): nginx:1.27.5-alpine-slim, uid 101, port 8080
 #                      nginx.conf baked in — no runtime ConfigMap dependency
 #
 # Implements ADR-INFRA-007: nginx SPA file server + Accept-header router.
@@ -26,6 +26,8 @@
 # ============================================================================
 # Stage 1: Build — Scala.js compilation (sbt) + asset bundling (Vite)
 # ============================================================================
+# node:22-alpine is pinned to major — patch updates ride along with Alpine rebuilds.
+# For release builds, pin to a digest: node:22-alpine@sha256:<digest> (ADR-020 §1).
 FROM node:22-alpine AS builder
 
 # OpenJDK 21 is required by sbt / Scala.js compiler
@@ -33,9 +35,14 @@ RUN apk add --no-cache openjdk21-jdk wget bash
 
 # Install sbt — must match project/build.properties exactly.
 # wget over curl: consistent with graalvm-builder convention in this repo.
+# SHA256 verified against the official release checksum published at:
+#   https://github.com/sbt/sbt/releases/download/v<VERSION>/sbt-<VERSION>.tgz.sha256
+# Update both SBT_VERSION and SBT_SHA256 together when bumping (ADR-020 §2).
 ARG SBT_VERSION=1.12.0-RC1
+ARG SBT_SHA256=16a47628ac572108374d2443e66482c245b80b3e825873fbe96de4f7bf2e6483
 RUN wget -q "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${SBT_VERSION}.tgz" \
         -O /tmp/sbt.tgz && \
+    echo "${SBT_SHA256}  /tmp/sbt.tgz" | sha256sum -c - && \
     tar -xzf /tmp/sbt.tgz -C /opt && \
     ln -s /opt/sbt/bin/sbt /usr/local/bin/sbt && \
     rm /tmp/sbt.tgz
@@ -79,7 +86,9 @@ RUN cd modules/app && npm run build
 # ============================================================================
 # Stage 2: Runtime — nginx serving static assets
 # ============================================================================
-FROM nginx:1.27-alpine-slim
+# 1.27.5 confirmed from `Server: nginx/1.27.5` response header.
+# For release builds, pin to a digest: nginx:1.27.5-alpine-slim@sha256:<digest> (ADR-020 §1).
+FROM nginx:1.27.5-alpine-slim
 
 LABEL maintainer="risquanter"
 LABEL description="Risk Register SPA — nginx frontend (production)"
@@ -125,6 +134,7 @@ http {
     default_type  application/octet-stream;
     access_log    /dev/stdout;
     sendfile      on;
+    server_tokens off;   # suppress nginx version in Server header + error pages
 
     # Resolver is injected at startup from /etc/resolv.conf.
     # Using set $backend + proxy_pass $backend defers DNS lookup to request

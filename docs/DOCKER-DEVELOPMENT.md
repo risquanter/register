@@ -44,7 +44,8 @@ docker build -f containers/dev/Dockerfile.irmin-dev -t local/irmin-dev:3.11 .
 ### Full Clean Build (all images from scratch)
 
 When building from a clean state (no pre-existing images), execute in this
-order. Steps 1 and 3 are independent builders; steps 2 and 4 depend on them.
+order. Steps 1, 3, and 4 are independent (can run in parallel); step 2
+depends on step 1; step 5 depends on step 3.
 
 ```bash
 # 1. Irmin builder base (opam + irmin packages) — ~15-40 min first run
@@ -52,6 +53,7 @@ docker build -f containers/builders/Dockerfile.irmin-builder \
   -t local/irmin-builder:3.11 containers/builders/
 
 # 2. Irmin production image (slim Alpine runtime) — ~10s (copies from builder)
+#    Requires step 1.
 docker build -f containers/prod/Dockerfile.irmin-prod \
   -t local/irmin-prod:3.11 containers/prod/
 
@@ -59,12 +61,18 @@ docker build -f containers/prod/Dockerfile.irmin-prod \
 docker build -f containers/builders/Dockerfile.graalvm-builder \
   -t local/graalvm-builder:21 containers/builders/
 
-# 4. Register server production (native binary on distroless) — ~5-10 min
+# 4. Frontend SPA (node:22-alpine builder + nginx:1.27.5-alpine-slim runtime) — ~10-15 min first run
+#    Self-contained: downloads and verifies sbt internally. Independent of steps 1-3.
+docker build -f containers/prod/Dockerfile.frontend-prod \
+  -t local/frontend:dev .
+
+# 5. Register server production (native binary on distroless) — ~5-10 min
+#    Requires step 3.
 docker build -f containers/prod/Dockerfile.register-prod \
   -t register-server:prod .
 
 # Verify all images
-docker images | grep -E 'irmin|register|graalvm'
+docker images | grep -E 'irmin|register|graalvm|frontend'
 ```
 
 ### Start / Run Modes
@@ -220,6 +228,71 @@ docker compose stop irmin
 - **Time-travel**: Query any historical state
 
 **For detailed testing, see:** [Testing Guide - Irmin Section](test/TESTING.md#irmin-graphql-server-tests)
+
+---
+
+### Frontend SPA (nginx)
+
+The SPA is a Scala.js + Vite application compiled at build time and served by
+nginx. It acts as both a static file server and an Accept-header router:
+browser navigation renders the SPA shell; API requests (Accept: application/json)
+are proxied to the register-server.
+
+**Port:** 18080 (host) → 8080 (container)  
+**Endpoint:** `http://localhost:18080/`  
+**Implements:** ADR-INFRA-007 (nginx SPA file server + Accept-header router)
+
+**Performance:**
+- Startup: ~100ms (nginx)
+- Memory: ~5-10 MB
+- Image size: ~25 MB
+
+#### Build Architecture
+
+The frontend build uses a two-stage strategy:
+
+1. **Builder stage** (`node:22-alpine`) — OpenJDK 21 + sbt (SHA256-verified
+   download) + `npm install --ignore-scripts` + `vite build`. The Vite plugin
+   (`@scala-js/vite-plugin-scalajs`) invokes sbt internally to compile
+   Scala.js. Output: `modules/app/dist/`.
+2. **Runtime stage** (`nginx:1.27.5-alpine-slim`) — static files served from
+   `/srv/app/`; nginx.conf baked in (no ConfigMap dependency). DNS resolver
+   injected at container startup from `/etc/resolv.conf`, allowing the image
+   to work in both Docker and Kubernetes without rebuilding.
+
+Layer caching mirrors the other images: build definition → sbt deps →
+npm deps → source compile. Only the source layer rebuilds on a code change.
+
+#### Standalone Docker
+
+```bash
+# Build
+docker build -f containers/prod/Dockerfile.frontend-prod \
+  -t local/frontend:dev .
+
+# Run
+docker run --rm -p 18080:8080 local/frontend:dev
+
+# Smoke test
+curl -s http://localhost:18080/ | grep -q '<html' && echo OK
+
+# Verify cache headers on a hashed asset
+JS=$(docker run --rm local/frontend:dev sh -c \
+  'find /srv/app/assets -name "*.js" | head -1 | sed s|/srv/app||')
+curl -sI "http://localhost:18080${JS}" | grep -E 'Cache-Control|X-Content-Type-Options'
+# Expected:
+#   Cache-Control: public, immutable, max-age=31536000
+#   X-Content-Type-Options: nosniff
+```
+
+**Security properties:**
+- Non-root execution (uid 101 / nginx user)
+- Port 8080 — no `CAP_NET_BIND_SERVICE` required
+- `server_tokens off` — nginx version not disclosed in headers or error pages
+- Static assets: `Cache-Control: public, immutable, max-age=31536000` +
+  `X-Content-Type-Options: nosniff`
+- Build-time: sbt download SHA256-verified; npm `ignore-scripts=true`;
+  exact dependency pins (ADR-020)
 
 ---
 
@@ -410,26 +483,43 @@ The native image build takes several minutes (GraalVM compilation inside Docker)
 
 ### Multi-Stage Build (Register Server)
 
-1. **Builder Stage**: `sbtscala/scala-sbt` - compiles Scala code
-2. **GraalVM Stage**: `ghcr.io/graalvm/native-image-community` - builds native binary
-3. **Runtime Stage**: `gcr.io/distroless/static-debian12:nonroot` - minimal runtime
+1. **Builder base** (`local/graalvm-builder:21`) — pre-built toolchain: GraalVM,
+   `native-image`, sbt. Built once from `containers/builders/Dockerfile.graalvm-builder`;
+   rebuilt only when GraalVM or sbt versions change.
+2. **Build layer** — sbt resolves dependencies + compiles Scala source +
+   GraalVM `native-image` produces a fully static binary.
+3. **Runtime stage** (`gcr.io/distroless/static-debian12:nonroot`) — static binary only;
+   no shell, no package manager, no libc.
 
-**Benefits:**
-- Static binary (no libc dependencies)
-- Non-root user for security
-- No shell or package manager
-- Minimal attack surface (~2 MB base + binary)
+**Properties:**
+- Static binary (no dynamic library dependencies)
+- Non-root user (UID 65532 / `nonroot`) — numeric UID for Kubernetes `runAsNonRoot`
+- No shell (`/bin/sh` absent — distroless)
+- Minimal attack surface (~118 MB total)
 
 ### Multi-Stage Build (Irmin Server)
 
-1. **Builder Base**: `local/irmin-builder:3.11` — pre-compiled opam packages (one-time build)
-2. **Runtime Stage**: `alpine:3.21` — slim Alpine with only `libgmp` + `libffi`
+1. **Builder base** (`local/irmin-builder:3.11`) — pre-compiled opam packages
+   (`irmin-cli.3.11.0`, `irmin-graphql.3.11.0`, `irmin-pack.3.11.0`). Built once;
+   rebuilt only when Irmin or OCaml versions change.
+2. **Runtime stage** (`alpine:3.21`) — slim Alpine with only `libgmp` + `libffi`
+   dynamically linked by the irmin binary.
 
 **Image sizes:**
 - Prod (`local/irmin-prod:3.11`): ~87 MB
 - Dev (`local/irmin-dev:3.11`): ~650-700 MB (full opam toolchain + irmin-git)
 
-See [ADR-026](ADR-026-container-image-strategy.md) for the container image strategy.
+### Multi-Stage Build (Frontend SPA)
+
+1. **Builder stage** (`node:22-alpine`) — OpenJDK 21 + sbt (SHA256-verified) +
+   npm (exact-pinned, scripts blocked) + Vite. Outputs `modules/app/dist/`.
+2. **Runtime stage** (`nginx:1.27.5-alpine-slim`) — static files at `/srv/app/`;
+   nginx.conf baked in with routing rules per ADR-INFRA-007.
+
+**Image size:** ~25 MB
+
+See [ADR-020](ADR-020-supply-chain-security.md) for supply chain security policy
+and [ADR-INFRA-007] in the infra repository for the nginx routing design.
 
 ---
 
@@ -663,8 +753,8 @@ trivy image register-server:prod
 
 - [Testing Guide](test/TESTING.md) - Comprehensive test procedures
 - [ADR-012: Service Mesh Strategy](ADR-012.md)
-- [ADR-026: Container Image Strategy](ADR-026-container-image-strategy.md)
-- [Implementation Plan](IMPLEMENTATION-PLAN-PROPOSALS.md)
+- [ADR-020: Supply Chain Security](ADR-020-supply-chain-security.md)
+- [Implementation Plan](IMPLEMENTATION-PLAN.md)
 - [Authorization Plan](AUTHORIZATION-PLAN.md)
 
 ---

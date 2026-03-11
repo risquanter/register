@@ -18,6 +18,8 @@ COPY modules/server/src/main/ modules/server/src/main/
 RUN sbt server/compile && sbt server/nativeImage
 
 # Stage 2: Create minimal runtime image with distroless
+# nonroot is a stable tag (maps to a fixed Debian 12 snapshot); still, pin to
+# a digest for release builds to guarantee bit-for-bit reproducibility (ADR-020 §1).
 FROM gcr.io/distroless/static-debian12:nonroot
 
 # Copy native binary from builder

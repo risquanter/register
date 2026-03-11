@@ -15,7 +15,10 @@
 # purging deployed images.
 # ============================================================================
 
-FROM ocaml/opam:alpine-ocaml-5.2
+# alpine-ocaml-5.2 pins the OCaml major.minor version; Alpine patch version floats.
+# Prefer ocaml/opam:alpine-3.21-ocaml-5.2 for full Alpine version pinning.
+# For release builds, pin to a digest (ADR-020 §1).
+FROM ocaml/opam:alpine-3.21-ocaml-5.2
 
 LABEL maintainer="risquanter"
 LABEL description="Irmin opam builder base — toolchain + compiled packages"
@@ -33,17 +36,23 @@ WORKDIR /home/opam
 # Update opam repository
 RUN opam update
 
-# Install Irmin with GraphQL support (production packages only)
-# - irmin-cli: Command-line interface with `irmin graphql` command
-# - irmin-graphql: GraphQL server implementation (queries, mutations, subscriptions)
-# - irmin-pack: Optimized on-disk content-addressed storage backend
+# Install Irmin with GraphQL support (production packages only).
+# Versions are EXPLICITLY PINNED (ADR-020 §1 — toolchain-agnostic version pinning).
+# opam's version-pin syntax: <package>.<version>
+# To update: rebuild with new versions, capture output with opam list --installed,
+# and update the pinned versions below. Never run without version suffixes.
+#
+# Package roles:
+# - irmin-cli:     Command-line interface with `irmin graphql` command
+# - irmin-graphql: GraphQL server (queries, mutations, subscriptions)
+# - irmin-pack:    Optimized on-disk content-addressed storage backend
 #
 # Note: irmin-git is NOT installed here — it's only in the dev image
 # (containers/dev/Dockerfile.irmin-dev) for debugging with git CLI.
 RUN opam install -y \
-    irmin-cli \
-    irmin-graphql \
-    irmin-pack
+    irmin-cli.3.11.0 \
+    irmin-graphql.3.11.0 \
+    irmin-pack.3.11.0
 
 # Verify installation and record binary location
 RUN opam exec -- irmin --version && \

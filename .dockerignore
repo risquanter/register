@@ -1,13 +1,22 @@
 # Security: Deny everything by default, allow only what's needed
 *
 
-# Build essentials only
+# --------------------------------------------------------------------------
+# Build essentials — shared by containers/prod/Dockerfile.register-prod
+#                              and containers/prod/Dockerfile.frontend-prod
+# --------------------------------------------------------------------------
 !build.sbt
 !project/
 !modules/common/src/main/
+
+# --------------------------------------------------------------------------
+# Register server build sources — containers/prod/Dockerfile.register-prod
+# --------------------------------------------------------------------------
 !modules/server/src/main/
 
-# Frontend (SPA) build sources — Dockerfile.frontend-prod
+# --------------------------------------------------------------------------
+# Frontend (SPA) build sources — containers/prod/Dockerfile.frontend-prod
+# --------------------------------------------------------------------------
 !modules/app/package.json
 !modules/app/.npmrc
 !modules/app/src/main/
