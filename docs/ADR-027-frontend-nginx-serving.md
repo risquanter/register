@@ -41,7 +41,7 @@ location ~* \.(js|css|woff2|svg|png|ico)$ {
 # /w/* — dual-purpose capability URL path (ADR-021)
 location /w/ {
     if ($http_accept ~* "application/json") {
-        set $backend "http://register.register.svc.cluster.local:8090";
+        set $backend "__BACKEND__";
         proxy_pass $backend;
         break;
     }
@@ -50,9 +50,9 @@ location /w/ {
 }
 
 # API endpoints — unconditionally proxied
-location /workspaces { set $backend "…:8090"; proxy_pass $backend; }
-location /health     { set $backend "…:8090"; proxy_pass $backend; }
-location /docs       { set $backend "…:8090"; proxy_pass $backend; }
+location /workspaces { set $backend "__BACKEND__"; proxy_pass $backend; }
+location /health     { set $backend "__BACKEND__"; proxy_pass $backend; }
+location /docs       { set $backend "__BACKEND__"; proxy_pass $backend; }
 
 # Default — SPA fallback
 location / {
@@ -78,12 +78,19 @@ The builder stage downloads sbt with SHA-256 verification (ADR-020 §2). npm
 packages are installed with `--ignore-scripts` and `.npmrc` enforces
 `save-exact=true` (ADR-020 §1, §3).
 
-### 3. Runtime Resolver Injection
+### 3. Runtime Template Injection (Resolver + Backend)
 
-The baked-in `nginx.conf.template` contains a `__RESOLVER__` placeholder. The
-entrypoint script reads the first `nameserver` from `/etc/resolv.conf` at startup
-and substitutes it via `sed`. This works in both Docker (host DNS or `127.0.0.11`)
-and Kubernetes (CoreDNS ClusterIP from kubelet).
+The baked-in `nginx.conf.template` contains two placeholders substituted at
+container startup by the entrypoint script:
+
+| Placeholder | Source | Default | K8s Override |
+|---|---|---|---|
+| `__RESOLVER__` | First `nameserver` in `/etc/resolv.conf` | `127.0.0.11` | CoreDNS ClusterIP (automatic) |
+| `__BACKEND__` | `BACKEND_URL` env var | `http://register-server:8090` | `http://register.register.svc.cluster.local:8090` |
+
+The default `BACKEND_URL` uses the Docker Compose service name, making the image
+portable across Docker Compose and Kubernetes without rebuilding. Only the env var
+changes between environments.
 
 ### 4. Security Properties
 

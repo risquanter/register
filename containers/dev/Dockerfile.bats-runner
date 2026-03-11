@@ -1,0 +1,75 @@
+# ============================================================================
+# BATS Test Runner — Smoke / Integration Test Image
+# ============================================================================
+# Purpose:  Self-contained test runner for BATS smoke and integration tests.
+#           Used in CI pipelines (GitHub Actions) and local validation.
+#
+# Contains: bash, bats-core (pinned + SHA256-verified), curl, jq,
+#           docker CLI + compose plugin (for compose lifecycle in tests).
+#
+# Security: Non-root (uid 65532), pinned base + dependency versions,
+#           SHA256-verified bats-core download, no unnecessary packages.
+#           Follows ADR-020 supply chain security policy.
+#
+# Build:  docker build -f containers/dev/Dockerfile.bats-runner \
+#           -t local/bats-runner:1.11 containers/dev/
+# Run:    docker run --rm \
+#           -v /var/run/docker.sock:/var/run/docker.sock \
+#           -v "$PWD/tests/bats:/tests" \
+#           --network host \
+#           local/bats-runner:1.11 /tests/suite-c-in-memory.bats
+# ============================================================================
+
+# alpine:3.21 — consistent with irmin-prod and other project images.
+# For release builds, pin to a digest: alpine:3.21@sha256:<digest> (ADR-020 §1).
+FROM alpine:3.21
+
+LABEL maintainer="risquanter"
+LABEL description="BATS test runner for container smoke/integration tests"
+
+# --------------------------------------------------------------------------
+# System dependencies
+#   bash:           required by bats-core
+#   curl + jq:      HTTP assertions in test scripts
+#   docker-cli +
+#   docker-cli-compose: compose lifecycle (setup_file / teardown_file)
+# --------------------------------------------------------------------------
+RUN apk add --no-cache \
+    bash \
+    curl \
+    jq \
+    docker-cli \
+    docker-cli-compose
+
+# --------------------------------------------------------------------------
+# bats-core — pinned version with SHA256 verification (ADR-020 §2).
+# Source: https://github.com/bats-core/bats-core/releases
+# Update BATS_VERSION and BATS_SHA256 together when bumping.
+# --------------------------------------------------------------------------
+ARG BATS_VERSION=1.11.1
+ARG BATS_SHA256=5c57ed9616b78f7fd8c553b9bae3c7c9870119edd727ec17dbd1185c599f79d9
+RUN wget -q "https://github.com/bats-core/bats-core/archive/refs/tags/v${BATS_VERSION}.tar.gz" \
+        -O /tmp/bats.tar.gz && \
+    echo "${BATS_SHA256}  /tmp/bats.tar.gz" | sha256sum -c - && \
+    tar -xzf /tmp/bats.tar.gz -C /opt && \
+    /opt/bats-core-${BATS_VERSION}/install.sh /usr/local && \
+    rm -rf /tmp/bats.tar.gz /opt/bats-core-${BATS_VERSION}
+
+# Verify bats is installed and functional
+RUN bats --version
+
+# --------------------------------------------------------------------------
+# Non-root user — matches register-server / irmin convention (UID 65532).
+# The docker socket mount requires the container user to be in the 'docker'
+# group or the socket must be world-readable. In CI (GitHub Actions), the
+# socket is typically accessible. For local use, run with --group-add to
+# match the host docker group GID if needed.
+# --------------------------------------------------------------------------
+RUN addgroup -g 65532 -S bats && \
+    adduser -u 65532 -S -G bats -h /tests -s /bin/bash bats
+
+USER 65532
+
+WORKDIR /tests
+
+ENTRYPOINT ["bats"]

@@ -1,3 +1,5 @@
+name: register
+
 services:
   # ============================================================================
   # Irmin GraphQL Server (Persistence Layer)
@@ -56,6 +58,16 @@ services:
       
       # CORS configuration
       REGISTER_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"
+
+      # Workspace creation rate limit — defaults to 5/hour (anti-abuse).
+      # Test suites override by exporting REGISTER_WORKSPACE_MAX_CREATES_PER_IP
+      # before 'docker compose up' (see tests/bats/suite-*.bats setup_file).
+      REGISTER_WORKSPACE_MAX_CREATES_PER_IP: "${REGISTER_WORKSPACE_MAX_CREATES_PER_IP:-5}"
+
+      # Repository backend — defaults to in-memory. Set to 'irmin' for
+      # persistent storage. Suite D injects these for E2E testing.
+      REGISTER_REPOSITORY_TYPE: "${REGISTER_REPOSITORY_TYPE:-in-memory}"
+      IRMIN_URL: "${IRMIN_URL:-http://irmin:8080}"
       
       # Telemetry configuration
       # NOTE: TracingLive.console & MetricsLive.console are configured but produce
@@ -101,6 +113,40 @@ services:
       - register-network
     profiles:
       - observability
+
+  # ============================================================================
+  # Frontend SPA (nginx — production image)
+  # ============================================================================
+  # Serves static SPA assets and proxies API requests to register-server.
+  # Profile-gated: does not start with plain `docker compose up` (dev workflow
+  # uses Vite dev server at localhost:5173 instead).
+  #
+  # Start with:  docker compose --profile frontend up
+  # Full stack:  docker compose --profile persistence --profile frontend up
+  frontend:
+    build:
+      context: .
+      dockerfile: containers/prod/Dockerfile.frontend-prod
+    image: local/frontend:dev
+    container_name: frontend
+    ports:
+      - "18080:8080"
+    environment:
+      # Backend URL — uses Compose service name (resolved via Docker DNS).
+      # Override with k8s FQDN in Helm values for Kubernetes deployment.
+      BACKEND_URL: "http://register-server:8090"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=10M
+    depends_on:
+      - register-server
+    restart: unless-stopped
+    networks:
+      - register-network
+    profiles:
+      - frontend
 
 networks:
   register-network:

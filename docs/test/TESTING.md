@@ -17,6 +17,7 @@ This document provides comprehensive testing procedures for the Risk Register ap
 - [SBT Unit & Integration Tests](#sbt-unit--integration-tests)
 - [API Testing - Register Server](#api-testing---register-server)
 - [Container Testing](#container-testing)
+- [BATS Smoke & Integration Tests](#bats-smoke--integration-tests)
 - [Irmin GraphQL Server Tests](#irmin-graphql-server-tests)
 - [Performance Benchmarks](#performance-benchmarks)
 - [Automated Test Scripts](#automated-test-scripts)
@@ -516,6 +517,136 @@ docker inspect register-test --format='{{.State.ExitCode}}'
 ```
 
 **Expected Exit Code:** `0` (graceful shutdown)
+
+---
+
+## BATS Smoke & Integration Tests
+
+### Overview
+
+Three automated [BATS](https://github.com/bats-core/bats-core) suites validate Docker
+images, compose topology, nginx routing, and end-to-end persistence **after**
+container images are built. Tests run inside a purpose-built runner image
+(`local/bats-runner:1.11`) that contains bash, bats-core 1.11, curl, jq, and
+the Docker CLI + compose plugin.
+
+| Suite | File | Services | Tests | Purpose |
+|-------|------|----------|-------|---------|
+| **A** | `tests/bats/suite-a-full-prod.bats` | server + frontend + irmin | 5 | E2E: data flows nginx → server → Irmin and is verifiable |
+| **B** | `tests/bats/suite-b-irmin-prod.bats` | irmin (standalone) | 5 | Irmin image security & GraphQL round-trip |
+| **C** | `tests/bats/suite-c-in-memory.bats` | server + frontend | 16 | In-memory mode — nginx routing & ADR-027 validation |
+
+### Prerequisites
+
+1. **Build production images** (from the project root):
+
+```bash
+# Server (GraalVM native)
+docker build -f Dockerfile.native -t register-server:prod .
+
+# Frontend (nginx)
+docker build -f containers/prod/Dockerfile.frontend-prod \
+  -t local/frontend:dev .
+
+# Irmin builder + prod (needed for suites A and B)
+docker build -f containers/prod/Dockerfile.irmin-builder \
+  -t local/irmin-builder:3.11 containers/prod/
+docker build -f containers/prod/Dockerfile.irmin-prod \
+  -t local/irmin-prod:3.11 containers/prod/
+```
+
+2. **Build the BATS runner image**:
+
+```bash
+docker build -f containers/dev/Dockerfile.bats-runner \
+  -t local/bats-runner:1.11 containers/dev/
+```
+
+3. **Docker socket access**: The runner needs access to the host Docker socket
+   to manage compose services during tests.
+
+### Running the Suites
+
+All suites are invoked the same way — only the `.bats` file changes:
+
+```bash
+docker run --rm --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+  -v "$(pwd):/workspace:ro" \
+  -w /workspace \
+  local/bats-runner:1.11 tests/bats/<SUITE>.bats
+```
+
+**Suite C** — quickest, no Irmin dependency (start here):
+
+```bash
+docker run --rm --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+  -v "$(pwd):/workspace:ro" \
+  -w /workspace \
+  local/bats-runner:1.11 tests/bats/suite-c-in-memory.bats
+```
+
+**Suite A** — E2E with Irmin persistence (server configured with `REGISTER_REPOSITORY_TYPE=irmin`):
+
+```bash
+docker run --rm --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+  -v "$(pwd):/workspace:ro" \
+  -w /workspace \
+  local/bats-runner:1.11 tests/bats/suite-a-full-prod.bats
+```
+
+**Suite B** — standalone Irmin image validation:
+
+```bash
+docker run --rm --network host \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+  -v "$(pwd):/workspace:ro" \
+  -w /workspace \
+  local/bats-runner:1.11 tests/bats/suite-b-irmin-prod.bats
+```
+
+### Which Suite to Run When
+
+| Scenario | Suite(s) |
+|----------|----------|
+| Quick smoke test after code changes | C |
+| Frontend/nginx config changes | C |
+| Server ↔ Irmin integration changes | A |
+| Irmin image or Dockerfile changes | B, then A |
+| Full release validation | A + B + C |
+| CI pipeline (fast gate) | C |
+| CI pipeline (full gate) | A + B + C |
+
+### Upgrading
+
+When upgrading dependencies (alpine, bats-core, docker CLI, etc.):
+
+1. Update pinned versions in `containers/dev/Dockerfile.bats-runner`
+2. If bats-core version changes, update the SHA256 checksum in the Dockerfile
+3. Rebuild the runner image: `docker build -f containers/dev/Dockerfile.bats-runner -t local/bats-runner:1.11 containers/dev/`
+4. Re-run all three suites to validate
+
+When adding new test cases, follow the naming convention `@test "X## — description"` where `X` is the suite letter and `##` is the zero-padded number.
+
+### File Layout
+
+```
+tests/bats/
+├── helpers/
+│   └── setup.bash              # Shared helpers: ports, wait_for_url, create_workspace
+├── suite-a-full-prod.bats      # Suite A — E2E: nginx → server → Irmin
+├── suite-b-irmin-prod.bats     # Suite B — standalone irmin-prod
+└── suite-c-in-memory.bats      # Suite C — in-memory mode
+
+containers/dev/
+└── Dockerfile.bats-runner      # BATS runner image definition
+```
 
 ---
 
