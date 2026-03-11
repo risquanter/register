@@ -240,7 +240,7 @@ are proxied to the register-server.
 
 **Port:** 18080 (host) → 8080 (container)  
 **Endpoint:** `http://localhost:18080/`  
-**Implements:** ADR-INFRA-007 (nginx SPA file server + Accept-header router)
+**Implements:** [ADR-027](ADR-027-frontend-nginx-serving.md) (local); ADR-INFRA-007 (authoritative, in register-infra)
 
 **Performance:**
 - Startup: ~100ms (nginx)
@@ -518,8 +518,9 @@ The native image build takes several minutes (GraalVM compilation inside Docker)
 
 **Image size:** ~25 MB
 
-See [ADR-020](ADR-020-supply-chain-security.md) for supply chain security policy
-and [ADR-INFRA-007] in the infra repository for the nginx routing design.
+See [ADR-020](ADR-020-supply-chain-security.md) for supply chain security policy,
+[ADR-027](ADR-027-frontend-nginx-serving.md) for the local routing rationale, and
+[ADR-INFRA-007] in register-infra for the complete architectural decision.
 
 ---
 

@@ -9,6 +9,7 @@
 #                      nginx.conf baked in — no runtime ConfigMap dependency
 #
 # Implements ADR-INFRA-007: nginx SPA file server + Accept-header router.
+# See also ADR-027 (local companion) for the register-side routing rationale.
 #
 # Upstream resolver:
 #   nginx resolves proxy_pass upstreams using a runtime-extracted DNS address
