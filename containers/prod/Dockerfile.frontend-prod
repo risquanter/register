@@ -98,7 +98,7 @@ LABEL description="Risk Register SPA — nginx frontend (production)"
 COPY --from=builder /app/modules/app/dist/ /srv/app/
 
 # --------------------------------------------------------------------------
-# nginx.conf template (baked in — no ConfigMap dependency, ADR-INFRA-007 §4)
+# nginx.conf template (baked in — no ConfigMap dependency, register-infra/docs/adrs/ADR-INFRA-007 §4)
 #
 # Written as a template with __RESOLVER__ substituted at container startup
 # by the entrypoint script below. The resolver comes from /etc/resolv.conf,
