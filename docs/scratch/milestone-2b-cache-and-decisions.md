@@ -1,0 +1,918 @@
+# Milestone 2b: Cache Strategy Deep-Dive & Decision Points
+
+> Throwaway document. Detailed analysis for design discussion.
+
+---
+
+# Part I: Cache Strategy — Current → Intermediate → Ideal
+
+## What We Have Today
+
+```
+TreeCacheManagerLive
+  caches: Ref[Map[TreeId, RiskResultCache]]
+                  ↓
+                  TreeId ──────────► RiskResultCacheLive
+                                      cacheRef: Ref[Map[NodeId, RiskResult]]
+```
+
+Concrete:
+- One cache per **tree** (keyed by `TreeId`).
+- Within that cache, entries keyed by **`NodeId`** — a ULID wrapper.
+- `cacheFor(treeId)` returns-or-creates the cache.
+- `invalidate(tree, nodeId)` walks `tree.index.ancestorPath(nodeId)` and removes those entries.
+- `RiskResult` stores `outcomes: Map[TrialId, Loss]` (sparse), `nTrials`, `provenances`.
+
+**Why this breaks with branches:**
+
+Today every tree lives only on `main`. A `TreeId` uniquely identifies one tree
+with one set of contents. With branches, the *same* `TreeId` can exist on
+multiple branches with *different* node contents. If user is on `main` and the
+cache holds `nodeA → resultX`, then they switch to `scenario-high-cyber` where
+`nodeA` has different parameters, the cache returns `resultX` — **wrong
+answer**.
+
+---
+
+## State A: Per-Branch Caches (Intermediate)
+
+The simplest fix — change the `TreeCacheManager` map key from `TreeId` to
+`(TreeId, BranchRef)`:
+
+```
+TreeCacheManagerLive
+  caches: Ref[Map[(TreeId, BranchRef), RiskResultCache]]
+```
+
+### What changes
+
+| Component | Before | After |
+|-----------|--------|-------|
+| `TreeCacheManager.cacheFor` | `cacheFor(treeId: TreeId)` | `cacheFor(treeId: TreeId, branch: BranchRef)` |
+| `TreeCacheManager.invalidate` | `invalidate(tree, nodeId)` | `invalidate(tree, nodeId, branch)` |
+| `TreeCacheManager.onTreeStructureChanged` | `onTreeStructureChanged(treeId)` | `onTreeStructureChanged(treeId, branch)` |
+| `TreeCacheManager.deleteTree` | `deleteTree(treeId)` | `deleteTree(treeId, branch)` + `deleteAllBranches(treeId)` |
+| `RiskResultResolverLive.ensureCached` | `cacheManager.cacheFor(tree.id)` | `cacheManager.cacheFor(tree.id, activeBranch)` |
+| `InvalidationHandler` | Uses `tree.id` | Uses `(tree.id, branch)` |
+| `RiskResultCache` internals | **Unchanged** — still `Map[NodeId, RiskResult]` |
+
+### Memory profile
+
+Each branch gets its own fully independent cache. If tree has 100 nodes and
+you have 3 branches:
+
+```
+main:              100 entries × ~80KB = 8 MB
+scenario-high:     100 entries × ~80KB = 8 MB   (even though 95 nodes are identical)
+scenario-low:      100 entries × ~80KB = 8 MB
+                                         ─────
+                                         24 MB   (vs 8 MB single-branch)
+```
+
+For 19 of the 20 nodes that are identical across branches, we're tripling
+memory and tripling simulation time (each branch simulates them independently).
+
+### When this matters / doesn't
+
+**Doesn't matter:** Small trees (5-20 nodes), few branches (2-3). 24 MB vs 8
+MB is nothing. Simulation of 20 nodes with 10K trials takes ~200ms — not
+perceptible.
+
+**Matters:** Large trees (100+ nodes), many scenarios (10+), frequent
+switching in comparison workflows. The comparison use case is the critical
+one — user opens "compare main vs scenario" view, both branches need full
+caches populated, so you pay 2× simulation cost even when 90% of nodes are
+unchanged.
+
+### Design for future migration
+
+The key to a clean transition later: make the cache lookup opaque.
+
+```scala
+// Abstract the cache resolution — callers don't know HOW caching works
+trait CacheScope:
+  def resolve(treeId: TreeId, nodeId: NodeId): UIO[Option[RiskResult]]
+  def store(treeId: TreeId, nodeId: NodeId, result: RiskResult): UIO[Unit]
+
+// State A implementation: per-branch
+class PerBranchCacheScope(branch: BranchRef, manager: TreeCacheManager) extends CacheScope:
+  def resolve(treeId, nodeId) = manager.cacheFor(treeId, branch).flatMap(_.get(nodeId))
+  def store(treeId, nodeId, result) = manager.cacheFor(treeId, branch).flatMap(_.put(nodeId, result))
+
+// Future State B implementation: content-addressed
+class ContentAddressedCacheScope(hashIndex: ContentHashIndex, globalCache: ContentCache) extends CacheScope:
+  def resolve(treeId, nodeId) = hashIndex.hashOf(treeId, nodeId).flatMap(globalCache.get)
+  def store(treeId, nodeId, result) = hashIndex.hashOf(treeId, nodeId).flatMap(h => globalCache.put(h, result))
+```
+
+`RiskResultResolver` takes a `CacheScope` instead of calling
+`TreeCacheManager` directly. Swapping strategies becomes a layer change, not a
+rewrite.
+
+---
+
+## State B: Content-Addressed Cache (Ideal Final State)
+
+### What are Merkle hashes?
+
+Named after Ralph Merkle (1979). A **Merkle tree** is a data structure where:
+
+1. Every **leaf** node stores data and is labelled with the **hash of its
+   data**.
+2. Every **non-leaf** node is labelled with the hash of **the concatenation of
+   its children's labels**.
+
+```
+         hash(h1 + h2)             ← root hash
+            /       \
+       h1=hash(A)   h2=hash(B)    ← leaf hashes
+          |            |
+         [A]          [B]          ← actual data
+```
+
+Key properties:
+
+- **If any leaf data changes, every ancestor hash changes** — the change
+  ripples up to the root. This is how Git detects changes: if the root hash
+  differs, *something* changed; you can then binary-search down the tree to
+  find *what*.
+
+- **If two subtrees have the same root hash, they are guaranteed identical
+  content** (assuming collision-free hashing). This is how Git knows two
+  branches share a subtree — identical hash = identical content, no
+  comparison needed.
+
+- **Irmin works this way.** Every value stored in Irmin gets a `Hash` (visible
+  as `Contents.hash` in the GraphQL schema). Every tree node also has a hash
+  (`Tree.hash`). When you write the same value to two branches, Irmin stores
+  it once — both branches reference the same content hash.
+
+### Applied to our cache
+
+For our risk tree:
+
+```
+portfolio (root)
+   ├── ops-risk
+   │   ├── cyber       { prob: 0.3, type: lognormal, min: 1M, max: 50M }
+   │   └── hardware    { prob: 0.1, type: lognormal, min: 0.5M, max: 5M }
+   └── market-risk     { prob: 0.4, type: expert, percentiles: [...] }
+```
+
+**Leaf content hash** = hash of the simulation-relevant parameters:
+```
+hash(cyber)       = sha256("lognormal|0.3|1000000|50000000|seed3|seed4|nTrials")  → "abc111"
+hash(hardware)    = sha256("lognormal|0.1|500000|5000000|seed3|seed4|nTrials")    → "abc222"
+hash(market-risk) = sha256("expert|0.4|[0.1,0.5,0.9]|[2M,10M,30M]|seed3|seed4") → "abc333"
+```
+
+**Portfolio content hash** = hash of sorted children's content hashes:
+```
+hash(ops-risk)  = sha256(sort(["abc111", "abc222"]))  → "def444"
+hash(portfolio) = sha256(sort(["def444", "abc333"]))   → "ghi555"
+```
+
+**Cache is a global map:**
+```
+globalCache: Map[ContentHash, RiskResult]
+
+"abc111" → RiskResult(cyber, outcomes={...}, nTrials=10000)
+"abc222" → RiskResult(hardware, outcomes={...}, nTrials=10000)
+"abc333" → RiskResult(market-risk, outcomes={...}, nTrials=10000)
+"def444" → RiskResult(ops-risk, outcomes={...}, nTrials=10000)
+"ghi555" → RiskResult(portfolio, outcomes={...}, nTrials=10000)
+```
+
+Now user creates `scenario-high-cyber`, changes cyber prob to 0.6:
+
+```
+hash(cyber)       = sha256("lognormal|0.6|1000000|50000000|...")  → "xyz999"  ← different!
+hash(hardware)    = sha256("lognormal|0.1|500000|5000000|...")    → "abc222"  ← SAME
+hash(market-risk) = sha256("expert|0.4|...")                      → "abc333"  ← SAME
+hash(ops-risk)    = sha256(sort(["xyz999", "abc222"]))            → "def888"  ← different (child changed)
+hash(portfolio)   = sha256(sort(["def888", "abc333"]))            → "ghi777"  ← different (child changed)
+```
+
+Cache lookup:
+```
+"xyz999" → miss → simulate cyber (NEW)
+"abc222" → HIT  → hardware (REUSED from main!)
+"abc333" → HIT  → market-risk (REUSED from main!)
+"def888" → miss → aggregate ops-risk (using cached hardware + new cyber)
+"ghi777" → miss → aggregate portfolio (using new ops-risk + cached market-risk)
+```
+
+**Result:** 2 simulations + 1 aggregation instead of 5 simulations. For a
+100-node tree where you changed 1 leaf, that's 3 operations instead of 100.
+
+### What makes this hard
+
+1. **Bottom-up hash computation.** Portfolio hashes depend on all children.
+   You must compute child hashes before parent hashes. This means when you
+   load a tree from Irmin, you do a full bottom-up hash pass — O(n) at tree
+   load time. This is cheap (just hashing strings), but it's a new
+   computation that doesn't exist today.
+
+2. **Hash input canonicalization.** The hash must be *deterministic*. Consider
+   `percentiles: Option[Array[Double]]` — floating-point serialization
+   (`0.1000000000000001` vs `0.1`), array ordering, and `Option` encoding all
+   must produce identical strings for identical data. We'd need a
+   `canonicalForm(node: RiskNode): String` function that's byte-stable.
+
+3. **Orphan eviction.** When a node changes, the old content hash entry is
+   never looked up again (no node points to that hash now), but it's still in
+   the cache eating memory. Options:
+   - **LRU eviction**: cap the global cache size, evict least-recently-used.
+     Simple, proven.
+   - **Reference counting**: track how many active branches reference each
+     hash. Zero refs → evict. Accurate but complex bookkeeping.
+   - **Periodic GC**: walk all active trees, collect reachable hashes, evict
+     the rest. Simple conceptually, O(total-nodes) per GC pass.
+   
+   Recommendation: LRU with generous cap. For our scale, stale entries are
+   tiny (80KB each) and accumulate slowly.
+
+4. **SimulationConfig is global.** Today the content hash naturally includes
+   `nTrials`, `seed3`, `seed4` from the service-wide `SimulationConfig`. If
+   we ever have per-branch configs (different trial counts per scenario), the
+   hash must include those. Currently not a concern — config is global — but
+   the hash function design should accommodate this.
+
+### The Irmin hash reuse shortcut
+
+Here's the elegant angle: **we don't need to compute our own hashes.** Irmin
+already computes content hashes for every stored value.
+
+When we read a node from Irmin using:
+```graphql
+{
+  branch(name: "main") {
+    tree {
+      get_contents(path: "risk-trees/tree1/nodes/cyber") {
+        value     # ← the JSON
+        hash      # ← Irmin's content hash of this value!
+      }
+    }
+  }
+}
+```
+
+Irmin returns both the value AND its content hash. If the same JSON value
+exists on two branches, Irmin returns **the same hash** for both. We can use
+`Contents.hash` directly as our cache key.
+
+For portfolios (which are trees in Irmin, not leaf contents), we can use
+`Tree.hash`:
+```graphql
+{
+  branch(name: "main") {
+    tree {
+      get_tree(path: "risk-trees/tree1/nodes") {
+        hash     # ← Irmin hash of the entire subtree at this path
+      }
+    }
+  }
+}
+```
+
+**The catch:** Irmin hashes are computed from the *serialized storage format*,
+not from our simulation parameters. If we store metadata alongside params
+(like `schemaVersion` or `updatedAt` timestamps), those change the hash even
+when simulation-relevant data is unchanged. We'd need to either:
+- Store simulation params separately from metadata, or
+- Accept that timestamp changes bust the cache (probably fine — timestamp only
+  changes on actual edits)
+
+**Bottom line:** Irmin hash reuse is the cleanest path to content-addressed
+caching. But it needs a prototype to validate hash stability and granularity.
+
+---
+
+## In-Memory Irmin Instance — Feasibility
+
+You asked about running a separate in-memory Irmin instance. Let me assess:
+
+### What irmin-mem is
+
+Irmin supports pluggable storage backends:
+- `irmin-pack` — on-disk content-addressed (what we use in prod)
+- `irmin-git` — git-compatible format (what dev uses for debugging)
+- `irmin-mem` — **in-memory**, no persistence, same API
+
+`irmin-mem` is a standard backend that OCaml programs link against. It's
+started as a separate process or linked into an existing server.
+
+### Why you might want it
+
+The idea: run a second, in-memory Irmin instance purely to compute content
+hashes. You write node data into it, it computes hashes, you read the hashes
+back for cache keys. No disk I/O, no persistence needed.
+
+### Why it's the wrong tool
+
+1. **Latency overhead.** Even in-memory, every hash computation requires a
+   network round-trip (write value → read hash back via GraphQL). Our Scala
+   code can compute `sha256(canonicalizedParams)` in **microseconds** on the
+   JVM. The GraphQL round-trip adds milliseconds. For 100 nodes, that's the
+   difference between <1ms and >100ms.
+
+2. **Operational complexity.** Another container to deploy, health-check,
+   monitor. We already have one Irmin instance; adding a second for hash
+   computation is architecturally extravagant.
+
+3. **We already have the hashes.** When we read data from our *existing*
+   production Irmin instance, `Contents.hash` is returned alongside the
+   value. We don't need a second instance to compute hashes — the data's
+   home instance already has them.
+
+4. **For ZIO-side hashing, Java has SHA-256.** `java.security.MessageDigest`
+   is built-in, zero-allocation per call, battle-tested. We don't need OCaml
+   to hash strings.
+
+### When it WOULD make sense
+
+If we wanted to do **server-side branch operations without hitting production
+Irmin** — like a staging area for merge previews or dry-run diffs. You'd clone
+a branch into the in-memory instance, apply proposed changes, read the result,
+then discard it. This is a more advanced pattern for later phases
+(specifically, the merge preview in ScenarioMerger could benefit).
+
+**Verdict:** Not needed for cache hashing. Potentially useful later for
+branch operation staging, but that's a distinct concern.
+
+---
+
+## Summary: The Three States
+
+| Aspect | Today | State A (Per-Branch) | State B (Content-Addressed) |
+|--------|-------|---------------------|----------------------------|
+| **Cache key** | `(TreeId, NodeId)` | `(TreeId, BranchRef, NodeId)` | `ContentHash` |
+| **Cache structure** | 1 map per tree | 1 map per (tree, branch) | 1 global map |
+| **Branch switch cost** | N/A (no branches) | O(n) simulation on miss | O(changed-path) simulation |
+| **Cross-branch sharing** | N/A | None | Full (identical content = shared) |
+| **Memory for K branches, N nodes** | — | K × N × 80KB | N × 80KB + changed × 80KB |
+| **Implementation effort** | Done | Small (change map key) | Medium (hash computation, eviction) |
+| **Orphan risk** | None | None (per-branch clear) | Yes (needs LRU/GC) |
+| **Comparison workflow** | N/A | Both branches simulated fully | Only diff nodes simulated |
+
+---
+
+---
+
+# Part II: Decision Points — Full Analysis
+
+## DD-1: IrminClient Branch Parameterization
+
+### Context
+
+All 7 `IrminClient` methods today are hardcoded to the `main` branch. Reads
+parse `response.data.flatMap(_.main)`, writes omit the `branch:` GraphQL
+argument. To operate on branches, we need to parameterize this.
+
+`IrminQueries.getValueFromBranch(branch, path)` already exists but
+`IrminClientLive` never calls it — it has no corresponding `get` variant.
+
+### Alternatives
+
+**A) Optional parameter on existing methods** (recommended)
+```scala
+def get(path: IrminPath, branch: Option[BranchRef] = None): IO[IrminError, Option[String]]
+def set(path, value, message, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit]
+def remove(path, message, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit]
+def list(prefix, branch: Option[BranchRef] = None): IO[IrminError, List[IrminPath]]
+```
+- Implementation: `None` → existing query (via `main`), `Some(b)` → branch-parameterized query
+- Needs `BranchGetValueResponse` (response shape: `data.branch.tree.get` instead of `data.main.tree.get`)
+
+**B) Separate methods (additive)**
+```scala
+def getFromBranch(branch: BranchRef, path: IrminPath): IO[IrminError, Option[String]]
+```
+
+**C) Separate trait**
+```scala
+trait BranchAwareIrminClient extends IrminClient { ... }
+```
+
+### Implications
+
+| | Option A | Option B | Option C |
+|---|---------|---------|---------|
+| Existing call sites change? | No (default arg) | No | No |
+| API surface growth | 0 new methods | 4 new methods | Full duplication |
+| Single code path for tests | Yes (parameterized) | No (two paths) | No |
+| Callers need to choose? | No | Yes (which `get`?) | Yes (which type?) |
+| Response types needed | 1 new (`BranchGetValueResponse`) | 1 new | 1 new |
+| Repository threading | Natural (pass branch through) | Awkward (method name changes) | Awkward |
+
+### Recommendation: A
+
+Low risk because `branch = None` executes exactly the `main` path (same
+query, same response type). The implementation branches at the query level,
+not at the API level. The one new response type (`BranchGetValueResponse`)
+mirrors `GetValueResponse` with `branch` instead of `main` in the JSON path.
+
+---
+
+## DD-2: New IrminClient Operations
+
+### Context
+
+Beyond parameterizing existing methods, we need operations that have no
+current equivalent — branch lifecycle, merge, history, revert.
+
+### Proposed Operations
+
+| Method | GraphQL | Return Type | Used By |
+|--------|---------|-------------|---------|
+| `getBranch(name)` | `query { branch(name:) { name, head { hash, key, info { ... } } } }` | `Option[IrminBranch]` | ScenarioService.create/list |
+| `mergeBranch(from, into, info)` | `mutation { merge_with_branch(from:, branch:, info:) }` | `IrminCommit` | ScenarioMerger.merge |
+| `revert(commit, branch)` | `mutation { revert(commit:, branch:) }` | `IrminCommit` | HistoryService.revert |
+| `getCommit(hash)` | `query { commit(hash:) { tree { ... }, info { ... } } }` | `Option[IrminCommit]` + tree access | HistoryService.getTreeAtCommit |
+| `getHistory(branch, path, n)` | `query { branch(name:) { last_modified(n:, path:) } }` | `List[IrminCommit]` | HistoryService.getHistory |
+| `lca(branch, commit)` | `query { branch(name:) { lcas(commit:) } }` | `List[IrminCommit]` | ScenarioMerger (3-way merge) |
+| `getContents(branch, path)` | `query { branch(name:) { tree { get_contents(path:) { value, hash } } } }` | `Option[IrminContents]` (value + hash) | Content-addressed cache (State B) |
+
+### Alternatives
+
+**Do we add all 7 now, or incrementally?**
+
+- **All at once:** More upfront work, but the queries are simple GraphQL strings. Each is ~15 lines of query + response type + 10 lines of client method. Total: ~2-3 hours of mechanical work.
+- **Incremental:** Add only what Phase A/B need (getBranch, mergeBranch). Add history/revert in Phase D. Risk: response type patterns diverge over time.
+
+### Recommendation
+
+Add all 7 in the foundation phase. They're trivial to implement (each is a GraphQL string + a response case class + a method that calls `executeQuery`). Having them available means later phases don't have infrastructure blockers. `getContents` (value + hash) is specifically needed for the content-addressed cache investigation.
+
+---
+
+## DD-3: Cache Strategy for Multi-Branch
+
+### Context
+
+Covered in depth in Part I above. This is the most consequential decision.
+
+### Alternatives
+
+| | A: Clear-on-switch | B: Per-branch caches | C: Content-addressed |
+|---|---|---|---|
+| **Correctness** | Correct | Correct | Correct |
+| **Branch switch cost** | O(n) simulation | O(1) if cached, O(n) on first visit | O(changed-nodes) |
+| **Memory** | Minimal (1 cache) | K × N × 80KB | N × 80KB + margin |
+| **Cross-branch sharing** | None | None | Full |
+| **Comparison workflow** | Terrible (thrashing) | OK (both cached) | Optimal |
+| **Complexity** | Trivial | Low | Medium-High |
+| **Orphan risk** | None | None | Yes (needs LRU) |
+| **Implementation time** | Minutes | Hours | Days |
+
+### Recommendation
+
+**Start with B**, ship the feature, measure. If comparison workflows suffer
+from redundant simulation, migrate to C. The abstract `CacheScope` approach
+ensures callers don't change.
+
+The key metric to watch after shipping B: in comparison requests
+(`GET .../compare/...`), what fraction of nodes are identical across branches?
+If it's consistently >80%, Content-Addressed is worth the investment.
+
+---
+
+## DD-4: Repository Layer Branch Threading
+
+### Context
+
+`RiskTreeRepositoryIrmin` constructs `IrminPath` values and calls
+`irmin.get(path)` / `irmin.set(path, value, message)`. All 5 methods (create,
+update, delete, getById, getAll) need to support reading/writing on a specific
+branch.
+
+### Alternatives
+
+**A) Optional parameter on trait methods** (recommended)
+```scala
+trait RiskTreeRepository:
+  def create(riskTree: RiskTree, branch: Option[BranchRef] = None): Task[RiskTree]
+  def getById(id: TreeId, branch: Option[BranchRef] = None): Task[Option[RiskTree]]
+  // ...
+```
+
+**B) ZIO environment-based branch context**
+```scala
+type BranchContext = Has[BranchRef]
+def create(riskTree: RiskTree): ZIO[BranchContext, ...] 
+```
+The active branch flows through the ZIO environment implicitly.
+
+**C) Separate BranchAwareRepository trait**
+```scala
+trait BranchAwareRiskTreeRepository extends RiskTreeRepository:
+  def createOnBranch(riskTree: RiskTree, branch: BranchRef): Task[RiskTree]
+```
+
+### Implications
+
+| | Option A | Option B | Option C |
+|---|---------|---------|---------|
+| Comparison workflow (read 2 branches) | Easy: pass different branch args | Awkward: provide/override environment mid-effect | Easy: call branch-specific method |
+| Existing call sites | Unchanged (default None) | Must provide BranchContext | Unchanged (inherit parent trait) |
+| Readability | Explicit at call site | "Magic" — branch comes from env | Two methods per operation |
+| Test setup | Simple (pass None) | Need `.provideLayer(BranchContext(...))` | Simple |
+
+### Recommendation: A
+
+Same rationale as DD-1. The comparison use case is the decisive factor — you
+need to read `treeOnBranchA` and `treeOnBranchB` in the same effect, which is
+trivial with explicit parameters but awkward with environment-based context.
+
+---
+
+## DD-5: Scenario Domain Model
+
+### Context
+
+Need new types per ADR-001 (Iron validation at boundary), ADR-018 (nominal
+wrappers for distinct-but-same-base types).
+
+### Key Types
+
+```scala
+case class BranchRef(value: String)              // Irmin branch name
+case class CommitHash(value: String)             // Irmin content-addressed hash
+case class ScenarioId(toSafeId: SafeId.SafeId)   // ULID, same pattern as TreeId/NodeId
+type ScenarioName = String :| Match["^[a-zA-Z0-9][a-zA-Z0-9 _-]{0,48}[a-zA-Z0-9]$"]
+```
+
+### Alternatives
+
+**Branch naming convention:**
+
+| Pattern | Example | Pro | Con |
+|---------|---------|-----|-----|
+| `scenarios/{workspaceKey}/{scenarioId}/{slug}` | `scenarios/abc123/01HXYZ/high-cyber` | Unique per workspace, prefix-searchable | Long names |
+| `scenarios/{scenarioId}` | `scenarios/01HXYZ` | Short | Not workspace-scoped in Irmin, need separate ownership lookup |
+| `{workspaceKey}/{slug}` | `abc123/high-cyber` | Human-readable | Slug collision within workspace |
+
+**Scenario metadata storage:**
+
+| Location | Pro | Con |
+|----------|-----|-----|
+| In Irmin at `_scenarios/{id}/meta` on main | Durable, survives restarts, versioned | Pollutes main branch with non-tree data |
+| In Irmin at root of the scenario branch itself | Self-contained per branch | Mixes metadata with tree data |
+| In `WorkspaceStore` (in-memory) | Simple, fast | Lost on restart, needs reconstruction from Irmin branches |
+| Hybrid: workspace store + Irmin fallback | Fast reads, durable | Complexity of two-tier storage |
+
+### Recommendation
+
+**Naming:** `scenarios/{workspaceKey}/{scenarioId}/{slug}` — workspace-scoped
+isolation at the Irmin branch level means no ownership confusion. Listing
+workspace scenarios = `irmin.branches` filtered by prefix
+`scenarios/{workspaceKey}/`.
+
+**Metadata:** Hybrid. `WorkspaceStore` holds scenario metadata in-memory (fast
+UI operations). On server restart, reconstruct by scanning Irmin branches with
+the workspace prefix pattern and reading metadata from a well-known path
+within each branch (e.g., `_scenario-meta`). This gives durability without
+polluting `main`.
+
+---
+
+## DD-6: ScenarioService API Shape
+
+### Context
+
+The service that orchestrates scenario lifecycle, comparison, and merge.
+
+### Core Operations
+
+| Operation | Input | Output | Notes |
+|-----------|-------|--------|-------|
+| `create` | name, treeId, description | Scenario | Creates Irmin branch from current head |
+| `list` | workspaceKey | List[Scenario] | Filter branches by workspace prefix |
+| `delete` | scenarioId | Unit | Removes branch from Irmin |
+| `switchBranch` | branchRef | Unit | Updates active branch in workspace session |
+| `getActiveBranch` | workspaceKey | BranchRef | Returns current active branch |
+| `compare` | treeId, branchA, branchB | ScenarioDiff | Loads both trees, diffs structure + LEC |
+| `merge` | scenarioId, targetBranch | MergeResult | Irmin merge_with_branch |
+
+### Alternatives
+
+**compare — server-side vs client-side:**
+
+| Approach | Pro | Con |
+|----------|-----|-----|
+| Server computes full diff + LEC deltas | Single request, complete answer | Heavy server-side computation |
+| Server provides two tree snapshots, client diffs | Simpler server | Requires client-side diff logic, more data transfer |
+| Hybrid: server diffs structure, client renders | Balance | Two conceptual models |
+
+**merge — eager vs preview-first:**
+
+| Approach | Pro | Con |
+|----------|-----|-----|
+| `POST /merge` directly | Simple API | Dangerous if conflicts |
+| Preview-then-confirm: `GET /merge/preview` → `POST /merge/confirm` | Safe, user sees conflicts first | Two-request workflow, stale preview risk |
+| Single request with dry-run flag: `POST /merge?dryRun=true` | Single endpoint, clean | Slightly odd REST semantics |
+
+### Recommendation
+
+**compare:** Server-side. The server already has all the data (two trees, two
+caches). Computing the diff is O(n) node comparison + cached LEC lookups.
+Sending raw trees to the client doubles data transfer for no benefit.
+
+**merge:** Preview-first. `POST /merge/preview` returns `MergePreview`
+(conflicts, structural changes, LEC impact). `POST /merge/confirm` applies
+the merge. This matches Git's "check before push" mental model and is the
+safer UX.
+
+---
+
+## DD-7: Time Travel / HistoryService API
+
+### Context
+
+Irmin stores the complete commit DAG. Every mutation creates an immutable
+commit. We can query any historical state by commit hash.
+
+### Core Operations
+
+| Operation | Input | Output | Notes |
+|-----------|-------|--------|-------|
+| `getHistory` | treeId, branch, limit | List[CommitSummary] | Paginated commit log |
+| `getTreeAtCommit` | treeId, commitHash | RiskTree | Reconstruct tree from historical commit |
+| `revert` | treeId, branch, toCommit | CommitHash | Creates new commit reverting to old state |
+
+### Alternatives
+
+**History granularity:**
+
+| Approach | Pro | Con |
+|----------|-----|-----|
+| Raw Irmin commits (every `set` is a commit) | Complete audit trail | Very noisy — each node write is a separate commit |
+| Grouped by transaction ID (our txn prefix in commit messages) | Meaningful operations ("updated tree X") | Need to parse/group commit messages |
+| Summary only (last N logical operations) | Clean UI | Loses granularity |
+
+Our commit messages already use a structured format:
+`risk-tree:{treeId}:update:{txn}:set-node:{nodeId}`. We can group by
+`{txn}` to reconstruct logical operations from raw commits.
+
+**Revert semantics:**
+
+| Approach | Pro | Con |
+|----------|-----|-----|
+| Irmin `revert(commit)` — creates a NEW commit that resets to old state | Non-destructive, preserves full history | "Forward revert" may confuse users |
+| Branch from old commit — creates a scenario from historical state | Explicit, branch metaphor | Adds a branch per revert |
+| Destructive reset — force HEAD to old commit | Clean | Loses intermediate history |
+
+### Recommendation
+
+**Granularity:** Group by transaction ID. Show "Updated tree 'Portfolio'"
+instead of "set-node:abc, set-node:def, meta:ghi". Parse from commit messages
+that already carry structured prefixes.
+
+**Revert:** Forward revert via Irmin `revert` mutation. This preserves full
+history (the user can revert-the-revert) and is what Irmin natively supports.
+Present it in the UI as "Restore to this point" — no need to explain the
+git-style forward-revert semantics.
+
+---
+
+## DD-8: HTTP Endpoint Design
+
+### Context
+
+All current endpoints live under `/w/{key}/...`. Scenarios must follow the
+same pattern for workspace-scoped security (ADR-021, ADR-024).
+
+### Proposed Endpoints
+
+```
+Scenarios:
+  POST   /w/{key}/scenarios                              create
+  GET    /w/{key}/scenarios                              list
+  DELETE /w/{key}/scenarios/{scenarioId}                  delete
+  GET    /w/{key}/scenarios/{sid}/compare/{branchRef}     compare
+  POST   /w/{key}/scenarios/{sid}/merge/preview           merge preview
+  POST   /w/{key}/scenarios/{sid}/merge/confirm           merge confirm
+
+Branch:
+  POST   /w/{key}/branch/switch                          switch active branch
+  GET    /w/{key}/branch/active                          get active branch
+
+History:
+  GET    /w/{key}/risk-trees/{treeId}/history             commit log
+  GET    /w/{key}/risk-trees/{treeId}/at/{commitHash}     tree at commit
+  POST   /w/{key}/risk-trees/{treeId}/revert              revert to commit
+```
+
+### Alternatives
+
+**Branch-as-query-param vs active-branch session:**
+
+| Approach | Pro | Con |
+|----------|-----|-----|
+| Server-side active branch (switch then CRUD) | Simple client, fewer params per request | Stateful server, two-tab confusion |
+| Query param `?branch=X` on every request | Stateless, explicit | Noisy URLs, client must track branch |
+| Path segment `/w/{key}/b/{branch}/risk-trees/...` | RESTful, bookmarkable | Deep URL nesting, branch names in paths can be problematic |
+
+**Two-tab problem with server-side state:**
+
+If two browser tabs share a workspace URL, switching branch in tab A affects
+tab B's subsequent reads. This is a real concern.
+
+Mitigation options:
+1. Active branch is **client-side only** (frontend `Var`), passed as a header
+   (`X-Branch: scenario-1`) on every request. Server is stateless.
+2. Active branch is per-session, not per-workspace (requires session tracking).
+3. Accept the limitation — document that branch state is workspace-global.
+
+### Recommendation
+
+**Client-side branch state** with a `X-Active-Branch` header on every
+request. The server reads this header (defaulting to `main` if absent) and
+passes it through to the repository layer. This is stateless, avoids the
+two-tab problem, and is explicit. The frontend `BranchState` Var tracks the
+active branch; the `BackendClient` (Scala.js) attaches the header
+automatically.
+
+This changes the endpoint design slightly — no need for
+`POST /branch/switch` or `GET /branch/active` on the server. Branch state
+is purely client→server, per-request.
+
+---
+
+## DD-9: Frontend UI Placement
+
+### Context
+
+Current sections: Design | Analyze. No branch/scenario UI surface.
+
+### Alternatives
+
+| Approach | Description | Pro | Con |
+|----------|-------------|-----|-----|
+| **A) New "Scenarios" tab** | Third top-level section | Clear separation | Scenario is cross-cutting, not a "mode" |
+| **B) Persistent branch bar** | Always-visible bar below nav showing current branch + switcher | Standard pattern (GitHub, VS Code) | Takes vertical space |
+| **C) Branch dropdown in header** | Compact: just a dropdown next to the workspace badge | Minimal UI impact | Not discoverable, comparison flows unclear |
+
+### Recommendation: B (Persistent branch bar)
+
+The user needs to **always know what branch they're working on** — this is a
+lesson from every branching tool ever built. The branch bar is:
+
+- Visible in both Design and Analyze sections
+- Shows `main` (default) or `scenario: high-cyber` with distinct styling
+- Contains a dropdown to switch branches
+- Has a "New Scenario" button
+- Shows scenario count badge
+
+Scenario comparison goes in the **Analyze** section as a new view mode
+("Compare Scenarios" alongside the existing single-tree LEC view).
+
+History/time-travel goes in the **Design** section as a collapsible sidebar
+panel ("Commit History").
+
+---
+
+## DD-10: Error Types
+
+### Context
+
+ADR-010 requires typed errors in a sealed hierarchy. New branch operations
+can fail in new ways.
+
+### Proposed Types
+
+| Error | When | HTTP Status |
+|-------|------|-------------|
+| `BranchNotFound(ref)` | Branch name doesn't exist in Irmin | 404 |
+| `BranchAlreadyExists(ref)` | Creating a scenario with existing branch name | 409 |
+| `ScenarioNotFound(id)` | Scenario ID not found or not owned by workspace | 404 |
+| `MergeConflictError(conflicts)` | Irmin merge found conflicting changes | 409 |
+| `CommitNotFound(hash)` | Historical commit hash doesn't exist | 404 |
+
+### Alternatives
+
+**Flat errors vs nested:**
+
+| Approach | Pro | Con |
+|----------|-----|-----|
+| Flat: each error is its own case class extending AppError | Simple pattern matching, clear HTTP mapping | More types if errors proliferate |
+| Nested: `ScenarioError` sealed trait with sub-cases | Grouped, single catch-all possible | Extra hierarchy level, less direct mapping |
+
+### Recommendation
+
+Flat — consistent with existing `ValidationFailed`, `RepositoryFailure`,
+`SimulationFailure`. Each new error is a case class extending `AppError` with
+a clear HTTP mapping. No unnecessary hierarchy.
+
+---
+
+## DD-11: Workspace ↔ Scenario Ownership
+
+### Context
+
+Security model: workspace key grants access to trees within that workspace.
+Scenarios must follow the same model — a scenario belongs to a workspace and
+only that workspace's key grants access.
+
+### Enforcement Layers
+
+| Layer | Mechanism |
+|-------|-----------|
+| **Irmin branch naming** | `scenarios/{workspaceKey}/...` — data-level isolation |
+| **API validation** | `resolveScenario(key, scenarioId)` verifies branch prefix matches key |
+| **Authorization** | Same `AuthorizationService.check` as tree operations |
+
+### Alternatives
+
+**Is branch naming sufficient, or do we need explicit ownership records?**
+
+| Approach | Pro | Con |
+|----------|-----|-----|
+| Convention-based (prefix matching) | Zero storage, simple | Someone could create a branch bypassing naming convention |
+| Explicit ownership table in WorkspaceStore | Definitive | Additional state to manage, sync risk |
+| Both (defense in depth) | Belt and suspenders | Slight complexity |
+
+### Recommendation
+
+Convention-based as primary, with the workspace store tracking scenario IDs as
+a secondary index (for fast `list` operations without scanning all Irmin
+branches). The prefix check `branchRef.startsWith("scenarios/${key}/")` is the
+security enforcement; the workspace store tracking is the performance
+optimization.
+
+---
+
+## DD-12: Impact on Existing Tests
+
+### Context
+
+We're adding default-valued parameters to existing traits. Need to verify this
+doesn't break anything.
+
+### Analysis
+
+**Backward compatibility:** Adding `branch: Option[BranchRef] = None` to
+`IrminClient.get` is source-compatible — all existing callers that call
+`get(path)` continue to compile and work, passing `None` implicitly.
+
+**Binary compatibility (sbt incremental):** Scala 3 default arguments are
+compiled to overloaded methods. The existing `get(IrminPath)` signature remains
+in the bytecode, so downstream code doesn't need recompilation. This is safe.
+
+### New Test Categories
+
+| Category | Tests | Estimated Count |
+|----------|-------|-----------------|
+| IrminClient branch operations | get/set/remove/list with branch param, new operations | ~15 |
+| Repository on branch | CRUD cycle on non-main, isolation from main | ~8 |
+| ScenarioService | Full lifecycle: create → list → switch → delete | ~10 |
+| ScenarioComparator | Diff detection, LEC delta computation | ~8 |
+| ScenarioMerger | Success path, conflict path, no-changes path | ~6 |
+| HistoryService | Commit log, getTreeAtCommit, revert | ~6 |
+| Cache branch isolation | Per-branch cache hit/miss, no cross-contamination | ~4 |
+| Integration (BATS) | E2E scenario workflow via HTTP | ~5 |
+| Frontend | BranchBar, scenario list (Scala.js tests if we have them) | TBD |
+| **Total** | | **~60+** |
+
+### Recommendation
+
+Add a new test suite per feature (not per layer). `ScenarioSpec` covers
+service + repository + cache integration for the scenario workflow.
+`HistorySpec` covers time travel. Each has both unit tests (mocked IrminClient)
+and integration tests (live Irmin).
+
+---
+
+## DD-13: Implementation Order
+
+### Context
+
+Five phases proposed in Milestone 2. Question: is this sequencing optimal?
+
+### Alternatives
+
+| Order | Sequence | Pro | Con |
+|-------|----------|-----|-----|
+| **Linear** (proposed) | Foundation → Scenario → Compare → Time Travel → Frontend | Builds bottom-up, each phase has complete backend | Long time before any user-visible feature |
+| **Vertical slice** | Foundation + Scenario + minimal UI → Compare → Time Travel | User can see/test scenarios early | Frontend work interleaved, context switching |
+| **Frontend-first** | Mock backend, build UI → Wire to real backend | Fast visual feedback | Throw-away mock code, integration risk |
+| **Compare-first** | Foundation → Compare (read-only) → Scenario (write) → Time Travel | Highest-value feature first (comparison is the selling point) | Comparison needs branch creation to have something to compare |
+
+### Recommendation
+
+**Vertical slice.** After foundation (Phase A), build scenario
+create/switch/delete with a minimal BranchBar UI. This lets you demo the
+feature end-to-end before investing in comparison and merge complexity:
+
+```
+Phase A: IrminClient + types + repository parameterization (no UI)
+Phase B: Scenario CRUD + cache + BranchBar UI (end-to-end hello world)
+Phase C: Comparison service + AnalyzeView comparison mode
+Phase D: Merge service + merge UI
+Phase E: History service + CommitHistoryPanel
+```
+
+The key change from the original linear plan: Phase B includes minimal frontend
+work (BranchBar + scenario list). This provides early validation that the
+branch switching mechanism works through the full stack before building the
+more complex comparison and merge features.

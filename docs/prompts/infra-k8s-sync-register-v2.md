@@ -20,8 +20,13 @@ been wired into the cluster.
 Your task is to **read and understand** the current state of both repos, then
 produce a **concrete, ordered plan** for what must change in `register-infra`.
 Do NOT make any changes yet.  Deliver a prioritised list of diffs with the
-exact field values that need to change and why.
-
+exact field values that need to change and why. Focus should be on:
+1) updating the various bootstrap and rollout guides 
+2) updating any code / config values in the infra repo
+3) point out issues, ambiguities, spaces for improvement
+4) considerng the implementation and authorization plans in   
+/home/danago/projects/register/docs/IMPLEMENTATION-PLAN.md
+/home/danago/projects/register/docs/AUTHORIZATION-PLAN.md fo the strategic goals and the ADRs in both repos (slightly differetn folders structures)
 ---
 
 ## Step 1 — Read the application architecture docs (register repo)
