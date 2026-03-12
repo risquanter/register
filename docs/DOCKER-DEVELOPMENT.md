@@ -309,15 +309,28 @@ Configure via `docker-compose.yml`, `.env`, or CLI overrides:
 | `REGISTER_HEALTH_PORT` | `8091` | Health probe port (kubelet liveness/readiness) |
 | `REGISTER_DEFAULT_NTRIALS` | `10000` | Default simulation trials |
 | `REGISTER_MAX_TREE_DEPTH` | `5` | Maximum risk tree depth |
-| `REGISTER_PARALLELISM` | `8` | Parallel processing threads |
+| `REGISTER_TRIAL_PARALLELISM` | `8` | Trial-level parallelism (fibers per simulation) |
 | `REGISTER_MAX_CONCURRENT_SIMULATIONS` | `4` | Max concurrent simulations |
 | `REGISTER_MAX_NTRIALS` | `1000000` | Maximum trials per simulation |
 | `REGISTER_MAX_PARALLELISM` | `16` | Maximum parallelism |
-| `REGISTER_CORS_ORIGINS` | See config | Allowed CORS origins |
+| `REGISTER_SEED3` | `0` | HDR histogram seed 3 (0 = random, ADR-003) |
+| `REGISTER_SEED4` | `0` | HDR histogram seed 4 (0 = random, ADR-003) |
+| `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins (comma-separated) |
+| `REGISTER_API_LIST_ALL_TREES_ENABLED` | `false` | Enable `GET /risk-trees` list-all endpoint (A17 gate) |
+| `REGISTER_WORKSPACE_TTL` | `72h` | Workspace time-to-live |
+| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry |
+| `REGISTER_WORKSPACE_REAPER_INTERVAL` | `5m` | How often the reaper runs |
+| `REGISTER_WORKSPACE_MAX_CREATES_PER_IP` | `5` | Max workspace creates per IP per hour |
+| `REGISTER_WORKSPACE_MAX_TREES` | `10` | Max risk trees per workspace |
 | `OTEL_SERVICE_NAME` | `risk-register` | OpenTelemetry service name |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP endpoint |
 | `REGISTER_REPOSITORY_TYPE` | `in-memory` | Set to `irmin` to enable Irmin backend |
 | `IRMIN_URL` | `http://localhost:9080` | Irmin GraphQL URL (use `http://irmin:8080` inside compose) |
+| `IRMIN_BRANCH` | `main` | Irmin default branch |
+| `IRMIN_TIMEOUT_SECONDS` | `30` | Irmin request timeout |
+| `IRMIN_HEALTHCHECK_TIMEOUT_MILLIS` | `5000` | Irmin startup health-check timeout |
+| `IRMIN_HEALTHCHECK_RETRIES` | `0` | Irmin health-check retries (0 = fail-fast) |
+| `BACKEND_URL` | `http://register-server:8090` | **Frontend (nginx) only** — register-server URL for proxy_pass |
 
 ### Custom Configuration
 
@@ -406,7 +419,7 @@ docker compose down
 
 ### Full-Stack Development (Backend + Frontend)
 
-The frontend is a Scala.js SPA served by Vite on port 5173. It calls the backend on port 8080 (CORS is pre-configured for this). You need **three terminals**:
+The frontend is a Scala.js SPA served by Vite on port 5173. It calls the backend on port 8090 (CORS is pre-configured for this). You need **three terminals**:
 
 **Terminal 1 — Backend (Docker):**
 ```bash
@@ -558,11 +571,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '4'
-          memory: 4G
-        reservations:
           cpus: '2'
-          memory: 2G
+          memory: 256M
+        reservations:
+          cpus: '0.5'
+          memory: 64M
 ```
 
 ### Logging
