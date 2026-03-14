@@ -17,6 +17,93 @@ This guide covers containerization, deployment, and development environment setu
 
 ## Quick Start
 
+### Cluster Commands
+
+#### Teardown — stop everything managed by this Compose file
+
+```bash
+# Stop and remove all containers, networks, and the Irmin data volume.
+# Covers all profiles at once — safe to run regardless of what is currently up.
+docker compose \
+  --profile persistence \
+  --profile frontend \
+  --profile observability \
+  down -v
+```
+
+Omit `-v` to keep Irmin data across restarts.
+
+---
+
+#### Nginx cluster (full prod-equivalent stack)
+
+Serves the compiled SPA via nginx on port 18080, proxying API calls internally.
+No Vite, no sbt watch needed.
+
+```bash
+docker compose \
+  --profile persistence \
+  --profile frontend \
+  up -d
+
+# Verify
+docker compose ps
+curl http://localhost:18080/          # SPA via nginx
+curl http://localhost:8090/health     # API direct
+curl http://localhost:9080/graphql \  # Irmin GraphiQL (GET in browser)
+  -X POST -H 'Content-Type: application/json' \
+  -d '{"query":"{ __typename }"}'
+```
+
+Access: **`http://localhost:18080`**
+
+---
+
+#### Vite dev cluster (fast iteration on frontend/backend)
+
+Backend runs in Docker (native binary); frontend is served by Vite with HMR.
+Scala.js recompiles on every save.
+
+```bash
+# Terminal 1 — backend (in-memory, default)
+docker compose up -d register-server
+
+# Terminal 2 — Scala.js watch compiler
+sbt ~app/fastLinkJS
+
+# Terminal 3 — Vite dev server
+cd modules/app && npm run dev
+```
+
+Access: **`http://localhost:5173`**
+
+To use Irmin persistence instead of in-memory:
+```bash
+docker compose --profile persistence up -d register-server irmin
+```
+
+> **How Vite mode differs from nginx mode:**
+> Vite is a direct-origin frontend — the browser makes API calls directly from
+> `http://localhost:5173` to the backend at `http://localhost:8090`. There is no
+> server-side proxy: two distinct origins are involved, so the browser enforces
+> CORS. This is why `REGISTER_CORS_ORIGINS` must list `localhost:5173`.
+>
+> In nginx mode the browser only ever talks to port 18080; nginx proxies API
+> calls internally on the Docker network. No cross-origin request reaches the
+> browser, so CORS is not triggered and `REGISTER_CORS_ORIGINS` is irrelevant
+> for that mode.
+>
+> **Remote-backend consequence:** if the Docker cluster runs on a different
+> machine (e.g. a dev VM at `192.168.1.50`) while your browser loads Vite from
+> your laptop at `192.168.1.100:5173`, the browser sees a different origin and
+> the backend will reject the request. Add the Vite origin explicitly:
+> ```bash
+> REGISTER_CORS_ORIGINS=http://192.168.1.100:5173 docker compose up -d register-server
+> ```
+> This does not apply to nginx mode — the proxy collapses everything to a single
+> origin regardless of which machine the cluster runs on.
+
+---
 
 #### One-Time Setup: Irmin Builder Base Image
 
@@ -315,7 +402,7 @@ Configure via `docker-compose.yml`, `.env`, or CLI overrides:
 | `REGISTER_MAX_PARALLELISM` | `16` | Maximum parallelism |
 | `REGISTER_SEED3` | `0` | HDR histogram seed 3 (0 = random, ADR-003) |
 | `REGISTER_SEED4` | `0` | HDR histogram seed 4 (0 = random, ADR-003) |
-| `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins (comma-separated) |
+| `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins (comma-separated). `localhost:18080` (nginx) is intentionally absent — in that mode the browser only talks to nginx; API calls are proxied server-side so the browser never issues a cross-origin request to port 8090. |
 | `REGISTER_API_LIST_ALL_TREES_ENABLED` | `false` | Enable `GET /risk-trees` list-all endpoint (A17 gate) |
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace time-to-live |
 | `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry |
@@ -419,24 +506,38 @@ docker compose down
 
 ### Full-Stack Development (Backend + Frontend)
 
-The frontend is a Scala.js SPA served by Vite on port 5173. It calls the backend on port 8090 (CORS is pre-configured for this). You need **three terminals**:
+See the [Vite dev cluster](#vite-dev-cluster-fast-iteration-on-frontendbacked) and
+[Nginx cluster](#nginx-cluster-full-prod-equivalent-stack) recipes in Quick Start
+for the exact commands. The key difference between the two modes:
+
+| | Vite dev mode | Nginx prod mode |
+|---|---|---|
+| Frontend port | 5173 | 18080 |
+| API calls | Browser → 8090 directly (cross-origin) | Browser → 18080 → nginx → 8090 (same-origin) |
+| CORS | Required — browser enforces it | Not involved — no cross-origin request |
+| Frontend updates | HMR on every Scala.js save | Requires image rebuild + `up -d` |
+| Use for | Day-to-day GUI development | Testing nginx routing, security headers, prod parity |
+
+Vite dev mode requires **three terminals**:
 
 **Terminal 1 — Backend (Docker):**
 ```bash
-docker compose up -d
+docker compose up -d register-server
 ```
 
 **Terminal 2 — Scala.js continuous compilation:**
 ```bash
 sbt ~app/fastLinkJS
 ```
-This watches for Scala source changes in `modules/app/` and `modules/common/` and recompiles to JavaScript. The `~` prefix means it re-runs on every file save.
+Watches `modules/app/` and `modules/common/` and recompiles to JavaScript on every
+save. The `~` prefix triggers re-runs automatically.
 
 **Terminal 3 — Vite dev server:**
 ```bash
 cd modules/app && npm run dev
 ```
-Serves the frontend at `http://localhost:5173` with hot module replacement. Vite picks up the Scala.js output automatically via the `@scala-js/vite-plugin-scalajs` plugin.
+Serves the frontend at `http://localhost:5173` with hot module replacement. Vite
+picks up Scala.js output automatically via the `@scala-js/vite-plugin-scalajs` plugin.
 
 **Verify the full stack:**
 1. Open `http://localhost:5173` — the frontend should load
