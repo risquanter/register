@@ -2022,6 +2022,53 @@ case class Mark(tpe: MarkType, interpolate: Option[Interpolate], ...)
 
 ---
 
+### TODO: Time Travel / Commit History (Detailed Design Pending)
+
+**Objective:** Expose Irmin's immutable commit history to the user, enabling
+point-in-time state browsing, structured change comparison, and
+non-destructive restore.
+
+This feature leverages capabilities inherent to the storage layer. Every
+mutation already creates an immutable, content-addressed commit with hash,
+timestamp, and message. The Irmin GraphQL schema exposes `commit(hash)`,
+`Branch.last_modified`, `Commit.tree`, and `revert` — the backend work is
+primarily wrapper methods on `IrminClient`.
+
+**Scope (to be refined during detailed design):**
+
+- `IrminClient` extensions: `getHistory`, `getCommit`, `getAtCommit`, `revert`
+- `HistoryService`: orchestrates commit listing, tree reconstruction at a
+  commit, and revert operations
+- History panel UI: chronological commit log (hash, timestamp, message)
+- Read-only historical view: existing tree view + LEC chart rendered with
+  data from a selected commit, with a banner indicating non-current state
+- Restore action: creates a new forward commit matching the selected
+  historical state (non-destructive, append-only)
+- Two-version comparison: field-level structured diff between any two
+  commits (recommended: leverage scenario comparison infrastructure)
+
+**Design questions (open):**
+
+| Question | Options | Notes |
+|----------|---------|-------|
+| History granularity | Raw Irmin commits vs transaction-grouped | Raw is simplest; grouping improves UX for batch edits (DD-7, open) |
+| Revert semantics | Whole-tree vs per-node vs per-path | Irmin `revert` operates on the branch HEAD; per-node revert requires selective cherry-pick |
+| UI placement | Toggleable right panel vs dedicated page vs drawer | Right panel recommended — fits existing split-pane layout without navigation changes |
+| Cache interaction | Content-addressed cache produces automatic hits on revert (same hashes = cached results) | Design should document this explicitly as it eliminates re-simulation cost |
+
+**Prerequisites:** Working `IrminClient` (✅ exists). Branch parameterisation
+(DD-1) is NOT required — time travel works with commit hashes on any branch.
+Content-addressed cache (milestone-2b Phase A) is not blocking but amplifies
+the value (reverts become zero-cost cache hits).
+
+**Estimated effort:** 3–5 days (backend: 1–2 days, frontend: 2–3 days).
+
+**Reference:** Design analysis in `docs/scratch/milestone-2b-cache-and-decisions.md`
+(Phase E, UC4 walkthrough). Irmin schema capabilities documented in
+`dev/irmin-schema.graphql`.
+
+---
+
 ## Deferred: SSE Phases (Post Tier 1.5)
 
 These phases were originally on the Tier 1 critical path but have been deferred.
@@ -2433,6 +2480,46 @@ test/.../ScenarioComparatorSpec.scala
 - [ ] Conflict resolution on merge
 
 **Checkpoint:** End-to-end scenario workflow: create → edit → compare → merge.
+
+---
+
+### Phase 8: Follow-Up Improvements (Post-Launch)
+
+These items are not blocking for Tier 3 launch but become higher-value once content-addressed caching and scenario branching are in place.
+
+#### Risk-Level Simulation Parallelism
+
+`RiskResultResolverLive` simulates portfolio children sequentially (`ZIO.foreach`). Only trial-level parallelism exists (inside `Simulator.performTrials`). A `Simulator.simulate` method with `ZIO.collectAllPar` exists but is not wired into the cache-aware resolver.
+
+With content-addressed caching, this optimisation has higher relative payoff: cross-branch sharing produces fewer cache misses on branch switch, so remaining misses should resolve as fast as possible. Independent sibling subtrees can be simulated in parallel.
+
+```
+Before (sequential):    cyber → hardware → ops-risk → market → portfolio
+                        ████████████████████████████████████████████████ 200ms
+
+After (parallel):       cyber    ──────┐
+                        hardware ──────┼→ ops-risk ────┐
+                        market   ──────────────────────┼→ portfolio
+                        ████████████████████████████████  120ms
+```
+
+**Implementation:** Replace `ZIO.foreach(childIds)(simulateNode)` with `ZIO.foreachPar(childIds)(simulateNode)` in the portfolio branch of `simulateNode`, constrained by a concurrency semaphore.
+
+#### Name-Change Re-Simulation Avoidance
+
+Renaming a node changes its content hash (the JSON includes `name`) → cache miss → re-simulation, even though `name` does not affect simulation output. Avoiding this would require hashing only simulation-relevant fields on the JVM side — a canonicalisation layer that strips non-simulation fields before hashing. Renames are rare and re-simulation of one node is fast, so this is acceptable for v1. Revisit if user feedback indicates otherwise.
+
+#### RiskResultGroup for Drill-Down
+
+`RiskResult.combine` returns a `RiskResult` with `distributionType = Leaf` even for portfolio aggregates. A `RiskResultGroup` type with `Composite` distribution type exists but is unused. Switching portfolio entries to `RiskResultGroup` would preserve child references for component-contribution drill-down in the UI. Adds memory overhead per portfolio entry. Implement when drill-down feature is prioritised.
+
+#### Eviction Strategy
+
+The initial `ContentCache` uses `NoOpEvictionStrategy` (entries never evicted, cleared on restart). For long-running production instances with large trees and many branches, a `RefCountEvictionStrategy` (track active branch references per hash) or size-bounded LRU may be needed. Monitor memory usage in production before implementing.
+
+#### Per-Branch SimulationConfig
+
+`SimulationConfig` is currently global (injected once at service layer construction). All nodes share `defaultNTrials`, `seed3`, `seed4`. If per-branch config is needed, extend the cache key from `ContentHash` to `(ContentHash, configHash)`. Cache-clear-on-restart is sufficient for v1.
 
 ---
 
