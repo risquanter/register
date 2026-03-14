@@ -1,5 +1,5 @@
 ThisBuild / version      := "0.1.0"
-ThisBuild / scalaVersion := "3.6.4"
+ThisBuild / scalaVersion := "3.7.4"
 
 ThisBuild / scalacOptions ++= Seq(
   "-unchecked",
@@ -75,6 +75,8 @@ val serverDependencies = Seq(
   "io.github.iltotore"            %% "iron-zio"                          % ironVersion,
   "org.scala-lang.modules"        %% "scala-parallel-collections"        % "1.0.4",
   "com.risquanter"                 % "simulation.util"                   % "0.8.0",
+  // Vague quantifier logic (ADR-028)
+  "com.risquanter"                %% "fol-engine"                        % "0.1.0-SNAPSHOT",
   // STTP zio-json integration for Irmin GraphQL client
   "com.softwaremill.sttp.client3" %% "zio-json"                          % sttpVersion,
   "com.bilal-fazlani"             %% "zio-ulid"                          % zioUlidVersion

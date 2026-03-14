@@ -145,8 +145,9 @@ docker build -f containers/prod/Dockerfile.irmin-prod \
   -t local/irmin-prod:3.11 containers/prod/
 
 # 3. GraalVM builder base (native-image + sbt) — ~1-2 min
+#    Context is the parent directory so fol-engine source is in scope.
 docker build -f containers/builders/Dockerfile.graalvm-builder \
-  -t local/graalvm-builder:21 containers/builders/
+  -t local/graalvm-builder:21 ..
 
 # 4. Frontend SPA (node:22-alpine builder + nginx:1.27.5-alpine-slim runtime) — ~10-15 min first run
 #    Self-contained: downloads and verifies sbt internally. Independent of steps 1-3.
@@ -244,12 +245,22 @@ build the toolchain image:
 
 ```bash
 docker build -f containers/builders/Dockerfile.graalvm-builder \
-  -t local/graalvm-builder:21 containers/builders/
+  -t local/graalvm-builder:21 ..
 ```
 
 This takes ~1–2 minutes and only needs to be repeated when:
 - GraalVM version changes (update the `FROM` in `containers/builders/Dockerfile.graalvm-builder`)
 - sbt version changes (update `SBT_VERSION` arg to match `project/build.properties`)
+- `fol-engine` (or any other local SNAPSHOT library) has a new version to bake in
+
+> **Build context:** the graalvm-builder uses `..` (the parent of the register
+> project) as its Docker build context so that both `register/` and
+> `vague-quantifier-logic/` source trees are accessible. Run the build command
+> from the register project root:
+> ```bash
+> docker build -f containers/builders/Dockerfile.graalvm-builder \
+>   -t local/graalvm-builder:21 ..
+> ```
 
 #### Build Options
 
