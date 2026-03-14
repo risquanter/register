@@ -10,7 +10,7 @@
 
 | Group | Name | Depends on | Gate |
 |---|---|---|---|
-| TG-1 | vague-quantifier-logic build prep | — | `sbt +publishLocal` succeeds |
+| TG-1 | fol-engine integration build prep | — | ✅ Done — all tests + bats suites pass |
 | TG-2 | `RiskTreeKnowledgeBase` + query service | TG-1 | curl returns valid JSON |
 | TG-3 | Frontend query pane | TG-2 | end-to-end GUI flow |
 | TG-4 | Integration tests | TG-2 | `sbt serverIt/test` passes |
@@ -18,32 +18,53 @@
 
 ---
 
-## TG-1 — vague-quantifier-logic Build Prep
+## TG-1 — fol-engine Integration Build Prep ✅
 
-Work in `~/projects/vague-quantifier-logic`.
+**Status: Complete.** Actual approach differed from the original plan.
 
-No logic changes to the library. The only change is build configuration
-to produce a JAR consumable by the register (Scala 3.6.4).
+Rather than cross-building the library for Scala 3.6.4, the register project
+was upgraded to Scala 3.7.4 to match the library. No cross-build is needed.
 
-### T1.1 — Cross-build for Scala 3.6.4
+### T1.1 — Rename and re-org the library ✅
 
-**File:** `build.sbt`
+**Files:** `vague-quantifier-logic/build.sbt`
 
-Add:
+- `organization := "com.risquanter"` added
+- `name := "fol-engine"` (was `scala-logic`)
+- `sbt.version` aligned to `1.12.0-RC1` (matches register's graalvm-builder)
+
+Published as `com.risquanter::fol-engine:0.1.0-SNAPSHOT`.
+
+### T1.2 — Bump register to Scala 3.7.4 ✅
+
+**File:** `register/build.sbt`
+
 ```scala
-crossScalaVersions := Seq("3.6.4", scala3Version)
+ThisBuild / scalaVersion := "3.7.4"
 ```
 
-**Acceptance:** `sbt +test` passes on both 3.6.4 and 3.7.x.
+All 711 unit tests + 19 integration tests pass at 3.7.4.
 
-### T1.2 — publishLocal
+### T1.3 — Bake fol-engine into graalvm-builder ✅
 
-```bash
-sbt +publishLocal
+**File:** `containers/builders/Dockerfile.graalvm-builder`
+
+fol-engine is built from source inside the graalvm-builder image via
+`sbt publishLocal`, making it available in the builder's `~/.ivy2/local`
+when `Dockerfile.register-prod` runs `sbt server/update`. Build context
+changed from `containers/builders/` to `..` (project parent dir) so both
+`register/` and `vague-quantifier-logic/` are accessible during the build.
+
+All three bats suites (A, B, C — 26 tests total) pass against the rebuilt
+native distroless image.
+
+### T1.4 — Add dependency to register build ✅
+
+**File:** `register/build.sbt` (serverDependencies)
+
+```scala
+"com.risquanter" %% "fol-engine" % "0.1.0-SNAPSHOT"
 ```
-
-**Acceptance:** JAR exists at
-`~/.ivy2/local/default/scala-logic_3/0.1.0-SNAPSHOT/`.
 
 ---
 
@@ -51,14 +72,18 @@ sbt +publishLocal
 
 Work in `~/projects/register`.
 
-### T2.1 — Add library dependency
+### T2.1 — Add library dependency ✅
 
-**File:** `build.sbt` (server module)
+**File:** `build.sbt` (serverDependencies)
 
-Add `"default" %% "scala-logic" % "0.1.0-SNAPSHOT"` to server
-dependencies.
+Done as part of TG-1 (T1.4). Coordinate:
 
-**Acceptance:** `sbt server/compile` succeeds; VagueQuery is importable.
+```scala
+"com.risquanter" %% "fol-engine" % "0.1.0-SNAPSHOT"
+```
+
+**Acceptance met:** `sbt server/compile` succeeds; `sbt server/test` passes
+(323 tests). VagueQuery and all library types are importable.
 
 ### T2.2 — Define DTOs in `common`
 
@@ -299,7 +324,7 @@ Week 5:  TG-5 (polish)
 
 | Gate | After | Criteria |
 |---|---|---|
-| G1 | TG-1 | `sbt +test` passes; `+publishLocal` produces 3.6.4 JAR |
+| G1 | TG-1 | ✅ 711 unit + 19 IT tests pass at Scala 3.7.4; bats A+B+C pass on rebuilt distroless image |
 | G2 | TG-2 | `curl -X POST .../query -d '{"query":"Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"}'` returns valid JSON |
 | G3 | TG-4 | `sbt serverIt/test` passes all 6 integration tests |
 | G4 | TG-3 | Type query → result card → tree highlights → LEC overlay |
