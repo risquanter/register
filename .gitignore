@@ -68,7 +68,8 @@ _opam/
 /temp/
 /temp/*
 private-docs/*
+interview-prep/
 
 # npm
 .vite/
-node_modules/
+node_modules/tmp/
