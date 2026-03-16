@@ -225,7 +225,7 @@ parameters.
 ```json
 {
   "satisfied": true,
-  "actualProportion": 0.72,
+  "proportion": 0.72,
   "rangeSize": 25,
   "sampleSize": 25,
   "satisfyingCount": 18,
@@ -264,7 +264,7 @@ Location: `server/.../services/QueryService.scala`
 ZIO service. Single method:
 
 ```scala
-def evaluate(key: WorkspaceKey, treeId: TreeId, query: String): Task[QueryResultDTO]
+def evaluate(key: WorkspaceKey, treeId: TreeId, query: String): Task[QueryResponse]
 ```
 
 Steps:
@@ -275,7 +275,7 @@ Steps:
 5. Build `RiskTreeKnowledgeBase(tree, results)`
 6. Call `RangeExtractor.extractRange` + `ScopeEvaluator.evaluateSample`
 7. Apply quantifier check
-8. Map to `QueryResultDTO`
+8. Map to `QueryResponse` via `QueryResponse.from(...)` (outbound validation boundary)
 
 Note: step 6 calls library components directly rather than
 `VagueSemantics.holds()`, because `evaluateSample` returns the satisfying
@@ -296,7 +296,7 @@ Wires endpoint to service. Auth check via `AuthorizationService`.
 
 ```
 queryInput       : Var[String]                        ← exists
-queryResult      : Var[LoadState[QueryResultDTO]]     ← new
+queryResult      : Var[LoadState[QueryResponse]]     ← new
 matchingNodeIds  : Signal[Set[NodeId]]                ← derived from queryResult
 isExecuting      : Signal[Boolean]                    ← derived from queryResult
 ```
@@ -313,7 +313,7 @@ isExecuting      : Signal[Boolean]                    ← derived from queryResu
 
 ### ADR-019 Compliance
 
-- **Pattern 1:** `QueryResultCard` is a composable function `Signal[LoadState[QueryResultDTO]] => HtmlElement`
+- **Pattern 1:** `QueryResultCard` is a composable function `Signal[LoadState[QueryResponse]] => HtmlElement`
 - **Pattern 2:** `AnalyzeQueryState` passed as constructor parameter (existing pattern)
 - **Pattern 4:** `QueryResultCard` derives display from signal, owns no state
 

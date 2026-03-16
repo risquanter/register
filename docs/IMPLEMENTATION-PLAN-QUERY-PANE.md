@@ -85,25 +85,74 @@ Done as part of TG-1 (T1.4). Coordinate:
 **Acceptance met:** `sbt server/compile` succeeds; `sbt server/test` passes
 (323 tests). VagueQuery and all library types are importable.
 
-### T2.2 — Define DTOs in `common`
+### T2.2 — Define request/response types in `common`
 
 **Files:**
-- `modules/common/src/main/scala/.../http/responses/QueryResultResponse.scala`
+- `modules/common/src/main/scala/.../http/responses/QueryResponse.scala`
+- `modules/common/src/main/scala/.../http/requests/QueryRequest.scala`
 
-**Type:**
+#### Response type
+
 ```scala
-case class QueryResultDTO(
+final case class QueryResponse(
   satisfied: Boolean,
-  actualProportion: Double,
+  proportion: Double,
   rangeSize: Int,
   sampleSize: Int,
   satisfyingCount: Int,
-  matchingNodeIds: List[String],
+  matchingNodeIds: List[NodeId],
   queryEcho: String
 )
+
+object QueryResponse:
+  given JsonCodec[QueryResponse] = DeriveJsonCodec.gen
+
+  /** Outbound validation boundary: projects untyped library evaluation
+    * results back into the typed register domain (ADR-001 §7, ADR-018).
+    * This is the single construction point for query responses — the
+    * outbound counterpart of the smart-constructor pattern on the
+    * inbound side.
+    */
+  def from(
+    satisfyingElements: Set[Any],
+    rangeElements: Set[Any],
+    nodeIdLookup: Map[String, NodeId],
+    queryEcho: String,
+    thresholdSatisfied: Boolean
+  ): QueryResponse =
+    val matchingIds = satisfyingElements.toList.flatMap { elem =>
+      nodeIdLookup.get(elem.toString)
+    }
+    QueryResponse(
+      satisfied       = thresholdSatisfied,
+      proportion      = if rangeElements.isEmpty then 0.0
+                        else satisfyingElements.size.toDouble / rangeElements.size,
+      rangeSize       = rangeElements.size,
+      sampleSize      = rangeElements.size,
+      satisfyingCount = satisfyingElements.size,
+      matchingNodeIds = matchingIds,
+      queryEcho       = queryEcho
+    )
 ```
 
-With `JsonCodec` (zio-json) and `Schema` (Tapir) derivations.
+No explicit `Schema` derivation — auto-derived via `tapir.generic.auto.*`
+(imported in `BaseEndpoint`).
+
+`matchingNodeIds` uses `List[NodeId]` (not `List[String]`) per ADR-001 §7
+and ADR-018. The `from` factory method is the **outbound validation
+boundary** where untyped `Any` elements from the fol-engine evaluator
+re-enter register's typed domain. This follows the same architectural
+principle as `SimulationResponse.fromRiskTree` on the response side and
+`RiskTreeDefinitionRequest.resolve` on the request side.
+
+#### Request type
+
+```scala
+final case class QueryRequest(query: String)
+
+object QueryRequest:
+  given JsonCodec[QueryRequest] = DeriveJsonCodec.gen
+```
 
 **Acceptance:** `sbt common/compile` succeeds on JVM and JS.
 
@@ -114,8 +163,8 @@ With `JsonCodec` (zio-json) and `Schema` (Tapir) derivations.
 Add `queryWorkspaceTreeEndpoint`:
 ```
 POST /w/{key}/risk-trees/{treeId}/query
-  in: jsonBody[QueryRequest]   // { "query": String }
-  out: jsonBody[QueryResultDTO]
+  in: jsonBody[QueryRequest]
+  out: jsonBody[QueryResponse]
 ```
 
 **Acceptance:** Endpoint compiles; Swagger docs show it.
@@ -155,7 +204,7 @@ ZIO service layer. Steps:
 4. Build `RiskTreeKnowledgeBase`
 5. Call `RangeExtractor.extractRange` + `ScopeEvaluator.evaluateSample`
 6. Apply quantifier check (trivial arithmetic)
-7. Map to `QueryResultDTO`
+7. Map to `QueryResponse` via `QueryResponse.from(...)`
 
 Uses `evaluateSample` (not `VagueSemantics.holds`) to retain the
 satisfying element set for `matchingNodeIds`.
@@ -189,7 +238,7 @@ Work in `~/projects/register/modules/app`.
 
 **File:** `src/main/scala/.../state/AnalyzeQueryState.scala`
 
-Add `queryResult: Var[LoadState[QueryResultDTO]]`, derived signals
+Add `queryResult: Var[LoadState[QueryResponse]]`, derived signals
 `matchingNodeIds` and `isExecuting`. Add `executeQuery()` method that
 fires POST via `ZJS.loadInto`.
 
@@ -199,7 +248,7 @@ fires POST via `ZJS.loadInto`.
 
 **File:** `src/main/scala/.../views/QueryResultCard.scala` (new)
 
-Composable function: `Signal[LoadState[QueryResultDTO]] => HtmlElement`.
+Composable function: `Signal[LoadState[QueryResponse]] => HtmlElement`.
 Shows satisfied badge, proportion bar, count, matching IDs, query echo.
 States: Idle, Loading, Failed, Loaded.
 
