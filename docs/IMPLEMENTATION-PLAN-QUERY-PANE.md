@@ -2,7 +2,8 @@
 
 **Parent:** [ADR-028](ADR-028-vague-quantifier-query-pane.md) +
 [ADR-028 Appendix](ADR-028-appendix-technical-design.md)  
-**Scope:** All code changes to ship the query pane end-to-end.
+**Scope:** All code changes to ship the query pane end-to-end.  
+**Last updated:** 2026-03-16
 
 ---
 
@@ -11,7 +12,8 @@
 | Group | Name | Depends on | Gate |
 |---|---|---|---|
 | TG-1 | fol-engine integration build prep | — | ✅ Done — all tests + bats suites pass |
-| TG-2 | `RiskTreeKnowledgeBase` + query service | TG-1 | curl returns valid JSON |
+| TG-1b | fol-engine internal debt resolution | TG-1 | 🔄 In progress — all 768 fol-engine tests pass; evaluation path unification pending |
+| TG-2 | `RiskTreeKnowledgeBase` + query service | TG-1b | curl returns valid JSON |
 | TG-3 | Frontend query pane | TG-2 | end-to-end GUI flow |
 | TG-4 | Integration tests | TG-2 | `sbt serverIt/test` passes |
 | TG-5 | Polish + docs | TG-3, TG-4 | ready to merge |
@@ -68,6 +70,59 @@ native distroless image.
 
 ---
 
+## TG-1b — fol-engine Internal Debt Resolution 🔄
+
+**Status: In progress.** Work in `~/projects/vague-quantifier-logic`.
+
+This task group resolves technical debt in fol-engine that must be
+completed before register can consume the library correctly. The core
+issue: fol-engine has two parallel evaluation paths (string-parsed and
+typed-DSL) implementing the same paper semantics with different
+infrastructure. The string-parser path (which register uses) had a
+degraded sampling implementation using `scala.util.Random` instead of
+the proper HDR + statistical sampling pipeline.
+
+**Design document:** [`vague-quantifier-logic/docs/EVALUATION-PATH-UNIFICATION.md`](../../vague-quantifier-logic/docs/EVALUATION-PATH-UNIFICATION.md)
+
+### Completed sub-tasks
+
+| Task | What | Status |
+|---|---|---|
+| T1b.1 | `NormalApprox` — replace commons-math3 inverse-normal with pure-Scala Acklam + A&S | ✅ Done (17 tests) |
+| T1b.2 | Split `SamplingParams` → `SamplingParams(epsilon, alpha)` + `HDRConfig(entityId, varId, seed3, seed4)` | ✅ Done |
+| T1b.3 | Rewrite `HDRSampler` — Fisher-Yates shuffle with HDR PRNG, eliminate `scala.util.Random` | ✅ Done (41 tests) |
+| T1b.4 | Remove `UniformSampler` / `StratifiedSampler` | ✅ Done |
+| T1b.5 | Update all typed-DSL source + test files to new `SamplingParams` + `HDRConfig` API | ✅ Done (768 tests pass) |
+
+### Remaining sub-tasks — Evaluation path unification (Approach 2)
+
+These tasks unify the two evaluation paths into a single pipeline so that
+string-parsed queries and typed-DSL queries use identical sampling,
+tolerance, and result semantics. See the
+[design document](../../vague-quantifier-logic/docs/EVALUATION-PATH-UNIFICATION.md)
+for full rationale and implementation steps.
+
+| Task | What | Status | Est. |
+|---|---|---|---|
+| T1b.6 | Unify quantifier types: `Quantifier` (ratio) ↔ `VagueQuantifier` (percentage) — keep ratio as canonical, percentage as builder | Not done | 1.5h |
+| T1b.7 | Create unified `VagueQueryResult` (replaces both `vague.semantics.QueryResult` and `vague.query.QueryResult`; adds `satisfyingElements`, `confidenceInterval`, `marginOfError`) | Not done | 0.5h |
+| T1b.8 | Bridge FOL scope formulas into typed predicates (`Formula → RelationValue => Boolean` closure over `Model[Any]`) — enables string-parsed queries to flow through the typed evaluation pipeline | Not done | 1.0h |
+| T1b.9 | Rewrite `VagueSemantics` to delegate to unified pipeline (remove `selectSample`, `checkQuantifier`, `EvaluationParams`, `import scala.util.Random`) | Not done | 1.5h |
+| T1b.10 | Update `VagueQuery[A].evaluate` to return `VagueQueryResult` (remove `vague.query.QueryResult` wrapper) | Not done | 1.0h |
+| T1b.11 | Remove deprecated KB wrappers (`holdsOnKB`, `holdsExactOnKB`, `holdsWithSamplingOnKB`) | Not done | 0.5h |
+| T1b.12 | Build cleanup: remove `commons-math3` and `simulation.util` from `build.sbt` | Not done | 0.5h |
+| T1b.13 | fol-engine usage documentation: `README.md` examples covering three evaluation modes (exact, sampled with HDR + CI, exact with satisfying element set) with semantic context for new users | Not done | 1.0h |
+| T1b.14 | Cross-compile fol-engine (JVM + JS) — enables `commonDependencies` in register | Not done | TBD |
+
+**Gate:** All fol-engine tests pass. `VagueSemantics.holds()` returns
+`VagueQueryResult` with `satisfyingElements`. No `scala.util.Random`
+anywhere. `commons-math3` and `simulation.util` removed from build.
+
+**Acceptance:** `sbt test` passes (expect ~770+ tests). `sbt publishLocal`
+produces artifact consumable by register.
+
+---
+
 ## TG-2 — Server: `RiskTreeKnowledgeBase` + Endpoint
 
 Work in `~/projects/register`.
@@ -85,7 +140,9 @@ Done as part of TG-1 (T1.4). Coordinate:
 **Acceptance met:** `sbt server/compile` succeeds; `sbt server/test` passes
 (323 tests). VagueQuery and all library types are importable.
 
-### T2.2 — Define request/response types in `common`
+### T2.2 — Define request/response types in `common` ✅
+
+**Status: Complete.** Both types exist and compile.
 
 **Files:**
 - `modules/common/src/main/scala/.../http/responses/QueryResponse.scala`
@@ -107,11 +164,17 @@ final case class QueryResponse(
 object QueryResponse:
   given JsonCodec[QueryResponse] = DeriveJsonCodec.gen
 
-  /** Outbound validation boundary: projects untyped library evaluation
+  /** Outbound validation boundary: projects library evaluation
     * results back into the typed register domain (ADR-001 §7, ADR-018).
-    * This is the single construction point for query responses — the
-    * outbound counterpart of the smart-constructor pattern on the
-    * inbound side.
+    *
+    * After TG-1b, this method receives a VagueQueryResult from the
+    * library (which includes satisfyingElements). No direct access to
+    * ScopeEvaluator or RangeExtractor is needed.
+    *
+    * NOTE: QueryResponseBuilder.scala already exists in
+    * modules/server/src/main/scala/.../foladapter/ with the old
+    * Set[RelationValue] signature. It will be refactored in T2.5b
+    * to accept VagueQueryResult instead.
     */
   def from(
     satisfyingElements: Set[Any],
@@ -156,18 +219,20 @@ object QueryRequest:
 
 **Acceptance:** `sbt common/compile` succeeds on JVM and JS.
 
-### T2.3 — Define endpoint in `WorkspaceEndpoints`
+### T2.3 — Define endpoint in `WorkspaceEndpoints` ✅
+
+**Status: Complete.** Endpoint defined at line 182.
 
 **File:** `modules/common/src/main/scala/.../http/endpoints/WorkspaceEndpoints.scala`
 
-Add `queryWorkspaceTreeEndpoint`:
+Added `queryWorkspaceTreeEndpoint`:
 ```
 POST /w/{key}/risk-trees/{treeId}/query
   in: jsonBody[QueryRequest]
   out: jsonBody[QueryResponse]
 ```
 
-**Acceptance:** Endpoint compiles; Swagger docs show it.
+**Acceptance:** ✅ Endpoint compiles; Swagger docs show it.
 
 ### T2.4 — Implement `RiskTreeKnowledgeBase`
 
@@ -222,14 +287,57 @@ ZIO service layer. Steps:
 2. Validate symbols against known schema (fail 400 with available list)
 3. Load tree + ensure simulations cached (fail 409 if not)
 4. Build `RiskTreeKnowledgeBase`
-5. Call `RangeExtractor.extractRange` + `ScopeEvaluator.evaluateSample`
-6. Apply quantifier check (trivial arithmetic)
-7. Map to `QueryResponse` via `QueryResponse.from(...)`
+5. Call `VagueSemantics.holds(query, source, answerTuple, params, config)`
+   — returns `VagueQueryResult` including `satisfyingElements`
+6. Map to `QueryResponse` via `QueryResponseBuilder.from(result, lookup)`
 
-Uses `evaluateSample` (not `VagueSemantics.holds`) to retain the
-satisfying element set for `matchingNodeIds`.
+**Design change (2026-03-16):** The original plan called for bypassing
+`VagueSemantics.holds()` and calling `RangeExtractor` +
+`ScopeEvaluator.evaluateSample()` directly, with "trivial arithmetic"
+for the quantifier check. This was a shortcut that discarded the
+statistical sampling infrastructure (no `SampleSizeCalculator`, no
+confidence intervals, no HDR determinism) and re-implemented tolerance
+logic outside the library.
+
+After TG-1b (evaluation path unification), `VagueSemantics.holds()`
+returns `VagueQueryResult` which includes `satisfyingElements`. The
+bypass is no longer needed. The register calls a single library method
+and gets everything: satisfaction verdict (with tolerance), proportion,
+CI, and the actual matching element set.
+
+Three evaluation modes are available:
+- **Exact** (default): All range elements evaluated. No `SamplingParams` needed.
+- **Sampled**: Pass `SamplingParams(epsilon, alpha)` + `HDRConfig`.
+  Library computes sample size statistically. For small trees the
+  calculator may return n ≥ N, falling back to exact evaluation.
+- **Exact with elements**: Default exact mode already includes
+  `satisfyingElements` in the result.
 
 **Acceptance:** Unit test with mocked resolver + tree.
+
+### T2.5b — Refactor `QueryResponseBuilder`
+
+**File:** `modules/server/src/main/scala/.../foladapter/QueryResponseBuilder.scala`
+
+**Status:** File already exists with `from(satisfyingElements: Set[RelationValue], ...)` signature
+(written before the TG-1b design change).
+
+After TG-1b, refactor to accept `VagueQueryResult` directly:
+
+```scala
+object QueryResponseBuilder:
+  def from(
+    result: VagueQueryResult,
+    nodeIdLookup: Map[String, NodeId],
+    queryEcho: String
+  ): QueryResponse
+```
+
+The builder extracts `satisfyingElements` from the `VagueQueryResult`,
+maps `RelationValue.Const(name)` → `NodeId` via `nodeIdLookup`, and
+populates all `QueryResponse` fields from the library result.
+
+**Acceptance:** Compiles; unit test verifies NodeId mapping.
 
 ### T2.6 — Implement `QueryController`
 
@@ -366,25 +474,43 @@ Add "Query Pane" section to `docs/WORKING-INSTRUCTIONS.md`:
 - Range predicate guidance (leaf vs descendant_of)
 - Double-counting warning
 
+### T5.5 — Register domain usage documentation
+
+Add query-pane usage documentation covering how fol-engine capabilities
+are exposed within the risk register domain:
+- How queries map to risk tree structures (range = leaf/portfolio/descendant_of)
+- How simulation results are exposed as functions (p50, p90, p95, p99, lec)
+- API examples: exact evaluation, sampled evaluation for large trees
+- Configuration: SamplingParams + HDRConfig (what they control, when to tune)
+- End-to-end example: POST query → JSON response → tree highlighting
+- Error cases: parse error, unknown symbol, no simulation data
+
 ---
 
 ## Sequencing
 
 ```
-Week 1:  TG-1 (library build prep)
-         T1.1 → T1.2
+Week 1:  TG-1 (library build prep)                            ✅ DONE
+         T1.1 → T1.2 → T1.3 → T1.4
 
-Week 2:  TG-2 (server components)
-         T2.1 → T2.2 + T2.3 (parallel) → T2.4 → T2.5 → T2.6 → T2.7
+Week 2:  TG-1b (fol-engine internal debt)                     🔄 IN PROGRESS
+         T1b.1–T1b.5 (sampling infrastructure)                ✅ DONE
+         T1b.6–T1b.12 (evaluation path unification)           ← CURRENT
+         T1b.13 (fol-engine usage docs)
+         T1b.14 (cross-compilation)
 
-Week 3:  TG-4 (tests, can overlap with TG-2 tail)
+Week 3:  TG-2 (server components)
+         T2.2 ✅ + T2.3 ✅ (already done)
+         T2.4 → T2.5 → T2.6 → T2.7
+
+Week 4:  TG-4 (tests, can overlap with TG-2 tail)
          T4.1 (once T2.4 done) → T4.2 (once T2.6 done)
 
-Week 4:  TG-3 (frontend)
+Week 5:  TG-3 (frontend)
          T3.1 → T3.2 → T3.3 → T3.4 → T3.5
 
-Week 5:  TG-5 (polish)
-         T5.1 → T5.2 → T5.3 → T5.4
+Week 6:  TG-5 (polish + docs)
+         T5.1 → T5.2 → T5.3 → T5.4 → T5.5
 ```
 
 ---
@@ -394,7 +520,8 @@ Week 5:  TG-5 (polish)
 | Gate | After | Criteria |
 |---|---|---|
 | G1 | TG-1 | ✅ 711 unit + 19 IT tests pass at Scala 3.7.4; bats A+B+C pass on rebuilt distroless image |
+| G1b | TG-1b | fol-engine: all tests pass (~770+); `VagueSemantics.holds()` returns `VagueQueryResult` with `satisfyingElements`; no `scala.util.Random`; commons-math3 removed; `sbt publishLocal` succeeds |
 | G2 | TG-2 | `curl -X POST .../query -d '{"query":"Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"}'` returns valid JSON |
 | G3 | TG-4 | `sbt serverIt/test` passes all 6 integration tests |
 | G4 | TG-3 | Type query → result card → tree highlights → LEC overlay |
-| G5 | TG-5 | ADR-028 accepted; WORKING-INSTRUCTIONS updated |
+| G5 | TG-5 | ADR-028 accepted; WORKING-INSTRUCTIONS updated; register domain usage docs complete |
