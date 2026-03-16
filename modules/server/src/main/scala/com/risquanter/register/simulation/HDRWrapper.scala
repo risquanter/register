@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.simulation.util.rng.HDR
+import com.risquanter.hdr.HDR
 
 /**
  * Thin Scala wrapper around simulation-util's HDR (Hash-Derived Random) PRNG.

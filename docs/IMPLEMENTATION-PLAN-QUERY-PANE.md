@@ -171,7 +171,7 @@ POST /w/{key}/risk-trees/{treeId}/query
 
 ### T2.4 — Implement `RiskTreeKnowledgeBase`
 
-**File:** `modules/server/src/main/scala/.../query/RiskTreeKnowledgeBase.scala`
+**File:** `modules/server/src/main/scala/.../foladapter/RiskTreeKnowledgeBase.scala`
 
 Responsibilities:
 1. Build `KnowledgeBase` with structural facts (`leaf`, `portfolio`,
@@ -180,6 +180,26 @@ Responsibilities:
    with simulation-backed functions (`p50`, `p90`, `p95`, `p99`, `lec`)
    and comparison predicates (`>`, `<`, `>=`, `<=`)
 3. Override `getFunction` for numeric literal parsing
+
+**TREE-OPS applicability (Pattern 3 — Catamorphism):**
+The `allDescendants` helper that materialises `descendant_of` and
+`leaf_descendant_of` is a textbook catamorphism (bottom-up fold) over the
+tree structure. `TreeIndex` already provides `children(nodeId)` which is
+the one-level functor step; `allDescendants` composes it recursively.
+While the codebase does not use a formal `Fix[F]` / recursion-scheme
+library, the *shape* of the computation is a cata:
+
+```
+algebra: TreeF[Set[NodeId]] => Set[NodeId]
+  LeafF(id)              => Set(id)
+  PortfolioF(id, merged) => merged + id   // merged = union of children's sets
+```
+
+This insight is recorded for design clarity but does **not** warrant
+introducing a recursion-scheme library — direct recursive implementation
+via `TreeIndex.children` is idiomatic and sufficient at current scale.
+If future tree operations proliferate, factoring the recursion via
+TREE-OPS Pattern 3 would reduce duplication across folds.
 
 Public API:
 ```scala
@@ -289,7 +309,7 @@ and triggers chart load.
 
 ### T4.1 — KB builder tests
 
-**File:** `modules/server/src/test/scala/.../query/RiskTreeKnowledgeBaseSpec.scala` (new)
+**File:** `modules/server/src/test/scala/.../foladapter/RiskTreeKnowledgeBaseSpec.scala` (new)
 
 Test cases:
 1. Structural facts: leaf/portfolio/child_of populated correctly

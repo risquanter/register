@@ -249,7 +249,7 @@ parameters.
 
 ### `RiskTreeKnowledgeBase`
 
-Location: `server/.../query/RiskTreeKnowledgeBase.scala`
+Location: `server/.../foladapter/RiskTreeKnowledgeBase.scala`
 
 Constructed from `(RiskTree, Map[NodeId, LossDistribution])`. Owns KB
 building + `Interpretation` augmentation. Single public method:

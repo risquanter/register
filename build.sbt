@@ -75,6 +75,8 @@ val serverDependencies = Seq(
   "io.github.iltotore"            %% "iron-zio"                          % ironVersion,
   "org.scala-lang.modules"        %% "scala-parallel-collections"        % "1.0.4",
   "com.risquanter"                 % "simulation.util"                   % "0.8.0",
+  // HDR counter-based PRNG (pure Scala, cross-compiled)
+  "com.risquanter"                %% "hdr-rng"                           % "0.1.0-SNAPSHOT",
   // Vague quantifier logic (ADR-028)
   "com.risquanter"                %% "fol-engine"                        % "0.1.0-SNAPSHOT",
   // STTP zio-json integration for Irmin GraphQL client

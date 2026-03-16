@@ -5,8 +5,8 @@ import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import sttp.model.{StatusCode, Header, MediaType}
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, WorkspaceRotateResponse, SimulationResponse}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, QueryRequest}
+import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, WorkspaceRotateResponse, SimulationResponse, QueryResponse}
 import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
@@ -176,3 +176,15 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .in(jsonBody[List[NodeId]].description("Array of node IDs to include in chart"))
       .out(stringBody.description("Vega-Lite JSON specification"))
       .out(header(Header.contentType(MediaType.ApplicationJson)))
+
+  // ── Workspace-scoped vague quantifier query (ADR-028) ─────────────
+
+  val queryWorkspaceTreeEndpoint =
+    authedBaseEndpoint
+      .tag("workspaces")
+      .name("queryWorkspaceTree")
+      .description("Evaluate a vague quantifier query against a risk tree")
+      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "query")
+      .post
+      .in(jsonBody[QueryRequest])
+      .out(jsonBody[QueryResponse])

@@ -188,7 +188,7 @@ val augmented = new Interpretation[Any](domain, baseFuncs ++ simFuncs, basePreds
 
 | Location | Pattern |
 |----------|---------|
-| `server/.../query/RiskTreeKnowledgeBase` | KB construction + Model augmentation (DD-2, DD-3) |
+| `server/.../foladapter/RiskTreeKnowledgeBase` | KB construction + Model augmentation (DD-2, DD-3) |
 | `server/.../services/QueryService` | Parse → validate → build model → evaluate → QueryResponse |
 | `server/.../http/controllers/QueryController` | Endpoint wiring |
 | `common/.../http/endpoints/WorkspaceEndpoints` | `POST /w/{key}/risk-trees/{treeId}/query` |
