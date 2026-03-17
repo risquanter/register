@@ -410,10 +410,10 @@ SpiceDB is the selected Layer 2 backend. This phase establishes the implementati
 
 ### L2.0 Exit Criteria
 
-- Deploy SpiceDB on k3s (Helm) with persistent storage
+- Deploy SpiceDB on k3s (Helm) with persistent storage — see [ADR-INFRA-010](../register-infra/docs/adr/ADR-INFRA-010.md)
 - Apply initial `.zed` schema (`workspace`, `risk_tree`, inherited permissions)
 - Implement `AuthorizationServiceSpiceDB` with `check` and `listAccessible` only — app is a pure PEP, never writes tuples (see ADR-024)
-- Implement `AuthzProvisioning` job in CI/CD (idempotent reconcile, drift detection, audit logs)
+- Implement `AuthzProvisioning` job in CI/CD (idempotent reconcile, drift detection, audit logs) — delivery via in-cluster CI runner, see [ADR-INFRA-011](../register-infra/docs/adr/ADR-INFRA-011.md)
 - Ensure app runtime never writes authorization data — no `grant`/`revoke`/tuple writes in application code (see ADR-024)
 - Verify latency budget for `check` on representative workspace/tree paths
 - Record operational runbook (backup, upgrade, health checks)
@@ -427,6 +427,7 @@ The schema lives in the application repository at `infra/spicedb/schema.zed`, ve
 - A schema rename (e.g. `design_write` → `write`) that breaks `check("design_write", ...)` call sites fails CI immediately, not silently at runtime
 - Commit signing (ADR-020) covers schema changes automatically
 - No additional credentials or fetch infrastructure for schema apply
+- The in-cluster CI runner applies schema via `zed schema write` over cluster-internal gRPC — no kubeconfig leaves the cluster (see [ADR-INFRA-011](../register-infra/docs/adr/ADR-INFRA-011.md))
 
 The CI provisioning job accepts a configurable schema source for enterprise deployers with a dedicated policy team:
 

@@ -39,7 +39,7 @@ SpiceDB tuples are written exclusively by external tooling:
 
 | Path | Mechanism | When |
 |------|-----------|------|
-| Org/team provisioning | `AuthzProvisioning` CI/CD job | Config change merged to main |
+| Org/team provisioning | `AuthzProvisioning` CI/CD job (in-cluster runner — ADR-INFRA-011) | Config change merged to main |
 | Individual access changes | `zed` CLI via ops service account | On-demand admin operation with audit log |
 | Emergency bulk revocation | Audited `zed` CLI runbook | Account termination / security incident |
 
@@ -155,5 +155,7 @@ authService.check(user, permission, resource)
 
 - [ADR-012: Service Mesh Strategy](./ADR-012.md) — mesh validates JWT; app extracts claims only
 - [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md) — Layer 2 design, SpiceDB provisioning, ops paths
+- [ADR-INFRA-010](../register-infra/docs/adr/ADR-INFRA-010.md) — SpiceDB runtime: Helm chart, fail-closed availability, NetworkPolicy
+- [ADR-INFRA-011](../register-infra/docs/adr/ADR-INFRA-011.md) — Schema lifecycle: in-cluster CI runner applies `schema.zed` via `zed` CLI
 - Google Zanzibar: Google's Consistent, Global Authorization System (2019) — reference for PDP/PAP separation
 - XACML 3.0 (OASIS) — formalizes PEP/PDP/PAP/PIP roles

@@ -272,6 +272,7 @@ npm install some-fancy-package   # scripts run, no vulnerability check
 | `containers/prod/Dockerfile.frontend-prod` | wget | `SBT_SHA256` arg + `sha256sum -c` |
 | `project/build.properties` | sbt | `sbt.version=<exact>` |
 | All `FROM` lines | Docker | Pin to specific semver tags; use digest for releases |
+| `zed` CLI (CI runner) | SpiceDB | Pin version + checksum verify (same pattern as `opa`, `conftest`) |
 | Pre-install checklist | All | socket.dev / opam-show / apk audit review |
 
 ---
