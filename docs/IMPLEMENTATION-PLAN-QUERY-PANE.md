@@ -3,7 +3,7 @@
 **Parent:** [ADR-028](ADR-028-vague-quantifier-query-pane.md) +
 [ADR-028 Appendix](ADR-028-appendix-technical-design.md)  
 **Scope:** All code changes to ship the query pane end-to-end.  
-**Last updated:** 2026-03-16
+**Last updated:** 2026-03-17
 
 ---
 
@@ -12,7 +12,7 @@
 | Group | Name | Depends on | Gate |
 |---|---|---|---|
 | TG-1 | fol-engine integration build prep | — | ✅ Done — all tests + bats suites pass |
-| TG-1b | fol-engine internal debt resolution | TG-1 | 🔄 In progress — all 768 fol-engine tests pass; evaluation path unification pending |
+| TG-1b | fol-engine internal debt resolution | TG-1 | 🔄 In progress — T1b.1–T1b.12 done (768 tests); T1b.15–T1b.22 (true unification via concrete `ResolvedQuery` shared IL, `EvaluationOutput`, renames, `fol.*` package migration) + T1b.13 (docs) + T1b.14 (cross-compile) remain |
 | TG-2 | `RiskTreeKnowledgeBase` + query service | TG-1b | curl returns valid JSON |
 | TG-3 | Frontend query pane | TG-2 | end-to-end GUI flow |
 | TG-4 | Integration tests | TG-2 | `sbt serverIt/test` passes |
@@ -73,16 +73,30 @@ native distroless image.
 ## TG-1b — fol-engine Internal Debt Resolution 🔄
 
 **Status: In progress.** Work in `~/projects/vague-quantifier-logic`.
+T1b.1–T1b.12 done (committed as `22ea9b6`): sampling infrastructure,
+quantifier unification, `VagueQueryResult`, `FOLBridge`, facade rewrite,
+build cleanup. Remaining: T1b.15–T1b.22 (true unification via
+concrete `ResolvedQuery` shared IL, `EvaluationOutput`, renames,
+`fol.*` package migration), T1b.13 (usage docs), T1b.14 (cross-compile).
 
 This task group resolves technical debt in fol-engine that must be
-completed before register can consume the library correctly. The core
-issue: fol-engine has two parallel evaluation paths (string-parsed and
-typed-DSL) implementing the same paper semantics with different
-infrastructure. The string-parser path (which register uses) had a
-degraded sampling implementation using `scala.util.Random` instead of
-the proper HDR + statistical sampling pipeline.
+completed before register can consume the library correctly.
 
-**Design document:** [`vague-quantifier-logic/docs/EVALUATION-PATH-UNIFICATION.md`](../../vague-quantifier-logic/docs/EVALUATION-PATH-UNIFICATION.md)
+The core issue has two parts:
+1. **Sampling degradation (resolved):** The string-parser path used
+   `scala.util.Random` instead of the HDR + statistical pipeline.
+   Fixed in T1b.1–T1b.5.
+2. **Two orchestrators (not yet resolved):** Both paths share the
+   bottom of the stack (`ProportionEstimator`, `HDRSampler`,
+   `VagueQuantifier.evaluateExact/evaluateWithSampling`) but the
+   string path does NOT construct a `ResolvedQuery` — it calls
+   `VagueQuantifier` methods directly, bypassing the shared IL.
+   The typed DSL lacks exact mode. This is "convergence at
+   `VagueQuantifier`" not "unification through a shared IL."
+   T1b.15–T1b.21 close this gap. T1b.22 normalizes packages.
+
+**Design document:** [`vague-quantifier-logic/docs/ADR-001.md`](../../vague-quantifier-logic/docs/ADR-001.md)
+(ADR-001: Evaluation Path Unification — architecture, trace diagram, gap analysis)
 
 ### Completed sub-tasks
 
@@ -99,24 +113,90 @@ the proper HDR + statistical sampling pipeline.
 These tasks unify the two evaluation paths into a single pipeline so that
 string-parsed queries and typed-DSL queries use identical sampling,
 tolerance, and result semantics. See the
-[design document](../../vague-quantifier-logic/docs/EVALUATION-PATH-UNIFICATION.md)
+[design document](../../vague-quantifier-logic/docs/ADR-001.md)
 for full rationale and implementation steps.
 
 | Task | What | Status | Est. |
 |---|---|---|---|
-| T1b.6 | Unify quantifier types: `Quantifier` (ratio) ↔ `VagueQuantifier` (percentage) — keep ratio as canonical, percentage as builder | Not done | 1.5h |
-| T1b.7 | Create unified `VagueQueryResult` (replaces both `vague.semantics.QueryResult` and `vague.query.QueryResult`; adds `satisfyingElements`, `confidenceInterval`, `marginOfError`) | Not done | 0.5h |
-| T1b.8 | Bridge FOL scope formulas into typed predicates (`Formula → RelationValue => Boolean` closure over `Model[Any]`) — enables string-parsed queries to flow through the typed evaluation pipeline | Not done | 1.0h |
-| T1b.9 | Rewrite `VagueSemantics` to delegate to unified pipeline (remove `selectSample`, `checkQuantifier`, `EvaluationParams`, `import scala.util.Random`) | Not done | 1.5h |
-| T1b.10 | Update `VagueQuery[A].evaluate` to return `VagueQueryResult` (remove `vague.query.QueryResult` wrapper) | Not done | 1.0h |
-| T1b.11 | Remove deprecated KB wrappers (`holdsOnKB`, `holdsExactOnKB`, `holdsWithSamplingOnKB`) | Not done | 0.5h |
-| T1b.12 | Build cleanup: remove `commons-math3` and `simulation.util` from `build.sbt` | Not done | 0.5h |
+| T1b.6 | Unify quantifier types: `Quantifier` (ratio) ↔ `VagueQuantifier` (percentage) — `toQuantifier`/`fromQuantifier` bridge, `tolerance` param | ✅ Done | — |
+| T1b.7 | Create unified `VagueQueryResult` with `fromEstimate` factory (replaces 3 prior result types) | ✅ Done | — |
+| T1b.8 | Bridge FOL scope formulas into typed predicates (`FOLBridge` — `Formula → RelationValue => Boolean` closure over `Model[Any]`) | ✅ Done | — |
+| T1b.9 | Rewrite `VagueSemantics` as thin facade (no `selectSample`, `checkQuantifier`, `EvaluationParams`, `scala.util.Random`) | ✅ Done | — |
+| T1b.10 | Update `VagueQuery[A].evaluate` to return `VagueQueryResult` directly | ✅ Done | — |
+| T1b.11 | Remove deprecated KB wrappers (`holdsOnKB`, `holdsExactOnKB`, `holdsWithSamplingOnKB`) | ✅ Done | — |
+| T1b.12 | Build cleanup: remove `commons-math3` and `simulation.util` from `build.sbt` | ✅ Done | — |
 | T1b.13 | fol-engine usage documentation: `README.md` examples covering three evaluation modes (exact, sampled with HDR + CI, exact with satisfying element set) with semantic context for new users | Not done | 1.0h |
 | T1b.14 | Cross-compile fol-engine (JVM + JS) — enables `commonDependencies` in register | Not done | TBD |
 
-**Gate:** All fol-engine tests pass. `VagueSemantics.holds()` returns
-`VagueQueryResult` with `satisfyingElements`. No `scala.util.Random`
-anywhere. `commons-math3` and `simulation.util` removed from build.
+### Remaining sub-tasks — True unification (string path → shared IL)
+
+These tasks close the gap identified during architecture review
+(2026-03-18): the string path must compile `ParsedQuery` into
+a `ResolvedQuery`, and the typed DSL must resolve
+`UnresolvedQuery` into a `ResolvedQuery`, so that both paths converge on
+one concrete shared IL with one evaluator. See the
+[design document](../../vague-quantifier-logic/docs/ADR-001.md)
+§ Gap Analysis for the full comparison of plan vs achieved state.
+
+**Key design decisions:**
+- **D5:** `ResolvedQuery` is an explicit concrete shared IL type (always
+  `RelationValue`), not a `DomainSpec.Resolved` variant. Phase separation
+  is in the type system.
+- **D6:** Phase-based query naming: `ParsedQuery` / `UnresolvedQuery` /
+  `ResolvedQuery`. The adjective describes the pipeline phase, not the
+  query kind (all three are vague quantifier queries).
+- **D7:** "Vague" reserved for types modelling the paper's constructs
+  (`VagueQuantifier`, `VagueQueryResult`, `VagueQueryParser`, `VagueSemantics`).
+  Not used for query phase types, error/result-monad types, or namespace.
+- **D8:** Phase 1 renames done: `ParsedQuery`, `QueryError`, `QueryException`,
+  `QueryResult`. Phase 2 rename (`UnresolvedQuery`) ships with T1b.15.
+  Package rename (`vague.*` → `fol.*`) deferred to T1b.22.
+- **D9:** Drop type parameter `[A]`. Both paths query the same KB; elements
+  are always `RelationValue`. The typed DSL's prior unwrap to `String` was
+  premature convenience that created a false split. `ResolvedQuery`,
+  `UnresolvedQuery`, and `EvaluationOutput` are concrete types — no generics.
+  DSL convenience via predicate helpers (`.whereConst(name => ...)`).
+- **D10:** Simulation data (LEC curves, p95, etc.) flows through the FOL
+  `Model[Any]` function table, not through the element type or KB facts.
+  `RiskTreeKnowledgeBase.toModel()` registers `p95`, `lec`, `>`, etc.
+  as model functions backed by register's simulation results. The engine
+  evaluates `>(p95(x), 5000000)` by calling these functions — it never
+  needs to know what kind of data backs them.
+- **D11:** No `useSampling: Boolean` toggle on `ResolvedQuery.evaluate()`
+  or `VagueSemantics.holds()`. One code path — `SamplingParams` controls
+  whether evaluation is exact or sampled. `SamplingParams.exact`
+  (ε = 1e-6) forces n = N via the sample size formula for any population
+  under ~10¹². The "exact mode" toggle is a **service-level** concern
+  in register: `if exactMode then SamplingParams.exact else SamplingParams.default`.
+  T1b.16 is **ELIMINATED** — merged into params behavior. See
+  `ADR-001.md` §Decision for the full rationale.
+
+| Task | What | Status | Est. |
+|---|---|---|---|
+| T1b.15 | Create concrete `ResolvedQuery` in `vague.query` — shared IL with `evaluate()` and `evaluateWithOutput()`. Fields: `quantifier: VagueQuantifier`, `elements: Set[RelationValue]`, `predicate: RelationValue => Boolean`, `params: SamplingParams`, `hdrConfig: HDRConfig`. No `KnowledgeSource` dependency. No type parameter. No `useSampling` boolean (D11). Rename `VagueQuery[A]` → `UnresolvedQuery` (concrete, `RelationValue`). Remove `toDomainSetTyped` unwrap — DSL keeps `RelationValue` end-to-end. Add `.whereConst` convenience on builder. | Not done | 0.5h |
+| ~~T1b.15b~~ | ~~Rename `vague.logic.VagueQuery` → `ParsedQuery`~~ | ✅ Done | — |
+| ~~T1b.16~~ | ~~Add exact/sampled mode toggle~~ | **ELIMINATED** (D11) — `SamplingParams` controls mode; `SamplingParams.exact` forces n=N | — |
+| T1b.18 | Rewrite `VagueSemantics`: add private `toResolved()` that constructs `ResolvedQuery` from `ParsedQuery` via Steps A1-A5. `holds()` calls `toResolved(...).evaluate()`. True delegation — no direct `VagueQuantifier` calls. | Not done | 1.0h |
+| T1b.19 | Add `ProportionEstimator.estimateFromCount(successes: Int, sampleSize: Int, params)` — builds estimate from pre-counted integers without re-iterating | Not done | 0.5h |
+| T1b.20 | Create concrete `EvaluationOutput` in `vague.result` — `result: VagueQueryResult` + `rangeElements: Set[RelationValue]` + `satisfyingElements: Set[RelationValue]`. No type parameter. Add `evaluateWithOutput()` to `ResolvedQuery`. In sampled mode, `satisfyingElements` contains sample-only elements (D2B). | Not done | 1.5h |
+| T1b.21 | Add `VagueSemantics.evaluate()` returning `EvaluationOutput` — the element-aware API that register will call. `holds()` remains as statistics-only convenience. | Not done | 0.5h |
+| T1b.22 | Bulk package rename `vague.*` → `fol.*`. Type renames (`QueryError`, `QueryException`, `QueryResult`) already done. Mechanical — all references + tests. | Not done | 1-2h |
+
+**Note:** T1b.17 (handle `Resolved` in `UnresolvedQuery.evaluate` match)
+was **eliminated** — there is no `DomainSpec.Resolved` variant. The
+resolution step produces `ResolvedQuery`, a separate type. The match
+arm is not needed.
+
+**Gate G1b:** All fol-engine tests pass (~770+). `VagueSemantics.evaluate()`
+returns `EvaluationOutput` with `satisfyingElements`.
+String path compiles `ParsedQuery` → `ResolvedQuery` and
+delegates to `.evaluate()`. Typed DSL resolves `UnresolvedQuery` →
+`ResolvedQuery` via `.resolve(source)`. **One concrete shared IL, one
+evaluator** for both entry points. `ResolvedQuery.evaluate()` takes
+no `KnowledgeSource` argument — domain sealed in the type.
+Both paths produce the same concrete type — no generics, no split.
+No `scala.util.Random` anywhere. `commons-math3` and `simulation.util`
+removed from build.
 
 **Acceptance:** `sbt test` passes (expect ~770+ tests). `sbt publishLocal`
 produces artifact consumable by register.
@@ -138,7 +218,7 @@ Done as part of TG-1 (T1.4). Coordinate:
 ```
 
 **Acceptance met:** `sbt server/compile` succeeds; `sbt server/test` passes
-(323 tests). VagueQuery and all library types are importable.
+(323 tests). ParsedQuery and all library types are importable.
 
 ### T2.2 — Define request/response types in `common` ✅
 
@@ -167,14 +247,14 @@ object QueryResponse:
   /** Outbound validation boundary: projects library evaluation
     * results back into the typed register domain (ADR-001 §7, ADR-018).
     *
-    * After TG-1b, this method receives a VagueQueryResult from the
-    * library (which includes satisfyingElements). No direct access to
+    * After TG-1b, this method receives an EvaluationOutput from the
+    * library (which includes satisfyingElements via VagueQueryResult). No direct access to
     * ScopeEvaluator or RangeExtractor is needed.
     *
     * NOTE: QueryResponseBuilder.scala already exists in
     * modules/server/src/main/scala/.../foladapter/ with the old
     * Set[RelationValue] signature. It will be refactored in T2.5b
-    * to accept VagueQueryResult instead.
+    * to accept EvaluationOutput instead.
     */
   def from(
     satisfyingElements: Set[Any],
@@ -283,35 +363,40 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
 **File:** `modules/server/src/main/scala/.../services/QueryService.scala`
 
 ZIO service layer. Steps:
-1. Parse query → `VagueQuery` (fail 400 on parse error)
+1. Parse query → `ParsedQuery` (fail 400 on parse error)
 2. Validate symbols against known schema (fail 400 with available list)
 3. Load tree + ensure simulations cached (fail 409 if not)
 4. Build `RiskTreeKnowledgeBase`
-5. Call `VagueSemantics.holds(query, source, answerTuple, params, config)`
-   — returns `VagueQueryResult` including `satisfyingElements`
-6. Map to `QueryResponse` via `QueryResponseBuilder.from(result, lookup)`
+5. Call `VagueSemantics.evaluate(parsedQuery, source, answerTuple, params, config)`
+   — internally compiles `ParsedQuery` → `ResolvedQuery`
+   → calls `.evaluateWithOutput()`
+   — returns `EvaluationOutput` containing
+   `result: VagueQueryResult` + `rangeElements` + `satisfyingElements`
+6. Map to `QueryResponse` via `QueryResponseBuilder.from(output, lookup)`
 
 **Design change (2026-03-16):** The original plan called for bypassing
 `VagueSemantics.holds()` and calling `RangeExtractor` +
-`ScopeEvaluator.evaluateSample()` directly, with "trivial arithmetic"
-for the quantifier check. This was a shortcut that discarded the
-statistical sampling infrastructure (no `SampleSizeCalculator`, no
-confidence intervals, no HDR determinism) and re-implemented tolerance
-logic outside the library.
+`ScopeEvaluator.evaluateSample()` directly. This is no longer needed.
 
-After TG-1b (evaluation path unification), `VagueSemantics.holds()`
-returns `VagueQueryResult` which includes `satisfyingElements`. The
-bypass is no longer needed. The register calls a single library method
-and gets everything: satisfaction verdict (with tolerance), proportion,
-CI, and the actual matching element set.
+**Architecture clarification (2026-03-18):** The library exposes two
+facade methods:
+- `VagueSemantics.holds()` → `VagueQueryResult` (statistics only —
+  satisfied, proportion, CI, satisfyingCount)
+- `VagueSemantics.evaluate()` → `EvaluationOutput`
+  (statistics + element sets — `rangeElements`, `satisfyingElements`)
 
-Three evaluation modes are available:
-- **Exact** (default): All range elements evaluated. No `SamplingParams` needed.
-- **Sampled**: Pass `SamplingParams(epsilon, alpha)` + `HDRConfig`.
-  Library computes sample size statistically. For small trees the
-  calculator may return n ≥ N, falling back to exact evaluation.
-- **Exact with elements**: Default exact mode already includes
-  `satisfyingElements` in the result.
+Register uses `evaluate()` because it needs the element sets for tree
+highlighting. Internally, both methods compile `ParsedQuery` →
+`ResolvedQuery` via `toResolved()`, then call
+`.evaluate()` / `.evaluateWithOutput()` — one concrete shared IL, one evaluator.
+
+Two evaluation modes:
+- **Exact** (default): All range elements checked. Deterministic.
+  `satisfyingElements` = complete set of matches.
+- **Sampled**: `SampleSizeCalculator` computes n, `HDRSampler` draws
+  via Fisher-Yates. `satisfyingElements` = matches from the **sample
+  only** (not the full range). User switches to exact mode for
+  exhaustive results.
 
 **Acceptance:** Unit test with mocked resolver + tree.
 
@@ -322,20 +407,23 @@ Three evaluation modes are available:
 **Status:** File already exists with `from(satisfyingElements: Set[RelationValue], ...)` signature
 (written before the TG-1b design change).
 
-After TG-1b, refactor to accept `VagueQueryResult` directly:
+After TG-1b, refactor to accept `EvaluationOutput`:
 
 ```scala
+import vague.result.EvaluationOutput
+
 object QueryResponseBuilder:
   def from(
-    result: VagueQueryResult,
+    output: EvaluationOutput,
     nodeIdLookup: Map[String, NodeId],
     queryEcho: String
   ): QueryResponse
 ```
 
-The builder extracts `satisfyingElements` from the `VagueQueryResult`,
+The builder extracts `satisfyingElements` from `EvaluationOutput`,
 maps `RelationValue.Const(name)` → `NodeId` via `nodeIdLookup`, and
-populates all `QueryResponse` fields from the library result.
+populates `QueryResponse` fields from `output.result` (the
+`VagueQueryResult` with statistics).
 
 **Acceptance:** Compiles; unit test verifies NodeId mapping.
 
@@ -495,7 +583,10 @@ Week 1:  TG-1 (library build prep)                            ✅ DONE
 
 Week 2:  TG-1b (fol-engine internal debt)                     🔄 IN PROGRESS
          T1b.1–T1b.5 (sampling infrastructure)                ✅ DONE
-         T1b.6–T1b.12 (evaluation path unification)           ← CURRENT
+         T1b.6–T1b.12 (partial unification + code quality)    ✅ DONE
+         T1b.15–T1b.21 (ResolvedQuery IL + EvaluationOutput)  ← CURRENT
+         T1b.15b (ParsedQuery rename — can interleave)
+         T1b.22 (fol.* package migration — after unification)
          T1b.13 (fol-engine usage docs)
          T1b.14 (cross-compilation)
 
@@ -520,7 +611,7 @@ Week 6:  TG-5 (polish + docs)
 | Gate | After | Criteria |
 |---|---|---|
 | G1 | TG-1 | ✅ 711 unit + 19 IT tests pass at Scala 3.7.4; bats A+B+C pass on rebuilt distroless image |
-| G1b | TG-1b | fol-engine: all tests pass (~770+); `VagueSemantics.holds()` returns `VagueQueryResult` with `satisfyingElements`; no `scala.util.Random`; commons-math3 removed; `sbt publishLocal` succeeds |
+| G1b | TG-1b | fol-engine: all tests pass (~770+); `VagueSemantics.evaluate()` returns `EvaluationOutput` with `satisfyingElements`; both paths produce concrete `ResolvedQuery` (one IL, one evaluator, no generics); `ParsedQuery` rename done; no `scala.util.Random`; commons-math3 removed; `sbt publishLocal` succeeds |
 | G2 | TG-2 | `curl -X POST .../query -d '{"query":"Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"}'` returns valid JSON |
 | G3 | TG-4 | `sbt serverIt/test` passes all 6 integration tests |
 | G4 | TG-3 | Type query → result card → tree highlights → LEC overlay |
