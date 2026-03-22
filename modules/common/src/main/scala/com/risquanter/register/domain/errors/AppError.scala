@@ -22,7 +22,24 @@ case class ValidationFailed(errors: List[ValidationError]) extends SimError {
 }
 
 /** Repository operation failure */
-case class RepositoryFailure(reason: String) extends SimError
+case class RepositoryFailure(reason: String) extends SimError:
+  override def getMessage: String = reason
+
+object RepositoryFailure:
+  /** Sentinel prefix for workspace-level errors reconstructed by `ErrorResponse.decode`.
+    *
+    * A13 opaque 404s are decoded as `RepositoryFailure("workspace:…")` because
+    * the real `WorkspaceNotFound` requires a `WorkspaceKeySecret` that is lost
+    * through the opaque wire format.  Both `GlobalError.fromThrowable` and
+    * `ZJS.loadInto` use this predicate to route workspace errors to the blue
+    * info banner rather than inline error displays.
+    */
+  val WorkspaceSentinelPrefix: String = "workspace:"
+
+  /** Check whether a `Throwable` is a workspace-level sentinel error. */
+  def isWorkspaceSentinel(e: Throwable): Boolean = e match
+    case rf: RepositoryFailure => rf.reason.startsWith(WorkspaceSentinelPrefix)
+    case _                     => false
 
 /** Simulation execution failure - wraps underlying cause with context */
 case class SimulationFailure(simulationId: String, cause: Throwable) extends SimError {
@@ -31,10 +48,12 @@ case class SimulationFailure(simulationId: String, cause: Throwable) extends Sim
 }
 
 /** Data conflict (e.g., duplicate key) */
-case class DataConflict(reason: String) extends SimError
+case class DataConflict(reason: String) extends SimError:
+  override def getMessage: String = reason
 
 /** Authorization failure for disabled/forbidden operations */
-case class AccessDenied(reason: String) extends SimError
+case class AccessDenied(reason: String) extends SimError:
+  override def getMessage: String = reason
 
 /** Rate limiting failure for abuse-prevention controls */
 case class RateLimitExceeded(ip: String, limit: Int, window: String = "1h") extends SimError {

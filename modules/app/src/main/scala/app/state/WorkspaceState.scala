@@ -100,7 +100,7 @@ final class WorkspaceState extends WorkspaceEndpoints:
               onExpired()
             }
           }
-          .runJs
+          .runJsQuiet  // Quiet: onExpired() handles the error → avoid duplicate global banner
 
   // ── Bootstrap (Scenario 1 — first tree create) ────────────────
 

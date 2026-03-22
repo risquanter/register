@@ -191,6 +191,7 @@ http {
             }
             # Browser navigation — Accept contains text/html.
             add_header X-Content-Type-Options nosniff;
+            add_header Cache-Control "no-cache";
             try_files $uri /index.html;
         }
 
@@ -213,9 +214,13 @@ http {
 
         # ----------------------------------------------------------------
         # Everything else — SPA fallback. nginx generates this response.
+        # index.html MUST NOT be immutably cached — it references content-
+        # hashed JS/CSS bundles. no-cache forces the browser to revalidate
+        # on every load, picking up new bundle hashes after deploys.
         # ----------------------------------------------------------------
         location / {
             add_header X-Content-Type-Options nosniff;
+            add_header Cache-Control "no-cache";
             try_files $uri /index.html;
         }
     }

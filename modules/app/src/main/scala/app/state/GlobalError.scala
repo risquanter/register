@@ -85,6 +85,13 @@ object GlobalError:
     case _: VersionConflict => Conflict(msg(e))
     case _: MergeConflict   => Conflict(msg(e))
 
+    // Workspace A13 opaque 404 — decoded as RepositoryFailure("workspace:not-found").
+    // Route to informational blue banner, not red error.
+    case rf: RepositoryFailure if RepositoryFailure.isWorkspaceSentinel(rf) =>
+      WorkspaceExpired(
+        "Your previous workspace has expired and its data is no longer available. " +
+        "Creating a new tree will start a fresh workspace.")
+
     case _: IrminError      => DependencyError(msg(e))
 
     case _: SimError        => ServerError(msg(e))

@@ -11,6 +11,12 @@ final case class ErrorResponse(error: JsonHttpError)
 object ErrorResponse {
   given codec: JsonCodec[ErrorResponse] = DeriveJsonCodec.gen[ErrorResponse]
 
+  /** Domain tag carried by A13 opaque workspace 404s.
+    * Used in both `encode` (via `makeWorkspaceOpaqueNotFoundResponse`) and
+    * `decode` to disambiguate workspace 404s from generic not-found errors.
+    */
+  val WorkspaceDomain: String = "workspaces"
+
   /** Reconstruct a domain error from an HTTP error response.
     *
     * This is the inverse of `encode`: it maps `(StatusCode, ErrorResponse)` back
@@ -61,6 +67,21 @@ object ErrorResponse {
       // 504 → NetworkTimeout
       case 504 =>
         NetworkTimeout(message, scala.concurrent.duration.Duration.Zero)
+
+      // 404 → disambiguate by domain
+      // A13: workspace opaque 404s carry domain="workspaces".
+      // Reconstruct as WorkspaceNotFound so the frontend can route
+      // to the informational blue banner, not the red error banner.
+      // WorkspaceNotFound requires a WorkspaceKeySecret which is lost
+      // through the opaque wire format, so we use a sentinel
+      // RepositoryFailure with a well-known prefix that the frontend
+      // classifier recognizes.
+      case 404 =>
+        val firstDomain = details.headOption.map(_.domain).getOrElse("")
+        if firstDomain == WorkspaceDomain then
+          RepositoryFailure(s"${RepositoryFailure.WorkspaceSentinelPrefix}not-found")
+        else
+          RepositoryFailure(s"Not found: $message")
 
       // 500 → disambiguate by field
       case 500 => firstField match
@@ -159,7 +180,7 @@ object ErrorResponse {
   /** A13: constant opaque 404 — intentionally resource-neutral to avoid leaking
     * whether the workspace key, tree association, or TTL caused the failure.
     */
-  def makeWorkspaceOpaqueNotFoundResponse(domain: String = "workspaces", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+  def makeWorkspaceOpaqueNotFoundResponse(domain: String = WorkspaceDomain, requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.NotFound, "resource", ValidationErrorCode.NOT_FOUND,
       "Not found", domain, requestId)
 

@@ -266,6 +266,50 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         assertTrue(throwable.isInstanceOf[IrminGraphQLError])
       },
 
+      test("decodes workspace 404 to RepositoryFailure with workspace sentinel") {
+        val response = ErrorResponse(
+          JsonHttpError(404, "Not found", List(
+            ErrorDetail("workspaces", "resource", ValidationErrorCode.NOT_FOUND, "Not found")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.NotFound, response))
+        assertTrue(
+          throwable.isInstanceOf[RepositoryFailure],
+          throwable.asInstanceOf[RepositoryFailure].reason.startsWith(RepositoryFailure.WorkspaceSentinelPrefix),
+          RepositoryFailure.isWorkspaceSentinel(throwable)
+        )
+      },
+
+      test("decodes non-workspace 404 to generic RepositoryFailure") {
+        val response = ErrorResponse(
+          JsonHttpError(404, "Not found", List(
+            ErrorDetail("risk-trees", "resource", ValidationErrorCode.NOT_FOUND, "Tree not found")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.NotFound, response))
+        assertTrue(
+          throwable.isInstanceOf[RepositoryFailure],
+          !RepositoryFailure.isWorkspaceSentinel(throwable),
+          throwable.getMessage.contains("Not found")
+        )
+      },
+
+      test("roundtrip: workspace opaque 404 encodes to opaque 404 and decodes to workspace sentinel") {
+        val key = WorkspaceKeySecret.fromString("abcdefghijklmnopqrstuv").toOption.get
+        val treeId = com.risquanter.register.domain.data.iron.TreeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
+        // All three workspace error types encode to the same opaque 404
+        val errors = List(
+          WorkspaceNotFound(key),
+          WorkspaceExpired(key, java.time.Instant.now(), java.time.Duration.ofHours(1)),
+          TreeNotInWorkspace(key, treeId)
+        )
+        val results = errors.map(e => ErrorResponse.decode(ErrorResponse.encode(e)))
+        assertTrue(
+          results.forall(_.isInstanceOf[RepositoryFailure]),
+          results.forall(RepositoryFailure.isWorkspaceSentinel)
+        )
+      },
+
       test("decodes 500 with simulation field to SimulationFailure") {
         val response = ErrorResponse(
           JsonHttpError(500, "Simulation failed", List(

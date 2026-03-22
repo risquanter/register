@@ -105,19 +105,25 @@ object ZJS:
   // ---------------------------------------------------------------------------
 
   import app.state.LoadState
+  import com.risquanter.register.domain.errors.RepositoryFailure
 
   extension [E <: Throwable, A](zio: ZIO[BackendClient, E, A])
 
     /** Fork the ZIO and push its lifecycle into a `Var[LoadState[A]]`.
       *
       * Sets Loading → Loaded(a) on success, Loading → Failed(msg) on error.
+      * Workspace-level errors (A13 sentinel) reset to Idle — the global
+      * ErrorBanner handles those exclusively.
       */
     def loadInto(target: Var[LoadState[A]]): Unit =
       target.set(LoadState.Loading)
       forkProvided {
         zio
           .tap(a => ZIO.succeed(target.set(LoadState.Loaded(a))))
-          .tapError(e => ZIO.succeed(target.set(LoadState.Failed(e.safeMessage))))
+          .tapError(e => ZIO.succeed {
+            if RepositoryFailure.isWorkspaceSentinel(e) then target.set(LoadState.Idle)
+            else target.set(LoadState.Failed(e.safeMessage))
+          })
       }
 
   /** Extension for ZIO effects returning `Option[B]` — unwraps into `LoadState[B]`. */
@@ -127,6 +133,7 @@ object ZJS:
       *
       * Useful for endpoints that return `Option` (e.g. getById) where the
       * target `Var` holds the unwrapped type.
+      * Workspace-level errors reset to Idle (see `loadInto`).
       */
     def loadOptionInto(target: Var[LoadState[B]], noneMessage: String): Unit =
       target.set(LoadState.Loading)
@@ -136,7 +143,10 @@ object ZJS:
             case Some(b) => ZIO.succeed(target.set(LoadState.Loaded(b)))
             case None    => ZIO.succeed(target.set(LoadState.Failed(noneMessage)))
           }
-          .tapError(e => ZIO.succeed(target.set(LoadState.Failed(e.safeMessage))))
+          .tapError(e => ZIO.succeed {
+            if RepositoryFailure.isWorkspaceSentinel(e) then target.set(LoadState.Idle)
+            else target.set(LoadState.Failed(e.safeMessage))
+          })
       }
 
   // ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import app.state.{TreeBuilderState, TreeViewState, WorkspaceState}
   *   SplitPane.horizontal(40% | 60%)
   *   ├── LEFT:  TreeBuilderView (forms)
   *   └── RIGHT: SplitPane.vertical(60% | 40%)
-  *       ├── TOP:    TreePreview (live ASCII preview)
+  *       ├── TOP:    TreeListView (dropdown selector) + TreePreview (live ASCII preview)
   *       └── BOTTOM: Placeholder panel for future distribution modelling chart
   *
   * Pure structural component — owns no state (ADR-019 Pattern 1).
@@ -24,12 +24,18 @@ object DesignView:
     treeViewState: TreeViewState,
     wsState: WorkspaceState
   ): HtmlElement =
+    val previewPanel = div(
+      cls := "design-preview-panel",
+      TreeListView(treeViewState),
+      TreePreview(builderState)
+    )
+
     div(
       cls := "design-view",
       SplitPane.horizontal(
         left = TreeBuilderView(builderState, treeViewState, wsState),
         right = SplitPane.vertical(
-          top = TreePreview(builderState),
+          top = previewPanel,
           bottom = DistributionChartPlaceholder(),
           topPercent = 60
         ),
