@@ -3,7 +3,7 @@
 **Parent:** [ADR-028](ADR-028-vague-quantifier-query-pane.md) +
 [ADR-028 Appendix](ADR-028-appendix-technical-design.md)  
 **Scope:** All code changes to ship the query pane end-to-end.  
-**Last updated:** 2026-03-17
+**Last updated:** 2026-03-20
 
 ---
 
@@ -12,7 +12,7 @@
 | Group | Name | Depends on | Gate |
 |---|---|---|---|
 | TG-1 | fol-engine integration build prep | — | ✅ Done — all tests + bats suites pass |
-| TG-1b | fol-engine internal debt resolution | TG-1 | 🔄 In progress — T1b.1–T1b.12 done (768 tests); T1b.15–T1b.22 (true unification via concrete `ResolvedQuery` shared IL, `EvaluationOutput`, renames, `fol.*` package migration) + T1b.13 (docs) + T1b.14 (cross-compile) remain |
+| TG-1b | fol-engine internal debt resolution | TG-1 | ✅ Core complete (792 tests) — T1b.1–T1b.22 done; T1b.13 (README docs) + T1b.14 (cross-compile) optional, non-blocking |
 | TG-2 | `RiskTreeKnowledgeBase` + query service | TG-1b | curl returns valid JSON |
 | TG-3 | Frontend query pane | TG-2 | end-to-end GUI flow |
 | TG-4 | Integration tests | TG-2 | `sbt serverIt/test` passes |
@@ -70,30 +70,25 @@ native distroless image.
 
 ---
 
-## TG-1b — fol-engine Internal Debt Resolution 🔄
+## TG-1b — fol-engine Internal Debt Resolution ✅ (core)
 
-**Status: In progress.** Work in `~/projects/vague-quantifier-logic`.
-T1b.1–T1b.12 done (committed as `22ea9b6`): sampling infrastructure,
-quantifier unification, `VagueQueryResult`, `FOLBridge`, facade rewrite,
-build cleanup. Remaining: T1b.15–T1b.22 (true unification via
-concrete `ResolvedQuery` shared IL, `EvaluationOutput`, renames,
-`fol.*` package migration), T1b.13 (usage docs), T1b.14 (cross-compile).
+**Status: Core complete.** Work in `~/projects/vague-quantifier-logic`.
+All code tasks done (T1b.1–T1b.22). 792 tests passing.
+Remaining: T1b.13 (README docs) and T1b.14 (cross-compile) —
+neither blocks register integration.
 
-This task group resolves technical debt in fol-engine that must be
-completed before register can consume the library correctly.
+This task group resolved technical debt in fol-engine so that
+register can consume the library correctly.
 
-The core issue has two parts:
-1. **Sampling degradation (resolved):** The string-parser path used
-   `scala.util.Random` instead of the HDR + statistical pipeline.
-   Fixed in T1b.1–T1b.5.
-2. **Two orchestrators (not yet resolved):** Both paths share the
-   bottom of the stack (`ProportionEstimator`, `HDRSampler`,
-   `VagueQuantifier.evaluateExact/evaluateWithSampling`) but the
-   string path does NOT construct a `ResolvedQuery` — it calls
-   `VagueQuantifier` methods directly, bypassing the shared IL.
-   The typed DSL lacks exact mode. This is "convergence at
-   `VagueQuantifier`" not "unification through a shared IL."
-   T1b.15–T1b.21 close this gap. T1b.22 normalizes packages.
+The core issue had two parts:
+1. **Sampling degradation (resolved T1b.1–T1b.5):** The string-parser
+   path used `scala.util.Random` instead of the HDR + statistical
+   pipeline.
+2. **Two orchestrators (resolved T1b.15–T1b.22):** Both paths now
+   compile to `ResolvedQuery` (concrete shared IL) with one evaluator.
+   String path: `ParsedQuery` → `VagueSemantics.toResolved()` →
+   `ResolvedQuery`. Typed DSL: `UnresolvedQuery.resolve(source)` →
+   `ResolvedQuery`. Package rename `vague.*` → `fol.*` complete.
 
 **Design document:** [`vague-quantifier-logic/docs/ADR-001.md`](../../vague-quantifier-logic/docs/ADR-001.md)
 (ADR-001: Evaluation Path Unification — architecture, trace diagram, gap analysis)
@@ -108,7 +103,7 @@ The core issue has two parts:
 | T1b.4 | Remove `UniformSampler` / `StratifiedSampler` | ✅ Done |
 | T1b.5 | Update all typed-DSL source + test files to new `SamplingParams` + `HDRConfig` API | ✅ Done (768 tests pass) |
 
-### Remaining sub-tasks — Evaluation path unification (Approach 2)
+### Completed sub-tasks — Evaluation path unification (Approach 2)
 
 These tasks unify the two evaluation paths into a single pipeline so that
 string-parsed queries and typed-DSL queries use identical sampling,
@@ -128,9 +123,9 @@ for full rationale and implementation steps.
 | T1b.13 | fol-engine usage documentation: `README.md` examples covering three evaluation modes (exact, sampled with HDR + CI, exact with satisfying element set) with semantic context for new users | Not done | 1.0h |
 | T1b.14 | Cross-compile fol-engine (JVM + JS) — enables `commonDependencies` in register | Not done | TBD |
 
-### Remaining sub-tasks — True unification (string path → shared IL)
+### Completed sub-tasks — True unification (string path → shared IL)
 
-These tasks close the gap identified during architecture review
+These tasks closed the gap identified during architecture review
 (2026-03-18): the string path must compile `ParsedQuery` into
 a `ResolvedQuery`, and the typed DSL must resolve
 `UnresolvedQuery` into a `ResolvedQuery`, so that both paths converge on
@@ -173,14 +168,14 @@ one concrete shared IL with one evaluator. See the
 
 | Task | What | Status | Est. |
 |---|---|---|---|
-| T1b.15 | Create concrete `ResolvedQuery` in `vague.query` — shared IL with `evaluate()` and `evaluateWithOutput()`. Fields: `quantifier: VagueQuantifier`, `elements: Set[RelationValue]`, `predicate: RelationValue => Boolean`, `params: SamplingParams`, `hdrConfig: HDRConfig`. No `KnowledgeSource` dependency. No type parameter. No `useSampling` boolean (D11). Rename `VagueQuery[A]` → `UnresolvedQuery` (concrete, `RelationValue`). Remove `toDomainSetTyped` unwrap — DSL keeps `RelationValue` end-to-end. Add `.whereConst` convenience on builder. | Not done | 0.5h |
+| T1b.15 | Create concrete `ResolvedQuery` in `fol.query` — shared IL with `evaluate()` and `evaluateWithOutput()`. Fields: `quantifier: VagueQuantifier`, `elements: Set[RelationValue]`, `predicate: RelationValue => Boolean`, `params: SamplingParams`, `hdrConfig: HDRConfig`. No `KnowledgeSource` dependency. No type parameter. No `useSampling` boolean (D11). Rename `VagueQuery[A]` → `UnresolvedQuery` (concrete, `RelationValue`). Remove `toDomainSetTyped` unwrap — DSL keeps `RelationValue` end-to-end. Add `.whereConst` convenience on builder. | ✅ Done | — |
 | ~~T1b.15b~~ | ~~Rename `vague.logic.VagueQuery` → `ParsedQuery`~~ | ✅ Done | — |
 | ~~T1b.16~~ | ~~Add exact/sampled mode toggle~~ | **ELIMINATED** (D11) — `SamplingParams` controls mode; `SamplingParams.exact` forces n=N | — |
-| T1b.18 | Rewrite `VagueSemantics`: add private `toResolved()` that constructs `ResolvedQuery` from `ParsedQuery` via Steps A1-A5. `holds()` calls `toResolved(...).evaluate()`. True delegation — no direct `VagueQuantifier` calls. | Not done | 1.0h |
-| T1b.19 | Add `ProportionEstimator.estimateFromCount(successes: Int, sampleSize: Int, params)` — builds estimate from pre-counted integers without re-iterating | Not done | 0.5h |
-| T1b.20 | Create concrete `EvaluationOutput` in `vague.result` — `result: VagueQueryResult` + `rangeElements: Set[RelationValue]` + `satisfyingElements: Set[RelationValue]`. No type parameter. Add `evaluateWithOutput()` to `ResolvedQuery`. In sampled mode, `satisfyingElements` contains sample-only elements (D2B). | Not done | 1.5h |
-| T1b.21 | Add `VagueSemantics.evaluate()` returning `EvaluationOutput` — the element-aware API that register will call. `holds()` remains as statistics-only convenience. | Not done | 0.5h |
-| T1b.22 | Bulk package rename `vague.*` → `fol.*`. Type renames (`QueryError`, `QueryException`, `QueryResult`) already done. Mechanical — all references + tests. | Not done | 1-2h |
+| T1b.18 | Rewrite `VagueSemantics`: add private `toResolved()` that constructs `ResolvedQuery` from `ParsedQuery` via Steps A1-A5. `holds()` calls `toResolved(...).evaluate()`. True delegation — no direct `VagueQuantifier` calls. | ✅ Done | — |
+| T1b.19 | Add `ProportionEstimator.estimateFromCount(successes: Int, sampleSize: Int, params)` — builds estimate from pre-counted integers without re-iterating | ✅ Done | — |
+| T1b.20 | Create concrete `EvaluationOutput` in `fol.result` — `result: VagueQueryResult` + `rangeElements: Set[RelationValue]` + `satisfyingElements: Set[RelationValue]`. No type parameter. Add `evaluateWithOutput()` to `ResolvedQuery`. In sampled mode, `satisfyingElements` contains sample-only elements (D2B). | ✅ Done | — |
+| T1b.21 | Add `VagueSemantics.evaluate()` returning `EvaluationOutput` — the element-aware API that register will call. `holds()` remains as statistics-only convenience. | ✅ Done | — |
+| T1b.22 | Bulk package rename `vague.*` → `fol.*`. Type renames (`QueryError`, `QueryException`, `QueryResult`) already done. Mechanical — all references + tests. | ✅ Done | — |
 
 **Note:** T1b.17 (handle `Resolved` in `UnresolvedQuery.evaluate` match)
 was **eliminated** — there is no `DomainSpec.Resolved` variant. The
@@ -410,7 +405,7 @@ Two evaluation modes:
 After TG-1b, refactor to accept `EvaluationOutput`:
 
 ```scala
-import vague.result.EvaluationOutput
+import fol.result.EvaluationOutput
 
 object QueryResponseBuilder:
   def from(
@@ -581,18 +576,18 @@ are exposed within the risk register domain:
 Week 1:  TG-1 (library build prep)                            ✅ DONE
          T1.1 → T1.2 → T1.3 → T1.4
 
-Week 2:  TG-1b (fol-engine internal debt)                     🔄 IN PROGRESS
+Week 2:  TG-1b (fol-engine internal debt)                     ✅ CORE COMPLETE
          T1b.1–T1b.5 (sampling infrastructure)                ✅ DONE
          T1b.6–T1b.12 (partial unification + code quality)    ✅ DONE
-         T1b.15–T1b.21 (ResolvedQuery IL + EvaluationOutput)  ← CURRENT
-         T1b.15b (ParsedQuery rename — can interleave)
-         T1b.22 (fol.* package migration — after unification)
-         T1b.13 (fol-engine usage docs)
-         T1b.14 (cross-compilation)
+         T1b.15–T1b.21 (ResolvedQuery IL + EvaluationOutput)  ✅ DONE
+         T1b.15b (ParsedQuery rename)                          ✅ DONE
+         T1b.22 (fol.* package migration)                      ✅ DONE
+         T1b.13 (fol-engine usage docs)                        ⬜ optional
+         T1b.14 (cross-compilation)                            ⬜ optional
 
-Week 3:  TG-2 (server components)
+Week 3:  TG-2 (server components)                             ← CURRENT
          T2.2 ✅ + T2.3 ✅ (already done)
-         T2.4 → T2.5 → T2.6 → T2.7
+         T2.4 → T2.5 → T2.5b → T2.6 → T2.7
 
 Week 4:  TG-4 (tests, can overlap with TG-2 tail)
          T4.1 (once T2.4 done) → T4.2 (once T2.6 done)
@@ -611,7 +606,7 @@ Week 6:  TG-5 (polish + docs)
 | Gate | After | Criteria |
 |---|---|---|
 | G1 | TG-1 | ✅ 711 unit + 19 IT tests pass at Scala 3.7.4; bats A+B+C pass on rebuilt distroless image |
-| G1b | TG-1b | fol-engine: all tests pass (~770+); `VagueSemantics.evaluate()` returns `EvaluationOutput` with `satisfyingElements`; both paths produce concrete `ResolvedQuery` (one IL, one evaluator, no generics); `ParsedQuery` rename done; no `scala.util.Random`; commons-math3 removed; `sbt publishLocal` succeeds |
+| G1b | TG-1b | ✅ fol-engine: 792 tests pass; `VagueSemantics.evaluate()` returns `EvaluationOutput` with `satisfyingElements`; both paths produce concrete `ResolvedQuery` (one IL, one evaluator, no generics); `ParsedQuery` rename done; `fol.*` package migration done; commons-math3 removed; `sbt publishLocal` succeeds. Minor caveat: `scala.util.Random` remains in `KnowledgeSource.sampleDomain()` (TODO-marked, unused on eval path) and demo code. |
 | G2 | TG-2 | `curl -X POST .../query -d '{"query":"Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"}'` returns valid JSON |
 | G3 | TG-4 | `sbt serverIt/test` passes all 6 integration tests |
 | G4 | TG-3 | Type query → result card → tree highlights → LEC overlay |

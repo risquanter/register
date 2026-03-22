@@ -112,10 +112,16 @@ COPY --from=builder /app/modules/app/dist/ /srv/app/
 #
 # Routing rules (ADR-INFRA-007 §Decision 1):
 #   *.js|css|woff2|svg|png|ico  → static, Cache-Control: public immutable 1y
-#   /w/*  + Accept: application/json → proxy to register-server:8090
 #   /w/*  + Accept: text/html        → try_files → index.html (SPA shell)
+#   /w/*  + anything else            → proxy to register-server:8090
 #   /workspaces, /health, /docs      → proxy unconditionally
 #   / and everything else            → try_files → index.html (SPA fallback)
+#
+# The /w/ routing uses an inverted Accept check: proxy by default, serve
+# the SPA shell only when Accept explicitly contains text/html (browser
+# navigation).  This is more robust than matching application/json because
+# the browser Fetch API sends Accept: */* by default, which would fall
+# through a positive json check and incorrectly return the SPA shell.
 #
 # Security headers:
 #   X-Content-Type-Options: nosniff only on nginx-generated responses
@@ -150,6 +156,14 @@ http {
     uwsgi_temp_path       /tmp/nginx-uwsgi;
     scgi_temp_path        /tmp/nginx-scgi;
 
+    # Map Accept header to proxy-or-SPA decision for /w/ paths.
+    # Only explicit text/html (browser navigation) gets the SPA shell.
+    # Everything else (Fetch */* , XHR, application/json, curl) is proxied.
+    map $http_accept $w_proxy_backend {
+        "~*text/html"  "";            # empty → fall through to try_files
+        default        "__BACKEND__"; # non-empty → proxy_pass target
+    }
+
     server {
         listen      8080;
         server_name _;
@@ -167,16 +181,15 @@ http {
 
         # ----------------------------------------------------------------
         # /w/* — dual-purpose capability URL path (ADR-021, ADR-INFRA-007).
-        # Fetch/XHR from SPA carries Accept: application/json → proxy.
-        # Browser navigation carries Accept: text/html → SPA shell.
+        # Inverted Accept check: proxy by default, SPA shell only on
+        # explicit text/html (browser navigation).  See Dockerfile comment.
         # ----------------------------------------------------------------
         location /w/ {
-            if ($http_accept ~* "application/json") {
-                set $backend "__BACKEND__";
-                proxy_pass $backend;
+            if ($w_proxy_backend) {
+                proxy_pass $w_proxy_backend;
                 break;
             }
-            # Browser navigation — nginx generates this response.
+            # Browser navigation — Accept contains text/html.
             add_header X-Content-Type-Options nosniff;
             try_files $uri /index.html;
         }

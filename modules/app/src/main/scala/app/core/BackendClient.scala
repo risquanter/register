@@ -49,11 +49,20 @@ private class BackendClientLive(
     baseUrl: Option[Uri]
 ) extends BackendClient:
 
-  /** Turn an endpoint into a function from Input => Request. */
+  /** Turn an endpoint into a function from Input => Request.
+    *
+    * Every request carries `Accept: application/json` so that nginx's
+    * Accept-header router (`location /w/`) proxies it to the backend
+    * instead of serving the SPA shell.  Tapir's sttp client interpreter
+    * does not reliably set this header on bodiless GET requests, and the
+    * browser Fetch API defaults to `Accept: *⁄*` which does not match
+    * the nginx rule.  See ADR-027 / ADR-INFRA-007 for routing design.
+    */
   private def endpointRequest[I, E, O](
       endpoint: Endpoint[Unit, I, E, O, Any]
   ): I => Request[Either[E, O], Any] =
-    interpreter.toRequestThrowDecodeFailures(endpoint, baseUrl)
+    val toRequest = interpreter.toRequestThrowDecodeFailures(endpoint, baseUrl)
+    input => toRequest(input).header("Accept", "application/json")
 
   def endpointRequestZIO[I, E <: Throwable, O](
       endpoint: Endpoint[Unit, I, E, O, Any]
