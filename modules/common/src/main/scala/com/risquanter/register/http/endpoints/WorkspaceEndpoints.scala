@@ -153,7 +153,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .get
       .in(query[Long]("threshold"))
       .in(query[Boolean]("includeProvenance").default(false))
-      .out(jsonBody[BigDecimal])
+      .out(jsonBody[Double])
 
   val getWorkspaceLECCurvesMultiEndpoint =
     authedBaseEndpoint

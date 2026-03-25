@@ -72,9 +72,9 @@ trait RiskTreeService {
     * @param nodeId Node identifier
     * @param threshold Loss threshold to compute P(Loss >= threshold)
     * @param includeProvenance Whether to include provenance metadata (currently unused for this endpoint)
-    * @return Probability as BigDecimal
+    * @return Probability as Double (empirical frequency ratio: exceedingCount / nTrials)
     */
-  def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal]
+  def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[Double]
   
   /** Get LEC curves for multiple nodes with shared tick domain.
     * 

@@ -408,7 +408,7 @@ class RiskTreeServiceLive private (
       } yield response
     }
   
-  override def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[BigDecimal] =
+  override def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[Double] =
     traced("probOfExceedance") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -425,7 +425,7 @@ class RiskTreeServiceLive private (
         
         // Compute exceedance probability from cached result
         prob = result.probOfExceedance(threshold)
-        _ <- tracing.setAttribute("exceedance_probability", prob.toDouble)
+        _ <- tracing.setAttribute("exceedance_probability", prob)
       } yield prob
     }
   

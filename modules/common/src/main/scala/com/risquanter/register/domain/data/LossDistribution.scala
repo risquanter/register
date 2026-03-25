@@ -24,7 +24,7 @@ trait LECCurve {
   def nTrials: Int
   
   /** Probability that loss exceeds the given threshold: P(Loss ≥ threshold) */
-  def probOfExceedance(threshold: Loss): BigDecimal
+  def probOfExceedance(threshold: Loss): Double
   
   /** Maximum loss observed across all trials */
   def maxLoss: Loss
@@ -94,9 +94,9 @@ case class RiskResult private (
   override lazy val minLoss: Loss = 
     if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
   
-  override def probOfExceedance(threshold: Loss): BigDecimal = {
+  override def probOfExceedance(threshold: Loss): Double = {
     val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
-    BigDecimal(exceedingCount) / BigDecimal(nTrials)
+    exceedingCount.toDouble / nTrials.toDouble
   }
   
   /** Create a new result with updated outcomes while preserving metadata. */
@@ -180,9 +180,9 @@ case class RiskResultGroup private (
   override lazy val minLoss: Loss = 
     if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
   
-  override def probOfExceedance(threshold: Loss): BigDecimal = {
+  override def probOfExceedance(threshold: Loss): Double = {
     val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
-    BigDecimal(exceedingCount) / BigDecimal(nTrials)
+    exceedingCount.toDouble / nTrials.toDouble
   }
   
   override def flatten: Vector[LossDistribution] =

@@ -28,7 +28,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     def getAll: Task[List[RiskTree]]                                                                    = ZIO.die(new UnsupportedOperationException)
     def getById(id: TreeId): Task[Option[RiskTree]]                                                     = ZIO.die(new UnsupportedOperationException)
     def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean): Task[LECCurveResponse]  = ZIO.die(new UnsupportedOperationException)
-    def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[BigDecimal] = ZIO.die(new UnsupportedOperationException)
+    def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[Double] = ZIO.die(new UnsupportedOperationException)
     def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
     def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String]                                 = ZIO.die(new UnsupportedOperationException)
 

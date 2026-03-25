@@ -266,7 +266,7 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
           prob    = cached.get.probOfExceedance(10000L)
         yield assertTrue(
           // 3 of 5 trials have loss >= 10000: trials 1 (10000), 2 (25000), 4 (15000)
-          prob == BigDecimal(3) / BigDecimal(5)
+          prob == 3.0 / 5.0
         )
       }
     ),

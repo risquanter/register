@@ -61,7 +61,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       test("probOfExceedance with no outcomes returns 0") {
         val result = withCfg(1000) { RiskResult.empty(nodeId("RISK-001")) }
 
-        assertTrue(result.probOfExceedance(1000L) == BigDecimal(0))
+        assertTrue(result.probOfExceedance(1000L) == 0.0)
       },
       test("probOfExceedance calculates correctly") {
         val result = withCfg(1000) {
@@ -81,7 +81,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         // Threshold 5000: includes trials 3, 4, 5 = 3 outcomes
         val prob = result.probOfExceedance(5000L)
 
-        assertTrue(prob == BigDecimal(3) / BigDecimal(1000))
+        assertTrue(prob == 3.0 / 1000.0)
       },
       test("probOfExceedance handles threshold above max loss") {
         val result = withCfg(1000) {
@@ -93,7 +93,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         }
 
         val prob = result.probOfExceedance(10000L)
-        assertTrue(prob == BigDecimal(0))
+        assertTrue(prob == 0.0)
       }
     ),
     suite("LossDistribution.merge - outer join semantics")(

@@ -45,7 +45,7 @@ Represents: **P(Loss ≥ threshold)** for any threshold value.
 **Conceptual interface:**
 ```scala
 trait LECCurve {
-  def probOfExceedance(threshold: Loss): BigDecimal
+  def probOfExceedance(threshold: Loss): Double
   def maxLoss: Loss
   def minLoss: Loss
   def nTrials: Int
