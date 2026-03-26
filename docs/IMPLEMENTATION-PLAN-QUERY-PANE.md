@@ -3,7 +3,7 @@
 **Parent:** [ADR-028](ADR-028-vague-quantifier-query-pane.md) +
 [ADR-028 Appendix](ADR-028-appendix-technical-design.md)  
 **Scope:** All code changes to ship the query pane end-to-end.  
-**Last updated:** 2026-03-20
+**Last updated:** 2026-03-26 (D12/D13 — ADR-001 compliance)
 
 ---
 
@@ -12,7 +12,8 @@
 | Group | Name | Depends on | Gate |
 |---|---|---|---|
 | TG-1 | fol-engine integration build prep | — | ✅ Done — all tests + bats suites pass |
-| TG-1b | fol-engine internal debt resolution | TG-1 | ✅ Core complete (792 tests) — T1b.1–T1b.22 done; T1b.13 (README docs) + T1b.14 (cross-compile) optional, non-blocking |
+| TG-1b | fol-engine internal debt resolution | TG-1 | ✅ Complete (854 tests) — includes generic KB, DSL removal, cross-compilation |
+| TG-1c | fol-engine model augmentation API | TG-1b | ✅ Complete — `ModelAugmenter[D]` on `VagueSemantics.evaluate()` and `holds()` |
 | TG-2 | `RiskTreeKnowledgeBase` + query service | TG-1b | curl returns valid JSON |
 | TG-3 | Frontend query pane | TG-2 | end-to-end GUI flow |
 | TG-4 | Integration tests | TG-2 | `sbt serverIt/test` passes |
@@ -62,33 +63,54 @@ native distroless image.
 
 ### T1.4 — Add dependency to register build ✅
 
-**File:** `register/build.sbt` (serverDependencies)
+**File:** `register/build.sbt`
+
+Originally added to `serverDependencies` as `%% "fol-engine" % "0.1.0-SNAPSHOT"`.
+After TG-1b cross-compilation, moved to `common` crossProject `.settings()` as:
 
 ```scala
-"com.risquanter" %% "fol-engine" % "0.1.0-SNAPSHOT"
+"com.risquanter" %%% "fol-engine" % "0.2.0-SNAPSHOT"
 ```
+
+Available on both JVM and JS. Server gets it transitively through `common`.
 
 ---
 
-## TG-1b — fol-engine Internal Debt Resolution ✅ (core)
+## TG-1b — fol-engine Internal Debt Resolution ✅
 
-**Status: Core complete.** Work in `~/projects/vague-quantifier-logic`.
-All code tasks done (T1b.1–T1b.22). 792 tests passing.
-Remaining: T1b.13 (README docs) and T1b.14 (cross-compile) —
-neither blocks register integration.
+**Status: Complete.** Work in `~/projects/vague-quantifier-logic`.
+854 tests passing. Published as `0.2.0-SNAPSHOT` (JVM + JS).
+Remaining: T1b.13 (README docs) — non-blocking.
 
 This task group resolved technical debt in fol-engine so that
-register can consume the library correctly.
+register can consume the library correctly. The 0.2.0 release
+included several changes beyond the original plan scope:
 
-The core issue had two parts:
 1. **Sampling degradation (resolved T1b.1–T1b.5):** The string-parser
    path used `scala.util.Random` instead of the HDR + statistical
    pipeline.
-2. **Two orchestrators (resolved T1b.15–T1b.22):** Both paths now
-   compile to `ResolvedQuery` (concrete shared IL) with one evaluator.
-   String path: `ParsedQuery` → `VagueSemantics.toResolved()` →
-   `ResolvedQuery`. Typed DSL: `UnresolvedQuery.resolve(source)` →
-   `ResolvedQuery`. Package rename `vague.*` → `fol.*` complete.
+2. **Evaluation path unification (resolved T1b.15–T1b.22):** String
+   path compiles `ParsedQuery` → `ResolvedQuery[D]` via
+   `VagueSemantics.toResolved()`. Package rename `vague.*` → `fol.*`
+   complete.
+3. **Generic `KnowledgeBase[D]` (0.2.0):** Replaced stringly-typed
+   `DomainValue` with a fully generic datastore/eval pipeline. New
+   types: `DomainElement[D]`, `DomainCodec[D]`, `RelationTuple[D]`.
+   `RelationValue` remains as a built-in domain type with pre-existing
+   given instances. See fol-engine ADR-007, ADR-008.
+4. **Bridge decomposition (0.2.0):** `NumericAugmenter` decomposed into
+   `ArithmeticAugmenter`, `ComparisonAugmenter`, `LiteralResolver`.
+   `NumericAugmenter.augmenter` remains as a composed convenience for
+   `RelationValue`. See fol-engine ADR-009.
+5. **DSL removal (0.2.0):** Typed Query DSL (`UnresolvedQuery`, etc.)
+   deleted. `ResolvedQuery.fromRelation` is the sole programmatic entry
+   point. See fol-engine ADR-011.
+6. **`RelationName` opaque type (0.2.0):** Relation names are now
+   `RelationName` (opaque over `String`), constructed via
+   `RelationName("name")`, extracted via `.value`. See fol-engine ADR-010.
+7. **Cross-compilation (0.2.0):** JVM + JS via `crossProject`. All
+   `scala.util.Random` usages removed (dead `sampleDomain`/
+   `sampleActiveDomain` methods + demo code). T1b.14 complete.
 
 **Design document:** [`vague-quantifier-logic/docs/ADR-001.md`](../../vague-quantifier-logic/docs/ADR-001.md)
 (ADR-001: Evaluation Path Unification — architecture, trace diagram, gap analysis)
@@ -121,7 +143,7 @@ for full rationale and implementation steps.
 | T1b.11 | Remove deprecated KB wrappers (`holdsOnKB`, `holdsExactOnKB`, `holdsWithSamplingOnKB`) | ✅ Done | — |
 | T1b.12 | Build cleanup: remove `commons-math3` and `simulation.util` from `build.sbt` | ✅ Done | — |
 | T1b.13 | fol-engine usage documentation: `README.md` examples covering three evaluation modes (exact, sampled with HDR + CI, exact with satisfying element set) with semantic context for new users | Not done | 1.0h |
-| T1b.14 | Cross-compile fol-engine (JVM + JS) — enables `commonDependencies` in register | Not done | TBD |
+| T1b.14 | Cross-compile fol-engine (JVM + JS) — enables `common` crossProject dependency in register | ✅ Done | — |
 
 ### Completed sub-tasks — True unification (string path → shared IL)
 
@@ -146,17 +168,24 @@ one concrete shared IL with one evaluator. See the
 - **D8:** Phase 1 renames done: `ParsedQuery`, `QueryError`, `QueryException`,
   `QueryResult`. Phase 2 rename (`UnresolvedQuery`) ships with T1b.15.
   Package rename (`vague.*` → `fol.*`) deferred to T1b.22.
-- **D9:** Drop type parameter `[A]`. Both paths query the same KB; elements
-  are always `RelationValue`. The typed DSL's prior unwrap to `String` was
-  premature convenience that created a false split. `ResolvedQuery`,
-  `UnresolvedQuery`, and `EvaluationOutput` are concrete types — no generics.
-  DSL convenience via predicate helpers (`.whereConst(name => ...)`).
+- **D9:** ~~Drop type parameter `[A]`.~~ **Superseded by 0.2.0:** The
+  generic `KnowledgeBase[D]` rewrite (fol-engine ADR-007) re-introduced
+  type parameters across the pipeline — but now as a principled generic
+  design with `DomainElement[D]` and `DomainCodec[D]` type classes, not
+  the ad-hoc `[A]` from before. Register uses `D = RelationValue` with
+  built-in given instances. `ResolvedQuery[D]`, `EvaluationOutput[D]`,
+  `KnowledgeBase[D]`, `KnowledgeSource[D]`, `RelationTuple[D]` are all
+  now generic. The typed DSL (`UnresolvedQuery`) was removed entirely
+  (fol-engine ADR-011).
 - **D10:** Simulation data (LEC curves, p95, etc.) flows through the FOL
-  `Model[Any]` function table, not through the element type or KB facts.
-  `RiskTreeKnowledgeBase.toModel()` registers `p95`, `lec`, `>`, etc.
-  as model functions backed by register's simulation results. The engine
-  evaluates `>(p95(x), 5000000)` by calling these functions — it never
-  needs to know what kind of data backs them.
+  `Model[D]` function table, not through the element type or KB facts.
+  `RiskTreeKnowledgeBase` provides a `ModelAugmenter[RelationValue]` that
+  registers `p95`, `lec`, `>`, etc. as model functions backed by register's
+  simulation results. The engine evaluates `>(p95(x), 5000000)` by calling
+  these functions — it never needs to know what kind of data backs them.
+  The built-in `NumericAugmenter.augmenter` (composed from
+  `ArithmeticAugmenter`, `ComparisonAugmenter`, `LiteralResolver`) handles
+  arithmetic, comparisons, and numeric literal parsing for `RelationValue`.
 - **D11:** No `useSampling: Boolean` toggle on `ResolvedQuery.evaluate()`
   or `VagueSemantics.holds()`. One code path — `SamplingParams` controls
   whether evaluation is exact or sampled. `SamplingParams.exact`
@@ -182,19 +211,55 @@ was **eliminated** — there is no `DomainSpec.Resolved` variant. The
 resolution step produces `ResolvedQuery`, a separate type. The match
 arm is not needed.
 
-**Gate G1b:** All fol-engine tests pass (~770+). `VagueSemantics.evaluate()`
-returns `EvaluationOutput` with `satisfyingElements`.
-String path compiles `ParsedQuery` → `ResolvedQuery` and
-delegates to `.evaluate()`. Typed DSL resolves `UnresolvedQuery` →
-`ResolvedQuery` via `.resolve(source)`. **One concrete shared IL, one
-evaluator** for both entry points. `ResolvedQuery.evaluate()` takes
-no `KnowledgeSource` argument — domain sealed in the type.
-Both paths produce the same concrete type — no generics, no split.
-No `scala.util.Random` anywhere. `commons-math3` and `simulation.util`
-removed from build.
+**Gate G1b:** ✅ Met. fol-engine: 854 tests pass. `VagueSemantics.evaluate()`
+returns `EvaluationOutput[D]` with `satisfyingElements`. String path
+compiles `ParsedQuery` → `ResolvedQuery[D]` via `toResolved()`. Typed
+DSL removed (ADR-011) — `ResolvedQuery.fromRelation` is the sole
+programmatic entry point. Generic `KnowledgeBase[D]` with
+`DomainElement`/`DomainCodec` type classes. `RelationName` opaque type.
+Cross-compiled JVM + JS. No `scala.util.Random` anywhere. `commons-math3`
+and `simulation.util` removed from build.
 
-**Acceptance:** `sbt test` passes (expect ~770+ tests). `sbt publishLocal`
-produces artifact consumable by register.
+**Acceptance:** ✅ `sbt test` passes (854 tests). `sbt publishLocal`
+produces artifact consumable by register (JVM + JS). `0.2.0-SNAPSHOT`
+integrated in register `common` crossProject — all register tests pass.
+
+---
+
+## TG-1c — fol-engine Model Augmentation API ✅
+
+**Status: Complete.** Delivered as part of fol-engine 0.2.0-SNAPSHOT.
+See fol-engine ADR-005 (Model Augmentation) and ADR-009 (Bridge
+Decomposition).
+
+**Problem:** `VagueSemantics.evaluate()` internally builds `Model[D]`
+via `FOLBridge.scopeToPredicate()` → `KnowledgeSourceModel.toModel(source)`.
+Register needs to inject simulation-backed functions (`p50`, `p90`, `p95`,
+`p99`, `lec`) and comparison predicates (`>`, `<`, `>=`, `<=`) into the
+model — these functions are backed by register's `LossDistribution`
+results, not by KB facts.
+
+**Solution (implemented):** `ModelAugmenter[D]` — a composable case class
+wrapping `Model[D] => Model[D]`. Both `VagueSemantics.evaluate()` and
+`holds()` accept a `modelAugmenter: ModelAugmenter[D]` parameter
+(default = `ModelAugmenter.identity[D]`). Register will compose:
+- `NumericAugmenter.augmenter` (built-in: arithmetic + comparisons +
+  literal parsing for `RelationValue`)
+- A custom augmenter for simulation-backed functions (`p95`, `lec`, etc.)
+  via `ModelAugmenter.fromFunctions`
+
+Composed via `NumericAugmenter.augmenter andThen simulationAugmenter`.
+
+**Original prompt:** [`docs/PROMPT-FOL-ENGINE-MODEL-AUGMENTATION.md`](PROMPT-FOL-ENGINE-MODEL-AUGMENTATION.md)
+(written pre-0.2.0 — the library agent implemented a more comprehensive
+design with `ModelAugmenter[D]`, decomposed bridge, and composable
+augmenters)
+
+**Acceptance:** ✅ `VagueSemantics.evaluate[D]()` and `holds[D]()`
+accept `modelAugmenter: ModelAugmenter[D]`. All 854 tests pass.
+`FOLBridge.scopeToPredicate` also accepts the augmenter parameter.
+Built-in `NumericAugmenter.augmenter` composes `ArithmeticAugmenter`,
+`ComparisonAugmenter`, and `LiteralResolver`.
 
 ---
 
@@ -204,16 +269,22 @@ Work in `~/projects/register`.
 
 ### T2.1 — Add library dependency ✅
 
-**File:** `build.sbt` (serverDependencies)
+**File:** `build.sbt` (`common` crossProject settings)
 
-Done as part of TG-1 (T1.4). Coordinate:
+Originally added to `serverDependencies` (TG-1, T1.4). After fol-engine
+0.2.0 cross-compilation, moved to `common` crossProject `.settings()`:
 
 ```scala
-"com.risquanter" %% "fol-engine" % "0.1.0-SNAPSHOT"
+"com.risquanter" %%% "fol-engine" % "0.2.0-SNAPSHOT"
 ```
 
-**Acceptance met:** `sbt server/compile` succeeds; `sbt server/test` passes
-(323 tests). ParsedQuery and all library types are importable.
+Available on both JVM and JS (same pattern as `zio-ulid`). Server gets
+it transitively through `common`.
+
+**Acceptance met:** `sbt server/compile` and `sbt commonJS/compile` succeed;
+`sbt server/test` passes (323 tests); `sbt commonJVM/test` passes (391
+tests). `VagueQueryParser`, `ParsedQuery`, `ModelAugmenter`, and all
+library types are importable on both platforms.
 
 ### T2.2 — Define request/response types in `common` ✅
 
@@ -290,9 +361,33 @@ final case class QueryRequest(query: String)
 
 object QueryRequest:
   given JsonCodec[QueryRequest] = DeriveJsonCodec.gen
+
+  /** Inbound parse boundary (ADR-001 §1 — parse-don't-validate).
+    *
+    * Wraps `VagueQueryParser.parse()` — the library's syntactic parser.
+    * Returns the library's `fol.error.QueryError` on failure (not register's
+    * `FolQueryFailure`); the controller maps the error type at the wiring
+    * layer, keeping this DTO free of `AppError` dependencies.
+    *
+    * Analogous to `RiskTreeDefinitionRequest.resolve()` returning
+    * `Validation[ValidationError, ResolvedCreate]` — the DTO owns the
+    * parse step, the controller owns the error mapping.
+    */
+  def resolve(req: QueryRequest): Either[fol.error.QueryError, ParsedQuery] =
+    VagueQueryParser.parse(req.query)
 ```
 
-**Acceptance:** `sbt common/compile` succeeds on JVM and JS.
+**Design decision D12 (2026-03-26):** `resolve()` returns the **library
+type** `Either[fol.error.QueryError, ParsedQuery]`, not register's
+`FolQueryFailure`. This mirrors how `RiskTreeDefinitionRequest.resolve()`
+returns `Validation[ValidationError, ...]` — a domain-specific error, not
+`AppError` — with the controller doing the final mapping. Keeping
+`resolve()` free of `AppError` avoids a circular dependency from the DTO
+companion into the error hierarchy.
+
+**Acceptance:** `sbt common/compile` succeeds on JVM and JS;
+`QueryRequest.resolve(QueryRequest("Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"))` returns `Right(ParsedQuery(...))`;
+`QueryRequest.resolve(QueryRequest("garbage"))` returns `Left(ParseError(...))`.
 
 ### T2.3 — Define endpoint in `WorkspaceEndpoints` ✅
 
@@ -309,17 +404,118 @@ POST /w/{key}/risk-trees/{treeId}/query
 
 **Acceptance:** ✅ Endpoint compiles; Swagger docs show it.
 
+### T2.3b — Add `FolQueryFailure` to error hierarchy
+
+**Files:**
+- `modules/common/src/main/scala/.../errors/AppError.scala`
+- `modules/common/src/main/scala/.../errors/ErrorResponse.scala`
+
+Add a new `FolQueryFailure` branch to the sealed `AppError` hierarchy
+(alongside `SimError`, `IrminError`, `AuthError`). The `Fol` prefix
+identifies errors originating from fol-engine interaction; the `Failure`
+suffix follows the existing `RepositoryFailure` / `SimulationFailure`
+naming convention (D13).
+
+```scala
+sealed trait FolQueryFailure extends AppError
+
+object FolQueryFailure:
+  /** Maps from fol.error.QueryError.ParseError / LexicalError.
+    * Syntactic parse failure — query string is not well-formed.
+    */
+  final case class FolParseFailure(message: String, position: Option[Int])
+    extends FolQueryFailure:
+    override def getMessage: String =
+      position.fold(message)(p => s"$message (at position $p)")
+
+  /** Maps from fol.error.QueryError.RelationNotFoundError /
+    * UninterpretedSymbolError / SchemaError.
+    * Well-formed query references unknown predicates or functions.
+    */
+  final case class FolUnknownSymbol(symbol: String, available: List[String])
+    extends FolQueryFailure:
+    override def getMessage: String =
+      s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}"
+
+  /** Maps from fol.error.QueryError.EvaluationError /
+    * ScopeEvaluationError / TypeMismatchError / TimeoutError / etc.
+    * Catch-all for unexpected evaluation-phase failures.
+    */
+  final case class FolEvaluationFailure(message: String, phase: String)
+    extends FolQueryFailure:
+    override def getMessage: String = s"Evaluation failed in $phase: $message"
+
+  /** Register precondition — no Fol prefix.
+    * Simulation results not yet computed for the requested tree.
+    */
+  final case class SimulationNotCached(treeId: TreeId)
+    extends FolQueryFailure:
+    override def getMessage: String =
+      s"Simulation not cached for tree ${treeId.value}"
+```
+
+In `ErrorResponse.scala`, add `encodeFolQueryFailure` exhaustive matcher:
+- `FolParseFailure` → 400 (`{ "error": "parse_error", "detail": ..., "position": ... }`)
+- `FolUnknownSymbol` → 400 (`{ "error": "unknown_symbol", "symbol": ..., "available": [...] }`)
+- `FolEvaluationFailure` → 500 (`{ "error": "evaluation_failed", "detail": ..., "phase": ... }`)
+- `SimulationNotCached` → 409 (`{ "error": "simulation_required", "detail": ... }`)
+
+Update the `encode` dispatch to include
+`case e: FolQueryFailure => encodeFolQueryFailure(e)`.
+Compiler-enforced exhaustive matching per ADR-022.
+
+**Design decision (2026-03-23):** Query errors do NOT belong under
+`SimError` — queries are a separate domain concern. A dedicated sealed
+trait gives compiler-enforced exhaustive matching and clean HTTP mapping
+without polluting the simulation error namespace.
+
+**Design decision D13 (2026-03-26) — naming convention:** The `Fol`
+prefix identifies all error types that map from `fol.error.QueryError`
+variants (the library's error algebra). This avoids a naming collision:
+`fol.error.QueryError` is the library type (used in `Either` returns
+from `VagueQueryParser.parse()` and `VagueSemantics.evaluate()`), while
+`FolQueryFailure` is register's HTTP error dispatch type. The `Failure`
+suffix follows the existing `RepositoryFailure` / `SimulationFailure`
+pattern in `AppError.scala`. `SimulationNotCached` has no `Fol` prefix
+because it is a register precondition — no fol-engine involvement.
+The `Auth` prefix pattern (`AuthForbidden`, `AuthServiceUnavailable`
+under `AuthError`) and `Irmin` prefix pattern (`IrminUnavailable`,
+`IrminHttpError` under `IrminError`) confirm this convention.
+
+**Design decision (2026-03-23) — empty range:** A query that resolves to
+an empty range (e.g., `child_of(x, cyber)` where `cyber` is a leaf node
+with no children) is **not an error**. It returns HTTP 200 with
+`rangeSize: 0`, `satisfied: false`, `proportion: 0.0`. This is valid
+data — the query executed correctly; there are simply no elements in the
+range. No error type is needed for this case.
+
+**fol.error.QueryError → FolQueryFailure mapping table:**
+
+| Library type (`fol.error.QueryError.*`) | Register type (`FolQueryFailure.*`) | HTTP |
+|---|---|---|
+| `ParseError`, `LexicalError` | `FolParseFailure` | 400 |
+| `RelationNotFoundError`, `UninterpretedSymbolError`, `SchemaError` | `FolUnknownSymbol` | 400 |
+| `EvaluationError`, `ScopeEvaluationError`, `TypeMismatchError`, `TimeoutError`, `QuantifierError` | `FolEvaluationFailure` | 500 |
+| *(register precondition)* | `SimulationNotCached` | 409 |
+
+**Acceptance:** `sbt common/compile` succeeds; exhaustive match on
+`FolQueryFailure` is compiler-checked.
+
 ### T2.4 — Implement `RiskTreeKnowledgeBase`
 
 **File:** `modules/server/src/main/scala/.../foladapter/RiskTreeKnowledgeBase.scala`
 
 Responsibilities:
-1. Build `KnowledgeBase` with structural facts (`leaf`, `portfolio`,
-   `child_of`, `descendant_of`, `leaf_descendant_of`)
-2. Build `Model[Any]` by augmenting `KnowledgeSourceModel.toModel()`
-   with simulation-backed functions (`p50`, `p90`, `p95`, `p99`, `lec`)
-   and comparison predicates (`>`, `<`, `>=`, `<=`)
-3. Override `getFunction` for numeric literal parsing
+1. Build `KnowledgeBase[RelationValue]` with structural facts (`leaf`,
+   `portfolio`, `child_of`, `descendant_of`, `leaf_descendant_of`) using
+   the fluent builder API: `KnowledgeBase.builder[RelationValue]
+   .withUnaryRelation(RelationName("leaf")).withFact(...).build()`
+2. Provide `ModelAugmenter[RelationValue]` that composes:
+   - `NumericAugmenter.augmenter` (built-in: arithmetic + comparisons +
+     numeric literal parsing)
+   - Custom simulation-backed functions (`p50`, `p90`, `p95`, `p99`,
+     `lec`) via `ModelAugmenter.fromFunctions`
+   Composed via `NumericAugmenter.augmenter andThen simulationAugmenter`.
 
 **TREE-OPS applicability (Pattern 3 — Catamorphism):**
 The `allDescendants` helper that materialises `descendant_of` and
@@ -343,41 +539,66 @@ TREE-OPS Pattern 3 would reduce duplication across folds.
 
 Public API:
 ```scala
+import fol.datastore.{KnowledgeSource, RelationValue, RelationName, RelationTuple}
+import fol.semantics.ModelAugmenter
+
 class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistribution]):
-  def toModel(): Model[Any]
-  def source: KnowledgeSource     // needed by RangeExtractor
+  def augmenter: ModelAugmenter[RelationValue]
+  def source: KnowledgeSource[RelationValue]
 ```
 
 **Acceptance:** Unit test — given a hand-built tree + results, assert:
-- `source.contains("leaf", RelationTuple.fromConstants("cyber"))` is true
-- `source.contains("descendant_of", RelationTuple.fromConstants("cyber", "root"))` is true
-- `toModel().interpretation.getFunction("p95")(List("cyber"))` returns expected Long
+- `source.contains(RelationName("leaf"), RelationTuple.fromConstants("cyber"))` is true
+- `source.contains(RelationName("descendant_of"), RelationTuple.fromConstants("cyber", "root"))` is true
+- `augmenter(baseModel).interpretation.getFunction("p95")(List(Const("cyber")))` returns expected value
 
 ### T2.5 — Implement `QueryService`
 
 **File:** `modules/server/src/main/scala/.../services/QueryService.scala`
 
-ZIO service layer. Steps:
-1. Parse query → `ParsedQuery` (fail 400 on parse error)
-2. Validate symbols against known schema (fail 400 with available list)
-3. Load tree + ensure simulations cached (fail 409 if not)
-4. Build `RiskTreeKnowledgeBase`
-5. Call `VagueSemantics.evaluate(parsedQuery, source, answerTuple, params, config)`
-   — internally compiles `ParsedQuery` → `ResolvedQuery`
+ZIO service layer. The service signature accepts `ParsedQuery` (already
+parsed at the HTTP boundary via `QueryRequest.resolve()` in the
+controller — see D12). **No parsing or raw-string validation happens
+in the service layer** (ADR-001 §4: "No validation in service methods").
+
+Service signature:
+```scala
+trait QueryService:
+  def evaluate(treeId: TreeId, parsed: ParsedQuery): Task[QueryResponse]
+```
+
+Steps:
+1. Validate symbols against known schema (fail with `FolUnknownSymbol` → 400)
+2. Load tree + ensure simulations cached (fail with `SimulationNotCached` → 409)
+3. Build `RiskTreeKnowledgeBase`
+4. Call `VagueSemantics.evaluate[RelationValue](parsed, source, answerTuple, params, config, augmenter)`
+   — `augmenter` from `RiskTreeKnowledgeBase` composes
+     `NumericAugmenter.augmenter andThen simulationAugmenter`
+   — context bounds `DomainElement[RelationValue]` and
+     `DomainCodec[RelationValue]` resolved via built-in givens
+   — internally compiles `ParsedQuery` → `ResolvedQuery[RelationValue]`
    → calls `.evaluateWithOutput()`
-   — returns `EvaluationOutput` containing
+   — returns `EvaluationOutput[RelationValue]` containing
    `result: VagueQueryResult` + `rangeElements` + `satisfyingElements`
-6. Map to `QueryResponse` via `QueryResponseBuilder.from(output, lookup)`
+   — on `Left(fol.error.QueryError)`, map to `FolEvaluationFailure`
+5. Map to `QueryResponse` via `QueryResponseBuilder.from(output, lookup)`
 
 **Design change (2026-03-16):** The original plan called for bypassing
 `VagueSemantics.holds()` and calling `RangeExtractor` +
 `ScopeEvaluator.evaluateSample()` directly. This is no longer needed.
 
+**Architecture note (2026-03-26):** ~~The library's current
+`VagueSemantics.evaluate()` builds `Model[Any]` internally with no
+extension point for custom functions.~~ **Resolved in 0.2.0:** Both
+`evaluate()` and `holds()` accept `modelAugmenter: ModelAugmenter[D]`
+(default = `ModelAugmenter.identity[D]`). TG-1c is complete. The entire
+TG-2 chain is unblocked.
+
 **Architecture clarification (2026-03-18):** The library exposes two
 facade methods:
-- `VagueSemantics.holds()` → `VagueQueryResult` (statistics only —
-  satisfied, proportion, CI, satisfyingCount)
-- `VagueSemantics.evaluate()` → `EvaluationOutput`
+- `VagueSemantics.holds[D]()` → `Either[fol.error.QueryError, VagueQueryResult]`
+  (statistics only — satisfied, proportion, CI, satisfyingCount)
+- `VagueSemantics.evaluate[D]()` → `Either[fol.error.QueryError, EvaluationOutput[D]]`
   (statistics + element sets — `rangeElements`, `satisfyingElements`)
 
 Register uses `evaluate()` because it needs the element sets for tree
@@ -402,14 +623,15 @@ Two evaluation modes:
 **Status:** File already exists with `from(satisfyingElements: Set[RelationValue], ...)` signature
 (written before the TG-1b design change).
 
-After TG-1b, refactor to accept `EvaluationOutput`:
+After TG-1b, refactor to accept `EvaluationOutput[RelationValue]`:
 
 ```scala
 import fol.result.EvaluationOutput
+import fol.datastore.RelationValue
 
 object QueryResponseBuilder:
   def from(
-    output: EvaluationOutput,
+    output: EvaluationOutput[RelationValue],
     nodeIdLookup: Map[String, NodeId],
     queryEcho: String
   ): QueryResponse
@@ -420,15 +642,43 @@ maps `RelationValue.Const(name)` → `NodeId` via `nodeIdLookup`, and
 populates `QueryResponse` fields from `output.result` (the
 `VagueQueryResult` with statistics).
 
-**Acceptance:** Compiles; unit test verifies NodeId mapping.
+Additionally, **remove the `Set[Any]` factory** from
+`QueryResponse` in `common`. Once the typed
+`QueryResponseBuilder.from(EvaluationOutput[RelationValue], ...)` is the
+sole construction site, the untyped `QueryResponse.from(Set[Any], ...)`
+becomes dead code. `QueryResponse` itself (the DTO) stays in `common`
+for JS access — only the untyped factory goes away.
+
+**Acceptance:** Compiles; unit test verifies NodeId mapping;
+`QueryResponse.from(Set[Any], ...)` no longer exists.
 
 ### T2.6 — Implement `QueryController`
 
 **File:** `modules/server/src/main/scala/.../http/controllers/QueryController.scala`
 
-Wire endpoint to service. Add auth check. Register in `HttpApi`.
+The controller is "dumb" per ADR-001 — it calls `QueryRequest.resolve()`
+at the HTTP boundary, maps the library error to `FolQueryFailure`, then
+forwards the typed `ParsedQuery` to the service:
 
-**Acceptance:** Server starts; Swagger shows endpoint.
+```scala
+val queryTree = queryWorkspaceTreeEndpoint.serverLogic { case (authCtx, (key, treeId, req)) =>
+  QueryRequest.resolve(req) match
+    case Left(parseErr) =>
+      ZIO.fail(FolQueryFailure.mapParseError(parseErr))
+    case Right(parsed) =>
+      queryService.evaluate(treeId, parsed)
+}
+```
+
+The `FolQueryFailure.mapParseError` helper centralises the
+`fol.error.QueryError → FolParseFailure` mapping (see T2.3b mapping
+table). The controller never inspects query content — it wires
+`resolve()` → service, nothing more.
+
+Add auth check. Register in `HttpApi`.
+
+**Acceptance:** Server starts; Swagger shows endpoint;
+malformed query returns 400 before reaching `QueryService`.
 
 ### T2.7 — OTel instrumentation
 
@@ -445,6 +695,42 @@ Wrap `evaluate()` in `ZIO.serviceWithZIO[Tracing]` span with attributes
 
 Work in `~/projects/register/modules/app`.
 
+**Data flow clarification (2026-03-23):** The query field in the Analyze
+view accepts fol-engine's **string path syntax** (the `ParsedQuery` entry
+point). Queries run against the **tree selected in the Analyze view's
+dropdown** — that tree selection, combined with its cached simulation
+results, becomes the `KnowledgeSource[RelationValue]` for range extraction
+and the `ModelAugmenter[RelationValue]` source for scope evaluation.
+The execution flow is:
+
+1. User selects tree in Analyze view dropdown (`TreeViewState.selectedTreeId`)
+2. User types query in textarea
+3. **Client-side parse validation:** `VagueQueryParser.parse()` runs
+   in-browser (fol-engine is cross-compiled to JS via `common`) giving
+   instant syntax error feedback — red underline, error position, error
+   message — without a server round-trip
+4. User presses Run (or Ctrl+Enter)
+5. Frontend POSTs `QueryRequest { query }` to
+   `/w/{key}/risk-trees/{treeId}/query`
+6. Server loads tree + simulation results → `RiskTreeKnowledgeBase`
+   → `VagueSemantics.evaluate(...)` → `QueryResponse`
+7. Frontend renders result card + highlights matching nodes in tree view
+
+**Client-side parsing rationale (2026-03-26):** fol-engine is cross-compiled
+(JVM + JS) and declared as a `common` dependency with `%%%`. This was a
+specific goal of the cross-compilation initiative (T1b.14): enable
+`VagueQueryParser.parse()` on the ScalaJS side so the frontend can
+validate query syntax at the input boundary per ADR-001 (parse-don't-validate)
+without requiring a server round-trip. The parser is pure Scala with no
+JVM-only dependencies — it runs identically on both platforms.
+`VagueQueryParser.parse(s): Either[fol.error.QueryError, ParsedQuery]` is the
+client-side validation boundary; server-side `QueryRequest.resolve()` (called
+in the controller) re-parses authoritatively before evaluation.
+
+**Note:** ADR-028 §1 ruled out client-side *evaluation* (data transfer,
+cache locality), but client-side *parsing* is lightweight and was unblocked
+once the JVM-only dependency (`commons-math3`) was removed in TG-1b.
+
 ### T3.1 — Extend `AnalyzeQueryState`
 
 **File:** `src/main/scala/.../state/AnalyzeQueryState.scala`
@@ -454,6 +740,31 @@ Add `queryResult: Var[LoadState[QueryResponse]]`, derived signals
 fires POST via `ZJS.loadInto`.
 
 **Acceptance:** State compiles; `executeQuery` callable.
+
+### T3.1b — Client-side parse validation
+
+**File:** `src/main/scala/.../state/AnalyzeQueryState.scala`
+
+Add a derived signal that calls `VagueQueryParser.parse()` on the current
+`queryInput` value (debounced ~300ms). Produces
+`Signal[Option[Either[fol.error.QueryError, ParsedQuery]]]` — `None` when
+input is empty, `Left(err)` on syntax error (with error position),
+`Right(parsed)` on valid parse. Note: the client uses the **library
+error type** (`fol.error.QueryError`) directly for UI display — no
+mapping to `FolQueryFailure` is needed on the JS side (that type
+exists only for HTTP dispatch on the server).
+
+The `AnalyzeView` uses this signal to:
+- Show/hide inline syntax error message with position indicator
+- Disable the Run button when parse fails
+- Optionally highlight the error position in the textarea
+
+This is the **client-side validation boundary** per ADR-001 §3 — parsing
+at the input edge gives instant feedback. The server re-parses
+authoritatively via `QueryRequest.resolve()` in the controller.
+
+**Acceptance:** Typing a malformed query shows inline error instantly;
+typing a valid query clears the error and enables Run.
 
 ### T3.2 — Add `QueryResultCard`
 
@@ -503,11 +814,12 @@ and triggers chart load.
 **File:** `modules/server/src/test/scala/.../foladapter/RiskTreeKnowledgeBaseSpec.scala` (new)
 
 Test cases:
-1. Structural facts: leaf/portfolio/child_of populated correctly
-2. Transitive closure: descendant_of/leaf_descendant_of correct for
+1. Structural facts: `source.contains(RelationName("leaf"), ...)` populated correctly
+2. Transitive closure: `descendant_of`/`leaf_descendant_of` correct for
    3-level tree
-3. Simulation functions: p95, lec return expected values
-4. Numeric literal: `getFunction("5000000")` parses correctly
+3. Simulation functions: augmented model's `p95`, `lec` return expected values
+4. Composed augmenter: `NumericAugmenter.augmenter andThen simulationAugmenter`
+   provides arithmetic, comparisons, literal parsing, and simulation functions
 5. Empty tree: KB has only schema, no facts
 
 ### T4.2 — Endpoint integration tests
@@ -517,15 +829,16 @@ Test cases:
 Test cases:
 1. **Happy path:** Tree with known distributions. POST query. Assert
    satisfied, proportion, matchingNodeIds.
-2. **Parse error:** Malformed query → 400 with position
-3. **Unknown symbol:** `p96(x)` → 400 with available list
+2. **Parse error:** Malformed query → 400 with `FolParseFailure` position
+3. **Unknown symbol:** `p96(x)` → 400 with `FolUnknownSymbol` available list
 4. **Empty range:** `portfolio(x)` on leaf-only tree → 200,
    rangeSize = 0, satisfied = false
 5. **Unary query:** Answer variable `(y)` → matchingNodeIds has
    portfolio IDs
-6. **Simulation not cached:** 409 with detail message
+6. **Simulation not cached:** 409 with `SimulationNotCached` detail message
+7. **Evaluation failure:** Catch-all → 500 with `FolEvaluationFailure`
 
-**Acceptance:** `sbt serverIt/test` passes all 6.
+**Acceptance:** `sbt serverIt/test` passes all 7.
 
 ---
 
@@ -576,24 +889,30 @@ are exposed within the risk register domain:
 Week 1:  TG-1 (library build prep)                            ✅ DONE
          T1.1 → T1.2 → T1.3 → T1.4
 
-Week 2:  TG-1b (fol-engine internal debt)                     ✅ CORE COMPLETE
+Week 2:  TG-1b (fol-engine internal debt)                     ✅ DONE
          T1b.1–T1b.5 (sampling infrastructure)                ✅ DONE
          T1b.6–T1b.12 (partial unification + code quality)    ✅ DONE
          T1b.15–T1b.21 (ResolvedQuery IL + EvaluationOutput)  ✅ DONE
          T1b.15b (ParsedQuery rename)                          ✅ DONE
          T1b.22 (fol.* package migration)                      ✅ DONE
          T1b.13 (fol-engine usage docs)                        ⬜ optional
-         T1b.14 (cross-compilation)                            ⬜ optional
+         T1b.14 (cross-compilation)                            ✅ DONE
+         0.2.0-SNAPSHOT: generic KB, DSL removal, bridge       ✅ DONE
+           decomposition, RelationName opaque, ModelAugmenter
 
-Week 3:  TG-2 (server components)                             ← CURRENT
-         T2.2 ✅ + T2.3 ✅ (already done)
-         T2.4 → T2.5 → T2.5b → T2.6 → T2.7
+Week 3:  TG-1c (model augmentation — delivered in 0.2.0)      ✅ DONE
+         TG-2 (server components — fully unblocked)            ← CURRENT
+         T2.1 ✅ + T2.2 ✅ + T2.3 ✅ (already done)
+         T2.3b (FolQueryFailure) → T2.4 (KB + augmenter)
+         → T2.5 (QueryService) → T2.5b (ResponseBuilder)
+         → T2.6 (Controller) → T2.7 (OTel)
 
 Week 4:  TG-4 (tests, can overlap with TG-2 tail)
          T4.1 (once T2.4 done) → T4.2 (once T2.6 done)
 
 Week 5:  TG-3 (frontend)
-         T3.1 → T3.2 → T3.3 → T3.4 → T3.5
+         T3.1 → T3.1b (client-side parse) → T3.2 → T3.3
+         → T3.4 → T3.5
 
 Week 6:  TG-5 (polish + docs)
          T5.1 → T5.2 → T5.3 → T5.4 → T5.5
@@ -606,8 +925,9 @@ Week 6:  TG-5 (polish + docs)
 | Gate | After | Criteria |
 |---|---|---|
 | G1 | TG-1 | ✅ 711 unit + 19 IT tests pass at Scala 3.7.4; bats A+B+C pass on rebuilt distroless image |
-| G1b | TG-1b | ✅ fol-engine: 792 tests pass; `VagueSemantics.evaluate()` returns `EvaluationOutput` with `satisfyingElements`; both paths produce concrete `ResolvedQuery` (one IL, one evaluator, no generics); `ParsedQuery` rename done; `fol.*` package migration done; commons-math3 removed; `sbt publishLocal` succeeds. Minor caveat: `scala.util.Random` remains in `KnowledgeSource.sampleDomain()` (TODO-marked, unused on eval path) and demo code. |
+| G1b | TG-1b | ✅ fol-engine: 854 tests pass; `VagueSemantics.evaluate[D]()` returns `EvaluationOutput[D]`; generic `KnowledgeBase[D]` with `DomainElement`/`DomainCodec` type classes; typed DSL removed (ADR-011); `RelationName` opaque type; cross-compiled JVM+JS; `0.2.0-SNAPSHOT` integrated in register `common` crossProject; no `scala.util.Random`; `commons-math3` removed |
+| G1c | TG-1c | ✅ `VagueSemantics.evaluate[D]()` and `holds[D]()` accept `modelAugmenter: ModelAugmenter[D]` (default = identity); 854 tests pass; `NumericAugmenter.augmenter` composes `ArithmeticAugmenter` + `ComparisonAugmenter` + `LiteralResolver`; `ModelAugmenter.fromFunctions` / `fromPredicates` factory methods available |
 | G2 | TG-2 | `curl -X POST .../query -d '{"query":"Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"}'` returns valid JSON |
-| G3 | TG-4 | `sbt serverIt/test` passes all 6 integration tests |
+| G3 | TG-4 | `sbt serverIt/test` passes all 7 integration tests |
 | G4 | TG-3 | Type query → result card → tree highlights → LEC overlay |
 | G5 | TG-5 | ADR-028 accepted; WORKING-INSTRUCTIONS updated; register domain usage docs complete |
