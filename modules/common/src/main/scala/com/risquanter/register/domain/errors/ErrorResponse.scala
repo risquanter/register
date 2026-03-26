@@ -5,6 +5,8 @@ import scala.concurrent.duration.Duration
 import zio.json.{JsonCodec, DeriveJsonCodec}
 import sttp.model.StatusCode
 
+import com.risquanter.register.domain.errors.FolQueryFailure.*
+
 /** Wrapper for error responses sent to clients */
 final case class ErrorResponse(error: JsonHttpError)
 
@@ -38,9 +40,14 @@ object ErrorResponse {
     val firstCode = details.headOption.map(_.code).getOrElse(ValidationErrorCode.INTERNAL_ERROR)
 
     status.code match
-      // 400 → ValidationFailed (only source for this status code)
-      case 400 =>
-        ValidationFailed(details.map(d => ValidationError(d.field, d.code, d.message)))
+      // 400 → disambiguate by code: FOL parse/symbol errors vs general validation
+      case 400 => firstCode match
+        case ValidationErrorCode.PARSE_ERROR =>
+          FolParseFailure(message, None)
+        case ValidationErrorCode.UNKNOWN_SYMBOL =>
+          FolUnknownSymbol(firstField, Nil)
+        case _ =>
+          ValidationFailed(details.map(d => ValidationError(d.field, d.code, d.message)))
 
       // 403 → AccessDenied
       case 403 =>
@@ -50,11 +57,16 @@ object ErrorResponse {
       case 429 =>
         RateLimitExceeded("unknown", 0)
 
-      // 409 → disambiguate by field
-      case 409 => firstField match
-        case "version" => VersionConflict("unknown", "unknown", message)  // nodeId lost through HTTP
-        case "branch"  => MergeConflict("unknown", message)               // branch name lost through HTTP
-        case _         => DataConflict(message)
+      // 409 → disambiguate by field/code
+      case 409 => firstCode match
+        case ValidationErrorCode.SIMULATION_REQUIRED =>
+          // SimulationNotCached requires TreeId (valid ULID) which is lost through HTTP;
+          // reconstruct as DataConflict — the frontend already knows the treeId from context.
+          DataConflict(message)
+        case _ => firstField match
+          case "version" => VersionConflict("unknown", "unknown", message)  // nodeId lost through HTTP
+          case "branch"  => MergeConflict("unknown", message)               // branch name lost through HTTP
+          case _         => DataConflict(message)
 
       // 502 → IrminGraphQLError
       case 502 =>
@@ -83,10 +95,13 @@ object ErrorResponse {
         else
           RepositoryFailure(s"Not found: $message")
 
-      // 500 → disambiguate by field
-      case 500 => firstField match
-        case "simulation" => SimulationFailure("unknown", new RuntimeException(message))
-        case _            => RepositoryFailure(message)
+      // 500 → disambiguate by field/code
+      case 500 => firstCode match
+        case ValidationErrorCode.EVALUATION_FAILED =>
+          FolEvaluationFailure(message, "unknown")
+        case _ => firstField match
+          case "simulation" => SimulationFailure("unknown", new RuntimeException(message))
+          case _            => RepositoryFailure(message)
 
       // Any other status code → generic
       case _ =>
@@ -102,8 +117,9 @@ object ErrorResponse {
     * compiler enforces coverage when new subtypes are added (ADR-022 Decision 3).
     */
   def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
-    case e: SimError   => encodeSimError(e)
-    case e: IrminError => encodeIrminError(e)
+    case e: SimError          => encodeSimError(e)
+    case e: IrminError        => encodeIrminError(e)
+    case e: FolQueryFailure   => encodeFolQueryFailure(e)
     // Genuine unknown — already logged at service layer (ADR-002 Decision 5)
     case _ => makeGeneralResponse()
   }
@@ -133,6 +149,14 @@ object ErrorResponse {
     case NetworkTimeout(operation, duration) => makeNetworkTimeoutResponse(operation, duration)
     case IrminHttpError(status, body)        => makeIrminHttpErrorResponse(status, body)
     case IrminGraphQLError(messages, path)   => makeIrminGraphQlErrorResponse(messages, path)
+  }
+
+  /** Exhaustive match on FolQueryFailure — compiler-enforced coverage (ADR-028). */
+  private def encodeFolQueryFailure(error: FolQueryFailure): (StatusCode, ErrorResponse) = error match {
+    case FolParseFailure(message, position)  => makeFolParseFailureResponse(message, position)
+    case FolUnknownSymbol(symbol, available) => makeFolUnknownSymbolResponse(symbol, available)
+    case FolEvaluationFailure(message, phase) => makeFolEvaluationFailureResponse(message, phase)
+    case SimulationNotCached(treeId)         => makeSimulationNotCachedResponse(treeId)
   }
 
   // ============================================================================
@@ -220,4 +244,22 @@ object ErrorResponse {
   def makeMergeConflictResponse(branch: String, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.Conflict, "branch", ValidationErrorCode.MERGE_CONFLICT,
       s"Merge conflict on branch $branch: $details", domain, requestId)
+
+  // ── FOL Query Error Responses (ADR-028) ─────────────────────────────────
+
+  def makeFolParseFailureResponse(message: String, position: Option[Int], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val detail = position.fold(message)(p => s"$message (at position $p)")
+    response(StatusCode.BadRequest, "query", ValidationErrorCode.PARSE_ERROR, detail, domain, requestId)
+
+  def makeFolUnknownSymbolResponse(symbol: String, available: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.BadRequest, "query", ValidationErrorCode.UNKNOWN_SYMBOL,
+      s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}", domain, requestId)
+
+  def makeFolEvaluationFailureResponse(message: String, phase: String, domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.InternalServerError, "query", ValidationErrorCode.EVALUATION_FAILED,
+      s"Evaluation failed in $phase: $message", domain, requestId)
+
+  def makeSimulationNotCachedResponse(treeId: com.risquanter.register.domain.data.iron.TreeId, domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.Conflict, "simulation", ValidationErrorCode.SIMULATION_REQUIRED,
+      s"Simulation not cached for tree ${treeId.value}", domain, requestId)
 }

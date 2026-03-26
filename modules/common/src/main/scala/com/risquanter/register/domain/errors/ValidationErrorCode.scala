@@ -43,6 +43,12 @@ enum ValidationErrorCode(val code: String, val description: String):
   // ── Infrastructure codes ──────────────────────────────────────────────────
   case INTERNAL_ERROR extends ValidationErrorCode("INTERNAL_ERROR", "Unexpected server-side error")
 
+  // ── FOL query codes (ADR-028) ─────────────────────────────────────────────
+  case PARSE_ERROR extends ValidationErrorCode("PARSE_ERROR", "Query syntax is malformed")
+  case UNKNOWN_SYMBOL extends ValidationErrorCode("UNKNOWN_SYMBOL", "Query references an unknown predicate or function")
+  case EVALUATION_FAILED extends ValidationErrorCode("EVALUATION_FAILED", "Query evaluation failed unexpectedly")
+  case SIMULATION_REQUIRED extends ValidationErrorCode("SIMULATION_REQUIRED", "Simulation must be run before querying")
+
 object ValidationErrorCode:
   given encoder: JsonEncoder[ValidationErrorCode] = 
     JsonEncoder[String].contramap(_.code)

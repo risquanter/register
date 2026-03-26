@@ -149,3 +149,50 @@ case class AuthForbidden(
 case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = None) extends AuthError:
   override def getMessage: String = s"Authorization service unavailable: $reason"
   override def getCause: Throwable = cause.orNull
+
+// ============================================================================
+// FOL Query Errors (ADR-028: Vague Quantifier Query Evaluation)
+// ============================================================================
+
+/** Errors originating from fol-engine interaction or query preconditions.
+  * The `Fol` prefix identifies types mapped from `fol.error.QueryError`
+  * (the library's error algebra); the `Failure` suffix follows the
+  * `RepositoryFailure` / `SimulationFailure` naming convention (D13).
+  *
+  * @see ADR-028 §4 — Query Validation Before Evaluation
+  */
+sealed trait FolQueryFailure extends AppError
+
+object FolQueryFailure:
+  /** Maps from fol.error.QueryError.ParseError / LexicalError.
+    * Syntactic parse failure — query string is not well-formed.
+    */
+  final case class FolParseFailure(message: String, position: Option[Int])
+    extends FolQueryFailure:
+    override def getMessage: String =
+      position.fold(message)(p => s"$message (at position $p)")
+
+  /** Maps from fol.error.QueryError.RelationNotFoundError /
+    * UninterpretedSymbolError / SchemaError.
+    * Well-formed query references unknown predicates or functions.
+    */
+  final case class FolUnknownSymbol(symbol: String, available: List[String])
+    extends FolQueryFailure:
+    override def getMessage: String =
+      s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}"
+
+  /** Maps from fol.error.QueryError.EvaluationError /
+    * ScopeEvaluationError / TypeMismatchError / TimeoutError / etc.
+    * Catch-all for unexpected evaluation-phase failures.
+    */
+  final case class FolEvaluationFailure(message: String, phase: String)
+    extends FolQueryFailure:
+    override def getMessage: String = s"Evaluation failed in $phase: $message"
+
+  /** Register precondition — no Fol prefix.
+    * Simulation results not yet computed for the requested tree.
+    */
+  final case class SimulationNotCached(treeId: TreeId)
+    extends FolQueryFailure:
+    override def getMessage: String =
+      s"Simulation not cached for tree ${treeId.value}"

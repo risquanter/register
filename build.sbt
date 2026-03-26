@@ -77,8 +77,6 @@ val serverDependencies = Seq(
   "com.risquanter"                 % "simulation.util"                   % "0.8.0",
   // HDR counter-based PRNG (pure Scala, cross-compiled)
   "com.risquanter"                %% "hdr-rng"                           % "0.1.0-SNAPSHOT",
-  // Vague quantifier logic (ADR-028)
-  "com.risquanter"                %% "fol-engine"                        % "0.1.0-SNAPSHOT",
   // STTP zio-json integration for Irmin GraphQL client
   "com.softwaremill.sttp.client3" %% "zio-json"                          % sttpVersion,
   "com.bilal-fazlani"             %% "zio-ulid"                          % zioUlidVersion
@@ -91,7 +89,9 @@ lazy val common = crossProject(JVMPlatform, JSPlatform)
   .settings(
     name := "register-common",
     libraryDependencies ++= commonDependencies,
-    libraryDependencies += "com.bilal-fazlani" %%% "zio-ulid" % zioUlidVersion
+    libraryDependencies += "com.bilal-fazlani" %%% "zio-ulid" % zioUlidVersion,
+    // Vague quantifier logic — cross-compiled (ADR-028)
+    libraryDependencies += "com.risquanter" %%% "fol-engine" % "0.2.0-SNAPSHOT"
   )
   .jsSettings(
     libraryDependencies ++= Seq(

@@ -2,7 +2,7 @@ package com.risquanter.register.foladapter
 
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.responses.QueryResponse
-import vague.datastore.RelationValue
+import fol.datastore.RelationValue
 
 /** Constructs [[QueryResponse]] from typed fol-engine evaluation results.
   *
