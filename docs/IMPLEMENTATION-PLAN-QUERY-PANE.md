@@ -3,7 +3,7 @@
 **Parent:** [ADR-028](ADR-028-vague-quantifier-query-pane.md) +
 [ADR-028 Appendix](ADR-028-appendix-technical-design.md)  
 **Scope:** All code changes to ship the query pane end-to-end.  
-**Last updated:** 2026-03-26 (D12/D13 — ADR-001 compliance)
+**Last updated:** 2026-03-27 (fol.typed API — many-sorted type system)
 
 ---
 
@@ -13,7 +13,7 @@
 |---|---|---|---|
 | TG-1 | fol-engine integration build prep | — | ✅ Done — all tests + bats suites pass |
 | TG-1b | fol-engine internal debt resolution | TG-1 | ✅ Complete (854 tests) — includes generic KB, DSL removal, cross-compilation |
-| TG-1c | fol-engine model augmentation API | TG-1b | ✅ Complete — `ModelAugmenter[D]` on `VagueSemantics.evaluate()` and `holds()` |
+| TG-1c | fol-engine model augmentation API | TG-1b | ✅ Complete — `ModelAugmenter[D]` on legacy `evaluate()`/`holds()`; **superseded by `fol.typed` many-sorted pipeline in 0.3.0** |
 | TG-2 | `RiskTreeKnowledgeBase` + query service | TG-1b | curl returns valid JSON |
 | TG-3 | Frontend query pane | TG-2 | end-to-end GUI flow |
 | TG-4 | Integration tests | TG-2 | `sbt serverIt/test` passes |
@@ -66,10 +66,11 @@ native distroless image.
 **File:** `register/build.sbt`
 
 Originally added to `serverDependencies` as `%% "fol-engine" % "0.1.0-SNAPSHOT"`.
-After TG-1b cross-compilation, moved to `common` crossProject `.settings()` as:
+After TG-1b cross-compilation, moved to `common` crossProject `.settings()`.
+Bumped to `0.3.0-SNAPSHOT` for the `fol.typed` many-sorted type system:
 
 ```scala
-"com.risquanter" %%% "fol-engine" % "0.2.0-SNAPSHOT"
+"com.risquanter" %%% "fol-engine" % "0.3.0-SNAPSHOT"
 ```
 
 Available on both JVM and JS. Server gets it transitively through `common`.
@@ -168,24 +169,31 @@ one concrete shared IL with one evaluator. See the
 - **D8:** Phase 1 renames done: `ParsedQuery`, `QueryError`, `QueryException`,
   `QueryResult`. Phase 2 rename (`UnresolvedQuery`) ships with T1b.15.
   Package rename (`vague.*` → `fol.*`) deferred to T1b.22.
-- **D9:** ~~Drop type parameter `[A]`.~~ **Superseded by 0.2.0:** The
-  generic `KnowledgeBase[D]` rewrite (fol-engine ADR-007) re-introduced
-  type parameters across the pipeline — but now as a principled generic
-  design with `DomainElement[D]` and `DomainCodec[D]` type classes, not
-  the ad-hoc `[A]` from before. Register uses `D = RelationValue` with
-  built-in given instances. `ResolvedQuery[D]`, `EvaluationOutput[D]`,
-  `KnowledgeBase[D]`, `KnowledgeSource[D]`, `RelationTuple[D]` are all
-  now generic. The typed DSL (`UnresolvedQuery`) was removed entirely
-  (fol-engine ADR-011).
-- **D10:** Simulation data (LEC curves, p95, etc.) flows through the FOL
-  `Model[D]` function table, not through the element type or KB facts.
-  `RiskTreeKnowledgeBase` provides a `ModelAugmenter[RelationValue]` that
-  registers `p95`, `lec`, `>`, etc. as model functions backed by register's
-  simulation results. The engine evaluates `>(p95(x), 5000000)` by calling
-  these functions — it never needs to know what kind of data backs them.
-  The built-in `NumericAugmenter.augmenter` (composed from
-  `ArithmeticAugmenter`, `ComparisonAugmenter`, `LiteralResolver`) handles
-  arithmetic, comparisons, and numeric literal parsing for `RelationValue`.
+- **D9:** ~~Drop type parameter `[A]`.~~ **Superseded by 0.3.0:** The
+  `fol.typed` many-sorted type system replaces the generic `D`-parameterised
+  pipeline for register's use case. Register no longer uses
+  `KnowledgeBase[D]`, `KnowledgeSource[D]`, `DomainElement[D]`, or
+  `DomainCodec[D]`. Instead: `TypeCatalog` (sort declarations + function/
+  predicate signatures), `RuntimeModel` (sort-tagged `Value` domains +
+  `RuntimeDispatcher`), and `VagueSemantics.evaluateTyped()` returning
+  `EvaluationOutput[Value]`. The legacy `[D]` API is preserved in the
+  library for backwards compatibility but register uses the typed path.
+- **D10:** Simulation data (LEC curves, p95, etc.) flows through the
+  `RuntimeDispatcher` function/predicate dispatch, not through a
+  `ModelAugmenter` or `Model[D]` function table.
+  `RiskTreeKnowledgeBase` provides a `RuntimeDispatcher` that implements
+  `evalFunction` for `p95`, `lec`, etc. (backed by `LossDistribution`
+  results) and `evalPredicate` for `gt_loss`, `gt_prob` (native
+  `Long`/`Double` comparisons) and structural predicates (`leaf`,
+  `portfolio`, `child_of`). The many-sorted type system uses **sort-
+  specific predicate names** (`gt_loss`, `gt_prob`) instead of the
+  overloaded `>` — `TypeCatalog.predicates` maps each `SymbolName` to
+  a single `PredicateSig(paramSorts)`, so a single `>` cannot serve
+  two different sort signatures. The engine evaluates
+  `gt_loss(p95(x), 5000000)` by dispatching to the `RuntimeDispatcher`.
+  Literal validation (`"5000000"` as Loss, `"0.05"` as Probability)
+  is handled by `TypeCatalog.literalValidators` with sort inference
+  from argument position.
 - **D11:** No `useSampling: Boolean` toggle on `ResolvedQuery.evaluate()`
   or `VagueSemantics.holds()`. One code path — `SamplingParams` controls
   whether evaluation is exact or sampled. `SamplingParams.exact`
@@ -211,17 +219,22 @@ was **eliminated** — there is no `DomainSpec.Resolved` variant. The
 resolution step produces `ResolvedQuery`, a separate type. The match
 arm is not needed.
 
-**Gate G1b:** ✅ Met. fol-engine: 854 tests pass. `VagueSemantics.evaluate()`
-returns `EvaluationOutput[D]` with `satisfyingElements`. String path
-compiles `ParsedQuery` → `ResolvedQuery[D]` via `toResolved()`. Typed
-DSL removed (ADR-011) — `ResolvedQuery.fromRelation` is the sole
-programmatic entry point. Generic `KnowledgeBase[D]` with
-`DomainElement`/`DomainCodec` type classes. `RelationName` opaque type.
-Cross-compiled JVM + JS. No `scala.util.Random` anywhere. `commons-math3`
-and `simulation.util` removed from build.
+**Gate G1b:** ✅ Met. fol-engine: 868 tests pass. Legacy
+`VagueSemantics.evaluate[D]()` returns `EvaluationOutput[D]` with
+`satisfyingElements`. New `VagueSemantics.evaluateTyped()` returns
+`EvaluationOutput[Value]` via the `fol.typed` many-sorted pipeline.
+String path compiles `ParsedQuery` → `ResolvedQuery[D]` via
+`toResolved()` (legacy) or `ParsedQuery` → `BoundQuery` via
+`QueryBinder.bind()` (typed). Typed DSL removed (ADR-011) —
+`ResolvedQuery.fromRelation` is the sole programmatic entry point for
+the legacy path. Generic `KnowledgeBase[D]` with `DomainElement`/
+`DomainCodec` type classes preserved for backwards compatibility.
+`RelationName` opaque type. Cross-compiled JVM + JS. No
+`scala.util.Random` anywhere. `commons-math3` and `simulation.util`
+removed from build.
 
-**Acceptance:** ✅ `sbt test` passes (854 tests). `sbt publishLocal`
-produces artifact consumable by register (JVM + JS). `0.2.0-SNAPSHOT`
+**Acceptance:** ✅ `sbt test` passes (868 tests). `sbt publishLocal`
+produces artifact consumable by register (JVM + JS). `0.3.0-SNAPSHOT`
 integrated in register `common` crossProject — all register tests pass.
 
 ---
@@ -232,34 +245,39 @@ integrated in register `common` crossProject — all register tests pass.
 See fol-engine ADR-005 (Model Augmentation) and ADR-009 (Bridge
 Decomposition).
 
-**Problem:** `VagueSemantics.evaluate()` internally builds `Model[D]`
-via `FOLBridge.scopeToPredicate()` → `KnowledgeSourceModel.toModel(source)`.
-Register needs to inject simulation-backed functions (`p50`, `p90`, `p95`,
-`p99`, `lec`) and comparison predicates (`>`, `<`, `>=`, `<=`) into the
-model — these functions are backed by register's `LossDistribution`
+**Note (2026-03-27):** TG-1c solved the augmentation problem for the
+**legacy** `[D]`-parameterised pipeline. The `fol.typed` many-sorted
+type system (0.3.0) supersedes this approach for register's use case:
+instead of `ModelAugmenter[D]`, register now provides a
+`RuntimeDispatcher` that handles function evaluation (`p95`, `lec`) and
+predicate evaluation (`gt_loss`, `gt_prob`, `leaf`, `child_of`, etc.)
+natively. The legacy `ModelAugmenter` API is preserved in the library
+for backwards compatibility but is **not used** by register.
+
+**Original problem:** Register needs to inject simulation-backed functions
+(`p50`, `p90`, `p95`, `p99`, `lec`) and comparison predicates into the
+evaluation model — these are backed by register's `LossDistribution`
 results, not by KB facts.
 
-**Solution (implemented):** `ModelAugmenter[D]` — a composable case class
-wrapping `Model[D] => Model[D]`. Both `VagueSemantics.evaluate()` and
-`holds()` accept a `modelAugmenter: ModelAugmenter[D]` parameter
-(default = `ModelAugmenter.identity[D]`). Register will compose:
-- `NumericAugmenter.augmenter` (built-in: arithmetic + comparisons +
-  literal parsing for `RelationValue`)
-- A custom augmenter for simulation-backed functions (`p95`, `lec`, etc.)
-  via `ModelAugmenter.fromFunctions`
+**Solution in 0.2.0 (legacy):** `ModelAugmenter[D]` — a composable case
+class wrapping `Model[D] => Model[D]`.
 
-Composed via `NumericAugmenter.augmenter andThen simulationAugmenter`.
+**Solution in 0.3.0 (current):** `RuntimeDispatcher` trait with
+`evalFunction(name: SymbolName, args: List[Value]): Either[String, Value]`
+and `evalPredicate(name: SymbolName, args: List[Value]): Either[String, Boolean]`.
+Register implements this trait to back `p95`/`lec` with
+`LossDistribution` data and `gt_loss`/`gt_prob` with native
+`Long`/`Double` comparisons. Sort-specific predicate names (`gt_loss`
+instead of `>`) are required because `TypeCatalog.predicates` maps each
+`SymbolName` to a single `PredicateSig(paramSorts)`.
 
 **Original prompt:** [`docs/PROMPT-FOL-ENGINE-MODEL-AUGMENTATION.md`](PROMPT-FOL-ENGINE-MODEL-AUGMENTATION.md)
-(written pre-0.2.0 — the library agent implemented a more comprehensive
-design with `ModelAugmenter[D]`, decomposed bridge, and composable
-augmenters)
+(written pre-0.2.0 — the library agent implemented `ModelAugmenter[D]`,
+then evolved to the `fol.typed` many-sorted system)
 
-**Acceptance:** ✅ `VagueSemantics.evaluate[D]()` and `holds[D]()`
-accept `modelAugmenter: ModelAugmenter[D]`. All 854 tests pass.
-`FOLBridge.scopeToPredicate` also accepts the augmenter parameter.
-Built-in `NumericAugmenter.augmenter` composes `ArithmeticAugmenter`,
-`ComparisonAugmenter`, and `LiteralResolver`.
+**Acceptance:** ✅ Legacy: `ModelAugmenter[D]` works (868 tests).
+Current: `RuntimeDispatcher` + `TypeCatalog` + `VagueSemantics.evaluateTyped()`
+works (868 tests including 9 typed-pipeline tests).
 
 ---
 
@@ -272,10 +290,11 @@ Work in `~/projects/register`.
 **File:** `build.sbt` (`common` crossProject settings)
 
 Originally added to `serverDependencies` (TG-1, T1.4). After fol-engine
-0.2.0 cross-compilation, moved to `common` crossProject `.settings()`:
+0.2.0 cross-compilation, moved to `common` crossProject `.settings()`.
+Bumped to `0.3.0-SNAPSHOT` for the `fol.typed` many-sorted type system:
 
 ```scala
-"com.risquanter" %%% "fol-engine" % "0.2.0-SNAPSHOT"
+"com.risquanter" %%% "fol-engine" % "0.3.0-SNAPSHOT"
 ```
 
 Available on both JVM and JS (same pattern as `zio-ulid`). Server gets
@@ -283,8 +302,8 @@ it transitively through `common`.
 
 **Acceptance met:** `sbt server/compile` and `sbt commonJS/compile` succeed;
 `sbt server/test` passes (323 tests); `sbt commonJVM/test` passes (391
-tests). `VagueQueryParser`, `ParsedQuery`, `ModelAugmenter`, and all
-library types are importable on both platforms.
+tests). `VagueQueryParser`, `ParsedQuery`, `TypeCatalog`, `RuntimeModel`,
+`Value`, and all library types are importable on both platforms.
 
 ### T2.2 — Define request/response types in `common` ✅
 
@@ -386,7 +405,7 @@ returns `Validation[ValidationError, ...]` — a domain-specific error, not
 companion into the error hierarchy.
 
 **Acceptance:** `sbt common/compile` succeeds on JVM and JS;
-`QueryRequest.resolve(QueryRequest("Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"))` returns `Right(ParsedQuery(...))`;
+`QueryRequest.resolve(QueryRequest("Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))"))` returns `Right(ParsedQuery(...))`;
 `QueryRequest.resolve(QueryRequest("garbage"))` returns `Left(ParseError(...))`.
 
 ### T2.3 — Define endpoint in `WorkspaceEndpoints` ✅
@@ -505,17 +524,39 @@ range. No error type is needed for this case.
 
 **File:** `modules/server/src/main/scala/.../foladapter/RiskTreeKnowledgeBase.scala`
 
+**Updated 2026-03-27** for `fol.typed` many-sorted type system (0.3.0).
+
 Responsibilities:
-1. Build `KnowledgeBase[RelationValue]` with structural facts (`leaf`,
-   `portfolio`, `child_of`, `descendant_of`, `leaf_descendant_of`) using
-   the fluent builder API: `KnowledgeBase.builder[RelationValue]
-   .withUnaryRelation(RelationName("leaf")).withFact(...).build()`
-2. Provide `ModelAugmenter[RelationValue]` that composes:
-   - `NumericAugmenter.augmenter` (built-in: arithmetic + comparisons +
-     numeric literal parsing)
-   - Custom simulation-backed functions (`p50`, `p90`, `p95`, `p99`,
-     `lec`) via `ModelAugmenter.fromFunctions`
-   Composed via `NumericAugmenter.augmenter andThen simulationAugmenter`.
+1. Build a `TypeCatalog` declaring register's many-sorted schema:
+   - **Sorts:** `Asset` (node names), `Loss` (Long), `Probability` (Double), `Bool`
+   - **Functions:** `p95: Asset → Loss`, `p99: Asset → Loss`,
+     `lec: (Asset, Loss) → Probability`
+   - **Predicates:** `leaf: (Asset)`, `portfolio: (Asset)`,
+     `child_of: (Asset, Asset)`, `descendant_of: (Asset, Asset)`,
+     `leaf_descendant_of: (Asset, Asset)`,
+     `gt_loss: (Loss, Loss)`, `gt_prob: (Probability, Probability)`
+   - **Literal validators:** Loss → `_.forall(_.isDigit)`,
+     Probability → `_.matches("[0-9]+(\\.[0-9]+)?")`
+2. Build a `RuntimeModel` containing:
+   - **Domains:** `Asset → Set[Value]` (one `Value(asset, nodeName)` per
+     tree node)
+   - **Dispatcher:** A `RuntimeDispatcher` that implements:
+     - `evalFunction("p95", [assetVal])` → looks up `LossDistribution`
+       for the asset, returns `Value(loss, p95Long)`
+     - `evalFunction("lec", [assetVal, lossVal])` → returns
+       `Value(probability, probOfExceedance)`
+     - `evalPredicate("leaf", [assetVal])` → true if asset is a leaf
+     - `evalPredicate("gt_loss", [a, b])` → `a.raw.asLong > b.raw.asLong`
+     - `evalPredicate("gt_prob", [a, b])` → `a.raw.asDouble > b.raw.asDouble`
+     - `evalPredicate("child_of", [a, b])` → structural lookup
+     - etc. for `descendant_of`, `leaf_descendant_of`, `portfolio`
+
+**Sort-specific predicates:** The many-sorted type system uses
+sort-specific predicate names (`gt_loss`, `gt_prob`) instead of the
+overloaded `>`. This is required because `TypeCatalog.predicates` maps
+each `SymbolName` to a single `PredicateSig(paramSorts)` — a single name
+cannot serve two different sort signatures. User-facing query syntax
+is `gt_loss(p95(x), 5000000)` not `>(p95(x), 5000000)`.
 
 **TREE-OPS applicability (Pattern 3 — Catamorphism):**
 The `allDescendants` helper that materialises `descendant_of` and
@@ -539,18 +580,18 @@ TREE-OPS Pattern 3 would reduce duplication across folds.
 
 Public API:
 ```scala
-import fol.datastore.{KnowledgeSource, RelationValue, RelationName, RelationTuple}
-import fol.semantics.ModelAugmenter
+import fol.typed.{TypeCatalog, RuntimeModel, RuntimeDispatcher, TypeId, SymbolName, Value}
 
 class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistribution]):
-  def augmenter: ModelAugmenter[RelationValue]
-  def source: KnowledgeSource[RelationValue]
+  def catalog: TypeCatalog
+  def model: RuntimeModel
 ```
 
 **Acceptance:** Unit test — given a hand-built tree + results, assert:
-- `source.contains(RelationName("leaf"), RelationTuple.fromConstants("cyber"))` is true
-- `source.contains(RelationName("descendant_of"), RelationTuple.fromConstants("cyber", "root"))` is true
-- `augmenter(baseModel).interpretation.getFunction("p95")(List(Const("cyber")))` returns expected value
+- `model.domains(TypeId("Asset"))` contains `Value(asset, "cyber")`
+- `model.dispatcher.evalPredicate(SymbolName("leaf"), List(Value(asset, "cyber")))` returns `Right(true)`
+- `model.dispatcher.evalFunction(SymbolName("p95"), List(Value(asset, "cyber")))` returns expected `Value(loss, ...)`
+- `catalog.predicates.contains(SymbolName("gt_loss"))` is true
 
 ### T2.5 — Implement `QueryService`
 
@@ -568,43 +609,47 @@ trait QueryService:
 ```
 
 Steps:
-1. Validate symbols against known schema (fail with `FolUnknownSymbol` → 400)
-2. Load tree + ensure simulations cached (fail with `SimulationNotCached` → 409)
-3. Build `RiskTreeKnowledgeBase`
-4. Call `VagueSemantics.evaluate[RelationValue](parsed, source, answerTuple, params, config, augmenter)`
-   — `augmenter` from `RiskTreeKnowledgeBase` composes
-     `NumericAugmenter.augmenter andThen simulationAugmenter`
-   — context bounds `DomainElement[RelationValue]` and
-     `DomainCodec[RelationValue]` resolved via built-in givens
-   — internally compiles `ParsedQuery` → `ResolvedQuery[RelationValue]`
-   → calls `.evaluateWithOutput()`
-   — returns `EvaluationOutput[RelationValue]` containing
-   `result: VagueQueryResult` + `rangeElements` + `satisfyingElements`
+1. Load tree + ensure simulations cached (fail with `SimulationNotCached` → 409)
+2. Build `RiskTreeKnowledgeBase` → get `catalog: TypeCatalog` + `model: RuntimeModel`
+3. Call `VagueSemantics.evaluateTyped(parsed, catalog, model, answerTuple, params, hdrConfig)`
+   — `evaluateTyped` internally: `bindTyped(parsed, catalog)` → sort-checks
+     the query → `model.validateAgainst(catalog)` → confirms all declared
+     functions/predicates have dispatcher implementations →
+     `TypedSemantics.evaluate(bound, model, ...)` → returns
+     `EvaluationOutput[Value]` containing
+     `result: VagueQueryResult` + `rangeElements: Set[Value]` +
+     `satisfyingElements: Set[Value]`
+   — `Value(sort: TypeId, raw: Any)` — sort-tagged runtime values
    — on `Left(fol.error.QueryError)`, map to `FolEvaluationFailure`
-5. Map to `QueryResponse` via `QueryResponseBuilder.from(output, lookup)`
+     (validation errors from `bindTyped` / model validation map to
+     `FolUnknownSymbol` where appropriate)
+4. Map to `QueryResponse` via `QueryResponseBuilder.from(output, lookup)`
 
 **Design change (2026-03-16):** The original plan called for bypassing
 `VagueSemantics.holds()` and calling `RangeExtractor` +
 `ScopeEvaluator.evaluateSample()` directly. This is no longer needed.
 
-**Architecture note (2026-03-26):** ~~The library's current
-`VagueSemantics.evaluate()` builds `Model[Any]` internally with no
-extension point for custom functions.~~ **Resolved in 0.2.0:** Both
-`evaluate()` and `holds()` accept `modelAugmenter: ModelAugmenter[D]`
-(default = `ModelAugmenter.identity[D]`). TG-1c is complete. The entire
-TG-2 chain is unblocked.
+**Architecture note (2026-03-27):** ~~The 0.2.0 approach used
+`VagueSemantics.evaluate[RelationValue]()` with `ModelAugmenter[D]`.~~
+**Superseded by 0.3.0:** Register now uses the `fol.typed` many-sorted
+pipeline via `VagueSemantics.evaluateTyped()`. This takes a `TypeCatalog`
+(sort declarations, function/predicate signatures, literal validators) and
+a `RuntimeModel` (sort-tagged value domains + `RuntimeDispatcher`), and
+returns `EvaluationOutput[Value]`. No `DomainElement[D]`, `DomainCodec[D]`,
+`KnowledgeSource[D]`, or `ModelAugmenter[D]` are needed.
 
-**Architecture clarification (2026-03-18):** The library exposes two
-facade methods:
-- `VagueSemantics.holds[D]()` → `Either[fol.error.QueryError, VagueQueryResult]`
-  (statistics only — satisfied, proportion, CI, satisfyingCount)
-- `VagueSemantics.evaluate[D]()` → `Either[fol.error.QueryError, EvaluationOutput[D]]`
-  (statistics + element sets — `rangeElements`, `satisfyingElements`)
+**Architecture clarification (2026-03-18, updated 2026-03-27):** The
+library exposes three facade methods:
+- `VagueSemantics.holds[D]()` → `Either[QueryError, VagueQueryResult]`
+  (legacy — statistics only)
+- `VagueSemantics.evaluate[D]()` → `Either[QueryError, EvaluationOutput[D]]`
+  (legacy — statistics + element sets)
+- `VagueSemantics.evaluateTyped()` → `Either[QueryError, EvaluationOutput[Value]]`
+  (**current** — many-sorted typed pipeline)
 
-Register uses `evaluate()` because it needs the element sets for tree
-highlighting. Internally, both methods compile `ParsedQuery` →
-`ResolvedQuery` via `toResolved()`, then call
-`.evaluate()` / `.evaluateWithOutput()` — one concrete shared IL, one evaluator.
+Register uses `evaluateTyped()` because it provides both the element sets
+(for tree highlighting) and sort-safe evaluation (no `Int` truncation
+for `Long` losses or `Double` probabilities).
 
 Two evaluation modes:
 - **Exact** (default): All range elements checked. Deterministic.
@@ -623,34 +668,44 @@ Two evaluation modes:
 **Status:** File already exists with `from(satisfyingElements: Set[RelationValue], ...)` signature
 (written before the TG-1b design change).
 
-After TG-1b, refactor to accept `EvaluationOutput[RelationValue]`:
+**Updated 2026-03-27** for `fol.typed` many-sorted type system.
+
+Refactor to accept `EvaluationOutput[Value]`:
 
 ```scala
 import fol.result.EvaluationOutput
-import fol.datastore.RelationValue
+import fol.typed.{Value, TypeId, TypeRepr}
 
 object QueryResponseBuilder:
+
+  private val assetSort = TypeId("Asset")
+
+  given TypeRepr[String] with
+    val typeId = assetSort
+
   def from(
-    output: EvaluationOutput[RelationValue],
+    output: EvaluationOutput[Value],
     nodeIdLookup: Map[String, NodeId],
     queryEcho: String
   ): QueryResponse
 ```
 
 The builder extracts `satisfyingElements` from `EvaluationOutput`,
-maps `RelationValue.Const(name)` → `NodeId` via `nodeIdLookup`, and
-populates `QueryResponse` fields from `output.result` (the
+uses `Value.as[String]` (with `TypeRepr[String]` targeting the `Asset`
+sort) to project node name strings, then maps via `nodeIdLookup` →
+`NodeId`. Populates `QueryResponse` fields from `output.result` (the
 `VagueQueryResult` with statistics).
 
 Additionally, **remove the `Set[Any]` factory** from
 `QueryResponse` in `common`. Once the typed
-`QueryResponseBuilder.from(EvaluationOutput[RelationValue], ...)` is the
+`QueryResponseBuilder.from(EvaluationOutput[Value], ...)` is the
 sole construction site, the untyped `QueryResponse.from(Set[Any], ...)`
 becomes dead code. `QueryResponse` itself (the DTO) stays in `common`
 for JS access — only the untyped factory goes away.
 
-**Acceptance:** Compiles; unit test verifies NodeId mapping;
-`QueryResponse.from(Set[Any], ...)` no longer exists.
+**Acceptance:** Compiles; unit test verifies NodeId mapping via
+`Value.as[String]` projection; `QueryResponse.from(Set[Any], ...)` no
+longer exists.
 
 ### T2.6 — Implement `QueryController`
 
@@ -699,8 +754,7 @@ Work in `~/projects/register/modules/app`.
 view accepts fol-engine's **string path syntax** (the `ParsedQuery` entry
 point). Queries run against the **tree selected in the Analyze view's
 dropdown** — that tree selection, combined with its cached simulation
-results, becomes the `KnowledgeSource[RelationValue]` for range extraction
-and the `ModelAugmenter[RelationValue]` source for scope evaluation.
+results, becomes the `TypeCatalog` + `RuntimeModel` for typed evaluation.
 The execution flow is:
 
 1. User selects tree in Analyze view dropdown (`TreeViewState.selectedTreeId`)
@@ -713,7 +767,7 @@ The execution flow is:
 5. Frontend POSTs `QueryRequest { query }` to
    `/w/{key}/risk-trees/{treeId}/query`
 6. Server loads tree + simulation results → `RiskTreeKnowledgeBase`
-   → `VagueSemantics.evaluate(...)` → `QueryResponse`
+   → `VagueSemantics.evaluateTyped(...)` → `QueryResponse`
 7. Frontend renders result card + highlights matching nodes in tree view
 
 **Client-side parsing rationale (2026-03-26):** fol-engine is cross-compiled
@@ -814,13 +868,14 @@ and triggers chart load.
 **File:** `modules/server/src/test/scala/.../foladapter/RiskTreeKnowledgeBaseSpec.scala` (new)
 
 Test cases:
-1. Structural facts: `source.contains(RelationName("leaf"), ...)` populated correctly
+1. Structural predicates: `dispatcher.evalPredicate(SymbolName("leaf"), List(Value(asset, "cyber")))` returns `Right(true)`
 2. Transitive closure: `descendant_of`/`leaf_descendant_of` correct for
-   3-level tree
-3. Simulation functions: augmented model's `p95`, `lec` return expected values
-4. Composed augmenter: `NumericAugmenter.augmenter andThen simulationAugmenter`
-   provides arithmetic, comparisons, literal parsing, and simulation functions
-5. Empty tree: KB has only schema, no facts
+   3-level tree (via dispatcher predicate evaluation)
+3. Simulation functions: `dispatcher.evalFunction(SymbolName("p95"), List(Value(asset, "cyber")))` returns expected `Value(loss, ...)`
+4. TypeCatalog completeness: all declared sorts, functions, predicates,
+   and literal validators present
+5. RuntimeModel validation: `model.validateAgainst(catalog)` returns `Right(())`
+6. Empty tree: model has only schema, no domain elements
 
 ### T4.2 — Endpoint integration tests
 
@@ -854,9 +909,11 @@ Selecting populates textarea.
 Collapsible accordion showing:
 - Available functions: `p50`, `p90`, `p95`, `p99`, `lec`
 - Available predicates: `leaf`, `portfolio`, `child_of`,
-  `descendant_of`, `leaf_descendant_of`, `>`, `<`, `>=`, `<=`
+  `descendant_of`, `leaf_descendant_of`, `gt_loss`, `gt_prob`
 - Operator table: `~`, `>=`, `<=`, tolerance `[ε]`
 - Two example queries with explanation
+- Note: sort-specific predicates (`gt_loss`, `gt_prob`) replace the
+  overloaded `>` from earlier designs
 
 ### T5.3 — Update ADR-028 status
 
@@ -899,12 +956,14 @@ Week 2:  TG-1b (fol-engine internal debt)                     ✅ DONE
          T1b.14 (cross-compilation)                            ✅ DONE
          0.2.0-SNAPSHOT: generic KB, DSL removal, bridge       ✅ DONE
            decomposition, RelationName opaque, ModelAugmenter
+         0.3.0-SNAPSHOT: fol.typed many-sorted type system      ✅ DONE
 
-Week 3:  TG-1c (model augmentation — delivered in 0.2.0)      ✅ DONE
+Week 3:  TG-1c (model augmentation — delivered in 0.2.0,       ✅ DONE
+                superseded by fol.typed in 0.3.0)
          TG-2 (server components — fully unblocked)            ← CURRENT
          T2.1 ✅ + T2.2 ✅ + T2.3 ✅ (already done)
-         T2.3b (FolQueryFailure) → T2.4 (KB + augmenter)
-         → T2.5 (QueryService) → T2.5b (ResponseBuilder)
+         T2.3b (FolQueryFailure) → T2.4 (TypeCatalog + RuntimeModel)
+         → T2.5 (QueryService via evaluateTyped) → T2.5b (ResponseBuilder)
          → T2.6 (Controller) → T2.7 (OTel)
 
 Week 4:  TG-4 (tests, can overlap with TG-2 tail)
@@ -925,9 +984,9 @@ Week 6:  TG-5 (polish + docs)
 | Gate | After | Criteria |
 |---|---|---|
 | G1 | TG-1 | ✅ 711 unit + 19 IT tests pass at Scala 3.7.4; bats A+B+C pass on rebuilt distroless image |
-| G1b | TG-1b | ✅ fol-engine: 854 tests pass; `VagueSemantics.evaluate[D]()` returns `EvaluationOutput[D]`; generic `KnowledgeBase[D]` with `DomainElement`/`DomainCodec` type classes; typed DSL removed (ADR-011); `RelationName` opaque type; cross-compiled JVM+JS; `0.2.0-SNAPSHOT` integrated in register `common` crossProject; no `scala.util.Random`; `commons-math3` removed |
-| G1c | TG-1c | ✅ `VagueSemantics.evaluate[D]()` and `holds[D]()` accept `modelAugmenter: ModelAugmenter[D]` (default = identity); 854 tests pass; `NumericAugmenter.augmenter` composes `ArithmeticAugmenter` + `ComparisonAugmenter` + `LiteralResolver`; `ModelAugmenter.fromFunctions` / `fromPredicates` factory methods available |
-| G2 | TG-2 | `curl -X POST .../query -d '{"query":"Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"}'` returns valid JSON |
+| G1b | TG-1b | ✅ fol-engine: 868 tests pass; `VagueSemantics.evaluateTyped()` returns `EvaluationOutput[Value]` via `fol.typed` many-sorted pipeline; legacy `evaluate[D]()` preserved; typed DSL removed (ADR-011); `RelationName` opaque type; cross-compiled JVM+JS; `0.3.0-SNAPSHOT` integrated in register `common` crossProject; no `scala.util.Random`; `commons-math3` removed |
+| G1c | TG-1c | ✅ Legacy: `ModelAugmenter[D]` on `evaluate[D]()`/`holds[D]()`. Current: `RuntimeDispatcher` + `TypeCatalog` + `VagueSemantics.evaluateTyped()` (868 tests including 9 typed-pipeline tests) |
+| G2 | TG-2 | `curl -X POST .../query -d '{"query":"Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))"}'` returns valid JSON |
 | G3 | TG-4 | `sbt serverIt/test` passes all 7 integration tests |
 | G4 | TG-3 | Type query → result card → tree highlights → LEC overlay |
 | G5 | TG-5 | ADR-028 accepted; WORKING-INSTRUCTIONS updated; register domain usage docs complete |
