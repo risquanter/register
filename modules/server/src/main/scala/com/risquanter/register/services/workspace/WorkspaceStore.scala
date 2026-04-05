@@ -43,6 +43,19 @@ trait WorkspaceStore:
   /** Check if a tree belongs to a workspace. Lazy TTL check included. */
   def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean]
 
+  /** Resolve workspace + verify tree ownership.
+    *
+    * Composed from `resolve` and `belongsTo` — fails with
+    * `TreeNotInWorkspace` (opaque 404 via A13) when the tree does
+    * not belong to the workspace.
+    */
+  def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
+    for
+      _       <- resolve(key)
+      belongs <- belongsTo(key, treeId)
+      _       <- ZIO.unless(belongs)(ZIO.fail(TreeNotInWorkspace(key, treeId)))
+    yield ()
+
   /** Evict all expired workspaces (absolute + idle). Returns evicted entries.
     *
     * Returns the full `Map[WorkspaceKeySecret, Workspace]` of evicted entries so that
@@ -87,6 +100,9 @@ object WorkspaceStore:
 
   def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Boolean] =
     ZIO.serviceWithZIO[WorkspaceStore](_.belongsTo(key, treeId))
+
+  def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
+    ZIO.serviceWithZIO[WorkspaceStore](_.resolveTree(key, treeId))
 
   def evictExpired: ZIO[WorkspaceStore, Nothing, Map[WorkspaceKeySecret, Workspace]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.evictExpired)

@@ -11,7 +11,6 @@ import com.risquanter.register.http.controllers.BaseController
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStore
 import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, UserId}
-import com.risquanter.register.domain.errors.TreeNotInWorkspace
 
 /**
   * Controller for SSE endpoints.
@@ -20,8 +19,7 @@ import com.risquanter.register.domain.errors.TreeNotInWorkspace
   * This controller connects the Tapir streaming endpoint to the SSEHub service.
   *
   * A15: Workspace-scoped — validates workspace key and tree ownership
-  * before subscribing. Shares the same `resolveTree` pattern as
-  * WorkspaceController.
+  * before subscribing via `WorkspaceStore.resolveTree`.
   *
   * Pattern: SSE Request → Tapir Endpoint → Controller → WorkspaceStore → SSEHub → ZStream → Client
   *
@@ -41,13 +39,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
 
   private val HeartbeatInterval = 30.seconds
 
-  /** Resolve workspace + verify tree ownership (shared pattern with WorkspaceController). */
-  private def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[Throwable, Unit] =
-    for
-      _       <- workspaceStore.resolve(key)
-      belongs <- workspaceStore.belongsTo(key, treeId)
-      _       <- ZIO.unless(belongs)(ZIO.fail(TreeNotInWorkspace(key, treeId)))
-    yield ()
+
 
   /**
     * Tree events SSE stream (workspace-scoped).
@@ -61,7 +53,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
       (for
         userId      <- userCtx.extract(maybeUserId)
         _           <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        _           <- resolveTree(key, treeId)
+        _           <- workspaceStore.resolveTree(key, treeId)
         eventStream <- sseHub.subscribe(treeId)
         sseStream    = eventStream.map(formatAsSSE)
         withHeartbeat = sseStream.merge(heartbeatStream)

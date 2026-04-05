@@ -4,7 +4,7 @@ import zio.*
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.http.controllers.{BaseController, RiskTreeController, WorkspaceController}
+import com.risquanter.register.http.controllers.{BaseController, RiskTreeController, WorkspaceController, QueryController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
 
@@ -28,17 +28,18 @@ object HttpApi {
     * 
     * @return ZIO effect that provides list of all controllers
     */
-  def makeControllers: ZIO[RiskTreeController & WorkspaceController & SSEController & CacheController, Nothing, List[BaseController]] = for {
+  def makeControllers: ZIO[RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController, Nothing, List[BaseController]] = for {
     riskTrees <- ZIO.service[RiskTreeController]
     workspaces <- ZIO.service[WorkspaceController]
     sse <- ZIO.service[SSEController]
     cache <- ZIO.service[CacheController]
-  } yield List(riskTrees, workspaces, sse, cache)
+    query <- ZIO.service[QueryController]
+  } yield List(riskTrees, workspaces, sse, cache, query)
 
   /** Complete application endpoints including business logic and documentation
     * 
     * @return ZIO effect providing all HTTP endpoints
     */
-  val endpointsZIO: ZIO[RiskTreeController & WorkspaceController & SSEController & CacheController, Nothing, List[ServerEndpoint[Any, Task]]] =
+  val endpointsZIO: ZIO[RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController, Nothing, List[ServerEndpoint[Any, Task]]] =
     makeControllers.map(gatherRoutes)
 }

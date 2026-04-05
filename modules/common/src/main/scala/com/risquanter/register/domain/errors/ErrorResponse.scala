@@ -40,12 +40,16 @@ object ErrorResponse {
     val firstCode = details.headOption.map(_.code).getOrElse(ValidationErrorCode.INTERNAL_ERROR)
 
     status.code match
-      // 400 → disambiguate by code: FOL parse/symbol errors vs general validation
+      // 400 → disambiguate by code: FOL parse/symbol/bind errors vs general validation
       case 400 => firstCode match
         case ValidationErrorCode.PARSE_ERROR =>
           FolParseFailure(message, None)
         case ValidationErrorCode.UNKNOWN_SYMBOL =>
           FolUnknownSymbol(firstField, Nil)
+        case ValidationErrorCode.BIND_FAILED =>
+          FolBindFailure(details.map(_.message))
+        case ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE =>
+          FolDomainNotQuantifiable(firstField, Set.empty)
         case _ =>
           ValidationFailed(details.map(d => ValidationError(d.field, d.code, d.message)))
 
@@ -99,6 +103,8 @@ object ErrorResponse {
       case 500 => firstCode match
         case ValidationErrorCode.EVALUATION_FAILED =>
           FolEvaluationFailure(message, "unknown")
+        case ValidationErrorCode.MODEL_VALIDATION_FAILED =>
+          FolModelValidationFailure(details.map(_.message))
         case _ => firstField match
           case "simulation" => SimulationFailure("unknown", new RuntimeException(message))
           case _            => RepositoryFailure(message)
@@ -153,10 +159,13 @@ object ErrorResponse {
 
   /** Exhaustive match on FolQueryFailure — compiler-enforced coverage (ADR-028). */
   private def encodeFolQueryFailure(error: FolQueryFailure): (StatusCode, ErrorResponse) = error match {
-    case FolParseFailure(message, position)  => makeFolParseFailureResponse(message, position)
-    case FolUnknownSymbol(symbol, available) => makeFolUnknownSymbolResponse(symbol, available)
-    case FolEvaluationFailure(message, phase) => makeFolEvaluationFailureResponse(message, phase)
-    case SimulationNotCached(treeId)         => makeSimulationNotCachedResponse(treeId)
+    case FolParseFailure(message, position)          => makeFolParseFailureResponse(message, position)
+    case FolUnknownSymbol(symbol, available)          => makeFolUnknownSymbolResponse(symbol, available)
+    case FolBindFailure(errors)                       => makeFolBindFailureResponse(errors)
+    case FolDomainNotQuantifiable(typeName, available) => makeFolDomainNotQuantifiableResponse(typeName, available)
+    case FolModelValidationFailure(errors)            => makeFolModelValidationFailureResponse(errors)
+    case FolEvaluationFailure(message, phase)         => makeFolEvaluationFailureResponse(message, phase)
+    case SimulationNotCached(treeId)                  => makeSimulationNotCachedResponse(treeId)
   }
 
   // ============================================================================
@@ -254,6 +263,20 @@ object ErrorResponse {
   def makeFolUnknownSymbolResponse(symbol: String, available: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.BadRequest, "query", ValidationErrorCode.UNKNOWN_SYMBOL,
       s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}", domain, requestId)
+
+  def makeFolBindFailureResponse(errors: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val details = errors.map(e => ErrorDetail(domain, "query", ValidationErrorCode.BIND_FAILED, e, requestId))
+    val message = s"Query type-checking failed: ${errors.mkString("; ")}"
+    (StatusCode.BadRequest, ErrorResponse(JsonHttpError(StatusCode.BadRequest.code, message, details)))
+
+  def makeFolDomainNotQuantifiableResponse(typeName: String, availableTypes: Set[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.BadRequest, "query", ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE,
+      s"Type '$typeName' cannot be quantified over. Available domain types: ${availableTypes.mkString(", ")}", domain, requestId)
+
+  def makeFolModelValidationFailureResponse(errors: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val details = errors.map(e => ErrorDetail(domain, "query", ValidationErrorCode.MODEL_VALIDATION_FAILED, e, requestId))
+    val message = s"Runtime model validation failed: ${errors.mkString("; ")}"
+    (StatusCode.InternalServerError, ErrorResponse(JsonHttpError(StatusCode.InternalServerError.code, message, details)))
 
   def makeFolEvaluationFailureResponse(message: String, phase: String, domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.InternalServerError, "query", ValidationErrorCode.EVALUATION_FAILED,

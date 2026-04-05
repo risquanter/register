@@ -9,10 +9,11 @@ import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirC
 import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, ApiConfig, WorkspaceConfig}
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
 import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
-import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
+import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController, QueryController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.services.RiskTreeServiceLive
+import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.cache.{TreeCacheManager, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
@@ -76,8 +77,8 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor] =
-    ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor](
+  val appLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor] =
+    ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
@@ -108,6 +109,7 @@ object Application extends ZIOAppDefault {
       SSEHub.live,
       InvalidationHandler.live,     // Requires TreeCacheManager & SSEHub (no RiskTreeService dep)
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + SimulationConfig + Tracing + SimulationSemaphore + Meter
+      QueryServiceLive.layer,       // Requires RiskTreeRepository + RiskResultResolver + Tracing
       WorkspaceStoreLive.layer,
       RateLimiterLive.layer,
       WorkspaceReaper.layer,
@@ -122,7 +124,8 @@ object Application extends ZIOAppDefault {
       SSEController.layer,
       CacheController.layer,
       ZLayer.fromZIO(RiskTreeController.makeZIO),
-      ZLayer.fromZIO(WorkspaceController.makeZIO)
+      ZLayer.fromZIO(WorkspaceController.makeZIO),
+      ZLayer.fromZIO(QueryController.makeZIO)
     )
 
   def startServer = for {

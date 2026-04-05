@@ -3,7 +3,8 @@
 **Parent:** [ADR-028](ADR-028-vague-quantifier-query-pane.md) +
 [ADR-028 Appendix](ADR-028-appendix-technical-design.md)  
 **Scope:** All code changes to ship the query pane end-to-end.  
-**Last updated:** 2026-03-27 (fol.typed API — many-sorted type system)
+**Last updated:** 2026-04-04 (fol-engine 0.9.0-SNAPSHOT adaptation — TypeDecl,
+FolModel, LiteralValue, BindError/ModelValidationError/DomainNotFoundError)
 
 ---
 
@@ -67,10 +68,11 @@ native distroless image.
 
 Originally added to `serverDependencies` as `%% "fol-engine" % "0.1.0-SNAPSHOT"`.
 After TG-1b cross-compilation, moved to `common` crossProject `.settings()`.
-Bumped to `0.3.0-SNAPSHOT` for the `fol.typed` many-sorted type system:
+Bumped to `0.9.0-SNAPSHOT` for the `fol.typed` many-sorted type system,
+`TypeDecl` ADT, `FolModel` smart constructor, and `LiteralValue` pipeline:
 
 ```scala
-"com.risquanter" %%% "fol-engine" % "0.3.0-SNAPSHOT"
+"com.risquanter" %%% "fol-engine" % "0.9.0-SNAPSHOT"
 ```
 
 Available on both JVM and JS. Server gets it transitively through `common`.
@@ -291,19 +293,21 @@ Work in `~/projects/register`.
 
 Originally added to `serverDependencies` (TG-1, T1.4). After fol-engine
 0.2.0 cross-compilation, moved to `common` crossProject `.settings()`.
-Bumped to `0.3.0-SNAPSHOT` for the `fol.typed` many-sorted type system:
+Bumped to `0.9.0-SNAPSHOT` for the `fol.typed` many-sorted type system,
+`TypeDecl` ADT, `FolModel` smart constructor, and `LiteralValue` pipeline:
 
 ```scala
-"com.risquanter" %%% "fol-engine" % "0.3.0-SNAPSHOT"
+"com.risquanter" %%% "fol-engine" % "0.9.0-SNAPSHOT"
 ```
 
 Available on both JVM and JS (same pattern as `zio-ulid`). Server gets
 it transitively through `common`.
 
 **Acceptance met:** `sbt server/compile` and `sbt commonJS/compile` succeed;
-`sbt server/test` passes (323 tests); `sbt commonJVM/test` passes (391
+`sbt server/test` passes (386 tests); `sbt commonJVM/test` passes (391
 tests). `VagueQueryParser`, `ParsedQuery`, `TypeCatalog`, `RuntimeModel`,
-`Value`, and all library types are importable on both platforms.
+`Value`, `FolModel`, `TypeDecl`, `LiteralValue`, and all library types
+are importable on both platforms.
 
 ### T2.2 — Define request/response types in `common` ✅
 
@@ -510,12 +514,43 @@ range. No error type is needed for this case.
 
 **fol.error.QueryError → FolQueryFailure mapping table:**
 
-| Library type (`fol.error.QueryError.*`) | Register type (`FolQueryFailure.*`) | HTTP |
-|---|---|---|
-| `ParseError`, `LexicalError` | `FolParseFailure` | 400 |
-| `RelationNotFoundError`, `UninterpretedSymbolError`, `SchemaError` | `FolUnknownSymbol` | 400 |
-| `EvaluationError`, `ScopeEvaluationError`, `TypeMismatchError`, `TimeoutError`, `QuantifierError` | `FolEvaluationFailure` | 500 |
-| *(register precondition)* | `SimulationNotCached` | 409 |
+| Library type (`fol.error.QueryError.*`) | Register type (`FolQueryFailure.*`) | HTTP | `ValidationErrorCode` |
+|---|---|---|---|
+| `ParseError`, `LexicalError` | `FolParseFailure` | 400 | `PARSE_ERROR` |
+| `RelationNotFoundError`, `UninterpretedSymbolError`, `SchemaError` | `FolUnknownSymbol` | 400 | `UNKNOWN_SYMBOL` |
+| `BindError` | `FolBindFailure` | 400 | `BIND_FAILED` |
+| `DomainNotFoundError` *(defensive fallback — D14)* | `FolDomainNotQuantifiable` | 400 | `DOMAIN_NOT_QUANTIFIABLE` |
+| `ModelValidationError` | `FolModelValidationFailure` | 500 | `MODEL_VALIDATION_FAILED` |
+| `EvaluationError`, `ScopeEvaluationError`, `TypeMismatchError`, `TimeoutError`, `QuantifierError` | `FolEvaluationFailure` | 500 | `EVALUATION_FAILED` |
+| *(register precondition)* | `SimulationNotCached` | 409 | `SIMULATION_REQUIRED` |
+
+**Design decision D14 (2026-03-27, updated 2026-04-04) — domain-only
+quantification:** FOL queries can only quantify over *entity types* — types
+that represent finite, enumerable collections of domain objects. In
+register's risk-tree schema the only entity type is `Asset` (the set of
+tree node names). Types such as `Loss` (Long) and `Probability` (Double)
+are *output types*: they appear as function return values (e.g.
+`p95: Asset → Loss`) and are computed, not enumerated. A query like
+`∀x: Loss. …` is semantically meaningless because there is no finite
+domain to iterate.
+
+**Resolved (0.9.0-SNAPSHOT):** fol-engine now enforces this at **two**
+levels:
+
+1. **Bind phase (Phase 2):** `TypeCheckError.TypeNotQuantifiable` rejects
+   quantification over `ValueType` sorts at bind time, surfacing as
+   `QueryError.BindError` → `FolBindFailure` → HTTP 400. This is the
+   primary enforcement per ADR-001 (parse-don't-validate).
+2. **Evaluation phase (Phase 1 — defensive fallback):**
+   `QueryError.DomainNotFoundError` catches the case where evaluation
+   reaches a type with no registered domain. In a correctly wired system
+   this is unreachable — the bind phase rejects it first. Mapped to
+   `FolDomainNotQuantifiable` → HTTP 400.
+
+The `TypeDecl` ADT (`DomainType` / `ValueType`) in `TypeCatalog.types`
+declares which types are quantifiable. `FolModel` smart constructor
+validates catalog+model pairing once at construction. See fol-engine
+ADR-014 and ADR-015.
 
 **Acceptance:** `sbt common/compile` succeeds; exhaustive match on
 `FolQueryFailure` is compiler-checked.
@@ -524,30 +559,36 @@ range. No error type is needed for this case.
 
 **File:** `modules/server/src/main/scala/.../foladapter/RiskTreeKnowledgeBase.scala`
 
-**Updated 2026-03-27** for `fol.typed` many-sorted type system (0.3.0).
+**Updated 2026-04-04** for fol-engine `0.9.0-SNAPSHOT` (`TypeDecl` ADT,
+`FolModel` smart constructor, `LiteralValue` pipeline).
 
 Responsibilities:
 1. Build a `TypeCatalog` declaring register's many-sorted schema:
-   - **Sorts:** `Asset` (node names), `Loss` (Long), `Probability` (Double), `Bool`
+   - **Types:** `DomainType(Asset)`, `ValueType(Loss)`,
+     `ValueType(Probability)`, `ValueType(Bool)` — `TypeDecl` ADT
+     distinguishes quantifiable domain types from computed value types
    - **Functions:** `p95: Asset → Loss`, `p99: Asset → Loss`,
      `lec: (Asset, Loss) → Probability`
    - **Predicates:** `leaf: (Asset)`, `portfolio: (Asset)`,
      `child_of: (Asset, Asset)`, `descendant_of: (Asset, Asset)`,
      `leaf_descendant_of: (Asset, Asset)`,
      `gt_loss: (Loss, Loss)`, `gt_prob: (Probability, Probability)`
-   - **Literal validators:** Loss → `_.forall(_.isDigit)`,
-     Probability → `_.matches("[0-9]+(\\.[0-9]+)?")`
+   - **Literal validators:** Loss → `Some(IntLiteral(s.toLong))`,
+     Probability → `Some(FloatLiteral(s.toDouble))` — returns
+     `Option[LiteralValue]` (parsed typed literal), not `Boolean`
 2. Build a `RuntimeModel` containing:
    - **Domains:** `Asset → Set[Value]` (one `Value(asset, nodeName)` per
-     tree node)
+     tree node) — only `DomainType` sorts have registered domains
    - **Dispatcher:** A `RuntimeDispatcher` that implements:
-     - `evalFunction("p95", [assetVal])` → looks up `LossDistribution`
-       for the asset, returns `Value(loss, p95Long)`
+     - `evalFunction("p95", [assetVal])` → returns
+       `LiteralValue.IntLiteral(p95Long)` (not `Value`)
      - `evalFunction("lec", [assetVal, lossVal])` → returns
-       `Value(probability, probOfExceedance)`
+       `LiteralValue.FloatLiteral(probOfExceedance)`
      - `evalPredicate("leaf", [assetVal])` → true if asset is a leaf
-     - `evalPredicate("gt_loss", [a, b])` → `a.raw.asLong > b.raw.asLong`
-     - `evalPredicate("gt_prob", [a, b])` → `a.raw.asDouble > b.raw.asDouble`
+     - `evalPredicate("gt_loss", [a, b])` → extracts `LiteralValue.IntLiteral`
+       from `Value.raw`, compares
+     - `evalPredicate("gt_prob", [a, b])` → extracts `LiteralValue.FloatLiteral`
+       from `Value.raw`, compares
      - `evalPredicate("child_of", [a, b])` → structural lookup
      - etc. for `descendant_of`, `leaf_descendant_of`, `portfolio`
 
@@ -611,32 +652,44 @@ trait QueryService:
 Steps:
 1. Load tree + ensure simulations cached (fail with `SimulationNotCached` → 409)
 2. Build `RiskTreeKnowledgeBase` → get `catalog: TypeCatalog` + `model: RuntimeModel`
-3. Call `VagueSemantics.evaluateTyped(parsed, catalog, model, answerTuple, params, hdrConfig)`
-   — `evaluateTyped` internally: `bindTyped(parsed, catalog)` → sort-checks
-     the query → `model.validateAgainst(catalog)` → confirms all declared
-     functions/predicates have dispatcher implementations →
-     `TypedSemantics.evaluate(bound, model, ...)` → returns
-     `EvaluationOutput[Value]` containing
+3. Construct `FolModel(kb.catalog, kb.model)` — validated pairing (smart
+   constructor). Returns `Left(ModelValidationError)` if dispatcher
+   coverage or domain registration gaps exist → `FolModelValidationFailure`
+   → 500.
+4. Call `VagueSemantics.evaluateTyped(parsed, folModel, answerTuple, params, hdrConfig)`
+   — `evaluateTyped` internally: `bindTyped(parsed, folModel.catalog)` →
+     sort-checks the query (returns `BindError` → `FolBindFailure` → 400
+     if type-check fails, e.g. `TypeNotQuantifiable` for non-domain
+     quantification) → `TypedSemantics.evaluate(bound, folModel.model, ...)`
+     → returns `EvaluationOutput[Value]` containing
      `result: VagueQueryResult` + `rangeElements: Set[Value]` +
      `satisfyingElements: Set[Value]`
-   — `Value(sort: TypeId, raw: Any)` — sort-tagged runtime values
-   — on `Left(fol.error.QueryError)`, map to `FolEvaluationFailure`
-     (validation errors from `bindTyped` / model validation map to
-     `FolUnknownSymbol` where appropriate)
-4. Map to `QueryResponse` via `QueryResponseBuilder.from(output, lookup)`
+   — `Value(sort: TypeId, raw: Any)` — sort-tagged runtime values;
+     for domain elements `raw` is the domain type (e.g. `String`), for
+     computed values `raw` is a `LiteralValue` (e.g. `IntLiteral`,
+     `FloatLiteral`)
+   — on `Left(fol.error.QueryError)`, map via `FolQueryFailure.fromQueryError`
+     to the appropriate `FolQueryFailure` subtype
+5. Map to `QueryResponse` via `QueryResponseBuilder.from(output, lookup)`
 
 **Design change (2026-03-16):** The original plan called for bypassing
 `VagueSemantics.holds()` and calling `RangeExtractor` +
 `ScopeEvaluator.evaluateSample()` directly. This is no longer needed.
 
-**Architecture note (2026-03-27):** ~~The 0.2.0 approach used
-`VagueSemantics.evaluate[RelationValue]()` with `ModelAugmenter[D]`.~~
-**Superseded by 0.3.0:** Register now uses the `fol.typed` many-sorted
-pipeline via `VagueSemantics.evaluateTyped()`. This takes a `TypeCatalog`
-(sort declarations, function/predicate signatures, literal validators) and
-a `RuntimeModel` (sort-tagged value domains + `RuntimeDispatcher`), and
-returns `EvaluationOutput[Value]`. No `DomainElement[D]`, `DomainCodec[D]`,
-`KnowledgeSource[D]`, or `ModelAugmenter[D]` are needed.
+**Architecture note (2026-03-27, updated 2026-04-04):** ~~The 0.2.0
+approach used `VagueSemantics.evaluate[RelationValue]()` with
+`ModelAugmenter[D]`.~~ **Superseded by 0.9.0:** Register now uses the
+`fol.typed` many-sorted pipeline via `VagueSemantics.evaluateTyped()`.
+This takes a `FolModel` (validated pairing of `TypeCatalog` + `RuntimeModel`,
+constructed via smart constructor) and returns `EvaluationOutput[Value]`.
+No `DomainElement[D]`, `DomainCodec[D]`, `KnowledgeSource[D]`, or
+`ModelAugmenter[D]` are needed. Key 0.9.0 changes:
+- `TypeCatalog.types` uses `Set[TypeDecl]` (`DomainType`/`ValueType`)
+  instead of `Set[TypeId]`
+- `literalValidators` returns `Option[LiteralValue]` instead of `Boolean`
+- `evalFunction` returns `LiteralValue` instead of `Value`
+- `FolModel` smart constructor validates catalog+model once at construction
+- New error types: `BindError`, `ModelValidationError`, `DomainNotFoundError`
 
 **Architecture clarification (2026-03-18, updated 2026-03-27):** The
 library exposes three facade methods:
@@ -957,14 +1010,18 @@ Week 2:  TG-1b (fol-engine internal debt)                     ✅ DONE
          0.2.0-SNAPSHOT: generic KB, DSL removal, bridge       ✅ DONE
            decomposition, RelationName opaque, ModelAugmenter
          0.3.0-SNAPSHOT: fol.typed many-sorted type system      ✅ DONE
+         0.9.0-SNAPSHOT: TypeDecl, FolModel, LiteralValue,     ✅ DONE
+           BindError, ModelValidationError, DomainNotFoundError
 
 Week 3:  TG-1c (model augmentation — delivered in 0.2.0,       ✅ DONE
                 superseded by fol.typed in 0.3.0)
-         TG-2 (server components — fully unblocked)            ← CURRENT
-         T2.1 ✅ + T2.2 ✅ + T2.3 ✅ (already done)
-         T2.3b (FolQueryFailure) → T2.4 (TypeCatalog + RuntimeModel)
-         → T2.5 (QueryService via evaluateTyped) → T2.5b (ResponseBuilder)
-         → T2.6 (Controller) → T2.7 (OTel)
+         TG-2 (server components)                               ✅ DONE
+         T2.1 ✅ + T2.2 ✅ + T2.3 ✅ + T2.3b ✅ + T2.4 ✅
+         + T2.5 ✅ + T2.5b ✅ + T2.6 ✅ + T2.7 ✅
+         0.9.0-SNAPSHOT adaptation (2026-04-04):                ✅ DONE
+           TypeDecl ADT, FolModel smart constructor,
+           LiteralValue pipeline, new error hierarchy
+           777 tests passing (391 common + 386 server)
 
 Week 4:  TG-4 (tests, can overlap with TG-2 tail)
          T4.1 (once T2.4 done) → T4.2 (once T2.6 done)

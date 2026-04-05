@@ -164,35 +164,163 @@ case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = Non
 sealed trait FolQueryFailure extends AppError
 
 object FolQueryFailure:
-  /** Maps from fol.error.QueryError.ParseError / LexicalError.
-    * Syntactic parse failure — query string is not well-formed.
+  /** Maps from `fol.error.QueryError.ParseError` / `LexicalError`.
+    *
+    * Syntactic parse failure — the query string is not well-formed FOL syntax.
+    * The parser rejected the input before any semantic analysis.
+    *
+    * Example: `"Q[>=]^{2/3 x (leaf(x))"` — missing closing brace after
+    * the quantifier ratio produces `ParseError("Expected '}' ...", pos=14)`.
+    *
+    * HTTP 400 — `PARSE_ERROR`.
     */
   final case class FolParseFailure(message: String, position: Option[Int])
     extends FolQueryFailure:
     override def getMessage: String =
       position.fold(message)(p => s"$message (at position $p)")
 
-  /** Maps from fol.error.QueryError.RelationNotFoundError /
-    * UninterpretedSymbolError / SchemaError.
-    * Well-formed query references unknown predicates or functions.
+  /** Maps from `fol.error.QueryError.RelationNotFoundError` /
+    * `UninterpretedSymbolError` / `SchemaError`.
+    *
+    * The query is syntactically valid but references a predicate or function
+    * name that does not exist in the `TypeCatalog`.
+    *
+    * Example: `"Q[>=]^{2/3} x (leaf(x), gt_loss(p96(x), 5000))"` —
+    * `p96` is not a declared function; available functions are `p95`, `p99`, `lec`.
+    *
+    * HTTP 400 — `UNKNOWN_SYMBOL`.
     */
   final case class FolUnknownSymbol(symbol: String, available: List[String])
     extends FolQueryFailure:
     override def getMessage: String =
       s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}"
 
-  /** Maps from fol.error.QueryError.EvaluationError /
-    * ScopeEvaluationError / TypeMismatchError / TimeoutError / etc.
-    * Catch-all for unexpected evaluation-phase failures.
+  /** Maps from `fol.error.QueryError.BindError`.
+    *
+    * The query is syntactically valid and all symbols are known, but the
+    * typed bind phase (type-checking variable sorts against the catalog)
+    * detected one or more type errors. This covers arity mismatches,
+    * sort conflicts, and quantification over non-domain types.
+    *
+    * Example: `"Q[>=]^{1/2} x:Loss (gt_loss(x, 5000))"` — the type
+    * `Loss` is a `ValueType` (computed output) and cannot be quantified
+    * over; only `DomainType` sorts like `Asset` have finite domains.
+    * The bind phase rejects this with `TypeNotQuantifiable("Loss")`.
+    *
+    * HTTP 400 — `BIND_FAILED`.
+    */
+  final case class FolBindFailure(errors: List[String])
+    extends FolQueryFailure:
+    override def getMessage: String =
+      s"Query type-checking failed: ${errors.mkString("; ")}"
+
+  /** Maps from `fol.error.QueryError.ModelValidationError`.
+    *
+    * The `RuntimeModel` does not satisfy the `TypeCatalog` contract:
+    * a declared function or predicate has no dispatcher implementation,
+    * or a `DomainType` has no registered element set. This is an
+    * infrastructure / wiring error in `RiskTreeKnowledgeBase`, not a
+    * user query error.
+    *
+    * Example: Register declares `lec: (Asset, Loss) → Probability` in
+    * the catalog but the `RuntimeDispatcher` omits `lec` from its
+    * `functionSymbols` set. `FolModel(catalog, model)` validation
+    * catches this before any query is evaluated.
+    *
+    * HTTP 500 — `MODEL_VALIDATION_FAILED`.
+    */
+  final case class FolModelValidationFailure(errors: List[String])
+    extends FolQueryFailure:
+    override def getMessage: String =
+      s"Runtime model validation failed: ${errors.mkString("; ")}"
+
+  /** Maps from `fol.error.QueryError.DomainNotFoundError` (D14).
+    *
+    * The query attempts to quantify over a type that has no registered
+    * domain in the `RuntimeModel`. In a correctly wired system this is
+    * unreachable (the bind phase rejects non-domain quantification via
+    * `TypeNotQuantifiable`). Mapped as a defensive fallback.
+    *
+    * Example: If a catalog declared `Loss` as `DomainType` (incorrect)
+    * but the `RuntimeModel` had no domain set for `Loss`, evaluation
+    * would reach this error. In practice, `FolModel` validation catches
+    * such gaps first.
+    *
+    * HTTP 400 — `DOMAIN_NOT_QUANTIFIABLE`.
+    */
+  final case class FolDomainNotQuantifiable(typeName: String, availableTypes: Set[String])
+    extends FolQueryFailure:
+    override def getMessage: String =
+      s"Queries can only range over tree nodes (type 'Asset'). " +
+      s"The type '$typeName' cannot be enumerated. " +
+      s"Available quantifiable types: ${availableTypes.mkString(", ")}"
+
+  /** Maps from `fol.error.QueryError.EvaluationError` /
+    * `ScopeEvaluationError` / `TypeMismatchError` / `TimeoutError` / etc.
+    *
+    * Catch-all for unexpected evaluation-phase failures that occur after
+    * binding succeeds. These indicate internal errors (dispatcher bugs,
+    * resource exhaustion) rather than user query mistakes.
+    *
+    * Example: The dispatcher's `evalFunction("p95", args)` throws because
+    * simulation data is corrupted, surfacing as
+    * `EvaluationError("Division by zero", phase="function:p95")`.
+    *
+    * HTTP 500 — `EVALUATION_FAILED`.
     */
   final case class FolEvaluationFailure(message: String, phase: String)
     extends FolQueryFailure:
     override def getMessage: String = s"Evaluation failed in $phase: $message"
 
-  /** Register precondition — no Fol prefix.
-    * Simulation results not yet computed for the requested tree.
+  /** Register precondition — no `Fol` prefix because no fol-engine involvement.
+    *
+    * Simulation results have not yet been computed for the requested tree.
+    * The user must run a simulation before querying.
+    *
+    * Example: POST `/w/{key}/risk-trees/{treeId}/query` before any
+    * simulation has been triggered for `treeId`.
+    *
+    * HTTP 409 — `SIMULATION_REQUIRED`.
     */
   final case class SimulationNotCached(treeId: TreeId)
     extends FolQueryFailure:
     override def getMessage: String =
       s"Simulation not cached for tree ${treeId.value}"
+
+  /** Centralised mapping from library `fol.error.QueryError` to register's
+    * `FolQueryFailure` hierarchy. Used by both the controller (parse errors)
+    * and the service layer (evaluation errors).
+    *
+    * @see T2.3b mapping table in IMPLEMENTATION-PLAN-QUERY-PANE.md
+    */
+  def fromQueryError(err: fol.error.QueryError): FolQueryFailure =
+    import fol.error.QueryError as QE
+    err match
+      // ── Parse-phase errors → 400 ────────────────────────────────
+      case e: QE.ParseError               => FolParseFailure(e.message, e.position)
+      case e: QE.LexicalError             => FolParseFailure(e.message, Some(e.position))
+      // ── Symbol-resolution errors → 400 ──────────────────────────
+      case e: QE.RelationNotFoundError    => FolUnknownSymbol(e.relationName.value, e.availableRelations.map(_.value).toList)
+      case e: QE.UninterpretedSymbolError => FolUnknownSymbol(e.symbolName, e.availableSymbols.toList)
+      case e: QE.SchemaError              => FolUnknownSymbol(e.relationName.value, Nil)
+      // ── Bind-phase type errors → 400 ────────────────────────────
+      case e: QE.BindError                => FolBindFailure(e.errors)
+      // ── Domain-not-found → 400 (D14, defensive fallback) ───────
+      case e: QE.DomainNotFoundError      => FolDomainNotQuantifiable(e.typeName, e.availableTypes)
+      // ── Model-validation → 500 (wiring error) ──────────────────
+      case e: QE.ModelValidationError     => FolModelValidationFailure(e.errors)
+      // ── Evaluation-phase errors → 500 ───────────────────────────
+      case e: QE.EvaluationError          => FolEvaluationFailure(e.message, e.phase)
+      case e: QE.ScopeEvaluationError     => FolEvaluationFailure(e.message, "scope")
+      case e: QE.TypeMismatchError        => FolEvaluationFailure(e.message, "type_check")
+      case e: QE.TimeoutError             => FolEvaluationFailure(e.message, e.operation)
+      case e: QE.QuantifierError          => FolEvaluationFailure(e.message, "quantifier")
+      case e: QE.ValidationError          => FolEvaluationFailure(e.message, "validation")
+      // ── Remaining subtypes → 500 (each explicit for exhaustiveness) ─
+      case e: QE.QueryStructureError      => FolEvaluationFailure(e.message, "query_structure")
+      case e: QE.DataStoreError           => FolEvaluationFailure(e.message, "data_store")
+      case e: QE.PositionOutOfBoundsError => FolEvaluationFailure(e.message, "position_bounds")
+      case e: QE.UnboundVariableError     => FolEvaluationFailure(e.message, "unbound_variable")
+      case e: QE.ResourceError            => FolEvaluationFailure(e.message, "resource")
+      case e: QE.ConnectionError          => FolEvaluationFailure(e.message, "connection")
+      case e: QE.ConfigError              => FolEvaluationFailure(e.message, "config")

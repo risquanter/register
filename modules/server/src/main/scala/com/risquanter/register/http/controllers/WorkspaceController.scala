@@ -40,18 +40,7 @@ class WorkspaceController private (
   private def normaliseIp(xff: Option[String]): String =
     xff.flatMap(_.split(",").headOption).map(_.trim).filter(_.nonEmpty).getOrElse("unknown")
 
-  /** Resolve workspace + verify tree ownership.
-    *
-    * Shared by all tree-scoped endpoints under `/w/{key}/risk-trees/{treeId}/`.
-    * Fails with TreeNotInWorkspace (opaque 404 via A13) if the tree
-    * does not belong to the workspace.
-    */
-  private def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[Throwable, Unit] =
-    for
-      _       <- workspaceStore.resolve(key)
-      belongs <- workspaceStore.belongsTo(key, treeId)
-      _       <- ZIO.unless(belongs)(ZIO.fail(TreeNotInWorkspace(key, treeId)))
-    yield ()
+
 
   // ── Workspace lifecycle ───────────────────────────────────────────
 
@@ -119,7 +108,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        _      <- resolveTree(key, treeId)
+        _      <- workspaceStore.resolveTree(key, treeId)
         result <- riskTreeService.getById(treeId).map(_.map(SimulationResponse.fromRiskTree))
       yield result).either
   }
@@ -129,7 +118,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        result <- resolveTree(key, treeId) *> riskTreeService.getById(treeId)
+        result <- workspaceStore.resolveTree(key, treeId) *> riskTreeService.getById(treeId)
       yield result).either
   }
 
@@ -138,7 +127,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        result <- resolveTree(key, treeId) *>
+        result <- workspaceStore.resolveTree(key, treeId) *>
                     riskTreeService.update(treeId, req).map(SimulationResponse.fromRiskTree)
       yield result).either
   }
@@ -148,7 +137,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        result <- resolveTree(key, treeId) *>
+        result <- workspaceStore.resolveTree(key, treeId) *>
                     riskTreeService.delete(treeId)
                       .tap(_ => workspaceStore.removeTree(key, treeId))
                       .map(SimulationResponse.fromRiskTree)
@@ -160,7 +149,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        _      <- resolveTree(key, treeId)
+        _      <- workspaceStore.resolveTree(key, treeId)
         tree   <- riskTreeService.getById(treeId).someOrFail(TreeNotInWorkspace(key, treeId))
         r      <- invalidationHandler.handleNodeChange(nodeId, tree)
       yield InvalidationResponse(
@@ -176,7 +165,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        result <- resolveTree(key, treeId) *>
+        result <- workspaceStore.resolveTree(key, treeId) *>
                     riskTreeService.getLECCurve(treeId, nodeId, includeProvenance)
       yield result).either
   }
@@ -186,7 +175,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        result <- resolveTree(key, treeId) *>
+        result <- workspaceStore.resolveTree(key, treeId) *>
                     riskTreeService.probOfExceedance(treeId, nodeId, threshold, includeProvenance)
       yield result).either
   }
@@ -196,7 +185,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        result <- resolveTree(key, treeId) *>
+        result <- workspaceStore.resolveTree(key, treeId) *>
                     riskTreeService.getLECCurvesMulti(treeId, nodeIds.toSet, includeProvenance)
                       .map(_.map { case (nodeId, nodeCurve) => (nodeId.value, nodeCurve) })
       yield result).either
@@ -207,7 +196,7 @@ class WorkspaceController private (
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        result <- resolveTree(key, treeId) *>
+        result <- workspaceStore.resolveTree(key, treeId) *>
                     riskTreeService.getLECChart(treeId, nodeIds.toSet)
       yield result).either
   }

@@ -7,6 +7,7 @@ import zio.test.*
 import zio.json.*
 import sttp.model.StatusCode
 import com.risquanter.register.domain.data.iron.WorkspaceKeySecret
+import com.risquanter.register.domain.errors.FolQueryFailure
 
 object ErrorResponseSpec extends ZIOSpecDefault {
 
@@ -367,6 +368,50 @@ object ErrorResponseSpec extends ZIOSpecDefault {
           sfDecoded.isInstanceOf[SimulationFailure],
           rfDecoded.isInstanceOf[RepositoryFailure]
         )
+      }
+    ),
+
+    suite("FolQueryFailure roundtrip")(
+      test("FolParseFailure roundtrip preserves type") {
+        val original = FolQueryFailure.FolParseFailure("Unexpected token", Some(10))
+        val decoded = ErrorResponse.decode(ErrorResponse.encode(original))
+        assertTrue(
+          decoded.isInstanceOf[FolQueryFailure.FolParseFailure],
+          decoded.getMessage.contains("Unexpected token")
+        )
+      },
+      test("FolUnknownSymbol roundtrip preserves type") {
+        val original = FolQueryFailure.FolUnknownSymbol("p96", List("p95", "p99", "lec"))
+        val decoded = ErrorResponse.decode(ErrorResponse.encode(original))
+        assertTrue(decoded.isInstanceOf[FolQueryFailure.FolUnknownSymbol])
+      },
+      test("FolBindFailure roundtrip preserves error list losslessly") {
+        val errors = List("type 'Loss' is not quantifiable", "arity mismatch; for 'leaf'")
+        val original = FolQueryFailure.FolBindFailure(errors)
+        ErrorResponse.decode(ErrorResponse.encode(original)) match
+          case f: FolQueryFailure.FolBindFailure =>
+            assertTrue(f.errors == errors)
+          case other =>
+            assertTrue(other.isInstanceOf[FolQueryFailure.FolBindFailure])
+      },
+      test("FolDomainNotQuantifiable roundtrip preserves type") {
+        val original = FolQueryFailure.FolDomainNotQuantifiable("Loss", Set("Asset"))
+        val decoded = ErrorResponse.decode(ErrorResponse.encode(original))
+        assertTrue(decoded.isInstanceOf[FolQueryFailure.FolDomainNotQuantifiable])
+      },
+      test("FolModelValidationFailure roundtrip preserves error list losslessly") {
+        val errors = List("Missing function: lec", "Missing domain; for type: Asset")
+        val original = FolQueryFailure.FolModelValidationFailure(errors)
+        ErrorResponse.decode(ErrorResponse.encode(original)) match
+          case f: FolQueryFailure.FolModelValidationFailure =>
+            assertTrue(f.errors == errors)
+          case other =>
+            assertTrue(other.isInstanceOf[FolQueryFailure.FolModelValidationFailure])
+      },
+      test("FolEvaluationFailure roundtrip preserves type") {
+        val original = FolQueryFailure.FolEvaluationFailure("Division by zero", "function:p95")
+        val decoded = ErrorResponse.decode(ErrorResponse.encode(original))
+        assertTrue(decoded.isInstanceOf[FolQueryFailure.FolEvaluationFailure])
       }
     ),
     
