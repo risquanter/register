@@ -914,6 +914,146 @@ and triggers chart load.
 
 ---
 
+## TG-0 — Percentile VaR Fix (prerequisite)
+
+### Rationale
+
+The `percentile()` implementation in `RiskTreeKnowledgeBase` and
+`calculateQuantiles()`/`findQuantileLoss()` in `LECGenerator` use
+`outcomeCount.values.sum` (count of occurring trials only) as their
+denominator. This computes **conditional** percentiles — P_p(Loss | occurrence) —
+which silently diverges from the industry-standard **unconditional**
+interpretation (VaR): P_p(Loss) over all trials including non-occurring.
+
+The standard relationship between LEC and VaR is:
+
+    VaR_p = LEC⁻¹(1 − p)
+
+Since `probOfExceedance(t)` already correctly divides by `nTrials`
+(total), the percentile computation should be its inverse — walking
+the empirical CDF including the implicit zero-loss mass from
+non-occurring trials.
+
+The `lec(x, t)` computation is **not affected** by this fix — it
+delegates to `probOfExceedance`, which already uses the correct
+unconditional denominator.
+
+### T0.1 — Fix `RiskTreeKnowledgeBase.percentile()`
+
+**File:** `modules/server/src/main/scala/.../foladapter/RiskTreeKnowledgeBase.scala`
+
+**Current (broken):**
+```scala
+private def percentile(result: RiskResult, p: Double): Long =
+  val outcomes = result.outcomeCount
+  val totalTrials = outcomes.values.sum       // ← BUG: only occurring trials
+  ...
+  val target = totalTrials.toDouble * p
+```
+
+**Fix:** Use `result.nTrials` as the total and prepend the implicit
+zero-loss mass from non-occurring trials:
+
+```scala
+private def percentile(result: RiskResult, p: Double): Long =
+  val outcomes = result.outcomeCount
+  if outcomes.isEmpty then 0L
+  else
+    val implicitZeros = result.nTrials - outcomes.values.sum
+    val target = result.nTrials.toDouble * p
+    var cumulative = implicitZeros.toLong           // zero-loss mass
+    if cumulative.toDouble >= target then 0L        // percentile falls in non-occurring
+    else
+      outcomes.iterator
+        .find { case (loss, count) =>
+          cumulative += count
+          cumulative.toDouble >= target
+        }
+        .map(_._1)
+        .getOrElse(outcomes.lastKey)
+```
+
+For a risk with prob=0.10 and 1000 trials: implicitZeros=900,
+target(0.95)=950. Need 50 more from ~100 occurring trials →
+unconditional P95 = conditional P50. This is VaR₉₅.
+
+For a risk with prob=0.03: implicitZeros=970 > 950 → P95 = $0.
+Correct: the risk fires too rarely to register at the 95th percentile.
+
+**Tests updated:** Existing `RiskTreeKnowledgeBaseSpec` percentile suite
+assertions must be recalculated for the unconditional denominator.
+
+### T0.2 — Fix `LECGenerator.calculateQuantiles()`
+
+**File:** `modules/server/src/main/scala/.../simulation/LECGenerator.scala`
+
+Same fix pattern: use `result.nTrials` as the denominator, start
+cumulative count at `nTrials - outcomeCount.values.sum`.
+
+This affects the `quantiles` field in `LECCurveResponse` (REST API).
+**Breaking API change accepted** — no clients rely on this yet.
+
+### T0.3 — Fix `LECGenerator.findQuantileLoss()`
+
+**File:** `modules/server/src/main/scala/.../simulation/LECGenerator.scala`
+
+Same fix. This function backs the p99.5 tail-clipping for chart
+rendering.
+
+**Effect on chart tail clipping:** `findQuantileLoss(result, 0.995)`
+currently finds the conditional p99.5 — the loss at the 99.5th
+percentile of *occurring* trials only. After the fix, it finds the
+unconditional p99.5 over all trials:
+
+- **High-probability risks** (prob ≥ 0.80): Minimal difference.
+  implicitZeros is small relative to nTrials; the unconditional and
+  conditional p99.5 are nearly equal.
+
+- **Low-probability risks** (prob ≈ 0.10): The unconditional p99.5
+  shifts left (lower loss) because the zero-loss mass pushes most
+  of the CDF mass low. For a risk with prob=0.10, the unconditional
+  p99.5 ≈ conditional p95 (since 900 implicit zeros consume 90% of
+  the cumulative). This means the chart x-axis clips earlier — tight
+  around the meaningful part of the distribution rather than
+  extending to extreme outliers that only matter if the risk fires.
+
+- **Very-low-probability risks** (prob ≤ 0.005): The unconditional
+  p99.5 = $0, so `findQuantileLoss` returns `Some(0L)`. The chart
+  code falls back to `result.maxLoss` in this degenerate case.
+  Verify the caller handles this gracefully (it already passes
+  through `getOrElse(result.maxLoss)`).
+
+Net effect: charts for low-probability risks become tighter (less
+tail extension), which is actually more informative — the x-axis
+reflects the risk's real aggregate weight rather than its extreme
+conditional outliers.
+
+### T0.4 — Clean up dead variable in `generateVegaLiteSpec()`
+
+**File:** `modules/server/src/main/scala/.../simulation/LECGenerator.scala`
+
+`generateVegaLiteSpec` declares `val totalTrials = outcomes.values.sum`
+but never uses it for exceedance computation (it delegates to
+`result.probOfExceedance`). Remove the dead variable.
+
+### T0.5 — Update existing tests
+
+Existing tests affected:
+- `RiskTreeKnowledgeBaseSpec.scala` — percentile suite: recalculate
+  expected values using unconditional denominator (nTrials=5 in
+  fixture, with sparse outcomes)
+- `LECGenerator` tests (if any) — same pattern
+- Verify no other tests assert specific quantile values
+
+**Acceptance:**
+- All 3 `percentile`/`calculateQuantiles`/`findQuantileLoss` call
+  sites use `result.nTrials` as denominator
+- `sbt server/test` passes with updated assertions
+- P95 for a risk with prob=0.10 and nTrials=1000 equals the loss at
+  rank 950 of the full empirical CDF (including ~900 zeros)
+
+---
+
 ## TG-4 — Integration Tests
 
 ### T4.1 — KB builder tests
@@ -930,23 +1070,258 @@ Test cases:
 5. RuntimeModel validation: `model.validateAgainst(catalog)` returns `Right(())`
 6. Empty tree: model has only schema, no domain elements
 
+### Metric Semantics (2026-04-05)
+
+All percentile functions (`p95`, `p99`, `calculateQuantiles`,
+`findQuantileLoss`) compute **unconditional** (VaR) percentiles over
+all Monte Carlo trials, including non-occurring trials which contribute
+implicit $0 loss. This is the industry-standard interpretation.
+
+The relationship between LEC and VaR is: VaR_p = LEC⁻¹(1 − p).
+Since `probOfExceedance(t)` divides by `nTrials` (total), the
+percentile computation is its inverse — walking the empirical CDF
+with the implicit zero-loss mass prepended.
+
+| Metric | Denominator | Semantics |
+|--------|-------------|-----------|
+| `probOfExceedance(t)` | `nTrials` (total) | **Unconditional** P(Loss ≥ t) |
+| `lec(x, t)` (KB) | delegates to `probOfExceedance` | **Unconditional** |
+| `percentile(result, p)` (KB) | `nTrials` (total, incl. implicit zeros) | **Unconditional** VaR_p |
+| `p95(x)` / `p99(x)` (KB) | delegates to `percentile` | **Unconditional** VaR₉₅ / VaR₉₉ |
+| `calculateQuantiles` (LECGen) | `nTrials` (total, incl. implicit zeros) | **Unconditional** |
+| `findQuantileLoss` (LECGen) | `nTrials` (total, incl. implicit zeros) | **Unconditional** |
+| `gt_loss(a, b)` | N/A (comparison) | Pure `a > b` |
+| `gt_prob(a, b)` | N/A (comparison) | Pure `a > b` |
+| All structural predicates | N/A (tree lookups) | Deterministic |
+
 ### T4.2 — Endpoint integration tests
 
-**File:** `modules/server-it/src/test/scala/.../QueryEndpointSpec.scala` (new)
+**File:** `modules/server-it/src/test/scala/.../http/QueryEndpointSpec.scala` (new)
 
-Test cases:
-1. **Happy path:** Tree with known distributions. POST query. Assert
-   satisfied, proportion, matchingNodeIds.
-2. **Parse error:** Malformed query → 400 with `FolParseFailure` position
-3. **Unknown symbol:** `p96(x)` → 400 with `FolUnknownSymbol` available list
-4. **Empty range:** `portfolio(x)` on leaf-only tree → 200,
-   rangeSize = 0, satisfied = false
-5. **Unary query:** Answer variable `(y)` → matchingNodeIds has
-   portfolio IDs
-6. **Simulation not cached:** 409 with `SimulationNotCached` detail message
-7. **Evaluation failure:** Catch-all → 500 with `FolEvaluationFailure`
+#### Test tree
 
-**Acceptance:** `sbt serverIt/test` passes all 7.
+All endpoint tests operate on a single bootstrapped workspace with the
+following tree structure. Parameters are chosen so that threshold values
+used in queries discriminate between the two leaves based on their
+defined distribution ranges — not on arbitrary round numbers.
+
+```
+IT Portfolio (portfolio, root)
+├── Cyber Attack (leaf)
+│   probability: 0.80
+│   lognormal 90% CI: [$10,000 – $500,000]
+│   → VaR₉₅ well above CI floor: with prob=0.80, only 20% implicit
+│     zeros, so unconditional P95 ≈ conditional P93.75 — still deep
+│     inside the CI range, well above $10K.
+│   → lec(·, 0) ≈ 0.80 (occurrence frequency)
+│
+└── Hardware Failure (leaf)
+    probability: 0.80
+    lognormal 90% CI: [$100 – $5,000]
+    → VaR₉₅ near CI ceiling (~$4K): same logic, unconditional P95 ≈
+      conditional P93.75. With CI ceiling at $5K, VaR₉₅ sits below.
+    → lec(·, 0) ≈ 0.80 (occurrence frequency)
+
+Discrimination threshold: $8,000 sits between the two distributions'
+VaR₉₅ values, separating Cyber Attack (exceeds) from Hardware Failure
+(below).
+
+Both leaves have prob=0.80 → with nTrials=10 (integration harness
+default), ~8 trials fire per leaf, implicitZeros ≈ 2. The 20% zero
+mass shifts the unconditional P95 slightly below the conditional P95
+but does not change the discrimination: Cyber Attack's distribution
+floor ($10K) keeps its VaR₉₅ well above $8K, and Hardware Failure's
+ceiling ($5K) keeps its VaR₉₅ well below.
+```
+
+#### Test cases
+
+##### 1. Happy path — VaR₉₅ tail screening
+**Query:** `Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 8000))`
+
+**Domain meaning:** Screens which leaves have VaR₉₅ above $8K — i.e.,
+in at least 5% of all Monte Carlo scenarios (including non-occurring),
+the loss exceeds $8K. Cyber Attack's distribution floor ($10K) ensures
+its VaR₉₅ exceeds $8K. Hardware Failure's ceiling ($5K) ensures its
+VaR₉₅ falls below. The $8K threshold sits in the gap between the two.
+
+**Exercises:** Full pipeline: parse → sort inference (`p95`: Asset → Loss,
+`gt_loss`: (Loss, Loss), literal `8000` validated as `IntLiteral`) →
+`p95` dispatch via `percentile(result, 0.95)` → `gt_loss` comparison.
+
+**Expected:** rangeSize=2, satisfyingCount ≥ 1 (at least Cyber Attack),
+proportion ≥ 0.5, satisfied=true. matchingNodeIds contains "Cyber Attack".
+Assert structural properties (rangeSize, queryEcho, proportion ∈ [0,1],
+matchingNodeIds ⊆ allNodeIds) without depending on exact PRNG outcomes
+beyond the CI-guaranteed discrimination.
+
+##### 2. Parse error — malformed query syntax
+**Query:** `Q[>=]^{2/3 x (leaf(x))`
+
+**Domain meaning:** N/A — syntactically invalid (missing `}`).
+
+**Expected:** HTTP 400, error code `PARSE_ERROR`, response body contains
+position information.
+
+##### 3. Unknown symbol — p96 not in catalog
+**Query:** `Q[>=]^{2/3} x (leaf(x), gt_loss(p96(x), 5000))`
+
+**Domain meaning:** N/A — `p96` is not declared in the TypeCatalog
+(only p95, p99, lec are available).
+
+**Exercises:** Bind phase detects unknown function symbol.
+
+**Expected:** HTTP 400, error code `UNKNOWN_SYMBOL`, response body includes
+available function list.
+
+##### 4. Contradictory scope — structural impossibility
+**Query:** `Q[>=]^{1/1} x (leaf(x), portfolio(x))`
+
+**Domain meaning:** Structural impossibility — no node can be both leaf
+and portfolio. Deterministic regardless of simulation values.
+
+**Exercises:** Engine evaluates scope for each range element, finds zero
+matches.
+
+**Expected:** HTTP 200, rangeSize=2, satisfyingCount=0, proportion=0.0,
+satisfied=false, matchingNodeIds=[].
+
+##### 5. LEC exceedance probability — unconditional exposure check
+**Query:** `Q[>=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000), 0.3))`
+
+**Domain meaning:** Checks whether most risks have >30% unconditional
+probability of loss exceeding $1K. `lec(x, 1000)` = P(Loss ≥ $1K) over
+all trials. For Cyber Attack: prob=0.80, all conditional outcomes exceed
+$1K (CI floor=$10K), so lec ≈ 0.80 — trivially above 0.3. For Hardware
+Failure: prob=0.80, CI range $100–$5K, so lec(·, 1000) depends on what
+fraction of conditional outcomes exceed $1K — likely above 0.3 given the
+lognormal shape.
+
+**Exercises:** `lec` function (2-arg: Asset × Loss → Probability), `gt_prob`
+predicate, Probability literal binding (`0.3` → `FloatLiteral`).
+
+**Expected:** HTTP 200, proportion > 0.0, rangeSize=2.
+
+##### 6. lec(x, 0) as occurrence frequency proxy
+**Query:** `Q[>=]^{1/2} x (leaf(x), gt_prob(lec(x, 0), 0.3))`
+
+**Domain meaning:** Pure frequency screen. `lec(x, 0)` = P(Loss ≥ 0) =
+P(occurrence), since all occurring trials produce non-negative loss.
+Both leaves have prob=0.80, well above 0.3. This pattern isolates
+occurrence frequency from loss magnitude — useful for compound queries
+that separate the frequency and severity dimensions.
+
+**Exercises:** `lec` with threshold=0 (edge case), Loss literal `0`.
+
+**Expected:** HTTP 200, proportion=1.0 (both leaves satisfy), satisfied=true.
+
+##### 7. Conjunction — high-frequency AND high-severity
+**Query:** `Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 5000) /\ gt_prob(lec(x, 0), 0.3))`
+
+**Domain meaning:** Identifies risks that are simultaneously high-frequency
+(occurrence > 30%) AND high-severity (VaR₉₅ > $5K). `lec(x, 0)` isolates
+the frequency dimension; `p95(x)` captures the unconditional severity
+tail. Cyber Attack satisfies both (prob=0.80, VaR₉₅ >> $5K). Hardware
+Failure satisfies frequency (prob=0.80) but not severity (VaR₉₅ ~$4K
+< $5K). So 1 of 2 satisfies.
+
+**Exercises:** `/\` (And) connective combining `p95` + `lec` + `gt_loss` +
+`gt_prob`.
+
+**Expected:** HTTP 200, at least 1 leaf satisfies, proportion ≥ 0.5.
+
+##### 8. Disjunction — severity OR frequency flag
+**Query:** `Q[>=]^{1/1} x (leaf(x), gt_loss(p95(x), 8000) \/ gt_prob(lec(x, 0), 0.5))`
+
+**Domain meaning:** Flags risks problematic on EITHER dimension: high VaR₉₅
+(> $8K) OR high occurrence frequency (> 50%). Cyber Attack satisfies via
+severity (VaR₉₅ >> $8K). Hardware Failure satisfies via frequency
+(lec(·, 0) ≈ 0.80 > 0.5). Both qualify through different paths.
+
+**Exercises:** `\/` (Or) connective.
+
+**Expected:** HTTP 200, proportion=1.0, satisfied=true.
+
+##### 9. Implication — distribution consistency rule
+**Query:** `Q[>=]^{1/1} x (leaf(x), gt_loss(p95(x), 8000) ==> gt_prob(lec(x, 5000), 0.1))`
+
+**Domain meaning:** Consistency check: IF a risk has VaR₉₅ > $8K, THEN it
+should also show ≥ 10% unconditional probability of exceeding $5K. A
+violation would indicate implausible distribution shape. Cyber Attack:
+antecedent true (VaR₉₅ >> $8K), consequent true (lec(·, 5000) ≈ 0.80
+> 0.1). Hardware Failure: antecedent false (VaR₉₅ < $8K), implication
+true vacuously.
+
+**Exercises:** `==>` (Implies) connective.
+
+**Expected:** HTTP 200, proportion=1.0, satisfied=true.
+
+##### 10. Negation — complement screening
+**Query:** `Q[>=]^{1/2} x (leaf(x), ~gt_loss(p95(x), 8000))`
+
+**Domain meaning:** Complement of test 1 — identifies leaves with VaR₉₅
+≤ $8K. In this tree, Hardware Failure qualifies (CI ceiling=$5K) while
+Cyber Attack does not (CI floor=$10K).
+
+**Exercises:** `~` (Not) prefix in scope formula.
+
+**Expected:** HTTP 200, proportion=0.5, satisfied=true.
+
+##### 11. Unary query — answer variable sub-portfolio screening
+**Query:** `Q[>=]^{1/2} x (leaf_descendant_of(x, y), gt_loss(p95(x), 8000))(y)`
+
+**Domain meaning:** "Which portfolios have ≥ half of their leaf descendants
+with VaR₉₅ above $8K?" Answer variable `y` ranges over all domain
+elements; the output reports those where the proportion threshold is met.
+For IT Portfolio, leaf descendants are {Cyber Attack, Hardware Failure} —
+1 of 2 satisfies → proportion=0.5 → IT Portfolio qualifies.
+
+**Exercises:** `leaf_descendant_of` (transitive closure + leaf filter),
+answer variable `(y)`, unary query mode.
+
+**Expected:** HTTP 200, matchingNodeIds contains the root portfolio node.
+
+##### 12. Portfolio-level aggregation
+**Query:** `Q[>=]^{1/1} x (portfolio(x), gt_loss(p95(x), 100))`
+
+**Domain meaning:** Asserts the portfolio-level VaR₉₅ exceeds a baseline
+threshold. The portfolio's outcomes are trial-wise sums of children (via
+`RiskResult.combine`). With both children having prob=0.80, in most trials
+at least one fires, so the aggregated VaR₉₅ easily exceeds $100. Tests
+the portfolio aggregation path.
+
+**Exercises:** `portfolio` range predicate with `p95` evaluated on
+aggregated simulation results.
+
+**Expected:** HTTP 200, rangeSize=1, proportion=1.0, satisfied=true.
+
+##### 13. Tolerance bracket — tight About quantifier
+**Query:** `Q[~]^{1/2}[0.05] x (leaf(x), gt_loss(p95(x), 8000))`
+
+**Domain meaning:** Same discrimination as test 1, but using `About`
+quantifier with 5% tolerance. Exactly 1 of 2 leaves satisfies →
+proportion=0.5. The `About` check: |0.5 − 0.5| ≤ 0.05 → true.
+
+**Exercises:** `~` (About) quantifier operator, explicit tolerance
+bracket `[0.05]` overriding default 0.1.
+
+**Expected:** HTTP 200, proportion=0.5, satisfied=true.
+
+##### 14. Simulation not cached — deterministic 409
+**Approach:** Custom failing `RiskResultResolver` layer injected into an
+in-memory server. Ensures the `SimulationNotCached(treeId)` error path
+is tested without depending on cache state timing.
+
+**Expected:** HTTP 409, error code `SIMULATION_REQUIRED`, detail message
+includes tree ID.
+
+##### 15. Evaluation failure — deterministic 500
+**Approach:** Custom failing `QueryService` layer injected into an
+in-memory server. Returns `FolEvaluationFailure` for any query.
+
+**Expected:** HTTP 500, error code `EVALUATION_FAILED`.
+
+**Acceptance:** `sbt serverIt/test` passes all 15.
 
 ---
 
@@ -1023,8 +1398,10 @@ Week 3:  TG-1c (model augmentation — delivered in 0.2.0,       ✅ DONE
            LiteralValue pipeline, new error hierarchy
            777 tests passing (391 common + 386 server)
 
-Week 4:  TG-4 (tests, can overlap with TG-2 tail)
-         T4.1 (once T2.4 done) → T4.2 (once T2.6 done)
+Week 4:  TG-0 (VaR percentile fix — prerequisite)
+         T0.1 → T0.2 → T0.3 → T0.4 → T0.5
+         TG-4 (tests)
+         T4.1 (once T0.5 done) → T4.2 (once T2.6 done)
 
 Week 5:  TG-3 (frontend)
          T3.1 → T3.1b (client-side parse) → T3.2 → T3.3
@@ -1044,6 +1421,7 @@ Week 6:  TG-5 (polish + docs)
 | G1b | TG-1b | ✅ fol-engine: 868 tests pass; `VagueSemantics.evaluateTyped()` returns `EvaluationOutput[Value]` via `fol.typed` many-sorted pipeline; legacy `evaluate[D]()` preserved; typed DSL removed (ADR-011); `RelationName` opaque type; cross-compiled JVM+JS; `0.3.0-SNAPSHOT` integrated in register `common` crossProject; no `scala.util.Random`; `commons-math3` removed |
 | G1c | TG-1c | ✅ Legacy: `ModelAugmenter[D]` on `evaluate[D]()`/`holds[D]()`. Current: `RuntimeDispatcher` + `TypeCatalog` + `VagueSemantics.evaluateTyped()` (868 tests including 9 typed-pipeline tests) |
 | G2 | TG-2 | `curl -X POST .../query -d '{"query":"Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))"}'` returns valid JSON |
-| G3 | TG-4 | `sbt serverIt/test` passes all 7 integration tests |
+| G0 | TG-0 | `sbt server/test` passes with unconditional VaR percentiles; `percentile()`, `calculateQuantiles()`, `findQuantileLoss()` all use `nTrials` denominator |
+| G3 | TG-4 | `sbt serverIt/test` passes all 15 integration tests; metric semantics documented |
 | G4 | TG-3 | Type query → result card → tree highlights → LEC overlay |
 | G5 | TG-5 | ADR-028 accepted; WORKING-INSTRUCTIONS updated; register domain usage docs complete |

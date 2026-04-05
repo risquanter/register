@@ -3,6 +3,7 @@ package com.risquanter.register.foladapter
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LossDistribution, RiskResult}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.simulation.LECGenerator
 
 import fol.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, RuntimeDispatcher, Value, LiteralValue}
 
@@ -69,27 +70,19 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
 
   // ── Percentile computation ─────────────────────────────────────────
 
-  /** Compute the loss value at a given percentile from the empirical distribution.
+  /** Compute the unconditional VaR at a given percentile.
     *
-    * Walks the sorted `outcomeCount: TreeMap[Loss, Int]` building a cumulative
-    * frequency ratio. Returns the first loss whose cumulative proportion ≥ p.
+    * Delegates to `LECGenerator.unconditionalQuantile` — the single
+    * canonical implementation of Q(p) = X_{(⌈Np⌉)} over the full
+    * empirical CDF including implicit zero-loss mass from non-occurring
+    * trials.
     *
-    * @param result Simulation result with outcome counts
+    * @param result Simulation result (carries nTrials and sparse outcomeCount)
     * @param p      Percentile as fraction in [0.0, 1.0]
-    * @return Loss value at the given percentile, or 0L if no outcomes
+    * @return Loss value at the unconditional percentile, or 0L if empty
     */
   private def percentile(result: RiskResult, p: Double): Long =
-    val outcomes = result.outcomeCount
-    val totalTrials = outcomes.values.sum
-    if outcomes.isEmpty || totalTrials == 0 then 0L
-    else
-      val target = totalTrials.toDouble * p
-      outcomes.iterator
-        .scanLeft((0L, 0L)) { case ((_, cum), (loss, count)) => (loss, cum + count) }
-        .drop(1)
-        .find(_._2.toDouble >= target)
-        .map(_._1)
-        .getOrElse(outcomes.lastKey)
+    LECGenerator.unconditionalQuantile(result, p)
 
   // ── TypeCatalog ────────────────────────────────────────────────────
 

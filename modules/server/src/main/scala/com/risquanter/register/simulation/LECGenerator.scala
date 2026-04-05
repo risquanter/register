@@ -21,48 +21,52 @@ import scala.collection.immutable.TreeMap
   */
 object LECGenerator {
   
-  /** Calculate key quantiles from simulation outcomes
-    * 
+  /** Compute the unconditional VaR at a given percentile.
+    *
+    * Returns Q(p) = X_{(⌈Np⌉)} over the full empirical CDF, including
+    * implicit zero-loss observations from non-occurring trials.
+    *
+    * This is the industry-standard unconditional percentile (VaR):
+    * the loss value below which a fraction p of ALL Monte Carlo trials
+    * fall — not just those where the risk event fired.
+    *
+    * @param result RiskResult carrying nTrials and sparse outcomeCount
+    * @param p      Percentile as fraction in [0.0, 1.0]
+    * @return Loss value at the unconditional percentile, or 0L if empty / nTrials=0
+    */
+  def unconditionalQuantile(result: RiskResult, p: Double): Long =
+    val outcomes = result.outcomeCount
+    if outcomes.isEmpty || result.nTrials == 0 then 0L
+    else
+      val implicitZeros = result.nTrials.toLong - outcomes.values.sum.toLong
+      val target = result.nTrials.toDouble * p
+      if implicitZeros >= target then 0L
+      else
+        outcomes.iterator
+          .scanLeft((0L, implicitZeros)) { case ((_, cum), (loss, count)) =>
+            (loss, cum + count)
+          }
+          .drop(1)
+          .find(_._2 >= target)
+          .map(_._1)
+          .getOrElse(outcomes.lastKey)
+
+  /** Calculate unconditional VaR quantiles from simulation outcomes.
+    *
     * @param result Risk simulation result with outcome counts
-    * @return Map of quantile names to loss values (in millions)
+    * @return Map of quantile names to loss values
     *         Keys: "p50" (median), "p90", "p95", "p99"
     */
-  def calculateQuantiles(result: RiskResult): Map[String, Double] = {
-    val outcomes = result.outcomeCount
-    if (outcomes.isEmpty || outcomes.values.sum == 0) Map.empty
-    else {
-      val totalTrials = outcomes.values.sum
-      
-      // Build cumulative distribution
-      var cumulativeCount = 0L
-      val cumulativeProbs = outcomes.map { case (loss, count) =>
-        cumulativeCount += count
-        loss -> (cumulativeCount.toDouble / totalTrials)
-      }
-      
-      // Find quantiles
-      def findQuantile(p: Double): Double = {
-        cumulativeProbs.find(_._2 >= p) match {
-          case Some((loss, _)) => loss.toDouble
-          case None => cumulativeProbs.lastOption.map(_._1.toDouble).getOrElse(0.0)
-        }
-      }
-      
-      Map(
-        "p50" -> findQuantile(0.50),
-        "p90" -> findQuantile(0.90),
-        "p95" -> findQuantile(0.95),
-        "p99" -> findQuantile(0.99)
-      )
-    }
-  }
+  def calculateQuantiles(result: RiskResult): Map[String, Double] =
+    if result.outcomeCount.isEmpty || result.nTrials == 0 then Map.empty
+    else Map(
+      "p50" -> unconditionalQuantile(result, 0.50).toDouble,
+      "p90" -> unconditionalQuantile(result, 0.90).toDouble,
+      "p95" -> unconditionalQuantile(result, 0.95).toDouble,
+      "p99" -> unconditionalQuantile(result, 0.99).toDouble
+    )
 
-  /** Find the loss value at a given percentile of the conditional distribution.
-    *
-    * Walks the sorted outcome histogram (TreeMap) and returns the loss value
-    * where the cumulative count reaches the target percentile. Only considers
-    * non-zero outcomes (conditional on event occurring), consistent with
-    * `calculateQuantiles`.
+  /** Find the unconditional VaR at a given percentile.
     *
     * Used to clip tick ranges to a meaningful percentile (e.g. p99.5) instead
     * of `maxLoss`, which is a single extreme outlier and stretches the x-axis
@@ -70,19 +74,12 @@ object LECGenerator {
     *
     * @param result     Simulation result with outcome histogram
     * @param percentile Target percentile in [0, 1] (e.g. 0.995 for p99.5)
-    * @return Loss value at the percentile, or None if no outcomes
+    * @return Loss value at the unconditional percentile, or None if no outcomes
     */
-  def findQuantileLoss(result: RiskResult, percentile: Double): Option[Long] = {
-    val outcomes = result.outcomeCount
-    val total = outcomes.values.sum.toLong
-    Option.when(total > 0) {
-      val target = (percentile * total).toLong
-      val cumSums = outcomes.valuesIterator.scanLeft(0L)(_ + _).drop(1)
-      cumSums.zip(outcomes.keysIterator)
-        .collectFirst { case (cum, loss) if cum >= target => loss }
-        .getOrElse(outcomes.lastKey)
+  def findQuantileLoss(result: RiskResult, percentile: Double): Option[Long] =
+    Option.when(result.nTrials > 0 && result.outcomeCount.nonEmpty) {
+      unconditionalQuantile(result, percentile)
     }
-  }
   
   /** Generate Vega-Lite JSON specification for exceedance curve visualization
     * 
@@ -96,7 +93,6 @@ object LECGenerator {
     val outcomes = result.outcomeCount
     if (outcomes.isEmpty || outcomes.values.sum == 0) None
     else {
-    val totalTrials = outcomes.values.sum
     
     // Sample points for large datasets
     val sampledOutcomes = if (outcomes.size > maxPoints) {

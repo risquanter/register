@@ -116,6 +116,23 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     RiskResult(nodeId = cyberId, outcomes = Map.empty, provenances = Nil)
   }
 
+  // Sparse result for unconditional VaR tests: nTrials=10, only 3 outcomes fire
+  // outcomeCount: {5000→1, 10000→1, 50000→1}, implicitZeros = 10 - 3 = 7
+  private val sparseCyberResult = withCfg(10) {
+    RiskResult(nodeId = cyberId, outcomes = Map(1 -> 5000L, 2 -> 10000L, 3 -> 50000L), provenances = Nil)
+  }
+  private val sparseHardwareResult = withCfg(10) {
+    RiskResult(nodeId = hardwareId, outcomes = Map(1 -> 500L, 2 -> 1000L, 3 -> 2000L), provenances = Nil)
+  }
+  private val sparseRootResult = withCfg(10) {
+    RiskResult(nodeId = rootId, outcomes = Map(1 -> 5500L, 2 -> 11000L, 3 -> 52000L), provenances = Nil)
+  }
+  private val sparseItResult = withCfg(10) {
+    RiskResult(nodeId = itId, outcomes = Map(1 -> 5500L, 2 -> 11000L, 3 -> 52000L), provenances = Nil)
+  }
+  private val sparseResults: Map[NodeId, RiskResult] =
+    Map(rootId -> sparseRootResult, itId -> sparseItResult, cyberId -> sparseCyberResult, hardwareId -> sparseHardwareResult)
+
   // ── Knowledge base under test ──────────────────────────────────────
 
   private val kb = RiskTreeKnowledgeBase(tree, results)
@@ -139,6 +156,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
     suite("RiskTreeKnowledgeBase")(
       percentileSuite,
+      unconditionalVarSuite,
       predicateSuite,
       functionSuite,
       domainSuite,
@@ -187,6 +205,121 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     test("percentile monotonicity: p95 <= p99") {
       val p95 = kb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
       val p99 = kb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
+      for
+        v95 <- p95
+        v99 <- p99
+      yield (v95, v99) match
+        case (LiteralValue.IntLiteral(l95), LiteralValue.IntLiteral(l99)) =>
+          assertTrue(l95 <= l99)
+        case other =>
+          throw MatchError(other)
+    }
+  )
+
+  // ── Unconditional VaR suite (sparse results) ──────────────────────
+
+  private val unconditionalVarSuite = suite("unconditional VaR (sparse results)")(
+    test("p95 with sparse outcomes — target in non-zero range") {
+      // sparseCyberResult: nTrials=10, outcomes = {5000→1, 10000→1, 50000→1}
+      // outcomeCount: {5000→1, 10000→1, 50000→1}, implicitZeros = 10 - 3 = 7
+      // target = 10 * 0.95 = 9.5
+      // cumulative starts at 7 (zeros), then 8, 9, 10
+      // Walk: 5000→cum 8, 10000→cum 9, 50000→cum 10
+      // First where cum >= 9.5 is 50000 (cum=10)
+      val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
+      val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
+      assertTrue(result == Right(LiteralValue.IntLiteral(50000L)))
+    },
+    test("p95 on sparse hardware — walks past zero mass into tail") {
+      // Hardware: outcomeCount {500→1, 1000→1, 2000→1}, implicitZeros=7
+      // target = 10 * 0.95 = 9.5, cum: 7, 8, 9, 10
+      // Walk: 500→8, 1000→9, 2000→10 → first >= 9.5 is 2000
+      val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
+      val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Hardware")))
+      assertTrue(result == Right(LiteralValue.IntLiteral(2000L)))
+    },
+    test("p99 with low occurrence returns last outcome") {
+      // sparseCyberResult: nTrials=10, implicitZeros=7
+      // target = 10 * 0.99 = 9.9
+      // Walk: 5000→8, 10000→9, 50000→10 → first >= 9.9 is 50000
+      val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
+      val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
+      assertTrue(result == Right(LiteralValue.IntLiteral(50000L)))
+    },
+    test("p95 with very sparse results returns 0 — target deep in zero mass") {
+      // nTrials=100, only 2 outcomes → implicitZeros = 98
+      // target = 100 * 0.95 = 95.0
+      // cumulative starts at 98 >= 95.0 → 0L
+      val verySparse = withCfg(100) {
+        RiskResult(nodeId = cyberId, outcomes = Map(1 -> 10000L, 2 -> 50000L), provenances = Nil)
+      }
+      val sparseKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, verySparse))
+      val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
+      assertTrue(result == Right(LiteralValue.IntLiteral(0L)))
+    },
+    test("single outcome with many implicit zeros — p95 in zero mass, p99 in zero mass") {
+      // nTrials=100, 1 outcome {1→42000} → outcomeCount={42000→1}, implicitZeros=99
+      // p95 target=95.0, 99 >= 95 → 0L
+      // p99 target=99.0, 99 >= 99 → 0L (boundary: 99.0 >= 99.0 is true)
+      val single = withCfg(100) {
+        RiskResult(nodeId = cyberId, outcomes = Map(1 -> 42000L), provenances = Nil)
+      }
+      val singleKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, single))
+      val p95 = singleKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
+      val p99 = singleKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
+      assertTrue(
+        p95 == Right(LiteralValue.IntLiteral(0L)),
+        p99 == Right(LiteralValue.IntLiteral(0L))
+      )
+    },
+    test("all outcomes identical — single bin in outcomeCount") {
+      // nTrials=10, 5 outcomes all = 7000 → outcomeCount={7000→5}, implicitZeros=5
+      // p95 target=9.5, cum starts at 5, walk: {7000→5} → cum=10. 10 >= 9.5 → 7000L
+      // p99 target=9.9, same → 7000L
+      val identical = withCfg(10) {
+        RiskResult(nodeId = cyberId, outcomes = Map(1 -> 7000L, 2 -> 7000L, 3 -> 7000L, 4 -> 7000L, 5 -> 7000L), provenances = Nil)
+      }
+      val identKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, identical))
+      val p95 = identKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
+      val p99 = identKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
+      assertTrue(
+        p95 == Right(LiteralValue.IntLiteral(7000L)),
+        p99 == Right(LiteralValue.IntLiteral(7000L))
+      )
+    },
+    test("exact boundary — implicitZeros == target at p95") {
+      // nTrials=20, 1 outcome → implicitZeros=19, p95 target=19.0
+      // 19.0 >= 19.0 → true → returns 0L (percentile is AT the boundary of zero mass)
+      // This is correct: 95% of trials have $0 loss = VaR₉₅ is $0
+      val boundary = withCfg(20) {
+        RiskResult(nodeId = cyberId, outcomes = Map(1 -> 30000L), provenances = Nil)
+      }
+      val bKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, boundary))
+      val p95 = bKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
+      assertTrue(p95 == Right(LiteralValue.IntLiteral(0L)))
+    },
+    test("just past boundary — implicitZeros just below target at p99") {
+      // nTrials=20, 1 outcome → implicitZeros=19, p99 target=19.8
+      // 19.0 < 19.8, walk: {30000→1} → cum=20. 20 >= 19.8 → 30000L
+      // Correct: 1 of 20 trials exceeds the 99th percentile → last outcome
+      val boundary = withCfg(20) {
+        RiskResult(nodeId = cyberId, outcomes = Map(1 -> 30000L), provenances = Nil)
+      }
+      val bKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, boundary))
+      val p99 = bKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
+      assertTrue(p99 == Right(LiteralValue.IntLiteral(30000L)))
+    },
+    test("lec is unaffected by sparse results — still unconditional") {
+      // sparseCyberResult: nTrials=10, outcomes = {5000, 10000, 50000}
+      // P(Loss >= 5000) = count(outcomes >= 5000) / nTrials = 3/10 = 0.3
+      val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
+      val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("lec"), List(assetVal("Cyber"), lossVal(5000L)))
+      assertTrue(result == Right(LiteralValue.FloatLiteral(0.3)))
+    },
+    test("monotonicity holds with sparse outcomes: p95 <= p99") {
+      val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
+      val p95 = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
+      val p99 = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
       for
         v95 <- p95
         v99 <- p99
