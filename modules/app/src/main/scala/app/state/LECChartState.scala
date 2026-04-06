@@ -67,8 +67,12 @@ final class LECChartState(
         else lecChartSpec.set(LoadState.Idle)
       case _ => () // No tree loaded — nothing to do
 
-  /** Fetch the LEC chart spec from the backend for the given node IDs. */
-  private def loadLECChart(nodeIds: Set[NodeId]): Unit =
+  /** Fetch the LEC chart spec from the backend for the given node IDs.
+    *
+    * Public to allow cross-component triggers (e.g. query result
+    * "View LEC" button in AnalyzeView — T3.5).
+    */
+  def loadLECChart(nodeIds: Set[NodeId]): Unit =
     (keySignal.now(), selectedTreeId.now()) match
       case (Some(key), Some(treeId)) =>
         getWorkspaceLECChartEndpoint((userIdAccessor(), key, treeId, nodeIds.toList)).loadInto(lecChartSpec)

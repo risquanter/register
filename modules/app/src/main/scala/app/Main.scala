@@ -18,7 +18,11 @@ object Main:
 
     val builderState = new TreeBuilderState
     val treeViewState = new TreeViewState(wsState.keySignal, () => wsState.currentUserId)
-    val analyzeQueryState = new AnalyzeQueryState
+    val analyzeQueryState = new AnalyzeQueryState(
+      keySignal = wsState.keySignal,
+      selectedTreeId = treeViewState.selectedTreeId.signal,
+      userIdAccessor = () => wsState.currentUserId
+    )
 
     // Global error state — safety net for errors with no per-view handler
     val globalError: Var[Option[GlobalError]] = Var(None)

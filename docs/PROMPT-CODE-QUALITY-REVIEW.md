@@ -124,6 +124,22 @@ Apply these throughout the review.  Any violation of a general principle is a va
 - Are stale comments or TODOs removed or updated?
 - Do `@see` links point to correct ADR sections and related types?
 
+### 10. Plan Fidelity & Decision Discipline
+
+This criterion catches agent-introduced deviations from approved plans.  It is a **MUST-FIX** by default — any unapproved deviation blocks the commit.
+
+- Was the implementation plan (IMPLEMENTATION-PLAN-*.md or equivalent) followed **faithfully**?
+  - For every API, signal, method signature, file placement, or naming convention specified in the plan: does the implementation match?
+  - If the plan specifies a concrete API shape (e.g. method parameters, return types, file locations), does the code match that shape?
+- Were there **any deviations** from the planned design — renames, omissions, additions, changed signatures, moved responsibilities?
+  - If yes: was the deviation **explicitly approved** by the project owner before implementation?
+  - If not approved: flag as **MUST-FIX** regardless of whether the deviation seems reasonable.
+- Were **decision points or ambiguities** escalated to the owner before the agent made a choice?
+  - The agent must not resolve ambiguities, make naming decisions, skip planned features, or add unplanned features without explicit owner approval.
+  - Any decision the agent made unilaterally that the plan left to the owner is a **MUST-FIX**.
+- Does the implementation include any **unsolicited changes** — renames, refactors, style changes, comment rewrites, API reshaping — that nobody asked for?
+  - Cosmetic changes to unchanged code (reformatting, rewording comments, renaming existing symbols) are findings unless explicitly requested.
+
 ---
 
 ### Output Format
@@ -143,6 +159,7 @@ Apply these throughout the review.  Any violation of a general principle is a va
 | 7  | Compiler Hygiene                   | PASS / …  |          |
 | 8  | Test Quality                       | PASS / …  |          |
 | 9  | Documentation                      | PASS / …  |          |
+| 10 | Plan Fidelity & Decision Discipline| PASS / …  |          |
 
 ### MUST-FIX Items
 (list or "None")

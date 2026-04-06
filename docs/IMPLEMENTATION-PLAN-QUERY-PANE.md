@@ -852,26 +852,36 @@ fires POST via `ZJS.loadInto`.
 
 **File:** `src/main/scala/.../state/AnalyzeQueryState.scala`
 
-Add a derived signal that calls `VagueQueryParser.parse()` on the current
-`queryInput` value (debounced ~300ms). Produces
-`Signal[Option[Either[fol.error.QueryError, ParsedQuery]]]` — `None` when
-input is empty, `Left(err)` on syntax error (with error position),
-`Right(parsed)` on valid parse. Note: the client uses the **library
-error type** (`fol.error.QueryError`) directly for UI display — no
-mapping to `FolQueryFailure` is needed on the JS side (that type
+Parse validation is **not** a continuously derived signal. Instead,
+`parseResult` is a `Var` set imperatively by `validateNow()`, triggered
+by:
+- **Blur** (always) — textarea loses focus
+- **Run / Ctrl+Enter** — `executeQuery()` validates before submitting
+- **Keystroke debounce (300ms)** — only when the "Instant validation"
+  checkbox is enabled
+
+Produces `Var[Option[Either[fol.error.QueryError, ParsedQuery]]]` —
+`None` when not yet validated or input is empty, `Left(err)` on syntax
+error, `Right(parsed)` on valid parse. Note: the client uses the
+**library error type** (`fol.error.QueryError`) directly for UI display
+— no mapping to `FolQueryFailure` is needed on the JS side (that type
 exists only for HTTP dispatch on the server).
 
-The `AnalyzeView` uses this signal to:
-- Show/hide inline syntax error message with position indicator
-- Disable the Run button when parse fails
-- Optionally highlight the error position in the textarea
+The `AnalyzeView` adds:
+- An "Instant validation" checkbox (`queryState.instantValidate`)
+- `onBlur` handler on the textarea calling `queryState.validateNow()`
+- Debounced keystroke stream (300ms) filtered by `instantValidate`
+- Inline parse error display from `queryState.parseError` signal
+- Run button disabled when executing or input empty (not gated on parse
+  validity — `executeQuery()` validates inline before submitting)
 
 This is the **client-side validation boundary** per ADR-001 §3 — parsing
-at the input edge gives instant feedback. The server re-parses
-authoritatively via `QueryRequest.resolve()` in the controller.
+at the input edge gives feedback. The server re-parses authoritatively
+via `QueryRequest.resolve()` in the controller.
 
-**Acceptance:** Typing a malformed query shows inline error instantly;
-typing a valid query clears the error and enables Run.
+**Acceptance:** Typing a malformed query and blurring (or enabling instant
+validation) shows inline error; typing a valid query clears the error.
+Run validates before submitting.
 
 ### T3.2 — Add `QueryResultCard`
 
@@ -905,10 +915,12 @@ Add `node-query-matched` CSS class to matching nodes based on
 
 ### T3.5 — Wire "View LEC" cross-link
 
-**File:** `src/main/scala/.../views/QueryResultCard.scala`
+**File:** `src/main/scala/.../views/AnalyzeView.scala`
 
-"View LEC for N matching nodes" button sets `lecChartState.chartNodeIds`
-and triggers chart load.
+"View LEC for N matching nodes" button in the query actions row sets
+`lecChartState.chartNodeIds` and triggers chart load. Placed in
+`AnalyzeView` (not `QueryResultCard`) because the card is a pure display
+component (ADR-019 Pattern 1) with no access to `chartState`.
 
 **Acceptance:** Clicking loads LEC overlay for matching nodes.
 

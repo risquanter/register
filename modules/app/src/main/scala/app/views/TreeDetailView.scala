@@ -11,10 +11,14 @@ import com.risquanter.register.domain.data.iron.NodeId
   *
   * Renders the full node structure (portfolios + leaves) with
   * expand/collapse controls on portfolio nodes and click-to-select
-  * on any node (preparing for Phase F LEC wiring).
+  * on any node. Nodes matching the last query are highlighted with
+  * the `node-query-matched` CSS class (ADR-028 / T3.4).
   *
   * Pure derived view — owns no state (ADR-019 Pattern 4).
   * Receives `TreeViewState` as constructor arg (Pattern 2).
+  *
+  * @param state             Tree navigation and chart state.
+  * @param queryMatchedNodes Signal of node IDs matching the active query.
   */
 object TreeDetailView:
 
@@ -36,14 +40,17 @@ object TreeDetailView:
 
   // ── Public API ────────────────────────────────────────────────
 
-  def apply(state: TreeViewState): HtmlElement =
+  def apply(
+    state: TreeViewState,
+    queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty)
+  ): HtmlElement =
     div(
       cls := "tree-detail-view",
       child <-- state.selectedTree.signal.map {
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
         case LoadState.Failed(msg) => renderError(msg)
-        case LoadState.Loaded(tree) => renderTree(tree, state)
+        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes)
       }
     )
 
@@ -54,7 +61,7 @@ object TreeDetailView:
     div(cls := "tree-detail-error", p(cls := "error-message", s"Failed: $message"))
 
   /** Render the full tree from a RiskTree domain object. */
-  private def renderTree(tree: RiskTree, state: TreeViewState): HtmlElement =
+  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]]): HtmlElement =
     // Build children lookup: parentId → child nodes
     val childrenOf: Map[Option[NodeId], Seq[RiskNode]] =
       tree.nodes.groupBy(_.parentId)
@@ -72,7 +79,7 @@ object TreeDetailView:
         case Some(root) =>
           div(
             cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, state, prefix = "", isLast = true, isRoot = true)
+            renderNode(root, childrenOf, state, queryMatchedNodes, prefix = "", isLast = true, isRoot = true)
           )
         case None =>
           div(cls := "tree-detail-error", p("Root node not found"))
@@ -83,6 +90,7 @@ object TreeDetailView:
     node: RiskNode,
     childrenOf: Map[Option[NodeId], Seq[RiskNode]],
     state: TreeViewState,
+    queryMatchedNodes: Signal[Set[NodeId]],
     prefix: String,
     isLast: Boolean,
     isRoot: Boolean
@@ -94,14 +102,16 @@ object TreeDetailView:
     val isExpanded: Signal[Boolean] = state.expandedNodes.signal.map(_.contains(nodeId))
     val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeId))
     val isChartSelected: Signal[Boolean] = state.chartNodeIds.map(_.contains(nodeId))
+    val isQueryMatched: Signal[Boolean] = queryMatchedNodes.map(_.contains(nodeId))
 
-    val lineCls: Signal[String] = isSelected.combineWith(isChartSelected).map { (sel, chart) =>
-      (sel, chart) match
-        case (true, true)   => "tree-detail-inline node-selected node-chart-selected"
-        case (true, false)  => "tree-detail-inline node-selected"
-        case (false, true)  => "tree-detail-inline node-chart-selected"
-        case (false, false) => "tree-detail-inline"
-    }
+    val lineCls: Signal[String] =
+      isSelected.combineWith(isChartSelected, isQueryMatched).map { (sel, chart, qMatch) =>
+        val base = "tree-detail-inline"
+        val s = if sel then " node-selected" else ""
+        val c = if chart then " node-chart-selected" else ""
+        val q = if qMatch then " node-query-matched" else ""
+        s"$base$s$c$q"
+      }
 
     val connector = if isRoot then "" else if isLast then "└── " else "├── "
     val branchText = s"$prefix$connector"
@@ -156,7 +166,7 @@ object TreeDetailView:
           display <-- isExpanded.map(if _ then "block" else "none"),
           children.toList.zipWithIndex.map { case (c, idx) =>
             val childIsLast = idx == children.size - 1
-            renderNode(c, childrenOf, state, childPrefix, childIsLast, isRoot = false)
+            renderNode(c, childrenOf, state, queryMatchedNodes, childPrefix, childIsLast, isRoot = false)
           }
         )
       else
