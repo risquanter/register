@@ -887,23 +887,78 @@ trivy image register-server:prod
 
 ## Quick Reference
 
+### Lifecycle
+
 ```bash
-# Start everything
-docker compose --profile persistence up -d
+# Start (in-memory backend)
+docker compose up -d register-server
 
-# View logs
-docker compose logs -f
+# Start (Irmin persistence)
+docker compose --profile persistence up -d register-server irmin
 
-# Check health
-curl http://localhost:8090/health
-curl -X POST http://localhost:9080/graphql -H "Content-Type: application/json" -d '{"query": "{ __typename }"}'
-
-# Run tests
-./docs/test/run-tests.sh
-
-# Stop everything
+# Stop (keep data)
 docker compose down
 
-# Remove all data
+# Stop (destroy Irmin data)
 docker compose down -v
+
+# Teardown everything (all profiles)
+docker compose --profile persistence --profile frontend --profile observability down -v
+```
+
+### Restart after image rebuild
+
+```bash
+# Compose detects the new image and recreates the container automatically
+docker compose up -d register-server
+
+# With Irmin
+docker compose --profile persistence up -d register-server irmin
+```
+
+### Rebuild images
+
+Each image must be rebuilt separately when its inputs change.
+See the linked sections for full context and prerequisites.
+
+| Image | When to rebuild | Command | Details |
+|-------|-----------------|---------|---------|
+| `local/graalvm-builder:21` | fol-engine changes, GraalVM/sbt version bump | `docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..` | [Builder base](#one-time-setup-builder-base-image) |
+| `register-server:prod` | Server or common source changes | `docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod .` | [Register server](#standalone-docker) |
+| `local/frontend:dev` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:dev .` | [Frontend SPA](#standalone-docker-1) |
+| `local/irmin-prod:3.11` | Irmin version changes | `docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11 containers/prod/` | [Irmin server](#irmin-graphql-server-persistence-layer) |
+| `local/irmin-builder:3.11` | OCaml/Irmin version changes | `docker build -f containers/builders/Dockerfile.irmin-builder -t local/irmin-builder:3.11 containers/builders/` | [Irmin builder](#one-time-setup-irmin-builder-base-image) |
+
+**Typical rebuild after server code changes** (fol-engine unchanged):
+```bash
+docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod . \
+  && docker compose up -d register-server
+```
+
+**Rebuild after fol-engine changes** (must rebuild builder base first):
+```bash
+docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 .. \
+  && docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod . \
+  && docker compose up -d register-server
+```
+
+### Logs & health
+
+```bash
+docker compose logs -f                          # all services
+docker compose logs -f register-server          # server only
+curl http://localhost:8090/health               # API health
+curl http://localhost:8091/health               # probe health
+curl -s -X POST http://localhost:9080/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query":"{ __typename }"}'               # Irmin health
+```
+
+### Tests
+
+```bash
+sbt test                                        # all (common + server)
+sbt commonJVM/test                              # common only
+sbt server/test                                 # server only
+sbt app/fastLinkJS                              # frontend compile check
 ```

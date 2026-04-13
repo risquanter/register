@@ -40,11 +40,15 @@ RUN wget -q "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${
 RUN sbt --version
 
 # ---- Local SNAPSHOT libraries -----------------------------------------------
-# fol-engine (com.risquanter:fol-engine) is a sibling project not published to
-# any public registry. Build it from source and publishLocal so that
-# Dockerfile.register-prod's dependency layer resolves it from ~/.ivy2/local.
-# Rebuild this base image whenever fol-engine changes.
-# Build context must be the parent of both projects (see build command below).
+# These are sibling projects not published to any public registry.
+# They must be publishLocal'd in dependency order before fol-engine.
+# Build context must be the parent of all sibling projects (see build command).
+
+# hdr-rng (com.risquanter:hdr-rng) — required by fol-engine
+COPY hdr-rng/ /tmp/hdr-rng/
+RUN cd /tmp/hdr-rng && sbt publishLocal && cd / && rm -rf /tmp/hdr-rng
+
+# fol-engine (com.risquanter:fol-engine) — required by register
 COPY vague-quantifier-logic/ /tmp/fol-engine/
 RUN cd /tmp/fol-engine && sbt publishLocal && cd / && rm -rf /tmp/fol-engine
 # ---- end local SNAPSHOT libraries -------------------------------------------
