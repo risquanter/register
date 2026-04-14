@@ -22,10 +22,13 @@ import com.risquanter.register.http.responses.SimulationResponse
   * definitions for ZJS bridge calls.
   *
   * @param keySignal      Read-only signal providing the active workspace key.
+  * @param globalError    App-wide error Var (passed through to LECChartState for
+  *                       the 13-cap validation error).
   * @param userIdAccessor  Returns the current user identity (None in capability-only mode).
   */
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId] = () => None
 ) extends WorkspaceEndpoints:
 
@@ -41,17 +44,17 @@ final class TreeViewState(
   val selectedNodeId: Var[Option[NodeId]] = Var(None)
 
   // ── Chart state (delegated) ───────────────────────────────────
-  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, userIdAccessor)
+  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor)
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.
-  // Mutations go through toggleChartSelection (ADR-019: signals down, callbacks up).
-  /** Node IDs currently selected for LEC chart overlay (read-only). */
-  def chartNodeIds: StrictSignal[Set[NodeId]] = chartState.chartNodeIds.signal
+  // Mutations go through userSelectionToggle bus (ADR-019: events up).
+  /** Node IDs manually Ctrl+clicked for LEC chart overlay (read-only). */
+  def userSelectedNodeIds: StrictSignal[Set[NodeId]] = chartState.userSelectedNodeIds.signal
   /** Render-ready Vega-Lite JSON spec (read-only). */
   def lecChartSpec: StrictSignal[LoadState[String]] = chartState.lecChartSpec.signal
-  /** Toggle a node's chart selection (delegates to LECChartState). */
-  def toggleChartSelection(nodeId: NodeId): Unit = chartState.toggleChartSelection(nodeId)
+  /** WriteBus for Ctrl+click toggle events (delegates to LECChartState). */
+  def userSelectionToggle: WriteBus[NodeId] = chartState.userSelectionToggle
 
   // ── Actions ───────────────────────────────────────────────────
 
@@ -87,3 +90,15 @@ final class TreeViewState(
 
   def selectNode(nodeId: NodeId): Unit =
     selectedNodeId.set(Some(nodeId))
+
+  /** Expand the tree to reveal all given nodes (Feature 3: auto-expand).
+    *
+    * For each node, adds its entire ancestor path to `expandedNodes`.
+    * Additive — preserves existing expand/collapse state (§5.1 D3).
+    */
+  def expandToRevealNodes(nodeIds: Set[NodeId]): Unit =
+    selectedTree.now() match
+      case LoadState.Loaded(tree) =>
+        val ancestors = nodeIds.flatMap(tree.index.ancestorPath)
+        expandedNodes.update(_ ++ ancestors)
+      case _ => ()

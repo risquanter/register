@@ -48,6 +48,6 @@ object QueryResponseBuilder:
       rangeSize       = output.rangeElements.size,
       sampleSize      = output.rangeElements.size,
       satisfyingCount = output.satisfyingElements.size,
-      matchingNodeIds = matchingIds,
+      satisfyingNodeIds = matchingIds,
       queryEcho       = queryEcho
     )

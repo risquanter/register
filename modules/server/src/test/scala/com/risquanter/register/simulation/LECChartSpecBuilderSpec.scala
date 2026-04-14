@@ -4,7 +4,12 @@ import zio.test.*
 import zio.json.*
 import zio.json.ast.Json
 
-import com.risquanter.register.domain.data.{LECPoint, LECNodeCurve}
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.string.Match
+
+import com.risquanter.register.domain.data.{CurvePalette, LECPoint, LECNodeCurve}
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
+import com.risquanter.register.domain.data.iron.HexColorStr
 
 object LECChartSpecBuilderSpec extends ZIOSpecDefault:
 
@@ -16,6 +21,13 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
     LECPoint(200L, 0.35),
     LECPoint(500L, 0.02)
   )
+
+  /** Helper: wrap a LECNodeCurve as ColouredCurve with a given hex colour. */
+  private def coloured(curve: LECNodeCurve, hex: String): ColouredCurve =
+    ColouredCurve(curve, HexColor(hex.refineUnsafe[Match["^#[0-9a-fA-F]{6}$"]]))
+
+  /** Default colour for single-curve tests where exact colour doesn't matter. */
+  private val defaultHex = "#15803d"
 
   private val rootCurve = LECNodeCurve(
     id = "root-id",
@@ -141,18 +153,18 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
         )
       },
       test("single curve with empty points produces empty spec") {
-        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(curveEmptyPoints))
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(curveEmptyPoints, defaultHex)))
         val json = parseSpec(result)
         assertTrue(containsStr(json, "No data available"))
       }
     ),
     suite("single curve")(
       test("contains Vega-Lite v6 schema") {
-        val result = LECChartSpecBuilder.generateSpec(rootCurve)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(rootCurve, defaultHex)))
         assertTrue(result.contains("https://vega.github.io/schema/vega-lite/v6.json"))
       },
       test("contains data values matching input points") {
-        val result = LECChartSpecBuilder.generateSpec(rootCurve)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(rootCurve, defaultHex)))
         val json = parseSpec(result)
         assertTrue(
           containsNum(json, 0.0),    // loss: 0
@@ -162,16 +174,16 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
         )
       },
       test("contains risk name in data values") {
-        val result = LECChartSpecBuilder.generateSpec(rootCurve)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(rootCurve, defaultHex)))
         val json = parseSpec(result)
         assertTrue(containsStr(json, "Portfolio"))
       }
     ),
     suite("multi-curve ordering")(
-      test("root curve is first in color domain, children sorted alphabetically") {
-        // Order: root ID first, then children sorted by name (Alpha, Zeta)
+      test("input order is preserved in color domain") {
+        // Input order: root, zeta, alpha — builder preserves this order (no re-sorting)
         val result = LECChartSpecBuilder.generateMultiCurveSpec(
-          Vector(rootCurve, childZeta, childAlpha)
+          Vector(coloured(rootCurve, "#15803d"), coloured(childZeta, "#007299"), coloured(childAlpha, "#7b0acd"))
         )
         val json = parseSpec(result)
         // Navigate: last layer → encoding → color → scale → domain
@@ -180,13 +192,13 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
         val domain = fieldAt(json, "layer", lastLayerIdx, "encoding", "color", "scale", "domain")
         val ids  = domain.map(strValues).getOrElse(Seq.empty)
         assertTrue(
-          ids == Seq("root-id", "alpha-id", "zeta-id")
+          ids == Seq("root-id", "zeta-id", "alpha-id")
         )
       }
     ),
     suite("quantile annotations")(
       test("P50 and P95 rules rendered when quantiles present on root") {
-        val result = LECChartSpecBuilder.generateSpec(rootCurve)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(rootCurve, defaultHex)))
         val json = parseSpec(result)
         assertTrue(
           containsStr(json, "P50"),
@@ -196,7 +208,7 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
         )
       },
       test("no quantile rules when root has empty quantiles") {
-        val result = LECChartSpecBuilder.generateSpec(curveNoQuantiles)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(curveNoQuantiles, defaultHex)))
         val json = parseSpec(result)
         assertTrue(
           !containsStr(json, "P50"),
@@ -206,7 +218,7 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
       test("multi-curve uses root quantiles only, not children") {
         // Root has quantiles, childZeta does not — only root's should appear
         val result = LECChartSpecBuilder.generateMultiCurveSpec(
-          Vector(curveNoQuantiles, childAlpha)
+          Vector(coloured(curveNoQuantiles, "#15803d"), coloured(childAlpha, "#007299"))
         )
         val json = parseSpec(result)
         // curveNoQuantiles is root with no quantiles — childAlpha's quantiles should NOT appear
@@ -217,22 +229,21 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
       }
     ),
     suite("color palette")(
-      test("each curve gets a stable palette color from its ID") {
-        val colors = LECChartSpecBuilder.themeColorsRisk
-        def stableColor(id: String): String =
-          colors((id.hashCode.abs) % colors.size)
+      test("each curve gets its assigned hex colour in the spec") {
+        val greenHex  = "#15803d"
+        val aquaHex   = "#007299"
         val result = LECChartSpecBuilder.generateMultiCurveSpec(
-          Vector(rootCurve, childAlpha)
+          Vector(coloured(rootCurve, greenHex), coloured(childAlpha, aquaHex))
         )
         assertTrue(
-          result.contains(stableColor(rootCurve.id)),
-          result.contains(stableColor(childAlpha.id))
+          result.contains(greenHex),
+          result.contains(aquaHex)
         )
       }
     ),
     suite("JSON escaping")(
       test("risk name with quotes and backslash produces valid JSON with correct content") {
-        val result = LECChartSpecBuilder.generateSpec(curveWithSpecialChars)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(curveWithSpecialChars, defaultHex)))
         val json = parseSpec(result)
         // The AST should contain the *unescaped* name as a Str value
         assertTrue(containsStr(json, """Risk "A" \ B"""))
@@ -240,7 +251,7 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
     ),
     suite("params interpolation toggle")(
       test("spec contains params bind for interpolation") {
-        val result = LECChartSpecBuilder.generateSpec(rootCurve)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(rootCurve, defaultHex)))
         val json = parseSpec(result)
         assertTrue(
           containsStr(json, "interpolate"),
@@ -251,32 +262,27 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
         )
       }
     ),
-    suite("generateSpec delegation")(
-      test("generateSpec(curve) produces same output as generateMultiCurveSpec(Vector(curve))") {
-        val single = LECChartSpecBuilder.generateSpec(rootCurve)
-        val multi  = LECChartSpecBuilder.generateMultiCurveSpec(Vector(rootCurve))
-        assertTrue(single == multi)
-      }
-    ),
     suite("JSON validity")(
       test("single curve with few points produces valid JSON") {
-        val spec = LECChartSpecBuilder.generateSpec(rootCurve)
+        val spec = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(rootCurve, defaultHex)))
         val parsed = spec.fromJson[Json]
         assertTrue(parsed.isRight)
       },
       test("multi-curve with few points produces valid JSON") {
-        val spec = LECChartSpecBuilder.generateMultiCurveSpec(Vector(rootCurve, childAlpha, childZeta))
+        val spec = LECChartSpecBuilder.generateMultiCurveSpec(
+          Vector(coloured(rootCurve, "#15803d"), coloured(childAlpha, "#007299"), coloured(childZeta, "#7b0acd"))
+        )
         val parsed = spec.fromJson[Json]
         assertTrue(parsed.isRight)
       },
       test("realistic 100-tick single curve produces valid JSON") {
-        val spec = LECChartSpecBuilder.generateSpec(realisticRoot)
+        val spec = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(realisticRoot, defaultHex)))
         val parsed = spec.fromJson[Json]
         assertTrue(parsed.isRight) ?? parsed.left.getOrElse("")
       },
       test("realistic 100-tick multi-curve (3 curves) produces valid JSON") {
         val spec = LECChartSpecBuilder.generateMultiCurveSpec(
-          Vector(realisticRoot, realisticChild1, realisticChild2)
+          Vector(coloured(realisticRoot, "#15803d"), coloured(realisticChild1, "#007299"), coloured(realisticChild2, "#7b0acd"))
         )
         val parsed = spec.fromJson[Json]
         assertTrue(parsed.isRight) ?? parsed.left.getOrElse("")
@@ -287,32 +293,32 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
         assertTrue(parsed.isRight)
       },
       test("spec with special characters in name produces valid JSON") {
-        val spec = LECChartSpecBuilder.generateSpec(curveWithSpecialChars)
+        val spec = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(curveWithSpecialChars, defaultHex)))
         val parsed = spec.fromJson[Json]
         assertTrue(parsed.isRight)
       }
     ),
     suite("color mapping uses ID keys")(
-      test("curves with same name but different IDs get distinct colors") {
+      test("curves with same name but different IDs get distinct assigned colors") {
         val curveA = LECNodeCurve("id-a", "Duplicate Name", samplePoints, Map.empty)
         val curveB = LECNodeCurve("id-b", "Duplicate Name", samplePoints, Map.empty)
-        val colors = LECChartSpecBuilder.themeColorsRisk
-        def stableColor(id: String): String =
-          colors((id.hashCode.abs) % colors.size)
-        // Same name, different IDs → different stable colors
-        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(curveA, curveB))
+        val hexA = "#15803d"
+        val hexB = "#007299"
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(
+          Vector(coloured(curveA, hexA), coloured(curveB, hexB))
+        )
         val json = parseSpec(result)
         assertTrue(
-          result.contains(stableColor("id-a")),
-          result.contains(stableColor("id-b")),
-          stableColor("id-a") != stableColor("id-b")
+          result.contains(hexA),
+          result.contains(hexB),
+          hexA != hexB
         )
       }
     ),
     suite("y-axis adaptive ceiling")(
       test("y-axis domain ceiling fits to data, not hardcoded to 1.0") {
         // curveWithTail starts at 0.30 → yCeiling = min(1.0, 0.30 × 1.1) = 0.33
-        val result = LECChartSpecBuilder.generateSpec(curveWithTail)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(curveWithTail, defaultHex)))
         val json   = parseSpec(result)
         val layers = fieldAt(json, "layer")
         val lastIdx = layers.collect { case Json.Arr(es) => es.size - 1 }.getOrElse(0)
@@ -329,7 +335,7 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
       },
       test("y-axis ceiling is capped at 1.0 when curves start at 1.0") {
         // samplePoints starts at (0, 1.0) → ceiling = min(1.0, 1.0 × 1.1) = 1.0
-        val result = LECChartSpecBuilder.generateSpec(rootCurve)
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(coloured(rootCurve, defaultHex)))
         val json   = parseSpec(result)
         val layers = fieldAt(json, "layer")
         val lastIdx = layers.collect { case Json.Arr(es) => es.size - 1 }.getOrElse(0)
@@ -343,7 +349,9 @@ object LECChartSpecBuilderSpec extends ZIOSpecDefault:
       },
       test("multi-curve y ceiling uses max across all curves") {
         // childAlpha starts at 1.0, curveWithTail starts at 0.30 → max = 1.0 → capped at 1.0
-        val result = LECChartSpecBuilder.generateMultiCurveSpec(Vector(curveWithTail, childAlpha))
+        val result = LECChartSpecBuilder.generateMultiCurveSpec(
+          Vector(coloured(curveWithTail, "#15803d"), coloured(childAlpha, "#007299"))
+        )
         val json   = parseSpec(result)
         val layers = fieldAt(json, "layer")
         val lastIdx = layers.collect { case Json.Arr(es) => es.size - 1 }.getOrElse(0)

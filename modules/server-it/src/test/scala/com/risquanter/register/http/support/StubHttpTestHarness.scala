@@ -10,13 +10,14 @@ import com.risquanter.register.configs.{ApiConfig, IrminConfig, SimulationConfig
 import com.risquanter.register.domain.data.iron.SafeUrl
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.cache.CacheController
-import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
+import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController, QueryController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.SimulationSemaphore
 import com.risquanter.register.services.cache.{RiskResultResolverLive, TreeCacheManager}
 import com.risquanter.register.services.pipeline.InvalidationHandler
+import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
@@ -52,8 +53,8 @@ object StubHttpTestHarness {
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       simConfig: SimulationConfig = defaultSimulationConfig
   ): ZIO[Any, Throwable, SttpBackend[Task, Any]] =
-    val controllersLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController] =
-      ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController](
+    val controllersLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController] =
+      ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController](
         ZLayer.succeed(simConfig),
         ZLayer.succeed(defaultTelemetryConfig),
         ZLayer.succeed(WorkspaceConfig()),
@@ -74,7 +75,9 @@ object StubHttpTestHarness {
         SSEController.layer,
         CacheController.layer,
         ZLayer.fromZIO(RiskTreeController.makeZIO),
-        ZLayer.fromZIO(WorkspaceController.makeZIO)
+        ZLayer.fromZIO(WorkspaceController.makeZIO),
+        QueryServiceLive.layer,
+        ZLayer.fromZIO(QueryController.makeZIO)
       )
 
     for

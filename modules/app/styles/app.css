@@ -14,12 +14,16 @@
   --border:                    rgba(230, 232, 232, 0.12);
   --border-focus:              #b8bbbc;
   --accent:                    #b8bbbc;
-  --error:                     #ef4444;
-  --error-surface:             rgba(239, 68, 68, 0.10);
-  --info:                      #60a5fa;
-  --info-surface:              rgba(96, 165, 250, 0.10);
-  --success:                   #4ade80;
-  --success-surface:           rgba(74, 222, 128, 0.08);
+  --error:                     var(--curve-red-500);
+  --error-surface:             color-mix(in srgb, var(--curve-red-500) 10%, transparent);
+  --info:                      var(--curve-aqua-400);
+  --info-surface:              color-mix(in srgb, var(--curve-aqua-400) 10%, transparent);
+  --success:                   var(--curve-green-400);
+  --success-surface:           color-mix(in srgb, var(--curve-green-400) 8%, transparent);
+  --query-match:               var(--curve-green-300);
+  --query-match-surface:       color-mix(in srgb, var(--curve-green-300) 12%, transparent);
+  --chart-selected:            var(--curve-aqua-300);
+  --chart-selected-surface:    color-mix(in srgb, var(--curve-aqua-300) 12%, transparent);
 
   /* Curve color palettes (array-like, light -> dark)
      Usage from JS/TS/Scala.js:
@@ -130,7 +134,7 @@
   --curve-orange-950:          #361402;
   --curve-orange-975:          #1d0b01;
 
-  --curve-palette-aqua:        #f0fcff, #e0f9ff, #d4f5fc, #aee9f8, #7bdaf3, #42c9ed, #00b3e6, #0094bf, #007299, #005370, #003a52, #002533, #00121a;
+ (DORA)       #f0fcff, #e0f9ff, #d4f5fc, #aee9f8, #7bdaf3, #42c9ed, #00b3e6, #0094bf, #007299, #005370, #003a52, #002533, #00121a;
 
   /* Aqua shades (explicit named stops) */
   --curve-aqua-25:             #f0fcff;
@@ -774,25 +778,25 @@ body {
 /* ── Tree node query highlighting (T3.4) ────────────── */
 
 .tree-detail-inline.node-query-matched {
-  border-left: 3px solid var(--info);
+  border-left: 3px solid var(--query-match);
   padding-left: calc(var(--sp-1) - 3px);
-  background-color: var(--info-surface);
+  background-color: var(--query-match-surface);
 }
 
 .tree-detail-inline.node-query-matched .node-label {
   color: var(--foreground);
 }
 
-/* Combined: query match + chart selected */
+/* Combined: query match + chart selected — aqua border (user pick) over green surface (query) */
 .tree-detail-inline.node-query-matched.node-chart-selected {
-  border-left: 3px solid var(--info);
-  background-color: var(--info-surface);
+  border-left: 3px solid var(--chart-selected);
+  background-color: var(--query-match-surface);
 }
 
 /* Combined: query match + node selected */
 .tree-detail-inline.node-selected.node-query-matched {
   background-color: var(--surface-overlay-active);
-  border-left: 3px solid var(--info);
+  border-left: 3px solid var(--query-match);
 }
 
 /* =============================================
@@ -840,10 +844,10 @@ body {
   opacity: 1;
 }
 
-/* Info variant (workspace expired — cold blue, not alarming) */
+/* Info variant (workspace expired — aqua, not alarming) */
 .info-banner {
   background-color: var(--info-surface);
-  border-bottom-color: rgba(96, 165, 250, 0.20);
+  border-bottom-color: color-mix(in srgb, var(--info) 20%, transparent);
   color: var(--info);
 }
 
@@ -1550,9 +1554,9 @@ select.form-input option {
 }
 
 .tree-detail-inline.node-chart-selected {
-  border-left: 3px solid var(--accent);
+  border-left: 3px solid var(--chart-selected);
   padding-left: calc(var(--sp-1) - 3px); /* compensate for border width */
-  background-color: rgba(184, 187, 188, 0.06);
+  background-color: var(--chart-selected-surface);
 }
 
 .tree-detail-inline.node-chart-selected .node-label {

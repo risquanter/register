@@ -74,10 +74,10 @@ final class AnalyzeQueryState(
   // ── Server-side evaluation result ─────────────────────────────
   val queryResult: Var[LoadState[QueryResponse]] = Var(LoadState.Idle)
 
-  /** Node IDs matching the last successful query (derived, read-only). */
-  val matchingNodeIds: Signal[Set[NodeId]] =
+  /** Node IDs satisfying the last successful query (derived, read-only). */
+  val satisfyingNodeIds: Signal[Set[NodeId]] =
     queryResult.signal.map {
-      case LoadState.Loaded(resp) => resp.matchingNodeIds.toSet
+      case LoadState.Loaded(resp) => resp.satisfyingNodeIds.toSet
       case _                     => Set.empty
     }
 

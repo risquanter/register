@@ -101,7 +101,7 @@ object TreeDetailView:
 
     val isExpanded: Signal[Boolean] = state.expandedNodes.signal.map(_.contains(nodeId))
     val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeId))
-    val isChartSelected: Signal[Boolean] = state.chartNodeIds.map(_.contains(nodeId))
+    val isChartSelected: Signal[Boolean] = state.userSelectedNodeIds.map(_.contains(nodeId))
     val isQueryMatched: Signal[Boolean] = queryMatchedNodes.map(_.contains(nodeId))
 
     val lineCls: Signal[String] =
@@ -122,7 +122,7 @@ object TreeDetailView:
     def handleNodeClick(ev: org.scalajs.dom.MouseEvent): Unit =
       if ev.ctrlKey || ev.metaKey then
         ev.preventDefault()
-        state.toggleChartSelection(nodeId)
+        state.userSelectionToggle.onNext(nodeId)
       else
         state.selectNode(nodeId)
 

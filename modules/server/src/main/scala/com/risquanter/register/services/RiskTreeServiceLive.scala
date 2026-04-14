@@ -9,15 +9,14 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint, LECNodeCurve, Distribution}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint, LECNodeCurve, Distribution, CurvePalette}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, Probability, DistributionType, TreeId, NodeId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.simulation.LECGenerator
-import com.risquanter.register.simulation.LECChartSpecBuilder
+import com.risquanter.register.simulation.{LECGenerator, LECChartSpecBuilder, ColouredCurve}
 import com.risquanter.register.services.cache.RiskResultResolver
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
@@ -471,7 +470,7 @@ class RiskTreeServiceLive private (
       } yield enriched
     }
 
-  override def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String] =
+  override def getLECChart(treeId: TreeId, nodeIds: Set[NodeId], paletteMap: Map[NodeId, CurvePalette]): Task[String] =
     traced("getLECChart") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -480,7 +479,9 @@ class RiskTreeServiceLive private (
         // Reuse getLECCurvesMulti for data resolution (no duplication)
         nodeCurves <- getLECCurvesMulti(treeId, nodeIds)
 
-        spec = LECChartSpecBuilder.generateMultiCurveSpec(nodeCurves.values.toVector)
+        // Group by palette, sort each group by p95 desc, assign colours
+        colouredCurves = ColouredCurve.assignPaletteColours(nodeCurves, paletteMap)
+        spec = LECChartSpecBuilder.generateMultiCurveSpec(colouredCurves)
         _ <- tracing.setAttribute("spec_length", spec.length.toLong)
       } yield spec
     }

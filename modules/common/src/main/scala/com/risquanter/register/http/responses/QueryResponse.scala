@@ -14,7 +14,7 @@ import com.risquanter.register.domain.data.iron.NodeId
   * @param rangeSize       total number of nodes the quantifier ranges over
   * @param sampleSize      number of nodes actually evaluated (equals rangeSize for exact mode)
   * @param satisfyingCount how many of those nodes satisfy the scope condition
-  * @param matchingNodeIds the specific nodes that satisfied the condition
+ * @param satisfyingNodeIds the specific nodes that satisfied the condition
   * @param queryEcho       the original query text, echoed for display and logging
   */
 final case class QueryResponse(
@@ -23,7 +23,7 @@ final case class QueryResponse(
   rangeSize: Int,
   sampleSize: Int,
   satisfyingCount: Int,
-  matchingNodeIds: List[NodeId],
+  satisfyingNodeIds: List[NodeId],
   queryEcho: String
 )
 

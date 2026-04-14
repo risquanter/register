@@ -116,7 +116,8 @@ isChartSelected → "node-chart-selected"  (Ctrl+click / chart overlay)
 isQueryMatched  → "node-query-matched"   (query match)
 ```
 
-`node-query-matched` currently uses **blue** (`--info` / `--info-surface`).
+`node-query-matched` currently uses **aqua** (`--info` / `--info-surface`,
+sourced from `--curve-aqua-400`).
 
 ### 2.4 Tree expand/collapse
 
@@ -854,7 +855,7 @@ chart?**
 | `LECChartState.toggleChartSelection` | Toggle node in `chartNodeIds`, re-fetch chart | **Replaced** by `toggleUserSelection`. In A, this only touches `userSelectedNodeIds`. In B, it also clears query state. In C, it clears + offers restore. |
 | `AnalyzeView.viewLECForMatches` | Overwrites `chartNodeIds` → calls `loadLECChart` | **Removed** as an imperative call. In v3, the reactive `chartRequest` signal fires when `satisfyingNodeIds` changes. But in D7-B, the query set might have been previously cleared by a Ctrl+click — the "View LEC" button (T3.5) may need to persist or be re-enabled. |
 | `TreeDetailView.handleNodeClick` | Ctrl+click → `state.toggleChartSelection(nodeId)` | Rewired to `state.toggleUserSelection(nodeId)`. Unchanged across all D7 options — the click always mutates the user set. The difference is what happens to the *other* set. |
-| `TreeDetailView` CSS: `node-chart-selected` | Blue ring, driven by `chartNodeIds.contains(nodeId)` | In v3, this signal should reflect `userSelectedNodeIds` (the user's manual picks). Query-matched nodes already have `node-query-matched` (green). D7 does not affect this — all options use the same CSS signal. |
+| `TreeDetailView` CSS: `node-chart-selected` | Aqua ring (`--curve-aqua-300`), driven by `chartNodeIds.contains(nodeId)` | In v3, this signal should reflect `userSelectedNodeIds` (the user's manual picks). Query-matched nodes already have `node-query-matched` (green). D7 does not affect this — all options use the same CSS signal. |
 | `chartRequest` reactive signal (§3.10) | Does not exist yet | Created by v3. Combines `satisfyingNodeIds` + `userSelectedNodeIds`, tags overlaps with `Purple`. D7 determines whether `satisfyingNodeIds` is included in the combination or suppressed. |
 
 #### Interplay with other settled decisions
@@ -1020,7 +1021,8 @@ non-breaking.
 
 ### 4.1 Current state
 
-`node-query-matched` uses **blue** (`--info` / `--info-surface`).
+`node-query-matched` used **aqua** (`--info` / `--info-surface`,
+sourced from `--curve-aqua-400`).
 
 ### 4.2 SETTLED — D2: Colour strategy
 
@@ -1226,13 +1228,13 @@ expose?
 
 | Consumer | Needs | Current access |
 |---|---|---|
-| `TreeDetailView.renderNode` → `isChartSelected` CSS class | A signal that is true when the node is in the **user** set (manual picks get the blue ring `node-chart-selected`) | `state.chartNodeIds.map(_.contains(nodeId))` |
+| `TreeDetailView.renderNode` → `isChartSelected` CSS class | A signal that is true when the node is in the **user** set (manual picks get the aqua ring `node-chart-selected`, from `--curve-aqua-300`) | `state.chartNodeIds.map(_.contains(nodeId))` |
 | `TreeDetailView.renderNode` → `isQueryMatched` CSS class | A signal that is true when the node is in the **query** set (green highlight) | `queryMatchedNodes.map(_.contains(nodeId))` — already a separate parameter |
 | `TreeDetailView.handleNodeClick` → Ctrl+click | A way to emit a node toggle event to `LECChartState` | `state.toggleChartSelection(nodeId)` |
 | `AnalyzeView` → chart panel | The Vega-Lite spec signal | `treeViewState.lecChartSpec` |
 
 **Key insight:** Tree highlighting already uses **two separate signals**:
-`isChartSelected` (blue ring) and `isQueryMatched` (green background).
+`isChartSelected` (aqua ring, `--curve-aqua-300`) and `isQueryMatched` (green background).
 These map exactly to `userSelectedNodeIds` and `satisfyingNodeIds`
 respectively. The query signal is already piped via a separate
 `queryMatchedNodes` parameter — it does not flow through
@@ -1426,5 +1428,6 @@ changes (`LECChartState`, `TreeViewState`, `AnalyzeView`,
 4. Ctrl+click 14th node → verify error banner appears, selection
    unchanged.
 5. Run a new query → verify green curves update, aqua curves persist.
-6. CSS: verify `node-query-matched` uses green (not blue), and
-   `node-chart-selected` uses blue ring as before.
+6. CSS: verify `node-query-matched` uses green (`--query-match`, from
+   `--curve-green-300`), and `node-chart-selected` uses aqua ring
+   (`--curve-aqua-300` / `rgba(123, 218, 243, 0.12)` surface).

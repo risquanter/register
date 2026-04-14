@@ -16,16 +16,16 @@ object Main:
     // ── Workspace state (owns the key lifecycle) ──────────────────
     val wsState = new WorkspaceState
 
+    // Global error state — safety net for errors with no per-view handler
+    val globalError: Var[Option[GlobalError]] = Var(None)
+
     val builderState = new TreeBuilderState
-    val treeViewState = new TreeViewState(wsState.keySignal, () => wsState.currentUserId)
+    val treeViewState = new TreeViewState(wsState.keySignal, globalError, () => wsState.currentUserId)
     val analyzeQueryState = new AnalyzeQueryState(
       keySignal = wsState.keySignal,
       selectedTreeId = treeViewState.selectedTreeId.signal,
       userIdAccessor = () => wsState.currentUserId
     )
-
-    // Global error state — safety net for errors with no per-view handler
-    val globalError: Var[Option[GlobalError]] = Var(None)
 
     // Register the global error observer at the ZJS chokepoint.
     // Every API call forked via forkProvided will automatically:

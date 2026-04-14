@@ -12,11 +12,12 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.configs.*
 import com.risquanter.register.http.cache.CacheController
-import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController}
+import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController, QueryController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeServiceLive, SimulationSemaphore}
+import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.cache.{RiskResultResolverLive, TreeCacheManager}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
@@ -112,9 +113,9 @@ object HttpTestHarness:
       port: Int,
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       cfg: HarnessConfig
-  ): ZLayer[Any, Throwable, Server & CorsConfig & RiskTreeController & WorkspaceController & SSEController & CacheController] =
+  ): ZLayer[Any, Throwable, Server & CorsConfig & RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController] =
     ZLayer.make[
-      Server & CorsConfig & RiskTreeController & WorkspaceController & SSEController & CacheController
+      Server & CorsConfig & RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController
     ](
       ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port, healthPort = port + 1)),
       ZLayer.succeed(cfg.simulation),
@@ -141,7 +142,9 @@ object HttpTestHarness:
       SSEController.layer,
       CacheController.layer,
       ZLayer.fromZIO(RiskTreeController.makeZIO),
-      ZLayer.fromZIO(WorkspaceController.makeZIO)
+      ZLayer.fromZIO(WorkspaceController.makeZIO),
+      QueryServiceLive.layer,
+      ZLayer.fromZIO(QueryController.makeZIO)
     )
 
   private def waitForHealth(baseUrl: String): Task[Unit] =

@@ -74,7 +74,7 @@ object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
           response.proportion == 1.0,
           response.rangeSize == 2,
           response.satisfyingCount == 2,
-          response.matchingNodeIds.toSet == Set(cyberId, hardwareId),
+          response.satisfyingNodeIds.toSet == Set(cyberId, hardwareId),
           response.queryEcho == "test query"
         )
       },
@@ -87,7 +87,7 @@ object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
         val response = QueryResponseBuilder.from(output, nodeLookup, "q")
         // Only "Cyber" should resolve — the Loss value should be filtered
         assertTrue(
-          response.matchingNodeIds == List(cyberId)
+          response.satisfyingNodeIds == List(cyberId)
         )
       },
       test("filters out unknown names not in nodeLookup") {
@@ -97,7 +97,7 @@ object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
           satisfyingElements = Set(Value(assetSort, "Unknown"))
         )
         val response = QueryResponseBuilder.from(output, nodeLookup, "q")
-        assertTrue(response.matchingNodeIds.isEmpty)
+        assertTrue(response.satisfyingNodeIds.isEmpty)
       },
       test("empty evaluation output produces empty response") {
         val output = EvaluationOutput(
@@ -111,7 +111,7 @@ object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
           response.proportion == 0.0,
           response.rangeSize == 0,
           response.satisfyingCount == 0,
-          response.matchingNodeIds.isEmpty,
+          response.satisfyingNodeIds.isEmpty,
           response.queryEcho == "empty"
         )
       },

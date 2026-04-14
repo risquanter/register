@@ -72,13 +72,13 @@ object QueryResultCard:
         span(cls := "proportion-label", s"$pct% (${r.satisfyingCount} of ${r.rangeSize})")
       ),
       // Matching node IDs
-      if r.matchingNodeIds.nonEmpty then
+      if r.satisfyingNodeIds.nonEmpty then
         div(
           cls := "query-result-matches",
           span(cls := "matches-label", "Matching nodes:"),
           ul(
             cls := "matches-list",
-            r.matchingNodeIds.map(nid => li(nid.toString))
+            r.satisfyingNodeIds.map(nid => li(nid.toString))
           )
         )
       else

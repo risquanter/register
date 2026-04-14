@@ -4,6 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.components.SplitPane
 import app.state.{TreeViewState, AnalyzeQueryState, LoadState}
+import com.risquanter.register.http.requests.LECChartRequest
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
   *
@@ -18,7 +19,10 @@ import app.state.{TreeViewState, AnalyzeQueryState, LoadState}
   *       ├── TreeListView  (dropdown selector)
   *       └── TreeDetailView (expandable hierarchy, query highlighting)
   *
-  * Pure structural component — owns no state (ADR-019 Pattern 1).
+  * Owns reactive subscriptions for:
+  *   - Auto-expand: expands tree to reveal query-matched nodes (§5, D3/D4)
+  *   - Auto-LEC: builds and fires chart requests when either the query set
+  *     or manual user set changes (§3.10, §6)
   */
 object AnalyzeView:
 
@@ -27,17 +31,39 @@ object AnalyzeView:
     /** Fire query against selected tree. No-op if no tree is selected. */
     def runQuery(): Unit = queryState.executeQuery()
 
-    /** Load LEC charts for the nodes that matched the last query. */
-    def viewLECForMatches(): Unit =
-      queryState.queryResult.now() match
-        case LoadState.Loaded(resp) if resp.matchingNodeIds.nonEmpty =>
-          // Set chart selection to matching nodes and trigger LEC fetch
-          treeViewState.chartState.chartNodeIds.set(resp.matchingNodeIds.toSet)
-          treeViewState.chartState.loadLECChart(resp.matchingNodeIds.toSet)
-        case _ => ()
+    // ── Reactive chart request (§3.10) ──────────────────────────
+    // Merges query-matched nodes (green) with user Ctrl+click selections
+    // (aqua), tagging overlap as purple. Fires POST to /lec-chart on
+    // any change to either set (debounced 100ms for rapid Ctrl+click).
+    val chartRequest: Signal[Option[LECChartRequest]] =
+      queryState.satisfyingNodeIds
+        .combineWith(treeViewState.chartState.userSelectedNodeIds.signal)
+        .map { (querySet, userSet) =>
+          val allNodes = querySet ++ userSet
+          if allNodes.isEmpty then None
+          else Some(LECChartRequest.build(querySet, userSet))
+        }
 
     val analyzeLeftPanel = div(
       cls := "analyze-left-panel",
+      // ── Reactive subscriptions (bound to element lifecycle) ────
+      // Auto-expand: reveal query-matched nodes in tree (§5.1, §5.2)
+      queryState.queryResult.signal.changes --> {
+        case LoadState.Loaded(resp) if resp.satisfied && resp.satisfyingNodeIds.nonEmpty =>
+          treeViewState.expandToRevealNodes(resp.satisfyingNodeIds.toSet)
+        case _ => ()
+      },
+      // Auto-LEC: fire chart request on any change to either node set
+      chartRequest.changes
+        .collect { case Some(req) => req }
+        .debounce(100) --> { req =>
+          treeViewState.chartState.loadLECChart(req)
+        },
+      // Reset chart to idle when both sets become empty
+      chartRequest.changes
+        .collect { case None => () } --> { _ =>
+          treeViewState.chartState.lecChartSpec.set(LoadState.Idle)
+        },
       // ── Query input panel ───────────────────────────────────────
       div(
         cls := "analyze-query-panel",
@@ -97,17 +123,7 @@ object AnalyzeView:
               case false => span("Run")
             },
             onClick --> (_ => runQuery())
-          ),
-          // "View LEC" cross-link (T3.5)
-          child.maybe <-- queryState.queryResult.signal.map {
-            case LoadState.Loaded(resp) if resp.matchingNodeIds.nonEmpty =>
-              Some(button(
-                cls := "btn btn-secondary query-lec-btn",
-                s"View LEC for ${resp.matchingNodeIds.size} matching node${if resp.matchingNodeIds.size != 1 then "s" else ""}",
-                onClick --> (_ => viewLECForMatches())
-              ))
-            case _ => None
-          }
+          )
         )
       ),
       // ── Query result card ───────────────────────────────────────
@@ -122,7 +138,7 @@ object AnalyzeView:
     val savedTreePanel = div(
       cls := "saved-tree-panel",
       TreeListView(treeViewState),
-      TreeDetailView(treeViewState, queryState.matchingNodeIds)
+      TreeDetailView(treeViewState, queryState.satisfyingNodeIds)
     )
 
     div(

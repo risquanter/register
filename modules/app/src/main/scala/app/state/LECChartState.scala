@@ -3,19 +3,21 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
-import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
+import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
+import com.risquanter.register.http.requests.LECChartRequest
 
 /** Chart selection and LEC spec state, separated from tree navigation.
   *
-  * Receives read-only signals from `TreeViewState` for the currently selected
-  * tree context. Owns the chart selection lifecycle: which nodes are selected
-  * for charting, and the fetched Vega-Lite spec.
+  * Owns the user's manual node selection for charting (Ctrl+click picks),
+  * the fetched Vega-Lite spec, and the bus-based toggle with a 13-cap guard.
   *
-  * This separation follows the SRP split identified in the Phase F code review:
-  * navigation state (expand/collapse/select) vs chart state (chart selection/spec).
-  * Phase H's `LECState` (stale tracking for SSE) will extend this class.
+  * The reactive `chartRequest` signal that merges query-matched nodes with
+  * user selections is constructed in `AnalyzeView`, where both
+  * `AnalyzeQueryState.satisfyingNodeIds` and this state's
+  * `userSelectedNodeIds` are in scope.
   *
   * Extends `WorkspaceEndpoints` to access workspace-scoped Tapir endpoint
   * definitions for ZJS bridge calls.
@@ -23,57 +25,63 @@ import com.risquanter.register.http.endpoints.WorkspaceEndpoints
   * @param keySignal      Read-only signal providing the active workspace key.
   * @param selectedTreeId Signal for the currently selected tree ID.
   * @param selectedTree   Signal for the currently loaded tree structure.
+  * @param globalError    App-wide error Var for the 13-cap validation error.
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   */
 final class LECChartState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
   selectedTree: StrictSignal[LoadState[RiskTree]],
+  globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId] = () => None
 ) extends WorkspaceEndpoints:
 
-  // ── Chart selection state ─────────────────────────────────────
-  /** Node IDs currently selected for LEC chart overlay. */
-  val chartNodeIds: Var[Set[NodeId]] = Var(Set.empty)
+  // ── User selection state ──────────────────────────────────────
+  /** Node IDs manually Ctrl+clicked by the user for LEC chart overlay. */
+  val userSelectedNodeIds: Var[Set[NodeId]] = Var(Set.empty)
   /** Render-ready Vega-Lite JSON spec (fetched from backend). */
   val lecChartSpec: Var[LoadState[String]] = Var(LoadState.Idle)
+
+  // ── Bus-based toggle (ADR-019 P2: events up) ─────────────────
+
+  /** WriteBus exposed to views for Ctrl+click toggle events.
+    *
+    * Views emit node IDs into this bus; the internal observer handles
+    * set toggle + 13-cap guard. This keeps mutation logic encapsulated
+    * inside the state owner (ADR-019 P2: events up, not imperative calls).
+    */
+  private val userSelectionBus: EventBus[NodeId] = new EventBus[NodeId]
+  val userSelectionToggle: WriteBus[NodeId] = userSelectionBus.writer
+
+  // Internal observer — handles the toggle + cap logic.
+  // Uses unsafeWindowOwner: LECChartState lives for the app lifetime.
+  userSelectionBus.events.foreach { nodeId =>
+    val current = userSelectedNodeIds.now()
+    if current.contains(nodeId) then
+      userSelectedNodeIds.update(_ - nodeId)
+    else if current.size >= 13 then
+      globalError.set(Some(GlobalError.ValidationFailed(List(
+        ValidationError("chartSelection", ValidationErrorCode.CONSTRAINT_VIOLATION,
+          "Maximum 13 user-selected curves. Remove a selection before adding more.")
+      ))))
+    else
+      userSelectedNodeIds.update(_ + nodeId)
+  }(using unsafeWindowOwner)
 
   // ── Actions ───────────────────────────────────────────────────
 
   /** Reset chart state (called when tree selection changes). */
   def reset(): Unit =
-    chartNodeIds.set(Set.empty)
+    userSelectedNodeIds.set(Set.empty)
     lecChartSpec.set(LoadState.Idle)
 
-  /** Toggle a node's inclusion in the chart selection.
+  /** Fetch the LEC chart spec from the backend for the given request.
     *
-    * For portfolio nodes: toggles the portfolio and all its direct children
-    * as a group. For leaf nodes: toggles just the leaf.
-    * After updating `chartNodeIds`, triggers a backend LEC chart fetch.
+    * Called reactively from the `chartRequest` signal subscription
+    * in `AnalyzeView`.
     */
-  def toggleChartSelection(nodeId: NodeId): Unit =
-    selectedTree.now() match
-      case LoadState.Loaded(tree) =>
-        // Resolve the group: nodeId + direct children if portfolio
-        val node     = tree.nodes.find(_.id == nodeId)
-        val childIds = node.collect { case p: RiskPortfolio => p.childIds.toSet }.getOrElse(Set.empty)
-        val group    = childIds + nodeId
-
-        val current = chartNodeIds.now()
-        val updated = if current.contains(nodeId) then current -- group else current ++ group
-        chartNodeIds.set(updated)
-
-        if updated.nonEmpty then loadLECChart(updated)
-        else lecChartSpec.set(LoadState.Idle)
-      case _ => () // No tree loaded — nothing to do
-
-  /** Fetch the LEC chart spec from the backend for the given node IDs.
-    *
-    * Public to allow cross-component triggers (e.g. query result
-    * "View LEC" button in AnalyzeView — T3.5).
-    */
-  def loadLECChart(nodeIds: Set[NodeId]): Unit =
+  def loadLECChart(request: LECChartRequest): Unit =
     (keySignal.now(), selectedTreeId.now()) match
       case (Some(key), Some(treeId)) =>
-        getWorkspaceLECChartEndpoint((userIdAccessor(), key, treeId, nodeIds.toList)).loadInto(lecChartSpec)
+        getWorkspaceLECChartEndpoint((userIdAccessor(), key, treeId, request)).loadInto(lecChartSpec)
       case _ => () // No workspace or tree selected — nothing to do

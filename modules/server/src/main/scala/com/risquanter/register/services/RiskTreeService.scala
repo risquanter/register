@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve}
+import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve, CurvePalette}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /** Service layer for RiskTree business logic.
@@ -100,9 +100,10 @@ trait RiskTreeService {
     * 
     * @param treeId Tree identifier
     * @param nodeIds Set of node identifiers to include in the chart
+    * @param paletteMap Map of node ID to requested colour palette
     * @return Vega-Lite JSON specification as a string
     */
-  def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String]
+  def getLECChart(treeId: TreeId, nodeIds: Set[NodeId], paletteMap: Map[NodeId, CurvePalette]): Task[String]
 }
 
 object RiskTreeService:

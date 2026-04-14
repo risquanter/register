@@ -9,7 +9,7 @@ import java.time.Duration
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.domain.data.iron.TreeId
-import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve}
+import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve, CurvePalette}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.util.IdGenerators
@@ -30,7 +30,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean): Task[LECCurveResponse]  = ZIO.die(new UnsupportedOperationException)
     def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[Double] = ZIO.die(new UnsupportedOperationException)
     def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
-    def getLECChart(treeId: TreeId, nodeIds: Set[NodeId]): Task[String]                                 = ZIO.die(new UnsupportedOperationException)
+    def getLECChart(treeId: TreeId, nodeIds: Set[NodeId], paletteMap: Map[NodeId, CurvePalette]): Task[String] = ZIO.die(new UnsupportedOperationException)
 
   /** No-op stub: `delete` always fails (simulates already-deleted tree). */
   private val noOpTreeServiceLayer: ULayer[RiskTreeService] =

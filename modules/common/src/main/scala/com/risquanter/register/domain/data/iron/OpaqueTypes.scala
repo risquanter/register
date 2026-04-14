@@ -316,3 +316,20 @@ object WorkspaceId:
   given JsonEncoder[WorkspaceId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[WorkspaceId] = JsonDecoder[String].mapOrFail(s =>
     WorkspaceId.fromString(s).left.map(_.mkString(", ")))
+
+// CSS hex colour (#RRGGBB). Used by CurvePaletteRegistry and ColouredCurve
+// for Vega-Lite chart spec colour assignment. Never serialized to the wire —
+// .value extraction happens only at the Vega-Lite JSON edge.
+// Single concept, no second hex-colour kind to distinguish → bare opaque per ADR-018.
+type HexColorStr = String :| Match["^#[0-9a-fA-F]{6}$"]
+
+object HexColor:
+  opaque type HexColor = HexColorStr
+
+  object HexColor:
+    /** Construct from an already-refined HexColorStr (Iron proof required). */
+    def apply(s: HexColorStr): HexColor = s
+
+  extension (c: HexColor)
+    /** Extract the refined `#rrggbb` string — only at the Vega-Lite JSON edge. */
+    def value: HexColorStr = c
