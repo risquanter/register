@@ -134,11 +134,15 @@ trait WorkspaceEndpoints extends BaseEndpoint:
 
   // ── Workspace-scoped LEC queries ──────────────────────────────────
 
+  // TODO-REMOVE: No real-world clients. All LEC rendering uses lec-chart (Vega-Lite spec)
+  // or lec-multi (Map[String, LECNodeCurve]). Remove along with LECCurveResponse,
+  // RiskTreeService.getLECCurve, WorkspaceController.getLECCurve, and their tests.
+  @deprecated("No real-world clients. Use lec-multi or lec-chart instead.", since = "2026-04-14")
   val getWorkspaceLECCurveEndpoint =
     authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceLECCurve")
-      .description("Get LEC curve for a node (workspace-scoped)")
+      .description("[DEPRECATED] Get LEC curve for a node (workspace-scoped). Use lec-multi or lec-chart instead.")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "nodes" / path[NodeId]("nodeId") / "lec")
       .get
       .in(query[Boolean]("includeProvenance").default(false))

@@ -8,8 +8,9 @@
 - v2: Client-explicit hex colours — client sends `(nodeId, hexColor)`.
 - **v3 (current):** Client sends `(nodeId, paletteName)`. Server resolves
   colours by sorting curves within each palette group by p95 and assigning
-  shades darkest → lightest. No extra round trips. No `HexColor` type.
-  Overlap nodes get a third palette.
+  shades darkest → lightest. No extra round trips. Hex colours are
+  typed via an Iron opaque `HexColor` in `OpaqueTypes.scala` (alongside
+  all other opaque types). Overlap nodes get a third palette.
 
 ---
 
@@ -437,31 +438,65 @@ shade assignment that v2 pushed to the client.
 
 #### Step 1 — Palette registry (new, in `LECChartSpecBuilder` or `common`)
 
-A `Map[CurvePalette, Vector[String]]` mapping palette names to 13 hex
-shades, **darkest first**:
+**`HexColor` Iron opaque type** — added to `OpaqueTypes.scala` in
+`common`, alongside `PRNGCounter`, `SafeName`, `SafeId`, etc. Single
+concept, no second hex-colour kind to distinguish → bare opaque per
+ADR-018 §"When to Apply":
 
 ```scala
+// In common module: .../domain/data/iron/OpaqueTypes.scala (appended)
+
+// CSS hex colour (#RRGGBB). Used by CurvePaletteRegistry and ColouredCurve
+// for Vega-Lite chart spec colour assignment. Never serialized to the wire —
+// .value extraction happens only at the Vega-Lite JSON edge.
+type HexColorStr = String :| Match["^#[0-9a-fA-F]{6}$"]
+
+object HexColor:
+  opaque type HexColor = HexColorStr
+
+  object HexColor:
+    /** Construct from an already-refined HexColorStr (Iron proof required). */
+    def apply(s: HexColorStr): HexColor = s
+
+  extension (c: HexColor)
+    /** Extract the raw `#rrggbb` string — only at the Vega-Lite JSON edge. */
+    def value: HexColorStr = c
+```
+
+No JSON codecs needed — `HexColor` is never serialized to the wire.
+`refineUnsafe` is safe for the registry literals (compile-time constants,
+same pattern as `IronConstants`).
+
+**`CurvePaletteRegistry`** — a `Map[CurvePalette, Vector[HexColor]]`
+mapping palette names to 13 hex shades, **darkest first**:
+
+```scala
+import HexColor.HexColor
+
 object CurvePaletteRegistry:
   /** 13 hex shades per palette, ordered darkest → lightest.
     * Sourced from app.css curve palette custom properties.
     * Index 0 = highest-risk (darkest), index 12 = lowest-risk (lightest).
+    * `refineUnsafe` is safe: literals are compile-time constants.
     */
-  val shades: Map[CurvePalette, Vector[String]] = Map(
+  private def hex(s: String): HexColor = HexColor(s.refineUnsafe[Match["^#[0-9a-fA-F]{6}$"]])
+
+  val shades: Map[CurvePalette, Vector[HexColor]] = Map(
     CurvePalette.Green -> Vector(
       "#03170b", "#052914", "#0f3e21", "#145c2f", "#15803d",
       "#16a34a", "#22c55e", "#4ade80", "#86efac", "#bbf7d0",
       "#d5fbe2", "#e4fbec", "#f1fdf5"
-    ),
+    ).map(hex),
     CurvePalette.Aqua -> Vector(
       "#00121a", "#002533", "#003a52", "#005370", "#007299",
       "#0094bf", "#00b3e6", "#42c9ed", "#7bdaf3", "#aee9f8",
       "#d4f5fc", "#e0f9ff", "#f0fcff"
-    ),
+    ).map(hex),
     CurvePalette.Purple -> Vector(
       "#11011e", "#23023b", "#3e0f61", "#5a1094", "#7b0acd",
       "#9810fa", "#ad46ff", "#c27aff", "#dab2ff", "#e5ccff",
       "#ecdbff", "#f2e6ff", "#faf5ff"
-    )
+    ).map(hex)
   )
 ```
 
@@ -509,6 +544,8 @@ server-local product type pairing each curve with its resolved hex
 colour:
 
 ```scala
+import HexColor.HexColor
+
 /** Curve paired with its resolved hex colour — server-local, never serialized.
   *
   * Keeps the rendering concern (colour) separate from the domain DTO
@@ -518,9 +555,9 @@ colour:
   * lives in presentation-scoped types.
   *
   * @param curve    Domain curve data (id, name, points, quantiles).
-  * @param hexColor Resolved hex colour string (e.g. "#15803d").
+  * @param hexColor Resolved hex colour (Iron-refined `HexColor`, not raw String).
   */
-final case class ColouredCurve(curve: LECNodeCurve, hexColor: String)
+final case class ColouredCurve(curve: LECNodeCurve, hexColor: HexColor)
 ```
 
 ```scala
@@ -553,43 +590,109 @@ itself is **not modified**.
 
 #### Step 4 — Builder (`LECChartSpecBuilder.generateMultiCurveSpec`)
 
-Signature changes to accept `Vector[ColouredCurve]` via an overload or
-by replacing the current `Vector[LECNodeCurve]` parameter:
+The existing signature changes from `Vector[LECNodeCurve]` to
+`Vector[ColouredCurve]`. No overload — the legacy `themeColorsRisk`
+palette and `stableColor` hash function are **removed** as part of
+this plan (see "Legacy colour removal" below).
 
 ```scala
-// New signature (overload alongside existing for backward compat):
-def generateMultiCurveSpec(coloured: Vector[ColouredCurve]): String
+// Before:
+def generateMultiCurveSpec(curves: Vector[LECNodeCurve], ...): String
+
+// After:
+def generateMultiCurveSpec(coloured: Vector[ColouredCurve], ...): String
 
 // Inside — colour comes from the wrapper, not from the curve:
-val colorRange = coloured.map(cc => str(cc.hexColor))
+val colorRange = coloured.map(cc => str(cc.hexColor.value))
 // Curve data accessed via cc.curve.id, cc.curve.name, etc.
+// .value extraction happens ONLY here — at the Vega-Lite JSON edge.
 ```
 
-The existing `generateMultiCurveSpec(curves: Vector[LECNodeCurve])`
-remains for the `lec-multi` endpoint's current (non-palette) callers,
-preserving `stableColor(id)` fallback and alphabetical sort.
+**Sort order change:** The new signature **preserves input order**
+(which is already p95-sorted per group by `assignPaletteColours`). The
+old alphabetical sort is removed.
 
-**Sort order:** The new overload **preserves input order** (which is
-already p95-sorted per group by `assignPaletteColours`). No
-conditional sort-skip logic needed — the two overloads have different
-responsibilities:
-- `(Vector[LECNodeCurve])` — legacy: alphabetical sort, hash colour.
-- `(Vector[ColouredCurve])` — new: preserve input order, use provided
-  colours.
+**`generateSpec` (single-curve convenience):** This method exists in the
+builder and delegates to `generateMultiCurveSpec`. It has **zero
+production callers** — only tests use it. It will be updated to accept
+a `ColouredCurve` (or removed, with tests calling the multi-curve
+method directly).
 
-### 3.9 `LECNodeCurve` — unchanged
+**Legacy colour removal:** The following artifacts in
+`LECChartSpecBuilder` become dead code and are deleted:
+- `themeColorsRisk: Vector[String]` — the 10-colour BCG-style palette (bare `String`, no type safety).
+- `stableColor(id: String): String` — the `hashCode.abs % 10` function.
 
-`LECNodeCurve` is **not modified**. The colour is a presentation-layer
-concern and lives on the server-local `ColouredCurve` wrapper (§3.8
-step 3). This avoids:
-- Leaking a stringly-typed `Option[String]` into the cross-compiled
-  wire DTO (`common` module).
-- Serializing `"color": null` on the `lec-multi` endpoint.
-- Violating ADR-001's boundary separation (domain data carries domain
-  fields; presentation metadata lives in presentation-scoped types).
+These are replaced entirely by `CurvePaletteRegistry` shades, which
+provide 13 shades per palette (vs 10 total), p95-ranked ordering
+(vs hash-based), and explicit palette grouping (vs single mixed bag).
+The only production call site is `RiskTreeServiceLive.getLECChart`,
+which this plan already changes to pass `ColouredCurve` vectors.
 
-The `lec-multi` endpoint continues returning `Map[String, LECNodeCurve]`
-with no presentation fields.
+### 3.9 `LECNodeCurve` — unchanged; why `ColouredCurve` exists
+
+`LECNodeCurve` is **not modified**.
+
+#### Why not add `color: Option[String]` to `LECNodeCurve`?
+
+The earlier v3 draft proposed adding `color: Option[String] = None` to
+`LECNodeCurve`. The reasoning was simple: the server computes the hex
+colour in `assignPaletteColours`, stamps it on the curve, and the
+builder reads it back when constructing the Vega-Lite spec:
+
+```
+assignPaletteColours → stamps curve.color = Some("#hex")
+  → builder reads curve.color → embeds in Vega-Lite JSON
+```
+
+This was a shortcut to thread the colour through the pipeline using
+the same data structure. But it is a **DDD violation**:
+
+1. **Domain vs presentation.** `LECNodeCurve` is a domain DTO —
+   identity (id), name, curve points, quantiles. Colour is a rendering
+   decision made by the service layer. It is not an intrinsic property
+   of a curve.
+
+2. **Wire type pollution.** `LECNodeCurve` lives in `common`
+   (cross-compiled JVM + JS) and is serialized to the client by the
+   `/lec-multi` endpoint (`Map[String, LECNodeCurve]`). Adding
+   `color: Option[String]` would serialize `"color": null` for every
+   curve on that endpoint — noise on the wire for a field the client
+   never asked for.
+
+3. **Stringly-typed.** `Option[String]` accepts any garbage. The hex
+   colour is an internal invariant guaranteed by `CurvePaletteRegistry`,
+   not a user-supplied value. This plan uses an Iron-refined opaque
+   type `HexColor` (§3.8 step 1) to enforce the `#[0-9a-fA-F]{6}`
+   constraint at compile time.
+
+#### What is "the `lec-multi` path"?
+
+There are **two** endpoints that touch `LECNodeCurve`:
+
+| Endpoint | URL | Returns | Purpose |
+|---|---|---|---|
+| `lec-chart` | `POST .../lec-chart` | `String` (Vega-Lite JSON) | Render-ready chart spec. **This plan changes its request body** to `LECChartRequest`. The response is a JSON string, not `LECNodeCurve` objects. |
+| `lec-multi` | `POST .../nodes/lec-multi` | `Map[String, LECNodeCurve]` | Raw curve data for inspection (points, quantiles). No chart spec. **This endpoint is unchanged by this plan.** |
+
+The `lec-multi` endpoint is the reason `LECNodeCurve` must stay clean:
+it serializes the type directly to the client. Adding a colour field
+would leak presentation metadata into a data-inspection endpoint.
+
+#### Why no colour field is needed anywhere on the client
+
+The client never sees or handles hex colours. The flow is:
+1. Client sends palette *names* in `LECChartRequest` (§3.6).
+2. Server resolves names → hex colours internally (§3.8).
+3. Server embeds hex colours directly into the Vega-Lite JSON spec.
+4. Client receives the finished Vega-Lite JSON and renders it.
+
+The hex colours exist **only** between `assignPaletteColours` and the
+Vega-Lite JSON encoder, both server-side. The server-local
+`ColouredCurve(curve: LECNodeCurve, hexColor: HexColor)` is the minimal
+type that threads this data through that pipeline without touching any
+shared or serialized type. `HexColor.value` (raw `String` extraction)
+happens only at the Vega-Lite JSON edge in `generateMultiCurveSpec`.
 
 ### 3.10 Client-side flow
 
@@ -657,10 +760,11 @@ chartRequest.changes
   * This keeps TreeDetailView from calling methods on shared state
   * objects — it only emits events; the state owner handles them.
   */
-val userSelectionToggle: WriteBus[NodeId] = new EventBus[NodeId]
+private val userSelectionBus: EventBus[NodeId] = new EventBus[NodeId]
+val userSelectionToggle: WriteBus[NodeId] = userSelectionBus.writer
 
 // Internal observer — handles the toggle + cap logic
-userSelectionToggle.events --> { nodeId =>
+userSelectionBus.events --> { nodeId =>
   val current = userSelectedNodeIds.now()
   if current.contains(nodeId) then
     userSelectedNodeIds.update(_ - nodeId)
@@ -1000,7 +1104,7 @@ Feature 2 (CSS colour) is independent.
 `/w/{key}/risk-trees/{treeId}/query` with `QueryRequest("...")`.
 
 **Step 2 — Server returns matches.**
-`QueryResponse` with `satisfyingNodeIds: List[NodeId]`. Unchanged from today.
+`QueryResponse` with `satisfyingNodeIds: List[NodeId]` (renamed per §1b; same shape as today).
 
 **Step 3 — Client processes result.**
 1. `satisfyingNodeIds` signal updates → tree nodes highlighted green.
@@ -1023,8 +1127,8 @@ HTTP POST `/w/{key}/risk-trees/{treeId}/lec-chart` with body:
    quantiles.
 3. `assignPaletteColours`: groups by `Green`, sorts by p95 desc, assigns
    shades `#03170b` (darkest, highest p95) → `#f1fdf5` (lightest).
-4. Builder reads `curve.color` for each curve, injects into Vega-Lite
-   `encoding.color.scale.range`.
+4. Builder reads `cc.hexColor.value` from each `ColouredCurve`, injects
+   into Vega-Lite `encoding.color.scale.range`.
 5. Returns Vega-Lite JSON.
 
 **Step 6 — Client renders chart.**
@@ -1078,8 +1182,9 @@ None — all decisions are settled.
 | `modules/common/src/main/scala/com/risquanter/register/domain/data/CurvePalette.scala` | New `CurvePalette` enum + JSON codecs | **New** |
 | `modules/common/src/main/scala/com/risquanter/register/http/requests/LECChartRequest.scala` | New `LECChartRequest` + `LECChartCurveEntry` DTOs | **New** |
 | `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceEndpoints.scala` | Change `getWorkspaceLECChartEndpoint` body to `jsonBody[LECChartRequest]` | Modify |
-| `modules/server/src/main/scala/com/risquanter/register/simulation/LECChartSpecBuilder.scala` | Add `CurvePaletteRegistry`, add `generateMultiCurveSpec(Vector[ColouredCurve])` overload | Modify |
-| `modules/server/src/main/scala/com/risquanter/register/simulation/ColouredCurve.scala` | New server-local `ColouredCurve(curve, hexColor)` case class | **New** |
+| `modules/server/src/main/scala/com/risquanter/register/simulation/LECChartSpecBuilder.scala` | Replace `generateMultiCurveSpec` signature to accept `Vector[ColouredCurve]`. Add `CurvePaletteRegistry`. Delete `themeColorsRisk`, `stableColor`, and `generateSpec` (test-only convenience). | Modify |
+| `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala` | Add `HexColorStr` constraint + `HexColor` opaque type (same file as all other opaques). No JSON codecs. | Modify |
+| `modules/server/src/main/scala/com/risquanter/register/simulation/ColouredCurve.scala` | New server-local `ColouredCurve(curve: LECNodeCurve, hexColor: HexColor)` case class | **New** |
 | `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala` | Add `paletteMap` param to `getLECChart` trait method | Modify |
 | `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala` | Implement new `getLECChart` signature, add `assignPaletteColours` | Modify |
 | `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceController.scala` | Destructure `LECChartRequest`, build `paletteMap` | Modify |
@@ -1093,10 +1198,11 @@ None — all decisions are settled.
 presentation concern, kept on the server-local `ColouredCurve` wrapper.
 
 **No new endpoints.** No `QueryResponse` change (rename is a
-prerequisite — §1b). No quantiles endpoint. No `HexColor` type. No
-client-side quantile cache.
+prerequisite — §1b). No quantiles endpoint. No client-side quantile
+cache. `HexColor` is an Iron opaque type in `OpaqueTypes.scala` (§3.8
+step 1) — the client never uses it (no JSON codecs, no wire presence).
 
-**Estimated total:** ~150–180 lines of new/changed Scala, ~10 lines of
+**Estimated total:** ~160–190 lines of new/changed Scala, ~10 lines of
 CSS, 3 new files.
 
 ### 9.1 TreeViewState delegation changes
@@ -1168,8 +1274,10 @@ exposes them individually because the consumers need them individually.
    (purple). No guessing, no precedence rules.
 
 5. **Client is dramatically simpler than v2.** No quantile cache, no
-   `HexColor` type, no palette constants, no `assignColours` function.
-   The client only knows three words: `Green`, `Aqua`, `Purple`.
+   palette constants, no `assignColours` function. `HexColor` (Iron
+   opaque in `OpaqueTypes.scala`, §3.8 step 1) has no JSON codecs and
+   no wire presence — the client only knows three words: `Green`,
+   `Aqua`, `Purple`.
 
 6. **p95-based ordering is domain-meaningful** (§3.5). Higher-risk
    curves get darker colours. This matches how risk professionals scan
@@ -1182,8 +1290,6 @@ exposes them individually because the consumers need them individually.
    structurally unavoidable: Vega-Lite renders in a `<canvas>` element,
    not DOM, so it cannot resolve CSS custom properties (`var(--x)`) at
    runtime. The server must embed raw hex strings in the Vega-Lite JSON.
-   This is the same pattern as the existing `themeColorsRisk` array in
-   `LECChartSpecBuilder`.
    **Mitigation:** Cross-reference comment in both files. Build-time
    codegen (CSS → Scala or Scala → CSS) deferred to §11.
 
@@ -1197,14 +1303,12 @@ exposes them individually because the consumers need them individually.
    **Mitigation:** Internal API behind capability URLs. No external
    consumers. Integration tests need updating.
 
-4. **Builder sort order interaction.** The current
+4. **Builder sort order change.** The current
    `generateMultiCurveSpec(Vector[LECNodeCurve])` sorts root first then
-   alphabetically. With palette groups, the service's p95-based ordering
-   should be preserved.
-   **Mitigation:** The new `generateMultiCurveSpec(Vector[ColouredCurve])`
-   overload (§3.8 step 4) preserves input order. The legacy overload
-   retains its alphabetical sort. Two code paths, each with clear
-   responsibility.
+   alphabetically. The new signature `(Vector[ColouredCurve])` preserves
+   input order (§3.8 step 4), which is p95-sorted per group. Old
+   callers: `generateSpec` (single-curve convenience, test-only) is
+   updated to wrap in `ColouredCurve`. No backward-compat concern.
 
 5. **Server-side palette coupling.** The server must know about CSS
    palettes — arguably a presentation concern.
@@ -1247,19 +1351,14 @@ sites with a single reactive subscription.
 exist because there was no reactive source of chart entries. With
 `chartRequest` as a signal, the reactive approach is cleaner.
 
-#### 10.3.3 Replace `themeColorsRisk` with registry fallback
+#### 10.3.3 ~~Replace `themeColorsRisk` with registry fallback~~
 
-The existing `stableColor` hash-based assignment uses `themeColorsRisk`.
-Once `CurvePaletteRegistry` exists, the builder could fall back to a
-default palette (e.g. `CurvePalette.Aqua`) instead of the legacy 10-colour
-hash. This eliminates `themeColorsRisk` entirely.
-
-| Pros | Cons |
-|---|---|
-| One colour system, not two | Changes existing chart colours — visual regression for non-palette callers |
-| `stableColor` hash collisions eliminated (13 shades vs 10) | Requires checking all call sites of `generateSpec` |
-
-**Assessment:** Nice-to-have. Not blocking. Can be done in a follow-up.
+**Incorporated into the main design (§3.8 step 4).** The legacy
+`themeColorsRisk` (10-colour BCG-style palette) and `stableColor`
+(hashCode-based assignment) are removed. All colour assignment flows
+through `CurvePaletteRegistry` and `assignPaletteColours`. This
+eliminates the dual-colour-system concern and the hash-collision risk
+(13 shades per palette vs 10 total).
 
 ---
 
@@ -1277,7 +1376,8 @@ hash. This eliminates `themeColorsRisk` entirely.
   duplication is structurally unavoidable: Vega-Lite renders in a
   `<canvas>`, not DOM, so it cannot resolve CSS custom properties at
   runtime. The server must embed raw hex strings in the Vega-Lite JSON.
-  This is the same pattern as the existing `themeColorsRisk` array.
+  This is the same structural constraint that the (now-removed)
+  `themeColorsRisk` array addressed. `CurvePaletteRegistry` replaces it.
   A future improvement could generate one from the other at build time
   (CSS → Scala codegen or Scala → CSS codegen), but is out of scope
   for this plan.
@@ -1297,8 +1397,9 @@ Scala specs.
 | `buildChartRequest` | `BuildChartRequestSpec` | (1) Disjoint sets → no overlap, correct palette tags. (2) Partial overlap → overlap nodes get `Purple`, remainder correct. (3) Full overlap → all `Purple`. (4) Empty query set → only `Aqua` entries. (5) Empty user set → only `Green` entries. (6) Both empty → empty entries list. |
 | `CurvePalette` JSON | `CurvePaletteSpec` | (1) Encode → decode round-trip = identity for all variants. (2) Unknown string → Left with descriptive error. (3) Case-insensitive decode ("GREEN", "Green", "green" all succeed). |
 | `LECChartRequest` JSON | `LECChartRequestSpec` | (1) Encode → decode round-trip. (2) Empty `curves` list accepted at codec level (validation is separate). |
-| `CurvePaletteRegistry` | `CurvePaletteRegistrySpec` | (1) Every `CurvePalette` variant has an entry. (2) Each entry has exactly 13 shades. (3) All shade strings match `#[0-9a-f]{6}` pattern. |
-| `generateMultiCurveSpec(Vector[ColouredCurve])` | `LECChartSpecBuilderSpec` | (1) Colour range in output JSON matches input `hexColor` values. (2) Input order preserved (no re-sort). (3) All curve IDs appear in legend domain. |
+| `HexColor` | `HexColorSpec` | (1) Valid `#rrggbb` accepted. (2) Invalid strings rejected (no `#`, wrong length, non-hex chars). (3) Case-insensitive (`#aaBBcc` accepted). |
+| `CurvePaletteRegistry` | `CurvePaletteRegistrySpec` | (1) Every `CurvePalette` variant has an entry. (2) Each entry has exactly 13 `HexColor` values. (3) Compile-time safe — `refineUnsafe` on literals. |
+| `generateMultiCurveSpec(Vector[ColouredCurve])` | `LECChartSpecBuilderSpec` | (1) Colour range in output JSON matches input `hexColor.value` strings. (2) Input order preserved (no re-sort). (3) All curve IDs appear in legend domain. (4) Existing tests that called `generateSpec(LECNodeCurve)` are updated to wrap in `ColouredCurve` with `HexColor` — verifies backward compat of the output JSON structure. |
 
 ### 12.2 Integration tests (server — `sbt server-it/test`)
 

@@ -36,6 +36,10 @@ object LECPoint {
   * @param quantiles Key percentiles (p50, p90, p95, p99) for quick reference
   * @param provenances Opt-in provenance metadata for reproducibility (via ?includeProvenance=true)
   */
+// TODO-REMOVE: No real-world clients. All LEC rendering uses the lec-chart endpoint
+// (Vega-Lite spec) or lec-multi endpoint (Map[String, LECNodeCurve]). Remove along
+// with getWorkspaceLECCurveEndpoint, RiskTreeService.getLECCurve, and their tests.
+@deprecated("No real-world clients. Use lec-multi (LECNodeCurve) or lec-chart (Vega-Lite spec) instead.", since = "2026-04-14")
 final case class LECCurveResponse(
   id: String,
   name: String,
