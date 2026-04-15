@@ -1,9 +1,10 @@
 # Plan: Query Result Visualization — v2
 
-**Status:** Draft  
+**Status:** Decisions accepted — ready for implementation  
 **Scope:** Planning only — no code changes  
 **Predecessor:** PLAN-QUERY-RESULT-VISUALIZATION.md (v3, fully implemented)  
-**Date:** 2026-04-14
+**Date:** 2026-04-14  
+**Decisions accepted:** 2026-04-15 — D1(a), D2(a), D3(a)
 
 ---
 
@@ -27,6 +28,45 @@ plan:
    forms, where all domain errors stay inside their owning card.
 
 This plan addresses both issues as independent work streams.
+
+---
+
+## 0.1 ADR Compliance Review (Planning Phase)
+
+**Reviewed ADRs:** ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011
+
+| ADR | Status | Notes |
+|-----|--------|-------|
+| ADR-001 (Iron types) | Compliant | `NodeId` is Iron-refined. Display code extracts via `.value` — no `.toString` on the opaque wrapper. |
+| ADR-002 (Logging) | N/A | No new logging. |
+| ADR-003 (Provenance) | N/A | No simulation changes. |
+| ADR-009 (Identity aggregation) | N/A | No aggregation changes. |
+| ADR-010 (Error handling) | Compliant | Work Stream B reclassifies error routing to match ADR-010's hybrid error channel pattern: domain errors inline, infra errors to `ErrorBanner`. |
+| ADR-011 (Import conventions) | Compliant | Top-level imports, no FQNs. |
+
+**Deviations detected:** None.
+
+### Validation Checklist
+
+- [x] Compliant with ADR-001 (Iron types)
+- [x] Compliant with ADR-010 (Error handling)
+- [x] Compliant with ADR-011 (Import conventions)
+- [ ] Code compiles
+- [ ] Tests pass
+- [ ] Integration verified
+- [ ] User approves
+
+### Decision Triggers Acknowledged
+
+Per WORKING-INSTRUCTIONS.md § Decision Triggers:
+
+- **Trigger #4 (Type changes):** Work Stream A changes `QueryResultCard`
+  constructor signature (new `Signal` parameter). Accepted as part of
+  this plan approval.
+- **Trigger #5 (Behavioral changes):** Work Stream A changes node label
+  format across all views. Accepted as part of this plan approval.
+- **Critical Stop Point:** Work Stream B task B3 removes `renderError`
+  from `QueryResultCard`. Approved as part of this plan acceptance.
 
 ---
 
@@ -138,39 +178,23 @@ the raw ULID.
 | A3 | `QueryResultCard.scala` | Accept a `Signal[Map[NodeId, RiskNode]]` parameter. Resolve node names in the matching-nodes list. |
 | A4 | `AnalyzeView.scala` | Derive and pass the node-lookup signal to `QueryResultCard`. |
 
-### 1.5 Design Decisions
+### 1.5 Design Decisions (all accepted 2026-04-15)
 
 **D1: TreePreview (Design view) — draft nodes have no ULID.**  
-Draft nodes are client-side only (`PortfolioDraft`, `LeafDraft`) and
-use string names as identifiers, not server-assigned ULIDs. Options:
-
-- **(a) Skip ID in preview labels.** Show `"Cyber Attacks (draft)"` or
-  just `"Cyber Attacks"` as today. Tooltip shows all draft params.
-- **(b) Show client-generated temporary IDs.** Not useful to the user.
-
-**Recommendation:** Option (a). The Design view preview is for tree
-construction, not for cross-referencing with query results. The ID is
-only meaningful after server persistence.
+**Decision: (a) Skip ID in preview labels.** Show `"Cyber Attacks"`
+as today. Tooltip shows all draft params. The ID is only meaningful
+after server persistence.
 
 **D2: Tooltip implementation.**  
-- **(a) Native `title` attribute.** Zero dependency, no CSS, works
-  everywhere. Delayed appearance (~500ms), plain text only.
-- **(b) Custom CSS tooltip.** Styled, instant, monospace. Requires a
-  small component and CSS.
-
-**Recommendation:** Start with (a). Upgrade to (b) if user feedback
+**Decision: (a) Native `title` attribute.** Zero dependency, no CSS,
+works everywhere. Upgrade to custom CSS tooltip if user feedback
 demands richer formatting.
 
-**D3: ID format in label — full ULID vs truncated.**
-- **(a) Full ULID** — 26 chars, e.g. `01KP6W0Y48CMEX60GBM7A23C3E`.
-  Unambiguous, directly copyable for API use.
-- **(b) Truncated** — e.g. `01KP6W…3C3E` (first 6 + last 4).
-  Shorter, but may collide visually in small trees.
-
-**Recommendation:** (a) Full ULID. The monospace font and horizontal
-scroll in the tree container handle long labels. The tooltip is always
-available for copying. Truncation can be introduced later with CSS
-`text-overflow: ellipsis` on the ID portion if needed.
+**D3: ID format in label — full ULID vs truncated.**  
+**Decision: (a) Full ULID** — 26 chars, e.g.
+`01KP6W0Y48CMEX60GBM7A23C3E`. Unambiguous, directly copyable for API
+use. Truncation can be introduced later with CSS `text-overflow:
+ellipsis` on the ID portion if needed.
 
 ### 1.6 Implementation Phases
 
@@ -288,7 +312,7 @@ query execution.
 |---|---|---|
 | B1 | `AnalyzeQueryState.scala` | Add `queryServerError: Var[Option[String]]`. Update `executeQuery()` to classify errors and route accordingly. Clear on new execution. |
 | B2 | `AnalyzeView.scala` | Add a `child.maybe` for `queryServerError` below the parse-error slot (same `div > span.form-error` pattern). |
-| B3 | `QueryResultCard.scala` | Remove `renderError` — the `Failed` branch becomes unreachable for domain errors. Optionally keep a safety-net rendering for unexpected states. |
+| B3 | `QueryResultCard.scala` | Remove `renderError` — the `Failed` branch becomes unreachable for domain errors. Keep a safety-net `case Failed(_) => emptyNode` for unexpected states. **Critical Stop Point approved.** |
 | B4 | `app.css` | Add `.query-server-error` class with same spacing as `.query-parse-error`. |
 
 ### 2.7 Implementation Phases
