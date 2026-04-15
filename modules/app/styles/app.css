@@ -134,7 +134,7 @@
   --curve-orange-950:          #361402;
   --curve-orange-975:          #1d0b01;
 
- (DORA)       #f0fcff, #e0f9ff, #d4f5fc, #aee9f8, #7bdaf3, #42c9ed, #00b3e6, #0094bf, #007299, #005370, #003a52, #002533, #00121a;
+  --curve-palette-aqua:        #f0fcff, #e0f9ff, #d4f5fc, #aee9f8, #7bdaf3, #42c9ed, #00b3e6, #0094bf, #007299, #005370, #003a52, #002533, #00121a;
 
   /* Aqua shades (explicit named stops) */
   --curve-aqua-25:             #f0fcff;
@@ -554,6 +554,10 @@ body {
   flex: 0 0 auto;
   min-height: 0;
   overflow: visible;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
 }
 
 .analyze-lec-panel .lec-chart-view {

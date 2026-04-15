@@ -185,7 +185,7 @@ object LECChartSpecBuilder {
           ),
           "axis" -> obj(
             "grid"        -> bool(true),
-            "gridColor"   -> str("#2a3a3e"),
+            "gridColor"   -> str("#1c2225"),
             "labelColor"  -> str("#b0b8b8"),
             "titleColor"  -> str("#e6e8e8"),
             "domainColor" -> str("#4a5a5e"),
