@@ -1,9 +1,12 @@
 package app.state
 
+import zio.ZIO
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.errors.FolQueryFailure
+import com.risquanter.register.domain.errors.FolQueryFailure.*
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.http.responses.QueryResponse
@@ -77,6 +80,19 @@ final class AnalyzeQueryState(
   // ── Server-side evaluation result ─────────────────────────────
   val queryResult: Var[LoadState[QueryResponse]] = Var(LoadState.Idle)
 
+  /** Server-side domain error (400 query failures) for inline display.
+    *
+    * Populated when `executeQuery()` receives a 400-level `FolQueryFailure`
+    * (parse, unknown-symbol, bind, domain-not-quantifiable). Rendered as
+    * `span.form-error` in the query panel, parallel to `parseError`.
+    *
+    * Cleared on every new query execution. Infra-level errors (500, network)
+    * bypass this channel and route to `GlobalError` / `ErrorBanner` instead.
+    *
+    * @see Plan v2 §2.5 — Error Routing table
+    */
+  val queryServerError: Var[Option[String]] = Var(None)
+
   /** Node IDs satisfying the last successful query (derived, read-only). */
   val satisfyingNodeIds: Signal[Set[NodeId]] =
     queryResult.signal.map {
@@ -96,8 +112,12 @@ final class AnalyzeQueryState(
   /** Fire a query against the backend.
     *
     * Sends `POST /w/{key}/risk-trees/{treeId}/query` with the current
-    * `queryInput` text. Result lifecycle tracked in `queryResult` via
-    * `ZJS.loadInto`. No-op if no workspace or tree is selected.
+    * `queryInput` text. Result lifecycle tracked in `queryResult`.
+    * No-op if no workspace or tree is selected.
+    *
+    * Error routing (ADR-010 / Plan v2 §2.5):
+    *   - 400 domain errors (parse/symbol/bind) → `queryServerError` (inline)
+    *   - 5xx / network / other → `GlobalError` → `ErrorBanner`
     */
   def executeQuery(): Unit =
     val queryText = queryInput.now()
@@ -111,6 +131,33 @@ final class AnalyzeQueryState(
         case Right(_) =>
           (keySignal.now(), selectedTreeId.now()) match
             case (Some(key), Some(treeId)) =>
+              queryResult.set(LoadState.Loading)
+              queryServerError.set(None)
               queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(queryText)))
-                .loadInto(queryResult)
+                .foldZIO(
+                  failure = {
+                    case e: FolQueryFailure if isQueryDomainError(e) =>
+                      ZIO.succeed {
+                        queryServerError.set(Some(e.getMessage))
+                        queryResult.set(LoadState.Idle)
+                      }
+                    case e =>
+                      ZIO.succeed(queryResult.set(LoadState.Idle)) *> ZIO.fail(e)
+                  },
+                  success = resp => ZIO.succeed(queryResult.set(LoadState.Loaded(resp)))
+                )
+                .runJs
             case _ => () // No workspace or tree selected
+
+  /** True for `FolQueryFailure` subtypes that represent user-facing query
+    * domain errors (HTTP 400). These route to the inline `queryServerError`
+    * slot. Infra-level failures (500, 409) propagate to `GlobalError` / `ErrorBanner`.
+    */
+  private def isQueryDomainError(e: FolQueryFailure): Boolean = e match
+    case _: FolParseFailure          => true
+    case _: FolUnknownSymbol         => true
+    case _: FolBindFailure           => true
+    case _: FolDomainNotQuantifiable => true
+    case _: FolModelValidationFailure => false
+    case _: FolEvaluationFailure      => false
+    case _: SimulationNotCached       => false

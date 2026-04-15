@@ -4,6 +4,8 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.components.SplitPane
 import app.state.{TreeViewState, AnalyzeQueryState, LoadState}
+import com.risquanter.register.domain.data.{RiskNode, RiskTree}
+import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.requests.LECChartRequest
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
@@ -43,6 +45,13 @@ object AnalyzeView:
           if allNodes.isEmpty then None
           else Some(LECChartRequest.build(querySet, userSet))
         }
+
+    // ── Node lookup for name resolution in QueryResultCard (A1) ──
+    val nodeLookup: Signal[Map[NodeId, RiskNode]] =
+      treeViewState.selectedTree.signal.map {
+        case LoadState.Loaded(tree) => tree.nodes.map(n => n.id -> n).toMap
+        case _                      => Map.empty
+      }
 
     val analyzeLeftPanel = div(
       cls := "analyze-left-panel",
@@ -110,6 +119,10 @@ object AnalyzeView:
         child.maybe <-- queryState.parseError.map(_.map { msg =>
           div(cls := "query-parse-error", span(cls := "form-error", msg))
         }),
+        // Inline server domain error (400 query failures, Plan v2 §2.4)
+        child.maybe <-- queryState.queryServerError.signal.map(_.map { msg =>
+          div(cls := "query-server-error", span(cls := "form-error", msg))
+        }),
         // Run button row
         div(
           cls := "query-actions",
@@ -127,7 +140,7 @@ object AnalyzeView:
         )
       ),
       // ── Query result card ───────────────────────────────────────
-      QueryResultCard(queryState.queryResult.signal),
+      QueryResultCard(queryState.queryResult.signal, nodeLookup),
       // ── LEC chart panel ─────────────────────────────────────────
       div(
         cls := "analyze-lec-panel",

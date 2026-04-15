@@ -30,9 +30,28 @@ object TreeDetailView:
 
   private def nodeLabel(node: RiskNode): String = node match
     case leaf: RiskLeaf =>
-      s"${leaf.name} (${leaf.distributionType}, p=${f"${leaf.probability}%.2f"})"
+      s"${leaf.name} (id: ${leaf.id.value})"
     case portfolio: RiskPortfolio =>
-      portfolio.name
+      s"${portfolio.name} (id: ${portfolio.id.value})"
+
+  /** Build a structured tooltip showing all node params (D2(a): native title). */
+  private def nodeTooltip(node: RiskNode): String = node match
+    case leaf: RiskLeaf =>
+      val base = s"${leaf.name}\n" +
+        s"─────────────────────\n" +
+        s"ID:           ${leaf.id.value}\n" +
+        s"Type:         ${leaf.distributionType}\n" +
+        s"Probability:  ${leaf.probability}"
+      val pcts = leaf.percentiles.fold("")(arr => s"\nPercentiles:  [${arr.mkString(", ")}]")
+      val qtls = leaf.quantiles.fold("")(arr => s"\nQuantiles:    [${arr.mkString(", ")}]")
+      val minL = leaf.minLoss.fold("")(v => s"\nMin Loss:     $v")
+      val maxL = leaf.maxLoss.fold("")(v => s"\nMax Loss:     $v")
+      s"$base$pcts$qtls$minL$maxL"
+    case portfolio: RiskPortfolio =>
+      s"${portfolio.name}\n" +
+        s"─────────────────────\n" +
+        s"ID:           ${portfolio.id.value}\n" +
+        s"Children:     ${portfolio.childIds.length}"
 
   private def isPortfolio(node: RiskNode): Boolean = node match
     case _: RiskPortfolio => true
@@ -154,6 +173,7 @@ object TreeDetailView:
           span(
             cls := "node-label",
             cursor.pointer,
+            title := nodeTooltip(node),
             nodeLabel(node),
             onClick --> handleNodeClick
           )

@@ -28,6 +28,12 @@ object TreePreview:
       case Portfolio(n) => n
       case Leaf(n, dt, p) => s"$n ($dt, p=${f"$p%.2f"})"
 
+    /** Tooltip showing all draft params (D2(a): native title). */
+    def tooltip: String = this match
+      case Portfolio(n) => n
+      case Leaf(n, dt, p) =>
+        s"$n\n─────────────────────\nType:         $dt\nProbability:  $p"
+
   def apply(builderState: TreeBuilderState): HtmlElement =
     val treeSignal: Signal[List[HtmlElement]] =
       builderState.treeNameVar.signal
@@ -96,7 +102,7 @@ object TreePreview:
         cls := "tree-node",
         span(cls := "tree-branch", s"$prefix$connector"),
         node.iconSvg,
-        span(cls := "tree-label", s" ${node.label} "),
+        span(cls := "tree-label", title := node.tooltip, s" ${node.label} "),
         button(
           cls := "remove-btn",
           "✕",

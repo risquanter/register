@@ -591,6 +591,12 @@ body {
   margin-bottom: var(--sp-2);
 }
 
+/* Server-side domain error (Plan v2 §2.4) */
+.query-server-error {
+  margin-top: calc(-1 * var(--sp-1));
+  margin-bottom: var(--sp-2);
+}
+
 /* Instant validation checkbox */
 .query-instant-validate {
   margin-top: var(--sp-1);

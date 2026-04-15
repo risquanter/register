@@ -3,26 +3,33 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.LoadState
+import com.risquanter.register.domain.data.RiskNode
+import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.responses.QueryResponse
 
 /** Result card for vague quantifier query evaluation (ADR-028).
   *
-  * Composable function: `Signal[LoadState[QueryResponse]] => HtmlElement`.
-  * Shows satisfied badge, proportion bar, count, matching IDs, query echo.
-  * States: Idle, Loading, Failed, Loaded.
+  * Shows satisfied badge, proportion bar, count, matching nodes, query echo.
+  * States: Idle, Loading, Loaded (Failed renders as emptyNode safety-net).
+  *
+  * Accepts a node-lookup signal for resolving node names in the
+  * matching-nodes list (Plan v2 §1.3.3, Work Stream A).
   *
   * Pure derived view — owns no state (ADR-019 Pattern 4).
   */
 object QueryResultCard:
 
-  def apply(resultSignal: Signal[LoadState[QueryResponse]]): HtmlElement =
+  def apply(
+    resultSignal: Signal[LoadState[QueryResponse]],
+    nodeLookup: Signal[Map[NodeId, RiskNode]] = Signal.fromValue(Map.empty)
+  ): HtmlElement =
     div(
       cls := "query-result-card",
-      child <-- resultSignal.map {
-        case LoadState.Idle        => renderIdle
-        case LoadState.Loading     => renderLoading
-        case LoadState.Failed(msg) => renderError(msg)
-        case LoadState.Loaded(r)   => renderResult(r)
+      child <-- resultSignal.combineWith(nodeLookup).map {
+        case (LoadState.Idle, _)        => renderIdle
+        case (LoadState.Loading, _)     => renderLoading
+        case (LoadState.Failed(_), _)   => emptyNode // safety-net: domain errors route to AnalyzeView inline slot
+        case (LoadState.Loaded(r), lookup) => renderResult(r, lookup)
       }
     )
 
@@ -40,13 +47,7 @@ object QueryResultCard:
       p("Evaluating query…")
     )
 
-  private def renderError(message: String): HtmlElement =
-    div(
-      cls := "query-result-error",
-      p(cls := "error-message", message)
-    )
-
-  private def renderResult(r: QueryResponse): HtmlElement =
+  private def renderResult(r: QueryResponse, nodeLookup: Map[NodeId, RiskNode]): HtmlElement =
     val satisfiedCls = if r.satisfied then "badge-satisfied" else "badge-not-satisfied"
     val satisfiedText = if r.satisfied then "SATISFIED" else "NOT SATISFIED"
     val pct = (r.proportion * 100).round.toInt
@@ -71,14 +72,19 @@ object QueryResultCard:
         ),
         span(cls := "proportion-label", s"$pct% (${r.satisfyingCount} of ${r.rangeSize})")
       ),
-      // Matching node IDs
+      // Matching nodes — resolved to "Name (id: ULID)" when possible
       if r.satisfyingNodeIds.nonEmpty then
         div(
           cls := "query-result-matches",
           span(cls := "matches-label", "Matching nodes:"),
           ul(
             cls := "matches-list",
-            r.satisfyingNodeIds.map(nid => li(nid.toString))
+            r.satisfyingNodeIds.map { nid =>
+              val label = nodeLookup.get(nid) match
+                case Some(node) => s"${node.name} (id: ${nid.value})"
+                case None       => nid.value
+              li(label)
+            }
           )
         )
       else
