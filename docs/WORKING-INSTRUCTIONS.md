@@ -27,7 +27,8 @@ This document defines the working protocol for implementing the ADR proposals.
 ### Scala / ZIO
 
 - Code must be **idiomatic Scala 3** with ZIO 2.x patterns
-- Follow existing codebase conventions (check existing files for style)
+- Follow existing codebase conventions
+- check existing files for style
 - Use ZIO Prelude types where applicable (`Identity`, `Validation`, etc.)
 - Prefer `for` comprehensions for ZIO effect composition
 - Use Iron refined types for domain validation (per ADR-001)
@@ -51,7 +52,7 @@ This document defines the working protocol for implementing the ADR proposals.
 
 Before writing any code, agent must:
 
-1. **Review all accepted ADRs** to understand current architecture
+1. **Review all accepted ADRs** to understand current architecture; explicitly review ALL ADRs for ALL tasks to internalize the preferences regarding not just directly related concepts, but cross-cutting concerns like security, validation, data access and persistance methods, etc.
 2. **Identify potential conflicts** with proposed changes
 3. **Document alignment or deviations** in planning proposal
 4. **Notify user immediately** if any deviation is detected:
