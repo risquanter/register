@@ -65,10 +65,38 @@ _opam/
 
 # Temp folder
 /temp/
-/temp/*
-private-docs/*
+/private-docs/
 interview-prep/
 
 # npm
 .vite/
 node_modules/tmp/
+
+# Environment files — may contain secrets; commit .env.*.example templates instead
+.env
+.env.*
+!.env.*.example
+
+# Key material / certificates
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# Scala CLI IDE environment snapshot — snapshots full shell env at build time,
+# potentially capturing any secret-bearing variables that happen to be set.
+.scala-build/
+
+# Generic secret files
+*.secret
+*.secrets
+.netrc
+
+# Agent / MCP tooling credential files
+.vscode/mcp.json
+.cursor/
+.copilot/
