@@ -3,19 +3,21 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
-import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
-import com.risquanter.register.http.requests.LECChartRequest
 
-/** Chart selection and LEC spec state, separated from tree navigation.
+/** Chart selection and LEC curve data state, separated from tree navigation.
   *
   * Owns the user's manual node selection for charting (Ctrl+click picks),
-  * the fetched Vega-Lite spec, and the bus-based toggle with a 13-cap guard.
+  * the fetched curve data cache, and the bus-based toggle with a 13-cap guard.
   *
-  * The reactive `chartRequest` signal that merges query-matched nodes with
-  * user selections is constructed in `AnalyzeView`, where both
+  * Fetches structured `Map[String, LECNodeCurve]` via `lec-multi`.
+  * The Vega-Lite spec is built client-side from this data.
+  *
+  * The reactive `loadCurves` call that merges query-matched nodes with
+  * user selections is driven from `AnalyzeView`, where both
   * `AnalyzeQueryState.satisfyingNodeIds` and this state's
   * `userSelectedNodeIds` are in scope.
   *
@@ -39,8 +41,33 @@ final class LECChartState(
   // ── User selection state ──────────────────────────────────────
   /** Node IDs manually Ctrl+clicked by the user for LEC chart overlay. */
   val userSelectedNodeIds: Var[Set[NodeId]] = Var(Set.empty)
-  /** Render-ready Vega-Lite JSON spec (fetched from backend). */
-  val lecChartSpec: Var[LoadState[String]] = Var(LoadState.Idle)
+
+  /** Node IDs satisfying the current query (set from AnalyzeView). */
+  val satisfyingNodeIds: Var[Set[NodeId]] = Var(Set.empty)
+
+  /** Structured curve data fetched via `lec-multi` endpoint.
+    * Keyed by `nodeId.value` (String), matching the endpoint response shape.
+    */
+  val curveCache: Var[LoadState[Map[String, LECNodeCurve]]] = Var(LoadState.Idle)
+
+  /** Manual colour overrides per node (hex strings, e.g. "#4ade80"). */
+  val colorOverrides: Var[Map[NodeId, String]] = Var(Map.empty)
+
+  // ── Derived signals ───────────────────────────────────────────
+
+  /** Union of query-matched + user-selected node IDs — the set of nodes
+    * whose curves should be rendered in the chart.
+    */
+  val visibleCurves: Signal[Set[NodeId]] =
+    userSelectedNodeIds.signal
+      .combineWith(satisfyingNodeIds.signal)
+      .map { (user, query) => user ++ query }
+
+  /** Node → hex colour mapping for chart curves and tree highlights.
+    * Returns empty map; populated once ColorAssigner is wired.
+    */
+  val nodeColorMap: Signal[Map[NodeId, String]] =
+    Signal.fromValue(Map.empty)
 
   // ── Bus-based toggle (ADR-019 P2: events up) ─────────────────
 
@@ -73,15 +100,23 @@ final class LECChartState(
   /** Reset chart state (called when tree selection changes). */
   def reset(): Unit =
     userSelectedNodeIds.set(Set.empty)
-    lecChartSpec.set(LoadState.Idle)
+    satisfyingNodeIds.set(Set.empty)
+    curveCache.set(LoadState.Idle)
+    colorOverrides.set(Map.empty)
 
-  /** Fetch the LEC chart spec from the backend for the given request.
+  /** Fetch LEC curves from the backend for the given node IDs.
     *
-    * Called reactively from the `chartRequest` signal subscription
-    * in `AnalyzeView`.
+    * Calls the `lec-multi` endpoint, which returns structured
+    * `Map[String, LECNodeCurve]` data. The Vega-Lite spec is built
+    * client-side from this cache (not here).
+    *
+    * @param nodeIds List of node IDs to fetch curves for
     */
-  def loadLECChart(request: LECChartRequest): Unit =
+  def loadCurves(nodeIds: List[NodeId]): Unit =
     (keySignal.now(), selectedTreeId.now()) match
       case (Some(key), Some(treeId)) =>
-        getWorkspaceLECChartEndpoint((userIdAccessor(), key, treeId, request)).loadInto(lecChartSpec)
+        getWorkspaceLECCurvesMultiEndpoint(
+          (userIdAccessor(), key, treeId, false, nodeIds)
+        ).loadInto(curveCache)
       case _ => () // No workspace or tree selected — nothing to do
+

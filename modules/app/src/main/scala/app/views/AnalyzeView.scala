@@ -6,7 +6,6 @@ import app.components.SplitPane
 import app.state.{TreeViewState, AnalyzeQueryState, LoadState}
 import com.risquanter.register.domain.data.{RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.NodeId
-import com.risquanter.register.http.requests.LECChartRequest
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
   *
@@ -33,17 +32,17 @@ object AnalyzeView:
     /** Fire query against selected tree. No-op if no tree is selected. */
     def runQuery(): Unit = queryState.executeQuery()
 
-    // ── Reactive chart request (§3.10) ──────────────────────────
-    // Merges query-matched nodes (green) with user Ctrl+click selections
-    // (aqua), tagging overlap as purple. Fires POST to /lec-chart on
-    // any change to either set (debounced 100ms for rapid Ctrl+click).
-    val chartRequest: Signal[Option[LECChartRequest]] =
+    // ── Reactive chart node list (§3.10) ───────────────────────────
+    // Merges query-matched nodes with user Ctrl+click selections.
+    // Fires POST to /lec-multi on any change to either set (debounced 100ms).
+    // Also keeps chartState.satisfyingNodeIds in sync for visibleCurves.
+    val chartNodeIds: Signal[Option[List[NodeId]]] =
       queryState.satisfyingNodeIds
         .combineWith(treeViewState.chartState.userSelectedNodeIds.signal)
         .map { (querySet, userSet) =>
           val allNodes = querySet ++ userSet
           if allNodes.isEmpty then None
-          else Some(LECChartRequest.build(querySet, userSet))
+          else Some(allNodes.toList)
         }
 
     // ── Node lookup for name resolution in QueryResultCard (A1) ──
@@ -62,16 +61,20 @@ object AnalyzeView:
           treeViewState.expandToRevealNodes(resp.satisfyingNodeIds.toSet)
         case _ => ()
       },
-      // Auto-LEC: fire chart request on any change to either node set
-      chartRequest.changes
-        .collect { case Some(req) => req }
-        .debounce(100) --> { req =>
-          treeViewState.chartState.loadLECChart(req)
+      // Sync satisfyingNodeIds into chartState for visibleCurves derivation
+      queryState.satisfyingNodeIds.changes --> { ids =>
+        treeViewState.chartState.satisfyingNodeIds.set(ids)
+      },
+      // Auto-LEC: fire curve fetch on any change to either node set
+      chartNodeIds.changes
+        .collect { case Some(ids) => ids }
+        .debounce(100) --> { nodeIds =>
+          treeViewState.chartState.loadCurves(nodeIds)
         },
-      // Reset chart to idle when both sets become empty
-      chartRequest.changes
+      // Reset curve cache to idle when both sets become empty
+      chartNodeIds.changes
         .collect { case None => () } --> { _ =>
-          treeViewState.chartState.lecChartSpec.set(LoadState.Idle)
+          treeViewState.chartState.curveCache.set(LoadState.Idle)
         },
       // ── Query input panel ───────────────────────────────────────
       div(
@@ -142,9 +145,16 @@ object AnalyzeView:
       // ── Query result card ───────────────────────────────────────
       QueryResultCard(queryState.queryResult.signal, nodeLookup),
       // ── LEC chart panel ─────────────────────────────────────────
+      // Maps curveCache lifecycle to LECChartView's LoadState[String].
+      // Spec generation from curve data is not yet wired.
       div(
         cls := "analyze-lec-panel",
-        LECChartView(treeViewState.lecChartSpec)
+        LECChartView(treeViewState.curveCache.map {
+          case LoadState.Idle       => LoadState.Idle
+          case LoadState.Loading    => LoadState.Loading
+          case LoadState.Failed(m)  => LoadState.Failed(m)
+          case LoadState.Loaded(_)  => LoadState.Loaded("{}") // No-op spec; LECSpecBuilder not wired yet
+        })
       )
     )
 

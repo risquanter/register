@@ -33,6 +33,12 @@ This document defines the working protocol for implementing the ADR proposals.
 - Prefer `for` comprehensions for ZIO effect composition
 - Use Iron refined types for domain validation (per ADR-001)
 
+### Comment Style
+
+- **Comments must describe the current state** — never reference migration history, plan phases, timelines, or future work (e.g. "after v4 migration", "in P2", "will be implemented in P3", "moved from server-side")
+- If something is not yet wired, say so factually (e.g. "returns empty map; populated once ColorAssigner is wired") without referencing when
+- Commit messages and plan documents may reference phases; source code comments must not
+
 ### OCaml
 
 - **Minimize OCaml code** — prefer using Irmin as an external service

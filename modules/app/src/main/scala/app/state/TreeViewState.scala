@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
-import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
+import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 import com.risquanter.register.http.responses.SimulationResponse
@@ -51,8 +51,10 @@ final class TreeViewState(
   // Mutations go through userSelectionToggle bus (ADR-019: events up).
   /** Node IDs manually Ctrl+clicked for LEC chart overlay (read-only). */
   def userSelectedNodeIds: StrictSignal[Set[NodeId]] = chartState.userSelectedNodeIds.signal
-  /** Render-ready Vega-Lite JSON spec (read-only). */
-  def lecChartSpec: StrictSignal[LoadState[String]] = chartState.lecChartSpec.signal
+  /** Structured curve data (read-only). Vega-Lite spec built client-side. */
+  def curveCache: Signal[LoadState[Map[String, LECNodeCurve]]] = chartState.curveCache.signal
+  /** Node → hex colour map for chart curves and tree highlights (read-only). */
+  def nodeColorMap: Signal[Map[NodeId, String]] = chartState.nodeColorMap
   /** WriteBus for Ctrl+click toggle events (delegates to LECChartState). */
   def userSelectionToggle: WriteBus[NodeId] = chartState.userSelectionToggle
 
