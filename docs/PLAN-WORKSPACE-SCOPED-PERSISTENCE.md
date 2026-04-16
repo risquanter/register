@@ -726,58 +726,124 @@ special handling needed.
 
 | Option | Description |
 |--------|-------------|
-| **D6-A: Soft delete** | Set `status = 'expired'`. Workspace row preserved. Tree data deleted from Irmin. Full audit trail in PG. |
-| **D6-B: Hard delete** | `DELETE FROM workspaces WHERE ...`. Row gone. Irmin tree data deleted. Irmin commit history retains tree provenance. |
+| **D6-A: Soft delete** | Set `status = 'expired'`. Workspace row preserved in PG. Tree data removed from Irmin current state (commit history retains it). |
+| **D6-B: Hard delete** | `DELETE FROM workspaces WHERE ...`. PG row gone. Irmin current tree data removed (commit history retains it). |
 
 #### EU Regulatory and Data Privacy Analysis
 
-The workspace row contains: `id` (ULID), `key_hash` (SHA-256 digest),
-`created_at`, `last_access`, `ttl`, `idle_timeout`, `status`. The
-associated `workspace_trees` rows contain `workspace_id` and `tree_id`
-(both ULIDs) plus `added_at`.
+##### What data exists where
 
-**Is any of this personal data under GDPR?**
+| Location | Content | Personal data? |
+|----------|---------|----------------|
+| **PG `workspaces` row** | `id` (ULID), `key_hash` (SHA-256), timestamps, status | **No** at Layer 0. **Yes** when `owner_id` added (Layer 1+) — becomes pseudonymous under GDPR Art. 4(1). |
+| **PG `workspace_trees`** | `workspace_id`, `tree_id` (ULIDs), `added_at` | **No** — system-generated identifiers with no person link. |
+| **Irmin current state** | Risk node names, L/E/C values, tree structure | **No** — domain model data (risk assessments), not data about a person. |
+| **Irmin commit history** | Workspace ID, tree ID, operation type, timestamp in commit messages. Full prior tree state in parent commits. | **No** — same content as current state, plus system-generated metadata. No person identifiers. |
 
-In the current Layer 0 architecture (no authentication), workspaces
-are anonymous. There is no `user_id`, email, IP address, or any other
-identifier linking a workspace to a natural person. A ULID is a random
-identifier with an embedded timestamp — it does not identify a person.
-The `key_hash` is a one-way digest of a random token, also not
-personal data.
+Under normal operating conditions, **Irmin data is not personal
+data.** Risk trees describe risk assessments, not natural persons.
+Irmin paths and commit messages contain only system-generated ULIDs
+and operation labels. This holds at both Layer 0 and Layer 1+ —
+`owner_id` lives exclusively in PG, never in Irmin.
 
-However, once Layer 1 authentication lands (AUTHORIZATION-PLAN
-L1.2), workspaces gain an `owner_id` linking them to a user account.
-At that point the workspace row becomes **pseudonymous personal data**
-under GDPR Art. 4(1) — the `owner_id` is an identifier that, combined
-with the user table, relates to an identified natural person.
+**Edge case:** If a user types personally identifying information
+into a risk node name (e.g., "Jane Smith's department risk"), that
+content becomes personal data. This is a content-level concern, not
+a structural one, and is addressed under "Irmin and the right to
+erasure" below.
 
-**Implications for each option:**
+##### Irmin and the right to erasure — legal precedents
 
-| Consideration | D6-A: Soft delete | D6-B: Hard delete |
-|---------------|-------------------|-------------------|
-| **GDPR Art. 5(1)(e) — storage limitation** | Retaining expired workspace rows indefinitely may conflict with the principle that personal data should be kept "no longer than necessary." Requires a documented retention period and scheduled purge job. | Compliant by default — data is gone when no longer needed. |
-| **GDPR Art. 17 — right to erasure** | A user requesting deletion requires a purge of their soft-deleted rows. Must be implemented as an admin/automated operation. Forgetting to purge = non-compliance. | Already satisfied — row is deleted. |
-| **GDPR Art. 30 — records of processing** | The soft-deleted manifest can serve as a processing record. However, GDPR does not require retaining *per-workspace* records — a processing register at the controller level suffices. | Irmin commit history still provides structural provenance (workspace ID in commit messages). Not as convenient as a PG table scan, but sufficient for audit. |
-| **ePrivacy / data minimisation** | More data retained = larger attack surface. Soft-deleted rows with `key_hash` are low-risk (SHA-256 of random input, one-way) but non-zero. | Minimal footprint. |
-| **Operational audit** | Full manifest of all workspaces ever created. Easy `SELECT count(*)` reporting, capacity planning, abuse detection. | Lost unless separately logged. Irmin commit messages retain workspace IDs but are harder to query. |
-| **Layer 1 transition** | When `owner_id` is added, existing soft-deleted rows (from Layer 0) have no owner — they remain anonymous and GDPR-neutral. New rows with `owner_id` require a retention policy. | No legacy rows to worry about. |
+Irmin is content-addressed and append-only. `remove()` creates a new
+commit without the data at the current path, but **all prior commits
+still contain the data.** This is architecturally identical to Git.
+A "delete" in Irmin is not an erasure — it is a state transition.
+
+Relevant regulatory guidance:
+
+1. **GDPR Art. 17(1) — Right to erasure.** The controller must erase
+   personal data "without undue delay." The regulation does not define
+   "erase" technically, but EDPB guidance clarifies intent.
+
+2. **EDPB Guidelines 5/2019 on Art. 17, §2.3.** Erasure means data
+   must be "put beyond any possibility of retrieval." This applies to
+   **all copies** including backups, replicas, and archives. However,
+   the EDPB acknowledges technical constraints on immutable media:
+   when true erasure is impracticable, the controller must apply
+   additional protections and delete when feasible.
+
+3. **UK ICO "putting beyond use" doctrine.** When immediate erasure
+   is technically impracticable (immutable storage, backup tapes),
+   data may be "put beyond use" as an **interim measure** if:
+   - The data is not used for any purpose
+   - No access is given to any third party
+   - Appropriate technical/organizational measures prevent access
+   - Deletion occurs as soon as practicable
+   This is a pragmatic concession, not a permanent exemption.
+
+4. **CJEU C-131/12 (Google Spain).** Established that erasure must be
+   "effective and complete." Applied to search engine delisting, not
+   immutable stores, but the principle stands: data must become
+   practically inaccessible to those who could use it.
+
+5. **Anonymisation by severance (EDPB Opinion 05/2014 on
+   Anonymisation Techniques).** If you destroy the key that links
+   pseudonymous data to an identity, the remaining data is no longer
+   personal data and is no longer subject to Art. 17. This is the
+   pattern that applies to our architecture.
+
+**How this applies to register:**
+
+- **Layer 0 (now):** No personal data anywhere. Art. 17 does not
+  apply. Irmin history retention is regulatory-neutral.
+- **Layer 1+ with `owner_id` in PG:** The only person-linkable data
+  is the `owner_id` column in PG. Deleting the PG row (or nulling
+  `owner_id`) **severs the identity link.** After severance, Irmin
+  data containing `workspace_id` (a ULID) cannot be linked to a
+  natural person → it becomes anonymised → Art. 17 is satisfied.
+- **If tree content itself contains personal data:** Irmin's immutable
+  history retains it. The "put beyond use" interim measure applies:
+  restrict API access to history, document a retention period, and
+  investigate Irmin GC/compaction when feasible. Alternatively,
+  terms of service can prohibit personal data in risk tree content
+  (shifts controller obligation but does not eliminate it).
+
+**Takeaway:** Under normal circumstances, Irmin history is not subject
+to GDPR erasure obligations because it does not contain personal data.
+The identity link (`owner_id`) lives exclusively in PG and can be
+fully erased there. D6 is therefore primarily an **operational**
+decision, not a regulatory one.
+
+##### Soft delete vs hard delete — comparative analysis
+
+| Dimension | D6-A: Soft delete | D6-B: Hard delete |
+|-----------|-------------------|-------------------|
+| **GDPR Art. 17 compliance** | Requires purge job for Art. 17 requests (Layer 1+). Forgetting to purge = non-compliance. | Compliant by default — row is gone. |
+| **GDPR Art. 5(1)(e) storage limitation** | Requires documented retention period and scheduled purge (Layer 1+). | Satisfied automatically. |
+| **Data minimisation** | More data retained = larger attack surface. Low-risk (SHA-256 hashes, ULIDs) but non-zero. | Minimal PG footprint. |
+| **Operational audit / analytics** | Full manifest of all workspaces ever created. Easy `SELECT count(*), min(created_at), max(created_at)` for capacity planning, abuse detection, usage trends. | Lost unless separately logged. Requires a dedicated audit log table or external system. |
+| **Workspace recovery / undo** | Expired workspace can be reactivated (`status = 'active'`, reset TTL) if the user still has the key. Useful during grace period. | Deletion is permanent. No undo. User must create a new workspace. |
+| **Reaper simplicity** | Reaper sets `status = 'expired'` — single UPDATE. Separate purge job handles final deletion. Two-phase approach. | Reaper does `DELETE` — single operation. Simpler control flow. |
+| **Schema evolution** | Soft-deleted rows accumulate. Table grows unboundedly without purge. Index bloat on `status` column if many expired rows. | Table size stays proportional to active workspaces only. |
+| **Cascade to Irmin** | Irmin tree data can be removed lazily (Reaper cleans up after marking expired). Temporal decoupling between PG state change and Irmin cleanup. | Irmin tree data removed at same time as PG row. If Irmin removal fails, PG row is already gone — orphan risk. |
+| **Debugging / incident response** | "Why did this workspace disappear?" → query PG for expired rows. Workspace ID, timestamps, tree associations all preserved. | "Why did this workspace disappear?" → nothing in PG. Must search Irmin commit history (harder, less structured). |
+| **Layer 1 transition** | Existing expired rows from Layer 0 have no `owner_id` — remain anonymous and GDPR-neutral. New Layer 1 rows with `owner_id` require a retention policy. | Clean slate — no legacy rows. |
+| **Implementation cost** | `status` column already in schema. Purge job adds ~50 lines. | Simpler — standard `DELETE`. No purge job needed. |
 
 **Recommendation — conditional:**
 
 - **Pre-Layer 1 (now):** D6-A is safe. No personal data exists in
-  workspace rows. The audit manifest has operational value at zero
-  regulatory cost.
+  workspace rows. The audit manifest has operational value (debugging,
+  analytics, undo) at zero regulatory cost.
 - **Post-Layer 1:** D6-A requires a **retention policy** (e.g., purge
-  soft-deleted rows after 90 days) and an erasure handler for Art. 17
-  requests. If this operational commitment is unwanted, D6-B is the
-  simpler compliant choice.
+  after 90 days) and an Art. 17 erasure handler. If this operational
+  commitment is unwanted, D6-B is the simpler compliant choice.
 
-A pragmatic middle ground: **start with D6-A now** (Layer 0, no
-personal data), and add a scheduled hard-purge job (`DELETE FROM
-workspaces WHERE status = 'expired' AND last_access < now() -
-interval '90 days'`) when Layer 1 lands. This preserves the audit
-manifest for a bounded retention window while satisfying storage
-limitation.
+A pragmatic approach: **start with D6-A now** (Layer 0, no personal
+data) and add a scheduled hard-purge job (`DELETE FROM workspaces
+WHERE status = 'expired' AND last_access < now() - interval '90
+days'`) when Layer 1 lands. This preserves the audit manifest for a
+bounded retention window while satisfying storage limitation.
 
 ---
 
