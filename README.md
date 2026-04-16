@@ -115,7 +115,23 @@ modules/
 
 For setup, development workflow, and Docker commands, see the **[Docker & Development Guide](docs/DOCKER-DEVELOPMENT.md)**.
 
-Quick smoke test:
+### Environment files
+
+The repository ships template files instead of live `.env` files (live env files are gitignored to prevent accidental secret commits). After cloning, copy the templates you need:
+
+```bash
+# In-memory backend (default — no persistence, no extra containers)
+cp .env.inmemory.example .env.inmemory
+
+# Irmin backend (persistent, content-addressable store)
+cp .env.irmin.example .env.irmin
+```
+
+Both templates work out of the box for local development and contain no secrets. If you later add credentials (e.g. an `IRMIN_AUTH_TOKEN`), edit only your local copy — never the `.example` files, which are tracked by git.
+
+The correct env file is picked up at runtime via Docker Compose's `env_file` option or by exporting the variables into your shell before starting the server.
+
+### Quick smoke test
 
 ```bash
 # Start the backend
