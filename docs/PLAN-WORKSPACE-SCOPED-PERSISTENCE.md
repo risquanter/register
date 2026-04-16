@@ -1,8 +1,8 @@
 # Plan: Workspace-Scoped Persistence
 
-**Status:** Draft — decisions D1–D4 decided, D5–D6 pending  
+**Status:** Draft — decisions D1–D5 decided, D6 pending  
 **Scope:** Planning only — no code changes  
-**Date:** 2026-04-15 (decisions updated 2026-04-16)
+**Date:** 2026-04-15 (decisions updated 2026-04-17)
 
 ---
 
@@ -32,8 +32,8 @@ Three problems in the current architecture:
    namespaces for admin audit and structural clarity.
 3. **Durable workspace state:** Persist workspace associations so they
    survive server restarts (PostgreSQL — see D1, decided).
-4. **Rehydration:** Rebuild in-memory workspace state from the durable
-   store on startup.
+4. **Lazy cache population:** `Ref[Map]` starts empty on boot;
+   populated on-demand from PG when users present capability URLs.
 
 ---
 
@@ -172,7 +172,7 @@ workspace:{wsId}:risk-tree:{treeId}:create:{txn}:set-node:{nodeId}
 workspace:{wsId}:risk-tree:{treeId}:delete:meta
 ```
 
-#### 1.3 `RiskTreeRepositoryInMemory` ← **Decision D3** (pending)
+#### 1.3 `RiskTreeRepositoryInMemory` ← **Decision D3: Enforce** (decided)
 
 This decision determines how the **test-time** in-memory repository
 behaves when it receives a `WorkspaceId` parameter.
@@ -245,7 +245,7 @@ tables, not to a content-addressed store like Irmin.
 ```sql
 CREATE TABLE workspaces (
   id          TEXT PRIMARY KEY,      -- WorkspaceId (ULID)
-  key_hash    TEXT NOT NULL UNIQUE,  -- bcrypt/argon2 hash of WorkspaceKeySecret
+  key_hash    TEXT NOT NULL UNIQUE,  -- SHA-256 hex digest of WorkspaceKeySecret
   created_at  TIMESTAMPTZ NOT NULL,
   last_access TIMESTAMPTZ NOT NULL,
   ttl         INTERVAL NOT NULL,
@@ -266,14 +266,13 @@ CREATE TABLE workspace_trees (
 --    OR last_access + idle_timeout < now();
 ```
 
-**Note on `key_hash`:** The raw `WorkspaceKeySecret` is NEVER stored
-in plaintext in PostgreSQL. On rehydration, the server generates new
-capability tokens. The hash exists only for an optional
-"reconnect with existing key" flow (see Decision D5).
-
-Storing the raw key as plaintext would contradict ADR-022's secret
-handling principles. A hash-based approach is more secure but prevents
-reconnection. See Decision D5.
+**Note on `key_hash`:** SHA-256 hex digest of the `WorkspaceKeySecret`.
+One-way — the raw key cannot be recovered from the hash, satisfying
+ADR-022's secret handling principles. SHA-256 (not bcrypt) is correct
+here because the input is 128-bit `SecureRandom` with full entropy —
+no need for bcrypt's slow-by-design password stretching. The hash is
+deterministic and indexable, enabling O(1) lookups when users present
+capability URLs. See Decision D5 (decided: SHA-256 hash + lazy cache).
 
 #### 2.2 Tech Stack
 
@@ -448,9 +447,10 @@ object WorkspaceStorePostgres {
 Iron type ↔ SQL type mappings (`WorkspaceId ↔ String`, etc.) go in a
 `QuillMappings` object using Quill's `MappedEncoding[A, B]`.
 
-The `Ref[Map]` may remain as a **write-through cache** in front of
-PG for O(1) hot-path lookups, with PG as the durable backing store.
-Or the Ref can be eliminated entirely in favour of PG queries.
+The `Ref[Map]` remains as a **read-through cache** in front of PG
+for O(1) hot-path lookups. PG is the durable source of truth. Cache
+starts empty on boot; populated lazily on first access per workspace
+(see Phase 3).
 
 ##### Test Pattern
 
@@ -514,48 +514,48 @@ consistent: `docker compose --profile persistence up -d` starts both.
 
 ---
 
-### Phase 3: Startup Rehydration
+### Phase 3: Lazy Cache Population
 
-**Goal:** On server boot, rebuild the in-memory workspace state from
-the durable store.
+**Goal:** Ensure `Ref[Map]` serves as a fast read-through cache in
+front of PG, populated on-demand. No startup ceremony required.
 
-#### 3.1 Flow (PostgreSQL-backed)
+#### 3.1 Startup Sequence (PostgreSQL-backed)
 
 ```
 Server starts
-  → WorkspaceStorePostgres.loadAll()
-  → For each workspace with status = active:
-      1. Check if TTL/idle expired
-      2. If still valid:
-         - Generate fresh WorkspaceKeySecret (see Decision D5)
-         - Build Workspace(id, key, trees, ...)
-         - Populate write-through cache (if used)
-      3. If expired:
-         - UPDATE workspaces SET status = 'expired'
-         - Cascade-delete trees from Irmin (configurable)
-  → Log rehydrated count + expired count
+  → Flyway migrations run (idempotent)
+  → Ref[Map] initialized empty
+  → Server begins accepting HTTP traffic
 ```
 
-#### 3.2 Fresh Tokens on Rehydration
+No workspace data is loaded at startup. The cache populates lazily:
 
-Rehydrated workspaces get **new** `WorkspaceKeySecret` values.
-Old URLs are invalidated. This is acceptable because:
-- Capability URLs are ephemeral by design (ADR-021)
-- Users already experience URL invalidation on server restart today
-- Future authenticated users (Layer 1+) can retrieve workspaces
-  by `UserId` and get fresh capability URLs
-
-#### 3.3 Configuration
-
-```hocon
-register.workspace {
-  rehydrateOnStartup = false  # default: off (in-memory mode)
-  rehydrateOnStartup = ${?REGISTER_WORKSPACE_REHYDRATE}
-}
+```
+User presents GET /w/{key}/risk-trees
+  → Ref[Map] lookup: miss
+  → SELECT * FROM workspaces w
+      JOIN workspace_trees wt ON w.id = wt.workspace_id
+      WHERE w.key_hash = encode(sha256($key), 'hex')
+        AND w.status = 'active'
+  → Check TTL/idle expiry
+  → If valid: populate Ref[Map], serve request
+  → If expired: UPDATE status = 'expired', return 410
+  → If not found: return 404
 ```
 
-When `true` (recommended for persistence profile), scans the durable
-store on boot.
+#### 3.2 Why Not Proactive Loading?
+
+The earlier draft considered loading all workspaces into `Ref[Map]`
+at startup ("rehydration"). This is unnecessary because:
+
+- **No use case requires it.** The server has no reason to know about
+  a workspace before a user presents its capability URL. Access is
+  always user-initiated.
+- **Lazy population is simpler.** No startup delay, no config toggle,
+  no "hold traffic until loaded" synchronization.
+- **Cache semantics are clean.** `Ref[Map]` is a pure cache. PG is
+  the source of truth. Cache miss = PG query. Eviction from cache
+  is safe (key presented again → re-cached).
 
 ---
 
@@ -577,8 +577,8 @@ When backed by PostgreSQL, `evictExpired` also:
 - Cascade-deletes tree data from Irmin using workspace-scoped paths:
   `workspaces/{ws.id}/risk-trees/...`
 
-On startup (Phase 3), workspaces already marked `expired` are not
-rehydrated — they are skipped or their trees are cleaned up.
+Workspaces already marked `expired` in PG are ignored on cache miss
+lookups. Their Irmin tree data is cleaned up by the Reaper.
 
 #### Soft Delete vs Hard Delete ← **Decision D6**
 
@@ -622,14 +622,11 @@ implicit — workspace scoping is visible at every call site.
 
 ### Decision D3: In-memory repository workspace isolation?
 
-| Option | Description |
-|--------|-------------|
-| **D3-A: Ignore `wsId`** | Accept parameter, key `TrieMap` by `TreeId` only. Simple. Tests don't catch cross-workspace leaks. |
-| **D3-B: Enforce isolation** | Key by `(WorkspaceId, TreeId)`. Tests catch scoping bugs. Slightly more complex test setup. |
+> **Decided: D3-B — Enforce isolation.**
 
-**My assessment:** D3-B. The added complexity is minimal (tuple key)
-and catches real bugs — e.g., a forgotten `wsId` parameter silently
-returning another workspace's tree.
+Key `TrieMap` by `(WorkspaceId, TreeId)`. Catches scoping bugs — a
+forgotten or wrong `wsId` returns `None` instead of silently leaking
+another workspace's tree. Minimal added complexity (tuple key).
 
 ---
 
@@ -643,80 +640,85 @@ operation. An admin endpoint can be added later outside the trait.
 
 ---
 
-### Decision D5: Key persistence strategy on rehydration
+### Decision D5: Key persistence strategy
 
-| Option | Description |
-|--------|-------------|
-| **D5-A: Fresh tokens only** | Rehydrated workspaces always get new `WorkspaceKeySecret`. Old URLs die on restart. Simplest. No key storage needed. |
-| **D5-B: Hash-based reconnect** | Store `bcrypt(key)` in PG. On startup, rehydrate with fresh tokens. Users who present the old key can be re-linked (verify hash → issue session). Preserves old URLs across restarts. |
-| **D5-C: Encrypted key storage** | Store `AES-GCM(key)` in PG. Exact key recovery on rehydration. Old URLs survive restart. Requires key management (which key encrypts what?). |
+> **Decided: SHA-256 hash with lazy cache population.**
 
-**My assessment:** D5-A. Capability URLs are explicitly ephemeral
-(ADR-021). "Create a new workspace" on restart is the accepted UX.
-Future Layer 1 authenticated users bypass capability URLs entirely.
-D5-B/C add significant complexity for a transient benefit.
+Store `SHA-256(WorkspaceKeySecret)` in PG as an **indexed** column.
+`Ref[Map]` starts empty on boot. When a user presents a capability
+URL, the server:
 
-#### Rehydration: What It Means and When It Triggers
+1. Check `Ref[Map]` — cache hit → serve immediately
+2. Cache miss → `SELECT * FROM workspaces WHERE key_hash = sha256($key)`
+3. PG hit → populate `Ref[Map]` entry, serve request
+4. PG miss → 404 (unknown workspace)
 
-"Rehydration" is the process of reconstructing the in-memory
-`Ref[Map[WorkspaceKeySecret, Workspace]]` from the durable PostgreSQL
-store when the server starts. Without rehydration, a server restart
-means every workspace's tree associations are lost — trees exist in
-Irmin but no workspace claims them.
+Old URLs survive server restarts. No key regeneration. No startup
+ceremony. No key management infrastructure.
 
-**Happy path — planned restart (deploy, config change, scaling):**
+#### Why SHA-256, Not bcrypt
 
-```
-1. Server process starts
-2. Flyway migrations run (idempotent — no-op if schema current)
-3. WorkspaceStorePostgres.loadAll() queries all rows with
-   status = 'active'
-4. For each workspace:
-   a. Check: created_at + ttl > now()  AND
-              last_access + idle_timeout > now()
-   b. If valid:
-      - Generate fresh WorkspaceKeySecret (old URLs die)
-      - Build Workspace(id, freshKey, trees, ...)
-      - Insert into Ref[Map] (write-through cache)
-      - Log: "Rehydrated workspace {wsId} with {n} trees"
-   c. If expired:
-      - UPDATE workspaces SET status = 'expired'
-      - Schedule cascade delete of tree data from Irmin
-      - Log: "Expired workspace {wsId} — {n} trees scheduled
-        for cleanup"
-5. Server begins accepting HTTP traffic
-6. Log summary: "Rehydrated {alive} workspaces, expired {dead}"
+The original draft assumed `bcrypt(key)` — designed for **low-entropy
+human passwords** (intentionally slow to resist brute-force). But
+`WorkspaceKeySecret` is 128-bit `SecureRandom` with full entropy.
+SHA-256 provides 128-bit preimage resistance against this input —
+identical security to bcrypt — with two critical advantages:
+
+1. **Indexable.** SHA-256 output is deterministic and fixed-length →
+   standard B-tree index → O(1) lookup per request.
+2. **No O(n) scan.** bcrypt includes a per-row salt, requiring each
+   stored hash to be checked individually. SHA-256 is a single indexed
+   query.
+
+```sql
+-- O(1) lookup via B-tree index on key_hash
+SELECT * FROM workspaces WHERE key_hash = encode(sha256($key), 'hex');
 ```
 
-The key property: **no HTTP traffic is served until rehydration
-completes.** This prevents a race where a request arrives for a
-workspace that hasn't been loaded yet.
+#### Why Not Envelope Encryption
 
-**Unhappy path — crash restart (OOM, SIGKILL, hardware fault):**
+Envelope encryption (`AES-GCM(key)` in PG, decrypt at startup,
+populate `Ref[Map]`) was evaluated. It offers no practical benefit:
+the server never needs to know keys before a user presents a URL.
+"Instant access on restart" is meaningless — access is always
+user-initiated. Envelope encryption adds key management complexity
+(master key in env/KMS/file) for zero functional gain over hashing.
 
-The flow is identical to the happy path. PostgreSQL is the durable
-ground truth — the server process is stateless between restarts.
-Specific scenarios:
+| | SHA-256 hash | Envelope encryption |
+|---|---|---|
+| Lookup on first request | O(1) indexed query | O(1) map lookup (pre-populated) |
+| Key management burden | None | Must manage master encryption key |
+| Complexity | Low | Medium |
+| Old URLs survive restart | Yes | Yes |
 
-| Crash scenario | PostgreSQL state | Rehydration outcome |
-|----------------|-----------------|--------------------|
-| OOM kill during normal operation | All committed writes intact. `last_access` reflects last successful `touch()`. | Normal rehydration. Workspaces whose `last_access + idle_timeout` fell behind during downtime are expired. |
-| Crash during `evictExpired` | Partially committed. Some workspaces marked `expired`, others not yet. Irmin tree data may or may not be deleted. | Workspaces already marked `expired` are skipped. Still-active workspaces are rehydrated. Orphaned Irmin data (trees marked for delete but not yet removed) is cleaned up by the Reaper's next cycle. |
-| Crash during `create` (new workspace) | If PG insert committed: workspace exists in PG with tree list. If not committed: workspace never existed. | Committed workspaces are rehydrated. Uncommitted ones are lost — the user sees a failed request and retries. No orphans. |
-| Crash during `addTree` | If PG `workspace_trees` insert committed: association exists. If not: workspace exists but tree not associated. | Committed associations are rehydrated. Uncommitted tree data may exist in Irmin as an orphan — the Reaper cleans it up (tree has no workspace owner). |
-| PostgreSQL itself crashes | PG WAL ensures durability up to last committed transaction. | On PG recovery + server restart, rehydration proceeds normally from PG's recovered state. |
-| Both PG and server crash simultaneously | PG recovers from WAL. Server restarts and rehydrates from recovered PG state. | Same as above — PG's ACID guarantees handle this. |
+#### ADR-022 Alignment
 
-**Downtime duration effect:** If the server is down for longer than a
+ADR-022 mandates that secrets not be stored in plaintext. SHA-256 is
+a one-way function — the raw key cannot be recovered from the hash.
+This satisfies ADR-022 while maintaining O(1) lookup and full URL
+survivability across restarts.
+
+> **ADR note:** This analysis is ready to be incorporated into an ADR
+> (or appended to ADR-022) when implementation proceeds.
+
+#### Crash Recovery (Simplified)
+
+With PG as durable store and lazy cache population, crash recovery is
+straightforward: **server restarts → cache is empty → users show up →
+cache populates from PG.**
+
+| Crash scenario | Outcome |
+|----------------|---------|
+| OOM / SIGKILL during normal operation | PG state intact. Users present URLs, cache repopulates. Workspaces past TTL/idle are expired on next access or Reaper cycle. |
+| Crash during `create` | PG insert committed → workspace accessible. Not committed → user sees failed request, retries. No orphans. |
+| Crash during `addTree` | PG insert committed → association intact. Not committed → tree may exist in Irmin as orphan, Reaper cleans up. |
+| Crash during `evictExpired` | Partial commit. Already-expired workspaces stay expired. Others continue as active. Reaper resumes on next cycle. |
+| PostgreSQL crash | PG WAL ensures durability. On PG recovery, everything accessible. |
+
+**Downtime duration effect:** If the server is down longer than a
 workspace's remaining TTL or idle timeout, that workspace is naturally
-expired on rehydration. This is correct behaviour — the workspace
-*should* be expired. The user creates a new one.
-
-**Fresh tokens and URL invalidation:** Every rehydrated workspace gets
-a new `WorkspaceKeySecret`. Bookmarked capability URLs from before the
-restart are dead. This is by design (ADR-021: capability URLs are
-ephemeral). Future Layer 1 authenticated users retrieve workspaces by
-`UserId`, not by capability URL, so this limitation is transitional.
+expired. The user creates a new one. This is correct behaviour — no
+special handling needed.
 
 ---
 
@@ -729,7 +731,7 @@ ephemeral). Future Layer 1 authenticated users retrieve workspaces by
 
 #### EU Regulatory and Data Privacy Analysis
 
-The workspace row contains: `id` (ULID), `key_hash` (bcrypt digest),
+The workspace row contains: `id` (ULID), `key_hash` (SHA-256 digest),
 `created_at`, `last_access`, `ttl`, `idle_timeout`, `status`. The
 associated `workspace_trees` rows contain `workspace_id` and `tree_id`
 (both ULIDs) plus `added_at`.
@@ -756,7 +758,7 @@ with the user table, relates to an identified natural person.
 | **GDPR Art. 5(1)(e) — storage limitation** | Retaining expired workspace rows indefinitely may conflict with the principle that personal data should be kept "no longer than necessary." Requires a documented retention period and scheduled purge job. | Compliant by default — data is gone when no longer needed. |
 | **GDPR Art. 17 — right to erasure** | A user requesting deletion requires a purge of their soft-deleted rows. Must be implemented as an admin/automated operation. Forgetting to purge = non-compliance. | Already satisfied — row is deleted. |
 | **GDPR Art. 30 — records of processing** | The soft-deleted manifest can serve as a processing record. However, GDPR does not require retaining *per-workspace* records — a processing register at the controller level suffices. | Irmin commit history still provides structural provenance (workspace ID in commit messages). Not as convenient as a PG table scan, but sufficient for audit. |
-| **ePrivacy / data minimisation** | More data retained = larger attack surface. Soft-deleted rows with `key_hash` are low-risk (bcrypt is one-way, random input) but non-zero. | Minimal footprint. |
+| **ePrivacy / data minimisation** | More data retained = larger attack surface. Soft-deleted rows with `key_hash` are low-risk (SHA-256 of random input, one-way) but non-zero. | Minimal footprint. |
 | **Operational audit** | Full manifest of all workspaces ever created. Easy `SELECT count(*)` reporting, capacity planning, abuse detection. | Lost unless separately logged. Irmin commit messages retain workspace IDs but are harder to query. |
 | **Layer 1 transition** | When `owner_id` is added, existing soft-deleted rows (from Layer 0) have no owner — they remain anonymous and GDPR-neutral. New rows with `owner_id` require a retention policy. | No legacy rows to worry about. |
 
@@ -796,7 +798,7 @@ limitation.
 |------|--------|
 | `RiskTreeRepository.scala` | Add `wsId` param to all methods (D2-A) |
 | `RiskTreeRepositoryIrmin.scala` | Scoped paths, commit messages |
-| `RiskTreeRepositoryInMemory.scala` | Accept `wsId`, enforce isolation (D3 pending — see §1.3) |
+| `RiskTreeRepositoryInMemory.scala` | Accept `wsId`, enforce isolation (D3-B, decided — see §1.3) |
 | `RiskTreeService.scala` + `RiskTreeServiceLive.scala` | Thread `wsId` |
 | `WorkspaceController.scala` | Pass `ws.id` to service |
 | `QueryController.scala` | Pass `wsId` to query service |
@@ -821,13 +823,13 @@ limitation.
 | `RepositorySpec.scala` | **New** — Testcontainers `DataSource` trait for tests |
 | `WorkspaceStorePostgresSpec.scala` | **New** — repository unit tests |
 
-### Phase 3 (Rehydration)
+### Phase 3 (Lazy Cache)
 
 | File | Change |
 |------|--------|
-| `WorkspaceConfig.scala` | Add `rehydrateOnStartup` |
-| `Application.scala` | Rehydration startup logic |
-| Integration tests | Rehydration E2E |
+| `WorkspaceStorePostgres.scala` | Add `resolveByKeyHash` query (cache-miss path) |
+| `WorkspaceStoreLive.scala` | Cache-miss → PG fallback logic in `resolve()` |
+| Integration tests | Cache miss → PG lookup E2E |
 
 ### Phase 4 (Reaper)
 
@@ -846,9 +848,9 @@ No code changes — operational: clear `risk-trees/` prefix from Irmin.
 
 ```
 Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4
-Domain       Scoped       PG store    Rehydrate   Reaper
-model        paths                    on boot     aware
-(~2h)        (~4h)        (~6h)       (~3h)       (~2h)
+Domain       Scoped       PG store    Lazy        Reaper
+model        paths                    cache       aware
+(~2h)        (~4h)        (~6h)       (~2h)       (~2h)
 ```
 
 Phase 5 (migration) executes once at the Phase 1→2 boundary.
@@ -860,7 +862,7 @@ Each phase is independently deployable and testable.
 
 | Property | Guarantee |
 |----------|-----------|
-| `WorkspaceKeySecret` never in Irmin or PG plaintext | Secret exists only in `Ref[Map]` (or PG as hash, if D5-B). Never in Irmin paths, commits, or logs (ADR-022). |
+| `WorkspaceKeySecret` never in Irmin or PG plaintext | Secret exists only in `Ref[Map]` (cache) and PG as SHA-256 hash (D5, decided). Never in Irmin paths, commits, or logs (ADR-022). Raw key cannot be recovered from hash. |
 | `WorkspaceId` is immutable | Generated once at creation. Survives `rotate()`. Survives server restart (if persisted). |
 | Key rotation preserves identity | `rotate()` generates new key, copies same `WorkspaceId`. Irmin paths unchanged. Old key instantly dead. |
 | Layered separation | `WorkspaceStore` = association/token index. `RiskTreeRepository` = domain content store. Connected only by `TreeId` references. Never cross-contaminated. |
@@ -907,10 +909,10 @@ None of this requires a `WorkspaceKeySecret`.
 |----|----------|---------|--------|
 | D1 | When does PostgreSQL land? | **A: Now** | **Decided** |
 | D2 | How does `WorkspaceId` reach the repo? | **A: Explicit param** | **Decided** |
-| D3 | In-memory repo workspace isolation? | A: Ignore / B: Enforce | Pending — lean B |
+| D3 | In-memory repo workspace isolation? | **B: Enforce** | **Decided** |
 | D4 | `getAll` replacement strategy? | **A: Replace only** | **Decided** |
-| D5 | Key persistence on rehydration? | A: Fresh / B: Hash / C: Encrypted | Pending — lean A |
+| D5 | Key persistence strategy? | **SHA-256 hash + lazy cache** | **Decided** |
 | D6 | Soft vs hard delete? | A: Soft / B: Hard | Pending — see GDPR analysis |
 
-All five phases proceed (D1-A). D3 affects Phase 1 in-memory impl.
-D5–D6 affect Phases 2–4.
+All five phases proceed (D1-A). D3-B affects Phase 1 in-memory impl.
+D5 (SHA-256 + lazy cache) simplifies Phases 2–3. D6 affects Phase 4.
