@@ -1,6 +1,6 @@
 # Plan: Workspace-Scoped Persistence
 
-**Status:** Draft — decisions D1–D5 decided, D6 pending  
+**Status:** Draft — all decisions (D1–D6) decided  
 **Scope:** Planning only — no code changes  
 **Date:** 2026-04-15 (decisions updated 2026-04-17)
 
@@ -249,21 +249,22 @@ CREATE TABLE workspaces (
   created_at  TIMESTAMPTZ NOT NULL,
   last_access TIMESTAMPTZ NOT NULL,
   ttl         INTERVAL NOT NULL,
-  idle_timeout INTERVAL NOT NULL,
-  status      TEXT NOT NULL DEFAULT 'active'
+  idle_timeout INTERVAL NOT NULL
+  -- No status column — D6-B: hard delete. Expired rows are DELETEd.
 );
 
 CREATE TABLE workspace_trees (
-  workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
   tree_id      TEXT NOT NULL,
   added_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (workspace_id, tree_id)
 );
 
--- TTL-based pruning:
+-- TTL-based pruning (Reaper):
 -- DELETE FROM workspaces
 -- WHERE created_at + ttl < now()
 --    OR last_access + idle_timeout < now();
+-- workspace_trees rows cascade-deleted automatically.
 ```
 
 **Note on `key_hash`:** SHA-256 hex digest of the `WorkspaceKeySecret`.
@@ -830,20 +831,30 @@ decision, not a regulatory one.
 | **Layer 1 transition** | Existing expired rows from Layer 0 have no `owner_id` — remain anonymous and GDPR-neutral. New Layer 1 rows with `owner_id` require a retention policy. | Clean slate — no legacy rows. |
 | **Implementation cost** | `status` column already in schema. Purge job adds ~50 lines. | Simpler — standard `DELETE`. No purge job needed. |
 
-**Recommendation — conditional:**
+> **Decided: D6-B — Hard delete.**
 
-- **Pre-Layer 1 (now):** D6-A is safe. No personal data exists in
-  workspace rows. The audit manifest has operational value (debugging,
-  analytics, undo) at zero regulatory cost.
-- **Post-Layer 1:** D6-A requires a **retention policy** (e.g., purge
-  after 90 days) and an Art. 17 erasure handler. If this operational
-  commitment is unwanted, D6-B is the simpler compliant choice.
+Hard delete is the simpler, more defensible choice:
 
-A pragmatic approach: **start with D6-A now** (Layer 0, no personal
-data) and add a scheduled hard-purge job (`DELETE FROM workspaces
-WHERE status = 'expired' AND last_access < now() - interval '90
-days'`) when Layer 1 lands. This preserves the audit manifest for a
-bounded retention window while satisfying storage limitation.
+1. **GDPR-compliant by default.** No purge job, no retention policy,
+   no Art. 17 handler needed — now or at Layer 1+.
+2. **Simpler code.** Standard `DELETE`. No status filter on every
+   query. No "forgot `WHERE status = 'active'`" bug class.
+3. **No table bloat.** Size stays proportional to active workspaces.
+   No index bloat, no purge scheduling.
+4. **Simpler testing.** Rows exist or don't. No expired-row edge cases.
+5. **Smaller backups.** No accumulated expired rows in PG dumps.
+6. **No Layer 1 legacy burden.** No pre-existing expired rows to
+   retrofit with `owner_id` or retention policies.
+7. **Single Reaper operation.** `DELETE` — no two-phase mark-then-purge.
+
+What is given up:
+- No undo window (acceptable — workspace creation is cheap)
+- No PG-based audit trail (Irmin commit history retains workspace IDs)
+- No `SELECT count(*)` analytics (add Prometheus counter on delete if needed)
+
+The `status` column is removed from the schema. The Reaper performs
+`DELETE FROM workspaces WHERE created_at + ttl < now() OR last_access
++ idle_timeout < now()` followed by Irmin tree cleanup.
 
 ---
 
@@ -978,7 +989,8 @@ None of this requires a `WorkspaceKeySecret`.
 | D3 | In-memory repo workspace isolation? | **B: Enforce** | **Decided** |
 | D4 | `getAll` replacement strategy? | **A: Replace only** | **Decided** |
 | D5 | Key persistence strategy? | **SHA-256 hash + lazy cache** | **Decided** |
-| D6 | Soft vs hard delete? | A: Soft / B: Hard | Pending — see GDPR analysis |
+| D6 | Soft vs hard delete? | **B: Hard delete** | **Decided** |
 
-All five phases proceed (D1-A). D3-B affects Phase 1 in-memory impl.
-D5 (SHA-256 + lazy cache) simplifies Phases 2–3. D6 affects Phase 4.
+All six decisions decided. All five phases proceed. D3-B affects
+Phase 1 in-memory impl. D5 (SHA-256 + lazy cache) simplifies
+Phases 2–3. D6-B (hard delete) simplifies Phase 4 Reaper.
