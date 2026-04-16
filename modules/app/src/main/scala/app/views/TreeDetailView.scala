@@ -19,8 +19,8 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   * - Query-matched-but-not-charted: dotted 3px left border in neutral.
   * - Neither: no border.
   *
-  * Pure derived view — owns no state (ADR-019 Pattern 4).
-  * Receives `TreeViewState` as constructor arg (Pattern 2).
+  * Receives shared `TreeViewState` (ADR-019 Pattern 2 consumer).
+  * Owns local picker open/close UI state.
   *
   * @param state             Tree navigation and chart state.
   * @param queryMatchedNodes Signal of node IDs matching the active query.
@@ -97,6 +97,10 @@ object TreeDetailView:
       cls := "tree-detail-view",
       // Close picker when clicking outside (attached to the container)
       onClick --> { _ => pickerOpenFor.set(None) },
+      // F-GP1: Escape key closes picker
+      onKeyDown --> { ev => if ev.key == "Escape" then pickerOpenFor.set(None) },
+      // F-GP2(B): reactively clear preview whenever picker closes
+      pickerOpenFor.signal.changes.filter(_.isEmpty) --> { _ => state.clearPreview() },
       child <-- state.selectedTree.signal.map {
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
@@ -222,40 +226,9 @@ object TreeDetailView:
             onClick --> handleNodeClick
           ),
           // Colour-swatch trigger icon — visible on hover for charted nodes (PD1(b))
-          child <-- isCharted.combineWith(currentColor).map { (charted, colorOpt) =>
-            if charted then
-              div(
-                cls := "node-swatch-trigger",
-                styleAttr := s"background-color: ${colorOpt.map(_.value).getOrElse("transparent")};",
-                onClick.stopPropagation --> { _ =>
-                  // Toggle picker open/closed for this node
-                  if pickerOpenFor.now().contains(nodeId) then pickerOpenFor.set(None)
-                  else pickerOpenFor.set(Some(nodeId))
-                }
-              )
-            else emptyNode
-          },
+          child.maybe <-- isCharted.combineWith(currentColor).map(renderSwatchTrigger(nodeId, pickerOpenFor, _, _)),
           // Picker popover — rendered when open for this node
-          child <-- pickerOpen.combineWith(currentColor).map { (open, colorOpt) =>
-            if open then
-              colorOpt match
-                case Some(col) =>
-                  ColorSwatchPicker(
-                    currentColor = col,
-                    onSelect = hex => {
-                      state.chartState.setColorOverride(nodeId, hex)
-                      pickerOpenFor.set(None)
-                    },
-                    onReset = () => {
-                      state.chartState.clearColorOverride(nodeId)
-                      pickerOpenFor.set(None)
-                    },
-                    onPreview = hex => state.chartState.previewOverride.set(Some((nodeId, hex))),
-                    onPreviewClear = () => state.chartState.previewOverride.set(None)
-                  )
-                case None => emptyNode
-            else emptyNode
-          }
+          child.maybe <-- pickerOpen.combineWith(currentColor).map(renderPickerPopover(nodeId, state, pickerOpenFor, _, _))
         )
       ),
       // Children (only rendered when expanded)
@@ -271,3 +244,49 @@ object TreeDetailView:
       else
         emptyNode
     )
+
+  // ── Extracted view helpers (F3a: named functions for inline lambdas) ──
+
+  /** Render the colour-swatch trigger icon for charted nodes (PD1(b)). */
+  private def renderSwatchTrigger(
+    nodeId: NodeId,
+    pickerOpenFor: Var[Option[NodeId]],
+    charted: Boolean,
+    colorOpt: Option[HexColor]
+  ): Option[HtmlElement] =
+    if charted then
+      Some(div(
+        cls := "node-swatch-trigger",
+        styleAttr := s"background-color: ${colorOpt.map(_.value).getOrElse("transparent")};",
+        onClick.stopPropagation --> { _ =>
+          if pickerOpenFor.now().contains(nodeId) then pickerOpenFor.set(None)
+          else pickerOpenFor.set(Some(nodeId))
+        }
+      ))
+    else None
+
+  /** Render the colour picker popover when open for this node. */
+  private def renderPickerPopover(
+    nodeId: NodeId,
+    state: TreeViewState,
+    pickerOpenFor: Var[Option[NodeId]],
+    open: Boolean,
+    colorOpt: Option[HexColor]
+  ): Option[HtmlElement] =
+    if open then
+      colorOpt.map { col =>
+        ColorSwatchPicker(
+          currentColor = col,
+          onSelect = hex => {
+            state.setColorOverride(nodeId, hex)
+            pickerOpenFor.set(None)
+          },
+          onReset = () => {
+            state.clearColorOverride(nodeId)
+            pickerOpenFor.set(None)
+          },
+          onPreview = hex => state.setPreview(nodeId, hex),
+          onPreviewClear = () => state.clearPreview()
+        )
+      }
+    else None

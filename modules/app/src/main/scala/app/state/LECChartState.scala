@@ -54,14 +54,15 @@ final class LECChartState(
     */
   val curveCache: Var[LoadState[Map[NodeId, LECNodeCurve]]] = Var(LoadState.Idle)
 
-  /** Manual colour overrides per node. */
-  val colorOverrides: Var[Map[NodeId, HexColor]] = Var(Map.empty)
+  /** Manual colour overrides per node (mutated via `setColorOverride`/`clearColorOverride`). */
+  private val colorOverrides: Var[Map[NodeId, HexColor]] = Var(Map.empty)
 
   /** Transient preview override for live swatch hover (P5 §5.6).
     * When `Some`, this temporarily replaces the colour for one node
     * in `nodeColorMap` without committing to `colorOverrides`.
+    * Mutated via `setPreview`/`clearPreview`.
     */
-  val previewOverride: Var[Option[(NodeId, HexColor)]] = Var(None)
+  private val previewOverride: Var[Option[(NodeId, HexColor)]] = Var(None)
 
   // ── Derived signals ───────────────────────────────────────────
 
@@ -140,6 +141,14 @@ final class LECChartState(
   /** Remove the manual colour override for a node (revert to auto). */
   def clearColorOverride(nodeId: NodeId): Unit =
     colorOverrides.update(_ - nodeId)
+    previewOverride.set(None)
+
+  /** Temporarily preview a colour for a node (live swatch hover). */
+  def setPreview(nodeId: NodeId, hex: HexColor): Unit =
+    previewOverride.set(Some((nodeId, hex)))
+
+  /** Clear the transient preview (swatch hover ended or picker closed). */
+  def clearPreview(): Unit =
     previewOverride.set(None)
 
   /** Reset chart state (called when tree selection changes). */

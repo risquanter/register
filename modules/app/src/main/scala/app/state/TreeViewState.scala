@@ -63,6 +63,15 @@ final class TreeViewState(
   /** WriteBus for Ctrl+click toggle events (delegates to LECChartState). */
   def userSelectionToggle: WriteBus[NodeId] = chartState.userSelectionToggle
 
+  /** Commit a manual colour override for a node's chart curve. */
+  def setColorOverride(nodeId: NodeId, hex: HexColor): Unit = chartState.setColorOverride(nodeId, hex)
+  /** Remove the manual colour override for a node (revert to auto). */
+  def clearColorOverride(nodeId: NodeId): Unit = chartState.clearColorOverride(nodeId)
+  /** Temporarily preview a colour for a node (live swatch hover). */
+  def setPreview(nodeId: NodeId, hex: HexColor): Unit = chartState.setPreview(nodeId, hex)
+  /** Clear the transient preview (swatch hover ended or picker closed). */
+  def clearPreview(): Unit = chartState.clearPreview()
+
   // ── Actions ───────────────────────────────────────────────────
 
   /** Fetch all trees from the backend (summary only). */

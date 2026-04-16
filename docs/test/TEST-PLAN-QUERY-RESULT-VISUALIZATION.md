@@ -1,7 +1,7 @@
 # Manual Test Plan: Query Result Visualization
 
-**Status:** Draft — aligned with PLAN-QUERY-RESULT-VISUALIZATION.md v3  
-**Prerequisite:** All 6 implementation phases complete, application running locally  
+**Status:** Draft — aligned with PLAN-QUERY-RESULT-VISUALIZATION.md v4  
+**Prerequisite:** All 6 implementation phases (P0–P5) complete, application running locally  
 **Tester setup:** `sbt run` → open `http://localhost:8090` in browser  
 
 ---
@@ -29,6 +29,9 @@ before proceeding. See [TESTING.md](TESTING.md) for sample payloads.
 | **[F2]** | Feature 2: Green tree highlighting |
 | **[F3]** | Feature 3: Auto-expand tree |
 | **[P0]** | Prerequisite: `matchingNodeIds` → `satisfyingNodeIds` rename |
+| **[P3]** | Phase 3: Tree colour sync (inline borders from nodeColorMap) |
+| **[P4]** | Phase 4: Bidirectional hover (chart ↔ tree) |
+| **[P5]** | Phase 5: Colour picker + live preview |
 
 ---
 
@@ -370,6 +373,225 @@ before proceeding. See [TESTING.md](TESTING.md) for sample payloads.
 
 ---
 
+## Section 10: Tree Colour Sync [P3]
+
+### T-P3.1 Charted nodes show solid coloured left border
+
+1. Ctrl+click 2–3 nodes to chart them.
+2. Inspect the tree panel.
+3. **Expected:** Each charted node row has a **solid** left border whose
+   colour matches the curve colour assigned to it in the chart legend.
+4. **Expected:** Border width is **3px**.
+
+### T-P3.2 Query-matched-but-not-charted nodes show dotted neutral border
+
+1. Run a query returning 4+ matching nodes.
+2. Find a matching node that is **not** charted (no Ctrl+click).
+3. **Expected:** That node has a **dotted** left border in `--neutral-700`
+   colour — visually distinct from the solid coloured borders.
+4. Ctrl+click that node to add it to the chart.
+5. **Expected:** Dotted border changes to solid coloured border matching
+   the newly assigned curve colour.
+
+### T-P3.3 Border colour tracks automatic colour assignment
+
+1. Chart 3 nodes Ctrl+click.
+2. Note each node's border colour.
+3. **Expected:** Colours are drawn from the 8-family palette (Green, Aqua,
+   Purple, Yellow, Orange, Red, Pink, Emerald), shades 200–900.
+4. DeCtrl+click one node, then chart a different node.
+5. **Expected:** Remaining nodes keep their border colours. New node gets
+   its own assigned colour.
+
+### T-P3.4 Non-matching non-charted nodes have no colour border
+
+1. Look at nodes that are neither query-matched nor charted.
+2. **Expected:** No coloured or dotted left border (standard tree styling).
+
+| Test | Pass / Fail | Notes |
+|------|-------------|-------|
+| T-P3.1 Charted border matches curve | | |
+| T-P3.2 Dotted neutral for uncharted match | | |
+| T-P3.3 Colour tracks assignment | | |
+| T-P3.4 No border for unrelated nodes | | |
+
+---
+
+## Section 11: Bidirectional Hover [P4]
+
+### T-P4.1 Hover chart curve → tree border thickens
+
+1. Chart 3+ nodes. Hover over one curve in the chart.
+2. **Expected:** Hovered curve stays **fully opaque**. Other curves dim
+   to reduced opacity (~0.2).
+3. **Expected:** Corresponding node in the tree panel has its left border
+   width **thickened** from 3px to 5px.
+4. Move mouse away from the chart.
+5. **Expected:** All curves return to full opacity. All tree borders
+   revert to 3px.
+
+### T-P4.2 Hover tree node → chart curve highlighted
+
+1. Hover over a charted node row in the tree panel.
+2. **Expected:** That node's curve in the chart stays opaque. Other curves
+   dim to reduced opacity.
+3. **Expected:** Node's tree border thickens to 5px.
+4. Move mouse away from the node.
+5. **Expected:** All curves return to full opacity. Border reverts.
+
+### T-P4.3 No feedback loop on rapid hover
+
+1. Rapidly move the mouse between 3+ chart curves in quick succession.
+2. **Expected:** Smooth transitions, no flickering. Only the currently
+   hovered curve is highlighted.
+3. Open browser DevTools → Console.
+4. **Expected:** No errors or warnings during rapid hovering.
+
+### T-P4.4 Hover works across chart ↔ tree without sticking
+
+1. Hover a chart curve (tree border thickens).
+2. Without pausing, move the mouse directly to the tree panel and hover
+   a **different** node.
+3. **Expected:** First node's border reverts. Second node's border thickens.
+   Chart correctly switches which curve is highlighted.
+
+### T-P4.5 Hover on non-charted node is no-op
+
+1. Hover over a node that is **not** charted (no curve in chart).
+2. **Expected:** No chart dimming occurs. No errors.
+
+| Test | Pass / Fail | Notes |
+|------|-------------|-------|
+| T-P4.1 Chart hover → tree thickens | | |
+| T-P4.2 Tree hover → chart highlights | | |
+| T-P4.3 No feedback loop | | |
+| T-P4.4 Cross-panel hover | | |
+| T-P4.5 Non-charted hover no-op | | |
+
+---
+
+## Section 12: Colour Picker + Live Preview [P5]
+
+### T-P5.1 Swatch trigger appears for charted nodes
+
+1. Chart 2+ nodes via Ctrl+click.
+2. **Expected:** Each charted node row in the tree shows a small coloured
+   **swatch square** icon (the colour picker trigger).
+3. **Expected:** Non-charted nodes do **not** show a swatch trigger.
+
+### T-P5.2 Click swatch opens picker popover
+
+1. Click the swatch trigger for a charted node.
+2. **Expected:** An 8×8 colour swatch grid appears as a popover/dropdown
+   near the trigger. Grid contains samples from all 8 palette families.
+3. **Expected:** The grid has a header/title row and an "↺ Auto" reset
+   button.
+
+### T-P5.3 Hover over swatches shows live preview
+
+1. Open the picker for a node.
+2. Hover over different colour swatches in the grid.
+3. **Expected:** The node's chart curve colour changes to match the hovered
+   swatch in **real time** (debounced ~50ms).
+4. **Expected:** The node's tree border colour also updates to the
+   previewed colour.
+
+### T-P5.4 Click a swatch to confirm colour override
+
+1. Open the picker and click a specific colour swatch.
+2. **Expected:** Picker closes. The node's curve and tree border are now
+   the selected colour.
+3. Hover the chart, interact with tree — the override colour persists.
+4. **Expected:** Override survives hover interactions and panel switches.
+
+### T-P5.5 Escape key closes picker and reverts preview
+
+1. Open the picker for a node.
+2. Hover over a swatch (preview changes the curve colour).
+3. Press the **Escape** key.
+4. **Expected:** Picker closes. The node's curve reverts to its
+   **previous** colour (auto-assigned or prior override). The preview
+   colour is discarded.
+
+### T-P5.6 Click outside closes picker and clears preview
+
+1. Open the picker for a node.
+2. Hover over a swatch (preview changes the curve colour).
+3. Click **outside** the picker (anywhere else on the page).
+4. **Expected:** Picker closes. The node's curve reverts to its previous
+   colour — the hover preview is **not** committed.
+5. **Expected:** No stale preview colour remains on the curve or border.
+
+### T-P5.7 "↺ Auto" resets to automatic colour
+
+1. Open the picker and select a custom colour override (per T-P5.4).
+2. Reopen the picker for the same node.
+3. Click the **"↺ Auto"** reset button.
+4. **Expected:** Picker closes. The node's colour reverts to the
+   automatically assigned colour (hash-based palette assignment).
+5. **Expected:** The override is removed, not just masked.
+
+### T-P5.8 One picker open at a time
+
+1. Open the picker for node A.
+2. Click the swatch trigger for a **different** node B.
+3. **Expected:** Node A's picker closes. Node B's picker opens.
+4. **Expected:** Any preview from node A is cleared/reverted.
+
+### T-P5.9 Preview cleared on every close path
+
+This test specifically verifies that the reactive preview cleanup (F-GP2)
+works correctly across all close paths:
+
+1. **Via Escape:**
+   a. Open picker, hover a swatch (preview visible on curve).
+   b. Press Escape.
+   c. **Expected:** Curve reverts immediately. No stale preview.
+
+2. **Via click-outside:**
+   a. Open picker, hover a swatch (preview visible on curve).
+   b. Click outside the picker.
+   c. **Expected:** Curve reverts immediately. No stale preview.
+
+3. **Via colour selection:**
+   a. Open picker, hover swatch A (preview A visible).
+   b. Click swatch B (different from A).
+   c. **Expected:** Curve shows swatch B's colour (committed override).
+      Preview A is not left behind.
+
+4. **Via "↺ Auto" reset:**
+   a. Open picker, hover a swatch (preview visible).
+   b. Click "↺ Auto".
+   c. **Expected:** Curve reverts to auto colour. No stale preview.
+
+5. **Via switching node:**
+   a. Open picker for node A, hover a swatch.
+   b. Click picker trigger for node B.
+   c. **Expected:** Node A's curve reverts. Node B's picker opens cleanly.
+
+### T-P5.10 Preview debounce works correctly
+
+1. Open the picker for a node.
+2. Rapidly sweep the mouse across several swatches (< 500ms total).
+3. **Expected:** The curve colour does not flicker rapidly. Due to 50ms
+   debounce, intermediate colours are skipped. Final preview settles
+   on the last hovered swatch's colour.
+
+| Test | Pass / Fail | Notes |
+|------|-------------|-------|
+| T-P5.1 Swatch trigger visible | | |
+| T-P5.2 Picker opens on click | | |
+| T-P5.3 Live preview on hover | | |
+| T-P5.4 Click confirms override | | |
+| T-P5.5 Escape reverts preview | | |
+| T-P5.6 Click-outside reverts | | |
+| T-P5.7 Auto reset removes override | | |
+| T-P5.8 One picker at a time | | |
+| T-P5.9 Preview cleared all paths | | |
+| T-P5.10 Debounce works | | |
+
+---
+
 ## Summary
 
 | Section | Tests | Pass | Fail | Blocked |
@@ -383,7 +605,10 @@ before proceeding. See [TESTING.md](TESTING.md) for sample payloads.
 | Combined | 3 | | | |
 | Edge cases | 5 | | | |
 | Regression | 3 | | | |
-| **Total** | **32** | | | |
+| P3 — Tree colour sync | 4 | | | |
+| P4 — Bidirectional hover | 5 | | | |
+| P5 — Colour picker | 10 | | | |
+| **Total** | **51** | | | |
 
 **Sign-off:**
 
