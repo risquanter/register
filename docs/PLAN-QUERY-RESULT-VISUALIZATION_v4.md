@@ -1017,6 +1017,56 @@ when all of the following are satisfied:
 
 ---
 
+## 10.1 Outstanding: App Module JS Test Infrastructure
+
+**Status:** Not yet set up — all three P2 chart modules (`PaletteData`,
+`ColorAssigner`, `LECSpecBuilder`) are untested pending this work.
+
+### Current state
+
+- The `app` module (Scala.js) has `zio-test` and `zio-test-sbt` as `Test`
+  dependencies in `build.sbt`, but **no test directory exists**
+  (`modules/app/src/test/` is absent).
+- Scala.js defaults to `NodeJSEnv` for `sbt app/test`. Pure-logic tests
+  (no DOM) would work out of the box, but `LECSpecBuilder` produces
+  `js.Dynamic` objects whose structure assertions benefit from a real JS
+  runtime with JSON comparison support.
+- Tests requiring DOM access (e.g. Laminar component tests, `vegaEmbed`
+  integration tests) need `jsdom-nodejs` or similar.
+
+### What needs to happen
+
+1. **Create test directory:** `modules/app/src/test/scala/app/chart/`
+2. **Add `scalajs-env-jsdom-nodejs`** (optional, only if DOM tests are
+   needed — pure logic tests work on bare Node.js):
+   ```scala
+   // project/plugins.sbt
+   libraryDependencies += "org.scala-js" %% "scalajs-env-jsdom-nodejs" % "1.1.0"
+
+   // build.sbt (app settings)
+   jsEnv := new org.scalajs.jsenv.jsdomnodejs.JSDOMNodeJSEnv()
+   ```
+3. **Install jsdom via npm** (for the jsdom env):
+   ```sh
+   npm install --save-dev jsdom
+   ```
+
+### Tests to create
+
+| File | Scope | Notes |
+|------|-------|-------|
+| `ColorAssignerSpec` | Classification (overlap/query/user), shade determinism, override precedence | Port assertions from archived `AssignPaletteColoursSpec` (line refs in `_deprecated/v4-purge/`) |
+| `PaletteDataSpec` | Family size (8 each), valid hex format, no duplicates within a family | Straightforward data assertions |
+| `LECSpecBuilderSpec` | Spec structure, colour encoding, quantile annotations, empty-data fallback, hover params | Port assertions from archived `LECChartSpecBuilderSpec` with `// Ported from` annotations |
+
+### Priority
+
+Not blocking — all P2 modules are pure functions with deterministic
+outputs. Tests can be added as a follow-up task once the JS test
+infrastructure is bootstrapped.
+
+---
+
 ## 11 Risk Assessment
 
 | Risk | Impact | Likelihood | Mitigation |

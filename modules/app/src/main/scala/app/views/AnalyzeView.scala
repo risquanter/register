@@ -145,16 +145,9 @@ object AnalyzeView:
       // ── Query result card ───────────────────────────────────────
       QueryResultCard(queryState.queryResult.signal, nodeLookup),
       // ── LEC chart panel ─────────────────────────────────────────
-      // Maps curveCache lifecycle to LECChartView's LoadState[String].
-      // Spec generation from curve data is not yet wired.
       div(
         cls := "analyze-lec-panel",
-        LECChartView(treeViewState.curveCache.map {
-          case LoadState.Idle       => LoadState.Idle
-          case LoadState.Loading    => LoadState.Loading
-          case LoadState.Failed(m)  => LoadState.Failed(m)
-          case LoadState.Loaded(_)  => LoadState.Loaded("{}") // No-op spec; LECSpecBuilder not wired yet
-        })
+        LECChartView(treeViewState.chartState.specSignal)
       )
     )
 

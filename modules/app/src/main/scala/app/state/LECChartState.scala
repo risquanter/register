@@ -2,6 +2,9 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 
+import scala.scalajs.js
+
+import app.chart.{ColorAssigner, LECSpecBuilder}
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
@@ -64,10 +67,35 @@ final class LECChartState(
       .map { (user, query) => user ++ query }
 
   /** Node → hex colour mapping for chart curves and tree highlights.
-    * Returns empty map; populated once ColorAssigner is wired.
+    * Derived from current visible nodes classified into query/user/overlap
+    * groups, each assigned a palette shade via `ColorAssigner`.
     */
   val nodeColorMap: Signal[Map[NodeId, String]] =
-    Signal.fromValue(Map.empty)
+    satisfyingNodeIds.signal
+      .combineWith(userSelectedNodeIds.signal, colorOverrides.signal)
+      .map { (query, user, overrides) =>
+        ColorAssigner.assign(query, user, overrides)
+      }
+
+  /** Complete Vega-Lite spec ready for `vegaEmbed`, derived reactively from
+    * the curve cache, visible node set, and colour assignments.
+    */
+  val specSignal: Signal[LoadState[js.Dynamic]] =
+    curveCache.signal
+      .combineWith(visibleCurves, nodeColorMap)
+      .map { (cacheState, visible, colorMap) =>
+        cacheState match
+          case LoadState.Idle       => LoadState.Idle
+          case LoadState.Loading    => LoadState.Loading
+          case LoadState.Failed(m)  => LoadState.Failed(m)
+          case LoadState.Loaded(allCurves) =>
+            // Build a NodeId-keyed map from the visible nodes that have curve data.
+            val filteredByNodeId: Map[NodeId, LECNodeCurve] = visible.flatMap { nid =>
+              allCurves.get(nid.value).map(nid -> _)
+            }.toMap
+            val relevantColors = colorMap.view.filterKeys(filteredByNodeId.contains).toMap
+            LoadState.Loaded(LECSpecBuilder.build(filteredByNodeId, relevantColors))
+      }
 
   // ── Bus-based toggle (ADR-019 P2: events up) ─────────────────
 

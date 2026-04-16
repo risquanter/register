@@ -2,6 +2,8 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 
+import scala.scalajs.js
+
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
@@ -55,6 +57,8 @@ final class TreeViewState(
   def curveCache: Signal[LoadState[Map[String, LECNodeCurve]]] = chartState.curveCache.signal
   /** Node → hex colour map for chart curves and tree highlights (read-only). */
   def nodeColorMap: Signal[Map[NodeId, String]] = chartState.nodeColorMap
+  /** Vega-Lite spec lifecycle for the LEC chart (read-only). */
+  def specSignal: Signal[LoadState[js.Dynamic]] = chartState.specSignal
   /** WriteBus for Ctrl+click toggle events (delegates to LECChartState). */
   def userSelectionToggle: WriteBus[NodeId] = chartState.userSelectionToggle
 

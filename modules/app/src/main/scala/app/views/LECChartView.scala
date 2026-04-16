@@ -11,16 +11,16 @@ import app.state.LoadState
 /** Reactive LEC chart panel backed by Vega-Lite via VegaEmbed.
   *
   * Pure derived view — owns no state (ADR-019 Pattern 4).
-  * Receives the chart spec lifecycle as a `Signal[LoadState[String]]`.
+  * Receives the chart spec lifecycle as a `Signal[LoadState[js.Dynamic]]`.
   *
   * Lifecycle:
-  *   - On `Loaded(specJson)`: parse JSON, call `vegaEmbed`, store `EmbedResult`
+  *   - On `Loaded(spec)`: call `vegaEmbed` with the dynamic spec, store `EmbedResult`
   *   - On any transition away from `Loaded` or on unmount: call `finalize()`
   *     to release canvas/timer resources
   */
 object LECChartView:
 
-  def apply(specSignal: Signal[LoadState[String]]): HtmlElement =
+  def apply(specSignal: Signal[LoadState[js.Dynamic]]): HtmlElement =
     // Mutable ref for the current EmbedResult — needed for cleanup.
     // This is local to the component lifecycle, not shared state.
     var currentResult: js.UndefOr[EmbedResult] = js.undefined
@@ -48,9 +48,9 @@ object LECChartView:
                 case LoadState.Idle           => renderIdle
                 case LoadState.Loading        => renderLoading
                 case LoadState.Failed(msg)    => renderError(msg)
-                case LoadState.Loaded(specJson) =>
+                case LoadState.Loaded(spec) =>
                   renderChart(
-                    specJson,
+                    spec,
                     onResult = result => currentResult = result,
                     onError = msg => renderError$.set(Some(msg))
                   )
@@ -84,20 +84,19 @@ object LECChartView:
 
   /** Mount a chart into a fresh container element via VegaEmbed. */
   private def renderChart(
-      specJson: String,
+      spec: js.Dynamic,
       onResult: EmbedResult => Unit,
       onError: String => Unit
   ): HtmlElement =
     val container = div(cls := "lec-chart-container")
     container.amend(
       onMountCallback { ctx =>
-        val parsed = js.JSON.parse(specJson)
         val options = js.Dynamic.literal(
           "actions"    -> false,
           "renderer"   -> "canvas",
           "hover"      -> true
         )
-        vegaEmbed(ctx.thisNode.ref, parsed, options)
+        vegaEmbed(ctx.thisNode.ref, spec, options)
           .`then`[Unit] { (result: EmbedResult) =>
             onResult(result)
             ()
