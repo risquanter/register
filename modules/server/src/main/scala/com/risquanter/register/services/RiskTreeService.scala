@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve, CurvePalette}
+import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /** Service layer for RiskTree business logic.
@@ -90,20 +90,6 @@ trait RiskTreeService {
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
   def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]]
-
-  /** Get a complete Vega-Lite chart specification for LEC visualization.
-    * 
-    * Composes on getLECCurvesMulti: resolves cached results, generates curves
-    * with shared tick domain, then builds a render-ready Vega-Lite JSON spec.
-    * The frontend renders this directly via VegaEmbed — no client-side spec
-    * construction needed.
-    * 
-    * @param treeId Tree identifier
-    * @param nodeIds Set of node identifiers to include in the chart
-    * @param paletteMap Map of node ID to requested colour palette
-    * @return Vega-Lite JSON specification as a string
-    */
-  def getLECChart(treeId: TreeId, nodeIds: Set[NodeId], paletteMap: Map[NodeId, CurvePalette]): Task[String]
 }
 
 object RiskTreeService:

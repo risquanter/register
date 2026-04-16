@@ -11,7 +11,6 @@ import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.{WorkspaceStore, RateLimiter}
 import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId, UserId}
-import com.risquanter.register.domain.data.CurvePalette
 import com.risquanter.register.domain.errors.TreeNotInWorkspace
 
 /** Workspace controller.
@@ -195,18 +194,6 @@ class WorkspaceController private (
       yield result).either
   }
 
-  val getLECChart: ServerEndpoint[Any, Task] = getWorkspaceLECChartEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, request) =>
-      (for
-        userId <- userCtx.extract(maybeUserId)
-        _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        paletteMap = request.curves.map(e => e.nodeId -> e.palette).toMap
-        nodeIds    = paletteMap.keySet
-        result <- workspaceStore.resolveTree(key, treeId) *>
-                    riskTreeService.getLECChart(treeId, nodeIds, paletteMap)
-      yield result).either
-  }
-
   override val routes: List[ServerEndpoint[Any, Task]] =
     List(
       // Workspace lifecycle
@@ -225,8 +212,7 @@ class WorkspaceController private (
       // LEC queries (workspace-scoped)
       getLECCurve,
       probOfExceedance,
-      getLECCurvesMulti,
-      getLECChart
+      getLECCurvesMulti
     )
 
 object WorkspaceController:

@@ -5,7 +5,7 @@ import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import sttp.model.{StatusCode, Header, MediaType}
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, QueryRequest, LECChartRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, QueryRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, WorkspaceRotateResponse, SimulationResponse, QueryResponse}
 import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId}
@@ -169,17 +169,6 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[List[NodeId]].description("Array of node IDs"))
       .out(jsonBody[Map[String, LECNodeCurve]])
-
-  val getWorkspaceLECChartEndpoint =
-    authedBaseEndpoint
-      .tag("workspaces")
-      .name("getWorkspaceLECChart")
-      .description("Get Vega-Lite chart spec for LEC visualization (workspace-scoped)")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "lec-chart")
-      .post
-      .in(jsonBody[LECChartRequest].description("Curves to render with palette assignments"))
-      .out(stringBody.description("Vega-Lite JSON specification"))
-      .out(header(Header.contentType(MediaType.ApplicationJson)))
 
   // ── Workspace-scoped vague quantifier query (ADR-028) ─────────────
 

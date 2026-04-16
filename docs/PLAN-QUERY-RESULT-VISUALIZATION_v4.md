@@ -44,8 +44,35 @@ the removal of ~1250 lines of server-side dead code.
 5. **Bidirectional hover-highlight:** Hovering a chart curve highlights
    the tree node (border thickens). Hovering a tree node highlights
    the chart curve (opacity dimming). Sub-millisecond via Vega signals.
-6. **Server dead code purged** — `lec-chart` endpoint, spec builder,
-   ColouredCurve, CurvePaletteRegistry all deleted.
+6. **Server code archived** — `lec-chart` endpoint, spec builder,
+   ColouredCurve, CurvePaletteRegistry moved to `_deprecated/v4-purge/`.
+   Permanently deleted only after client migration is verified.
+
+### Migration Safety Principles
+
+1. **Archive, don't delete.** All displaced files move to
+   `_deprecated/v4-purge/` preserving their original directory
+   structure. They remain in the repo for reference and rollback.
+2. **Test equivalence proof.** The client-side `LECSpecBuilder` must
+   produce specs that are **structurally identical** to the archived
+   `LECChartSpecBuilder` for the same inputs, except where this plan
+   explicitly changes behaviour. Equivalence is verified by porting
+   the archived spec builder's test assertions (366 LOC) to the new
+   client-side `LECSpecBuilderSpec`.
+3. **Explicit change catalog.** Every behavioural difference between
+   old and new code is documented:
+   - **Colour assignment:** p95-ranked sorting → hash-based rotation
+     (v4 §2 — intentional).
+   - **Palette shades:** 13 → 8 (v4 §2.7 — intentional).
+   - **Hover support:** Added hover param + invisible point layer
+     (v4 §3.4 — new feature, no old equivalent).
+   - **Data flow:** Identical — same `LECNodeCurve` from `lec-multi`.
+   - **Quantile annotations:** Identical — same P50/P95 rules.
+   - **Axes, legend, dark theme:** Identical.
+4. **Permanent deletion gate.** Archived files are deleted only when:
+   - All P0–P5 phases complete and verified.
+   - Manual testing matrix (§9.3) passes.
+   - User explicitly approves deletion.
 
 ### Locked-in Design Decisions
 
@@ -596,22 +623,41 @@ to match the curve.
 
 ---
 
-## 5 Server-Side Changes: Dead Code Purge
+## 5 Server-Side Changes: Archive + Trim
 
-### 5.1 Files to DELETE (1046 LOC server, 138 LOC common)
+### 5.0 Archive Policy
 
-| # | Module | File | LOC |
-|---|--------|------|-----|
-| D1 | server | `simulation/LECChartSpecBuilder.scala` | 227 |
-| D2 | server | `simulation/ColouredCurve.scala` | 55 |
-| D3 | server | `simulation/CurvePaletteRegistry.scala` | 40 |
-| D4 | server/test | `simulation/LECChartSpecBuilderSpec.scala` | 366 |
-| D5 | server/test | `simulation/AssignPaletteColoursSpec.scala` | 147 |
-| D6 | server/test | `simulation/CurvePaletteRegistrySpec.scala` | 53 |
-| D7 | server-it/test | `http/LECChartEndpointSpec.scala` | 158 |
-| D8 | common | `http/requests/LECChartRequest.scala` | 59 |
-| D9 | common/test | `http/requests/BuildChartRequestSpec.scala` | 79 |
-| | | **Total** | **1184** |
+All displaced files are **moved** (not deleted) to
+`_deprecated/v4-purge/` preserving their original module/package
+structure. This enables:
+- **Reference:** Developers can diff archived vs new code.
+- **Rollback:** `git mv` back if the client migration fails.
+- **Knowledge retention:** Test specs (especially `LECChartSpecBuilderSpec`
+  at 366 LOC) serve as the **equivalence contract** — every assertion
+  ported to the client-side `LECSpecBuilderSpec` must pass for the same
+  inputs, except where §0 "Explicit change catalog" documents a
+  planned divergence.
+
+Archived files are permanently deleted only after the full manual
+testing matrix (§9.3) passes and the user explicitly approves.
+
+### 5.1 Files to ARCHIVE → `_deprecated/v4-purge/`
+
+| # | Module | File | LOC | Equivalence role |
+|---|--------|------|-----|------------------|
+| D1 | server | `simulation/LECChartSpecBuilder.scala` | 227 | **Reference for `LECSpecBuilder`** — port all spec structure assertions |
+| D2 | server | `simulation/ColouredCurve.scala` | 55 | **Reference for `ColorAssigner`** — p95-ranked sorting replaced by hash-based (planned change) |
+| D3 | server | `simulation/CurvePaletteRegistry.scala` | 40 | **Reference for `PaletteData`** — 13→8 shades (planned change) |
+| D4 | server/test | `simulation/LECChartSpecBuilderSpec.scala` | 366 | **Equivalence contract** — port to `LECSpecBuilderSpec` |
+| D5 | server/test | `simulation/AssignPaletteColoursSpec.scala` | 147 | **Equivalence contract** — port colour assignment assertions to `ColorAssignerSpec` |
+| D6 | server/test | `simulation/CurvePaletteRegistrySpec.scala` | 53 | Reference only (palette enum tests) |
+| D7 | server-it/test | `http/LECChartEndpointSpec.scala` | 158 | Reference only (endpoint no longer served) |
+| D8 | common | `http/requests/LECChartRequest.scala` | 59 | Reference only (request type removed) |
+| D9 | common/test | `http/requests/BuildChartRequestSpec.scala` | 79 | Reference only |
+| D10 | common/test | `http/requests/LECChartRequestSpec.scala` | 53 | Reference only |
+| D11 | common | `domain/data/CurvePalette.scala` | 27 | Reference only |
+| D12 | common/test | `domain/data/CurvePaletteSpec.scala` | ~50 | Reference only (JSON codec tests) |
+| | | **Total** | **~1314** | |
 
 ### 5.2 Files to TRIM (~64 LOC)
 
@@ -622,12 +668,6 @@ to match the curve.
 | T3 | `http/controllers/WorkspaceController.scala` | `getLECChart` handler + route (~14 LOC) |
 | T4 | `http/endpoints/WorkspaceEndpoints.scala` | `getWorkspaceLECChartEndpoint` def (~14 LOC) |
 | T5 | `WorkspaceReaperSpec.scala` | `getLECChart` stub (1 LOC) |
-
-### 5.3 Conditional DELETE
-
-| File | LOC | Decision |
-|------|-----|----------|
-| `CurvePalette.scala` | 27 | **Delete** — client-side `ColorAssigner` uses hex vectors from CSS, not an enum. If needed later for a typed palette API, re-introduce. |
 
 ### 5.4 What STAYS (untouched)
 
@@ -751,21 +791,23 @@ phase fully before starting the next.
 
 ---
 
-### Phase P0: Dead Code Purge (~45 min)
+### Phase P0: Archive + Trim (~45 min)
 
-**Goal:** Remove all server-side spec-building, palette, and
-`LECChartRequest` code. Reduce surface area before building the
-replacement.
+**Goal:** Move all server-side spec-building, palette, and
+`LECChartRequest` code to `_deprecated/v4-purge/`. Trim references
+from active code. The archived files remain for reference and
+equivalence testing.
 
 | Step | File(s) | Action | Verify |
 |------|---------|--------|--------|
-| 0.1 | D1–D7 (§5.1, server) | Delete 7 server files: `LECChartSpecBuilder`, `ColouredCurve`, `CurvePaletteRegistry`, and their 4 test specs. | `sbt server/compile` — some unused import warnings OK |
-| 0.2 | D8–D9 (§5.1, common) | Delete `LECChartRequest.scala`, `BuildChartRequestSpec.scala`. | `sbt common/compile` |
-| 0.3 | D10 (§5.1, common) | Delete `CurvePalette.scala`. | `sbt common/compile` |
-| 0.4 | T1–T5 (§5.2) | Trim: `RiskTreeService` (remove `getLECChart`), `RiskTreeServiceLive`, `WorkspaceController` (remove route + handler), `WorkspaceEndpoints` (remove endpoint def), `WorkspaceReaperSpec` (remove stub). | `sbt server/compile server/test` green |
-| 0.5 | — | Run full `sbt common/test server/test server-it/test`. | All pass. App module has ~5–10 compile errors referencing deleted types — expected, fixed in P1. |
+| 0.1 | — | Create `_deprecated/v4-purge/` directory tree mirroring the original module/package structure. | Directory exists |
+| 0.2 | D1–D7 (§5.1, server) | `git mv` 7 server files to `_deprecated/v4-purge/server/`: `LECChartSpecBuilder`, `ColouredCurve`, `CurvePaletteRegistry`, and their 4 test specs. | Files moved, git tracks rename |
+| 0.3 | D8–D12 (§5.1, common) | `git mv` 5 common files to `_deprecated/v4-purge/common/`: `LECChartRequest`, `BuildChartRequestSpec`, `LECChartRequestSpec`, `CurvePalette`, `CurvePaletteSpec`. | Files moved |
+| 0.4 | T1–T5 (§5.2) | Trim active code: `RiskTreeService` (remove `getLECChart`), `RiskTreeServiceLive`, `WorkspaceController` (remove route + handler), `WorkspaceEndpoints` (remove endpoint def), `WorkspaceReaperSpec` (remove stub). Clean up now-unused imports (`CurvePalette`, `ColouredCurve`, `LECChartSpecBuilder`, `LECChartRequest`). | `sbt server/compile server/test` green |
+| 0.5 | — | Run full `sbt common/test server/test server-it/test`. | All pass. App module has ~5–10 compile errors referencing archived types — expected, fixed in P1. |
 
 **Commit gate:** All server + common tests green. App module broken (OK).
+Archived files in `_deprecated/v4-purge/` for reference.
 
 ---
 
@@ -799,7 +841,7 @@ invisible point layer.
 | 2.2 | `chart/ColorAssigner.scala` | Create. `assign(queryNodes, userNodes, overrides, palettes) → Map[NodeId, HexColor]`. Logic: classify → overlap=Purple, query-only=Green, user-only=Aqua. Hash-based shade: `id.value.hashCode.abs % 8`. Overrides win. | Compiles |
 | 2.3 | `chart/ColorAssignerSpec.scala` | Create tests: determinism (same input → same output), override wins, mod-8 wrap (9+ nodes), empty set, overlap detection, single-node. | Tests pass |
 | 2.4 | `chart/LECSpecBuilder.scala` | Create. `build(curves: Map[NodeId, LECNodeCurve], colorMap: Map[NodeId, HexColor], interpolation: String): js.Dynamic`. Build layered spec: base line layer with `curveId` field + `scale: {domain, range}` colour encoding, hover selection param `{name: "hover", select: {type: "point", on: "pointerover", nearest: true, fields: ["curveId"]}}`, invisible point layer for voronoi detection, opacity condition (`hover.curveId ? 1.0 : 0.3`), quantile rule annotations. | Compiles |
-| 2.5 | `chart/LECSpecBuilderSpec.scala` | Create tests: spec has `layer` array, colour domain/range correct, hover param present, point layer has `opacity: 0`, quantile rules present, empty curves → valid spec, single curve. | Tests pass |
+| 2.5 | `chart/LECSpecBuilderSpec.scala` | Create tests. **Port assertions from archived `LECChartSpecBuilderSpec`** (D4) to verify structural equivalence: data values shape, colour domain/range, quantile annotations, axes formatting, dark theme config, legend `labelExpr`. Add new assertions for v4 additions: `layer` array, hover param present, point layer `opacity: 0`. Document each ported assertion with `// Ported from LECChartSpecBuilderSpec line N` comment. | Tests pass |
 | 2.6 | `state/LECChartState.scala` | Wire real `ColorAssigner.assign` into `nodeColorMap` signal. Add `specSignal: Signal[LoadState[js.Dynamic]]` derived from `curveCache + visibleCurves + nodeColorMap + interpolation`. | Compiles |
 | 2.7 | `views/LECChartView.scala` | Change to accept `Signal[LoadState[js.Dynamic]]`. In `vegaEmbed` call: pass `spec` as `js.Dynamic` instead of JSON string. Remove JSON parse. | Compiles |
 | 2.8 | `views/AnalyzeView.scala` | Pass `specSignal` to `LECChartView`. | Compiles |
@@ -875,7 +917,7 @@ passed.
 
 | Phase | Description | Est. Time | Key Deliverable |
 |-------|-------------|-----------|-----------------|
-| P0 | Dead code purge | 45 min | ~1200 LOC deleted, server clean |
+| P0 | Archive + trim | 45 min | ~1264 LOC archived to `_deprecated/v4-purge/`, server clean |
 | P1 | Client data fetching | 30 min | `lec-multi` wired, structured data in client state |
 | P2 | Spec builder + colours | 75 min | Chart renders client-side with hover dimming |
 | P3 | Tree colour sync | 40 min | Tree borders match chart, unified colour map |
@@ -902,6 +944,21 @@ passed.
   (setting `externallySet` suppresses echo write), clearing hover
   produces empty selection store, `attachToView` registers signal
   listener.
+
+### 9.1.1 Equivalence Contract (archive → client)
+
+The client-side specs must provably reproduce the same behaviour as
+the archived server code, minus explicitly planned changes.
+
+| Archived test file | Ported to | What must match | Planned divergences |
+|--------------------|-----------|-----------------|---------------------|
+| `LECChartSpecBuilderSpec` (D4, 366 LOC) | `LECSpecBuilderSpec` | Data value shape (`curveId`, `risk`, `loss`, `exceedance`). Colour scale `domain`/`range`. Quantile P50/P95 dashed rules. Axes format (€ B/M, %). Legend `labelExpr`. Dark theme config (transparent bg). | Layered spec (line + point layers). Hover param. Opacity conditions. `js.Dynamic` not `zio.json`. |
+| `AssignPaletteColoursSpec` (D5, 147 LOC) | `ColorAssignerSpec` | Determinism (same nodes → same output). Palette family grouping (Green/Aqua/Purple). Override wins. | Hash-based shade index (not p95-rank). 8 shades (not 13). |
+| `CurvePaletteRegistrySpec` (D6, 53 LOC) | `PaletteData` inline assertions | Hex values valid. Shade count per palette. | 8 shades per family (not 13). |
+
+Each ported assertion is annotated with a comment:
+`// Ported from <ArchivedFile> line N — equivalence contract`
+so reviewers can cross-reference.
 
 ### 9.2 Integration Tests
 
@@ -932,6 +989,17 @@ passed.
 | M16 | 9+ curves (mod-8 wrap) | Two curves share same shade; no crash, manual override resolves |
 | M17 | Re-embed after hover | Interpolation dropdown change → re-embed → hover still works |
 
+### 9.4 Archive Deletion Gate
+
+The `_deprecated/v4-purge/` directory is permanently deleted **only**
+when all of the following are satisfied:
+
+1. All P0–P5 phases complete and committed.
+2. Full `sbt test` green.
+3. Manual testing matrix (M1–M17) passed.
+4. Equivalence contract (§9.1.1) assertions all green.
+5. **User explicitly approves permanent deletion.**
+
 ---
 
 ## 10 Out of Scope
@@ -960,5 +1028,6 @@ passed.
 | Feedback loop between chart hover and tree hover | High | Low | Guard flag in `ChartHoverBridge`. Tested in `ChartHoverBridgeSpec`. |
 | `addSignalListener` / `signal().run()` API changes in Vega 6+ | Medium | Low | Pin vega-embed version. Facade wraps calls centrally in `ChartHoverBridge`. |
 | `String.hashCode` differs JVM vs JS for non-ASCII | Low | None | ULIDs are ASCII-only. `hashCode` deterministic for ASCII in Scala.js. |
+| Functional drift during spec port | Medium | Medium | Equivalence contract (§9.1.1): port archived test assertions to client spec. Annotate with source line. |
 | Removing `lec-chart` endpoint breaks external consumers | None | None | Internal endpoint, capability URLs, no external consumers. |
 | Invisible point layer interferes with line tooltip | Low | Medium | Point layer has `tooltip: null`, line layer keeps tooltip. |
