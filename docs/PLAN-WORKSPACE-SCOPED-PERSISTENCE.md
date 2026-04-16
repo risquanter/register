@@ -1,8 +1,8 @@
 # Plan: Workspace-Scoped Persistence
 
-**Status:** Draft — decisions pending  
+**Status:** Draft — decisions D1–D4 decided, D5–D6 pending  
 **Scope:** Planning only — no code changes  
-**Date:** 2026-04-15
+**Date:** 2026-04-15 (decisions updated 2026-04-16)
 
 ---
 
@@ -31,7 +31,7 @@ Three problems in the current architecture:
 2. **Storage provenance:** Organize Irmin tree paths under workspace
    namespaces for admin audit and structural clarity.
 3. **Durable workspace state:** Persist workspace associations so they
-   survive server restarts (timing: see Decision D1).
+   survive server restarts (PostgreSQL — see D1, decided).
 4. **Rehydration:** Rebuild in-memory workspace state from the durable
    store on startup.
 
@@ -137,12 +137,12 @@ tests gain an `id` parameter. Test fixtures generate deterministic
 **Goal:** Move tree data under workspace namespaces in Irmin so every
 tree has structural provenance.
 
-#### 1.1 `RiskTreeRepository` Trait Change ← **Decision D2**
+#### 1.1 `RiskTreeRepository` Trait Change — **D2: Explicit Parameter** (decided)
 
-The trait currently has no workspace awareness. To support scoped
-paths, `WorkspaceId` must reach the repository. Options:
+The trait currently has no workspace awareness. `WorkspaceId` is
+added as an explicit parameter to every method — compile-time enforced,
+no hidden state:
 
-**Option A — Add `WorkspaceId` parameter to all methods:**
 ```scala
 trait RiskTreeRepository:
   def create(wsId: WorkspaceId, riskTree: RiskTree): Task[RiskTree]
@@ -151,25 +151,9 @@ trait RiskTreeRepository:
   def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]]
   def getAllForWorkspace(wsId: WorkspaceId): Task[List[...]]
 ```
-- Pro: Explicit, compile-time enforced, no hidden state
-- Con: Mechanical change across many call sites (~30+ files/tests)
 
-**Option B — Store `WorkspaceId` on `RiskTree` model:**
-```scala
-final case class RiskTree(id: TreeId, wsId: WorkspaceId, ...)
-```
-- Pro: Repository trait unchanged; wsId travels with the tree
-- Con: Couples domain content to access control; complicates sharing
-
-**Option C — Contextual path prefix via ZIO FiberRef:**
-```scala
-// Repository reads workspace context from fiber-local state
-FiberRef.make[Option[WorkspaceId]](None)
-```
-- Pro: Zero trait changes, zero call-site changes
-- Con: Hidden state, easy to forget, harder to test
-
-See **Decision D2** below.
+This is a mechanical change across ~30+ files/tests. The one-time cost
+makes workspace scoping visible at every call site.
 
 #### 1.2 `RiskTreeRepositoryIrmin` Path Changes
 
@@ -188,11 +172,36 @@ workspace:{wsId}:risk-tree:{treeId}:create:{txn}:set-node:{nodeId}
 workspace:{wsId}:risk-tree:{treeId}:delete:meta
 ```
 
-#### 1.3 `RiskTreeRepositoryInMemory` ← **Decision D3**
+#### 1.3 `RiskTreeRepositoryInMemory` ← **Decision D3** (pending)
 
-Options:
-- **Ignore:** Accept `wsId` parameter, key `TrieMap` only by `TreeId`
-- **Enforce:** Key by `(WorkspaceId, TreeId)` — tests catch scoping bugs
+This decision determines how the **test-time** in-memory repository
+behaves when it receives a `WorkspaceId` parameter.
+
+In production, the Irmin-backed repository uses `WorkspaceId` to
+construct the storage path (`workspaces/{wsId}/risk-trees/...`). The
+in-memory implementation has no path structure — it stores trees in a
+flat `TrieMap`. The question is whether that `TrieMap` should
+**enforce** workspace boundaries or **ignore** them:
+
+| Behaviour | TrieMap key | What tests catch | What tests miss |
+|-----------|-------------|------------------|-----------------|
+| **D3-A: Ignore** | `TreeId` only | CRUD logic, validation, idempotency | A service bug that passes the wrong `wsId` — the tree is still found because the key ignores `wsId`. Cross-workspace data leak is invisible. |
+| **D3-B: Enforce** | `(WorkspaceId, TreeId)` | All of the above **plus** wrong-workspace bugs. If a service forgets to thread `wsId` or passes a stale one, `getById` returns `None`. | Nothing — strictly more coverage. |
+
+**Practical example of what D3-B catches:**
+
+```scala
+// Bug: controller resolves workspace A, but service accidentally
+// passes workspace B's ID to the repository.
+riskTreeService.getById(wrongWsId, treeId)
+// D3-A: returns Some(tree) — bug is silent
+// D3-B: returns None — test fails, bug caught
+```
+
+The cost of D3-B is that every test constructing an in-memory repo
+must provide a valid `WorkspaceId` alongside each `TreeId`. This is
+mechanical — test fixtures already generate `WorkspaceId` values
+after Phase 0.
 
 See **Decision D3** below.
 
@@ -210,25 +219,26 @@ HTTP request → WorkspaceController
       → Irmin: set("workspaces/{ws.id}/risk-trees/{tree.id}/...")
 ```
 
-#### 1.5 `getAll` Replacement ← **Decision D4**
+#### 1.5 `getAll` Replacement — **D4: Replace only** (decided)
 
 Current `getAll` lists everything under `risk-trees/`. With scoped
-paths, the natural primitive is `getAllForWorkspace(wsId)`. A global
-admin scan across all workspaces would walk the `workspaces/` prefix.
-
-See **Decision D4** below.
+paths, it is replaced by `getAllForWorkspace(wsId)`. No global scan
+method exists on the repository trait. An admin endpoint scanning
+across all workspaces can be added later outside the repository trait
+if needed.
 
 ---
 
-### Phase 2: Durable Workspace State ← **Decision D1** (gating)
+### Phase 2: Durable Workspace State — **D1: PostgreSQL now** (decided)
 
 **Goal:** Persist workspace associations so they survive server restart.
 
-The correct backend for durable workspace state is **PostgreSQL**.
-Workspace data is an association/token index (key → set of TreeIds,
-TTL, status) — relational, mutable, TTL-evicted. This maps naturally
-to relational tables, not to a content-addressed store like Irmin.
-The timing depends on Decision D1.
+The durable backend is **PostgreSQL**, added to `docker-compose.yml`
+under the `persistence` profile alongside Irmin. Tech stack: Quill
+4.8.6 + Flyway 11.5.0 + PG JDBC 42.7.7. Workspace data is an
+association/token index (key → set of TreeIds, TTL, status) —
+relational, mutable, TTL-evicted. This maps naturally to relational
+tables, not to a content-addressed store like Irmin.
 
 #### 2.1 Schema
 
@@ -592,34 +602,21 @@ workspace-scoped `workspaces/{wsId}/risk-trees/` paths.
 
 ### Decision D1: When does PostgreSQL land?
 
-This is the **gating decision** for the plan. PostgreSQL is the
-correct durable workspace backend, but PG is not in the dev
-environment today.
+> **Decided: D1-A — PostgreSQL now.**
 
-| Option | Description | Trade-offs |
-|--------|-------------|------------|
-| **D1-A: PG now** | Add PostgreSQL to `docker-compose.yml` under the `persistence` profile. Implement `WorkspaceStorePostgres` as part of this plan. Tech stack: Quill 4.8.6 + Flyway 11.5.0 + PG JDBC 42.7.7 (following BCG patterns). | Aligns with all prior docs. Enables full rehydration. Adds PG to dev env alongside Irmin. Larger scope but tech stack is proven and specified. |
-| **D1-B: PG deferred, Irmin interim** | Store minimal workspace metadata in Irmin (`workspaces/{id}/meta`) as a stepping stone. Migrate to PG when it lands for Layer 1 auth. | Enables rehydration sooner. Workspaces are ephemeral/relational/token-like — a poor fit for content-addressed storage. Creates a migration liability (Irmin → PG). |
-| **D1-C: PG deferred, no interim** | Implement only Phases 0 and 1 (domain model + scoped paths). Defer workspace metadata persistence and rehydration entirely until PG lands. `Ref[Map]` remains the workspace store. | Smallest scope. No architectural contradiction. Workspaces still lost on restart. Irmin gains structural provenance via scoped paths but no rehydration. |
-
-**My assessment:** D1-A is the architecturally correct choice. D1-C
-is the pragmatic minimum if PG is not desired yet. D1-B is a poor
-fit — workspace data is relational and TTL-evicted, not immutable
-content — and creates migration debt.
+Add PostgreSQL to `docker-compose.yml` under the `persistence` profile.
+Implement `WorkspaceStorePostgres` as part of this plan. Tech stack:
+Quill 4.8.6 + Flyway 11.5.0 + PG JDBC 42.7.7. All five phases proceed.
 
 ---
 
 ### Decision D2: How does `WorkspaceId` reach the repository?
 
-| Option | Description |
-|--------|-------------|
-| **D2-A: Explicit parameter** | Add `wsId: WorkspaceId` to all `RiskTreeRepository` methods. Mechanical change across ~30 files. Compile-time safe. |
-| **D2-B: On `RiskTree` model** | Add `wsId: WorkspaceId` to `RiskTree` case class. Repository trait unchanged. Couples domain content to access control. |
-| **D2-C: FiberRef context** | Implicit via ZIO `FiberRef`. Zero signature changes. Hidden state; easy to misuse. |
+> **Decided: D2-A — Explicit parameter.**
 
-**My assessment:** D2-A. Explicit is better than implicit. The
-mechanical cost is one-time and makes workspace scoping visible at
-every call site. D2-B conflates concerns. D2-C is fragile.
+Add `wsId: WorkspaceId` to all `RiskTreeRepository` methods. Mechanical
+change across ~30 files. Compile-time safe. Explicit is better than
+implicit — workspace scoping is visible at every call site.
 
 ---
 
@@ -638,14 +635,11 @@ returning another workspace's tree.
 
 ### Decision D4: `getAll` replacement strategy
 
-| Option | Description |
-|--------|-------------|
-| **D4-A: Replace** | Remove `getAll`, add `getAllForWorkspace(wsId)` only. No global scan. |
-| **D4-B: Both** | Keep `getAll` (admin/debug) and add `getAllForWorkspace(wsId)`. Two scanning modes. |
+> **Decided: D4-A — Replace only.**
 
-**My assessment:** D4-A for now. `getAll` has no use case in
-workspace-scoped operation. An admin endpoint can be added later if
-needed, outside the repository trait.
+Remove `getAll`, add `getAllForWorkspace(wsId)` only. No global scan on
+the repository trait. `getAll` has no use case in workspace-scoped
+operation. An admin endpoint can be added later outside the trait.
 
 ---
 
@@ -662,7 +656,67 @@ needed, outside the repository trait.
 Future Layer 1 authenticated users bypass capability URLs entirely.
 D5-B/C add significant complexity for a transient benefit.
 
-Only relevant if D1 = A or B (if D1-C, there is no rehydration).
+#### Rehydration: What It Means and When It Triggers
+
+"Rehydration" is the process of reconstructing the in-memory
+`Ref[Map[WorkspaceKeySecret, Workspace]]` from the durable PostgreSQL
+store when the server starts. Without rehydration, a server restart
+means every workspace's tree associations are lost — trees exist in
+Irmin but no workspace claims them.
+
+**Happy path — planned restart (deploy, config change, scaling):**
+
+```
+1. Server process starts
+2. Flyway migrations run (idempotent — no-op if schema current)
+3. WorkspaceStorePostgres.loadAll() queries all rows with
+   status = 'active'
+4. For each workspace:
+   a. Check: created_at + ttl > now()  AND
+              last_access + idle_timeout > now()
+   b. If valid:
+      - Generate fresh WorkspaceKeySecret (old URLs die)
+      - Build Workspace(id, freshKey, trees, ...)
+      - Insert into Ref[Map] (write-through cache)
+      - Log: "Rehydrated workspace {wsId} with {n} trees"
+   c. If expired:
+      - UPDATE workspaces SET status = 'expired'
+      - Schedule cascade delete of tree data from Irmin
+      - Log: "Expired workspace {wsId} — {n} trees scheduled
+        for cleanup"
+5. Server begins accepting HTTP traffic
+6. Log summary: "Rehydrated {alive} workspaces, expired {dead}"
+```
+
+The key property: **no HTTP traffic is served until rehydration
+completes.** This prevents a race where a request arrives for a
+workspace that hasn't been loaded yet.
+
+**Unhappy path — crash restart (OOM, SIGKILL, hardware fault):**
+
+The flow is identical to the happy path. PostgreSQL is the durable
+ground truth — the server process is stateless between restarts.
+Specific scenarios:
+
+| Crash scenario | PostgreSQL state | Rehydration outcome |
+|----------------|-----------------|--------------------|
+| OOM kill during normal operation | All committed writes intact. `last_access` reflects last successful `touch()`. | Normal rehydration. Workspaces whose `last_access + idle_timeout` fell behind during downtime are expired. |
+| Crash during `evictExpired` | Partially committed. Some workspaces marked `expired`, others not yet. Irmin tree data may or may not be deleted. | Workspaces already marked `expired` are skipped. Still-active workspaces are rehydrated. Orphaned Irmin data (trees marked for delete but not yet removed) is cleaned up by the Reaper's next cycle. |
+| Crash during `create` (new workspace) | If PG insert committed: workspace exists in PG with tree list. If not committed: workspace never existed. | Committed workspaces are rehydrated. Uncommitted ones are lost — the user sees a failed request and retries. No orphans. |
+| Crash during `addTree` | If PG `workspace_trees` insert committed: association exists. If not: workspace exists but tree not associated. | Committed associations are rehydrated. Uncommitted tree data may exist in Irmin as an orphan — the Reaper cleans it up (tree has no workspace owner). |
+| PostgreSQL itself crashes | PG WAL ensures durability up to last committed transaction. | On PG recovery + server restart, rehydration proceeds normally from PG's recovered state. |
+| Both PG and server crash simultaneously | PG recovers from WAL. Server restarts and rehydrates from recovered PG state. | Same as above — PG's ACID guarantees handle this. |
+
+**Downtime duration effect:** If the server is down for longer than a
+workspace's remaining TTL or idle timeout, that workspace is naturally
+expired on rehydration. This is correct behaviour — the workspace
+*should* be expired. The user creates a new one.
+
+**Fresh tokens and URL invalidation:** Every rehydrated workspace gets
+a new `WorkspaceKeySecret`. Bookmarked capability URLs from before the
+restart are dead. This is by design (ADR-021: capability URLs are
+ephemeral). Future Layer 1 authenticated users retrieve workspaces by
+`UserId`, not by capability URL, so this limitation is transitional.
 
 ---
 
@@ -673,11 +727,55 @@ Only relevant if D1 = A or B (if D1-C, there is no rehydration).
 | **D6-A: Soft delete** | Set `status = 'expired'`. Workspace row preserved. Tree data deleted from Irmin. Full audit trail in PG. |
 | **D6-B: Hard delete** | `DELETE FROM workspaces WHERE ...`. Row gone. Irmin tree data deleted. Irmin commit history retains tree provenance. |
 
-**My assessment:** D6-A. Workspace rows are tiny. Keeping them gives
-a complete manifest of all workspaces ever created. Tree data (the
-large payload) is still cleaned up from Irmin.
+#### EU Regulatory and Data Privacy Analysis
 
-Only relevant if D1 = A.
+The workspace row contains: `id` (ULID), `key_hash` (bcrypt digest),
+`created_at`, `last_access`, `ttl`, `idle_timeout`, `status`. The
+associated `workspace_trees` rows contain `workspace_id` and `tree_id`
+(both ULIDs) plus `added_at`.
+
+**Is any of this personal data under GDPR?**
+
+In the current Layer 0 architecture (no authentication), workspaces
+are anonymous. There is no `user_id`, email, IP address, or any other
+identifier linking a workspace to a natural person. A ULID is a random
+identifier with an embedded timestamp — it does not identify a person.
+The `key_hash` is a one-way digest of a random token, also not
+personal data.
+
+However, once Layer 1 authentication lands (AUTHORIZATION-PLAN
+L1.2), workspaces gain an `owner_id` linking them to a user account.
+At that point the workspace row becomes **pseudonymous personal data**
+under GDPR Art. 4(1) — the `owner_id` is an identifier that, combined
+with the user table, relates to an identified natural person.
+
+**Implications for each option:**
+
+| Consideration | D6-A: Soft delete | D6-B: Hard delete |
+|---------------|-------------------|-------------------|
+| **GDPR Art. 5(1)(e) — storage limitation** | Retaining expired workspace rows indefinitely may conflict with the principle that personal data should be kept "no longer than necessary." Requires a documented retention period and scheduled purge job. | Compliant by default — data is gone when no longer needed. |
+| **GDPR Art. 17 — right to erasure** | A user requesting deletion requires a purge of their soft-deleted rows. Must be implemented as an admin/automated operation. Forgetting to purge = non-compliance. | Already satisfied — row is deleted. |
+| **GDPR Art. 30 — records of processing** | The soft-deleted manifest can serve as a processing record. However, GDPR does not require retaining *per-workspace* records — a processing register at the controller level suffices. | Irmin commit history still provides structural provenance (workspace ID in commit messages). Not as convenient as a PG table scan, but sufficient for audit. |
+| **ePrivacy / data minimisation** | More data retained = larger attack surface. Soft-deleted rows with `key_hash` are low-risk (bcrypt is one-way, random input) but non-zero. | Minimal footprint. |
+| **Operational audit** | Full manifest of all workspaces ever created. Easy `SELECT count(*)` reporting, capacity planning, abuse detection. | Lost unless separately logged. Irmin commit messages retain workspace IDs but are harder to query. |
+| **Layer 1 transition** | When `owner_id` is added, existing soft-deleted rows (from Layer 0) have no owner — they remain anonymous and GDPR-neutral. New rows with `owner_id` require a retention policy. | No legacy rows to worry about. |
+
+**Recommendation — conditional:**
+
+- **Pre-Layer 1 (now):** D6-A is safe. No personal data exists in
+  workspace rows. The audit manifest has operational value at zero
+  regulatory cost.
+- **Post-Layer 1:** D6-A requires a **retention policy** (e.g., purge
+  soft-deleted rows after 90 days) and an erasure handler for Art. 17
+  requests. If this operational commitment is unwanted, D6-B is the
+  simpler compliant choice.
+
+A pragmatic middle ground: **start with D6-A now** (Layer 0, no
+personal data), and add a scheduled hard-purge job (`DELETE FROM
+workspaces WHERE status = 'expired' AND last_access < now() -
+interval '90 days'`) when Layer 1 lands. This preserves the audit
+manifest for a bounded retention window while satisfying storage
+limitation.
 
 ---
 
@@ -696,16 +794,16 @@ Only relevant if D1 = A.
 
 | File | Change |
 |------|--------|
-| `RiskTreeRepository.scala` | Add `wsId` param (if D2-A) |
+| `RiskTreeRepository.scala` | Add `wsId` param to all methods (D2-A) |
 | `RiskTreeRepositoryIrmin.scala` | Scoped paths, commit messages |
-| `RiskTreeRepositoryInMemory.scala` | Accept `wsId` (ignore or enforce per D3) |
+| `RiskTreeRepositoryInMemory.scala` | Accept `wsId`, enforce isolation (D3 pending — see §1.3) |
 | `RiskTreeService.scala` + `RiskTreeServiceLive.scala` | Thread `wsId` |
 | `WorkspaceController.scala` | Pass `ws.id` to service |
 | `QueryController.scala` | Pass `wsId` to query service |
 | All controller/service specs (~20 files) | Thread `wsId` |
 | Integration tests (server-it) | Scoped path assertions |
 
-### Phase 2 (Durable State) — if D1-A
+### Phase 2 (Durable State)
 
 | File | Change |
 |------|--------|
@@ -723,7 +821,7 @@ Only relevant if D1 = A.
 | `RepositorySpec.scala` | **New** — Testcontainers `DataSource` trait for tests |
 | `WorkspaceStorePostgresSpec.scala` | **New** — repository unit tests |
 
-### Phase 3 (Rehydration) — if D1-A
+### Phase 3 (Rehydration)
 
 | File | Change |
 |------|--------|
@@ -731,7 +829,7 @@ Only relevant if D1 = A.
 | `Application.scala` | Rehydration startup logic |
 | Integration tests | Rehydration E2E |
 
-### Phase 4 (Reaper) — if D1-A
+### Phase 4 (Reaper)
 
 | File | Change |
 |------|--------|
@@ -746,8 +844,6 @@ No code changes — operational: clear `risk-trees/` prefix from Irmin.
 
 ## 5 Implementation Order
 
-### If D1-A (PG now):
-
 ```
 Phase 0 ──► Phase 1 ──► Phase 2 ──► Phase 3 ──► Phase 4
 Domain       Scoped       PG store    Rehydrate   Reaper
@@ -756,16 +852,6 @@ model        paths                    on boot     aware
 ```
 
 Phase 5 (migration) executes once at the Phase 1→2 boundary.
-
-### If D1-C (PG deferred):
-
-```
-Phase 0 ──► Phase 1 ──► (stop)
-Domain       Scoped      Phases 2-4 deferred
-model        paths       until PG lands
-(~2h)        (~4h)
-```
-
 Each phase is independently deployable and testable.
 
 ---
@@ -806,7 +892,7 @@ None of this requires a `WorkspaceKeySecret`.
 
 | Plan / ADR | Relationship |
 |------------|-------------|
-| AUTHORIZATION-PLAN Phase K.3 | PostgreSQL on K8s. If D1-A, we bring PG into dev-compose first; K8s deployment follows K.3 timeline. |
+| AUTHORIZATION-PLAN Phase K.3 | PostgreSQL on K8s. PG lands in dev-compose first (this plan); K8s deployment follows K.3 timeline. |
 | AUTHORIZATION-PLAN Task L1.2 | Workspace ownership (`owner_id`). Requires `WorkspaceId` in the model (Phase 0 of this plan). |
 | AUTHORIZATION-PLAN L552–569 | `WorkspaceId` for SpiceDB. Phase 0 is a prerequisite. |
 | ADR-INFRA-006 | SOPS-encrypted PG credentials for K8s. Dev-compose uses plaintext env vars (standard for local dev). |
@@ -817,14 +903,14 @@ None of this requires a `WorkspaceKeySecret`.
 
 ## 9 Summary of Required Decisions
 
-| ID | Question | Options | My Lean |
-|----|----------|---------|---------|
-| D1 | When does PostgreSQL land? | A: Now / B: Irmin interim / C: Deferred | A |
-| D2 | How does `WorkspaceId` reach the repo? | A: Explicit param / B: On model / C: FiberRef | A |
-| D3 | In-memory repo workspace isolation? | A: Ignore / B: Enforce | B |
-| D4 | `getAll` replacement strategy? | A: Replace only / B: Keep both | A |
-| D5 | Key persistence on rehydration? | A: Fresh / B: Hash / C: Encrypted | A |
-| D6 | Soft vs hard delete? | A: Soft / B: Hard | A |
+| ID | Question | Options | Status |
+|----|----------|---------|--------|
+| D1 | When does PostgreSQL land? | **A: Now** | **Decided** |
+| D2 | How does `WorkspaceId` reach the repo? | **A: Explicit param** | **Decided** |
+| D3 | In-memory repo workspace isolation? | A: Ignore / B: Enforce | Pending — lean B |
+| D4 | `getAll` replacement strategy? | **A: Replace only** | **Decided** |
+| D5 | Key persistence on rehydration? | A: Fresh / B: Hash / C: Encrypted | Pending — lean A |
+| D6 | Soft vs hard delete? | A: Soft / B: Hard | Pending — see GDPR analysis |
 
-Phases 0 and 1 can proceed regardless of D1. Phases 2–4 are gated
-on D1. D2–D4 affect Phase 1 implementation. D5–D6 affect Phases 2–4.
+All five phases proceed (D1-A). D3 affects Phase 1 in-memory impl.
+D5–D6 affect Phases 2–4.
