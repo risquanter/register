@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{TreeViewState, LoadState, ChartHoverBridge}
-import app.components.Icons
+import app.components.{Icons, ColorSwatchPicker}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
@@ -90,13 +90,18 @@ object TreeDetailView:
     queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
     hoverBridge: ChartHoverBridge = new ChartHoverBridge()
   ): HtmlElement =
+    // Local state: which node's picker popover is open (if any)
+    val pickerOpenFor: Var[Option[NodeId]] = Var(None)
+
     div(
       cls := "tree-detail-view",
+      // Close picker when clicking outside (attached to the container)
+      onClick --> { _ => pickerOpenFor.set(None) },
       child <-- state.selectedTree.signal.map {
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
         case LoadState.Failed(msg) => renderError(msg)
-        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge)
+        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor)
       }
     )
 
@@ -107,7 +112,7 @@ object TreeDetailView:
     div(cls := "tree-detail-error", p(cls := "error-message", s"Failed: $message"))
 
   /** Render the full tree from a RiskTree domain object. */
-  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge): HtmlElement =
+  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge, pickerOpenFor: Var[Option[NodeId]]): HtmlElement =
     // Build children lookup: parentId → child nodes
     val childrenOf: Map[Option[NodeId], Seq[RiskNode]] =
       tree.nodes.groupBy(_.parentId)
@@ -125,7 +130,7 @@ object TreeDetailView:
         case Some(root) =>
           div(
             cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, prefix = "", isLast = true, isRoot = true)
+            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, prefix = "", isLast = true, isRoot = true)
           )
         case None =>
           div(cls := "tree-detail-error", p("Root node not found"))
@@ -138,6 +143,7 @@ object TreeDetailView:
     state: TreeViewState,
     queryMatchedNodes: Signal[Set[NodeId]],
     hoverBridge: ChartHoverBridge,
+    pickerOpenFor: Var[Option[NodeId]],
     prefix: String,
     isLast: Boolean,
     isRoot: Boolean
@@ -172,6 +178,13 @@ object TreeDetailView:
       else
         state.selectNode(nodeId)
 
+    // Is this node charted (has a colour)?
+    val isCharted: Signal[Boolean] = state.nodeColorMap.map(_.contains(nodeId))
+    // Current colour for this node (used by picker to show active swatch)
+    val currentColor: Signal[Option[HexColor]] = state.nodeColorMap.map(_.get(nodeId))
+    // Is the picker open for this node?
+    val pickerOpen: Signal[Boolean] = pickerOpenFor.signal.map(_.contains(nodeId))
+
     div(
       cls := "tree-detail-node",
       div(
@@ -180,6 +193,7 @@ object TreeDetailView:
         div(
           cls <-- lineCls,
           styleAttr <-- borderStyle,
+          position.relative,
           onMouseEnter --> { _ => hoverBridge.hoveredCurveId.set(Some(nodeId)) },
           onMouseLeave --> { _ => hoverBridge.hoveredCurveId.set(None) },
           if hasChildren then
@@ -206,7 +220,42 @@ object TreeDetailView:
             title := nodeTooltip(node),
             nodeLabel(node),
             onClick --> handleNodeClick
-          )
+          ),
+          // Colour-swatch trigger icon — visible on hover for charted nodes (PD1(b))
+          child <-- isCharted.combineWith(currentColor).map { (charted, colorOpt) =>
+            if charted then
+              div(
+                cls := "node-swatch-trigger",
+                styleAttr := s"background-color: ${colorOpt.map(_.value).getOrElse("transparent")};",
+                onClick.stopPropagation --> { _ =>
+                  // Toggle picker open/closed for this node
+                  if pickerOpenFor.now().contains(nodeId) then pickerOpenFor.set(None)
+                  else pickerOpenFor.set(Some(nodeId))
+                }
+              )
+            else emptyNode
+          },
+          // Picker popover — rendered when open for this node
+          child <-- pickerOpen.combineWith(currentColor).map { (open, colorOpt) =>
+            if open then
+              colorOpt match
+                case Some(col) =>
+                  ColorSwatchPicker(
+                    currentColor = col,
+                    onSelect = hex => {
+                      state.chartState.setColorOverride(nodeId, hex)
+                      pickerOpenFor.set(None)
+                    },
+                    onReset = () => {
+                      state.chartState.clearColorOverride(nodeId)
+                      pickerOpenFor.set(None)
+                    },
+                    onPreview = hex => state.chartState.previewOverride.set(Some((nodeId, hex))),
+                    onPreviewClear = () => state.chartState.previewOverride.set(None)
+                  )
+                case None => emptyNode
+            else emptyNode
+          }
         )
       ),
       // Children (only rendered when expanded)
@@ -216,7 +265,7 @@ object TreeDetailView:
           display <-- isExpanded.map(if _ then "block" else "none"),
           children.toList.zipWithIndex.map { case (c, idx) =>
             val childIsLast = idx == children.size - 1
-            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, childPrefix, childIsLast, isRoot = false)
+            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, childPrefix, childIsLast, isRoot = false)
           }
         )
       else

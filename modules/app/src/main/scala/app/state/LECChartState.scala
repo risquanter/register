@@ -57,6 +57,12 @@ final class LECChartState(
   /** Manual colour overrides per node. */
   val colorOverrides: Var[Map[NodeId, HexColor]] = Var(Map.empty)
 
+  /** Transient preview override for live swatch hover (P5 §5.6).
+    * When `Some`, this temporarily replaces the colour for one node
+    * in `nodeColorMap` without committing to `colorOverrides`.
+    */
+  val previewOverride: Var[Option[(NodeId, HexColor)]] = Var(None)
+
   // ── Derived signals ───────────────────────────────────────────
 
   /** Union of query-matched + user-selected node IDs — the set of nodes
@@ -73,9 +79,12 @@ final class LECChartState(
     */
   val nodeColorMap: Signal[Map[NodeId, HexColor]] =
     satisfyingNodeIds.signal
-      .combineWith(userSelectedNodeIds.signal, colorOverrides.signal)
-      .map { (query, user, overrides) =>
-        ColorAssigner.assign(query, user, overrides)
+      .combineWith(userSelectedNodeIds.signal, colorOverrides.signal, previewOverride.signal)
+      .map { (query, user, overrides, preview) =>
+        val base = ColorAssigner.assign(query, user, overrides)
+        preview match
+          case Some((nid, hex)) if base.contains(nid) => base.updated(nid, hex)
+          case _                                      => base
       }
 
   /** Complete Vega-Lite spec ready for `vegaEmbed`, derived reactively from
@@ -123,12 +132,23 @@ final class LECChartState(
 
   // ── Actions ───────────────────────────────────────────────────
 
+  /** Commit a manual colour override for a single node. */
+  def setColorOverride(nodeId: NodeId, hex: HexColor): Unit =
+    colorOverrides.update(_ + (nodeId -> hex))
+    previewOverride.set(None)
+
+  /** Remove the manual colour override for a node (revert to auto). */
+  def clearColorOverride(nodeId: NodeId): Unit =
+    colorOverrides.update(_ - nodeId)
+    previewOverride.set(None)
+
   /** Reset chart state (called when tree selection changes). */
   def reset(): Unit =
     userSelectedNodeIds.set(Set.empty)
     satisfyingNodeIds.set(Set.empty)
     curveCache.set(LoadState.Idle)
     colorOverrides.set(Map.empty)
+    previewOverride.set(None)
 
   /** Fetch LEC curves from the backend for the given node IDs.
     *
