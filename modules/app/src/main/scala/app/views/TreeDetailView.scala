@@ -6,13 +6,18 @@ import app.state.{TreeViewState, LoadState}
 import app.components.Icons
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** Expandable hierarchical view of a server-persisted risk tree.
   *
   * Renders the full node structure (portfolios + leaves) with
   * expand/collapse controls on portfolio nodes and click-to-select
-  * on any node. Nodes matching the last query are highlighted with
-  * the `node-query-matched` CSS class (ADR-028 / T3.4).
+  * on any node.
+  *
+  * Highlighting is inline-style-driven from `nodeColorMap` (P3 §4.1):
+  * - Charted nodes: solid 3px left border in the node's curve hex colour.
+  * - Query-matched-but-not-charted: dotted 3px left border in neutral.
+  * - Neither: no border.
   *
   * Pure derived view — owns no state (ADR-019 Pattern 4).
   * Receives `TreeViewState` as constructor arg (Pattern 2).
@@ -56,6 +61,25 @@ object TreeDetailView:
   private def isPortfolio(node: RiskNode): Boolean = node match
     case _: RiskPortfolio => true
     case _: RiskLeaf      => false
+
+  /** Inline border style for a tree node based on chart/query state (§4.1).
+    *
+    * Charted nodes get their curve hex colour as a solid border.
+    * Query-matched-but-not-charted nodes get a neutral dotted border.
+    * All other nodes get no border.
+    */
+  private def borderStyleFor(
+    nodeId: NodeId,
+    colorMap: Map[NodeId, HexColor],
+    queryMatched: Set[NodeId]
+  ): String =
+    colorMap.get(nodeId) match
+      case Some(hex) =>
+        s"border-left: 3px solid ${hex.value}; padding-left: calc(var(--sp-1) - 3px);"
+      case None =>
+        if queryMatched.contains(nodeId) then
+          "border-left: 3px dotted var(--foreground-variant); padding-left: calc(var(--sp-1) - 3px);"
+        else ""
 
   // ── Public API ────────────────────────────────────────────────
 
@@ -120,17 +144,14 @@ object TreeDetailView:
 
     val isExpanded: Signal[Boolean] = state.expandedNodes.signal.map(_.contains(nodeId))
     val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeId))
-    val isChartSelected: Signal[Boolean] = state.userSelectedNodeIds.map(_.contains(nodeId))
-    val isQueryMatched: Signal[Boolean] = queryMatchedNodes.map(_.contains(nodeId))
 
     val lineCls: Signal[String] =
-      isSelected.combineWith(isChartSelected, isQueryMatched).map { (sel, chart, qMatch) =>
-        val base = "tree-detail-inline"
-        val s = if sel then " node-selected" else ""
-        val c = if chart then " node-chart-selected" else ""
-        val q = if qMatch then " node-query-matched" else ""
-        s"$base$s$c$q"
-      }
+      isSelected.map(sel => if sel then "tree-detail-inline node-selected" else "tree-detail-inline")
+
+    val borderStyle: Signal[String] =
+      state.nodeColorMap
+        .combineWith(queryMatchedNodes)
+        .map((colorMap, queryMatched) => borderStyleFor(nodeId, colorMap, queryMatched))
 
     val connector = if isRoot then "" else if isLast then "└── " else "├── "
     val branchText = s"$prefix$connector"
@@ -152,6 +173,7 @@ object TreeDetailView:
         span(cls := "tree-branch", branchText),
         div(
           cls <-- lineCls,
+          styleAttr <-- borderStyle,
           if hasChildren then
             span(
               cls := "node-toggle",
