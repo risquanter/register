@@ -2,7 +2,7 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 
-import app.state.{TreeViewState, LoadState}
+import app.state.{TreeViewState, LoadState, ChartHoverBridge}
 import app.components.Icons
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
@@ -71,11 +71,13 @@ object TreeDetailView:
   private def borderStyleFor(
     nodeId: NodeId,
     colorMap: Map[NodeId, HexColor],
-    queryMatched: Set[NodeId]
+    queryMatched: Set[NodeId],
+    isHovered: Boolean
   ): String =
     colorMap.get(nodeId) match
       case Some(hex) =>
-        s"border-left: 3px solid ${hex.value}; padding-left: calc(var(--sp-1) - 3px);"
+        val width = if isHovered then "5px" else "3px"
+        s"border-left: $width solid ${hex.value}; padding-left: calc(var(--sp-1) - $width);"
       case None =>
         if queryMatched.contains(nodeId) then
           "border-left: 3px dotted var(--foreground-variant); padding-left: calc(var(--sp-1) - 3px);"
@@ -85,7 +87,8 @@ object TreeDetailView:
 
   def apply(
     state: TreeViewState,
-    queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty)
+    queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
+    hoverBridge: ChartHoverBridge = new ChartHoverBridge()
   ): HtmlElement =
     div(
       cls := "tree-detail-view",
@@ -93,7 +96,7 @@ object TreeDetailView:
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
         case LoadState.Failed(msg) => renderError(msg)
-        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes)
+        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge)
       }
     )
 
@@ -104,7 +107,7 @@ object TreeDetailView:
     div(cls := "tree-detail-error", p(cls := "error-message", s"Failed: $message"))
 
   /** Render the full tree from a RiskTree domain object. */
-  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]]): HtmlElement =
+  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge): HtmlElement =
     // Build children lookup: parentId → child nodes
     val childrenOf: Map[Option[NodeId], Seq[RiskNode]] =
       tree.nodes.groupBy(_.parentId)
@@ -122,7 +125,7 @@ object TreeDetailView:
         case Some(root) =>
           div(
             cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, state, queryMatchedNodes, prefix = "", isLast = true, isRoot = true)
+            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, prefix = "", isLast = true, isRoot = true)
           )
         case None =>
           div(cls := "tree-detail-error", p("Root node not found"))
@@ -134,6 +137,7 @@ object TreeDetailView:
     childrenOf: Map[Option[NodeId], Seq[RiskNode]],
     state: TreeViewState,
     queryMatchedNodes: Signal[Set[NodeId]],
+    hoverBridge: ChartHoverBridge,
     prefix: String,
     isLast: Boolean,
     isRoot: Boolean
@@ -150,8 +154,10 @@ object TreeDetailView:
 
     val borderStyle: Signal[String] =
       state.nodeColorMap
-        .combineWith(queryMatchedNodes)
-        .map((colorMap, queryMatched) => borderStyleFor(nodeId, colorMap, queryMatched))
+        .combineWith(queryMatchedNodes, hoverBridge.hoveredCurveId.signal)
+        .map { (colorMap, queryMatched, hoveredId) =>
+          borderStyleFor(nodeId, colorMap, queryMatched, hoveredId.contains(nodeId))
+        }
 
     val connector = if isRoot then "" else if isLast then "└── " else "├── "
     val branchText = s"$prefix$connector"
@@ -174,6 +180,8 @@ object TreeDetailView:
         div(
           cls <-- lineCls,
           styleAttr <-- borderStyle,
+          onMouseEnter --> { _ => hoverBridge.hoveredCurveId.set(Some(nodeId)) },
+          onMouseLeave --> { _ => hoverBridge.hoveredCurveId.set(None) },
           if hasChildren then
             span(
               cls := "node-toggle",
@@ -208,7 +216,7 @@ object TreeDetailView:
           display <-- isExpanded.map(if _ then "block" else "none"),
           children.toList.zipWithIndex.map { case (c, idx) =>
             val childIsLast = idx == children.size - 1
-            renderNode(c, childrenOf, state, queryMatchedNodes, childPrefix, childIsLast, isRoot = false)
+            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, childPrefix, childIsLast, isRoot = false)
           }
         )
       else

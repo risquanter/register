@@ -6,21 +6,23 @@ import org.scalajs.dom
 import scala.scalajs.js
 
 import app.facades.{vegaEmbed, EmbedResult}
-import app.state.LoadState
+import app.state.{LoadState, ChartHoverBridge}
 
 /** Reactive LEC chart panel backed by Vega-Lite via VegaEmbed.
   *
   * Pure derived view — owns no state (ADR-019 Pattern 4).
-  * Receives the chart spec lifecycle as a `Signal[LoadState[js.Dynamic]]`.
+  * Receives the chart spec lifecycle as a `Signal[LoadState[js.Dynamic]]`
+  * and a `ChartHoverBridge` for bidirectional hover (§3B).
   *
   * Lifecycle:
-  *   - On `Loaded(spec)`: call `vegaEmbed` with the dynamic spec, store `EmbedResult`
-  *   - On any transition away from `Loaded` or on unmount: call `finalize()`
-  *     to release canvas/timer resources
+  *   - On `Loaded(spec)`: call `vegaEmbed` with the dynamic spec, store `EmbedResult`,
+  *     attach hover bridge signal listener
+  *   - On any transition away from `Loaded` or on unmount: detach listener,
+  *     call `finalize()` to release canvas/timer resources
   */
 object LECChartView:
 
-  def apply(specSignal: Signal[LoadState[js.Dynamic]]): HtmlElement =
+  def apply(specSignal: Signal[LoadState[js.Dynamic]], hoverBridge: ChartHoverBridge): HtmlElement =
     // Mutable ref for the current EmbedResult — needed for cleanup.
     // This is local to the component lifecycle, not shared state.
     var currentResult: js.UndefOr[EmbedResult] = js.undefined
@@ -30,6 +32,7 @@ object LECChartView:
 
     def disposeChart(): Unit =
       currentResult.foreach { result =>
+        hoverBridge.detachFromView(result.view)
         result.finalize()
         currentResult = js.undefined
       }
@@ -39,6 +42,12 @@ object LECChartView:
       h3("LEC Chart"),
       div(
         cls := "lec-chart-content",
+        // Laminar → Vega hover push (§3B.3)
+        hoverBridge.hoveredCurveId.signal.changes --> { maybeId =>
+          currentResult.foreach { result =>
+            hoverBridge.pushToView(result.view, maybeId)
+          }
+        },
         child <-- specSignal.combineWith(renderError$.signal).map { (state, renderErr) =>
           disposeChart()
           renderErr match
@@ -51,7 +60,10 @@ object LECChartView:
                 case LoadState.Loaded(spec) =>
                   renderChart(
                     spec,
-                    onResult = result => currentResult = result,
+                    onResult = result => {
+                      currentResult = result
+                      hoverBridge.attachToView(result.view)
+                    },
                     onError = msg => renderError$.set(Some(msg))
                   )
         },

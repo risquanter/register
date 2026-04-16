@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.components.SplitPane
-import app.state.{TreeViewState, AnalyzeQueryState, LoadState}
+import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge}
 import com.risquanter.register.domain.data.{RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.NodeId
 
@@ -31,6 +31,9 @@ object AnalyzeView:
 
     /** Fire query against selected tree. No-op if no tree is selected. */
     def runQuery(): Unit = queryState.executeQuery()
+
+    // Shared hover bridge — wired to both chart and tree views (§3B.1)
+    val hoverBridge = new ChartHoverBridge()
 
     // ── Reactive chart node list (§3.10) ───────────────────────────
     // Merges query-matched nodes with user Ctrl+click selections.
@@ -147,14 +150,14 @@ object AnalyzeView:
       // ── LEC chart panel ─────────────────────────────────────────
       div(
         cls := "analyze-lec-panel",
-        LECChartView(treeViewState.chartState.specSignal)
+        LECChartView(treeViewState.chartState.specSignal, hoverBridge)
       )
     )
 
     val savedTreePanel = div(
       cls := "saved-tree-panel",
       TreeListView(treeViewState),
-      TreeDetailView(treeViewState, queryState.satisfyingNodeIds)
+      TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
     )
 
     div(

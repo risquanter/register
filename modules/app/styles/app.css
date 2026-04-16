@@ -1524,7 +1524,7 @@ select.form-input option {
   gap: var(--sp-1);
   padding: var(--sp-0-5) var(--sp-1);
   border-radius: var(--radius-sm);
-  transition: background-color 0.1s;
+  transition: background-color 0.1s, border-width 80ms ease, padding-left 80ms ease;
 }
 
 .tree-detail-inline:hover {
