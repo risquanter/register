@@ -376,7 +376,7 @@ class RiskTreeServiceLive private (
   
   // TODO-REMOVE: No real-world clients. Remove along with LECCurveResponse,
   // getWorkspaceLECCurveEndpoint, RiskTreeService.getLECCurve, and WorkspaceController.getLECCurve.
-  @deprecated("No real-world clients. Use getLECCurvesMulti or getLECChart instead.", since = "2026-04-14")
+  @deprecated("No real-world clients. Use getLECCurvesMulti instead.", since = "2026-04-14")
   override def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] =
     traced("getLECCurve") {
       for {

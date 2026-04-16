@@ -67,7 +67,7 @@ trait RiskTreeService {
     */
   // TODO-REMOVE: No real-world clients. Remove along with LECCurveResponse,
   // getWorkspaceLECCurveEndpoint, and WorkspaceController.getLECCurve.
-  @deprecated("No real-world clients. Use getLECCurvesMulti or getLECChart instead.", since = "2026-04-14")
+  @deprecated("No real-world clients. Use getLECCurvesMulti instead.", since = "2026-04-14")
   def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse]
   
   /** Get exceedance probability at a threshold for a node.

@@ -167,7 +167,7 @@ Map[NodeId, LECNodeCurve] ◀──── structured curve data
 `LECChartState` maintains:
 
 ```
-curveCache: Var[Map[NodeId, LECNodeCurve]]     // fetched data, persists across interactions
+curveCache: Var[LoadState[Map[NodeId, LECNodeCurve]]]  // fetched data, wrapped in LoadState for loadInto API
 visibleCurves: Var[Set[NodeId]]                // currently charted (subset of cache keys)
 colorOverrides: Var[Map[NodeId, HexColor]]     // manual picks (persistent across sessions? TBD)
 ```
@@ -206,7 +206,7 @@ object ColorAssigner:
     val userOnly  = userNodes  -- overlap
 
     def hashShade(id: NodeId, palette: Vector[HexColor]): HexColor =
-      palette((id.value.hashCode.abs) % palette.size)
+      palette((id.value.hashCode & 0x7fffffff) % palette.size)
 
     val automatic: Map[NodeId, HexColor] =
       queryOnly.map(id => id -> hashShade(id, greenPalette)).toMap ++
@@ -219,7 +219,7 @@ object ColorAssigner:
 No state, no server dependency. Lives in the `app` module.
 
 **Key properties:**
-- Hash-based: `NodeId.value.hashCode.abs % 8` gives a deterministic
+- Hash-based: `NodeId.value.hashCode & 0x7fffffff % palette.size` gives a deterministic
   shade index. Same node → same shade every session. Adding/removing
   peers does NOT shift any other node's colour.
 - Palette family encodes provenance: Green = query, Aqua = user,
@@ -239,7 +239,7 @@ if needed.
 When a node is added to the chart (query match or Ctrl+click):
 1. `ColorAssigner.assign` is called.
 2. Node's provenance determines palette family (Green/Aqua/Purple).
-3. `nodeId.value.hashCode.abs % 8` picks a shade within the family.
+3. `nodeId.value.hashCode & 0x7fffffff % palette.size` picks a shade within the family.
 4. Result: deterministic, stable colour that doesn't shift when other
    nodes join or leave the chart.
 
@@ -483,18 +483,37 @@ A single `Var[Option[NodeId]]` acts as the shared hover channel. Both
 After `vegaEmbed` resolves:
 
 ```scala
-val handler: js.Function2[String, js.Dynamic, Unit] = { (_, value) =>
+/** Extract a NodeId from a Vega selection signal value.
+  * Returns None on unexpected shapes — never throws. */
+def parseHoverSignal(value: js.Dynamic): Option[NodeId] =
   val arr = value.asInstanceOf[js.Array[js.Dynamic]]
-  val hoveredId: Option[String] =
-    if (arr.length > 0)
-      val values = arr(0).values.asInstanceOf[js.Array[String]]
-      if (values.length > 0) Some(values(0)) else None
-    else None
+  if arr.length > 0 then
+    val values = arr(0).values.asInstanceOf[js.Array[String]]
+    if values.length > 0 then NodeId.fromString(values(0)).toOption else None
+  else None
+
+/** Build a Vega selection store for a given NodeId (or empty if None). */
+def buildSelectionStore(nodeId: Option[NodeId]): js.Array[js.Any] =
+  nodeId match
+    case Some(id) =>
+      js.Array(js.Dynamic.literal(
+        "fields" -> js.Array(js.Dynamic.literal("field" -> "curveId", "type" -> "E")),
+        "values" -> js.Array(id.value)
+      ))
+    case None => js.Array()
+
+val handler: js.Function2[String, js.Dynamic, Unit] = { (_, value) =>
+  val hoveredId = parseHoverSignal(value)
   if (hoveredId != externallySet)  // guard against feedback loop
-    hoverState.set(hoveredId.flatMap(NodeId.fromString(_).toOption))
+    hoverState.set(hoveredId)
 }
 view.addSignalListener("hover", handler)
 ```
+
+> **Design note (FL1):** `parseHoverSignal` and `buildSelectionStore`
+> are named total functions that encapsulate all `asInstanceOf` casts
+> at the Vega JS boundary. They are independently unit-testable
+> (see §9.1 `ChartHoverBridgeSpec`).
 
 The listener fires **only when the curveId changes** (Vega signal
 semantics), NOT on every mouse move. Cleanup: `view.removeSignalListener`
@@ -514,7 +533,7 @@ hoveredCurveId.signal.changes.foreach { maybeId =>
           "values" -> js.Array(id.value)
         ))
       case None => js.Array()
-    externallySet = maybeId.map(_.value)  // guard flag
+    externallySet = maybeId  // guard flag (Option[NodeId])
     result.view.signal("hover", store).run()
   }
 }
@@ -544,7 +563,7 @@ Both directions write to `hoveredCurveId`. Without a guard:
 3. → Vega signal listener fires → writes back to hoveredCurveId
 4. → Loop
 
-Solution: a `var externallySet: Option[String]` guard flag. The signal
+Solution: a `var externallySet: Option[NodeId]` guard flag. The signal
 listener compares the incoming value against `externallySet` and
 ignores it if they match. The tree→chart direction sets `externallySet`
 before calling `view.signal().run()`. The chart→tree direction clears
@@ -576,12 +595,14 @@ visible — not just on hover. It IS the selection indicator (CQ3=A).
 inline styles per node:
 
 ```scala
-// For each rendered node:
-val borderStyle: Signal[String] = nodeColorMap.map { colorMap =>
+// Named function — extract during implementation, do not inline.
+def borderStyleFor(nodeId: NodeId, colorMap: Map[NodeId, HexColor]): String =
   colorMap.get(nodeId) match
     case Some(hex) => s"border-left: 3px solid ${hex.value}; padding-left: calc(var(--sp-1) - 3px);"
     case None      => ""
-}
+
+// For each rendered node:
+val borderStyle: Signal[String] = nodeColorMap.map(borderStyleFor(nodeId, _))
 ```
 
 The old CSS classes `node-query-matched` and `node-chart-selected` are
@@ -821,7 +842,7 @@ Wire `AnalyzeView` to supply `List[NodeId]`.
 
 | Step | File(s) | Action | Verify |
 |------|---------|--------|--------|
-| 1.1 | `state/LECChartState.scala` | Rewrite: remove `loadLECChart`, `lecChartSpec: Var[LoadState[String]]`. Add `curveCache: Var[Map[NodeId, LECNodeCurve]]`, `visibleCurves: Signal[Set[NodeId]]` (derived from `userSelectedNodeIds ++ satisfyingNodeIds`), `colorOverrides: Var[Map[NodeId, HexColor]]`. Add `loadCurves(nodeIds: List[NodeId])` calling `lec-multi`. Keep 13-node cap guard. | Compiles (chart won't render) |
+| 1.1 | `state/LECChartState.scala` | Rewrite: remove `loadLECChart`, `lecChartSpec: Var[LoadState[String]]`. Add `curveCache: Var[LoadState[Map[NodeId, LECNodeCurve]]]`, `visibleCurves: Signal[Set[NodeId]]` (derived from `userSelectedNodeIds ++ satisfyingNodeIds`), `colorOverrides: Var[Map[NodeId, HexColor]]`. Add `loadCurves(nodeIds: List[NodeId])` calling `lec-multi`. Keep 13-node cap guard. | Compiles (chart won't render) |
 | 1.2 | `views/AnalyzeView.scala` | Update `chartRequest` signal → build `List[NodeId]` from `(satisfyingNodeIds ++ userSelectedNodeIds).toList`. Call `LECChartState.loadCurves(…)` instead of `loadLECChart`. Remove `LECChartRequest` import. | Compiles |
 | 1.3 | `state/LECChartState.scala` | Add `nodeColorMap: Signal[Map[NodeId, HexColor]]` — placeholder returning empty map (stubs `ColorAssigner`, which doesn't exist yet). | Compiles |
 | 1.4 | — | `sbt app/compile` green | All modules compile |
@@ -840,9 +861,9 @@ invisible point layer.
 | Step | File(s) | Action | Verify |
 |------|---------|--------|--------|
 | 2.1 | `chart/PaletteData.scala` | Create. Define 3 palette families: `Green`, `Aqua`, `Purple`. Each is `Vector[HexColor]` with 8 trimmed shades (drop 25/50/100/950/975). | Compiles |
-| 2.2 | `chart/ColorAssigner.scala` | Create. `assign(queryNodes, userNodes, overrides, palettes) → Map[NodeId, HexColor]`. Logic: classify → overlap=Purple, query-only=Green, user-only=Aqua. Hash-based shade: `id.value.hashCode.abs % 8`. Overrides win. | Compiles |
+| 2.2 | `chart/ColorAssigner.scala` | Create. `assign(queryNodes, userNodes, overrides, palettes) → Map[NodeId, HexColor]`. Logic: classify → overlap=Purple, query-only=Green, user-only=Aqua. Hash-based shade: `id.value.hashCode & 0x7fffffff % palette.size`. Overrides win. Also: `pairWithColors(allCurves, visible, colorMap) → Vector[(LECNodeCurve, HexColor)]` — named pure bridge between cache+colours and `LECSpecBuilder.build`. | Compiles |
 | 2.3 | `chart/ColorAssignerSpec.scala` | Create tests: determinism (same input → same output), override wins, mod-8 wrap (9+ nodes), empty set, overlap detection, single-node. | Tests pass |
-| 2.4 | `chart/LECSpecBuilder.scala` | Create. `build(curves: Vector[(LECNodeCurve, HexColor)], interpolation: String): js.Dynamic`. Build layered spec: base line layer with `curveId` field + `scale: {domain, range}` colour encoding, hover selection param `{name: "hover", select: {type: "point", on: "pointerover", nearest: true, fields: ["curveId"]}}`, invisible point layer for voronoi detection, opacity condition (`hover.curveId ? 1.0 : 0.3`), quantile rule annotations. | Compiles |
+| 2.4 | `chart/LECSpecBuilder.scala` | Create. `build(curves: Vector[(LECNodeCurve, HexColor)], interpolation: String): js.Dynamic`. Build layered spec: base line layer with `curveId` field + `scale: {domain, range}` colour encoding, hover selection param `{name: "hover", select: {type: "point", on: "pointerover", clear: "pointerout", nearest: true, fields: ["curveId"]}}`, invisible point layer for voronoi detection, opacity+strokeWidth two-condition encoding per CQ1 (hovered 1.0/3, others 0.2/1.5, nothing hovered 1.0/1.5), quantile rule annotations. | Compiles |
 | 2.5 | `chart/LECSpecBuilderSpec.scala` | Create tests. **Port assertions from archived `LECChartSpecBuilderSpec`** (D4) to verify structural equivalence: data values shape, colour domain/range, quantile annotations, axes formatting, dark theme config, legend `labelExpr`. Add new assertions for v4 additions: `layer` array, hover param present, point layer `opacity: 0`. Document each ported assertion with `// Ported from LECChartSpecBuilderSpec line N` comment. | Tests pass |
 | 2.6 | `state/LECChartState.scala` | Wire real `ColorAssigner.assign` into `nodeColorMap` signal. Add `specSignal: Signal[LoadState[js.Dynamic]]` derived from `curveCache + visibleCurves + nodeColorMap + interpolation`. | Compiles |
 | 2.7 | `views/LECChartView.scala` | Change to accept `Signal[LoadState[js.Dynamic]]`. In `vegaEmbed` call: pass `spec` as `js.Dynamic` instead of JSON string. Remove JSON parse. | Compiles |
@@ -883,7 +904,7 @@ dimming). Feedback-loop-safe.
 | 4.1 | `state/ChartHoverBridge.scala` | Create. Shared `hoveredCurveId: Var[Option[NodeId]]`. `attachToView(view)`: calls `view.addSignalListener("hover", callback)`. Callback reads `hover_store` selection, extracts `curveId`, parses to `NodeId`, writes to `hoveredCurveId` (with guard flag check). `pushToView(view, nodeId)`: builds selection store `js.Array(…)` or empty array, calls `view.signal("hover_store", store).run()` (extracting `.value` at the Vega edge, with guard flag). | Compiles |
 | 4.2 | `state/ChartHoverBridgeSpec.scala` | Test guard flag logic: setting `externallySet` prevents echo. Clearing hover produces empty store. | Tests pass |
 | 4.3 | `views/LECChartView.scala` | After `vegaEmbed` resolves: call `ChartHoverBridge.attachToView(result.view)`. Subscribe to `hoveredCurveId` changes → call `ChartHoverBridge.pushToView(…)` for Laminar→Vega direction. In `finalize()`: remove signal listener. | Compiles |
-| 4.4 | `views/TreeDetailView.scala` | Add `onMouseEnter` on charted node rows → set `ChartHoverBridge.hoveredCurveId` to `Some(nodeId.value)`. Add `onMouseLeave` → set to `None`. Read `hoveredCurveId` signal: when matches this node's id, thicken border from 3px → 5px. | Compiles |
+| 4.4 | `views/TreeDetailView.scala` | Add `onMouseEnter` on charted node rows → set `ChartHoverBridge.hoveredCurveId` to `Some(nodeId)`. Add `onMouseLeave` → set to `None`. Read `hoveredCurveId` signal: when matches this node's id, thicken border from 3px → 5px. | Compiles |
 | 4.5 | `views/AnalyzeView.scala` | Wire `ChartHoverBridge` instance: pass to both `LECChartView` and `TreeDetailView`. | Compiles |
 | 4.6 | `styles/app.css` | Add `transition: border-width 80ms ease` to tree node line style for smooth thickening. | Smooth animation |
 | 4.7 | — | Manual test: hover chart curve → tree node border thickens. Hover tree node → chart curve stays opaque while others dim. Move away → all revert. | Visual + no console errors |
@@ -905,7 +926,7 @@ swatch picker. Final cleanup and full test pass.
 | 5.3 | `views/TreeDetailView.scala` | Add colour-swatch icon that appears on hover of a charted node row (per PD1 recommendation (b)). Click opens `ColorSwatchPicker`. | Compiles |
 | 5.4 | `state/LECChartState.scala` | Add `setColorOverride(nodeId, hex)` and `clearColorOverride(nodeId)` methods that update `colorOverrides` Var. | Compiles |
 | 5.5 | Wire picker → state | Picker `onSelect` → `setColorOverride`. Picker `onReset` → `clearColorOverride`. | Override reflected in chart + tree immediately |
-| 5.6 | Hover preview | On swatch hover (debounced 50ms, per PD2 (b)): temporarily apply colour to see preview. On mouse leave without click: revert. | Smooth preview |
+| 5.6 | Hover preview | On swatch hover (debounced 50ms, per PD2 (b)): temporarily apply colour to see preview via `previewOverride: Var[Option[(NodeId, HexColor)]]` composed into `nodeColorMap` via signal combination. On mouse leave without click: revert by clearing the preview Var. | Smooth preview |
 | 5.7 | — | Run `sbt test` (all modules). | All tests green |
 | 5.8 | — | Full manual testing matrix (§9.3). | All scenarios pass |
 | 5.9 | Cleanup | Remove dead imports. Update Scaladoc references to deleted types. Verify no `TODO` items left from this plan. | Clean |
@@ -945,7 +966,9 @@ passed.
 - **`ChartHoverBridgeSpec`**: guard flag prevents feedback loop
   (setting `externallySet` suppresses echo write), clearing hover
   produces empty selection store, `attachToView` registers signal
-  listener.
+  listener, `parseHoverSignal` returns `Some(nodeId)` for valid
+  selection / `None` for empty or malformed input,
+  `buildSelectionStore` round-trips through `parseHoverSignal`.
 
 ### 9.1.1 Equivalence Contract (archive → client)
 
@@ -977,7 +1000,7 @@ so reviewers can cross-reference.
 | M2 | Ctrl+click 3 nodes | 3 curves with distinct colours, each tree border matches |
 | M3 | Query matching 4 nodes | 4 green-shade curves auto-added, tree borders match |
 | M4 | Query + manual = overlap | Overlapping nodes get Purple shades |
-| M5 | Hover chart curve | Hovered curve stays opaque, others dim to 0.3. Corresponding tree node border thickens 3→5px. |
+| M5 | Hover chart curve | Hovered curve stays opaque, others dim to 0.2. Corresponding tree node border thickens 3→5px. |
 | M6 | Hover tree node | Chart: that node's curve stays opaque, others dim. Tree: border thickens. |
 | M7 | Move mouse away from both | All curves full opacity. All borders revert to 3px. |
 | M8 | Rapid hover between curves | No feedback loop, no console errors, smooth transitions |

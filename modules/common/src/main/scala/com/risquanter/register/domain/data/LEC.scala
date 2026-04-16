@@ -41,7 +41,7 @@ object LECPoint {
 // TODO-REMOVE: No real-world clients. All LEC rendering uses the lec-multi endpoint
 // (Map[NodeId, LECNodeCurve]). Remove along with getWorkspaceLECCurveEndpoint,
 // RiskTreeService.getLECCurve, and their tests.
-@deprecated("No real-world clients. Use lec-multi (LECNodeCurve) or lec-chart (Vega-Lite spec) instead.", since = "2026-04-14")
+@deprecated("No real-world clients. Use lec-multi (LECNodeCurve) instead.", since = "2026-04-14")
 final case class LECCurveResponse(
   id: String,
   name: String,

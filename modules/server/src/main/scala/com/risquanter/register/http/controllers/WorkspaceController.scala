@@ -162,7 +162,7 @@ class WorkspaceController private (
 
   // TODO-REMOVE: No real-world clients. Remove along with LECCurveResponse,
   // getWorkspaceLECCurveEndpoint, and RiskTreeService.getLECCurve.
-  @deprecated("No real-world clients. Use lec-multi or lec-chart instead.", since = "2026-04-14")
+  @deprecated("No real-world clients. Use lec-multi instead.", since = "2026-04-14")
   val getLECCurve: ServerEndpoint[Any, Task] = getWorkspaceLECCurveEndpoint.serverLogic {
     case (maybeUserId, key, treeId, nodeId, includeProvenance) =>
       (for

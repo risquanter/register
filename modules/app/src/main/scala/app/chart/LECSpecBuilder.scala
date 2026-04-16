@@ -145,11 +145,18 @@ object LECSpecBuilder:
         ),
         "color"   -> makeColorEncoding(),
         "opacity" -> js.Dynamic.literal(
-          "condition" -> js.Dynamic.literal(
-            "param" -> "hover",
-            "value" -> 1.0
+          "condition" -> js.Array(
+            js.Dynamic.literal("param" -> "hover", "empty" -> false, "value" -> 1.0),
+            js.Dynamic.literal("test" -> "length(data('hover_store')) == 0", "value" -> 1.0)
           ),
-          "value" -> 0.3
+          "value" -> 0.2
+        ),
+        "strokeWidth" -> js.Dynamic.literal(
+          "condition" -> js.Array(
+            js.Dynamic.literal("param" -> "hover", "empty" -> false, "value" -> 3.0),
+            js.Dynamic.literal("test" -> "length(data('hover_store')) == 0", "value" -> 1.5)
+          ),
+          "value" -> 1.5
         )
       )
     )
@@ -160,7 +167,7 @@ object LECSpecBuilder:
       "mark" -> js.Dynamic.literal(
         "type"    -> "point",
         "opacity" -> 0,
-        "tooltip" -> true
+        "tooltip" -> false
       ),
       "encoding" -> js.Dynamic.literal(
         "x" -> js.Dynamic.literal(
@@ -179,6 +186,7 @@ object LECSpecBuilder:
           "select" -> js.Dynamic.literal(
             "type"    -> "point",
             "on"      -> "pointerover",
+            "clear"   -> "pointerout",
             "nearest" -> true,
             "fields"  -> js.Array("curveId")
           )

@@ -137,7 +137,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
   // TODO-REMOVE: No real-world clients. All LEC rendering uses lec-multi
   // (Map[NodeId, LECNodeCurve]). Remove along with LECCurveResponse,
   // RiskTreeService.getLECCurve, WorkspaceController.getLECCurve, and their tests.
-  @deprecated("No real-world clients. Use lec-multi or lec-chart instead.", since = "2026-04-14")
+  @deprecated("No real-world clients. Use lec-multi instead.", since = "2026-04-14")
   val getWorkspaceLECCurveEndpoint =
     authedBaseEndpoint
       .tag("workspaces")
