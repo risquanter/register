@@ -134,8 +134,8 @@ trait WorkspaceEndpoints extends BaseEndpoint:
 
   // ── Workspace-scoped LEC queries ──────────────────────────────────
 
-  // TODO-REMOVE: No real-world clients. All LEC rendering uses lec-chart (Vega-Lite spec)
-  // or lec-multi (Map[String, LECNodeCurve]). Remove along with LECCurveResponse,
+  // TODO-REMOVE: No real-world clients. All LEC rendering uses lec-multi
+  // (Map[NodeId, LECNodeCurve]). Remove along with LECCurveResponse,
   // RiskTreeService.getLECCurve, WorkspaceController.getLECCurve, and their tests.
   @deprecated("No real-world clients. Use lec-multi or lec-chart instead.", since = "2026-04-14")
   val getWorkspaceLECCurveEndpoint =
@@ -168,7 +168,7 @@ trait WorkspaceEndpoints extends BaseEndpoint:
       .post
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[List[NodeId]].description("Array of node IDs"))
-      .out(jsonBody[Map[String, LECNodeCurve]])
+      .out(jsonBody[Map[NodeId, LECNodeCurve]])
 
   // ── Workspace-scoped vague quantifier query (ADR-028) ─────────────
 

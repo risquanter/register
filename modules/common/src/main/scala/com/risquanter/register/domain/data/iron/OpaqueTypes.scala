@@ -6,7 +6,7 @@ import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.Match
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.{UIO, ZIO}
-import zio.json.{JsonEncoder, JsonDecoder}
+import zio.json.{JsonEncoder, JsonDecoder, JsonFieldEncoder, JsonFieldDecoder}
 
 // Base refined type alias used for most short strings:
 type SafeShortStr = String :| (Not[Blank] & MaxLength[50])
@@ -210,6 +210,11 @@ object NodeId:
   given JsonDecoder[NodeId] = JsonDecoder[String].mapOrFail(s =>
     NodeId.fromString(s).left.map(_.mkString(", ")))
 
+  // JSON map-key codecs — required for Map[NodeId, V] serialization (ADR-001 §4)
+  given JsonFieldEncoder[NodeId] = JsonFieldEncoder.string.contramap(_.value)
+  given JsonFieldDecoder[NodeId] = JsonFieldDecoder.string.mapOrFail(s =>
+    NodeId.fromString(s).left.map(_.mkString(", ")))
+
 // WorkspaceKeySecret: 128-bit SecureRandom credential, base64url encoded (22 chars, no padding).
 // Used as capability URL token for workspace access. Standalone type — NOT a ULID wrapper.
 // Different charset (base64url vs Crockford base32) and length (22 vs 26) from SafeId.
@@ -317,9 +322,9 @@ object WorkspaceId:
   given JsonDecoder[WorkspaceId] = JsonDecoder[String].mapOrFail(s =>
     WorkspaceId.fromString(s).left.map(_.mkString(", ")))
 
-// CSS hex colour (#RRGGBB). Used by CurvePaletteRegistry and ColouredCurve
-// for Vega-Lite chart spec colour assignment. Never serialized to the wire —
-// .value extraction happens only at the Vega-Lite JSON edge.
+// CSS hex colour (#RRGGBB). Used by PaletteData and ColorAssigner in the app
+// module for Vega-Lite chart curve colour assignment. Never serialized to the
+// wire — .value extraction happens only at the Vega-Lite JSON edge.
 // Single concept, no second hex-colour kind to distinguish → bare opaque per ADR-018.
 type HexColorStr = String :| Match["^#[0-9a-fA-F]{6}$"]
 

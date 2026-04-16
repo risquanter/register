@@ -7,6 +7,7 @@ import scala.scalajs.js
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 import com.risquanter.register.http.responses.SimulationResponse
 
@@ -54,9 +55,9 @@ final class TreeViewState(
   /** Node IDs manually Ctrl+clicked for LEC chart overlay (read-only). */
   def userSelectedNodeIds: StrictSignal[Set[NodeId]] = chartState.userSelectedNodeIds.signal
   /** Structured curve data (read-only). Vega-Lite spec built client-side. */
-  def curveCache: Signal[LoadState[Map[String, LECNodeCurve]]] = chartState.curveCache.signal
+  def curveCache: Signal[LoadState[Map[NodeId, LECNodeCurve]]] = chartState.curveCache.signal
   /** Node → hex colour map for chart curves and tree highlights (read-only). */
-  def nodeColorMap: Signal[Map[NodeId, String]] = chartState.nodeColorMap
+  def nodeColorMap: Signal[Map[NodeId, HexColor]] = chartState.nodeColorMap
   /** Vega-Lite spec lifecycle for the LEC chart (read-only). */
   def specSignal: Signal[LoadState[js.Dynamic]] = chartState.specSignal
   /** WriteBus for Ctrl+click toggle events (delegates to LECChartState). */

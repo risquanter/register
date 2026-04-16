@@ -18,7 +18,7 @@ colour customisation impossible without a round-trip.**
 
 Investigation revealed:
 1. The `lec-multi` endpoint already returns structured curve data
-   (`Map[String, LECNodeCurve]`) with full x/y points + quantiles.
+   (`Map[NodeId, LECNodeCurve]`) with full x/y points + quantiles.
 2. The spec builder is ~130 lines of JSON assembly with no server-
    exclusive dependencies.
 3. `EmbedResult.view` (Vega View API) is already exposed as
@@ -103,7 +103,7 @@ Per WORKING-INSTRUCTIONS.md:
 - **#1 (API changes):** `lec-chart` endpoint removed; client switches
   to `lec-multi`.
 - **#4 (Type changes):** `LECChartState` API changes (accepts
-  `List[NodeId]`, returns `Map[String, LECNodeCurve]` not spec string).
+  `List[NodeId]`, returns `Map[NodeId, LECNodeCurve]` not spec string).
 - **#5 (Behavioural changes):** Colour assignment moves client-side.
   Spec builder moves client-side.
 - **Critical Stop Points:**
@@ -142,15 +142,17 @@ Client                             Server
 List[NodeId]  ─────────POST──▶ getLECCurvesMulti
                                ├ simulate (or cache hit)
                                └ LECNodeCurve per node
-Map[String, LECNodeCurve] ◀──── structured curve data
+Map[NodeId, LECNodeCurve] ◀──── structured curve data
   │
   ▼ (cached in LECChartState)
   │
-  ├─▶ colorAssigner(nodeIds, overrides) → Map[NodeId, HexColor]
-  │     ├── automatic: NodeId sort → shade index
-  │     └── manual overrides: Map[NodeId, HexColor] applied on top
+  ├─▶ ColorAssigner.assign(queryNodes, userNodes, overrides) → Map[NodeId, HexColor]
+  │     ├── three palettes: green (query-only), aqua (user-only), purple (overlap)
+  │     ├── automatic: hashCode-based shade index per palette
+  │     └── manual overrides applied on top
   │
-  ├─▶ LECSpecBuilder.build(curves, colorMap)  → Vega-Lite JSON (js.Dynamic)
+  ├─▶ LECSpecBuilder.build(curves: Vector[(LECNodeCurve, HexColor)]) → js.Dynamic
+  │     (paired via ColorAssigner.colorFor curried bridge)
   │
   ├─▶ vegaEmbed(spec) → chart rendered
   │
@@ -761,7 +763,7 @@ jank.
 | A2 | `chart/ColorAssigner.scala` | **NEW.** `assign(queryNodes, userNodes, overrides, palettes)` → `Map[NodeId, HexColor]` (~40 LOC). Multi-palette (Green/Aqua/Purple) with hash-based shade index. |
 | A3 | `chart/PaletteData.scala` | **NEW.** 3 palette families (Green, Aqua, Purple) × 8 trimmed shades as `Vector[Vector[HexColor]]` (~50 LOC). |
 | A4 | `components/ColorSwatchPicker.scala` | **NEW.** Swatch grid popover component (~80 LOC Scala + ~25 LOC CSS). 8 palettes × 8 shades + "↺ Auto" reset. |
-| A5 | `state/ChartHoverBridge.scala` | **NEW.** Bidirectional hover bridge (~60 LOC). Shared `hoveredCurveId: Var[Option[String]]`. Methods: `attachToView(view: js.Dynamic)` (installs `addSignalListener("hover", …)`), `pushToView(view: js.Dynamic, nodeId: Option[String])` (calls `view.signal("hover_store", …).run()`). Contains guard flag to prevent feedback loops. |
+| A5 | `state/ChartHoverBridge.scala` | **NEW.** Bidirectional hover bridge (~60 LOC). Shared `hoveredCurveId: Var[Option[NodeId]]`. Methods: `attachToView(view: js.Dynamic)` (installs `addSignalListener("hover", …)`). Callback reads `hover_store` selection, extracts `curveId`, parses to `NodeId`, writes to `hoveredCurveId` (with guard flag check). `pushToView(view: js.Dynamic, nodeId: Option[NodeId])` (calls `view.signal("hover_store", …).run()`, extracting `.value` at the Vega edge). Contains guard flag to prevent feedback loops. |
 
 ### 7.4 App Module — Modified Files
 
@@ -840,7 +842,7 @@ invisible point layer.
 | 2.1 | `chart/PaletteData.scala` | Create. Define 3 palette families: `Green`, `Aqua`, `Purple`. Each is `Vector[HexColor]` with 8 trimmed shades (drop 25/50/100/950/975). | Compiles |
 | 2.2 | `chart/ColorAssigner.scala` | Create. `assign(queryNodes, userNodes, overrides, palettes) → Map[NodeId, HexColor]`. Logic: classify → overlap=Purple, query-only=Green, user-only=Aqua. Hash-based shade: `id.value.hashCode.abs % 8`. Overrides win. | Compiles |
 | 2.3 | `chart/ColorAssignerSpec.scala` | Create tests: determinism (same input → same output), override wins, mod-8 wrap (9+ nodes), empty set, overlap detection, single-node. | Tests pass |
-| 2.4 | `chart/LECSpecBuilder.scala` | Create. `build(curves: Map[NodeId, LECNodeCurve], colorMap: Map[NodeId, HexColor], interpolation: String): js.Dynamic`. Build layered spec: base line layer with `curveId` field + `scale: {domain, range}` colour encoding, hover selection param `{name: "hover", select: {type: "point", on: "pointerover", nearest: true, fields: ["curveId"]}}`, invisible point layer for voronoi detection, opacity condition (`hover.curveId ? 1.0 : 0.3`), quantile rule annotations. | Compiles |
+| 2.4 | `chart/LECSpecBuilder.scala` | Create. `build(curves: Vector[(LECNodeCurve, HexColor)], interpolation: String): js.Dynamic`. Build layered spec: base line layer with `curveId` field + `scale: {domain, range}` colour encoding, hover selection param `{name: "hover", select: {type: "point", on: "pointerover", nearest: true, fields: ["curveId"]}}`, invisible point layer for voronoi detection, opacity condition (`hover.curveId ? 1.0 : 0.3`), quantile rule annotations. | Compiles |
 | 2.5 | `chart/LECSpecBuilderSpec.scala` | Create tests. **Port assertions from archived `LECChartSpecBuilderSpec`** (D4) to verify structural equivalence: data values shape, colour domain/range, quantile annotations, axes formatting, dark theme config, legend `labelExpr`. Add new assertions for v4 additions: `layer` array, hover param present, point layer `opacity: 0`. Document each ported assertion with `// Ported from LECChartSpecBuilderSpec line N` comment. | Tests pass |
 | 2.6 | `state/LECChartState.scala` | Wire real `ColorAssigner.assign` into `nodeColorMap` signal. Add `specSignal: Signal[LoadState[js.Dynamic]]` derived from `curveCache + visibleCurves + nodeColorMap + interpolation`. | Compiles |
 | 2.7 | `views/LECChartView.scala` | Change to accept `Signal[LoadState[js.Dynamic]]`. In `vegaEmbed` call: pass `spec` as `js.Dynamic` instead of JSON string. Remove JSON parse. | Compiles |
@@ -878,7 +880,7 @@ dimming). Feedback-loop-safe.
 
 | Step | File(s) | Action | Verify |
 |------|---------|--------|--------|
-| 4.1 | `state/ChartHoverBridge.scala` | Create. Shared `hoveredCurveId: Var[Option[String]]`. `attachToView(view)`: calls `view.addSignalListener("hover", callback)`. Callback reads `hover_store` selection, extracts `curveId`, writes to `hoveredCurveId` (with guard flag check). `pushToView(view, nodeId)`: builds selection store `js.Array(…)` or empty array, calls `view.signal("hover_store", store).run()` (with guard flag). | Compiles |
+| 4.1 | `state/ChartHoverBridge.scala` | Create. Shared `hoveredCurveId: Var[Option[NodeId]]`. `attachToView(view)`: calls `view.addSignalListener("hover", callback)`. Callback reads `hover_store` selection, extracts `curveId`, parses to `NodeId`, writes to `hoveredCurveId` (with guard flag check). `pushToView(view, nodeId)`: builds selection store `js.Array(…)` or empty array, calls `view.signal("hover_store", store).run()` (extracting `.value` at the Vega edge, with guard flag). | Compiles |
 | 4.2 | `state/ChartHoverBridgeSpec.scala` | Test guard flag logic: setting `externallySet` prevents echo. Clearing hover produces empty store. | Tests pass |
 | 4.3 | `views/LECChartView.scala` | After `vegaEmbed` resolves: call `ChartHoverBridge.attachToView(result.view)`. Subscribe to `hoveredCurveId` changes → call `ChartHoverBridge.pushToView(…)` for Laminar→Vega direction. In `finalize()`: remove signal listener. | Compiles |
 | 4.4 | `views/TreeDetailView.scala` | Add `onMouseEnter` on charted node rows → set `ChartHoverBridge.hoveredCurveId` to `Some(nodeId.value)`. Add `onMouseLeave` → set to `None`. Read `hoveredCurveId` signal: when matches this node's id, thicken border from 3px → 5px. | Compiles |

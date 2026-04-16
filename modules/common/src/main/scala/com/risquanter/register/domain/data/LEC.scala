@@ -2,6 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec}
 import sttp.tapir.Schema
+import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.http.codecs.IronTapirCodecs.given_Schema_NodeId
 
 /** Single point on a Loss Exceedance Curve
   * 
@@ -36,9 +38,9 @@ object LECPoint {
   * @param quantiles Key percentiles (p50, p90, p95, p99) for quick reference
   * @param provenances Opt-in provenance metadata for reproducibility (via ?includeProvenance=true)
   */
-// TODO-REMOVE: No real-world clients. All LEC rendering uses the lec-chart endpoint
-// (Vega-Lite spec) or lec-multi endpoint (Map[String, LECNodeCurve]). Remove along
-// with getWorkspaceLECCurveEndpoint, RiskTreeService.getLECCurve, and their tests.
+// TODO-REMOVE: No real-world clients. All LEC rendering uses the lec-multi endpoint
+// (Map[NodeId, LECNodeCurve]). Remove along with getWorkspaceLECCurveEndpoint,
+// RiskTreeService.getLECCurve, and their tests.
 @deprecated("No real-world clients. Use lec-multi (LECNodeCurve) or lec-chart (Vega-Lite spec) instead.", since = "2026-04-14")
 final case class LECCurveResponse(
   id: String,
@@ -56,9 +58,9 @@ object LECCurveResponse {
 /** Core LEC curve data — identity + drawing data for a single node.
   *
   * This is the universal curve type used for:
-  *   - Multi-curve overlay (lec-multi endpoint: `Map[String, LECNodeCurve]`)
-  *   - Chart spec generation (`LECChartSpecBuilder.generateMultiCurveSpec`)
-  *   - Frontend chart cache (`LECState`)
+  *   - Multi-curve overlay (lec-multi endpoint: `Map[NodeId, LECNodeCurve]`)
+  *   - Client-side chart spec generation (`LECSpecBuilder.build`)
+  *   - Frontend chart cache (`LECChartState.curveCache`)
   *
   * Carries exactly what's needed to draw and identify a curve: id, name,
   * curve points, and quantiles. Tracing metadata (provenances) lives on
@@ -74,7 +76,7 @@ object LECCurveResponse {
   * @param quantiles Key percentiles (p50, p90, p95, p99) as loss values
   */
 final case class LECNodeCurve(
-  id: String,
+  id: NodeId,
   name: String,
   curve: Vector[LECPoint],
   quantiles: Map[String, Double]

@@ -8,6 +8,7 @@ import app.chart.{ColorAssigner, LECSpecBuilder}
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.endpoints.WorkspaceEndpoints
 
@@ -16,7 +17,7 @@ import com.risquanter.register.http.endpoints.WorkspaceEndpoints
   * Owns the user's manual node selection for charting (Ctrl+click picks),
   * the fetched curve data cache, and the bus-based toggle with a 13-cap guard.
   *
-  * Fetches structured `Map[String, LECNodeCurve]` via `lec-multi`.
+  * Fetches structured `Map[NodeId, LECNodeCurve]` via `lec-multi`.
   * The Vega-Lite spec is built client-side from this data.
   *
   * The reactive `loadCurves` call that merges query-matched nodes with
@@ -49,12 +50,12 @@ final class LECChartState(
   val satisfyingNodeIds: Var[Set[NodeId]] = Var(Set.empty)
 
   /** Structured curve data fetched via `lec-multi` endpoint.
-    * Keyed by `nodeId.value` (String), matching the endpoint response shape.
+    * Keyed by `NodeId`, matching the domain type end-to-end (ADR-001 §4).
     */
-  val curveCache: Var[LoadState[Map[String, LECNodeCurve]]] = Var(LoadState.Idle)
+  val curveCache: Var[LoadState[Map[NodeId, LECNodeCurve]]] = Var(LoadState.Idle)
 
-  /** Manual colour overrides per node (hex strings, e.g. "#4ade80"). */
-  val colorOverrides: Var[Map[NodeId, String]] = Var(Map.empty)
+  /** Manual colour overrides per node. */
+  val colorOverrides: Var[Map[NodeId, HexColor]] = Var(Map.empty)
 
   // ── Derived signals ───────────────────────────────────────────
 
@@ -70,7 +71,7 @@ final class LECChartState(
     * Derived from current visible nodes classified into query/user/overlap
     * groups, each assigned a palette shade via `ColorAssigner`.
     */
-  val nodeColorMap: Signal[Map[NodeId, String]] =
+  val nodeColorMap: Signal[Map[NodeId, HexColor]] =
     satisfyingNodeIds.signal
       .combineWith(userSelectedNodeIds.signal, colorOverrides.signal)
       .map { (query, user, overrides) =>
@@ -79,22 +80,19 @@ final class LECChartState(
 
   /** Complete Vega-Lite spec ready for `vegaEmbed`, derived reactively from
     * the curve cache, visible node set, and colour assignments.
+    *
+    * Composes `ColorAssigner.pairWithColors` → `LECSpecBuilder.build`
+    * inside `LoadState.map`, eliminating manual Idle/Loading/Failed threading.
     */
   val specSignal: Signal[LoadState[js.Dynamic]] =
     curveCache.signal
       .combineWith(visibleCurves, nodeColorMap)
       .map { (cacheState, visible, colorMap) =>
-        cacheState match
-          case LoadState.Idle       => LoadState.Idle
-          case LoadState.Loading    => LoadState.Loading
-          case LoadState.Failed(m)  => LoadState.Failed(m)
-          case LoadState.Loaded(allCurves) =>
-            // Build a NodeId-keyed map from the visible nodes that have curve data.
-            val filteredByNodeId: Map[NodeId, LECNodeCurve] = visible.flatMap { nid =>
-              allCurves.get(nid.value).map(nid -> _)
-            }.toMap
-            val relevantColors = colorMap.view.filterKeys(filteredByNodeId.contains).toMap
-            LoadState.Loaded(LECSpecBuilder.build(filteredByNodeId, relevantColors))
+        cacheState.map { allCurves =>
+          LECSpecBuilder.build(
+            ColorAssigner.pairWithColors(allCurves, visible, colorMap)
+          )
+        }
       }
 
   // ── Bus-based toggle (ADR-019 P2: events up) ─────────────────
@@ -135,7 +133,7 @@ final class LECChartState(
   /** Fetch LEC curves from the backend for the given node IDs.
     *
     * Calls the `lec-multi` endpoint, which returns structured
-    * `Map[String, LECNodeCurve]` data. The Vega-Lite spec is built
+    * `Map[NodeId, LECNodeCurve]` data. The Vega-Lite spec is built
     * client-side from this cache (not here).
     *
     * @param nodeIds List of node IDs to fetch curves for

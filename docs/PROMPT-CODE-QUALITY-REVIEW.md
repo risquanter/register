@@ -32,6 +32,9 @@ Apply these throughout the review.  Any violation of a general principle is a va
 - Push side effects to the edges; keep the core pure.
 - Use **higher-order functions, combinators, and type classes** to reduce boilerplate and increase composability.
 - Avoid premature abstraction — but recognise when duplication signals a missing abstraction.
+- **ADTs that carry data must be functors.** Any `enum`/`sealed trait` with a data-carrying success variant (e.g. `Loaded(data)`, `Ok(value)`) should provide `map` and `flatMap`. Manual pattern-matching that threads non-success variants unchanged (`Idle → Idle`, `Loading → Loading`) is boilerplate that a functor eliminates.
+- **Name domain operations.** Multi-line lambdas inside `.map`, `.combineWith`, or signal combinators that perform domain logic (filtering, pairing, projecting) must be extracted as named pure functions on the relevant companion object. Anonymous inline logic cannot be tested or composed.
+- **Compose, do not orchestrate.** Prefer `a.map(f)` over `a match { case Success(x) => Success(f(x)); case other => other }`. If the code manually unwraps, transforms, and re-wraps, it is missing a `map` or `flatMap`.
 
 ### Clean Code Practices
 
@@ -82,10 +85,14 @@ Apply these throughout the review.  Any violation of a general principle is a va
 - Is pattern matching exhaustive?  Are `MatchError` risks eliminated?
 - Does composition (`andThen`, `flatMap`, monoid `combine`) behave as callers expect — especially identity and associativity?
 - Are new abstractions justified by two or more concrete use sites, or are they speculative?
+- **Functor smell:** Is there any manual case-match on an ADT where non-success variants are threaded unchanged (e.g. `case Idle => Idle; case Loading => Loading; case Failed(m) => Failed(m)`)? This signals a missing `map`/`flatMap` on the ADT. **SHOULD-FIX.**
+- **Inline logic smell:** Are there lambdas > 3 lines inside `.map`, `.combineWith`, `.flatMap`, or reactive signal combinators? These should be extracted as named pure functions on the relevant companion or utility object. **SHOULD-FIX.**
+- **Orchestration smell:** Does code manually unwrap a wrapper, transform the inner value, and re-wrap it? This is `map` written longhand. **SHOULD-FIX.**
 
 ### 4. API Surface & Design Integrity
 
 - Are any **new public types, methods, or extension methods** introduced that are not required by the task?  Unused API surface is a liability.
+- **Dead method check:** Does every new public method have at least one call site in the current codebase? A public method with zero callers is dead code regardless of how useful it might be in the future. **MUST-FIX.**
 - Are any **existing public APIs removed or signature-changed** without corresponding migration of all call sites?
 - Do default parameter values remain unchanged unless the task explicitly requires it?
 - Does backward compatibility hold for external consumers (library users, downstream modules)?

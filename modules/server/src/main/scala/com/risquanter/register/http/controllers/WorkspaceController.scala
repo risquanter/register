@@ -190,7 +190,6 @@ class WorkspaceController private (
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         result <- workspaceStore.resolveTree(key, treeId) *>
                     riskTreeService.getLECCurvesMulti(treeId, nodeIds.toSet, includeProvenance)
-                      .map(_.map { case (nodeId, nodeCurve) => (nodeId.value, nodeCurve) })
       yield result).either
   }
 

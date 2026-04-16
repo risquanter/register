@@ -13,3 +13,17 @@ enum LoadState[+A]:
   case Loading
   case Loaded(data: A)
   case Failed(message: String)
+
+  /** Transform the loaded value, preserving Idle/Loading/Failed as-is. */
+  def map[B](f: A => B): LoadState[B] = this match
+    case Loaded(a)  => Loaded(f(a))
+    case Idle       => Idle
+    case Loading    => Loading
+    case Failed(m)  => Failed(m)
+
+  /** Chain a dependent load operation on the loaded value. */
+  def flatMap[B](f: A => LoadState[B]): LoadState[B] = this match
+    case Loaded(a)  => f(a)
+    case Idle       => Idle
+    case Loading    => Loading
+    case Failed(m)  => Failed(m)

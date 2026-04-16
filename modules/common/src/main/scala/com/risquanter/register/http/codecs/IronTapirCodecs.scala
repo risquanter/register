@@ -113,6 +113,8 @@ object IronTapirCodecs {
 
   given Schema[NodeId] = Schema.string
 
+  given [V: Schema]: Schema[Map[NodeId, V]] = Schema.schemaForMap[NodeId, V](_.value)
+
   /** Codec for WorkspaceKeySecret (base64url, 22 chars).
     * Used as path segment for workspace-scoped capability URLs.
     * Standalone validation — not a ULID wrapper.

@@ -33,6 +33,49 @@ This document defines the working protocol for implementing the ADR proposals.
 - Prefer `for` comprehensions for ZIO effect composition
 - Use Iron refined types for domain validation (per ADR-001)
 
+### Functional Composition
+
+These are not suggestions — they are mandatory design constraints.
+
+1. **ADTs that wrap values must be functors.** Any `enum` or `sealed trait` with a
+   single "success" variant carrying data (e.g. `LoadState.Loaded`, `Result.Ok`)
+   must define `map` and `flatMap`. Manual pattern-matching that threads
+   non-success cases unchanged (`Idle → Idle`, `Loading → Loading`,
+   `Failed → Failed`) is a code smell — use the functor.
+
+2. **Name domain operations; do not inline them.** If a lambda inside `.map`,
+   `.combineWith`, or similar is more than a single field access or trivial
+   transform, extract it as a named pure function on the relevant companion
+   object. Named functions are testable, composable, and readable. Anonymous
+   multi-line lambdas are none of those.
+
+3. **No speculative abstractions.** Every public method must have at least one
+   call site at the time it is written. Curried wrappers, convenience overloads,
+   and "bridge" methods that are not called are dead code. If a future step will
+   need it, add it in that future step.
+
+4. **Compose, do not orchestrate.** Prefer `a.map(f)` / `a andThen b` over
+   procedural sequences that manually unwrap, transform, and re-wrap. If you
+   find yourself writing `case Loaded(x) => Loaded(transform(x))`, you are
+   missing a `map`.
+
+### Signature Echo Protocol
+
+Before writing or modifying any function, type, or file, agent must execute these steps **visibly in the conversation**:
+
+0. **Call-site check.** Before writing any new public method, state the exact
+   call site(s) where it will be invoked. If no call site exists yet, the method
+   must not be written. "It might be useful later" is not a call site.
+1. **Echo.** Quote the plan passage that specifies the signature, types, or structure. Verbatim. If no plan passage exists, state that explicitly and ask before proceeding.
+2. **Type audit.** List every domain wrapper (opaque, refined, newtype) referenced in that passage. For each, confirm it exists in the target module's dependency graph and state the import path.
+3. **Signature first.** Write the exact function signature matching the plan. No implementation body yet.
+4. **Deviation = stop.** If the signature about to be written differs from the plan in any way — parameter order, type (`String` vs `HexColor`), shape (`Map` vs `Vector`), currying — agent must:
+   - State the deviation explicitly
+   - State why
+   - **Stop and ask before writing any implementation code**
+
+No silent deviations. No rationalising in review. The deviation declaration is the gate. Skipping it is a reviewable violation of these working instructions.
+
 ### Comment Style
 
 - **Comments must describe the current state** — never reference migration history, plan phases, timelines, or future work (e.g. "after v4 migration", "in P2", "will be implemented in P3", "moved from server-side")
@@ -103,6 +146,13 @@ After implementing changes, agent must:
    **Decision required:** How should we resolve this?
    ```
 5. **Wait for user decision** before marking phase complete
+6. **Functional composition review.** After implementation, check:
+   - [ ] No ADT with a data-carrying success variant lacks `map`/`flatMap`
+   - [ ] No public method without at least one call site
+   - [ ] No inline lambda > 3 lines that could be a named pure function
+   - [ ] No manual case-match that duplicates what `map`/`flatMap` would do
+   - [ ] All cross-cutting transforms (pairing, filtering, projection) live as
+         named functions on domain companions, not buried in state/view wiring
 
 ### Validation Requirements
 

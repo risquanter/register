@@ -463,7 +463,7 @@ class RiskTreeServiceLive private (
           val name = nodesMap.get(nodeId).map(_.name).getOrElse(nodeId.value)
           val curvePoints = points.map { case (loss, prob) => LECPoint(loss, prob) }
           val quantiles = results.get(nodeId).map(LECGenerator.calculateQuantiles).getOrElse(Map.empty)
-          nodeId -> LECNodeCurve(nodeId.value, name, curvePoints, quantiles)
+          nodeId -> LECNodeCurve(nodeId, name, curvePoints, quantiles)
         }
         
         _ <- tracing.setAttribute("curves_generated", enriched.size.toLong)

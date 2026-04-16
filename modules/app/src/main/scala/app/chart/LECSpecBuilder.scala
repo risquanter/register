@@ -2,18 +2,17 @@ package app.chart
 
 import scala.scalajs.js
 
-import com.risquanter.register.domain.data.{LECNodeCurve, LECPoint}
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.LECNodeCurve
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** Client-side Vega-Lite v6 specification builder for LEC curves.
   *
-  * Produces a `js.Dynamic` spec ready for `vegaEmbed`. Structure mirrors
-  * the archived server-side `LECChartSpecBuilder` with these additions:
+  * Produces a `js.Dynamic` spec ready for `vegaEmbed`.
+  *
+  * Spec features:
   *   - Hover selection param (`"hover"`) for pointer-based curve highlight
   *   - Invisible point layer for voronoi-based nearest-point detection
   *   - Opacity condition: hovered curve = 1.0, others = 0.3
-  *
-  * Shared structural elements (preserved from archived builder):
   *   - Data values shape: `{curveId, risk, loss, exceedance}`
   *   - Colour encoding: `scale.domain` (curveIds) + `scale.range` (hex colours)
   *   - Quantile annotations: dashed vertical rules + labels for P50/P95
@@ -25,77 +24,53 @@ import com.risquanter.register.domain.data.iron.NodeId
   */
 object LECSpecBuilder:
 
-  /** Build a Vega-Lite spec from structured curve data and a colour map.
+  /** Build a Vega-Lite spec from paired curve data and colours.
     *
-    * @param curves       Map of nodeId → LECNodeCurve (from `lec-multi` endpoint)
-    * @param colorMap     Map of nodeId → hex colour string (from ColorAssigner)
-    * @param interpolation Initial interpolation mode (default: "monotone")
-    * @param width        Chart width in pixels
-    * @param height       Chart height in pixels
+    * @param curves        Ordered pairs of (curve data, assigned colour)
+    * @param interpolation Initial interpolation mode
+    * @param width         Chart width in pixels
+    * @param height        Chart height in pixels
     * @return Vega-Lite spec as `js.Dynamic`, ready for `vegaEmbed`
     */
   def build(
-    curves: Map[NodeId, LECNodeCurve],
-    colorMap: Map[NodeId, String],
+    curves: Vector[(LECNodeCurve, HexColor)],
     interpolation: String = "monotone",
     width: Int = 950,
     height: Int = 400
   ): js.Dynamic =
-    val allPoints = curves.values.flatMap(_.curve)
+    val allPoints = curves.flatMap(_._1.curve)
     if curves.isEmpty || allPoints.isEmpty then emptySpec(width, height)
-    else buildSpec(curves, colorMap, interpolation, width, height)
+    else buildSpec(curves, interpolation, width, height)
 
   // ── Private builders ──────────────────────────────────────────
 
   private def buildSpec(
-    curves: Map[NodeId, LECNodeCurve],
-    colorMap: Map[NodeId, String],
+    curves: Vector[(LECNodeCurve, HexColor)],
     interpolation: String,
     width: Int,
     height: Int
   ): js.Dynamic =
     // Stable ordering: sort by curveId for deterministic domain/range
-    val ordered = curves.toVector.sortBy(_._2.id)
+    val ordered = curves.sortBy(_._1.id.value)
 
-    val allPoints = ordered.flatMap(_._2.curve)
+    val allPoints = ordered.flatMap(_._1.curve)
     val minLoss = allPoints.map(_.loss).min.toDouble
 
     // Y-axis adaptive ceiling (capped at 1.0)
     val yBuffer = 1.1
     val yCeiling = math.min(
       1.0,
-      ordered.flatMap(_._2.curve.headOption).map(_.exceedanceProbability).max * yBuffer
+      ordered.flatMap(_._1.curve.headOption).map(_.exceedanceProbability).max * yBuffer
     )
 
-    // Data values
-    val dataValues = js.Array[js.Any]()
-    ordered.foreach { case (_, nc) =>
-      nc.curve.foreach { pt =>
-        dataValues.push(js.Dynamic.literal(
-          "curveId"    -> nc.id,
-          "risk"       -> nc.name,
-          "loss"       -> pt.loss.toDouble,
-          "exceedance" -> pt.exceedanceProbability
-        ))
-      }
-    }
-
-    // Colour domain/range
-    val colorDomain = js.Array[js.Any]()
-    val colorRange = js.Array[js.Any]()
-    ordered.foreach { case (nid, nc) =>
-      colorDomain.push(nc.id)
-      colorRange.push(colorMap.getOrElse(nid, "#888888"))
-    }
-
-    // Legend labelExpr: map curveId → display name
-    val labelParts = ordered.map { case (_, nc) =>
-      s"datum.value == '${nc.id}' ? '${nc.name.replace("'", "\\'")}'"
+    // Legend labelExpr: map curveId → display name (immutable String, safe to share)
+    val labelParts = ordered.map { case (nc, _) =>
+      s"datum.value == '${nc.id.value}' ? '${nc.name.replace("'", "\\'")}'"
     }
     val legendLabelExpr = (labelParts :+ "datum.value").mkString(" : ")
 
     // Quantile annotations (from first curve)
-    val rootCurve = ordered.head._2
+    val rootCurve = ordered.head._1
     val quantileLayers = js.Array[js.Any]()
     List("p50" -> "P50", "p95" -> "P95").foreach { case (key, label) =>
       rootCurve.quantiles.get(key).foreach { value =>
@@ -103,23 +78,45 @@ object LECSpecBuilder:
       }
     }
 
-    // Colour encoding (shared between line and point layers)
-    val colorEncoding = js.Dynamic.literal(
-      "field" -> "curveId",
-      "type"  -> "nominal",
-      "title" -> "Risk modelled",
-      "scale" -> js.Dynamic.literal(
-        "domain" -> colorDomain,
-        "range"  -> colorRange
-      ),
-      "legend" -> js.Dynamic.literal(
-        "labelExpr" -> legendLabelExpr
+    // Fresh data values array — called per layer to avoid shared mutable state (F2)
+    def makeDataValues(): js.Array[js.Any] =
+      val arr = js.Array[js.Any]()
+      ordered.foreach { case (nc, _) =>
+        nc.curve.foreach { pt =>
+          arr.push(js.Dynamic.literal(
+            "curveId"    -> nc.id.value,
+            "risk"       -> nc.name,
+            "loss"       -> pt.loss.toDouble,
+            "exceedance" -> pt.exceedanceProbability
+          ))
+        }
+      }
+      arr
+
+    // Fresh colour encoding — called per layer to avoid shared mutable state (F2)
+    def makeColorEncoding(): js.Dynamic =
+      val domain = js.Array[js.Any]()
+      val range = js.Array[js.Any]()
+      ordered.foreach { case (nc, hexColor) =>
+        domain.push(nc.id.value)
+        range.push(hexColor.value: String) // .value at the Vega edge
+      }
+      js.Dynamic.literal(
+        "field" -> "curveId",
+        "type"  -> "nominal",
+        "title" -> "Risk modelled",
+        "scale" -> js.Dynamic.literal(
+          "domain" -> domain,
+          "range"  -> range
+        ),
+        "legend" -> js.Dynamic.literal(
+          "labelExpr" -> legendLabelExpr
+        )
       )
-    )
 
     // Main line layer with opacity condition for hover
     val lineLayer = js.Dynamic.literal(
-      "data" -> js.Dynamic.literal("values" -> dataValues),
+      "data" -> js.Dynamic.literal("values" -> makeDataValues()),
       "mark" -> js.Dynamic.literal(
         "type"        -> "line",
         "interpolate" -> js.Dynamic.literal("expr" -> "interpolate"),
@@ -146,7 +143,7 @@ object LECSpecBuilder:
           "axis"  -> js.Dynamic.literal("format" -> ".1~%"),
           "scale" -> js.Dynamic.literal("domain" -> js.Array(0.0, yCeiling))
         ),
-        "color"   -> colorEncoding,
+        "color"   -> makeColorEncoding(),
         "opacity" -> js.Dynamic.literal(
           "condition" -> js.Dynamic.literal(
             "param" -> "hover",
@@ -159,7 +156,7 @@ object LECSpecBuilder:
 
     // Invisible point layer for voronoi-based nearest-point hover detection
     val pointLayer = js.Dynamic.literal(
-      "data" -> js.Dynamic.literal("values" -> dataValues),
+      "data" -> js.Dynamic.literal("values" -> makeDataValues()),
       "mark" -> js.Dynamic.literal(
         "type"    -> "point",
         "opacity" -> 0,
@@ -174,7 +171,7 @@ object LECSpecBuilder:
           "field" -> "exceedance",
           "type"  -> "quantitative"
         ),
-        "color" -> colorEncoding
+        "color" -> makeColorEncoding()
       ),
       "params" -> js.Array(
         js.Dynamic.literal(
