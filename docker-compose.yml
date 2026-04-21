@@ -2,6 +2,32 @@ name: register
 
 services:
   # ============================================================================
+  # PostgreSQL (Workspace durable store)
+  # ============================================================================
+  postgres:
+    image: postgres:17-alpine
+    container_name: register-postgres
+    environment:
+      POSTGRES_DB: register
+      POSTGRES_USER: register_app
+      POSTGRES_PASSWORD: dev-only-password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U register_app -d register"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - register-network
+    profiles:
+      - persistence
+
+  # ============================================================================
   # Irmin GraphQL Server (Persistence Layer)
   # ============================================================================
   irmin:
@@ -68,6 +94,16 @@ services:
       # persistent storage. Suite D injects these for E2E testing.
       REGISTER_REPOSITORY_TYPE: "${REGISTER_REPOSITORY_TYPE:-in-memory}"
       IRMIN_URL: "${IRMIN_URL:-http://irmin:8080}"
+
+      # Workspace store backend — defaults to in-memory.
+      # Set to 'postgres' to enable durable workspace metadata.
+      REGISTER_WORKSPACE_STORE_BACKEND: "${REGISTER_WORKSPACE_STORE_BACKEND:-in-memory}"
+      REGISTER_DB_HOST: "${REGISTER_DB_HOST:-postgres}"
+      REGISTER_DB_PORT: "${REGISTER_DB_PORT:-5432}"
+      REGISTER_DB_NAME: "${REGISTER_DB_NAME:-register}"
+      REGISTER_DB_USER: "${REGISTER_DB_USER:-register_app}"
+      REGISTER_DB_PASSWORD: "${REGISTER_DB_PASSWORD:-dev-only-password}"
+      REGISTER_FLYWAY_URL: "${REGISTER_FLYWAY_URL:-jdbc:postgresql://postgres:5432/register}"
       
       # Telemetry configuration
       # NOTE: TracingLive.console & MetricsLive.console are configured but produce
@@ -154,4 +190,6 @@ networks:
 
 volumes:
   irmin-data:
+    driver: local
+  pg-data:
     driver: local

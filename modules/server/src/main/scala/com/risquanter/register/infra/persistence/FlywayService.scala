@@ -8,6 +8,10 @@ import com.risquanter.register.configs.FlywayConfig
 trait FlywayService:
   def runMigrations: Task[Unit]
 
+object FlywayService:
+  val noOp: FlywayService = new FlywayService:
+    override def runMigrations: Task[Unit] = ZIO.unit
+
 final class FlywayServiceLive(config: FlywayConfig) extends FlywayService:
   override def runMigrations: Task[Unit] =
     ZIO.attempt {

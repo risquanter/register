@@ -193,8 +193,8 @@ Run Compose with the selected env file:
 # In-memory
 docker compose --env-file .env.inmemory up -d register-server
 
-# Irmin persistence
-docker compose --env-file .env.irmin --profile persistence up -d register-server irmin
+# Irmin + PostgreSQL persistence services
+docker compose --env-file .env.irmin --profile persistence up -d register-server irmin postgres
 ```
 
 You can additionally set local values such as `REGISTER_CORS_ORIGINS` in these files when running the frontend from a non-default host/origin.
@@ -227,7 +227,13 @@ REGISTER_CORS_ORIGINS=http://<your-machine>:5173 docker compose up -d register-s
 To use the persistent Irmin backend during development, first build the Irmin builder image (see [Running an Instance](#running-an-instance)), then:
 
 ```bash
-docker compose --profile persistence up -d register-server irmin
+docker compose --profile persistence up -d register-server irmin postgres
+```
+
+To enable the PostgreSQL-backed workspace store as well, export:
+
+```bash
+export REGISTER_WORKSPACE_STORE_BACKEND=postgres
 ```
 
 ### Running Tests

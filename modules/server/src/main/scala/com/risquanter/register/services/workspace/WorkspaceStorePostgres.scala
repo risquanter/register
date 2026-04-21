@@ -47,10 +47,19 @@ final class WorkspaceStorePostgres private (
                keyHash = WorkspaceKeyHash.fromSecret(key),
                createdAt = toOffsetDateTime(now),
                lastAccess = toOffsetDateTime(now),
-               ttl = toIntervalLiteral(config.ttl),
-               idleTimeout = toIntervalLiteral(config.idleTimeout)
+               ttl = toIntervalString(config.ttl),
+               idleTimeout = toIntervalString(config.idleTimeout)
              )
-      _   <- db(run(query[WorkspaceRow].insertValue(lift(row))))
+      _   <- db(
+               run(
+                 quote {
+                   infix"""
+                     INSERT INTO workspaces (id, key_hash, created_at, last_access, ttl, idle_timeout)
+                     VALUES (${lift(row.id)}, ${lift(row.keyHash)}, ${lift(row.createdAt)}, ${lift(row.lastAccess)}, ${lift(row.ttl)}::interval, ${lift(row.idleTimeout)}::interval)
+                   """.as[Action[Long]]
+                 }
+               )
+             ).unit
     yield key).orDie
 
   override def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
@@ -194,21 +203,15 @@ final class WorkspaceStorePostgres private (
     effect.mapError(err => RepositoryFailure(Option(err.getMessage).getOrElse(err.toString)))
 
   private def parseInterval(value: String): IO[AppError, Duration] =
-    ZIO.attempt {
-      val pg = new org.postgresql.util.PGInterval(value)
-      if pg.getYears != 0 || pg.getMonths != 0 then
-        throw new IllegalArgumentException(s"Interval contains unsupported years/months component: $value")
-      val totalMillis =
-        (((pg.getDays.toLong * 24 + pg.getHours.toLong) * 60 + pg.getMinutes.toLong) * 60 * 1000L) +
-          math.round(pg.getSeconds * 1000d)
-      Duration.ofMillis(totalMillis)
-    }.mapError(err => RepositoryFailure(Option(err.getMessage).getOrElse(err.toString)))
+    ZIO
+      .fromEither(DurationString.parseInterval(value))
+      .mapError(err => RepositoryFailure(err))
 
   private def toOffsetDateTime(instant: Instant): OffsetDateTime =
     OffsetDateTime.ofInstant(instant, ZoneOffset.UTC)
 
-  private def toIntervalLiteral(duration: Duration): String =
-    s"${duration.toMillis} milliseconds"
+  private def toIntervalString(duration: Duration): String =
+    DurationString.renderInterval(duration)
 
 object WorkspaceStorePostgres:
   private final case class WorkspaceRow(
@@ -225,6 +228,53 @@ object WorkspaceStorePostgres:
     treeId: TreeId,
     addedAt: OffsetDateTime
   )
+
+  private object DurationString:
+    private val VerboseIntervalPattern =
+      raw"([+-]?\d+) days ([+-]?\d+) hours ([+-]?\d+) minutes ([+-]?\d+(?:\.\d+)?) seconds".r
+    private val DayTimeIntervalPattern =
+      raw"(?:(-?\d+) day[s]? ?)?(-?\d{1,2}):([0-5]?\d):([0-5]?\d(?:\.\d+)?)".r
+    private val DayOnlyIntervalPattern =
+      raw"(-?\d+) day[s]?".r
+
+    def renderInterval(duration: Duration): String =
+      val totalSeconds = duration.getSeconds
+      val days = Math.floorDiv(totalSeconds, 86400)
+      val remAfterDays = Math.floorMod(totalSeconds, 86400)
+      val hours = Math.floorDiv(remAfterDays, 3600)
+      val remAfterHours = Math.floorMod(remAfterDays, 3600)
+      val minutes = Math.floorDiv(remAfterHours, 60)
+      val seconds = Math.floorMod(remAfterHours, 60).toDouble + duration.getNano.toDouble / 1_000_000_000d
+      f"$days%d days $hours%d hours $minutes%d minutes $seconds%.9f seconds"
+
+    def parseInterval(value: String): Either[String, Duration] =
+      value match
+        case VerboseIntervalPattern(days, hours, minutes, seconds) =>
+          buildDuration(days, hours, minutes, seconds, value)
+        case DayTimeIntervalPattern(days, hours, minutes, seconds) =>
+          buildDuration(Option(days).getOrElse("0"), hours, minutes, seconds, value)
+        case DayOnlyIntervalPattern(days) =>
+          buildDuration(days, "0", "0", "0", value)
+        case _ => Left(s"Unsupported interval format: $value")
+
+    private def buildDuration(days: String, hours: String, minutes: String, seconds: String, original: String): Either[String, Duration] =
+      scala.util.Try {
+        val daysPart = days.toLong
+        val hoursPart = hours.toLong
+        val minutesPart = minutes.toLong
+        val secondsPart = BigDecimal(seconds)
+        val nanosPerSecond = BigDecimal(1000000000L)
+        val wholeSeconds = secondsPart.setScale(0, BigDecimal.RoundingMode.DOWN).toLongExact
+        val nanos = ((secondsPart - BigDecimal(wholeSeconds)) * nanosPerSecond)
+          .setScale(0, BigDecimal.RoundingMode.HALF_UP)
+          .toLongExact
+        Duration
+          .ofDays(daysPart)
+          .plusHours(hoursPart)
+          .plusMinutes(minutesPart)
+          .plusSeconds(wholeSeconds)
+          .plusNanos(nanos)
+      }.toEither.left.map(err => Option(err.getMessage).getOrElse(s"Invalid interval: $original"))
 
   val layer: ZLayer[Quill.Postgres[SnakeCase] & WorkspaceConfig, Nothing, WorkspaceStore] =
     ZLayer.fromZIO {

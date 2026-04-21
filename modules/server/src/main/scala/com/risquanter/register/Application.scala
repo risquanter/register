@@ -93,6 +93,24 @@ object Application extends ZIOAppDefault {
       } yield store
     }
 
+  private val postgresFlywayLayer: ZLayer[Any, Throwable, FlywayService] =
+    FlywayConfig.layer >>> FlywayServiceLive.layer
+
+  private val chooseFlywayService: ZLayer[WorkspaceStoreConfig, Throwable, FlywayService] =
+    ZLayer.fromZIO {
+      for {
+        cfg <- ZIO.service[WorkspaceStoreConfig]
+        flyway <- cfg.normalizedBackend match {
+          case "postgres" =>
+            ZIO.logInfo("workspaceStore.backend=postgres; enabling Flyway migrations") *>
+              ZIO.scoped(postgresFlywayLayer.build.map(_.get[FlywayService]))
+          case other =>
+            ZIO.logInfo(s"workspaceStore.backend='$other'; skipping Flyway migrations") *>
+              ZIO.succeed(FlywayService.noOp)
+        }
+      } yield flyway
+    }
+
   // Bootstrap: Configure TypesafeConfigProvider to load from application.conf
   override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
     Runtime.setConfigProvider(
@@ -109,7 +127,6 @@ object Application extends ZIOAppDefault {
       Configs.makeLayer[CorsConfig]("register.cors"),
       Configs.makeLayer[WorkspaceConfig]("register.workspace"),
       WorkspaceStoreConfig.layer,
-      FlywayConfig.layer,
       // Server layer uses ServerConfig
       ZLayer.fromZIO(
         ZIO.service[ServerConfig].map(cfg => 
@@ -135,9 +152,9 @@ object Application extends ZIOAppDefault {
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + SimulationConfig + Tracing + SimulationSemaphore + Meter
       QueryServiceLive.layer,       // Requires RiskTreeRepository + RiskResultResolver + Tracing
       chooseWorkspaceStore,
+      chooseFlywayService,
       RateLimiterLive.layer,
       WorkspaceReaper.layer,
-      FlywayServiceLive.layer,
       // Authorization — NoOp stub (always-allow) wired in all modes at Wave 0.
       // Replaced with AuthorizationServiceSpiceDB at Wave 3 when fine-grained mode is activated.
       // @see AUTHORIZATION-PLAN.md — Wave 0: Infrastructure bootstrap

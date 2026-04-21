@@ -79,7 +79,13 @@ Access: **`http://localhost:5173`**
 
 To use Irmin persistence instead of in-memory:
 ```bash
-docker compose --profile persistence up -d register-server irmin
+docker compose --profile persistence up -d register-server irmin postgres
+```
+
+To enable the PostgreSQL-backed workspace store, also set:
+
+```bash
+export REGISTER_WORKSPACE_STORE_BACKEND=postgres
 ```
 
 > **How Vite mode differs from nginx mode:**
