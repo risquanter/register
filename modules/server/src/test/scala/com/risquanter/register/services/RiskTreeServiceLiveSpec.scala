@@ -6,7 +6,7 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -23,33 +23,34 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
   // Stub repository factory - creates fresh instance per test
   private def makeStubRepo = new RiskTreeRepository {
-    private val db = collection.mutable.Map[TreeId, RiskTree]()
+    private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
     
-    override def create(riskTree: RiskTree): Task[RiskTree] = ZIO.succeed {
-      db += (riskTree.id -> riskTree)
+    override def create(wsId: WorkspaceId, riskTree: RiskTree): Task[RiskTree] = ZIO.succeed {
+      db += ((wsId, riskTree.id) -> riskTree)
       riskTree
     }
     
-    override def update(id: TreeId, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
-      val riskTree = db(id)
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
+      val riskTree = db((wsId, id))
       val updated = op(riskTree)
-      db += (id -> updated)
+      db += ((wsId, id) -> updated)
       updated
     }
     
-    override def delete(id: TreeId): Task[RiskTree] = ZIO.attempt {
-      val riskTree = db(id)
-      db -= id
+    override def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree] = ZIO.attempt {
+      val riskTree = db((wsId, id))
+      db -= ((wsId, id))
       riskTree
     }
     
-    override def getById(id: TreeId): Task[Option[RiskTree]] =
-      ZIO.succeed(db.get(id))
+    override def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]] =
+      ZIO.succeed(db.get((wsId, id)))
     
-    override def getAll: Task[List[Either[RepositoryFailure, RiskTree]]] =
-      ZIO.succeed(db.values.toList.map(Right(_)))
+    override def getAllForWorkspace(wsId: WorkspaceId): Task[List[Either[RepositoryFailure, RiskTree]]] =
+      ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
   }
   
+  private val stubWsId: WorkspaceId = WorkspaceId(safeId("test-workspace-live"))
   private val stubRepoLayer = ZLayer.fromFunction(() => makeStubRepo)
 
   // Valid request with single leaf node
@@ -73,7 +74,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   override def spec: Spec[TestEnvironment & Scope, Any] =
     suite("RiskTreeServiceLive")(
       test("create validates and persists risk tree config") {
-        val program = service(_.create(validRequest))
+        val program = service(_.create(stubWsId, validRequest))
 
         program.assert { result =>
           result.id.value.nonEmpty &&
@@ -112,7 +113,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           )
         )
 
-        val program = service(_.create(hierarchicalRequest))
+        val program = service(_.create(stubWsId, hierarchicalRequest))
 
         program.assert { result =>
           val root = result.root.asInstanceOf[RiskPortfolio]
@@ -125,7 +126,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("root NodeId is present in tree nodes (ADR-018 nominal identity)") {
         // Verifies that RiskNode.id (NodeId) matches rootId (NodeId) via
         // structural equality — the same invariant guarded by ensureRootPresent
-        val program = service(_.create(validRequest))
+        val program = service(_.create(stubWsId, validRequest))
 
         program.assert { tree =>
           val rootId = tree.rootId
@@ -140,7 +141,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("create fails with invalid name") {
         val invalidRequest = validRequest.copy(name = "")
-        val program = service(_.create(invalidRequest)).flip
+        val program = service(_.create(stubWsId, invalidRequest)).flip
 
         program.assert {
           case ValidationFailed(errors) => errors.exists(e => e.field.toLowerCase.contains("name"))
@@ -152,7 +153,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val invalidRequest = validRequest.copy(
           leaves = Seq(validRequest.leaves.head.copy(probability = 1.5))
         )
-        val program = service(_.create(invalidRequest)).flip
+        val program = service(_.create(stubWsId, invalidRequest)).flip
 
         program.assert {
           case ValidationFailed(errors) => errors.exists(_.field.contains("probability"))
@@ -160,23 +161,10 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("getAll returns all risk trees") {
-        val program = for {
-          tree1 <- service(_.create(validRequest))
-          tree2 <- service(_.create(validRequest.copy(name = "Second Risk Tree")))
-          all  <- service(_.getAll)
-        } yield (tree1, tree2, all)
-
-        program.assert { case (tree1, tree2, all) =>
-          all.length == 2 &&
-            all.map(_.id).toSet == Set(tree1.id, tree2.id)
-        }
-      },
-
       test("getById returns risk tree when exists") {
         val program = for {
-          created <- service(_.create(validRequest))
-          found   <- service(_.getById(created.id))
+          created <- service(_.create(stubWsId, validRequest))
+          found   <- service(_.getById(stubWsId, created.id))
         } yield (created, found)
 
         program.assert {
@@ -188,7 +176,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("getById returns None when not exists") {
-        val program = service(_.getById(treeId("nonexistent")))
+        val program = service(_.getById(stubWsId, treeId("nonexistent")))
 
         program.assert(_ == None)
       },
@@ -199,12 +187,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurve returns curve for leaf node") {
         val program = for {
-          tree <- service(_.create(validRequest))
+          tree <- service(_.create(stubWsId, validRequest))
           // RiskTree now has flat nodes with index already built
           rootId = tree.rootId
           
           // Call new getLECCurve API
-          response <- service(_.getLECCurve(tree.id, rootId))
+          response <- service(_.getLECCurve(stubWsId, tree.id, rootId))
         } yield (response, rootId)
 
         program.assert { case (response, rootId) =>
@@ -246,9 +234,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         )
 
         val program = for {
-          tree <- service(_.create(hierarchicalRequest))
+          tree <- service(_.create(stubWsId, hierarchicalRequest))
           rootId = tree.rootId
-          response <- service(_.getLECCurve(tree.id, rootId))
+          response <- service(_.getLECCurve(stubWsId, tree.id, rootId))
         } yield (tree, response)
 
         program.assert { case (tree, response) =>
@@ -260,9 +248,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurve fails for nonexistent node") {
         val program = for {
-          tree <- service(_.create(validRequest))
+          tree <- service(_.create(stubWsId, validRequest))
           invalidId = nodeId("nonexistent")
-          result <- service(_.getLECCurve(tree.id, invalidId)).flip
+          result <- service(_.getLECCurve(stubWsId, tree.id, invalidId)).flip
         } yield result
 
         program.assert {
@@ -273,13 +261,13 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("probOfExceedance returns probability for given threshold") {
         val program = for {
-          tree <- service(_.create(validRequest))
+          tree <- service(_.create(stubWsId, validRequest))
           rootId = tree.rootId
           
           // Test at multiple thresholds
-          prob1 <- service(_.probOfExceedance(tree.id, rootId, 1000L))   // Low threshold
-          prob2 <- service(_.probOfExceedance(tree.id, rootId, 25000L))  // Mid threshold
-          prob3 <- service(_.probOfExceedance(tree.id, rootId, 50000L))  // High threshold
+          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 1000L))   // Low threshold
+          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 25000L))  // Mid threshold
+          prob3 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 50000L))  // High threshold
         } yield (prob1, prob2, prob3)
 
         program.assert { case (prob1, prob2, prob3) =>
@@ -294,12 +282,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("probOfExceedance returns deterministic results") {
         val program = for {
-          tree <- service(_.create(validRequest))
+          tree <- service(_.create(stubWsId, validRequest))
           rootId = tree.rootId
           
           // Call twice with same threshold
-          prob1 <- service(_.probOfExceedance(tree.id, rootId, 10000L))
-          prob2 <- service(_.probOfExceedance(tree.id, rootId, 10000L))
+          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L))
+          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L))
         } yield (prob1, prob2)
 
         program.assert { case (prob1, prob2) =>
@@ -316,9 +304,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       // service layer omits it from response when not requested.
       test("getLECCurve with includeProvenance=true returns provenances") {
         val program = for {
-          tree <- service(_.create(validRequest))
+          tree <- service(_.create(stubWsId, validRequest))
           rootId = tree.rootId
-          response <- service(_.getLECCurve(tree.id, rootId, includeProvenance = true))
+          response <- service(_.getLECCurve(stubWsId, tree.id, rootId, includeProvenance = true))
         } yield (response, rootId)
 
         program.assert { case (response, rootId) =>
@@ -329,9 +317,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurve with includeProvenance=false returns empty provenances") {
         val program = for {
-          tree <- service(_.create(validRequest))
+          tree <- service(_.create(stubWsId, validRequest))
           rootId = tree.rootId
-          response <- service(_.getLECCurve(tree.id, rootId, includeProvenance = false))
+          response <- service(_.getLECCurve(stubWsId, tree.id, rootId, includeProvenance = false))
         } yield response
 
         program.assert { response =>
@@ -341,9 +329,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurve defaults to no provenance") {
         val program = for {
-          tree <- service(_.create(validRequest))
+          tree <- service(_.create(stubWsId, validRequest))
           rootId = tree.rootId
-          response <- service(_.getLECCurve(tree.id, rootId))  // No includeProvenance arg
+          response <- service(_.getLECCurve(stubWsId, tree.id, rootId))  // No includeProvenance arg
         } yield response
 
         program.assert { response =>
@@ -380,11 +368,11 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         )
 
         val program = for {
-          tree <- service(_.create(hierarchicalRequest))
+          tree <- service(_.create(stubWsId, hierarchicalRequest))
           idsByName = tree.index.nodes.map((nid, n) => n.name -> nid).toMap
           leaf1Id = idsByName("Leaf 1")
           leaf2Id = idsByName("Leaf 2")
-          curves <- service(_.getLECCurvesMulti(tree.id, Set(leaf1Id, leaf2Id)))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(leaf1Id, leaf2Id)))
         } yield curves
 
         program.assert { curves =>
@@ -422,12 +410,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         )
 
         val program = for {
-          tree <- service(_.create(hierarchicalRequest))
+          tree <- service(_.create(stubWsId, hierarchicalRequest))
           idsByName = tree.index.nodes.map((nid, n) => n.name -> nid).toMap
           nodeAId = idsByName("Node A")
           nodeBId = idsByName("Node B")
           
-          curves <- service(_.getLECCurvesMulti(tree.id, Set(nodeAId, nodeBId)))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(nodeAId, nodeBId)))
         } yield (curves, nodeAId, nodeBId)
 
         program.assert { case (curves, nodeAId, nodeBId) =>
@@ -443,8 +431,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurvesMulti rejects empty set") {
         for {
-          tree <- service(_.create(validRequest))
-          exit <- service(_.getLECCurvesMulti(tree.id, Set.empty)).exit
+          tree <- service(_.create(stubWsId, validRequest))
+          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set.empty)).exit
         } yield assertTrue(
           exit.isFailure
         )

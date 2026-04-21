@@ -945,14 +945,13 @@ Complete route census as of the current codebase. Every route is assigned a `Per
 | # | Method | Path | Controller | Permission | Resource type | Auth mode | Notes |
 |---|--------|------|-----------|-----------|--------------|-----------|-------|
 | 1 | GET | `/health` | RiskTree | **None** | — | All | Always public — no auth ever |
-| 2 | GET | `/risk-trees` | RiskTree | **None** | — | Config-gate | Default disabled (A17); admin debug only; no SpiceDB check |
-| 3 | POST | `/workspaces/bootstrap` | Workspace | **None (pre-resource)** | — | L0+ | Creates workspace; no prior resource to check; see Wave 5 for post-create grant |
-| 4 | GET | `/w/{key}/risk-trees` | Workspace | `ViewWorkspace` | Workspace | L0+ | Lists trees — coarse read of workspace membership |
-| 5 | POST | `/w/{key}/risk-trees` | Workspace | `DesignWrite` | Workspace | L0+ | Creates tree inside workspace |
-| 6 | POST | `/w/{key}/rotate` | Workspace | `AdminWorkspace` | Workspace | L0+ | Key rotation — sensitive, admin-level |
-| 7 | DELETE | `/w/{key}` | Workspace | `AdminWorkspace` | Workspace | L0+ | Hard-delete workspace + all trees |
-| 8 | DELETE | `/admin/workspaces/expired` | Workspace | `AdminSystem` | System | L0+ | Server-wide eviction — system admin only |
-| 9 | GET | `/w/{key}/risk-trees/{treeId}` | Workspace | `ViewTree` | RiskTree | L0+ | Tree summary |
+| 2 | POST | `/workspaces/bootstrap` | Workspace | **None (pre-resource)** | — | L0+ | Creates workspace; no prior resource to check; see Wave 5 for post-create grant |
+| 3 | GET | `/w/{key}/risk-trees` | Workspace | `ViewWorkspace` | Workspace | L0+ | Lists trees — coarse read of workspace membership |
+| 4 | POST | `/w/{key}/risk-trees` | Workspace | `DesignWrite` | Workspace | L0+ | Creates tree inside workspace |
+| 5 | POST | `/w/{key}/rotate` | Workspace | `AdminWorkspace` | Workspace | L0+ | Key rotation — sensitive, admin-level |
+| 6 | DELETE | `/w/{key}` | Workspace | `AdminWorkspace` | Workspace | L0+ | Hard-delete workspace + all trees |
+| 7 | DELETE | `/admin/workspaces/expired` | Workspace | `AdminSystem` | System | L0+ | Server-wide eviction — system admin only |
+| 8 | GET | `/w/{key}/risk-trees/{treeId}` | Workspace | `ViewTree` | RiskTree | L0+ | Tree summary |
 | 10 | GET | `/w/{key}/risk-trees/{treeId}/structure` | Workspace | `ViewTree` | RiskTree | L0+ | Full tree structure |
 | 11 | PUT | `/w/{key}/risk-trees/{treeId}` | Workspace | `DesignWrite` | RiskTree | L0+ | Full tree replacement |
 | 12 | DELETE | `/w/{key}/risk-trees/{treeId}` | Workspace | `DesignWrite` | RiskTree | L0+ | Tree deletion |
@@ -1148,7 +1147,7 @@ _Regression gate:_
 - New test: for every workspace-scoped route, `serverLogic` compiles and all tests pass with `NoOp` layers
 - `HttpApiIntegrationSpec` updated to use workspace-scoped API only (`POST /workspaces` → `GET /w/{key}/risk-trees` → `GET /w/{key}/risk-trees/{treeId}/structure`); no unscoped tree endpoints exercised
 
-_Diff scope:_ `WorkspaceEndpoints.scala`, `SSEEndpoints.scala`, `WorkspaceController.scala`, `SSEController.scala`, `app/Main.scala`, `app/state/WorkspaceState.scala`, `app/state/TreeViewState.scala`, `app/state/LECChartState.scala`, `app/views/TreeBuilderView.scala`, `server-it/HttpApiIntegrationSpec.scala`, `server-it/A17ConfigGateSpec.scala`, `server-it/HttpTestHarness.scala` — mechanical, no logic changes. Frontend files add `currentUserId` accessor (returns `None` in Layer 0; replaced by `AuthState` in L1.3). `HarnessConfig` gains `api: ApiConfig` field for config-gate test parameterization.
+_Diff scope:_ `WorkspaceEndpoints.scala`, `SSEEndpoints.scala`, `WorkspaceController.scala`, `SSEController.scala`, `app/Main.scala`, `app/state/WorkspaceState.scala`, `app/state/TreeViewState.scala`, `app/state/LECChartState.scala`, `app/views/TreeBuilderView.scala`, `server-it/HttpApiIntegrationSpec.scala`, `server-it/HttpTestHarness.scala` — mechanical, no logic changes. Frontend files add `currentUserId` accessor (returns `None` in Layer 0; replaced by `AuthState` in L1.3).
 
 ---
 

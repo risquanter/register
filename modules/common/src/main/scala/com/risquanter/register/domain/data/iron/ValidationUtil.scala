@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
-import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId, NodeId, WorkspaceKeySecret, UserId}
+import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId, NodeId, WorkspaceKeySecret, WorkspaceKeyHash, UserId}
 import com.bilalfazlani.zioUlid.ULID
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
@@ -163,6 +163,20 @@ object ValidationUtil {
         field = fieldPath,
         code = ValidationErrorCode.INVALID_FORMAT,
         message = ValidationMessages.workspaceKeyInvalid
+      )))
+  }
+
+  // Refinement for workspace key hashes — validates SHA-256 lowercase hex format (64 chars).
+  def refineWorkspaceKeyHash(value: String, fieldPath: String = "workspaceKeyHash"): Either[List[ValidationError], WorkspaceKeyHash] = {
+    val sanitized = nonEmpty(value)
+    sanitized
+      .refineEither[Match["^[0-9a-f]{64}$"]]
+      .map(WorkspaceKeyHash(_))
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_FORMAT,
+        message = ValidationMessages.workspaceKeyHashInvalid
       )))
   }
 

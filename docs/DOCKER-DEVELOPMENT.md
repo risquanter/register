@@ -414,7 +414,6 @@ Configure via `docker-compose.yml`, `.env`, or CLI overrides:
 | `REGISTER_SEED3` | `0` | HDR histogram seed 3 (0 = random, ADR-003) |
 | `REGISTER_SEED4` | `0` | HDR histogram seed 4 (0 = random, ADR-003) |
 | `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins (comma-separated). `localhost:18080` (nginx) is intentionally absent — in that mode the browser only talks to nginx; API calls are proxied server-side so the browser never issues a cross-origin request to port 8090. |
-| `REGISTER_API_LIST_ALL_TREES_ENABLED` | `false` | Enable `GET /risk-trees` list-all endpoint (A17 gate) |
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace time-to-live |
 | `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry |
 | `REGISTER_WORKSPACE_REAPER_INTERVAL` | `5m` | How often the reaper runs |

@@ -4,7 +4,7 @@ import zio.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
 
-import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
@@ -34,13 +34,13 @@ class QueryServiceLive private (
   private def traced[A](name: String)(body: Task[A]): Task[A] =
     tracing.span(s"QueryService.$name", SpanKind.INTERNAL)(body)
 
-  override def evaluate(treeId: TreeId, parsed: ParsedQuery): Task[QueryResponse] =
+  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery): Task[QueryResponse] =
     traced("evaluate") {
       for
         _ <- tracing.setAttribute("query.tree_id", treeId.value)
 
         // 1. Load tree
-        tree <- repo.getById(treeId).flatMap {
+        tree <- repo.getById(wsId, treeId).flatMap {
           case Some(t) => ZIO.succeed(t)
           case None =>
             ZIO.fail(ValidationFailed(List(ValidationError(

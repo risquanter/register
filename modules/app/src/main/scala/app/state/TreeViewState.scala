@@ -8,7 +8,7 @@ import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
-import com.risquanter.register.http.endpoints.WorkspaceEndpoints
+import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
 import com.risquanter.register.http.responses.SimulationResponse
 
 /** Reactive state for viewing server-persisted risk trees.
@@ -21,7 +21,7 @@ import com.risquanter.register.http.responses.SimulationResponse
   *
   * Views receive this as a constructor argument (ADR-019 Pattern 2).
   *
-  * Extends `WorkspaceEndpoints` to access workspace-scoped Tapir endpoint
+  * Extends workspace lifecycle/tree endpoint traits to access workspace-scoped Tapir endpoint
   * definitions for ZJS bridge calls.
   *
   * @param keySignal      Read-only signal providing the active workspace key.
@@ -33,7 +33,8 @@ final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId] = () => None
-) extends WorkspaceEndpoints:
+) extends WorkspaceLifecycleEndpoints
+  with WorkspaceTreeEndpoints:
 
   // ── Available trees (summary list) ────────────────────────────
   val availableTrees: Var[LoadState[List[SimulationResponse]]] = Var(LoadState.Idle)

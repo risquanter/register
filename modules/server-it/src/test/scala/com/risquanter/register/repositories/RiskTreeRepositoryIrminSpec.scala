@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, SafeUrl, NodeId, TreeId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, SafeUrl, NodeId, TreeId, WorkspaceId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.domain.data.RiskPortfolio
@@ -23,6 +23,8 @@ import io.github.iltotore.iron.*
   * Runs only when IRMIN_URL is set (e.g., http://localhost:9080).
   */
 object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
+
+  private val wsId: WorkspaceId = WorkspaceId(safeId("test-irmin-ws"))
 
   private def sampleTree(tid: TreeId, treeName: String): RiskTree =
     val rootId  = nodeId("root")
@@ -101,8 +103,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         for
           repo   <- ZIO.service[RiskTreeRepository]
           tree    = sampleTree(treeId("tree-1"), "Tree One")
-          _      <- repo.create(tree)
-          loaded <- repo.getById(tree.id)
+          _      <- repo.create(wsId, tree)
+          loaded <- repo.getById(wsId, tree.id)
         yield assertTrue(loaded.exists(_.index.nodes.size == tree.index.nodes.size))
       },
 
@@ -110,9 +112,9 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         for
           repo <- ZIO.service[RiskTreeRepository]
           tree  = sampleTree(treeId("tree-2"), "Tree Two")
-          _    <- repo.create(tree)
-          _    <- repo.update(tree.id, _ => updatedTree(tree))
-          got  <- repo.getById(tree.id)
+          _    <- repo.create(wsId, tree)
+          _    <- repo.update(wsId, tree.id, _ => updatedTree(tree))
+          got  <- repo.getById(wsId, tree.id)
           leaf2Id = nodeId("leaf-2")
         yield assertTrue(got.exists(!_.index.nodes.contains(leaf2Id)))
       },
@@ -121,8 +123,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         for
           repo <- ZIO.service[RiskTreeRepository]
           tree  = sampleTree(treeId("tree-3"), "Tree Three")
-          _    <- repo.create(tree)
-          all  <- repo.getAll
+          _    <- repo.create(wsId, tree)
+          all  <- repo.getAllForWorkspace(wsId)
         yield assertTrue(all.exists(_.exists(_.id == tree.id)))
       },
 
@@ -130,9 +132,9 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         for
           repo <- ZIO.service[RiskTreeRepository]
           tree  = sampleTree(treeId("tree-4"), "Tree Four")
-          _    <- repo.create(tree)
-          _    <- repo.delete(tree.id)
-          res  <- repo.getById(tree.id)
+          _    <- repo.create(wsId, tree)
+          _    <- repo.delete(wsId, tree.id)
+          res  <- repo.getById(wsId, tree.id)
         yield assertTrue(res.isEmpty)
       }
     ).provideLayerShared(irminLayer) @@ TestAspect.sequential

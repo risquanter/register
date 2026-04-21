@@ -1,15 +1,15 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
-import com.risquanter.register.domain.data.Workspace
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.WorkspaceRecord
+import com.risquanter.register.domain.data.iron.{WorkspaceId, WorkspaceKeySecret, TreeId}
 import com.risquanter.register.domain.errors.{AppError, WorkspaceNotFound, WorkspaceExpired, TreeNotInWorkspace}
 
 /** Workspace lifecycle service — association/token index.
   *
-  * Maps capability keys to sets of TreeIds. Does NOT store or duplicate
-  * tree data. The workspace key is consumed at the HTTP/controller layer
-  * and does not propagate into tree storage paths.
+  * Maps capability-key hashes to durable workspace metadata and sets of TreeIds.
+  * Does NOT store or duplicate tree data. The raw workspace key is consumed
+  * at the HTTP/controller layer and reduced to a hash for store lookup.
   *
   * Security features baked into the trait contract:
   * - A5:  `delete()` and `rotate()` — revocation and key rotation
@@ -38,7 +38,21 @@ trait WorkspaceStore:
     * Updates lastAccessedAt on successful resolution (A10).
     * Constant response for not-found vs expired at HTTP layer (A13).
     */
-  def resolve(key: WorkspaceKeySecret): IO[AppError, Workspace]
+  def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord]
+
+  /** Resolve a workspace by stable identity. */
+  def resolveById(id: WorkspaceId): IO[AppError, WorkspaceRecord]
+
+  /** Resolve a workspace, verify tree membership, and return the workspace.
+    *
+    * Fails with `TreeNotInWorkspace` when the tree does not belong to the
+    * resolved workspace.
+    */
+  def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, WorkspaceRecord] =
+    for
+      ws <- resolve(key)
+      _  <- ZIO.unless(ws.trees.contains(treeId))(ZIO.fail(TreeNotInWorkspace(key, treeId)))
+    yield ws
 
   /** Check if a tree belongs to a workspace. Lazy TTL check included. */
   def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean]
@@ -50,22 +64,18 @@ trait WorkspaceStore:
     * not belong to the workspace.
     */
   def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
-    for
-      _       <- resolve(key)
-      belongs <- belongsTo(key, treeId)
-      _       <- ZIO.unless(belongs)(ZIO.fail(TreeNotInWorkspace(key, treeId)))
-    yield ()
+    resolveTreeWorkspace(key, treeId).unit
 
   /** Evict all expired workspaces (absolute + idle). Returns evicted entries.
     *
-    * Returns the full `Map[WorkspaceKeySecret, Workspace]` of evicted entries so that
+    * Returns the full `Map[WorkspaceId, WorkspaceRecord]` of evicted entries so that
     * callers (e.g. `WorkspaceReaper`) can cascade-delete associated trees. Count is
     * derivable via `.size`.
     *
     * Called by both the background reaper fiber and the admin endpoint.
     * Security: logs eviction events (A31).
     */
-  def evictExpired: UIO[Map[WorkspaceKeySecret, Workspace]]
+  def evictExpired: UIO[Map[WorkspaceId, WorkspaceRecord]]
 
   /** Hard delete. Removes workspace from the store.
     * Tree cascade-deletion is orchestrated by the controller (Option B).
@@ -86,8 +96,14 @@ object WorkspaceStore:
   def create(): ZIO[WorkspaceStore, Nothing, WorkspaceKeySecret] =
     ZIO.serviceWithZIO[WorkspaceStore](_.create())
 
-  def resolve(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, Workspace] =
+  def resolve(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolve(key))
+
+  def resolveById(id: WorkspaceId): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
+    ZIO.serviceWithZIO[WorkspaceStore](_.resolveById(id))
+
+  def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
+    ZIO.serviceWithZIO[WorkspaceStore](_.resolveTreeWorkspace(key, treeId))
 
   def addTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.addTree(key, treeId))
@@ -104,7 +120,7 @@ object WorkspaceStore:
   def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolveTree(key, treeId))
 
-  def evictExpired: ZIO[WorkspaceStore, Nothing, Map[WorkspaceKeySecret, Workspace]] =
+  def evictExpired: ZIO[WorkspaceStore, Nothing, Map[WorkspaceId, WorkspaceRecord]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.evictExpired)
 
   def delete(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, Unit] =

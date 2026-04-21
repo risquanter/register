@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId}
 
 /** Service layer for RiskTree business logic.
   * 
@@ -15,6 +15,9 @@ import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
   * - Tree Manipulation: POST/PUT/DELETE → synchronous, fast (config only)
   * - LEC Query: Node-based APIs that use cache-aside pattern
   * - Simulation parameters come from SimulationConfig (not API parameters)
+  *
+  * Every method takes an explicit `wsId: WorkspaceId` as its first parameter
+  * so that workspace scoping is visible and compile-time enforced at every call site.
   */
 trait RiskTreeService {
   
@@ -23,34 +26,33 @@ trait RiskTreeService {
   // ========================================
   
   /** Create risk tree definition - persists tree structure only
+    * @param wsId Workspace that owns the tree
     * @param req Request containing tree definition
     * @return Persisted risk tree metadata (no LEC data)
     */
-  def create(req: RiskTreeDefinitionRequest): Task[RiskTree]
+  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest): Task[RiskTree]
   
   /** Update risk tree definition - modifies tree structure only
+    * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
     * @param req Updated tree definition
     * @return Updated risk tree metadata
     */
-  def update(id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]
+  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]
   
   /** Delete risk tree configuration
+    * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
     * @return Deleted risk tree metadata
     */
-  def delete(id: TreeId): Task[RiskTree]
-  
-  /** Retrieve all persisted risk tree configurations (no LEC data)
-    * @return List of all risk trees
-    */
-  def getAll: Task[List[RiskTree]]
+  def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree]
   
   /** Retrieve single risk tree configuration by ID (no LEC data)
+    * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
     * @return Optional risk tree metadata
     */
-  def getById(id: TreeId): Task[Option[RiskTree]]
+  def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]]
   
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)
@@ -61,23 +63,25 @@ trait RiskTreeService {
     * Uses cache-aside pattern: returns cached result if available,
     * otherwise simulates and caches before returning.
     * 
+    * @param wsId Workspace that owns the tree
     * @param nodeId Node identifier (SafeId)
     * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @return LEC curve response with quantiles, curve points, and childIds for navigation
     */
   // TODO-REMOVE: No real-world clients. Remove along with LECCurveResponse,
-  // getWorkspaceLECCurveEndpoint, and WorkspaceController.getLECCurve.
+  // getWorkspaceLECCurveEndpoint, and WorkspaceAnalysisController.getLECCurve.
   @deprecated("No real-world clients. Use getLECCurvesMulti instead.", since = "2026-04-14")
-  def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse]
+  def getLECCurve(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse]
   
   /** Get exceedance probability at a threshold for a node.
     * 
+    * @param wsId Workspace that owns the tree
     * @param nodeId Node identifier
     * @param threshold Loss threshold to compute P(Loss >= threshold)
     * @param includeProvenance Whether to include provenance metadata (currently unused for this endpoint)
     * @return Probability as Double (empirical frequency ratio: exceedingCount / nTrials)
     */
-  def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[Double]
+  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[Double]
   
   /** Get LEC curves for multiple nodes with shared tick domain.
     * 
@@ -85,21 +89,22 @@ trait RiskTreeService {
     * All curves share the same loss ticks for aligned rendering.
     * Returns LECNodeCurve (id + name + curve + quantiles) per node.
     * 
+    * @param wsId Workspace that owns the tree
     * @param nodeIds Set of node identifiers
     * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
-  def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]]
+  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]]
 }
 
 object RiskTreeService:
 
   /** Best-effort cascade deletion — deletes each tree, swallowing individual failures.
     *
-    * Used by both `WorkspaceController.deleteWorkspace` (explicit delete) and
+    * Used by both `WorkspaceLifecycleController.deleteWorkspace` (explicit delete) and
     * `WorkspaceReaper` (TTL expiry). Extracted here as the single source of truth
     * for the cascade-delete semantic.
     */
   extension (self: RiskTreeService)
-    def cascadeDeleteTrees(ids: Iterable[TreeId]): UIO[Unit] =
-      ZIO.foreachDiscard(ids)(id => self.delete(id).ignore)
+    def cascadeDeleteTrees(wsId: WorkspaceId, ids: Iterable[TreeId]): UIO[Unit] =
+      ZIO.foreachDiscard(ids)(id => self.delete(wsId, id).ignore)

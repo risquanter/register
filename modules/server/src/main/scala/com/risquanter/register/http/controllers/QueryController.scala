@@ -4,9 +4,9 @@ import zio.*
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Permission, ResourceRef, ResourceType, UserContextExtractor}
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, UserId}
+import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.domain.errors.FolQueryFailure
-import com.risquanter.register.http.endpoints.WorkspaceEndpoints
+import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.services.QueryService
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -23,17 +23,17 @@ class QueryController private (
   authzService: AuthorizationService,
   userCtx: UserContextExtractor
 ) extends BaseController
-    with WorkspaceEndpoints:
+  with WorkspaceQueryEndpoints:
 
   val queryTree: ServerEndpoint[Any, Task] = queryWorkspaceTreeEndpoint.serverLogic {
     case (maybeUserId, key, treeId, req) =>
       (for
         userId <- userCtx.extract(maybeUserId)
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        _      <- workspaceStore.resolveTree(key, treeId)
+        ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         parsed <- ZIO.fromEither(QueryRequest.resolve(req))
                     .mapError(e => FolQueryFailure.fromQueryError(e))
-        result <- queryService.evaluate(treeId, parsed)
+        result <- queryService.evaluate(ws.id, treeId, parsed)
       yield result).either
   }
 

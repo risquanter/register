@@ -7,7 +7,7 @@ import app.core.ZJS.*
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.domain.errors.FolQueryFailure.*
-import com.risquanter.register.http.endpoints.WorkspaceEndpoints
+import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.http.responses.QueryResponse
 import fol.error.QueryError
@@ -19,7 +19,7 @@ import fol.parser.VagueQueryParser
   * validation → server-side evaluation → result display.
   *
   * Views receive this as a constructor argument (ADR-019 Pattern 2).
-  * Extends `WorkspaceEndpoints` for Tapir endpoint access via ZJS.
+  * Extends `WorkspaceQueryEndpoints` for Tapir endpoint access via ZJS.
   *
   * @param keySignal      Read-only signal providing the active workspace key.
   * @param selectedTreeId Signal for the currently selected tree ID.
@@ -29,7 +29,7 @@ final class AnalyzeQueryState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
   userIdAccessor: () => Option[UserId] = () => None
-) extends WorkspaceEndpoints:
+) extends WorkspaceQueryEndpoints:
 
   // ── Query input ───────────────────────────────────────────────
   // Default query for development — comment out the next line to start with an empty field

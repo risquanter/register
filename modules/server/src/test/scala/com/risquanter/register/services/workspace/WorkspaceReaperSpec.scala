@@ -8,7 +8,7 @@ import java.time.Duration
 
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
 import com.risquanter.register.services.RiskTreeService
-import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
 import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
@@ -21,19 +21,18 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
   /** Build a RiskTreeService stub where only `delete` is customizable.
     * All other methods die immediately to catch unintended calls.
     */
-  private def makeStub(onDelete: TreeId => Task[RiskTree]): RiskTreeService = new RiskTreeService:
-    def create(req: RiskTreeDefinitionRequest): Task[RiskTree]                                          = ZIO.die(new UnsupportedOperationException)
-    def update(id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]                                  = ZIO.die(new UnsupportedOperationException)
-    def delete(id: TreeId): Task[RiskTree]                                                              = onDelete(id)
-    def getAll: Task[List[RiskTree]]                                                                    = ZIO.die(new UnsupportedOperationException)
-    def getById(id: TreeId): Task[Option[RiskTree]]                                                     = ZIO.die(new UnsupportedOperationException)
-    def getLECCurve(treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean): Task[LECCurveResponse]  = ZIO.die(new UnsupportedOperationException)
-    def probOfExceedance(treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[Double] = ZIO.die(new UnsupportedOperationException)
-    def getLECCurvesMulti(treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
+  private def makeStub(onDelete: (WorkspaceId, TreeId) => Task[RiskTree]): RiskTreeService = new RiskTreeService:
+    def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest): Task[RiskTree]                                          = ZIO.die(new UnsupportedOperationException)
+    def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]                                  = ZIO.die(new UnsupportedOperationException)
+    def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree]                                                              = onDelete(wsId, id)
+    def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]]                                                     = ZIO.die(new UnsupportedOperationException)
+    def getLECCurve(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean): Task[LECCurveResponse]  = ZIO.die(new UnsupportedOperationException)
+    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[Double] = ZIO.die(new UnsupportedOperationException)
+    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
 
   /** No-op stub: `delete` always fails (simulates already-deleted tree). */
   private val noOpTreeServiceLayer: ULayer[RiskTreeService] =
-    ZLayer.succeed(makeStub(_ => ZIO.fail(new NoSuchElementException("Tree not found"))))
+    ZLayer.succeed(makeStub((_, _) => ZIO.fail(new NoSuchElementException("Tree not found"))))
 
   /** Tracking stub: records deleted tree IDs in a Ref for assertions.
     * `delete` appends the ID then fails (tree doesn't really exist) — but the
@@ -41,7 +40,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     */
   private def trackingTreeService: UIO[(Ref[List[TreeId]], RiskTreeService)] =
     Ref.make(List.empty[TreeId]).map { ref =>
-      val svc = makeStub(id => ref.update(_ :+ id) *> ZIO.fail(new NoSuchElementException(s"Tree $id not found")))
+      val svc = makeStub((_, id) => ref.update(_ :+ id) *> ZIO.fail(new NoSuchElementException(s"Tree $id not found")))
       (ref, svc)
     }
 

@@ -1,5 +1,7 @@
 package com.risquanter.register.domain.data.iron
 
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
@@ -260,6 +262,34 @@ object WorkspaceKeySecret:
   given JsonEncoder[WorkspaceKeySecret] = JsonEncoder[String].contramap(_.reveal)
   given JsonDecoder[WorkspaceKeySecret] = JsonDecoder[String].mapOrFail(s =>
     WorkspaceKeySecret.fromString(s).left.map(_.mkString(", ")))
+
+// WorkspaceKeyHash: SHA-256 digest of a workspace capability key.
+// Internal-only durable identifier for workspace-key lookup.
+// Redacted toString avoids accidental correlation/log leakage.
+type WorkspaceKeyHashStr = String :| Match["^[0-9a-f]{64}$"]
+
+final class WorkspaceKeyHash private (private val raw: WorkspaceKeyHashStr):
+  /** Explicitly extract the digest string. Intended for persistence only. */
+  def value: String = raw
+  override def toString: String = "WorkspaceKeyHash(***)"
+  override def hashCode: Int = raw.hashCode
+  override def equals(that: Any): Boolean = that match
+    case wh: WorkspaceKeyHash => raw == wh.raw
+    case _                    => false
+
+object WorkspaceKeyHash:
+  def apply(value: WorkspaceKeyHashStr): WorkspaceKeyHash = new WorkspaceKeyHash(value)
+
+  def fromString(s: String): Either[List[ValidationError], WorkspaceKeyHash] =
+    ValidationUtil.refineWorkspaceKeyHash(s)
+
+  def fromSecret(secret: WorkspaceKeySecret): WorkspaceKeyHash =
+    val digest = MessageDigest
+      .getInstance("SHA-256")
+      .digest(secret.reveal.getBytes(StandardCharsets.UTF_8))
+      .map("%02x".format(_))
+      .mkString
+    new WorkspaceKeyHash(digest.refineUnsafe[Match["^[0-9a-f]{64}$"]])
 
 // ============================================================================
 // Auth Identity Types (ADR-012, ADR-024)

@@ -5,19 +5,21 @@ import zio.http.Server
 import zio.config.typesafe.TypesafeConfigProvider
 import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
+import io.getquill.SnakeCase
 
-import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, ApiConfig, WorkspaceConfig}
+import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, WorkspaceConfig, WorkspaceStoreConfig, FlywayConfig}
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
 import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
-import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController, QueryController}
+import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
+import com.risquanter.register.infra.persistence.{FlywayService, FlywayServiceLive, Repository}
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.cache.{TreeCacheManager, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
-import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive, WorkspaceReaper}
+import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive, WorkspaceStorePostgres, RateLimiterLive, WorkspaceReaper}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -70,6 +72,27 @@ object Application extends ZIOAppDefault {
       } yield repo
     }
 
+  private val postgresWorkspaceStoreLayer: ZLayer[WorkspaceConfig, Throwable, WorkspaceStore] =
+    (ZLayer.service[WorkspaceConfig] ++ Repository.dataLayer) >>> WorkspaceStorePostgres.layer
+
+  private val inMemoryWorkspaceStoreLayer: ZLayer[WorkspaceConfig, Nothing, WorkspaceStore] =
+    ZLayer.service[WorkspaceConfig] >>> WorkspaceStoreLive.layer
+
+  private val chooseWorkspaceStore: ZLayer[WorkspaceStoreConfig & WorkspaceConfig, Throwable, WorkspaceStore] =
+    ZLayer.fromZIO {
+      for {
+        cfg <- ZIO.service[WorkspaceStoreConfig]
+        store <- cfg.normalizedBackend match {
+          case "postgres" =>
+            ZIO.logInfo("workspaceStore.backend=postgres; using PostgreSQL-backed workspace store") *>
+              ZIO.scoped(postgresWorkspaceStoreLayer.build.map(_.get[WorkspaceStore]))
+          case other =>
+            ZIO.logWarning(s"workspaceStore.backend='$other' not 'postgres'; defaulting to in-memory workspace store") *>
+              ZIO.scoped(inMemoryWorkspaceStoreLayer.build.map(_.get[WorkspaceStore]))
+        }
+      } yield store
+    }
+
   // Bootstrap: Configure TypesafeConfigProvider to load from application.conf
   override val bootstrap: ZLayer[ZIOAppArgs, Any, Any] =
     Runtime.setConfigProvider(
@@ -77,15 +100,16 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor] =
-    ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor](
+  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor] =
+    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
       Configs.makeLayer[TelemetryConfig]("register.telemetry"),
       Configs.makeLayer[CorsConfig]("register.cors"),
-      Configs.makeLayer[ApiConfig]("register.api"),
       Configs.makeLayer[WorkspaceConfig]("register.workspace"),
+      WorkspaceStoreConfig.layer,
+      FlywayConfig.layer,
       // Server layer uses ServerConfig
       ZLayer.fromZIO(
         ZIO.service[ServerConfig].map(cfg => 
@@ -110,9 +134,10 @@ object Application extends ZIOAppDefault {
       InvalidationHandler.live,     // Requires TreeCacheManager & SSEHub (no RiskTreeService dep)
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + SimulationConfig + Tracing + SimulationSemaphore + Meter
       QueryServiceLive.layer,       // Requires RiskTreeRepository + RiskResultResolver + Tracing
-      WorkspaceStoreLive.layer,
+      chooseWorkspaceStore,
       RateLimiterLive.layer,
       WorkspaceReaper.layer,
+      FlywayServiceLive.layer,
       // Authorization — NoOp stub (always-allow) wired in all modes at Wave 0.
       // Replaced with AuthorizationServiceSpiceDB at Wave 3 when fine-grained mode is activated.
       // @see AUTHORIZATION-PLAN.md — Wave 0: Infrastructure bootstrap
@@ -121,10 +146,12 @@ object Application extends ZIOAppDefault {
       // Replaced with UserContextExtractor.requirePresent at Wave 2 when identity mode is activated.
       // @see AUTHORIZATION-PLAN.md — Wave 1: Header plumbing
       ZLayer.succeed(UserContextExtractor.noOp),
+      ZLayer.fromZIO(SystemController.makeZIO),
+      ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
+      ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
+      ZLayer.fromZIO(WorkspaceAnalysisController.makeZIO),
       SSEController.layer,
       CacheController.layer,
-      ZLayer.fromZIO(RiskTreeController.makeZIO),
-      ZLayer.fromZIO(WorkspaceController.makeZIO),
       ZLayer.fromZIO(QueryController.makeZIO)
     )
 
@@ -165,6 +192,9 @@ object Application extends ZIOAppDefault {
 
   def program = for {
     _ <- ZIO.logInfo("Bootstrapping Risk Register application...")
+    _ <- ZIO.logInfo("Running Flyway migrations...")
+    _ <- ZIO.serviceWithZIO[FlywayService](_.runMigrations)
+    _ <- ZIO.logInfo("Flyway migrations complete")
     _ <- startServer
   } yield ()
 

@@ -6,7 +6,7 @@ import zio.prelude.Validation
 import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState}
 import app.components.FormInputs
 import app.core.ZJS.*
-import com.risquanter.register.http.endpoints.WorkspaceEndpoints
+import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
 import com.risquanter.register.http.responses.SimulationResponse
 
 /**
@@ -17,7 +17,8 @@ import com.risquanter.register.http.responses.SimulationResponse
  * which drives a `Var[SubmitState]` through its lifecycle:
  * Submitting → Success (via callback) or Failed(msg).
  */
-object TreeBuilderView extends WorkspaceEndpoints:
+object TreeBuilderView extends WorkspaceLifecycleEndpoints
+  with WorkspaceTreeEndpoints:
   def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 

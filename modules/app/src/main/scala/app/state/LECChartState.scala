@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
-import com.risquanter.register.http.endpoints.WorkspaceEndpoints
+import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
 
 /** Chart selection and LEC curve data state, separated from tree navigation.
   *
@@ -25,7 +25,7 @@ import com.risquanter.register.http.endpoints.WorkspaceEndpoints
   * `AnalyzeQueryState.satisfyingNodeIds` and this state's
   * `userSelectedNodeIds` are in scope.
   *
-  * Extends `WorkspaceEndpoints` to access workspace-scoped Tapir endpoint
+  * Extends `WorkspaceAnalysisEndpoints` to access workspace-scoped Tapir endpoint
   * definitions for ZJS bridge calls.
   *
   * @param keySignal      Read-only signal providing the active workspace key.
@@ -40,7 +40,7 @@ final class LECChartState(
   selectedTree: StrictSignal[LoadState[RiskTree]],
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId] = () => None
-) extends WorkspaceEndpoints:
+) extends WorkspaceAnalysisEndpoints:
 
   // ── User selection state ──────────────────────────────────────
   /** Node IDs manually Ctrl+clicked by the user for LEC chart overlay. */

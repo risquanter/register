@@ -88,8 +88,6 @@ POST   /w/{key}/rotate                         → rotate workspace key
 DELETE /w/{key}                                → delete workspace + cascade trees
 ```
 
-The `GET /risk-trees` (list-all) endpoint is **sealed** with a config gate (A17, default deny) — no enumeration possible.
-
 ### 4. Rate Limiting & Abuse Prevention
 
 - **Creation rate limit:** Max N workspaces per IP per hour (configurable, default 10)
@@ -150,7 +148,6 @@ workspaceStore.create()  // no expiry
 GET /w  → List[WorkspaceKeySecret]
 
 // GOOD: No enumeration — capability URLs only
-// A17: GET /risk-trees sealed with config gate (default deny)
 ```
 
 ---

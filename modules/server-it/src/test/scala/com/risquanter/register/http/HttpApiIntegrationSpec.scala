@@ -19,9 +19,6 @@ import io.github.iltotore.iron.*
   *   - `GET  /w/{key}/risk-trees`                   → list trees in workspace
   *   - `GET  /w/{key}/risk-trees/{treeId}/structure` → full tree structure
   *
-  * The unscoped `GET /risk-trees` endpoint is sealed by A17 (default deny)
-  * and is NOT tested here — this reflects the production-path configuration.
-  *
   * Auth layers: `UserContextExtractor.noOp` + `AuthorizationServiceNoOp` (Wave 1).
   * No `x-user-id` header is sent — capability-only mode (Layer 0).
   *

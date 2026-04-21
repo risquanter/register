@@ -25,12 +25,12 @@ object InvalidationResponse:
 
 /** Non-workspace-scoped endpoints.
   *
-  * After workspace capability introduction (Tier 1.5), only `health` and
-  * the config-gated `getAll` remain. All tree-specific CRUD, LEC, and
-  * cache operations are served exclusively via workspace-scoped paths
-  * in `WorkspaceEndpoints` / `WorkspaceController`.
+  * After workspace capability introduction (Tier 1.5), only `health`
+  * remains in active use. All tree-specific CRUD, LEC, and cache
+  * operations are served exclusively via capability-specific
+  * workspace-scoped endpoint/controller pairs.
   *
-  * The frontend uses `WorkspaceEndpoints` directly for all tree operations.
+  * The frontend uses capability-specific workspace endpoint traits directly.
   */
 trait RiskTreeEndpoints extends BaseEndpoint:
 
@@ -43,7 +43,6 @@ trait RiskTreeEndpoints extends BaseEndpoint:
       .get
       .out(jsonBody[Map[String, String]])
 
-  /** A17: Config-gated. Returns 403 when disabled (default). */
   val getAllEndpoint =
     baseEndpoint
       .tag("risk-trees")

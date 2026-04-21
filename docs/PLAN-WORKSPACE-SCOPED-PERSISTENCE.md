@@ -23,6 +23,9 @@ Three problems in the current architecture:
    `WorkspaceKeySecret` as its sole identifier — a mutable, secret
    credential unsuitable for persistent paths, audit logs, or SpiceDB.
    `WorkspaceId` exists in `OpaqueTypes.scala` but is not wired in.
+4. **Raw-key retention was over-broad.** Durable state only needs a
+  one-way digest plus metadata. Retaining raw workspace keys beyond
+  issuance/rotation increases liability without adding capability.
 
 ### Design Goals
 
@@ -32,8 +35,9 @@ Three problems in the current architecture:
    namespaces for admin audit and structural clarity.
 3. **Durable workspace state:** Persist workspace associations so they
    survive server restarts (PostgreSQL — see D1, decided).
-4. **Lazy cache population:** `Ref[Map]` starts empty on boot;
-   populated on-demand from PG when users present capability URLs.
+4. **Hash-only durable model:** workspace state persists as
+  `WorkspaceRecord(id, keyHash, trees, timestamps, TTL)`; raw keys
+  exist only at issuance/rotation and caller presentation time.
 
 ---
 
@@ -42,14 +46,14 @@ Three problems in the current architecture:
 ### Two Types, Two Roles
 
 ```
-WorkspaceKeySecret                  WorkspaceId
-─────────────────────               ──────────────────
-128-bit SecureRandom                ULID (Crockford base32)
-base64url, 22 chars                 26 chars
-Mutable (rotatable)                 Immutable (generated once)
-Secret (toString redacted)          Non-secret (safe for paths/logs)
-External access credential          Internal grouping key
-Lives in Ref[Map] (ephemeral)       Persists in durable store
+WorkspaceKeySecret                  WorkspaceId / WorkspaceKeyHash
+─────────────────────               ──────────────────────────────
+128-bit SecureRandom                ULID / SHA-256 digest
+base64url, 22 chars                 26 chars / 64 hex chars
+Mutable (rotatable)                 Immutable id / derived hash
+Secret (toString redacted)          Internal durable identifiers
+External access credential          Safe id for logs; hash for lookup
+Exists only when issued/presented   Persist in durable store
 ```
 
 ### Two Storage Layers, Separated
@@ -59,7 +63,7 @@ The architecture has two distinct layers:
 ```
 ┌─────────────────────────────────────┐
 │  WorkspaceStore                     │  Association / token index
-│  Ref[Map] now → PostgreSQL later    │  Maps key → {id, trees, TTL}
+│  In-memory or PostgreSQL            │  Maps key-hash → {id, trees, TTL}
 │  NEVER stores domain content        │
 └──────────────┬──────────────────────┘
                │ TreeId references only
@@ -72,7 +76,7 @@ The architecture has two distinct layers:
 ```
 
 The `WorkspaceId` appears in **both** layers:
-- In `WorkspaceStore` as a stable identity (persisted alongside the key)
+- In `WorkspaceStore` as a stable identity (persisted alongside the hash)
 - In Irmin paths as a structural namespace for domain content
 
 This is NOT the same as "storing workspace metadata in Irmin." The
@@ -219,6 +223,68 @@ HTTP request → WorkspaceController
       → Irmin: set("workspaces/{ws.id}/risk-trees/{tree.id}/...")
 ```
 
+#### 1.4.1 `WorkspaceStore` helper for tree-scoped workspace resolution
+
+Phase 1 threading makes the workspace boundary explicit, but it also
+creates repeated controller ceremony for the common operation “resolve
+workspace by key, verify tree membership, then return the workspace so
+the caller can use `ws.id`”. The current effect shape is:
+
+```scala
+workspaceStore.resolveTree(key, treeId).as(()) *> workspaceStore.resolve(key)
+```
+
+This is already duplicated across multiple concrete call sites, so the
+plan adds one small `WorkspaceStore` helper instead of repeating that
+composition in each controller.
+
+```scala
+trait WorkspaceStore:
+  def resolveTreeWorkspace(
+    key: WorkspaceKeySecret,
+    treeId: TreeId
+  ): IO[AppError, Workspace]
+```
+
+Semantics:
+- resolve the workspace identified by `key`
+- enforce that `treeId` belongs to that workspace
+- return the resolved `Workspace`
+- preserve current opaque failure behaviour (`WorkspaceNotFound`,
+  `WorkspaceExpired`, `TreeNotInWorkspace`)
+- preserve access-touch behaviour in one place
+
+This helper is justified by existing use, not speculation.
+
+Current concrete call sites:
+- `WorkspaceController.getTreeById`
+- `WorkspaceController.getTreeStructure`
+- `WorkspaceController.updateTree`
+- `WorkspaceController.deleteTree`
+- `WorkspaceController.invalidateCache`
+- `WorkspaceController.getLECCurve`
+- `WorkspaceController.probOfExceedance`
+- `WorkspaceController.getLECCurvesMulti`
+- `QueryController.queryTree`
+
+#### 1.4.2 Controller split follow-on
+
+The current `WorkspaceController` is aligned with the workspace-scoped
+vision, but it has become too broad. The next refactor should split it
+by capability while preserving the same route surface:
+
+- `SystemController` — `/health`
+- `WorkspaceLifecycleController` — bootstrap, rotate, delete, evict,
+  workspace tree list/create
+- `WorkspaceTreeController` — get/update/delete tree, structure,
+  invalidate cache
+- `WorkspaceAnalysisController` — LEC/probability endpoints
+- `QueryController` — remains separate
+
+`WorkspaceEndpoints` should be split the same way so endpoint ownership
+matches controller ownership. `resolveTreeWorkspace(...)` becomes the
+shared primitive used by the tree, analysis, and query controllers.
+
 #### 1.5 `getAll` Replacement — **D4: Replace only** (decided)
 
 Current `getAll` lists everything under `risk-trees/`. With scoped
@@ -226,6 +292,17 @@ paths, it is replaced by `getAllForWorkspace(wsId)`. No global scan
 method exists on the repository trait. An admin endpoint scanning
 across all workspaces can be added later outside the repository trait
 if needed.
+
+#### 1.6 API config cleanup outcome
+
+The previous `ApiConfig.listAllTreesEnabled` entry is retired. The
+workspace-scoped list endpoint `GET /w/{key}/risk-trees` remains the
+supported list surface; the old config-gated unscoped list-all setting
+is removed along with its environment variable, tests, and docs.
+
+The API-config pattern remains documented, but there is no live
+`ApiConfig` product in code until a real API-specific setting exists
+again.
 
 ---
 
@@ -877,8 +954,14 @@ The `status` column is removed from the schema. The Reaper performs
 | `RiskTreeRepositoryIrmin.scala` | Scoped paths, commit messages |
 | `RiskTreeRepositoryInMemory.scala` | Accept `wsId`, enforce isolation (D3-B, decided — see §1.3) |
 | `RiskTreeService.scala` + `RiskTreeServiceLive.scala` | Thread `wsId` |
-| `WorkspaceController.scala` | Pass `ws.id` to service |
+| `WorkspaceStore.scala` | Add `resolveTreeWorkspace(key, treeId)` helper |
+| `WorkspaceController.scala` | Transitional owner during controller split; pass `ws.id` to service |
+| `SystemController.scala` | **New** — `/health` only |
+| `WorkspaceLifecycleController.scala` | **New** — bootstrap/rotate/delete/evict/list/create |
+| `WorkspaceTreeController.scala` | **New** — tree CRUD/structure/cache invalidation |
+| `WorkspaceAnalysisController.scala` | **New** — LEC/probability endpoints |
 | `QueryController.scala` | Pass `wsId` to query service |
+| `WorkspaceEndpoints.scala` | Split by controller ownership |
 | All controller/service specs (~20 files) | Thread `wsId` |
 | Integration tests (server-it) | Scoped path assertions |
 
@@ -939,7 +1022,7 @@ Each phase is independently deployable and testable.
 
 | Property | Guarantee |
 |----------|-----------|
-| `WorkspaceKeySecret` never in Irmin or PG plaintext | Secret exists only in `Ref[Map]` (cache) and PG as SHA-256 hash (D5, decided). Never in Irmin paths, commits, or logs (ADR-022). Raw key cannot be recovered from hash. |
+| `WorkspaceKeySecret` never in Irmin or PG plaintext | Secret exists only at issuance/rotation and during request presentation. Durable state stores only `WorkspaceKeyHash` plus metadata. Never in Irmin paths, commits, or logs (ADR-022). Raw key cannot be recovered from hash. |
 | `WorkspaceId` is immutable | Generated once at creation. Survives `rotate()`. Survives server restart (if persisted). |
 | Key rotation preserves identity | `rotate()` generates new key, copies same `WorkspaceId`. Irmin paths unchanged. Old key instantly dead. |
 | Layered separation | `WorkspaceStore` = association/token index. `RiskTreeRepository` = domain content store. Connected only by `TreeId` references. Never cross-contaminated. |

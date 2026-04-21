@@ -1,20 +1,21 @@
 package com.risquanter.register.domain.data
 
 import java.time.{Duration, Instant}
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash}
 
-/** Workspace domain model — association/token index.
+/** Workspace durable record — association/hash index.
   *
-  * A workspace groups a set of trees under a single capability key.
-  * It is NOT a content store — it maps a key to a set of TreeIds.
+  * A workspace groups a set of trees under a single capability hash.
+  * It is NOT a content store — it maps durable metadata to a set of TreeIds.
   * Tree data lives in RiskTreeRepository; this is just the access layer.
   *
   * Security-relevant fields (OWASP cross-reference):
   * - `lastAccessedAt` (A10): tracks idle timeout
   * - `idleTimeout` + `ttl` (A11): dual timeout — absolute AND idle
   */
-final case class Workspace(
-  key: WorkspaceKeySecret,
+final case class WorkspaceRecord(
+  id: WorkspaceId,
+  keyHash: WorkspaceKeyHash,
   trees: Set[TreeId],
   createdAt: Instant,
   lastAccessedAt: Instant,
@@ -38,7 +39,7 @@ final case class Workspace(
     absoluteExpired || idleExpired
 
   /** Record access — returns a copy with updated lastAccessedAt (A10). */
-  def touch(now: Instant): Workspace = copy(lastAccessedAt = now)
+  def touch(now: Instant): WorkspaceRecord = copy(lastAccessedAt = now)
 
   /** Absolute expiry instant, if TTL is finite. None for enterprise mode (infinite TTL). */
   def expiresAt: Option[Instant] =

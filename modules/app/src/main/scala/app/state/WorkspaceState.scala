@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret}
-import com.risquanter.register.http.endpoints.WorkspaceEndpoints
+import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 
@@ -25,9 +25,9 @@ import app.core.safeMessage
   *   3. Expired key (`/w/{k}`) → pre-validate fails, key cleared, blue info banner
   *
   * All workspace-scoped views read the key from `keySignal`.
-  * Extends `WorkspaceEndpoints` for ZJS bridge access to Tapir endpoint definitions.
+  * Extends `WorkspaceLifecycleEndpoints` for ZJS bridge access to Tapir endpoint definitions.
   */
-final class WorkspaceState extends WorkspaceEndpoints:
+final class WorkspaceState extends WorkspaceLifecycleEndpoints:
 
   // ── URL management ────────────────────────────────────────────
 

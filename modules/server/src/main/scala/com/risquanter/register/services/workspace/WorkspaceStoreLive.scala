@@ -1,12 +1,12 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
-import zio.logging.LogAnnotation
-import java.time.{Duration, Instant}
-import com.risquanter.register.domain.data.Workspace
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
-import com.risquanter.register.domain.errors.{AppError, WorkspaceNotFound, WorkspaceExpired}
+import java.time.Instant
+import com.risquanter.register.domain.data.WorkspaceRecord
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, WorkspaceNotFound, WorkspaceExpired}
 import com.risquanter.register.configs.WorkspaceConfig
+import com.risquanter.register.util.IdGenerators
 
 /** In-memory Ref-based WorkspaceStore implementation.
   *
@@ -18,7 +18,7 @@ import com.risquanter.register.configs.WorkspaceConfig
   * Data is ephemeral — lost on server restart (acceptable for free-tier).
   */
 final class WorkspaceStoreLive private (
-  ref: Ref[Map[WorkspaceKeySecret, Workspace]],
+  ref: Ref[WorkspaceStoreLive.State],
   config: WorkspaceConfig
 ) extends WorkspaceStore:
 
@@ -45,11 +45,12 @@ final class WorkspaceStoreLive private (
     * (lookup + instant comparison), preventing timing side-channels.
     */
   private def validateWorkspace(
-    map: Map[WorkspaceKeySecret, Workspace],
+    map: Map[WorkspaceKeyHash, WorkspaceRecord],
+    keyHash: WorkspaceKeyHash,
     key: WorkspaceKeySecret,
     now: Instant
-  ): Either[AppError, Workspace] =
-    map.get(key) match
+  ): Either[AppError, WorkspaceRecord] =
+    map.get(keyHash) match
       case None                          => Left(WorkspaceNotFound(key))
       case Some(ws) if ws.isExpired(now) => Left(WorkspaceExpired(key, ws.createdAt, ws.ttl))
       case Some(ws)                      => Right(ws)
@@ -60,20 +61,25 @@ final class WorkspaceStoreLive private (
   override def create(): UIO[WorkspaceKeySecret] =
     for
       key <- WorkspaceKeySecret.generate
+      sid <- IdGenerators.nextId.orDie
       now <- Clock.instant
-      workspace = Workspace(
-        key = key,
+      keyHash = WorkspaceKeyHash.fromSecret(key)
+      workspace = WorkspaceRecord(
+        id = WorkspaceId(sid),
+        keyHash = keyHash,
         trees = Set.empty,
         createdAt = now,
         lastAccessedAt = now,
         ttl = config.ttl,
         idleTimeout = config.idleTimeout
       )
-      _ <- ref.update(_ + (key -> workspace))
-      // ADR-022: redacted — security audit logs share the application log sink (stdout/SLF4J),
-      // not a restricted OTel channel. Use key.reveal here only if logs are routed to a
-      // restricted OpenTelemetry instance with access controls.
-      _ <- logSecurity("workspace.created", "workspace_key" -> key.toString)("Workspace created")
+      _ <- ref.update { state =>
+             state.copy(
+               byHash = state.byHash + (keyHash -> workspace),
+               byId = state.byId + (workspace.id -> keyHash)
+             )
+           }
+      _ <- logSecurity("workspace.created", "workspace_id" -> workspace.id.value)("Workspace created")
     yield key
 
   /** Associate a tree with a workspace.
@@ -85,8 +91,11 @@ final class WorkspaceStoreLive private (
     */
   override def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
     for
-      _ <- resolveInternal(key)
-      _ <- ref.update(_.updatedWith(key)(_.map(w => w.copy(trees = w.trees + treeId))))
+      _       <- resolveInternal(key)
+      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      _ <- ref.update(state =>
+             state.copy(byHash = state.byHash.updatedWith(keyHash)(_.map(w => w.copy(trees = w.trees + treeId))))
+           )
     yield ()
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op.
@@ -94,8 +103,11 @@ final class WorkspaceStoreLive private (
     */
   override def removeTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
     for
-      _ <- resolveInternal(key)
-      _ <- ref.update(_.updatedWith(key)(_.map(w => w.copy(trees = w.trees - treeId))))
+      _       <- resolveInternal(key)
+      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      _ <- ref.update(state =>
+             state.copy(byHash = state.byHash.updatedWith(keyHash)(_.map(w => w.copy(trees = w.trees - treeId))))
+           )
     yield ()
 
   /** List all tree IDs in a workspace. */
@@ -107,16 +119,38 @@ final class WorkspaceStoreLive private (
     * Atomic: single Ref.modify validates + touches in one step.
     * No TOCTOU race between read and write.
     */
-  override def resolve(key: WorkspaceKeySecret): IO[AppError, Workspace] =
+  override def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
     for
-      now    <- Clock.instant
+      now     <- Clock.instant
+      keyHash  = WorkspaceKeyHash.fromSecret(key)
       result <- ref.modify { map =>
-        validateWorkspace(map, key, now) match
+        validateWorkspace(map.byHash, keyHash, key, now) match
           case Left(err) => (Left(err), map)
           case Right(ws) =>
             val touched = ws.touch(now)
-            (Right(touched), map.updated(key, touched))
+            (Right(touched), map.copy(byHash = map.byHash.updated(keyHash, touched)))
       }
+      ws <- ZIO.fromEither(result)
+    yield ws
+
+  /** Resolve by immutable workspace ID (delegates to key-based resolve). */
+  override def resolveById(id: WorkspaceId): IO[AppError, WorkspaceRecord] =
+    for
+      now    <- Clock.instant
+      result <- ref.modify { state =>
+                  state.byId.get(id) match
+                    case None =>
+                      (Left(RepositoryFailure(s"Workspace id not found: ${id.value}")), state)
+                    case Some(keyHash) =>
+                      state.byHash.get(keyHash) match
+                        case None =>
+                          (Left(RepositoryFailure(s"Workspace record missing for id ${id.value}")), state)
+                        case Some(ws) if ws.isExpired(now) =>
+                          (Left(RepositoryFailure(s"Workspace expired for id ${id.value}")), state)
+                        case Some(ws) =>
+                          val touched = ws.touch(now)
+                          (Right(touched), state.copy(byHash = state.byHash.updated(keyHash, touched)))
+                }
       ws <- ZIO.fromEither(result)
     yield ws
 
@@ -125,12 +159,14 @@ final class WorkspaceStoreLive private (
     resolveInternal(key).map(_.trees.contains(treeId))
 
   /** Evict all expired workspaces. Returns evicted entries for cascade. (A31: logs eviction) */
-  override def evictExpired: UIO[Map[WorkspaceKeySecret, Workspace]] =
+  override def evictExpired: UIO[Map[WorkspaceId, WorkspaceRecord]] =
     for
       now     <- Clock.instant
       evicted <- ref.modify { map =>
-        val (expired, alive) = map.partition((_, ws) => ws.isExpired(now))
-        (expired, alive)
+        val (expired, aliveByHash) = map.byHash.partition((_, ws) => ws.isExpired(now))
+        val expiredIds = expired.values.map(_.id).toSet
+        val aliveById = map.byId.filter((id, _) => !expiredIds.contains(id))
+        (expired.values.map(ws => ws.id -> ws).toMap, map.copy(byHash = aliveByHash, byId = aliveById))
       }
       _ <- logSecurity("workspace.eviction", "evicted_count" -> evicted.size.toString)(
              s"Workspace reaper: evicted ${evicted.size} expired workspaces"
@@ -145,10 +181,15 @@ final class WorkspaceStoreLive private (
     */
   override def delete(key: WorkspaceKeySecret): IO[AppError, Unit] =
     for
-      _ <- resolveInternal(key)
-      _ <- ref.update(_ - key)
-      // ADR-022: redacted — see workspace.created comment for rationale
-      _ <- logSecurity("workspace.deleted", "workspace_key" -> key.toString)("Workspace deleted")
+      ws      <- resolveInternal(key)
+      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      _ <- ref.update(state =>
+             state.copy(
+               byHash = state.byHash - keyHash,
+               byId = state.byId - ws.id
+             )
+           )
+      _ <- logSecurity("workspace.deleted", "workspace_id" -> ws.id.value)("Workspace deleted")
     yield ()
 
   /** Atomic rotation via single Ref.modify — no window where neither key works.
@@ -158,19 +199,21 @@ final class WorkspaceStoreLive private (
     for
       newKey <- WorkspaceKeySecret.generate
       now    <- Clock.instant
+      oldHash  = WorkspaceKeyHash.fromSecret(key)
+      newHash  = WorkspaceKeyHash.fromSecret(newKey)
       result <- ref.modify { map =>
-        validateWorkspace(map, key, now) match
+        validateWorkspace(map.byHash, oldHash, key, now) match
           case Left(err) => (Left(err), map)
           case Right(ws) =>
-            val rotated = ws.copy(key = newKey, createdAt = now, lastAccessedAt = now)
-            (Right(newKey), (map - key) + (newKey -> rotated))
+            val rotated = ws.copy(keyHash = newHash, createdAt = now, lastAccessedAt = now)
+            (Right(newKey), map.copy(
+              byHash = (map.byHash - oldHash) + (newHash -> rotated),
+              byId = map.byId.updated(ws.id, newHash)
+            ))
       }
-      newK <- ZIO.fromEither(result)
-      // ADR-022: redacted — see workspace.created comment for rationale
-      _ <- logSecurity("workspace.rotated",
-             "workspace_key_old" -> key.toString,
-             "workspace_key_new" -> newK.toString
-           )("Workspace key rotated")
+      newK  <- ZIO.fromEither(result)
+      ws    <- resolve(newK)
+      _     <- logSecurity("workspace.rotated", "workspace_id" -> ws.id.value)("Workspace key rotated")
     yield newK
 
   // ── Internal ──────────────────────────────────────────────────────────
@@ -178,12 +221,12 @@ final class WorkspaceStoreLive private (
   /** Internal resolve without lastAccessedAt update — used by addTree, listTrees, etc.
     * Logs on failure for security audit (A29/A33).
     */
-  private def resolveInternal(key: WorkspaceKeySecret): IO[AppError, Workspace] =
+  private def resolveInternal(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
     for
-      now    <- Clock.instant
-      result <- ref.get.map(validateWorkspace(_, key, now))
+      now     <- Clock.instant
+      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      result <- ref.get.map(state => validateWorkspace(state.byHash, keyHash, key, now))
       ws     <- ZIO.fromEither(result).tapError {
-                  // ADR-022: redacted — see workspace.created comment for rationale
                   case _: WorkspaceNotFound =>
                     logSecurityWarning("workspace.resolve_failed",
                       "workspace_key" -> key.toString, "reason" -> "not_found"
@@ -197,14 +240,19 @@ final class WorkspaceStoreLive private (
     yield ws
 
 object WorkspaceStoreLive:
+  private final case class State(
+    byHash: Map[WorkspaceKeyHash, WorkspaceRecord],
+    byId: Map[WorkspaceId, WorkspaceKeyHash]
+  )
+
   val layer: ZLayer[WorkspaceConfig, Nothing, WorkspaceStore] =
     ZLayer.fromZIO {
       for
         config <- ZIO.service[WorkspaceConfig]
-        ref    <- Ref.make(Map.empty[WorkspaceKeySecret, Workspace])
+        ref    <- Ref.make(State(Map.empty, Map.empty))
       yield WorkspaceStoreLive(ref, config)
     }
 
   /** Create a store with explicit config (for tests). */
   def make(config: WorkspaceConfig): UIO[WorkspaceStore] =
-    Ref.make(Map.empty[WorkspaceKeySecret, Workspace]).map(ref => WorkspaceStoreLive(ref, config))
+    Ref.make(State(Map.empty, Map.empty)).map(ref => WorkspaceStoreLive(ref, config))

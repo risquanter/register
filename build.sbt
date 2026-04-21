@@ -79,7 +79,11 @@ val serverDependencies = Seq(
   "com.risquanter"                %% "hdr-rng"                           % "0.1.0-SNAPSHOT",
   // STTP zio-json integration for Irmin GraphQL client
   "com.softwaremill.sttp.client3" %% "zio-json"                          % sttpVersion,
-  "com.bilal-fazlani"             %% "zio-ulid"                          % zioUlidVersion
+  "com.bilal-fazlani"             %% "zio-ulid"                          % zioUlidVersion,
+  "io.getquill"                   %% "quill-jdbc-zio"                    % quillVersion,
+  "org.postgresql"                 % "postgresql"                        % "42.7.7",
+  "org.flywaydb"                   % "flyway-core"                       % "11.5.0",
+  "org.flywaydb"                   % "flyway-database-postgresql"        % "11.5.0"
 )
 
 // Common module (cross-compiled for JVM and JS)

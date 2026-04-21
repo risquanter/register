@@ -25,7 +25,7 @@ import com.risquanter.register.services.RiskTreeService
   * When workspaces expire, their associated trees must be cascade-deleted to prevent
   * orphans. The reaper calls `RiskTreeService.delete` for each tree in the evicted
   * workspace, which triggers the full pipeline: repo delete → cache evict → SSE notify.
-  * This mirrors `WorkspaceController.deleteWorkspace`'s cascade pattern. Tree deletion
+  * This mirrors `WorkspaceLifecycleController.deleteWorkspace`'s cascade pattern. Tree deletion
   * failures are ignored (best-effort) — a tree may already have been manually deleted.
   *
   * == Enterprise no-op ==
@@ -66,7 +66,7 @@ object WorkspaceReaper:
   /** Reap loop: evict expired workspaces, then cascade-delete their trees.
     *
     * Best-effort cascade: each `treeService.delete(id).ignore` swallows failures
-    * (the tree may already be gone). This matches `WorkspaceController.deleteWorkspace`.
+    * (the tree may already be gone). This matches `WorkspaceLifecycleController.deleteWorkspace`.
     */
   private def reapLoop(
     store: WorkspaceStore,
@@ -76,7 +76,7 @@ object WorkspaceReaper:
     val cycle =
       for
         evicted <- store.evictExpired
-        treeIds  = evicted.values.flatMap(_.trees)
-        _       <- treeService.cascadeDeleteTrees(treeIds)
+        _       <- ZIO.foreachDiscard(evicted.values)(ws =>
+                     treeService.cascadeDeleteTrees(ws.id, ws.trees))
       yield ()
     (ZIO.sleep(zio.Duration.fromJava(interval)) *> cycle).forever

@@ -6,11 +6,11 @@ import sttp.monad.MonadError
 import sttp.client3.testing.SttpBackendStub
 import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
-import com.risquanter.register.configs.{ApiConfig, IrminConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig}
+import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.SafeUrl
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.cache.CacheController
-import com.risquanter.register.http.controllers.{RiskTreeController, WorkspaceController, QueryController}
+import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.RiskTreeServiceLive
@@ -53,12 +53,11 @@ object StubHttpTestHarness {
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       simConfig: SimulationConfig = defaultSimulationConfig
   ): ZIO[Any, Throwable, SttpBackend[Task, Any]] =
-    val controllersLayer: ZLayer[Any, Throwable, RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController] =
-      ZLayer.make[RiskTreeController & WorkspaceController & SSEController & CacheController & QueryController](
+    val controllersLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController] =
+      ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController](
         ZLayer.succeed(simConfig),
         ZLayer.succeed(defaultTelemetryConfig),
         ZLayer.succeed(WorkspaceConfig()),
-        ZLayer.succeed(ApiConfig()),
         TracingLive.console,
         MetricsLive.console,
         SimulationSemaphore.layer,
@@ -72,10 +71,12 @@ object StubHttpTestHarness {
         RateLimiterLive.layer,
         AuthorizationServiceNoOp.layer,
         ZLayer.succeed(UserContextExtractor.noOp),
+        ZLayer.fromZIO(SystemController.makeZIO),
+        ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
+        ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
+        ZLayer.fromZIO(WorkspaceAnalysisController.makeZIO),
         SSEController.layer,
         CacheController.layer,
-        ZLayer.fromZIO(RiskTreeController.makeZIO),
-        ZLayer.fromZIO(WorkspaceController.makeZIO),
         QueryServiceLive.layer,
         ZLayer.fromZIO(QueryController.makeZIO)
       )

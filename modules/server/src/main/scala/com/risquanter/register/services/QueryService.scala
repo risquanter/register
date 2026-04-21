@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 
-import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
 import com.risquanter.register.http.responses.QueryResponse
 
 import fol.logic.ParsedQuery
@@ -26,13 +26,14 @@ trait QueryService:
     * 3. Call `VagueSemantics.evaluateTyped(parsed, catalog, model)`
     * 4. Map `EvaluationOutput[Value]` → `QueryResponse`
     *
+    * @param wsId   Workspace that owns the target risk tree
     * @param treeId  Target risk tree identifier
     * @param parsed  Pre-parsed query (from `QueryRequest.resolve()`)
     * @return Query response with satisfaction result and matching node IDs
     */
-  def evaluate(treeId: TreeId, parsed: ParsedQuery): Task[QueryResponse]
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery): Task[QueryResponse]
 
 object QueryService:
 
-  def evaluate(treeId: TreeId, parsed: ParsedQuery): ZIO[QueryService, Throwable, QueryResponse] =
-    ZIO.serviceWithZIO[QueryService](_.evaluate(treeId, parsed))
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery): ZIO[QueryService, Throwable, QueryResponse] =
+    ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed))

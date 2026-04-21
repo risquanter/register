@@ -897,7 +897,6 @@ This tier replaces the standalone Phase X by combining:
 |----------|-----|---------|-------|
 | 🔴 Critical | A5-A7 | No token revocation mechanism | W.2 (trait), W.3 (endpoint), Enterprise (denylist) |
 | 🔴 Critical | A15-A16 | SSE unauthenticated / no lifecycle | W.3, W.4 |
-| 🔴 Critical | A17 | `GET /risk-trees` open to all | W.3 |
 | 🔴 Critical | A27-A28 | No rate limiting | W.4 |
 | 🟠 High | A1-A4 | No security headers for `/w/*` | W.5 |
 | 🟠 High | A10-A11 | No dual timeout (idle + absolute) | W.2 |
@@ -930,7 +929,6 @@ This tier replaces the standalone Phase X by combining:
 | A14 | Constant-time workspace lookup | Low | W.2/W.3 | `Map.get` already O(1); document principle |
 | A15 | SSE scope to workspace key | Low | W.3 | ✅ SSE endpoint moved to `/w/{key}/events/tree/{treeId}`, validates workspace ownership |
 | A16 | Close SSE on workspace expiry/revocation | Medium | Deferred | Client-side `WorkspaceExpired` error handling is the reliability mechanism; SSE notification deferred |
-| A17 | Seal `GET /risk-trees` with config gate | Trivial | W.3 | Already planned (`list-all-trees.enabled = false`) |
 | A18 | Remove `reflectHeaders` from CORS | Low | W.5 | Replace with explicit origin whitelist |
 | A19 | Environment-specific CORS origin config | Low | W.5 | Config-driven origin list |
 | A20 | CORS preflight caching (`Access-Control-Max-Age`) | Trivial | W.5 | Single header addition |
@@ -960,7 +958,7 @@ The following items are implemented **inline** during their mapped phase, not as
 They are either low-effort or structurally load-bearing (retrofitting later changes the interface):
 
 - **W.2:** A5 (delete + rotate in trait), A10 (lastAccessedAt), A11 (dual timeout), A14 (constant-time), A29 (creation logging), A33 (structured fields)
-- **W.3:** A6 (DELETE endpoint — cascade hard-delete), A13 (constant response), A15 (SSE workspace scoping), A17 (seal GET /risk-trees), A24-A25 (error sanitisation), A30 (resolve failure logging)
+- **W.3:** A6 (DELETE endpoint — cascade hard-delete), A13 (constant response), A15 (SSE workspace scoping), A24-A25 (error sanitisation), A30 (resolve failure logging)
 - **W.4:** A27-A28 (rate limiting), A31-A32 (eviction/rate-limit logging). A16 (SSE lifecycle on eviction) deferred — client-side error handling is the reliability mechanism
 - **W.5:** A1-A4, A18-A23 (security headers + CORS hardening) ✅ — A8-A9 rejected (incompatible with capability-token model)
 - **W.7:** A26 (500 response body test assertions)
@@ -1185,7 +1183,6 @@ register.workspace {
 | `server/.../services/workspace/WorkspaceStoreLive.scala` | Created | Ref-based impl with `logSecurity` helpers, `validateWorkspace` pure function, atomic `resolve` |
 | `server/.../services/workspace/RateLimiter.scala` | Created | IP-based fixed-window rate limiter (A27) |
 | `server/.../configs/WorkspaceConfig.scala` | Created | `ttl`, `idleTimeout`, `reaperInterval`, `maxCreatesPerIpPerHour`, `maxTreesPerWorkspace` |
-| `server/.../configs/ApiConfig.scala` | Created | `listAllTreesEnabled` gate (A17) |
 | `server/.../configs/TestConfigs.scala` | Modified | Added `workspace` + `workspaceLayer` test defaults |
 | `server/test/.../WorkspaceStoreSpec.scala` | Created | 7 security regression tests |
 | `server/test/.../RateLimiterSpec.scala` | Created | 3 security regression tests |
@@ -1275,13 +1272,6 @@ distinction for internal logging (A30). Deleted workspaces simply don't exist �
 4. SSE connections on deleted workspace are dropped
 5. Worst case (crash mid-delete): orphaned trees — reaper cascade-deletes on next cycle
 
-**Existing `GET /risk-trees` (list-all):**
-- Frontend: unwired (no longer called)
-- Backend: sealed with configurable authorization gate
-- Config: `register.api.list-all-trees.enabled = false` (default: deny)
-- When `enabled = false`: returns 403 Forbidden
-- When `enabled = true`: returns all trees (admin/debug use)
-
 **Checkpoint:**
 - [ ] Bootstrap `POST /workspaces` creates workspace + tree, returns workspace key
 - [ ] `GET /w/{key}/risk-trees` lists only workspace-scoped trees
@@ -1293,7 +1283,6 @@ distinction for internal logging (A30). Deleted workspaces simply don't exist �
 - [ ] Old key immediately invalid after rotate or delete — no grace period
 - [x] SSE scoped to workspace key (A15)
 - [ ] SSE connections dropped on delete/rotate (A16) — deferred; client handles `WorkspaceExpired` errors
-- [ ] `GET /risk-trees` blocked by default (A17)
 - [ ] `IrminHttpError` sanitised — generic message to client (A24)
 - [ ] `RepositoryFailure` sanitised — generic message to client (A25)
 - [ ] `DELETE /admin/workspaces/expired` callable for manual eviction
@@ -1655,7 +1644,6 @@ common/.../domain/data/iron/WorkspaceKeySpec.scala
 
 **Motivation:** The W.2 unit tests validate `WorkspaceStore` and `RateLimiter` in isolation. However, several security properties are only observable at the HTTP boundary:
 
-- **A17:** `GET /risk-trees` returns 403 when `listAllTreesEnabled = false` — requires the endpoint to be wired with the `ApiConfig` gate
 - **A6:** `DELETE /w/{key}` cascade-deletes all associated trees — requires the controller's orchestration through `RiskTreeService.delete`
 - **A13:** Not-found and expired workspaces return identical 404 responses — requires `ErrorResponse.encode` integration with Tapir's error output
 
@@ -1665,7 +1653,6 @@ These are currently verified indirectly (unit tests on `ErrorResponse.encode`, `
 
 | Test | Asserts | Status |
 |------|---------|--------|
-| `GET /risk-trees` with gate=false | 403 Forbidden, body matches `ErrorResponse` | ✅ `A17ConfigGateSpec` |
 | `DELETE /w/{key}` cascade | 204 No Content; subsequent `GET /w/{key}/risk-trees` → 404 | ⬜ |
 | Expired workspace → 404 | Same status + body as non-existent workspace | ⬜ |
 | Cross-workspace tree access → 404 | Tree exists but wrong workspace key → 404 | ⬜ |
@@ -2869,7 +2856,6 @@ The theoretical underpinning for these patterns is documented in `TREE-OPS.md` (
 | DP-7 | Layered authorization | Three layers, single codebase | 2026-02-13 | Layer 0: workspace capability (Tier 1.5). Layer 1: Keycloak + OPA (AUTHORIZATION-PLAN.md). Layer 2: SpiceDB (AUTHORIZATION-PLAN.md — selected, decision closed in L2.0). Config-driven mode switching. |
 | DP-8 | Reaping strategy | Combined (lazy check + reaper fiber) | 2026-02-13 | Lazy TTL check on access → "expired" UX. Background ZIO fiber → storage hygiene. Admin endpoint for external CronJob. |
 | DP-9 | Workspace persistence | PostgreSQL (planned) | 2026-02-13 | In-memory TrieMap initially. PG implementation follows cheleb demo patterns. Config-selectable. |
-| DP-10 | `GET /risk-trees` (list-all) | Configurable auth gate | 2026-02-13 | Default deny. Config: `register.api.list-all-trees.enabled = false`. Frontend unwired. |
 | DP-11 | URL scheme consistency | Same workspace key URL everywhere | 2026-02-13 | URL `/#/{workspaceKey}/...` is identical across free-tier and enterprise. Enterprise adds JWT as additional gate — leaked URL alone insufficient. No URL scheme change between layers. |
 | DP-12 | Chart generation strategy | Server-side (BCG pattern) | 2026-02-13 | Server constructs complete Vega-Lite JSON spec via `zio.json.ast.Json` AST (intermediate step; typed DSL deferred — see W.11). Client only renders via VegaEmbed. Tick recalculation + quantile annotation = single server concern. JVM-testable. |
 | DP-13 | `lec-multi` vs `lec-chart` coexistence | Both endpoints coexist | 2026-02-13 | `lec-multi` = data API (raw curves + quantiles, for API consumers/tests). `lec-chart` = presentation API (render-ready Vega-Lite spec, for GUI). `lec-chart` composes on same service method — no duplication. |

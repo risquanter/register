@@ -89,8 +89,8 @@ docker compose down --remove-orphans --volumes && docker network prune -f
 |---------|-------|-------|
 | `commonJVM` | 289 | Domain model, Iron types, tree operations |
 | `server` | 219 | Service layer, simulation, controllers |
-| `serverIt` | 19 | Integration (Irmin via Docker Compose) + A17 config gate |
-| **Total** | **527** | |
+| `serverIt` | 18 | Integration (Irmin via Docker Compose) |
+| **Total** | **526** | |
 
 ---
 

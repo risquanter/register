@@ -2,40 +2,45 @@ package com.risquanter.register.repositories
 
 import zio.*
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.TreeId
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
 import com.risquanter.register.domain.errors.RepositoryFailure
 
-/** In-memory implementation of RiskTreeRepository for testing and development
-  * Uses a mutable map to store risk trees
+/** In-memory implementation of RiskTreeRepository for testing and development.
+  *
+  * The TrieMap is keyed by (WorkspaceId, TreeId) so that workspace isolation is
+  * enforced at the storage level. A wrong or missing WorkspaceId will yield None /
+  * NoSuchElementException rather than silently crossing workspace boundaries.
   */
 class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
-  private val db = collection.concurrent.TrieMap[TreeId, RiskTree]()
+  private val db = collection.concurrent.TrieMap[(WorkspaceId, TreeId), RiskTree]()
 
-  override def create(riskTree: RiskTree): Task[RiskTree] = ZIO.attempt {
-    val id = riskTree.id
-    if db.contains(id) then throw new IllegalStateException(s"RiskTree with id $id already exists")
-    db += (id -> riskTree)
+  override def create(wsId: WorkspaceId, riskTree: RiskTree): Task[RiskTree] = ZIO.attempt {
+    val key = (wsId, riskTree.id)
+    if db.contains(key) then throw new IllegalStateException(s"RiskTree with id ${riskTree.id} already exists in workspace $wsId")
+    db += (key -> riskTree)
     riskTree
   }
 
-  override def update(id: TreeId, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
-    val riskTree = db.getOrElse(id, throw new NoSuchElementException(s"RiskTree with id $id not found"))
+  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree): Task[RiskTree] = ZIO.attempt {
+    val key = (wsId, id)
+    val riskTree = db.getOrElse(key, throw new NoSuchElementException(s"RiskTree with id $id not found in workspace $wsId"))
     val updated = op(riskTree)
-    db += (id -> updated)
+    db += (key -> updated)
     updated
   }
 
-  override def delete(id: TreeId): Task[RiskTree] = ZIO.attempt {
-    val riskTree = db.getOrElse(id, throw new NoSuchElementException(s"RiskTree with id $id not found"))
-    db -= id
+  override def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree] = ZIO.attempt {
+    val key = (wsId, id)
+    val riskTree = db.getOrElse(key, throw new NoSuchElementException(s"RiskTree with id $id not found in workspace $wsId"))
+    db -= key
     riskTree
   }
 
-  override def getById(id: TreeId): Task[Option[RiskTree]] =
-    ZIO.succeed(db.get(id))
+  override def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]] =
+    ZIO.succeed(db.get((wsId, id)))
 
-  override def getAll: Task[List[Either[RepositoryFailure, RiskTree]]] =
-    ZIO.succeed(db.values.toList.map(Right(_)))
+  override def getAllForWorkspace(wsId: WorkspaceId): Task[List[Either[RepositoryFailure, RiskTree]]] =
+    ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
 }
 
 object RiskTreeRepositoryInMemory {

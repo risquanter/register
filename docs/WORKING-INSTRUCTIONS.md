@@ -20,6 +20,24 @@ This document defines the working protocol for implementing the ADR proposals.
 3. Agent implements only after approval
 4. Agent presents results for review before marking phase complete
 
+### Mandatory Review Halt (Hard Gate)
+
+This rule is absolute and applies to **every** planning/review presentation:
+
+1. Agent presents material for review (plan, signature echo, diff summary, compliance report, or options)
+2. **Agent stops immediately**
+3. Agent does **not** edit files, run implementation commands, or proceed to next steps
+4. Agent waits until the user finishes review and gives an explicit continuation signal
+
+Accepted continuation signals (must be explicit):
+- "proceed"
+- "approved"
+- "continue"
+- "implement option X"
+
+If no explicit signal is provided, the default action is **STOP and wait**.
+If this gate is violated, the current edit burst must be reverted and re-run under this protocol.
+
 ---
 
 ## Code Standards
@@ -73,8 +91,13 @@ Before writing or modifying any function, type, or file, agent must execute thes
    - State the deviation explicitly
    - State why
    - **Stop and ask before writing any implementation code**
+5. **Echo review halt (behavioral, not verbal).** After completing steps 0-4, the agent must:
+   - stop immediately,
+   - perform no edits,
+   - run no implementation commands,
+   - and wait until the user gives an accepted continuation signal from the list above.
 
-No silent deviations. No rationalising in review. The deviation declaration is the gate. Skipping it is a reviewable violation of these working instructions.
+No silent deviations. No rationalising in review. The deviation declaration is the gate. Skipping it is NOT ACCEPTABLE.
 
 ### Comment Style
 
@@ -342,6 +365,7 @@ User will confirm at these points:
 - [ ] Working instructions reviewed and approved
 - [ ] Implementation plan reviewed and approved
 - [ ] **ADR compliance verified at planning phase** (mandatory before implementation)
+- [ ] **After each presentation, agent stops and waits for explicit user continue signal** (mandatory)
 - [ ] Each phase completion approved
 - [ ] **ADR compliance re-verified post-implementation** (mandatory before phase sign-off)
 - [ ] **Agent re-reads `docs/WORKING-INSTRUCTIONS.md` before marking phase complete** (mandatory guardrail)
