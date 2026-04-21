@@ -8,8 +8,8 @@ import java.time.Duration
 import scala.concurrent.duration.*
 
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceKeyHash}
-import com.risquanter.register.domain.errors.{WorkspaceNotFound, WorkspaceExpired, TreeNotInWorkspace}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash}
+import com.risquanter.register.domain.errors.{TreeNotInWorkspace, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.util.IdGenerators
 
 object WorkspaceStoreSpec extends ZIOSpecDefault:
@@ -56,6 +56,16 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         _     <- TestClock.adjust(2.minutes)
         exit  <- store.resolve(key).exit
       yield assert(exit)(fails(isSubtype[WorkspaceExpired](anything)))
+    },
+
+    test("resolveById returns keyless expired error when workspace is idle-expired") {
+      for
+        store <- mkStore
+        key   <- store.create()
+        ws    <- store.resolve(key)
+        _     <- TestClock.adjust(2.minutes)
+        exit  <- store.resolveById(ws.id).exit
+      yield assert(exit)(fails(isSubtype[WorkspaceExpiredById](anything)))
     },
 
     test("addTree/listTrees/belongsTo operate within workspace") {
@@ -151,6 +161,14 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         _     <- store.delete(key)
         exit  <- store.resolve(key).exit
       yield assert(exit)(fails(isSubtype[WorkspaceNotFound](anything)))
+    },
+
+    test("resolveById on unknown id returns keyless not-found error") {
+      for
+        store   <- mkStore
+        rawId   <- IdGenerators.nextId
+        exit    <- store.resolveById(WorkspaceId(rawId)).exit
+      yield assert(exit)(fails(isSubtype[WorkspaceNotFoundById](anything)))
     },
 
     test("evictExpired removes expired workspaces and returns evicted entries") {

@@ -1,8 +1,8 @@
 # Plan: Workspace-Scoped Persistence
 
-**Status:** Draft — all decisions (D1–D6) decided  
-**Scope:** Planning only — no code changes  
-**Date:** 2026-04-15 (decisions updated 2026-04-17)
+**Status:** In progress — core implementation for Phases 0, 1, 2, and 4 landed; Phase 5 remains operational  
+**Scope:** Plan plus implementation status tracking  
+**Date:** 2026-04-15 (decisions updated 2026-04-17; status updated 2026-04-21)
 
 ---
 
@@ -594,8 +594,16 @@ consistent: `docker compose --profile persistence up -d` starts both.
 
 ### Phase 3: Lazy Cache Population
 
+**Status:** Superseded by the amended hash-only durable model.
+
 **Goal:** Ensure `Ref[Map]` serves as a fast read-through cache in
 front of PG, populated on-demand. No startup ceremony required.
+
+This phase described the earlier raw-key cache design. The implemented
+model does **not** retain raw workspace keys after issuance/rotation or
+between requests. PostgreSQL lookups hash the caller-presented key on
+demand, and in-memory storage uses `WorkspaceKeyHash` rather than a
+raw-key cache.
 
 #### 3.1 Startup Sequence (PostgreSQL-backed)
 
@@ -663,6 +671,8 @@ lookups. Their Irmin tree data is cleaned up by the Reaper.
 ---
 
 ### Phase 5: Migration — Flat to Scoped Paths
+
+**Status:** Not yet executed — operational follow-up.
 
 **Goal:** Handle the transition from flat `risk-trees/` paths to
 workspace-scoped `workspaces/{wsId}/risk-trees/` paths.

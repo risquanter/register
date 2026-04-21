@@ -8,7 +8,7 @@ import io.getquill.jdbczio.Quill
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, WorkspaceExpired, WorkspaceNotFound}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.infra.persistence.QuillMappings.given
 import com.risquanter.register.util.IdGenerators
 
@@ -94,7 +94,7 @@ final class WorkspaceStorePostgres private (
       row <- loadWorkspaceRowById(id)
       ws  <- toRecord(row)
       now <- Clock.instant
-      _   <- ZIO.fail(RepositoryFailure(s"Workspace expired for id ${id.value}")).when(ws.isExpired(now))
+      _   <- ZIO.fail(WorkspaceExpiredById(id, ws.createdAt, ws.ttl)).when(ws.isExpired(now))
       _   <- db(
               run(
                 query[WorkspaceRow]
@@ -163,7 +163,7 @@ final class WorkspaceStorePostgres private (
 
   private def loadWorkspaceRowById(id: WorkspaceId): IO[AppError, WorkspaceRow] =
     db(run(query[WorkspaceRow].filter(_.id == lift(id)))).flatMap(rows =>
-      ZIO.fromOption(rows.headOption).orElseFail(RepositoryFailure(s"Workspace id not found: ${id.value}"))
+      ZIO.fromOption(rows.headOption).orElseFail(WorkspaceNotFoundById(id))
     )
 
   private def loadTrees(workspaceId: WorkspaceId): IO[AppError, Set[TreeId]] =

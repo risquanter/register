@@ -4,7 +4,7 @@ import zio.*
 import java.time.Instant
 import com.risquanter.register.domain.data.WorkspaceRecord
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, WorkspaceNotFound, WorkspaceExpired}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.util.IdGenerators
 
@@ -140,13 +140,13 @@ final class WorkspaceStoreLive private (
       result <- ref.modify { state =>
                   state.byId.get(id) match
                     case None =>
-                      (Left(RepositoryFailure(s"Workspace id not found: ${id.value}")), state)
+                      (Left(WorkspaceNotFoundById(id)), state)
                     case Some(keyHash) =>
                       state.byHash.get(keyHash) match
                         case None =>
                           (Left(RepositoryFailure(s"Workspace record missing for id ${id.value}")), state)
                         case Some(ws) if ws.isExpired(now) =>
-                          (Left(RepositoryFailure(s"Workspace expired for id ${id.value}")), state)
+                          (Left(WorkspaceExpiredById(id, ws.createdAt, ws.ttl)), state)
                         case Some(ws) =>
                           val touched = ws.touch(now)
                           (Right(touched), state.copy(byHash = state.byHash.updated(keyHash, touched)))

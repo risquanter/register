@@ -6,7 +6,7 @@ import java.time.{Instant, Duration as JDuration}
 import zio.test.*
 import zio.json.*
 import sttp.model.StatusCode
-import com.risquanter.register.domain.data.iron.WorkspaceKeySecret
+import com.risquanter.register.domain.data.iron.{WorkspaceId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.FolQueryFailure
 
 object ErrorResponseSpec extends ZIOSpecDefault {
@@ -76,6 +76,30 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         val key = WorkspaceKeySecret.fromString("ABCDEFGHIJKLMNOPQRSTUV").toOption.get
         val (status, response) = ErrorResponse.encode(
           WorkspaceExpired(key, Instant.now(), JDuration.ofHours(1))
+        )
+
+        assertTrue(
+          status == StatusCode.NotFound,
+          response.error.code == 404,
+          response.error.message == "Not found"
+        )
+      },
+
+      test("encodes WorkspaceNotFoundById to same opaque 404 as key-based lookup") {
+        val wsId = WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
+        val (status, response) = ErrorResponse.encode(WorkspaceNotFoundById(wsId))
+
+        assertTrue(
+          status == StatusCode.NotFound,
+          response.error.code == 404,
+          response.error.message == "Not found"
+        )
+      },
+
+      test("encodes WorkspaceExpiredById to same opaque 404 as key-based lookup") {
+        val wsId = WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
+        val (status, response) = ErrorResponse.encode(
+          WorkspaceExpiredById(wsId, Instant.now(), JDuration.ofHours(1))
         )
 
         assertTrue(
@@ -298,11 +322,14 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       test("roundtrip: workspace opaque 404 encodes to opaque 404 and decodes to workspace sentinel") {
         val key = WorkspaceKeySecret.fromString("abcdefghijklmnopqrstuv").toOption.get
         val treeId = com.risquanter.register.domain.data.iron.TreeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
+        val wsId = WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
         // All three workspace error types encode to the same opaque 404
         val errors = List(
           WorkspaceNotFound(key),
           WorkspaceExpired(key, java.time.Instant.now(), java.time.Duration.ofHours(1)),
-          TreeNotInWorkspace(key, treeId)
+          TreeNotInWorkspace(key, treeId),
+          WorkspaceNotFoundById(wsId),
+          WorkspaceExpiredById(wsId, java.time.Instant.now(), java.time.Duration.ofHours(1))
         )
         val results = errors.map(e => ErrorResponse.decode(ErrorResponse.encode(e)))
         assertTrue(

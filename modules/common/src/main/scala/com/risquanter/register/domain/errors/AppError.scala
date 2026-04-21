@@ -3,7 +3,7 @@ package com.risquanter.register.domain.errors
 import scala.concurrent.duration.Duration
 import sttp.model.StatusCode
 import java.time.{Duration as JDuration, Instant}
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, WorkspaceKeySecret, TreeId}
 
 sealed trait AppError extends Throwable
 sealed trait SimError extends AppError
@@ -71,11 +71,25 @@ case class WorkspaceNotFound(key: WorkspaceKeySecret) extends SimError {
   override def getMessage: String = "Workspace not found"
 }
 
+/** Workspace not found by stable id — maps to the same opaque 404 (A13).
+  * Used on internal keyless paths such as `resolveById`, where no raw capability
+  * key should be materialized merely to shape an error.
+  */
+case class WorkspaceNotFoundById(id: WorkspaceId) extends SimError {
+  override def getMessage: String = s"Workspace not found for id ${id.value}"
+}
+
 /** Workspace expired — maps to same opaque 404 as not-found (A13).
   * ADR-022: getMessage uses createdAt/ttl as diagnostics, not raw key.
   */
 case class WorkspaceExpired(key: WorkspaceKeySecret, createdAt: Instant, ttl: JDuration) extends SimError {
   override def getMessage: String = s"Workspace expired (created: $createdAt, ttl: $ttl)"
+}
+
+/** Workspace expired on a keyless stable-id lookup — maps to the same opaque 404 (A13).
+  */
+case class WorkspaceExpiredById(id: WorkspaceId, createdAt: Instant, ttl: JDuration) extends SimError {
+  override def getMessage: String = s"Workspace expired for id ${id.value} (created: $createdAt, ttl: $ttl)"
 }
 
 /** Tree not associated with workspace — maps to opaque 404 (A13).
