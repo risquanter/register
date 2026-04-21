@@ -25,6 +25,11 @@ type UrlConstraint = Not[Blank] & MaxLength[200] & Match["^(?i)https?://(?:\\[[0
 // Service URL (absolute http/https with host, optional port)
 type SafeUrl = String :| UrlConstraint
 
+type BranchRefConstraint =
+  Not[Blank] & MaxLength[160] & Match["^(main|scenarios/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63})$"]
+
+type BranchRefStr = String :| BranchRefConstraint
+
 // General URL alias (kept for API parity; same constraint set as SafeUrl)
 type ValidUrl = String :| UrlConstraint
 
@@ -145,6 +150,7 @@ object SafeUrl:
 
   extension (u: SafeUrl)
     def value: SafeUrl = u
+    def asString: String = u
 
   def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], SafeUrl] =
     val sanitized = if s == null then "" else s.trim
@@ -160,6 +166,27 @@ object SafeUrl:
           )
         )
       )
+
+case class BranchRef(toBranchRef: BranchRefStr)
+
+object BranchRef:
+  val Main: BranchRef = BranchRef("main".refineUnsafe[BranchRefConstraint])
+
+  def fromString(s: String, fieldPath: String = "branch"): Either[List[ValidationError], BranchRef] =
+    val sanitized = if s == null then "" else s.trim
+    sanitized
+      .refineEither[BranchRefConstraint]
+      .left
+      .map(err =>
+        List(
+          ValidationError(
+            field = fieldPath,
+            code = ValidationErrorCode.INVALID_FORMAT,
+            message = s"Branch '$sanitized' is invalid: $err"
+          )
+        )
+      )
+      .map(BranchRef(_))
 
 // SafeId: Canonical ULID (Crockford base32, 26 chars, uppercase)
 // Accepts input case-insensitively, normalizes to uppercase canonical string.

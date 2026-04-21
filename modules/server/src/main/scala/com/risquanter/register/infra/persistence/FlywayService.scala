@@ -15,9 +15,10 @@ object FlywayService:
 final class FlywayServiceLive(config: FlywayConfig) extends FlywayService:
   override def runMigrations: Task[Unit] =
     ZIO.attempt {
+      val password = config.password.stringValue
       Flyway
         .configure()
-        .dataSource(config.url, config.user, config.password)
+        .dataSource(config.url, config.user, password)
         .locations("classpath:db/migration")
         .load()
         .migrate()

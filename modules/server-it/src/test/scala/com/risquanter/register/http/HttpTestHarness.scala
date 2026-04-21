@@ -14,6 +14,7 @@ import com.risquanter.register.configs.*
 import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController}
 import com.risquanter.register.http.sse.SSEController
+import com.risquanter.register.http.support.TestSafeUrls
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeServiceLive, SimulationSemaphore}
@@ -44,7 +45,7 @@ object HttpTestHarness:
   private val defaultTelemetryConfig = TelemetryConfig(
     serviceName = "register-it",
     instrumentationScope = "com.risquanter.register",
-    otlpEndpoint = "http://localhost:4317",
+    otlpEndpoint = TestSafeUrls.localhostOtlpEndpoint,
     devExportIntervalSeconds = 5,
     prodExportIntervalSeconds = 60
   )

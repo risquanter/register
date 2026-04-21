@@ -7,8 +7,8 @@ import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 import io.getquill.SnakeCase
 
-import com.risquanter.register.configs.{Configs, ServerConfig, SimulationConfig, CorsConfig, TelemetryConfig, RepositoryConfig, IrminConfig, WorkspaceConfig, WorkspaceStoreConfig, FlywayConfig}
-import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
+import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
+import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, UserContextExtractor}
 import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController}
 import com.risquanter.register.http.sse.SSEController
@@ -61,33 +61,33 @@ object Application extends ZIOAppDefault {
     ZLayer.fromZIO {
       for {
         repoCfg <- ZIO.service[RepositoryConfig]
-        repo <- repoCfg.normalizedType match {
-          case "irmin" =>
+        repo <- repoCfg.repositoryType match {
+          case RepositoryType.Irmin =>
             ZIO.logInfo("repository.type=irmin; attempting Irmin wiring with fail-fast health check") *>
               ZIO.scoped(irminRepoLayer.build.map(_.get[RiskTreeRepository]))
-          case other =>
-            ZIO.logWarning(s"repository.type='$other' not 'irmin'; defaulting to in-memory repository") *>
+          case RepositoryType.InMemory =>
+            ZIO.logInfo("repository.type=in-memory; using in-memory repository") *>
               ZIO.scoped(inMemoryRepoLayer.build.map(_.get[RiskTreeRepository]))
         }
       } yield repo
     }
 
-  private val postgresWorkspaceStoreLayer: ZLayer[WorkspaceConfig, Throwable, WorkspaceStore] =
+  private val postgresWorkspaceStoreLayer: ZLayer[WorkspaceConfig & PostgresDataSourceConfig, Throwable, WorkspaceStore] =
     (ZLayer.service[WorkspaceConfig] ++ Repository.dataLayer) >>> WorkspaceStorePostgres.layer
 
   private val inMemoryWorkspaceStoreLayer: ZLayer[WorkspaceConfig, Nothing, WorkspaceStore] =
     ZLayer.service[WorkspaceConfig] >>> WorkspaceStoreLive.layer
 
-  private val chooseWorkspaceStore: ZLayer[WorkspaceStoreConfig & WorkspaceConfig, Throwable, WorkspaceStore] =
+  private val chooseWorkspaceStore: ZLayer[WorkspaceStoreConfig & WorkspaceConfig & PostgresDataSourceConfig, Throwable, WorkspaceStore] =
     ZLayer.fromZIO {
       for {
         cfg <- ZIO.service[WorkspaceStoreConfig]
-        store <- cfg.normalizedBackend match {
-          case "postgres" =>
+        store <- cfg.backend match {
+          case WorkspaceStoreBackend.Postgres =>
             ZIO.logInfo("workspaceStore.backend=postgres; using PostgreSQL-backed workspace store") *>
               ZIO.scoped(postgresWorkspaceStoreLayer.build.map(_.get[WorkspaceStore]))
-          case other =>
-            ZIO.logWarning(s"workspaceStore.backend='$other' not 'postgres'; defaulting to in-memory workspace store") *>
+          case WorkspaceStoreBackend.InMemory =>
+            ZIO.logInfo("workspaceStore.backend=in-memory; using in-memory workspace store") *>
               ZIO.scoped(inMemoryWorkspaceStoreLayer.build.map(_.get[WorkspaceStore]))
         }
       } yield store
@@ -100,15 +100,33 @@ object Application extends ZIOAppDefault {
     ZLayer.fromZIO {
       for {
         cfg <- ZIO.service[WorkspaceStoreConfig]
-        flyway <- cfg.normalizedBackend match {
-          case "postgres" =>
+        flyway <- cfg.backend match {
+          case WorkspaceStoreBackend.Postgres =>
             ZIO.logInfo("workspaceStore.backend=postgres; enabling Flyway migrations") *>
               ZIO.scoped(postgresFlywayLayer.build.map(_.get[FlywayService]))
-          case other =>
-            ZIO.logInfo(s"workspaceStore.backend='$other'; skipping Flyway migrations") *>
+          case WorkspaceStoreBackend.InMemory =>
+            ZIO.logInfo("workspaceStore.backend=in-memory; skipping Flyway migrations") *>
               ZIO.succeed(FlywayService.noOp)
         }
       } yield flyway
+    }
+
+  private val chooseAuthorizationService: ZLayer[AuthConfig, Throwable, AuthorizationService] =
+    ZLayer.fromZIO {
+      ZIO.service[AuthConfig].map {
+        case AuthConfig(AuthMode.CapabilityOnly) => AuthorizationServiceNoOp
+        case AuthConfig(AuthMode.Identity)       => AuthorizationServiceNoOp
+        case AuthConfig(AuthMode.FineGrained)    => AuthorizationServiceNoOp
+      }
+    }
+
+  private val chooseUserContextExtractor: ZLayer[AuthConfig, Nothing, UserContextExtractor] =
+    ZLayer.fromZIO {
+      ZIO.service[AuthConfig].map {
+        case AuthConfig(AuthMode.CapabilityOnly) => UserContextExtractor.noOp
+        case AuthConfig(AuthMode.Identity)       => UserContextExtractor.noOp
+        case AuthConfig(AuthMode.FineGrained)    => UserContextExtractor.noOp
+      }
     }
 
   // Bootstrap: Configure TypesafeConfigProvider to load from application.conf
@@ -118,14 +136,16 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor] =
-    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor](
+  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig] =
+    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
       Configs.makeLayer[TelemetryConfig]("register.telemetry"),
       Configs.makeLayer[CorsConfig]("register.cors"),
       Configs.makeLayer[WorkspaceConfig]("register.workspace"),
+      PostgresDataSourceConfig.layer,
+      AuthConfig.layer,
       WorkspaceStoreConfig.layer,
       // Server layer uses ServerConfig
       ZLayer.fromZIO(
@@ -155,14 +175,8 @@ object Application extends ZIOAppDefault {
       chooseFlywayService,
       RateLimiterLive.layer,
       WorkspaceReaper.layer,
-      // Authorization — NoOp stub (always-allow) wired in all modes at Wave 0.
-      // Replaced with AuthorizationServiceSpiceDB at Wave 3 when fine-grained mode is activated.
-      // @see AUTHORIZATION-PLAN.md — Wave 0: Infrastructure bootstrap
-      AuthorizationServiceNoOp.layer,
-      // UserContextExtractor — noOp returns anonymous sentinel (Wave 1).
-      // Replaced with UserContextExtractor.requirePresent at Wave 2 when identity mode is activated.
-      // @see AUTHORIZATION-PLAN.md — Wave 1: Header plumbing
-      ZLayer.succeed(UserContextExtractor.noOp),
+      chooseAuthorizationService,
+      chooseUserContextExtractor,
       ZLayer.fromZIO(SystemController.makeZIO),
       ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
       ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
@@ -175,12 +189,19 @@ object Application extends ZIOAppDefault {
   def startServer = for {
     cfg        <- ZIO.service[ServerConfig]
     corsConfig <- ZIO.service[CorsConfig]
+    authConfig <- ZIO.service[AuthConfig]
     userCtx    <- ZIO.service[UserContextExtractor]
     _          <- ZIO.logInfo(s"Server config: host=${cfg.host}, port=${cfg.port}")
     _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.normalised.mkString(", ")}")
     // Auth mode startup log — operators should alert on capability-only in production namespaces.
     // @see ADR-012 §7 — Trust Assumption T3/Attack 3: silent mode mismatch detection
-    _          <- UserContextExtractor.logStartupMode("capability-only", userCtx)
+    _          <- UserContextExtractor.logStartupMode(
+                    authConfig.mode match
+                      case AuthMode.CapabilityOnly => "capability-only"
+                      case AuthMode.Identity       => "identity"
+                      case AuthMode.FineGrained    => "fine-grained",
+                    userCtx
+                  )
     endpoints  <- HttpApi.endpointsZIO
     _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
 

@@ -1,8 +1,9 @@
 package com.risquanter.register.configs
 
-import zio.*
-import io.github.iltotore.iron.refineUnsafe
 import java.time.Duration
+
+import io.github.iltotore.iron.refineUnsafe
+import zio.*
 
 /** Test configuration values - single source of truth for tests */
 object TestConfigs {
@@ -22,7 +23,7 @@ object TestConfigs {
   val telemetry: TelemetryConfig = TelemetryConfig(
     serviceName = "risk-register-test",
     instrumentationScope = "com.risquanter.register.test",
-    otlpEndpoint = "http://localhost:4317",
+    otlpEndpoint = TestSafeUrls.localhostOtlpEndpoint,
     devExportIntervalSeconds = 1,
     prodExportIntervalSeconds = 10
   )

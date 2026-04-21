@@ -3,9 +3,8 @@ package com.risquanter.register.configs
 import zio.*
 import zio.config.*
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
-import com.risquanter.register.domain.data.iron.SafeUrl
-import com.risquanter.register.domain.errors.ValidationError
-import io.github.iltotore.iron.refineEither
+import com.risquanter.register.domain.data.iron.{BranchRef, SafeUrl}
+import com.risquanter.register.domain.data.iron.SafeUrl.*
 
 /**
   * Configuration for Irmin GraphQL client.
@@ -20,13 +19,13 @@ import io.github.iltotore.iron.refineEither
   */
 final case class IrminConfig(
   url: SafeUrl,
-  branch: String = "main",
+  branch: BranchRef = BranchRef.Main,
   timeoutSeconds: Int = 30,
   healthCheckTimeoutMillis: Int = 5000,
   healthCheckRetries: Int = 0
 ) {
   /** Full GraphQL endpoint URL */
-  def graphqlUrl: String = s"$url/graphql"
+  def graphqlUrl: String = s"${url.asString}/graphql"
   
   /** Request timeout as Duration */
   def timeout: Duration = timeoutSeconds.seconds
@@ -52,7 +51,16 @@ object IrminConfig {
         .map(errs => zio.Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
     }
 
+  private val branchRefConfig: zio.Config[BranchRef] =
+    zio.Config.string.mapOrFail { s =>
+      BranchRef
+        .fromString(s, "branch")
+        .left
+        .map(errs => zio.Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
+    }
+
   given DeriveConfig[SafeUrl] = DeriveConfig(safeUrlConfig)
+  given DeriveConfig[BranchRef] = DeriveConfig(branchRefConfig)
   given DeriveConfig[IrminConfig] = DeriveConfig.derived
 
   /** ZLayer providing IrminConfig from application.conf */

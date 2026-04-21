@@ -1,5 +1,24 @@
 package com.risquanter.register.configs
 
+import zio.*
+import zio.config.*
+import zio.config.magnolia.*
+
+enum AuthMode:
+  case CapabilityOnly, Identity, FineGrained
+
+object AuthMode:
+  private val config: Config[AuthMode] =
+    Config.string.mapOrFail {
+      case "capability-only" => Right(AuthMode.CapabilityOnly)
+      case "identity"        => Right(AuthMode.Identity)
+      case "fine-grained"    => Right(AuthMode.FineGrained)
+      case other =>
+        Left(Config.Error.InvalidData(message = s"Invalid auth.mode: '$other'. Expected one of: capability-only, identity, fine-grained"))
+    }
+
+  given DeriveConfig[AuthMode] = DeriveConfig(config)
+
 /** Authorization mode configuration.
   *
   * Controls which authorization layers are active at runtime:
@@ -11,10 +30,9 @@ package com.risquanter.register.configs
   * @see ADR-012: Service Mesh / Istio
   */
 final case class AuthConfig(
-  mode: String = "capability-only"
-):
-  val normalizedMode: String = mode.trim.toLowerCase
+  mode: AuthMode = AuthMode.CapabilityOnly
+)
 
-  def isCapabilityOnly: Boolean = normalizedMode == "capability-only"
-  def isIdentity: Boolean       = normalizedMode == "identity"
-  def isFineGrained: Boolean    = normalizedMode == "fine-grained"
+object AuthConfig:
+  val layer: ZLayer[Any, Throwable, AuthConfig] =
+    Configs.makeLayer[AuthConfig]("register.auth")

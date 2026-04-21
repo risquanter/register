@@ -4,18 +4,19 @@ import zio.*
 import zio.config.*
 import zio.config.magnolia.*
 
-/** Flyway bootstrap configuration. */
-final case class FlywayConfig(
-  url: String,
+final case class PostgresDataSourceConfig(
   user: String,
-  password: Config.Secret
+  password: Config.Secret,
+  databaseName: String,
+  portNumber: Int,
+  serverName: String
 )
 
-object FlywayConfig:
+object PostgresDataSourceConfig:
   private val secretConfig: Config[Config.Secret] =
     Config.string.mapOrFail(value => Right(Config.Secret(value)))
 
   given DeriveConfig[Config.Secret] = DeriveConfig(secretConfig)
 
-  val layer: ZLayer[Any, Throwable, FlywayConfig] =
-    Configs.makeLayer[FlywayConfig]("register.flyway")
+  val layer: ZLayer[Any, Throwable, PostgresDataSourceConfig] =
+    Configs.makeLayer[PostgresDataSourceConfig]("register.db.dataSource")
