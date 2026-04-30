@@ -1,8 +1,38 @@
 # ADR-013-proposal: Testing Strategy
 
-**Status:** Proposed  
-**Date:** 2026-01-17  
+**Status:** Proposed (NOT accepted)
+**Date:** 2026-01-17
 **Tags:** testing, zio-test, integration, quality
+
+---
+
+## ⚠️ Status & Terminology Clarification (2026-04-30)
+
+This ADR is **Proposed**, not Accepted. Treat its prescriptions as ideas
+under discussion, not as binding constraints on new code.
+
+Two specific clarifications, surfaced during a code-review discussion:
+
+1. **"Wiring test" is not an industry-standard test category.** It is a
+   label coined inside this proposal. Standard categories are unit,
+   integration, end-to-end (and sometimes contract / smoke). Readers may
+   reasonably interpret "wiring" as informal shorthand for "an integration
+   test that verifies the controller is reachable through the real
+   router/layer stack" — which is the *intent* here.
+2. **The `*WiringSpec.scala` naming convention is NOT adopted in the
+   codebase.** As of 2026-04-30 there are zero files matching
+   `*WiringSpec*` in the repository. The repo's actual pattern is a
+   single `HttpApiIntegrationSpec.scala` in `modules/server-it/` that
+   boots the full app layer via `HttpTestHarness` and exercises every
+   HTTP surface — i.e. wiring concerns are folded into the integration
+   tier, not split into a separate `WiringSpec` tier.
+
+If this proposal is ever moved to Accepted, either (a) drop the separate
+"Wiring" category and document the integration-tier-includes-wiring
+pattern that actually exists, or (b) explicitly retrofit existing tests
+to the new naming convention. Until then, **new code should follow the
+existing integration-tier pattern** — do not invent `*WiringSpec.scala`
+files based solely on this proposal.
 
 ---
 
