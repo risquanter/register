@@ -35,6 +35,7 @@ services:
       context: .
       dockerfile: containers/prod/Dockerfile.irmin-prod
     image: local/irmin-prod:3.11
+    pull_policy: build
     container_name: irmin-graphql
     ports:
       - "9080:8080"  # Expose on 9080 to avoid conflict with register-server
@@ -64,6 +65,7 @@ services:
     build:
       context: .
       dockerfile: containers/prod/Dockerfile.register-prod
+    pull_policy: build
     container_name: register-server
     ports:
       - "8090:8090"
@@ -161,9 +163,10 @@ services:
   # Full stack:  docker compose --profile persistence --profile frontend up
   frontend:
     build:
-      context: .
-      dockerfile: containers/prod/Dockerfile.frontend-prod
+      context: ..
+      dockerfile: register/containers/prod/Dockerfile.frontend-prod
     image: local/frontend:dev
+    pull_policy: build
     container_name: frontend
     ports:
       - "18080:8080"

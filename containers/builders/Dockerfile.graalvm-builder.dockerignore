@@ -1,0 +1,20 @@
+# Per-Dockerfile context filter for Dockerfile.graalvm-builder.
+# Build context is the parent of register/ (i.e. projects/).
+# Deny everything by default; allow only the sibling source trees needed
+# for publishLocal. Register sources are not needed here.
+#
+# Rules: the last matching pattern for a path wins. '*' denies all
+# top-level entries; '!hdr-rng/' re-includes the directory; then
+# 'hdr-rng/target/' re-excludes the build artifact subtree.
+
+*
+
+# hdr-rng source — required for sbt publishLocal
+!hdr-rng/
+hdr-rng/target/
+hdr-rng/project/target/
+
+# vague-quantifier-logic source (fol-engine) — required for sbt publishLocal
+!vague-quantifier-logic/
+vague-quantifier-logic/target/
+vague-quantifier-logic/project/target/

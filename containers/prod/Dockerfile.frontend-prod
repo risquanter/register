@@ -19,7 +19,9 @@
 #   baked into the image (no ConfigMap required).
 #
 # Build:  docker build -f containers/prod/Dockerfile.frontend-prod \
-#           -t local/frontend:dev .
+#           -t local/frontend:dev ..
+#         (run from the register project root; ".." = projects parent dir,
+#          required so vague-quantifier-logic/ and hdr-rng/ are in context)
 # Run:    docker run --rm -p 18080:8080 local/frontend:dev
 # Test:   curl -s http://localhost:18080/ | grep -q '<html' && echo OK
 # ============================================================================
@@ -50,13 +52,28 @@ RUN wget -q "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${
 
 WORKDIR /app
 
+# ---- Local SNAPSHOT libraries -----------------------------------------------
+# These are sibling projects not published to any public registry.
+# Must be publishLocal'd before sbt resolves the main project dependencies.
+# Build context must be the parent of all sibling projects (see build command).
+# Mirrors the same pattern in containers/builders/Dockerfile.graalvm-builder.
+
+# hdr-rng (com.risquanter:hdr-rng) — required by fol-engine
+COPY hdr-rng/ /tmp/hdr-rng/
+RUN cd /tmp/hdr-rng && sbt publishLocal && cd / && rm -rf /tmp/hdr-rng
+
+# fol-engine (com.risquanter:fol-engine) — required by register (JS artifact: fol-engine_sjs1_3)
+COPY vague-quantifier-logic/ /tmp/fol-engine/
+RUN cd /tmp/fol-engine && sbt publishLocal && cd / && rm -rf /tmp/fol-engine
+# ---- end local SNAPSHOT libraries -------------------------------------------
+
 # --------------------------------------------------------------------------
 # Dependency layer — sbt resolution (cached unless build.sbt / project/ change)
 # Matches the pattern in containers/prod/Dockerfile.register-prod.
 # app/update resolves app + common.js (app.dependsOn(common.js)).
 # --------------------------------------------------------------------------
-COPY build.sbt build.sbt
-COPY project/ project/
+COPY register/build.sbt build.sbt
+COPY register/project/ project/
 RUN sbt "app/update; commonJS/update"
 
 # --------------------------------------------------------------------------
@@ -65,8 +82,8 @@ RUN sbt "app/update; commonJS/update"
 # No package-lock.json in repo → npm install; --ignore-scripts is belt-
 # and-suspenders in addition to the .npmrc setting.
 # --------------------------------------------------------------------------
-COPY modules/app/package.json modules/app/package.json
-COPY modules/app/.npmrc       modules/app/.npmrc
+COPY register/modules/app/package.json modules/app/package.json
+COPY register/modules/app/.npmrc       modules/app/.npmrc
 RUN cd modules/app && npm install --ignore-scripts
 
 # --------------------------------------------------------------------------
@@ -75,12 +92,12 @@ RUN cd modules/app && npm install --ignore-scripts
 # @scala-js/vite-plugin-scalajs plugin (cwd: '../..' points to build.sbt).
 # Output: modules/app/dist/
 # --------------------------------------------------------------------------
-COPY modules/common/src/main/ modules/common/src/main/
-COPY modules/app/src/main/    modules/app/src/main/
-COPY modules/app/styles/      modules/app/styles/
-COPY modules/app/index.html   modules/app/index.html
-COPY modules/app/main.js      modules/app/main.js
-COPY modules/app/vite.config.js modules/app/vite.config.js
+COPY register/modules/common/src/main/ modules/common/src/main/
+COPY register/modules/app/src/main/    modules/app/src/main/
+COPY register/modules/app/styles/      modules/app/styles/
+COPY register/modules/app/index.html   modules/app/index.html
+COPY register/modules/app/main.js      modules/app/main.js
+COPY register/modules/app/vite.config.js modules/app/vite.config.js
 
 RUN cd modules/app && npm run build
 

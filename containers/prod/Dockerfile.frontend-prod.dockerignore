@@ -1,0 +1,58 @@
+# Per-Dockerfile context filter for Dockerfile.frontend-prod.
+# Build context is the parent of register/ (i.e. projects/).
+# Deny everything by default; then re-include what is needed:
+#   - hdr-rng/ and vague-quantifier-logic/ source trees (for publishLocal)
+#   - register/ source files needed for the Scala.js + Vite frontend build
+#
+# Rules: the last matching pattern for a path wins. '*' denies all
+# top-level entries; '!dir/' re-includes a directory; more-specific
+# patterns that follow re-exclude unwanted subtrees within it.
+
+*
+
+# ---- hdr-rng source (for sbt publishLocal) ----------------------------------
+!hdr-rng/
+hdr-rng/target/
+hdr-rng/project/target/
+
+# ---- vague-quantifier-logic source / fol-engine (for sbt publishLocal) ------
+!vague-quantifier-logic/
+vague-quantifier-logic/target/
+vague-quantifier-logic/project/target/
+
+# ---- register source (frontend build inputs only) ---------------------------
+# Re-include the whole register tree, then prune everything that is not
+# needed for the frontend build. This avoids a deeply nested include chain.
+!register/
+
+# Build artifacts and IDE state (largest directories — exclude first)
+register/target/
+register/project/target/
+register/modules/app/target/
+register/modules/server/target/
+register/modules/server-it/target/
+register/modules/common/target/
+register/.bloop/
+register/.metals/
+register/.bsp/
+
+# Entire sub-modules not used by the frontend build
+register/modules/server/
+register/modules/server-it/
+register/native-image-config/
+register/native-config/
+
+# Project scaffolding not needed inside Docker
+register/containers/
+register/docs/
+register/private-docs/
+register/dev/
+register/tests/
+register/temp/
+register/_deprecated/
+
+# Sensitive and CI files
+register/.env
+register/.env.*
+register/.github/
+register/docker-compose*.yml

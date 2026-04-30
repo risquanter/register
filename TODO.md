@@ -108,3 +108,130 @@ zio-config decoding), at least for closed sets such as:
 Free-form config such as URLs, branch names, hostnames, and service names may
 remain strings where the domain is intentionally open; the concern here is with
 closed-choice selector values.
+
+---
+
+## 5b. SNAPSHOT dependency resolution strategy in Docker builds
+
+**Decision:** Inline `COPY + sbt publishLocal` per Dockerfile (Option 1).
+
+Each Dockerfile that needs `hdr-rng` or `fol-engine` and cannot inherit a
+pre-warmed base image copies the sibling source trees into a temporary directory,
+runs `sbt publishLocal`, then deletes the source. The compiled `.jar` artifacts
+remain in the image's Ivy cache (`~/.ivy2/local/`) for the duration of the build.
+
+Current state:
+- `containers/builders/Dockerfile.graalvm-builder` — publishLocal inline; context `..`
+- `containers/prod/Dockerfile.frontend-prod` — publishLocal inline; context `..`
+- `containers/prod/Dockerfile.register-prod` — no publishLocal; inherits the JVM
+  artifacts from `FROM local/graalvm-builder:21`
+
+**Rebuild rule:** if `hdr-rng` or `vague-quantifier-logic` source changes, rebuild
+`local/graalvm-builder:21` and `local/frontend:dev` before rebuilding dependent images.
+
+**Note on Docker context and sibling paths:**  
+Docker's `COPY` instruction cannot reference paths outside the build context —
+there is no `COPY ../sibling/` syntax. The `..` passed as the context *argument*
+to `docker build` is the only valid mechanism when sibling source trees are
+needed. Context `.` with sibling paths is not possible in a Dockerfile.
+
+**Migration work required when `hdr-rng` and `fol-engine` are published:**
+
+The following changes must be made atomically once both artifacts are available
+from a Maven registry (GitHub Packages or Maven Central):
+
+1. **`containers/builders/Dockerfile.graalvm-builder`**
+   - Delete the two `COPY` + `RUN sbt publishLocal` blocks for `hdr-rng` and
+     `vague-quantifier-logic`.
+   - Update the build comment at the top: remove "Build context must be the
+     parent of the register project" and change the example command to use `.`.
+
+2. **`containers/prod/Dockerfile.frontend-prod`**
+   - Delete the two `COPY` + `RUN sbt publishLocal` blocks for `hdr-rng` and
+     `vague-quantifier-logic`.
+   - Change all `COPY register/...` paths back to unprefixed `COPY ...` paths
+     (i.e. revert to context `.`).
+   - Update the build comment at the top: remove the `..` context note.
+
+3. **`containers/builders/Dockerfile.graalvm-builder.dockerignore`**
+   - Delete the file entirely (the new `.` context uses `register/.dockerignore`
+     which already has the correct allow-list).
+
+4. **`containers/prod/Dockerfile.frontend-prod.dockerignore`**
+   - Delete the file entirely (same reason as above).
+
+5. **`docs/DOCKER-DEVELOPMENT.md`** — update every occurrence of:
+   - The graalvm-builder build command: `.. ` → `.`
+   - The frontend-prod build command: `..` → `.`
+   - The build context explanatory notes in the graalvm-builder and frontend
+     sections.
+   - The Quick Reference table entries for both images.
+
+6. **`build.sbt`**
+   - Add a `resolvers +=` entry if publishing to GitHub Packages (not needed
+     for Maven Central which is already on the default resolver chain).
+   - For GitHub Packages: pass registry credentials via
+     `--secret id=MAVEN_TOKEN,...` in the `docker build` command and write
+     `~/.sbt/1.0/credentials` in the Dockerfile builder stage.
+   - The `libraryDependencies` coordinates (`com.risquanter %% "hdr-rng"`,
+     `com.risquanter %%% "fol-engine"`) remain unchanged.
+
+7. **`docker-compose.yml`**
+   - Change `context: ..` back to `context: .` for the `frontend` service
+     (widened to `..` solely because the Dockerfile needed sibling source trees;
+     once those `COPY` blocks are removed, the context can be narrowed back).
+   - Change `dockerfile: register/containers/prod/Dockerfile.frontend-prod` back
+     to `dockerfile: containers/prod/Dockerfile.frontend-prod` (the `register/`
+     prefix was added because the context root is `..`).
+   - `register-server` and `irmin` both already use `context: .` and are unaffected.
+
+---
+
+## 6. Inconsistent Docker image naming convention
+
+**Observed:** Locally-built images use inconsistent tag conventions:
+
+| Image | Tag | Issue |
+|---|---|---|
+| `local/frontend:dev` | `dev` | Misleading — built from `Dockerfile.frontend-prod`; tag does not reflect content |
+| `register-server:prod` | `prod` | No `local/` prefix; tag describes build type, not version |
+| `local/graalvm-builder:21` | `21` | JDK version — semantically clear |
+| `local/irmin-prod:3.11` | `3.11` | Irmin version — semantically clear |
+| `local/irmin-builder:3.11` | `3.11` | Irmin version — semantically clear |
+
+The `local/frontend:dev` and `register-server:prod` names pre-date a coherent
+naming policy. The inconsistency creates confusion when reading `docker ps` or
+build scripts.
+
+**Decision context:**
+
+Three options were evaluated:
+
+| Option | Example | Assessment |
+|---|---|---|
+| `local/` + `:latest` | `local/register-server:latest` | Honest for a mutable local-only image ("always the last thing built"); zero version management overhead; matches `pull_policy: never` semantics in compose |
+| `local/` + app version | `local/register-server:0.1.0-SNAPSHOT` | Aligns with sbt versioning; enables multi-version coexistence and rollback; requires keeping tag in sync with `build.sbt` |
+| Keep `:dev` / `:prod` tags | — | No migration cost; but `:dev` is actively misleading (prod Dockerfile, prod content) and `register-server` lacks the `local/` prefix |
+
+Version tagging (option 2) is the standard practice for images intended for
+registry promotion, and will be the eventual target as the project matures
+toward a release process. However, it requires a mechanism to keep the image
+tag in sync with `build.sbt` (e.g. a shell script or sbt task that reads the
+version and passes it as a `--build-arg`), which adds complexity not justified
+at the current stage.
+
+**Decided migration path (on hold):**
+
+1. **Phase 1 — immediate (on hold):** Rename to `local/` + `:latest` for all
+   locally-built app images. Specifically:
+   - `local/frontend:dev` → `local/frontend:latest`
+   - `register-server:prod` → `local/register-server:latest`
+   - Update `docker-compose.yml`, all docs, and test references atomically.
+
+2. **Phase 2 — subsequent:** Migrate to `local/` + app version tag
+   (e.g. `local/register-server:0.1.0-SNAPSHOT`), driven by the sbt project
+   version in `build.sbt`. Implement a helper (script or sbt task) to stamp
+   the tag automatically so it stays in sync without manual edits.
+
+The Irmin and GraalVM builder images are **not affected** — their version tags
+pin to external software versions (`3.11`, `21`) and are already correct.

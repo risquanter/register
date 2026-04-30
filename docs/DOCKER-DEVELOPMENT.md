@@ -127,12 +127,18 @@ docker build -f containers/builders/Dockerfile.irmin-builder \
 
 Rebuild only when Irmin or OCaml versions change.
 
-For local development/debugging, a separate dev image with full toolchain is
-available:
+For **debugging only** (e.g. `docker exec` into a running container to inspect
+Irmin state with the OCaml/opam/git CLI), a separate dev image with the full
+toolchain is available. This image is not required for any normal workflow —
+the builder and prod images are sufficient for all build and runtime tasks:
 
 ```bash
 docker build -f containers/dev/Dockerfile.irmin-dev -t local/irmin-dev:3.11 .
 ```
+
+> **Note:** The dev image is ~650-700 MB (full opam toolchain + irmin-git) and
+> is not referenced by `docker-compose.yml` or any standard build step. Build
+> it only when you need interactive OCaml toolchain access inside the container.
 
 ### Full Clean Build (all images from scratch)
 
@@ -156,9 +162,10 @@ docker build -f containers/builders/Dockerfile.graalvm-builder \
   -t local/graalvm-builder:21 ..
 
 # 4. Frontend SPA (node:22-alpine builder + nginx:1.27.5-alpine-slim runtime) — ~10-15 min first run
-#    Self-contained: downloads and verifies sbt internally. Independent of steps 1-3.
+#    Context is the parent directory so vague-quantifier-logic/ and hdr-rng/ are in scope.
+#    Requires hdr-rng/ and vague-quantifier-logic/ at ../. Independent of steps 1-3 image-wise.
 docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:dev .
+  -t local/frontend:dev ..
 
 # 5. Register server production (native binary on distroless) — ~5-10 min
 #    Requires step 3.
@@ -372,7 +379,7 @@ npm deps → source compile. Only the source layer rebuilds on a code change.
 ```bash
 # Build
 docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:dev .
+  -t local/frontend:dev ..
 
 # Run
 docker run --rm -p 18080:8080 local/frontend:dev
@@ -930,7 +937,7 @@ See the linked sections for full context and prerequisites.
 |-------|-----------------|---------|---------|
 | `local/graalvm-builder:21` | fol-engine changes, GraalVM/sbt version bump | `docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..` | [Builder base](#one-time-setup-builder-base-image) |
 | `register-server:prod` | Server or common source changes | `docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod .` | [Register server](#standalone-docker) |
-| `local/frontend:dev` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:dev .` | [Frontend SPA](#standalone-docker-1) |
+| `local/frontend:dev` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:dev ..` | [Frontend SPA](#standalone-docker-1) |
 | `local/irmin-prod:3.11` | Irmin version changes | `docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11 containers/prod/` | [Irmin server](#irmin-graphql-server-persistence-layer) |
 | `local/irmin-builder:3.11` | OCaml/Irmin version changes | `docker build -f containers/builders/Dockerfile.irmin-builder -t local/irmin-builder:3.11 containers/builders/` | [Irmin builder](#one-time-setup-irmin-builder-base-image) |
 
