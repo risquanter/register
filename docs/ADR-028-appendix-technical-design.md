@@ -14,15 +14,15 @@ map directly to types in the vague-quantifier-logic codebase.
 |---|---|---|---|
 | **Domain** ($D$) | Set of all things we can talk about | `Domain[Any]` | `{leaf_1, leaf_2, portfolio_A, 5000000}` |
 | **Term** | Expression denoting a domain element | `Term` | Variable `x`, constant `leaf_1`, function `p95(x)` |
-| **Formula** | Expression evaluating to true/false | `Formula[FOL]` | `>(p95(x), 5000000)`, `leaf(x)` |
+| **Formula** | Expression evaluating to true/false | `Formula[FOL]` | `gt_loss(p95(x), 5000000)`, `leaf(x)` |
 | **Interpretation** ($I$) | Maps symbols to actual computations | `Interpretation[Any]` | `"p95" → calculateQuantiles(results(id))("P95")` |
 | **Model** ($M$) | Domain + Interpretation | `Model[Any]` | The complete package for evaluating formulas |
 | **Valuation** ($v$) | Assigns values to variables | `Valuation[Any]` | $\{x \mapsto \text{leaf\_3}\}$ |
-| **Satisfaction** | $M, v \models \varphi$ — formula holds | `FOLSemantics.holds()` | `M, {x ↦ leaf_3} ⊨ >(p95(x), 5000000)` → true |
+| **Satisfaction** | $M, v \models \varphi$ — formula holds | `FOLSemantics.holds()` | `M, {x ↦ leaf_3} ⊨ gt_loss(p95(x), 5000000)` → true |
 
 ### Evaluation Trace
 
-For query: `Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))`
+For query: `Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))`
 
 ```
 For each element d in range {d | leaf(d) holds} :
@@ -36,8 +36,8 @@ For each element d in range {d | leaf(d) holds} :
      5000000 is constant → I.getFunction("5000000")() = 5000000
                                                         ← numeric literal parse
 
-  3. Evaluate atom >(7200000, 5000000):
-     > is predicate → I(">")(7200000, 5000000) = true
+  3. Evaluate atom gt_loss(7200000, 5000000):
+     > gt_loss is predicate → I("gt_loss")(7200000, 5000000) = true
 
 Count satisfying / total → proportion → check quantifier threshold
 ```
@@ -60,20 +60,30 @@ Count satisfying / total → proportion → check quantifier threshold
 
 | Symbol | Arity | Computes | Return type |
 |---|---|---|---|
-| `p50(x)` | 1 | `calculateQuantiles(results(x))("P50")` | Long |
-| `p90(x)` | 1 | `calculateQuantiles(results(x))("P90")` | Long |
-| `p95(x)` | 1 | `calculateQuantiles(results(x))("P95")` | Long |
-| `p99(x)` | 1 | `calculateQuantiles(results(x))("P99")` | Long |
-| `lec(x, t)` | 2 | `results(x).probOfExceedance(t)` | Double |
+| `p95(x)` | 1 | `LECGenerator.unconditionalQuantile(results(x), 0.95)` | Long (Loss sort) |
+| `p99(x)` | 1 | `LECGenerator.unconditionalQuantile(results(x), 0.99)` | Long (Loss sort) |
+| `lec(x, t)` | 2 | `results(x).probOfExceedance(t)` | Double (Probability sort) |
 
-### Comparison Predicates (via `Interpretation` augmentation)
+> **Status note (2026-04-30):** earlier drafts of this ADR also listed `p50`
+> and `p90`. Those were never implemented and have been removed. If they
+> are needed, add them as new entries in `RiskTreeKnowledgeBase.catalog`
+> alongside `p95`/`p99`.
 
-| Symbol | Arity | Semantics |
-|---|---|---|
-| `>(a, b)` | 2 | `a.doubleValue > b.doubleValue` |
-| `<(a, b)` | 2 | `a.doubleValue < b.doubleValue` |
-| `>=(a, b)` | 2 | `a.doubleValue >= b.doubleValue` |
-| `<=(a, b)` | 2 | `a.doubleValue <= b.doubleValue` |
+### Comparison Predicates (typed, via `Interpretation` augmentation)
+
+| Symbol | Arity | Sorts | Semantics |
+|---|---|---|---|
+| `gt_loss(a, b)` | 2 | `(Loss, Loss)` | `a > b` (Long) |
+| `gt_prob(a, b)` | 2 | `(Probability, Probability)` | `a > b` (Double) |
+
+> **Status note (2026-04-30):** earlier drafts described untyped infix
+> operators `>(a, b)`, `<(a, b)`, `>=(a, b)`, `<=(a, b)`. The implementation
+> uses sort-tagged predicates (`gt_loss`, `gt_prob`) instead, because the
+> `fol.typed` many-sorted pipeline rejects mixing `Loss` and `Probability`
+> at the type-check stage — catching bugs like
+> `gt_loss(lec(x, 1000000), 0.05)` (loss vs probability) before evaluation.
+> The `<`/`>=`/`<=` variants have not been added yet; if needed, follow
+> the same naming pattern (`lt_loss`, `gte_loss`, etc.).
 
 ### Numeric Literal Resolution
 
@@ -213,7 +223,7 @@ POST /w/{key}/risk-trees/{treeId}/query
 
 ```json
 {
-  "query": "Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"
+  "query": "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))"
 }
 ```
 
@@ -230,7 +240,7 @@ parameters.
   "sampleSize": 25,
   "satisfyingCount": 18,
   "matchingNodeIds": ["cyber", "hardware", "..."],
-  "queryEcho": "Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"
+  "queryEcho": "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))"
 }
 ```
 
@@ -239,7 +249,7 @@ parameters.
 | Status | Cause | Body |
 |---|---|---|
 | 400 | Parse error | `{ "error": "parse_error", "detail": "...", "position": 14 }` |
-| 400 | Unknown symbol | `{ "error": "unknown_symbol", "symbol": "p96", "available": ["p50","p90","p95","p99","lec"] }` |
+| 400 | Unknown symbol | `{ "error": "unknown_symbol", "symbol": "p96", "available": ["p95","p99","lec"] }` |
 | 404 | Tree not found | Standard workspace 404 |
 | 409 | Simulation not cached | `{ "error": "simulation_required", "detail": "Run simulation before querying" }` |
 
@@ -324,7 +334,7 @@ isExecuting      : Signal[Boolean]                    ← derived from queryResu
 ### Tail-risk concentration
 
 ```
-Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))
+Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))
 ```
 
 "At least ⅔ of leaves have P95 above 5M." Range = all leaves.
@@ -333,7 +343,7 @@ Scope = simulation-backed function + numeric comparison.
 ### Sub-portfolio analysis (unary — returns node IDs)
 
 ```
-Q[>=]^{2/3} x (leaf_descendant_of(x, y), >(p95(x), 5000000))(y)
+Q[>=]^{2/3} x (leaf_descendant_of(x, y), gt_loss(p95(x), 5000000))(y)
 ```
 
 "Which portfolios have at least ⅔ of their leaf descendants with P95
@@ -342,7 +352,7 @@ above 5M?" Answer variable `y` projects matching portfolio IDs.
 ### Exceedance screening
 
 ```
-Q[<=]^{1/4} x (leaf(x), >(lec(x, 10000000), 0.05))
+Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000), 0.05))
 ```
 
 "At most ¼ of leaves have >5% probability of exceeding 10M."
@@ -365,7 +375,7 @@ nested deeper)." Structural-only query, no simulation involvement.
 ```
 Span: query.evaluate
 Attributes:
-  query.text         = "Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"
+  query.text         = "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))"
   query.range_size   = 25
   query.sample_size  = 25
   query.proportion   = 0.72

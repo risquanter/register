@@ -4,6 +4,15 @@
 **Date:** 2026-03-14  
 **Tags:** query-language, simulation, fol, integration
 
+> **Update 2026-04-30 — syntax aligned with current implementation.**
+> Numeric comparison predicates are sort-tagged (`gt_loss(Loss,Loss)`,
+> `gt_prob(Probability,Probability)`) rather than untyped infix `>`/`<`.
+> Available simulation-backed functions are `p95`, `p99`, `lec` (the
+> earlier `p50`/`p90` listing was never implemented). All examples in
+> this document and the appendix have been updated. The three open bugs
+> blocking node-name literals (`"IT Risk"` etc.) remain — see
+> `docs/PLAN-QUERY-NODE-NAME-LITERALS.md`.
+
 ---
 
 ## Context
@@ -42,8 +51,9 @@ FOL `Model` by:
    topology, node types)
 2. Calling `KnowledgeSourceModel.toModel()` to get the base interpretation
 3. Augmenting the interpretation with simulation-backed **functions**
-   (`p95`, `p50`, `lec`) and numeric **comparison predicates** (`>`, `<`,
-   `>=`, `<=`)
+   (`p95`, `p99`, `lec`) and typed **comparison predicates** (`gt_loss`,
+   `gt_prob`) — see DD-2 in the appendix for the typed-many-sorted
+   rationale that replaced the earlier untyped `>`/`<` operators
 4. Overriding `getFunction` to parse numeric literals in query strings
 
 ```scala
@@ -83,7 +93,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
 ```
 
 **Key property:** Zero changes to the vague-quantifier-logic library.
-Thresholds live in the query syntax (`>(p95(x), 5000000)`), making
+Thresholds live in the query syntax (`gt_loss(p95(x), 5000000)`), making
 queries self-describing.
 
 ### 3. Materialised Tree Relations (Transitive Closure)
@@ -107,7 +117,7 @@ reports, `leaf_descendant_of(x, y)` for all leaf descendants).
 ### 4. Query Validation Before Evaluation
 
 The `Model[Any]` layer is untyped — `Interpretation[Any]` does not
-prevent a user from writing `>(leaf_1, leaf_2)`. The server validates
+prevent a user from writing `gt_loss(leaf_1, leaf_2)`. The server validates
 the parsed `VagueQuery` AST before evaluation:
 
 - Function symbols (`p95`, `lec`) must have correct arity
@@ -138,7 +148,7 @@ POST /query { "query": "Q[>=]^{2/3} x (leaf(x), high_p95(x))",
 
 ```scala
 // GOOD: threshold in query syntax — self-describing, auditable
-POST /query { "query": "Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))" }
+POST /query { "query": "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))" }
 ```
 
 ### ❌ Modifying Library Traits for Register-Specific Concerns
@@ -158,13 +168,13 @@ val augmented = new Interpretation[Any](domain, baseFuncs ++ simFuncs, basePreds
 
 ```scala
 // BAD: nested ∀y over full domain (includes numeric literals) — runtime errors
-"Q[>=]^{2/3} x (leaf(x), ∀y. >(p95(y), 5000000))"
+"Q[>=]^{2/3} x (leaf(x), ∀y. gt_loss(p95(y), 5000000))"
 // p95(5000000) → NoSuchElementException
 ```
 
 ```scala
 // GOOD: range predicate constrains iteration to valid elements
-"Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))"
+"Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))"
 // x bound by range predicate leaf(x) — only node IDs
 ```
 
@@ -172,14 +182,14 @@ val augmented = new Interpretation[Any](domain, baseFuncs ++ simFuncs, basePreds
 
 ```scala
 // BAD: node(x) includes portfolios → double-counts aggregated losses
-"Q[>=]^{1/2} x (node(x), >(p95(x), 5000000))"
+"Q[>=]^{1/2} x (node(x), gt_loss(p95(x), 5000000))"
 ```
 
 ```scala
 // GOOD: leaf(x) gives independent, non-overlapping risk units
-"Q[>=]^{1/2} x (leaf(x), >(p95(x), 5000000))"
+"Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))"
 // Or for sub-portfolio analysis:
-"Q[>=]^{2/3} x (leaf_descendant_of(x, portfolio_A), >(p95(x), 5000000))"
+"Q[>=]^{2/3} x (leaf_descendant_of(x, portfolio_A), gt_loss(p95(x), 5000000))"
 ```
 
 ---

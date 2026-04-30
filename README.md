@@ -39,12 +39,12 @@ The storage layer is [Irmin](https://irmin.org/) — a Git-like content-addresse
 Analysts can ask proportional screening questions across a live risk tree using a first-order logic query language with *vague quantifiers* (based on Fermüller, Hofer & Ortiz, FQAS 2017):
 
 ```
-Q[>=]^{2/3} x (leaf(x), >(p95(x), 5000000))
+Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))
 ```
 
 *"Do at least two-thirds of leaf risks have a P95 loss above $5 M?"*
 
-Queries are evaluated server-side against the current simulation cache. Available terms include structural predicates (`leaf`, `portfolio`, `child_of`, `descendant_of`) and simulation-backed functions (`p50`, `p90`, `p95`, `p99`, `lec`). Query syntax errors are reported at parse time with position information.
+Queries are evaluated server-side against the current simulation cache. Available terms include structural predicates (`leaf`, `portfolio`, `child_of`, `descendant_of`, `leaf_descendant_of`) and simulation-backed functions (`p95`, `p99`, `lec`). Query syntax errors are reported at parse time with position information.
 
 
 ---
@@ -307,9 +307,24 @@ Layer 1 (Keycloak identity) and Layer 2 (SpiceDB fine-grained ACL) infrastructur
 
 ---
 
-## API Quick-Start (httpie)
+## API Quick-Start
 
-The following example bootstraps a workspace containing a risk tree that models a simple operational risk portfolio, then runs a vague quantifier query against the simulation results. Replace `localhost:8090` with your server address.
+The following examples bootstrap a workspace containing a risk tree, then run vague quantifier queries against the simulation results. Replace `localhost:8090` with your server address.
+
+Ready-to-run scripts for both examples below — including coloured output, preflight checks, and `jq`-extracted results — live in the [`examples/`](examples/) directory:
+
+| Script | Tool | Scenario |
+|---|---|---|
+| [`examples/demo-simple-httpie.sh`](examples/demo-simple-httpie.sh) | httpie | Simple operational risk (4 leaves) |
+| [`examples/demo-simple-curl.sh`](examples/demo-simple-curl.sh) | curl | Simple operational risk (4 leaves) |
+| [`examples/demo-enterprise-httpie.sh`](examples/demo-enterprise-httpie.sh) | httpie | Financial services enterprise risk (20 leaves, 10 portfolios) |
+| [`examples/demo-enterprise-curl.sh`](examples/demo-enterprise-curl.sh) | curl | Financial services enterprise risk (20 leaves, 10 portfolios) |
+
+```bash
+chmod +x examples/*.sh
+./examples/demo-simple-httpie.sh          # or demo-simple-curl.sh
+./examples/demo-enterprise-httpie.sh      # or demo-enterprise-curl.sh
+```
 
 > **Note:** The `workspaceKey` returned by the bootstrap step is a 128-bit capability token embedded in every subsequent URL. Treat it like a shared secret.
 
@@ -446,33 +461,121 @@ export WS_KEY=aB3x7kLm2Pq9RwZvNsYt8u
 export TREE_ID=01J...
 ```
 
-### 2. Fetch Loss Exceedance Curves
+### 2. Fetch Tree Summary
 
+**httpie:**
 ```bash
-http GET "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/lec"
+http GET "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID"
 ```
 
-Returns pre-computed LEC curve points and P50/P90/P95/P99 quantile statistics for every node in the tree.
+**curl:**
+```bash
+curl -s "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
+```
+
+Returns the simulation summary for every node in the tree, including P95/P99 quantile statistics and LEC curve points.
 
 ### 3. Run a Vague Quantifier Query
 
 Ask whether most of the leaf risks in the tree have a tail (P95) loss exceeding $2 M:
 
+**httpie:**
 ```bash
 http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[>=]^{1/2} x (leaf(x), >(p95(x), 2000000))'
+  query='Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))'
+```
+
+**curl:**
+```bash
+curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))"}'
 ```
 
 This query reads: *"Do at least half of all leaf risks have a P95 loss above \$2 M?"*
 
-A more targeted variant scoped to IT risks only:
+A more targeted variant scoped to the tail at P99:
 
+**httpie:**
 ```bash
 http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[>=]^{2/3} x (leaf_descendant_of(x, "IT Risk"), >(p95(x), 1000000))'
+  query='Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))'
 ```
 
-*"Do at least two-thirds of IT Risk leaf descendants have P95 above \$1 M?"*
+**curl:**
+```bash
+curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))"}'
+```
+
+*"Do at least one third of leaves have a P99 loss above \$5 M?"*
+
+> **Known limitation (tracked in [docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md)):**
+> sub-portfolio scoping queries that reference a node by quoted name
+> (e.g. `leaf_descendant_of(x, "IT Risk")`) are temporarily unsupported.
+> The lexer, term parser, and FOL adapter need three coordinated
+> changes before such queries parse. The demo scripts in `examples/`
+> exercise the rest of the surface in the meantime.
+
+##### Coming soon: sub-portfolio scoping queries
+
+> ⚠️ **The queries below are NOT YET EXECUTABLE.** Running them today
+> against the running server returns either `400 PARSE_ERROR` (multi-word
+> names) or — worse — a *silently wrong* result (single-word names: the
+> name is rebound as a free variable rather than a constant lookup, so the
+> quantifier ranges over the entire domain). Tracked in
+> [docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md);
+> they form that plan's post-fix acceptance set. Naming convention assumed
+> below: the post-fix lexer accepts a `"…"` literal whose inner text is
+> looked up in the catalog of node names registered for the current tree
+> — so any name a user can store via the tree-create API is referenceable.
+
+Against the enterprise demo tree (`Enterprise Risk` root with
+`Operational Risk → Technology & Cyber → {Cyber Breach, …}` etc.):
+
+```
+# Q-A — sub-portfolio scoping (descendants of a named branch)
+Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology & Cyber"),
+               gt_loss(p95(x), 5000000))
+# "Do at least two-thirds of leaves under Technology & Cyber have a P95 loss above $5M?"
+
+# Q-B — direct-child scoping (one level down)
+Q[>=]^{1/2} x (child_of(x, "Operational Risk"),
+               gt_prob(lec(x, 10000000), 0.05))
+# "Is at least half of Operational Risk's direct sub-portfolio more than 5% likely to exceed $10M?"
+
+# Q-C — cross-branch comparison (same shape, different anchor)
+Q[>=]^{2/3} x (leaf_descendant_of(x, "Financial Risk"),
+               gt_loss(p99(x), 20000000))
+Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"),
+               gt_loss(p99(x), 20000000))
+# Compare tail-loss concentration between two named sub-portfolios.
+
+# Q-D — exclusion via negation
+Q[<=]^{1/3} x (leaf(x), ~descendant_of(x, "Technology & Cyber"),
+               gt_loss(p95(x), 1000000))
+# "Of leaves outside Technology & Cyber, do at most one-third have P95 above $1M?"
+
+# Q-E — pinpoint a single named leaf (additionally blocked, see TODO §8)
+Q[>=]^{1} x (eq(x, "Cyber Breach"),
+             gt_loss(p95(x), 5000000))
+# "Does the Cyber Breach leaf have P95 loss above $5M?"
+```
+
+Q-A through Q-D are unblocked once F1 + F2 + F3 from
+[docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md)
+ship and are listed as that plan's post-fix acceptance set.
+
+**Q-E is additionally blocked.** No `eq` predicate is registered in the
+typed FOL dispatcher today (`RiskTreeKnowledgeBase.scala` declares only
+`leaf`, `portfolio`, `child_of`, `descendant_of`, `leaf_descendant_of`,
+`gt_loss`, `gt_prob`). A separate `fol.bridge` / untyped-pipeline layer in
+the sibling `fol-engine` repo *does* register `=`, but is not wired into
+the typed pipeline used here. Why the two paths exist and which should be
+the long-term home for equality is captured as an investigation task —
+see [TODO.md §8](TODO.md). Q-E will become referenceable once that task
+resolves and equality lands in the typed dispatcher.
 
 The response includes the quantifier satisfaction result, the proportion of matching elements, and the set of node IDs that satisfy the predicate (for frontend tree highlighting):
 
@@ -482,7 +585,9 @@ The response includes the quantifier satisfaction result, the proportion of matc
   "proportion": 0.667,
   "satisfyingNodeIds": ["<Cyber Breach node id>", "<Ransomware node id>"],
   "rangeSize": 3,
-  "query": "Q[>=]^{2/3} x (leaf_descendant_of(x, \"IT Risk\"), >(p95(x), 1000000))"
+  "satisfyingCount": 2,
+  "sampleSize": 3,
+  "queryEcho": "Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))"
 }
 ```
 
@@ -491,14 +596,198 @@ The response includes the quantifier satisfaction result, the proportion of matc
 | Syntax element | Meaning |
 |---|---|
 | `Q[>=]^{2/3} x (range(x), pred(x))` | True when at least 2/3 of elements in `range` satisfy `pred` |
-| `Q[>]^{1/2}`, `Q[<=]^{3/4}` | Other proportional thresholds |
+| `Q[<=]^{1/2} x (range(x), pred(x))` | True when at most 1/2 of elements in `range` satisfy `pred` |
+| `Q[~]^{1/2} x (range(x), pred(x))` | True when approximately 1/2 of elements satisfy `pred` (fuzzy) |
 | `leaf(x)` | x is a leaf risk node |
 | `portfolio(x)` | x is a portfolio node |
-| `child_of(x, "Parent Name")` | x is a direct child of the named node |
-| `leaf_descendant_of(x, "Name")` | x is a leaf anywhere under the named node |
-| `p50(x)`, `p95(x)`, `p99(x)` | Quantile loss value for node x |
-| `lec(x, 1000000)` | Exceedance probability at \$1 M for node x |
-| `>(p95(x), 5000000)` | P95 loss exceeds \$5 M |
+| `child_of(x, "Parent Name")` | x is a direct child of the named node *(quoted-name forms temporarily unsupported — see PLAN-QUERY-NODE-NAME-LITERALS.md)* |
+| `descendant_of(x, "Name")` | x is any descendant of the named node *(quoted-name forms temporarily unsupported)* |
+| `leaf_descendant_of(x, "Name")` | x is a leaf anywhere under the named node *(quoted-name forms temporarily unsupported)* |
+| `p95(x)`, `p99(x)` | P95 / P99 loss value for node x (returns Loss) |
+| `lec(x, 1000000)` | Exceedance probability at \$1 M for node x (returns Probability) |
+| `gt_loss(p95(x), 5000000)` | P95 loss exceeds \$5 M (Loss comparison) |
+| `gt_prob(lec(x, 1000000), 0.05)` | Exceedance probability at \$1 M exceeds 5 % (Probability comparison) |
+
+---
+
+### Enterprise Risk Model Example
+
+The following example builds a realistic 4-domain financial services risk tree (21 nodes: 1 root + 10 portfolios + 20 leaves) to demonstrate queries at enterprise complexity.
+
+```
+Enterprise Risk  (root)
+├── Operational Risk
+│   ├── Technology & Cyber
+│   │   ├── Ransomware Attack             expert  15%  P25=$500K P50=$2M P75=$8M  P95=$25M
+│   │   ├── Cloud Provider Outage         lognorm 30%  $200K–$4M
+│   │   ├── Data Breach (PII)             lognorm 10%  $1M–$15M
+│   │   └── Insider Threat                lognorm  5%  $2M–$20M
+│   ├── Process & People
+│   │   ├── Key Person Departure          lognorm 20%  $100K–$800K
+│   │   ├── Internal Fraud                expert   8%  P25=$200K P50=$1M P75=$4M  P95=$18M
+│   │   └── Process Failure               lognorm 25%  $50K–$500K
+│   └── Third-Party & Supply Chain
+│       ├── Critical Vendor Failure       lognorm 12%  $500K–$5M
+│       ├── Outsourcing SLA Breach        lognorm 20%  $100K–$1.5M
+│       └── Concentration Risk            expert   8%  P25=$1M   P50=$4M          P95=$18M
+├── Financial Risk
+│   ├── Market Risk
+│   │   ├── Equity Portfolio Drawdown     expert  35%  P25=$1M P50=$4M P75=$12M  P95=$28M
+│   │   └── FX Adverse Move               lognorm 40%  $500K–$8M
+│   ├── Credit Risk
+│   │   ├── Counterparty Default          lognorm  5%  $3M–$30M
+│   │   └── Credit Downgrade Wave         expert  15%  P25=$800K P50=$3M          P95=$20M
+│   └── Liquidity Risk
+│       └── Funding Squeeze               lognorm  8%  $2M–$25M
+├── Compliance & Legal Risk
+│   ├── Regulatory Action                 lognorm 12%  $2M–$50M
+│   ├── Litigation                        expert   8%  P25=$300K P50=$2M P75=$8M  P95=$40M
+│   └── GDPR / Data Protection Fine       lognorm 15%  $500K–$10M
+└── Strategic & Reputational Risk
+    ├── ESG Controversy                   lognorm 10%  $1M–$12M
+    ├── M&A Integration Failure           lognorm  5%  $5M–$40M
+    └── Product Recall / Liability        expert   6%  P25=$1M   P50=$5M          P95=$35M
+```
+
+#### Bootstrap (httpie)
+
+```bash
+http POST localhost:8090/workspaces \
+  name="Financial Services Enterprise Risk" \
+  portfolios:='[
+    {"name": "Enterprise Risk",               "parentName": null},
+    {"name": "Operational Risk",              "parentName": "Enterprise Risk"},
+    {"name": "Technology & Cyber",            "parentName": "Operational Risk"},
+    {"name": "Process & People",              "parentName": "Operational Risk"},
+    {"name": "Third-Party & Supply Chain",    "parentName": "Operational Risk"},
+    {"name": "Financial Risk",                "parentName": "Enterprise Risk"},
+    {"name": "Market Risk",                   "parentName": "Financial Risk"},
+    {"name": "Credit Risk",                   "parentName": "Financial Risk"},
+    {"name": "Liquidity Risk",                "parentName": "Financial Risk"},
+    {"name": "Compliance & Legal Risk",       "parentName": "Enterprise Risk"},
+    {"name": "Strategic & Reputational Risk", "parentName": "Enterprise Risk"}
+  ]' \
+  leaves:='[
+    {"name":"Ransomware Attack","parentName":"Technology & Cyber","distributionType":"expert","probability":0.15,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[500000,2000000,8000000,25000000]},
+    {"name":"Cloud Provider Outage","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.30,"minLoss":200000,"maxLoss":4000000,"percentiles":null,"quantiles":null},
+    {"name":"Data Breach (PII)","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.10,"minLoss":1000000,"maxLoss":15000000,"percentiles":null,"quantiles":null},
+    {"name":"Insider Threat","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.05,"minLoss":2000000,"maxLoss":20000000,"percentiles":null,"quantiles":null},
+    {"name":"Key Person Departure","parentName":"Process & People","distributionType":"lognormal","probability":0.20,"minLoss":100000,"maxLoss":800000,"percentiles":null,"quantiles":null},
+    {"name":"Internal Fraud","parentName":"Process & People","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[200000,1000000,4000000,18000000]},
+    {"name":"Process Failure","parentName":"Process & People","distributionType":"lognormal","probability":0.25,"minLoss":50000,"maxLoss":500000,"percentiles":null,"quantiles":null},
+    {"name":"Critical Vendor Failure","parentName":"Third-Party & Supply Chain","distributionType":"lognormal","probability":0.12,"minLoss":500000,"maxLoss":5000000,"percentiles":null,"quantiles":null},
+    {"name":"Outsourcing SLA Breach","parentName":"Third-Party & Supply Chain","distributionType":"lognormal","probability":0.20,"minLoss":100000,"maxLoss":1500000,"percentiles":null,"quantiles":null},
+    {"name":"Concentration Risk","parentName":"Third-Party & Supply Chain","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[1000000,4000000,18000000]},
+    {"name":"Equity Portfolio Drawdown","parentName":"Market Risk","distributionType":"expert","probability":0.35,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[1000000,4000000,12000000,28000000]},
+    {"name":"FX Adverse Move","parentName":"Market Risk","distributionType":"lognormal","probability":0.40,"minLoss":500000,"maxLoss":8000000,"percentiles":null,"quantiles":null},
+    {"name":"Counterparty Default","parentName":"Credit Risk","distributionType":"lognormal","probability":0.05,"minLoss":3000000,"maxLoss":30000000,"percentiles":null,"quantiles":null},
+    {"name":"Credit Downgrade Wave","parentName":"Credit Risk","distributionType":"expert","probability":0.15,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[800000,3000000,20000000]},
+    {"name":"Funding Squeeze","parentName":"Liquidity Risk","distributionType":"lognormal","probability":0.08,"minLoss":2000000,"maxLoss":25000000,"percentiles":null,"quantiles":null},
+    {"name":"Regulatory Action","parentName":"Compliance & Legal Risk","distributionType":"lognormal","probability":0.12,"minLoss":2000000,"maxLoss":50000000,"percentiles":null,"quantiles":null},
+    {"name":"Litigation","parentName":"Compliance & Legal Risk","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[300000,2000000,8000000,40000000]},
+    {"name":"GDPR / Data Protection Fine","parentName":"Compliance & Legal Risk","distributionType":"lognormal","probability":0.15,"minLoss":500000,"maxLoss":10000000,"percentiles":null,"quantiles":null},
+    {"name":"ESG Controversy","parentName":"Strategic & Reputational Risk","distributionType":"lognormal","probability":0.10,"minLoss":1000000,"maxLoss":12000000,"percentiles":null,"quantiles":null},
+    {"name":"M&A Integration Failure","parentName":"Strategic & Reputational Risk","distributionType":"lognormal","probability":0.05,"minLoss":5000000,"maxLoss":40000000,"percentiles":null,"quantiles":null},
+    {"name":"Product Recall / Liability","parentName":"Strategic & Reputational Risk","distributionType":"expert","probability":0.06,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[1000000,5000000,35000000]}
+  ]'
+```
+
+#### Bootstrap (curl)
+
+```bash
+curl -s -X POST http://localhost:8090/workspaces \
+  -H 'Content-Type: application/json' \
+  -d '{ "name": "Financial Services Enterprise Risk", "portfolios": [
+    {"name":"Enterprise Risk","parentName":null},
+    {"name":"Operational Risk","parentName":"Enterprise Risk"},
+    {"name":"Technology & Cyber","parentName":"Operational Risk"},
+    {"name":"Process & People","parentName":"Operational Risk"},
+    {"name":"Third-Party & Supply Chain","parentName":"Operational Risk"},
+    {"name":"Financial Risk","parentName":"Enterprise Risk"},
+    {"name":"Market Risk","parentName":"Financial Risk"},
+    {"name":"Credit Risk","parentName":"Financial Risk"},
+    {"name":"Liquidity Risk","parentName":"Financial Risk"},
+    {"name":"Compliance & Legal Risk","parentName":"Enterprise Risk"},
+    {"name":"Strategic & Reputational Risk","parentName":"Enterprise Risk"}
+  ], "leaves": [
+    {"name":"Ransomware Attack","parentName":"Technology & Cyber","distributionType":"expert","probability":0.15,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[500000,2000000,8000000,25000000]},
+    {"name":"Cloud Provider Outage","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.30,"minLoss":200000,"maxLoss":4000000,"percentiles":null,"quantiles":null},
+    {"name":"Data Breach (PII)","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.10,"minLoss":1000000,"maxLoss":15000000,"percentiles":null,"quantiles":null},
+    {"name":"Insider Threat","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.05,"minLoss":2000000,"maxLoss":20000000,"percentiles":null,"quantiles":null},
+    {"name":"Key Person Departure","parentName":"Process & People","distributionType":"lognormal","probability":0.20,"minLoss":100000,"maxLoss":800000,"percentiles":null,"quantiles":null},
+    {"name":"Internal Fraud","parentName":"Process & People","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[200000,1000000,4000000,18000000]},
+    {"name":"Process Failure","parentName":"Process & People","distributionType":"lognormal","probability":0.25,"minLoss":50000,"maxLoss":500000,"percentiles":null,"quantiles":null},
+    {"name":"Critical Vendor Failure","parentName":"Third-Party & Supply Chain","distributionType":"lognormal","probability":0.12,"minLoss":500000,"maxLoss":5000000,"percentiles":null,"quantiles":null},
+    {"name":"Outsourcing SLA Breach","parentName":"Third-Party & Supply Chain","distributionType":"lognormal","probability":0.20,"minLoss":100000,"maxLoss":1500000,"percentiles":null,"quantiles":null},
+    {"name":"Concentration Risk","parentName":"Third-Party & Supply Chain","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[1000000,4000000,18000000]},
+    {"name":"Equity Portfolio Drawdown","parentName":"Market Risk","distributionType":"expert","probability":0.35,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[1000000,4000000,12000000,28000000]},
+    {"name":"FX Adverse Move","parentName":"Market Risk","distributionType":"lognormal","probability":0.40,"minLoss":500000,"maxLoss":8000000,"percentiles":null,"quantiles":null},
+    {"name":"Counterparty Default","parentName":"Credit Risk","distributionType":"lognormal","probability":0.05,"minLoss":3000000,"maxLoss":30000000,"percentiles":null,"quantiles":null},
+    {"name":"Credit Downgrade Wave","parentName":"Credit Risk","distributionType":"expert","probability":0.15,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[800000,3000000,20000000]},
+    {"name":"Funding Squeeze","parentName":"Liquidity Risk","distributionType":"lognormal","probability":0.08,"minLoss":2000000,"maxLoss":25000000,"percentiles":null,"quantiles":null},
+    {"name":"Regulatory Action","parentName":"Compliance & Legal Risk","distributionType":"lognormal","probability":0.12,"minLoss":2000000,"maxLoss":50000000,"percentiles":null,"quantiles":null},
+    {"name":"Litigation","parentName":"Compliance & Legal Risk","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[300000,2000000,8000000,40000000]},
+    {"name":"GDPR / Data Protection Fine","parentName":"Compliance & Legal Risk","distributionType":"lognormal","probability":0.15,"minLoss":500000,"maxLoss":10000000,"percentiles":null,"quantiles":null},
+    {"name":"ESG Controversy","parentName":"Strategic & Reputational Risk","distributionType":"lognormal","probability":0.10,"minLoss":1000000,"maxLoss":12000000,"percentiles":null,"quantiles":null},
+    {"name":"M&A Integration Failure","parentName":"Strategic & Reputational Risk","distributionType":"lognormal","probability":0.05,"minLoss":5000000,"maxLoss":40000000,"percentiles":null,"quantiles":null},
+    {"name":"Product Recall / Liability","parentName":"Strategic & Reputational Risk","distributionType":"expert","probability":0.06,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[1000000,5000000,35000000]}
+  ] }' | jq '{workspaceKey: .workspaceKey, treeId: .tree.id, expiresAt: .expiresAt}'
+```
+
+#### Sample Queries (httpie)
+
+> **Note:** Queries that scope to a sub-portfolio by quoted name
+> (e.g. `leaf_descendant_of(x, "Technology & Cyber")`) are temporarily
+> unsupported — see
+> [docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md).
+> The samples below exercise the full operator surface
+> (`gt_loss`/`gt_prob`, `p95`/`p99`/`lec`, `leaf`/`portfolio`, all
+> three quantifier shapes) without referencing node names.
+
+```bash
+# Q1: Do at least 1/4 of all leaves have P99 above $20M?
+http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  query='Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 20000000))'
+
+# Q2: Do fewer than half of all leaves have a >10% chance of exceeding $1M?
+http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  query='Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000000), 0.10))'
+
+# Q3: Do at least 3/4 of all leaves have P95 above $1M?
+http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  query='Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x), 1000000))'
+
+# Q4: Do about half of all leaves have P95 above $5M?
+http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  query='Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))'
+
+# Q5: Do at most 1/3 of portfolio nodes have P99 above $50M?
+http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  query='Q[<=]^{1/3} x (portfolio(x), gt_loss(p99(x), 50000000))'
+
+# Q6: Do at most 1/4 of all leaves have a >5% chance of exceeding $10M?
+http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  query='Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000), 0.05))'
+```
+
+#### Sample Queries (curl)
+
+```bash
+# Q1: Do at least 1/4 of all leaves have P99 above $20M?
+curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 20000000))"}'
+
+# Q5: Do at most 1/3 of portfolio nodes have P99 above $50M?
+curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Q[<=]^{1/3} x (portfolio(x), gt_loss(p99(x), 50000000))"}'
+
+# Q6: Do at most 1/4 of all leaves have a >5% chance of exceeding $10M?
+curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
+  -H 'Content-Type: application/json' \
+  -d '{"query": "Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000), 0.05))"}'
+```
 
 ---
 
