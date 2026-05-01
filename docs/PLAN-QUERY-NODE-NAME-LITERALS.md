@@ -212,60 +212,102 @@ Each fix is described as a signature/behaviour echo (no implementation
 bodies — per WORKING-INSTRUCTIONS § Signature Echo Protocol). Implementation
 will only proceed after explicit user approval.
 
-### F1 — Quoted-string token in lexer (addresses D1)
+### F1 — Typed `Token` ADT + quoted-string lexer branch (addresses D1)
 
 **Repo:** `vague-quantifier-logic`
 **File:** `core/src/main/scala/lexer/Lexer.scala`
 
-Add a third branch to `lex` for `"` that consumes characters up to the next
-unescaped `"` and emits the **inner** content as a single token (the leading
-and trailing `"` are stripped). The token retains its inner whitespace and is
-distinguishable from an alphanumeric token only by the contract that the
-parser-side const-detector knows about.
+Replaces the stringly-typed `List[String]` lexer output with a sealed
+`Token` ADT (per D-1, settled). Adds a fourth lexer branch for `"` that
+consumes characters up to the next `"` (no escaping; per D-4) and emits a
+`Token.StringLit(content)` carrying the **inner** content only — the
+surrounding quote characters are not part of the payload.
 
-**Decision required (see §6 D-1):** how to mark the token as "originated from
-a quoted string" so the parser can treat it as a constant rather than a
-variable.
-
-**Signature** (illustrative — exact placement TBD with user):
+**ADT shape (D-1 Option α — settled 2026-05-01):**
 
 ```scala
-// Lexer addition (pseudo-signature)
-def lex(inp: List[Char]): List[String] = ... {
-  case '"' :: rest => {
-    val (content, after) = lexUntilQuote(rest)
-    /* OPTION A */ s""""$content"""" :: lex(after)   // keep the surrounding quotes in the token
-    /* OPTION B */ "STR:" + content :: lex(after)    // sentinel-prefix marker
-    /* OPTION C */ content :: lex(after)             // strip; parser can't tell — REJECTED, breaks D2 disambiguation
-  }
-  ...
-}
+sealed trait Token
+object Token:
+  /** OCaml `string` (alphanumeric run). */
+  final case class Word(name: String) extends Token
+  /** New (D-1/D-4): content of a `"…"`-delimited literal, quotes stripped. */
+  final case class StringLit(content: String) extends Token
+  /** OCaml `string` (symbolic operator run, e.g. `">="`, `"/\\"`, `"==>"`). */
+  final case class OpSym(sym: String) extends Token
+  /** Single-character punctuation. One case per terminal. */
+  case object LParen extends Token   // OCaml: `"("`
+  case object RParen extends Token   // OCaml: `")"`
+  case object LBracket extends Token // OCaml: `"["`
+  case object RBracket extends Token // OCaml: `"]"`
+  case object LBrace extends Token   // OCaml: `"{"`
+  case object RBrace extends Token   // OCaml: `"}"`
+  case object Comma extends Token    // OCaml: `","`
+  case object Dot extends Token      // OCaml: `"."`
 ```
 
-### F2 — Const detection for quoted-string tokens (addresses D2)
+**Signature change:**
+
+```scala
+// before
+def lex(inp: List[Char]): List[String]
+// after
+def lex(inp: List[Char]): List[Token]
+```
+
+**Lexer behaviour additions (no implementation body yet):**
+
+- `"` opens a string literal; characters consumed verbatim until the next
+  `"` (no backslash escapes; newline inside ⇒ `LexerError`); emits one
+  `Token.StringLit(content)`.
+- Single-character punctuation is matched by exact char and emitted as the
+  corresponding object case.
+- Existing alphanumeric run → `Token.Word(...)`; symbolic run → `Token.OpSym(...)`.
+- `LexerError` for unterminated string literals (existing exception-based
+  backtracking pattern, per fol-engine ADR-002 / ADR-007 C2).
+
+**Downstream impact (per C13 of the proposed ADR-007 amendment).** Every
+downstream `case "(" :: rest =>` becomes `case Token.LParen :: rest =>`;
+every `case "," :: rest =>` becomes `case Token.Comma :: rest =>`; every
+`case op :: rest if isOp(op) =>` becomes `case Token.OpSym(op) :: rest =>`;
+bare-name detection becomes `case Token.Word(a) :: rest =>`. Same number of
+arms, same control flow, no new abstraction — covered by C13(c).
+
+### F2 — Const detection for `Token.StringLit` (addresses D2)
 
 **Repo:** `vague-quantifier-logic`
 **File:** `core/src/main/scala/parser/TermParser.scala`
 
-Extend `isConstName` (or replace with `classify(token) → TokenKind`) so a
-token recognised as a quoted-string emits `Term.Const(unquotedContent)`
-rather than `Term.Var(token)`.
+With the typed `Token` ADT (F1), the stringly-typed `isConstName`
+predicate is no longer needed for the quoted-string path — classification
+becomes a direct pattern match on the ADT case. The existing
+`isConstName: String => Boolean` is retained only to recognise the legacy
+numeric / `nil` / decimal-literal forms inside a `Token.Word`.
 
-**Signature:**
+**Atomic-term branch shape:**
+
+```scala
+// in the atomic-term parser, replacing the current `case a :: rest`:
+parserCases match
+  case Token.StringLit(content) :: rest =>
+    // Quoted literal — always a constant whose value is the inner content.
+    (Term.Const(content), rest)
+  case Token.Word(a) :: rest if isConstName(a) =>
+    // Numeric / `nil` / decimal — preserved unchanged from current behaviour.
+    (Term.Const(a), rest)
+  case Token.Word(a) :: rest =>
+    // Bare alphanumeric — variable, preserved unchanged.
+    (Term.Var(a), rest)
+```
+
+No `unquote` helper is needed: the lexer already strips the surrounding
+quotes when it constructs `Token.StringLit(content)`.
+
+`isConstName` itself is unchanged:
 
 ```scala
 private def isConstName(s: String): Boolean =
-  s.forall(numeric) || s == "nil" ||
-  StringUtil.isDecimalLiteral(s) ||
-  isQuotedStringToken(s)              // new — depends on F1's option
-
-private def unquote(s: String): String =
-  if isQuotedStringToken(s) then s.stripPrefix("\"").stripSuffix("\"") else s
+  s.forall(numeric) || s == "nil" || StringUtil.isDecimalLiteral(s)
 ```
-
-The atomic-term branch (`case a :: rest`) needs to call `unquote` before
-constructing `Term.Const(...)` so the constant carries the *content* (e.g.
-`IT Risk`), not the *raw token* (`"IT Risk"`).
 
 ### F3 — Populate `catalog.constants` from tree node names (addresses D3)
 
@@ -277,12 +319,24 @@ constructing `Term.Const(...)` so the constant carries the *content* (e.g.
 **Signature:**
 
 ```scala
+// Boundary: register code → fol-engine library API.
+//
+// fol-engine's `TypeCatalog.constants` is `Map[String, TypeId]` —
+// fol-engine has no knowledge of Iron / `SafeName`. The `SafeName`
+// refinement (`Not[Blank] & MaxLength[50]`) is a construction-time
+// invariant established at `RiskNode.parse`; the property travels with
+// the immutable `String` value, so stripping the wrapper at this
+// boundary discards the type-level proof but not the property. The
+// dispatcher uses `Set.contains` / `Map.get` only — no interpolation,
+// no concatenation — so an unwrapped `String` cannot widen the attack
+// surface. See §10 for the full injection-safety analysis.
 private val nodeNameConstants: Map[String, TypeId] =
   tree.index.nodes.values.iterator.map(_.name -> assetSort).toMap
 
 val catalog: TypeCatalog = TypeCatalog.unsafe(
   types = Set(...),
-  constants = nodeNameConstants,        // ← new line
+  constants = nodeNameConstants,        // ← new line; D-2.b safety net (skip + log)
+                                        //   on reserved-name collisions applied here
   functions = Map(...),
   predicates = Map(...),
   literalValidators = Map(...)
@@ -293,12 +347,13 @@ The map is built once per `RiskTreeKnowledgeBase` instance (per query — same
 lifetime as the existing `nameToNodeId` map directly above). Cost is O(n) over
 nodes; trees we're targeting have ≤ low thousands of nodes.
 
-**Open behaviour decisions (see §6 D-2):**
-
-- Duplicate node names — last one wins silently? Filter to unique? Reject?
-- Names that collide with predicate / function symbols (e.g. a node literally
-  named `leaf` or `p95`) — preserve the symbol (skip the constant)? Reject
-  KB construction? Allow shadowing?
+**D-2.a / D-2.b are settled (see §6).** The KB-level handling of duplicate or
+reserved-symbol-colliding names is **alarm-on-bypass diagnostics**, not
+normal-flow validation: the DTO validators (`requireUniqueNames`,
+`requireNoReservedNames`) are the authoritative gate, and any malformed
+tree reaching the KB indicates an upstream bypass (direct repo write,
+migration, Irmin merge). Behaviour: skip the offending entry, emit
+`ZIO.logWarning` so the bypass is observable.
 
 ---
 
@@ -342,13 +397,23 @@ Tests follow the existing layout & style:
 
 ### 5.4 register `RiskTreeKnowledgeBase` tests (F3) — `RiskTreeKnowledgeBaseSpec.scala`
 
-The existing `catalogSuite` already covers structure. Add a `constantsSuite`:
+The existing `catalogSuite` already covers structure. Add a `constantsSuite`.
+
+**Note on C2/C3.** These are **bypass-path diagnostics tests**, not
+normal-flow tests. In the supported flow, `requireUniqueNames` and
+`requireNoReservedNames` reject malformed trees at the DTO boundary —
+`RiskTreeRequestsSpec` covers that. C2/C3 simulate the unsupported case
+(direct repo write / migration / Irmin merge) where a malformed tree
+reaches the KB constructor, and assert that the KB does not crash, behaves
+deterministically, and emits the expected `ZIO.logWarning` diagnostic. The
+log-capture assertion is the contract being tested.
 
 | ID | Setup | Assertion |
 |---|---|---|
-| C1 | KB built from the existing 4-node fixture (`Root`, `IT Risk`, `Cyber`, `Hardware`) | `kb.catalog.constants` contains exactly those 4 keys, all → `assetSort` |
-| C2 | KB built from a tree containing two nodes both named `"Cyber"` | Behaviour matches the decision recorded in §6 D-2.a |
-| C3 | KB built from a tree containing a node named `"leaf"` | Behaviour matches the decision recorded in §6 D-2.b |
+| C1 | KB built from the existing 4-node fixture (`Root`, `IT Risk`, `Cyber`, `Hardware`) | `kb.catalog.constants` contains exactly those 4 keys, all → `assetSort`; no warnings logged |
+| C2 | KB built directly (bypassing DTO) from a tree fixture containing two distinct nodes both named `"Cyber"` | KB constructs without exception; `kb.catalog.constants` contains key `"Cyber"` exactly once (deterministic last-write-wins); exactly one `ZIO.logWarning` containing the duplicate name fires (captured via ZIO Test log harness) |
+| C3 | KB built directly (bypassing DTO) from a tree fixture containing a node named `"leaf"` (collides with the `leaf` predicate symbol) | KB constructs without exception; `kb.catalog.constants` does NOT contain key `"leaf"` (skipped); `kb.catalog.predicates` still contains `"leaf"` (predicate wins); exactly one `ZIO.logWarning` containing the colliding name fires |
+| C4 | KB built from any non-empty fixture | `RiskTreeKnowledgeBase.reservedFolNames` equals `kb.catalog.predicates.keySet ++ kb.catalog.functions.keySet`, and contains the documented baseline (`leaf`, `portfolio`, `child_of`, `descendant_of`, `leaf_descendant_of`, `gt_loss`, `gt_prob`, `p95`, `p99`, `lec`) |
 
 ### 5.5 register `QueryBinder` integration tests — new file `BinderIntegrationSpec.scala`
 
@@ -356,6 +421,7 @@ The existing `catalogSuite` already covers structure. Add a `constantsSuite`:
 |---|---|---|
 | B1 | `Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 1000))` against the 4-node fixture | parses + binds without error; range evaluates to `{Cyber, Hardware}` |
 | B2 | Same query but referencing a non-existent node (`"Nonexistent"`) | `Left(UnknownConstantOrLiteral)` mapped to a structured `ValidationError` (per ADR-010) |
+| B3 | Tree fixture containing a node literally named `foo")` (grammar-meaningful payload simulating an injection attempt). Query attempts to reference it: `Q[>=]^{1/2} x (leaf_descendant_of(x, "foo"), …)` | KB constructs without exception; query parses (lexer's `\"`-terminator stops at the embedded `\"` — see §10); binder rejects with `UNKNOWN_REFERENCE`; the structured error message echoes only the offending token, never re-feeds the embedded payload into any parser. **Locks the §10 verdict in code** — fails if anyone later swaps `Map.get` for string interpolation. |
 
 ### 5.6 HTTP integration test — new file `QueryEndpointSpec.scala` in `server-it`
 
@@ -451,9 +517,29 @@ quality-of-life and future-proofing investment: parser arms become
 self-documenting, future enhancements (position info, source spans,
 escape sequences, multi-line literals) can extend the ADT without
 breaking string conventions, and the type checker prevents accidental
-confusion between `Token.Symbol(",")` and `Token.StringLit(",")`.
+confusion between `Token.OpSym(",")` and `Token.StringLit(",")`.
 D-4-only would have shipped the bug fix with minimum fol-engine churn
 but would have nailed the parser to "everything is a string forever."
+
+#### D-1 punctuation granularity (settled 2026-05-01: Option α)
+
+The `Token` ADT uses **dedicated case objects per single-character
+punctuation terminal** (`LParen`, `RParen`, `LBracket`, `RBracket`,
+`LBrace`, `RBrace`, `Comma`, `Dot`), with `OpSym(String)` retained as a
+string carrier *only* for the open-ended symbolic-operator class
+(`">="`, `"/\\"`, `"==>"`, etc.).
+
+*Rationale.* (a) The punctuation alphabet is closed and finite — it
+deserves the named cases so the type checker can enforce exhaustiveness
+and prevent confusion between, e.g., `Comma` and `Dot`. (b) The
+symbolic-operator set is open-ended and varies per parser dialect (FOL
+vs vague-quantifier extensions); those tokens already need string
+content in downstream pattern matches, so a string carrier is the right
+shape there. (c) The dominant convention in functional
+compiler/interpreter codebases (GHC `Lexeme`, scala3 `Tokens`,
+Lean 4, Roc, Unison) is one ADT case per terminal. (d) The C13(c)
+"1:1 expansion" claim is preserved: `case "(" :: rest =>` →
+`case Token.LParen :: rest =>` is a literal substitution.
 
 ### D-2.a — How should duplicate node names be handled when building `catalog.constants`?
 
@@ -674,14 +760,39 @@ register.query {
   maxQuantifierDepth    = ${?REGISTER_QUERY_MAX_QUANTIFIER_DEPTH}
 }
 ```
-Server enforces in `QueryService.evaluate` *before* lexing — returns
-`ValidationFailed(ValidationError("query", INVALID_LENGTH, "…"))`. Client
-side: **investigation deferred to a mandatory follow-up task** (see §10).
-The instruction "do not change the existing pattern" means: if
-`AnalyzeView` already validates query length via a `Var[String]` length
-signal, extend it to read from a config-derived value; if it does no
-length validation today, mirror the server limit as a constant at the
-client boundary without adding a new pattern.
+
+*Enforcement sites (split — corrected 2026-05-01).* Length limits are
+cheap, depth requires structure:
+
+- `maxQueryLength` and `maxQuotedStringLength` — enforced **pre-lex** in
+  `QueryService.evaluate`, before any tokenisation work. Returns
+  `ValidationFailed(ValidationError("query", INVALID_LENGTH, "…"))`
+  (existing code, used by `ValidationUtil` for the same kind of bound
+  check; semantics: "String length constraint violated").
+- `maxQuantifierDepth` — enforced **post-parse**, before binding /
+  evaluation, by traversing the `ParsedQuery` AST. Returns
+  `ValidationFailed(ValidationError("query", QUANTIFIER_DEPTH_EXCEEDED,
+  "…"))`. **New code added to `ValidationErrorCode`**, placed in the
+  existing `── FOL query codes (ADR-028) ─────…` group, following the
+  established naming convention (`UPPER_SNAKE_CASE`, descriptive,
+  scoped) and the established enum-case shape (one line, with
+  human-readable description). No new error-handling **logic** —
+  reuses the existing `ValidationFailed` envelope, accumulating
+  `Validation` channel, and `ErrorResponse.encode` exhaustive arm
+  (ADR-022 §4 — `-Wconf` enforces the new arm).
+
+*No new mechanism.* Both sites use the same `ValidationFailed →
+ErrorResponse.encode` pipeline as every other validator in the
+codebase; the only additions are one new `ValidationErrorCode` enum
+case, its `ValidationErrorCodeSpec` round-trip case, and the matching
+`ErrorResponse.encode` arm.
+
+*Client side.* **Investigation deferred to a mandatory follow-up task**
+(see §9 F-R2). The instruction "do not change the existing pattern"
+means: if `AnalyzeView` already validates query length via a
+`Var[String]` length signal, extend it to read from a config-derived
+value; if it does no length validation today, mirror the server limit
+as a constant at the client boundary without adding a new pattern.
 
 ---
 
