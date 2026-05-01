@@ -144,5 +144,15 @@ run_query \
   "Do at most half of all leaves have a >5% chance of exceeding \$2M?" \
   'Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 2000000), 0.05))'
 
+# Existential quantifier in scope: does each portfolio harbour at least one high-severity child?
+run_query \
+  "Existential (exists): Do at least 2/3 of portfolio nodes have at least one direct child with P95 above \$1M?" \
+  'Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 1000000)))'
+
+# Universal quantifier in scope: are all direct children of most portfolios above a severity floor?
+run_query \
+  "Universal (forall): Do at least half of portfolio nodes have ALL direct children with P95 above \$1M?" \
+  'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y), 1000000)))'
+
 header "Done"
 info "Re-run anytime — the workspace key above remains valid until expiry."

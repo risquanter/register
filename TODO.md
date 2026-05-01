@@ -531,3 +531,48 @@ divergent code path, followed by a fix (or follow-up plan if the fix is
 non-trivial) that aligns Design-view dropdown behaviour with
 Analyze-view behaviour while keeping Design's edit-existing-tree
 capability intact.
+
+---
+
+## 10. `--profile persistence` is a no-op for the server — fix via compose override file
+
+**Observed:** Running `docker compose --profile persistence --profile frontend up -d`
+starts the postgres and irmin containers but the `register-server` service connects
+to neither — both `REGISTER_REPOSITORY_TYPE` and `REGISTER_WORKSPACE_STORE_BACKEND`
+default to `in-memory` in the base compose file, and `REGISTER_WORKSPACE_TTL` /
+`REGISTER_WORKSPACE_IDLE_TIMEOUT` are absent from the compose env block entirely.
+Workspaces disappear after ~1 h (the in-code `idleTimeout` default) regardless of
+whether persistence containers are running.
+
+**Decision:** Option A — companion override file (`docker-compose.persistence.yml`).
+The base `docker-compose.yml` stays in-memory/safe for plain `docker compose up`
+(dev/CI use). A separate override file resets the four env vars to their
+persistence-backend values and wires the TTL overrides, so that:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.persistence.yml \
+  --profile persistence --profile frontend up -d
+```
+
+is the single one-stop command for a fully persistent stack. The postgres and
+irmin `profiles: [persistence]` stay on those services so they are not started
+without the flag.
+
+**Env vars that need setting in the override file:**
+
+| Var | Value |
+|---|---|
+| `REGISTER_REPOSITORY_TYPE` | `irmin` |
+| `REGISTER_WORKSPACE_STORE_BACKEND` | `postgres` |
+| `REGISTER_WORKSPACE_TTL` | `120h` (5-day) |
+| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `120h` (5-day) |
+
+**Outcome wanted:**
+1. `docker-compose.persistence.yml` created with the above overrides.
+2. `docs/DOCKER-DEVELOPMENT.md` updated to document the two-file invocation,
+   explain the base vs. override split, and call out that `--profile persistence`
+   alone is not sufficient without the override file.
+3. `README.md` quick-start section reviewed and updated so that any persistence
+   instructions reflect the corrected invocation.
+4. A brief pass over any other docs that reference `docker compose … up` to
+   confirm no stale single-file examples remain.

@@ -2,8 +2,8 @@
 # =============================================================================
 # demo-enterprise-curl.sh — Financial Services Enterprise Risk demo (curl)
 #
-# Bootstraps a realistic 4-domain enterprise risk tree (20 leaves across
-# 10 portfolios) and runs 7 vague-quantifier queries against it.
+# Bootstraps a realistic 4-domain enterprise risk tree (21 leaves across
+# 11 portfolios) and runs 8 vague-quantifier queries against it.
 #
 # Requires: curl, jq
 #
@@ -65,7 +65,7 @@ header "Demo: Financial Services Enterprise Risk (curl)"
 info "Server: $BASE"
 
 # ── Step 1: Bootstrap workspace + tree ────────────────────────────────────────
-header "Step 1 — Bootstrap workspace (20 leaves, 10 portfolios)"
+header "Step 1 — Bootstrap workspace (21 leaves, 11 portfolios)"
 
 BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
   -H 'Content-Type: application/json' \
@@ -323,9 +323,21 @@ run_query \
   'Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x), 1000000))'
 
 # Q4 — Mid-band materiality (~ vague quantifier)
+# NOT SATISFIED by design: p95(x) is the *unconditional* P95 — computed over
+# every Monte Carlo trial, including those where the risk event did not fire
+# (loss = $0). For a leaf with 15% annual probability, the unconditional P95
+# corresponds only to the conditional ~67th percentile ((0.95−0.85)/0.15).
+# Any leaf with probability ≤ 5% has unconditional P95 = $0 by definition.
+# At a $5M bar, only 5/21 leaves qualify (24%) — far from "about half".
+# Q4b keeps the same threshold and restates the proportion to match reality.
 run_query \
-  "Q4: Do about half of all leaves have P95 above \$5M?" \
+  "Q4: Do about half of all leaves have unconditional P95 above \$5M?" \
   'Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))'
+
+# Q4b — same $5M threshold, proportion calibrated to the unconditional distribution
+run_query \
+  "Q4b: Do at least 1/5 of all leaves have unconditional P95 above \$5M?" \
+  'Q[>=]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))'
 
 # Q5 — Portfolio aggregation view (board-level filter)
 run_query \
@@ -336,6 +348,25 @@ run_query \
 run_query \
   "Q6: Do at most 1/4 of all leaves have a >5% chance of exceeding \$10M?" \
   'Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000), 0.05))'
+
+# Q7 — existential quantifier in scope: which portfolios harbour at least one severe child?
+# NOT SATISFIED by design: same unconditional-P95 effect applies to direct
+# children. 7/11 portfolios (64%) have at least one child clearing the $5M
+# bar — just short of the 3/4 threshold. Q7b uses the ~ quantifier to state
+# the same question at the proportion the data actually supports.
+run_query \
+  "Q7 (exists): Do at least 3/4 of portfolio nodes have at least one direct child with unconditional P95 above \$5M?" \
+  'Q[>=]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 5000000)))'
+
+# Q7b — same $5M threshold, proportion expressed as "about 2/3" (satisfied)
+run_query \
+  "Q7b (exists): Do about 2/3 of portfolio nodes have at least one direct child with unconditional P95 above \$5M?" \
+  'Q[~]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 5000000)))'
+
+# Q8 — universal quantifier in scope: are all direct children of most portfolios above a material floor?
+run_query \
+  "Q8 (forall): Do at least half of portfolio nodes have ALL their direct children with P99 above \$1M?" \
+  'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y), 1000000)))'
 
 header "Done"
 info "Re-run anytime — the workspace key above remains valid until expiry."
