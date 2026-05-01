@@ -223,26 +223,24 @@ consumes characters up to the next `"` (no escaping; per D-4) and emits a
 `Token.StringLit(content)` carrying the **inner** content only — the
 surrounding quote characters are not part of the payload.
 
-**ADT shape (D-1 Option α — settled 2026-05-01):**
+**ADT shape (D-1 Option α — settled 2026-05-01; encoding refined
+2026-05-01 to `enum` per fol-engine ADR-006 §1: pure-data sum type with
+no per-variant behaviour):**
 
 ```scala
-sealed trait Token
-object Token:
+enum Token:
   /** OCaml `string` (alphanumeric run). */
-  final case class Word(name: String) extends Token
+  case Word(name: String)
   /** New (D-1/D-4): content of a `"…"`-delimited literal, quotes stripped. */
-  final case class StringLit(content: String) extends Token
+  case StringLit(content: String)
   /** OCaml `string` (symbolic operator run, e.g. `">="`, `"/\\"`, `"==>"`). */
-  final case class OpSym(sym: String) extends Token
-  /** Single-character punctuation. One case per terminal. */
-  case object LParen extends Token   // OCaml: `"("`
-  case object RParen extends Token   // OCaml: `")"`
-  case object LBracket extends Token // OCaml: `"["`
-  case object RBracket extends Token // OCaml: `"]"`
-  case object LBrace extends Token   // OCaml: `"{"`
-  case object RBrace extends Token   // OCaml: `"}"`
-  case object Comma extends Token    // OCaml: `","`
-  case object Dot extends Token      // OCaml: `"."`
+  case OpSym(sym: String)
+  /** Single-character punctuation. One case per terminal.
+    *  OCaml originals (verbatim, per fol-engine ADR-007 C11):
+    *  LParen="(", RParen=")", LBracket="[", RBracket="]",
+    *  LBrace="{", RBrace="}", Comma=",", Dot="."
+    */
+  case LParen, RParen, LBracket, RBracket, LBrace, RBrace, Comma, Dot
 ```
 
 **Signature change:**
@@ -496,21 +494,25 @@ Two fol-engine ADRs apply to the lexer/parser layer:
   fragments stay verbatim; only the new ADT introduces a Scala
   extension note.
 
-**Required amendment to fol-engine ADR-007 (recorded as part of this
-plan, to be authored in fol-engine alongside the F1 implementation):**
+**Required amendment to fol-engine ADR-007 (to be authored in fol-engine
+alongside the F1 implementation; user-confirmed scope 2026-05-01):**
 
-> **C13 — Element-type evolution.** Element types within the parser
-> pipeline (e.g. lexer token type, intermediate parse result
-> components) may be replaced by Scala-side ADTs **provided that:**
-> (a) the surrounding combinator shape — signature arity, token
-> threading, exception-based backtracking, mutual recursion structure
-> — is unchanged; (b) each new ADT case carries a scaladoc note
-> identifying the OCaml `string` (or other primitive) it replaces;
-> (c) downstream pattern matches expand 1:1 from string-match arms to
-> ADT-match arms with no change in control flow. C13 documents that
-> Scala-side type refinements that improve compile-time guarantees
-> without altering Harrison's algorithmic structure are explicitly
-> permitted.
+1. **Update C1 wording** — replace the literal `List[String]` in the C1
+   heading and body with `List[Token]`, retaining the explicit note
+   that the *shape* (tuple-threaded `(A, Remaining)`, exception
+   backtracking, mutual recursion) is preserved unchanged.
+2. **Add C13 — Element-type evolution.** Element types within the parser
+   pipeline (e.g. lexer token type, intermediate parse result
+   components) may be replaced by Scala-side ADTs **provided that:**
+   (a) the surrounding combinator shape — signature arity, token
+   threading, exception-based backtracking, mutual recursion structure
+   — is unchanged; (b) each new ADT case carries a scaladoc note
+   identifying the OCaml `string` (or other primitive) it replaces;
+   (c) downstream pattern matches expand 1:1 from string-match arms to
+   ADT-match arms with no change in control flow. C13 documents that
+   Scala-side type refinements that improve compile-time guarantees
+   without altering Harrison's algorithmic structure are explicitly
+   permitted.
 
 *Trade-off acknowledged.* Choosing D-1 (typed ADT) over D-4-only is a
 quality-of-life and future-proofing investment: parser arms become
@@ -523,7 +525,7 @@ but would have nailed the parser to "everything is a string forever."
 
 #### D-1 punctuation granularity (settled 2026-05-01: Option α)
 
-The `Token` ADT uses **dedicated case objects per single-character
+The `Token` ADT uses **a dedicated `enum` case per single-character
 punctuation terminal** (`LParen`, `RParen`, `LBracket`, `RBracket`,
 `LBrace`, `RBrace`, `Comma`, `Dot`), with `OpSym(String)` retained as a
 string carrier *only* for the open-ended symbolic-operator class
