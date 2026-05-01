@@ -811,7 +811,23 @@ this verdict.
 
 ## 7. Implementation Order (Conditional on §6 Approvals)
 
-Once §6 is settled:
+> ⚠️ **Cross-repo dependency added 2026-05-01.** Phases 1–5 of this plan
+> now depend on the VQL refactor in
+> `vague-quantifier-logic/docs/PLAN-symmetric-value-boundaries.md`
+> Phases 0–6 (artifact rename `fol-engine` → `vql-engine`, version
+> stays `0.10.0-SNAPSHOT`, ADR-015 promoted to `Accepted`). The VQL
+> plan is the upstream gate; nothing in this plan may proceed past
+> Phase 0 until the VQL plan reaches its Phase 6 HARD STOP and ships
+> `vql-engine:0.10.0-SNAPSHOT`. The B1 case in
+> `BinderIntegrationSpec` is `@@ TestAspect.ignore` for the duration
+> and is re-enabled as the first action of the rewritten Phase 5b.
+
+> ⚠️ **Per-step LLM agent recommendation.** Each phase carries an
+> advisory "Recommended agent for next step" annotation. The user
+> remains the gate at every HARD STOP — the agent must not auto-advance
+> regardless of which model is recommended.
+
+Once §6 is settled and the VQL plan has reached Phase 6:
 
 0. **Phase 0 — DONE (2026-04-30): Demo scripts rewritten** to avoid the
    three bugs. All four scripts (`demo-simple-{httpie,curl}.sh`,
@@ -823,13 +839,73 @@ Once §6 is settled:
    `leaf_descendant_of(x, "Technology & Cyber")`) will be re-added once
    F1+F2+F3 land. ADR-028 + ADR-028-appendix syntax drift fixed in the
    same commit.
-1. **Phase 1 — fol-engine: F1 (lexer)** — write tests in §5.1 first (TDD); implement; `sbt test` green.
-2. **Phase 2 — fol-engine: F2 (term parser)** — tests §5.2 + §5.3; implement; `sbt test` green.
-3. **Phase 3 — fol-engine release & register bump** — `version := "0.10.0-SNAPSHOT"`; `sbt publishLocal`; bump register's `build.sbt`.
-4. **Phase 4 — register: F3 (catalog constants)** — tests §5.4 + §5.5; implement; `sbt test` green.
-5. **Phase 5 — register integration test** — §5.6; `sbt serverIt/test` green.
-6. **Phase 6 — re-enable quoted-name queries in demo scripts** — restore the dropped sub-portfolio queries.
+   **HARD STOP** — Recommended agent for next step: **Opus 4.7** (Phase 1
+   is upstream VQL lexer work; design judgement on `Token` ADT shape).
+
+1. **Phase 1 — vql-engine: F1 (lexer)** — write tests in §5.1 first (TDD);
+   implement; `sbt test` green.
+   **NOTE:** This phase is **subsumed** by VQL
+   `PLAN-symmetric-value-boundaries.md` insofar as the VQL refactor
+   must land first. The lexer change is *independent* of the ADR-015
+   refactor in mechanism, but coordination is required because both
+   ship in `vql-engine:0.10.0-SNAPSHOT`.
+   **HARD STOP** — Recommended agent for next step: **Opus 4.7** (Phase 2
+   parser work; ADR-018 nominal-wrapper interaction needs review).
+
+2. **Phase 2 — vql-engine: F2 (term parser)** — tests §5.2 + §5.3;
+   implement; `sbt test` green.
+   **HARD STOP** — Recommended agent for next step: **Opus 4.7**
+   (Phase 3 is the cross-repo publish coordination; small but
+   irreversible step that benefits from careful sequencing reasoning.)
+
+3. **Phase 3 — vql-engine release & register bump** —
+   `version := "0.10.0-SNAPSHOT"` (already current; do **not** bump);
+   `sbt publishLocal`; bump register's `build.sbt` artifact name to
+   `vql-engine` (version unchanged). This step now coincides with the
+   VQL plan's Phase 6 publish.
+   **HARD STOP** — Recommended agent for next step: **Sonnet 4.6**
+   (Phase 4 catalog-constants population is mechanical adaptation
+   against the now-published `vql-engine` surface.)
+
+4. **Phase 4 — register: F3 (catalog constants)** — tests §5.4 + §5.5;
+   implement; `sbt test` green. Includes registering the asset-sort
+   `literalValidators` entry per ADR-015 §4 (the existing register
+   `RiskTreeKnowledgeBase` registers loss + probability validators on
+   lines 172–176; assetSort must join the set).
+   **HARD STOP** — Recommended agent for next step: **Sonnet 4.6**
+   (Phase 5a integration test is mechanical; Phase 5b is the B1
+   re-enable, also mechanical against the now-binding ADR-015 surface.)
+
+5a. **Phase 5a — register integration test (existing scope)** — §5.6;
+   `sbt serverIt/test` green for B2/B3 paths.
+   **HARD STOP** — Recommended agent for next step: **Sonnet 4.6**.
+
+5b. **Phase 5b — re-enable B1 in `BinderIntegrationSpec` (added 2026-05-01)** —
+    Remove `@@ TestAspect.ignore` from the B1 case in
+    `register/modules/server/src/test/scala/com/risquanter/register/foladapter/BinderIntegrationSpec.scala`.
+    Adapt `RiskTreeKnowledgeBase` and `QueryResponseBuilder` to the new
+    VQL surface: replace the hand-written `extract*` helpers
+    (`RiskTreeKnowledgeBase.scala` lines ~291–310) with `Value.extract[A]`
+    via VQL's `Extract[A]` typeclass; replace `Value.as[String]` calls in
+    `QueryResponseBuilder` similarly. `sbt serverIt/test` green for B1.
+    This is **mechanical adaptation against a binding ADR-015** — the
+    design space is fully closed by the time this phase runs.
+    **HARD STOP** — Recommended agent for next step: **Sonnet 4.6**
+    (Phase 6 demo-script restoration is mechanical text edits.)
+
+6. **Phase 6 — re-enable quoted-name queries in demo scripts** — restore
+   the dropped sub-portfolio queries.
+   **HARD STOP** — Recommended agent for next step: **Opus 4.7**
+   (Phase 7 ADR review is architectural judgement work; not
+   mechanical.)
+
 7. **Phase 7 — Post-implementation ADR review** (per WORKING-INSTRUCTIONS).
+   Includes verification that ADR-015 (now `Accepted` upstream),
+   ADR-018, ADR-022 §6, ADR-028, and ADR-028-appendix remain
+   internally consistent with the shipped code, and that no new ADR is
+   required for the symmetric-boundary design (which is owned upstream
+   by VQL ADR-015).
+   **HARD STOP** — Recommended agent for next step: **(plan complete)**.
 
 Each phase ends with the WORKING-INSTRUCTIONS § Approval Checkpoint and a
 **hard halt** awaiting explicit user continuation.
