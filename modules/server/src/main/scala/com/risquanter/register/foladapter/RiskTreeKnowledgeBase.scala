@@ -86,6 +86,67 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
 
   // ── TypeCatalog ────────────────────────────────────────────────────
 
+  /** Names that, if used as node names, would shadow this catalog's own
+    * function or predicate symbols. Bare references to these names go through
+    * the formula/term parser's symbol arms (e.g. `p95(x)` → `Fn("p95",[x])`),
+    * so a constant binding for the same name would only be reachable via the
+    * quoted-literal path (`"p95"`). Allowing it would silently bind the asset
+    * with that name in `catalog.constants` and produce surprising behaviour.
+    *
+    * Per PLAN-QUERY-NODE-NAME-LITERALS §F3 + §6 (D-2.b), this is an
+    * **alarm-on-bypass** safety net: the supported flow is for the DTO
+    * validators to reject such names at create-tree time. If a tree carrying
+    * a colliding name reaches the KB anyway (direct repo write, migration,
+    * Irmin merge), we skip the entry and surface it via [[nameCollisions]]
+    * for the orchestrating service to log.
+    *
+    * The set is the union of this catalog's own function and predicate symbol
+    * names — see PLAN §5.4 C4 for the expected baseline.
+    */
+  val reservedFolNames: Set[String] =
+    Set("p95", "p99", "lec",
+        "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
+        "gt_loss", "gt_prob")
+
+  /** Diagnostic record of node names that were skipped (reserved-symbol
+    * collision) or coalesced (duplicate name, last-write-wins) when building
+    * `catalog.constants`. Empty in the supported flow — the DTO validators
+    * (`requireUniqueNames`, `requireNoReservedNames`) gate at create-tree time.
+    *
+    * Surfaced for the orchestrating service (e.g. `QueryServiceLive`) to log
+    * via `ZIO.logWarning` so any DTO-bypass path is observable.
+    */
+  val nameCollisions: List[String] =
+    val allNames = tree.index.nodes.values.map(_.name).toList
+    val reserved = allNames.filter(reservedFolNames.contains).distinct.sorted
+      .map(n => s"reserved:$n")
+    val duplicates = allNames
+      .filterNot(reservedFolNames.contains)
+      .groupBy(identity).collect { case (n, xs) if xs.size > 1 => n }
+      .toList.sorted
+      .map(n => s"duplicate:$n")
+    reserved ++ duplicates
+
+  /** Tree node names registered as `Asset`-sorted constants, enabling
+    * quoted-literal node references in queries (e.g. `child_of(x, "IT Risk")`).
+    *
+    * Boundary note: fol-engine's `TypeCatalog.constants` is `Map[String, TypeId]`;
+    * the `SafeName` Iron refinement is established at `RiskNode.parse` and the
+    * property travels with the immutable `String` value, so unwrapping at this
+    * boundary discards the type-level proof but not the property. The dispatcher
+    * uses `Set.contains` / `Map.get` only — no interpolation — so an unwrapped
+    * `String` cannot widen the attack surface (PLAN §10).
+    *
+    * Reserved-name collisions are skipped here (not in the resulting map).
+    * Duplicate names are deterministically last-write-wins via `.toMap`.
+    */
+  private val nodeNameConstants: Map[String, TypeId] =
+    tree.index.nodes.values.iterator
+      .map(_.name)
+      .filterNot(reservedFolNames.contains)
+      .map(_ -> assetSort)
+      .toMap
+
   val catalog: TypeCatalog = TypeCatalog.unsafe(
     types = Set(
       TypeDecl.DomainType(assetSort),
@@ -93,6 +154,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
       TypeDecl.ValueType(probabilitySort),
       TypeDecl.ValueType(boolSort)
     ),
+    constants = nodeNameConstants,
     functions = Map(
       SymbolName("p95") -> FunctionSig(List(assetSort), lossSort),
       SymbolName("p99") -> FunctionSig(List(assetSort), lossSort),

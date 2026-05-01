@@ -576,3 +576,48 @@ without the flag.
    instructions reflect the corrected invocation.
 4. A brief pass over any other docs that reference `docker compose … up` to
    confirm no stale single-file examples remain.
+
+## 11. `WorkspaceReaperSpec` — cascade-deletion across multiple expired workspaces flakes under `TestClock`
+
+**Observed:** The test
+`"reaper cascade-deletes trees across multiple expired workspaces"` in
+`modules/server/src/test/scala/.../WorkspaceReaperSpec.scala` fails
+intermittently. The failure pre-dates the
+`PLAN-QUERY-NODE-NAME-LITERALS.md` work — it surfaced again during the
+`server/test` run that followed the F3 implementation but is unrelated
+to any code touched by that plan (only `RiskTreeKnowledgeBase`,
+`QueryServiceLive` and one new spec were modified).
+
+**Current understanding:**
+- The reaper is a ZIO scheduled fiber that fires on a `Schedule` driven
+  by the live (or test) `Clock`.
+- The spec uses `TestClock.adjust` to advance time past the workspace TTL
+  and then asserts that all child trees of every expired workspace have
+  been removed.
+- Symptom is a count mismatch (some trees still present) rather than an
+  exception, which is the classic shape of a `TestClock` race: the
+  reaper fiber has not yet observed the clock advance and run the
+  cascade before the assertion is taken.
+
+**Reproduction / trigger:**
+- Run `sbt 'server/testOnly *WorkspaceReaperSpec'` repeatedly (or as
+  part of a full `server/test`); the failure is non-deterministic but
+  reliably appears within a small number of runs.
+- Likely triggers: ordering of fiber scheduling versus
+  `TestClock.adjust`, missing `TestClock.adjust(...).fork` /
+  `awaitAllDescendants`, or asserting before yielding to the reaper
+  fiber.
+
+**Suspected fixes to investigate (in order):**
+1. After every `TestClock.adjust`, insert
+   `TestClock.adjust(0.seconds)` or an explicit
+   `ZIO.yieldNow` / `awaitAllDescendants` to let the reaper fiber run.
+2. Switch the reaper handle the spec uses to one whose schedule is
+   driven via an injected `Clock` and use
+   `Live.live(...) *> TestClock.adjust(...)` to make the relationship
+   between the test clock and the fiber explicit.
+3. If neither helps, confirm the reaper itself reads the current time
+   from the same `Clock` service the test is adjusting (not a captured
+   `Instant.now()`).
+
+**Status:** flagged, untouched. Not blocking any current plan.

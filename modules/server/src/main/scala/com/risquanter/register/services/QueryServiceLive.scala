@@ -62,6 +62,17 @@ class QueryServiceLive private (
         // 3. Build knowledge base (TypeCatalog + RuntimeModel)
         kb = RiskTreeKnowledgeBase(tree, results)
 
+        // 3a. Surface alarm-on-bypass diagnostics for any tree node names that
+        //     collided with reserved FOL symbol names — see RiskTreeKnowledgeBase
+        //     `nameCollisions` scaladoc + PLAN-QUERY-NODE-NAME-LITERALS §F3.
+        _ <- ZIO.when(kb.nameCollisions.nonEmpty)(
+          ZIO.logWarning(
+            s"RiskTreeKnowledgeBase: ${kb.nameCollisions.size} tree node " +
+            s"name(s) skipped from constants because they collide with reserved " +
+            s"symbols (DTO validators bypassed?): ${kb.nameCollisions.mkString(", ")}"
+          )
+        )
+
         // 4. Validate catalog+model pairing (FolModel smart constructor)
         folModel <- ZIO.fromEither(
           FolModel(kb.catalog, kb.model)

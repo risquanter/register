@@ -95,7 +95,7 @@ lazy val common = crossProject(JVMPlatform, JSPlatform)
     libraryDependencies ++= commonDependencies,
     libraryDependencies += "com.bilal-fazlani" %%% "zio-ulid" % zioUlidVersion,
     // Vague quantifier logic — cross-compiled (ADR-028)
-    libraryDependencies += "com.risquanter" %%% "fol-engine" % "0.9.0-SNAPSHOT"
+    libraryDependencies += "com.risquanter" %%% "fol-engine" % "0.10.0-SNAPSHOT"
   )
   .jsSettings(
     libraryDependencies ++= Seq(

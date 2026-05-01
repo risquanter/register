@@ -160,7 +160,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       predicateSuite,
       functionSuite,
       domainSuite,
-      catalogSuite
+      catalogSuite,
+      constantsSuite
     )
 
   // ── Percentile suite ───────────────────────────────────────────────
@@ -496,6 +497,94 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         kb.nameToNodeId("Cyber") == cyberId,
         kb.nameToNodeId("Root") == rootId,
         kb.nameToNodeId.size == 4
+      )
+    }
+  )
+
+  // ── Constants suite (PLAN-QUERY-NODE-NAME-LITERALS §5.4) ───────────
+
+  /** Build a RiskTree directly from a list of nodes, bypassing DTO validation.
+    * Simulates an unsupported path (direct repo write / migration / Irmin merge)
+    * where a malformed tree could reach the KB. The first node is treated as
+    * the root.
+    */
+  private def bypassTree(nodes: Seq[RiskNode]): RiskTree =
+    val map: Map[NodeId, RiskNode] = nodes.iterator.map(n => n.id -> n).toMap
+    val root: NodeId = nodes.head.id
+    val idx = TreeIndex.fromNodesUnsafe(map)
+    RiskTree(
+      id     = treeId("bypass-tree"),
+      name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Bypass Tree").toOption.get,
+      nodes  = nodes,
+      rootId = root,
+      index  = idx
+    )
+
+  private val constantsSuite = suite("catalog.constants (PLAN §5.4)")(
+    test("C1: 4-node fixture populates exactly the four node names; no collisions") {
+      assertTrue(
+        kb.catalog.constants.keySet == Set("Root", "IT Risk", "Cyber", "Hardware"),
+        kb.catalog.constants.values.toSet == Set(assetSort),
+        kb.nameCollisions.isEmpty
+      )
+    },
+    test("C2: duplicate node names — last-write-wins; collision surfaced") {
+      // Two distinct nodes both named "Cyber" — bypasses DTO requireUniqueNames.
+      val rootIdStr = idStr("root2")
+      val aIdStr    = idStr("a")
+      val bIdStr    = idStr("b")
+      val rootP = RiskPortfolio.unsafeApply(
+        id = rootIdStr, name = "Root2",
+        childIds = Array(NodeId(safeId("a")), NodeId(safeId("b"))), parentId = None
+      )
+      val a = RiskLeaf.unsafeApply(
+        id = aIdStr, name = "Cyber",
+        distributionType = "lognormal", probability = 0.1,
+        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root2")))
+      )
+      val b = RiskLeaf.unsafeApply(
+        id = bIdStr, name = "Cyber",
+        distributionType = "lognormal", probability = 0.2,
+        minLoss = Some(3L), maxLoss = Some(4L), parentId = Some(NodeId(safeId("root2")))
+      )
+      val t = bypassTree(Seq(rootP, a, b))
+      val kb2 = RiskTreeKnowledgeBase(t, Map.empty)
+      assertTrue(
+        kb2.catalog.constants.keySet == Set("Root2", "Cyber"),
+        kb2.nameCollisions.exists(_.contains("Cyber")),
+        kb2.nameCollisions.count(_.startsWith("duplicate:")) == 1
+      )
+    },
+    test("C3: reserved-name collision (\"leaf\") — skipped from constants; predicate retained") {
+      val rootIdStr = idStr("root3")
+      val cIdStr    = idStr("c")
+      val rootP = RiskPortfolio.unsafeApply(
+        id = rootIdStr, name = "Root3",
+        childIds = Array(NodeId(safeId("c"))), parentId = None
+      )
+      val c = RiskLeaf.unsafeApply(
+        id = cIdStr, name = "leaf",
+        distributionType = "lognormal", probability = 0.1,
+        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root3")))
+      )
+      val t = bypassTree(Seq(rootP, c))
+      val kb3 = RiskTreeKnowledgeBase(t, Map.empty)
+      assertTrue(
+        !kb3.catalog.constants.contains("leaf"),
+        kb3.catalog.predicates.contains(fol.typed.SymbolName("leaf")),
+        kb3.nameCollisions.exists(s => s.startsWith("reserved:") && s.endsWith("leaf"))
+      )
+    },
+    test("C4: reservedFolNames equals the union of catalog function & predicate symbol names") {
+      val symbolStrings: Set[String] =
+        kb.catalog.functions.keySet.map(_.value) ++ kb.catalog.predicates.keySet.map(_.value)
+      val baseline = Set(
+        "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
+        "gt_loss", "gt_prob", "p95", "p99", "lec"
+      )
+      assertTrue(
+        kb.reservedFolNames == symbolStrings,
+        baseline.subsetOf(kb.reservedFolNames)
       )
     }
   )
