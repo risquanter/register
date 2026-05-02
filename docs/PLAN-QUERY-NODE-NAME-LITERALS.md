@@ -11,7 +11,7 @@
 **Repos affected:**
 1. `register` (this workspace)
 2. `vague-quantifier-logic` (sibling repo, published as
-   `com.risquanter::fol-engine:0.9.0-SNAPSHOT`)
+   `com.risquanter::vql-engine:0.10.0-SNAPSHOT`)
 
 ---
 

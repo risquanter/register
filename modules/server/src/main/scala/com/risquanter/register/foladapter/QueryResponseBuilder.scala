@@ -4,12 +4,12 @@ import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.responses.QueryResponse
 
 import fol.result.EvaluationOutput
-import fol.typed.{Value, TypeId, TypeRepr}
+import fol.typed.{Value, TypeId}
 
-/** Constructs [[QueryResponse]] from typed fol-engine evaluation results.
+/** Constructs [[QueryResponse]] from typed vql-engine evaluation results.
   *
   * This lives in `server` (not `common`) because it depends on
-  * `EvaluationOutput[Value]` from the fol-engine library, which is a
+  * `EvaluationOutput[Value]` from the vql-engine library, which is a
   * server-only dependency. `QueryResponse` itself remains a pure data
   * carrier in `common` for frontend consumption.
   */
@@ -17,18 +17,13 @@ object QueryResponseBuilder:
 
   private val assetSort: TypeId = TypeId("Asset")
 
-  /** TypeRepr instance for projecting Asset-sorted Values to String. */
-  private given assetTypeRepr: TypeRepr[String] = new TypeRepr[String]:
-    val typeId: TypeId = assetSort
-
-  /** Builds a response from fol-engine typed evaluation output.
+  /** Builds a response from vql-engine typed evaluation output.
     *
     * Satisfying and range elements arrive as `Set[Value]` — sort-tagged
     * runtime values from the typed pipeline. Asset-sorted values are
-    * projected to String via `Value.as[String]` (using the `TypeRepr`
-    * instance above), then resolved to `NodeId` via `nodeIdLookup`.
-    * Non-Asset values (Loss, Probability) are filtered out since they
-    * do not represent tree nodes.
+    * projected to String by matching on `Value.raw`, then resolved to
+    * `NodeId` via `nodeIdLookup`. Non-Asset values (Loss, Probability)
+    * are filtered out since they do not represent tree nodes.
     *
     * @param output        Evaluation output containing result, range, and satisfying elements
     * @param nodeIdLookup  Maps node names back to typed node IDs
@@ -40,7 +35,7 @@ object QueryResponseBuilder:
     queryEcho: String
   ): QueryResponse =
     val matchingIds = output.satisfyingElements.toList.flatMap { v =>
-      v.as[String].flatMap(nodeIdLookup.get)
+      (v.raw match { case s: String => Some(s); case _ => None }).flatMap(nodeIdLookup.get)
     }
     QueryResponse(
       satisfied       = output.satisfied,

@@ -5,9 +5,9 @@ import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
 
-import fol.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, RuntimeDispatcher, Value, LiteralValue}
+import fol.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, RuntimeDispatcher, Value}
 
-/** Bridges the register domain (RiskTree + simulation results) to the fol-engine
+/** Bridges the register domain (RiskTree + simulation results) to the vql-engine
   * typed evaluation pipeline.
   *
   * Provides a `TypeCatalog` declaring register's many-sorted schema and a
@@ -130,7 +130,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
   /** Tree node names registered as `Asset`-sorted constants, enabling
     * quoted-literal node references in queries (e.g. `child_of(x, "IT Risk")`).
     *
-    * Boundary note: fol-engine's `TypeCatalog.constants` is `Map[String, TypeId]`;
+    * Boundary note: vql-engine's `TypeCatalog.constants` is `Map[String, TypeId]`;
     * the `SafeName` Iron refinement is established at `RiskNode.parse` and the
     * property travels with the immutable `String` value, so unwrapping at this
     * boundary discards the type-level proof but not the property. The dispatcher
@@ -170,8 +170,8 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
       SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort))
     ),
     literalValidators = Map(
-      lossSort        -> ((s: String) => if s.nonEmpty && s.forall(_.isDigit) then Some(LiteralValue.IntLiteral(s.toLong)) else None),
-      probabilitySort -> ((s: String) => if s.matches("[0-9]+(\\.[0-9]+)?") then Some(LiteralValue.FloatLiteral(s.toDouble)) else None)
+      lossSort        -> ((s: String) => s.toLongOption),
+      probabilitySort -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0))
     )
   )
 
@@ -219,26 +219,26 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
         SymbolName("gt_loss"), SymbolName("gt_prob")
       )
 
-    override def evalFunction(name: SymbolName, args: List[Value]): Either[String, LiteralValue] =
+    override def evalFunction(name: SymbolName, args: List[Value]): Either[String, Any] =
       name.value match
         case "p95" =>
           for
             assetName <- extractString(args, 0, "p95")
             result    <- lookupResult(assetName, "p95")
-          yield LiteralValue.IntLiteral(percentile(result, 0.95))
+          yield percentile(result, 0.95)
 
         case "p99" =>
           for
             assetName <- extractString(args, 0, "p99")
             result    <- lookupResult(assetName, "p99")
-          yield LiteralValue.IntLiteral(percentile(result, 0.99))
+          yield percentile(result, 0.99)
 
         case "lec" =>
           for
             assetName <- extractString(args, 0, "lec")
             threshold <- extractLong(args, 1, "lec")
             result    <- lookupResult(assetName, "lec")
-          yield LiteralValue.FloatLiteral(result.probOfExceedance(threshold))
+          yield result.probOfExceedance(threshold)
 
         case other =>
           Left(s"Unknown function: $other")
@@ -298,17 +298,15 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
     private def extractLong(args: List[Value], idx: Int, ctx: String): Either[String, Long] =
       args.lift(idx).toRight(s"$ctx: missing argument at index $idx").flatMap { v =>
         v.raw match
-          case LiteralValue.IntLiteral(l)   => Right(l)
-          case LiteralValue.FloatLiteral(d) => Right(d.toLong)
-          case other      => Left(s"$ctx: expected numeric LiteralValue at index $idx, got ${other.getClass.getSimpleName}")
+          case l: Long => Right(l)
+          case other   => Left(s"$ctx: expected Long at index $idx, got ${other.getClass.getSimpleName}")
       }
 
     private def extractDouble(args: List[Value], idx: Int, ctx: String): Either[String, Double] =
       args.lift(idx).toRight(s"$ctx: missing argument at index $idx").flatMap { v =>
         v.raw match
-          case LiteralValue.FloatLiteral(d) => Right(d)
-          case LiteralValue.IntLiteral(l)   => Right(l.toDouble)
-          case other      => Left(s"$ctx: expected numeric LiteralValue at index $idx, got ${other.getClass.getSimpleName}")
+          case d: Double => Right(d)
+          case other     => Left(s"$ctx: expected Double at index $idx, got ${other.getClass.getSimpleName}")
       }
 
     private def lookupResult(assetName: String, ctx: String): Either[String, RiskResult] =
