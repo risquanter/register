@@ -9,7 +9,7 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
-import fol.typed.{Value, TypeId, TypeRepr, LiteralValue}
+import fol.typed.{Value, TypeId}
 
 /** Tests for [[RiskTreeKnowledgeBase]] — the bridge between register's domain
   * model and the fol-engine typed evaluation pipeline.
@@ -141,15 +141,11 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private val lossSort  = TypeId("Loss")
   private val probSort  = TypeId("Probability")
 
-  /** TypeRepr for projecting Asset-sorted Values to String (mirrors QueryResponseBuilder). */
-  private given TypeRepr[String] = new TypeRepr[String]:
-    val typeId: TypeId = assetSort
-
   private def assetVal(name: String): Value  = Value(assetSort, name)
-  private def lossVal(v: Long): Value        = Value(lossSort, LiteralValue.IntLiteral(v))
-  private def probVal(v: Double): Value      = Value(probSort, LiteralValue.FloatLiteral(v))
-  private def lossStr(s: String): Value      = Value(lossSort, LiteralValue.IntLiteral(s.toLong))
-  private def probStr(s: String): Value      = Value(probSort, LiteralValue.FloatLiteral(s.toDouble))
+  private def lossVal(v: Long): Value        = Value(lossSort, v)
+  private def probVal(v: Double): Value      = Value(probSort, v)
+  private def lossStr(s: String): Value      = Value(lossSort, s.toLongOption.get)
+  private def probStr(s: String): Value      = Value(probSort, s.toDoubleOption.get)
 
   // ── Spec ───────────────────────────────────────────────────────────
 
@@ -174,12 +170,12 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // Walk: 0→cum 1, 5000→cum 2, 10000→cum 3, 20000→cum 4, 50000→cum 5
       // First where cum >= 4.75 is 50000 (cum=5)
       val result = kb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
-      assertTrue(result == Right(LiteralValue.IntLiteral(50000L)))
+      assertTrue(result == Right(50000L))
     },
     test("p99 returns correct loss for known distribution") {
       // Same logic, target = 5 * 0.99 = 4.95 → 50000 (cum=5)
       val result = kb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
-      assertTrue(result == Right(LiteralValue.IntLiteral(50000L)))
+      assertTrue(result == Right(50000L))
     },
     test("p95 on wider distribution selects correct quantile") {
       // Hardware outcomes sorted: [500, 1000, 1000, 2000, 8000]
@@ -188,7 +184,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // Walk: 500→1, 1000→3, 2000→4, 8000→5
       // First where cum >= 4.75 is 8000 (cum=5)
       val result = kb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Hardware")))
-      assertTrue(result == Right(LiteralValue.IntLiteral(8000L)))
+      assertTrue(result == Right(8000L))
     },
     test("p50 behaviour via percentile — verified through lec instead") {
       // Use lec to verify probOfExceedance: P(Cyber >= 10000)
@@ -196,12 +192,12 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // rangeFrom(10000) = {10000→1, 20000→1, 50000→1}, sum = 3
       // P = 3/5 = 0.6
       val result = kb.dispatcher.evalFunction(fol.typed.SymbolName("lec"), List(assetVal("Cyber"), lossVal(10000L)))
-      assertTrue(result == Right(LiteralValue.FloatLiteral(0.6)))
+      assertTrue(result == Right(0.6))
     },
     test("percentile with empty outcomes returns 0") {
       val emptyKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, emptyResult))
       val result = emptyKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
-      assertTrue(result == Right(LiteralValue.IntLiteral(0L)))
+      assertTrue(result == Right(0L))
     },
     test("percentile monotonicity: p95 <= p99") {
       val p95 = kb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
@@ -210,7 +206,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         v95 <- p95
         v99 <- p99
       yield (v95, v99) match
-        case (LiteralValue.IntLiteral(l95), LiteralValue.IntLiteral(l99)) =>
+        case (l95: Long, l99: Long) =>
           assertTrue(l95 <= l99)
         case other =>
           throw MatchError(other)
@@ -229,7 +225,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // First where cum >= 9.5 is 50000 (cum=10)
       val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
       val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
-      assertTrue(result == Right(LiteralValue.IntLiteral(50000L)))
+      assertTrue(result == Right(50000L))
     },
     test("p95 on sparse hardware — walks past zero mass into tail") {
       // Hardware: outcomeCount {500→1, 1000→1, 2000→1}, implicitZeros=7
@@ -237,7 +233,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // Walk: 500→8, 1000→9, 2000→10 → first >= 9.5 is 2000
       val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
       val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Hardware")))
-      assertTrue(result == Right(LiteralValue.IntLiteral(2000L)))
+      assertTrue(result == Right(2000L))
     },
     test("p99 with low occurrence returns last outcome") {
       // sparseCyberResult: nTrials=10, implicitZeros=7
@@ -245,7 +241,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       // Walk: 5000→8, 10000→9, 50000→10 → first >= 9.9 is 50000
       val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
       val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
-      assertTrue(result == Right(LiteralValue.IntLiteral(50000L)))
+      assertTrue(result == Right(50000L))
     },
     test("p95 with very sparse results returns 0 — target deep in zero mass") {
       // nTrials=100, only 2 outcomes → implicitZeros = 98
@@ -256,7 +252,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       }
       val sparseKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, verySparse))
       val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
-      assertTrue(result == Right(LiteralValue.IntLiteral(0L)))
+      assertTrue(result == Right(0L))
     },
     test("single outcome with many implicit zeros — p95 in zero mass, p99 in zero mass") {
       // nTrials=100, 1 outcome {1→42000} → outcomeCount={42000→1}, implicitZeros=99
@@ -269,8 +265,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val p95 = singleKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
       val p99 = singleKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
       assertTrue(
-        p95 == Right(LiteralValue.IntLiteral(0L)),
-        p99 == Right(LiteralValue.IntLiteral(0L))
+        p95 == Right(0L),
+        p99 == Right(0L)
       )
     },
     test("all outcomes identical — single bin in outcomeCount") {
@@ -284,8 +280,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val p95 = identKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
       val p99 = identKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
       assertTrue(
-        p95 == Right(LiteralValue.IntLiteral(7000L)),
-        p99 == Right(LiteralValue.IntLiteral(7000L))
+        p95 == Right(7000L),
+        p99 == Right(7000L)
       )
     },
     test("exact boundary — implicitZeros == target at p95") {
@@ -297,7 +293,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       }
       val bKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, boundary))
       val p95 = bKb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Cyber")))
-      assertTrue(p95 == Right(LiteralValue.IntLiteral(0L)))
+      assertTrue(p95 == Right(0L))
     },
     test("just past boundary — implicitZeros just below target at p99") {
       // nTrials=20, 1 outcome → implicitZeros=19, p99 target=19.8
@@ -308,14 +304,14 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       }
       val bKb = RiskTreeKnowledgeBase(tree, results.updated(cyberId, boundary))
       val p99 = bKb.dispatcher.evalFunction(fol.typed.SymbolName("p99"), List(assetVal("Cyber")))
-      assertTrue(p99 == Right(LiteralValue.IntLiteral(30000L)))
+      assertTrue(p99 == Right(30000L))
     },
     test("lec is unaffected by sparse results — still unconditional") {
       // sparseCyberResult: nTrials=10, outcomes = {5000, 10000, 50000}
       // P(Loss >= 5000) = count(outcomes >= 5000) / nTrials = 3/10 = 0.3
       val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
       val result = sparseKb.dispatcher.evalFunction(fol.typed.SymbolName("lec"), List(assetVal("Cyber"), lossVal(5000L)))
-      assertTrue(result == Right(LiteralValue.FloatLiteral(0.3)))
+      assertTrue(result == Right(0.3))
     },
     test("monotonicity holds with sparse outcomes: p95 <= p99") {
       val sparseKb = RiskTreeKnowledgeBase(tree, sparseResults)
@@ -325,7 +321,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         v95 <- p95
         v99 <- p99
       yield (v95, v99) match
-        case (LiteralValue.IntLiteral(l95), LiteralValue.IntLiteral(l99)) =>
+        case (l95: Long, l99: Long) =>
           assertTrue(l95 <= l99)
         case other =>
           throw MatchError(other)
@@ -437,15 +433,15 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     test("lec computes correct probability of exceedance") {
       // Cyber: P(Loss >= 5000) = 4/5 = 0.8 (values: 5000, 10000, 20000, 50000)
       val r = kb.dispatcher.evalFunction(fol.typed.SymbolName("lec"), List(assetVal("Cyber"), lossVal(5000L)))
-      assertTrue(r == Right(LiteralValue.FloatLiteral(0.8)))
+      assertTrue(r == Right(0.8))
     },
-    test("lec with LiteralValue threshold (as engine delivers literals)") {
+    test("lec with raw Long threshold (as engine delivers literals)") {
       val r = kb.dispatcher.evalFunction(fol.typed.SymbolName("lec"), List(assetVal("Cyber"), lossStr("5000")))
-      assertTrue(r == Right(LiteralValue.FloatLiteral(0.8)))
+      assertTrue(r == Right(0.8))
     },
     test("lec with threshold above max returns 0.0") {
       val r = kb.dispatcher.evalFunction(fol.typed.SymbolName("lec"), List(assetVal("Cyber"), lossVal(100000L)))
-      assertTrue(r == Right(LiteralValue.FloatLiteral(0.0)))
+      assertTrue(r == Right(0.0))
     },
     test("unknown asset returns Left") {
       val r = kb.dispatcher.evalFunction(fol.typed.SymbolName("p95"), List(assetVal("Nonexistent")))
@@ -466,7 +462,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private val domainSuite = suite("domain elements")(
     test("Asset domain contains all node names") {
       val domain = kb.model.domains(assetSort)
-      val names  = domain.flatMap(_.as[String])
+      val names  = domain.flatMap(v => v.raw match { case s: String => Some(s); case _ => None })
       assertTrue(
         names == Set("Root", "IT Risk", "Cyber", "Hardware")
       )

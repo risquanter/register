@@ -163,53 +163,68 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     test("reaper cascade-deletes trees when workspace expires") {
       ZIO.scoped {
         for
-          store          <- WorkspaceStoreLive.make(reaperTestConfig)
-          (deletedRef, svc) <- trackingTreeService
-          key            <- store.create()
-          treeId         <- IdGenerators.nextTreeId
-          _              <- store.addTree(key, treeId)
-          _              <- WorkspaceReaper.layer.build
-                              .provide(
-                                ZLayer.succeed(reaperTestConfig),
-                                ZLayer.succeed(store: WorkspaceStore),
-                                ZLayer.succeed(svc: RiskTreeService),
-                                ZLayer.succeed(Scope.global)
-                              )
-          // Advance past TTL + reaper interval
-          _              <- TestClock.adjust(4.minutes)
-          deleted        <- deletedRef.get
-        yield assertTrue(deleted.contains(treeId))
+          store            <- WorkspaceStoreLive.make(reaperTestConfig)
+          deleted          <- Promise.make[Nothing, Unit]
+          deletedRef       <- Ref.make(List.empty[TreeId])
+          svc               = makeStub((_, id) =>
+                               deletedRef.update(_ :+ id) *>
+                               deleted.succeed(()).unit *>
+                               ZIO.fail(new NoSuchElementException(s"Tree $id not found")))
+          key              <- store.create()
+          treeId           <- IdGenerators.nextTreeId
+          _                <- store.addTree(key, treeId)
+          _                <- WorkspaceReaper.layer.build
+                               .provide(
+                                 ZLayer.succeed(reaperTestConfig),
+                                 ZLayer.succeed(store: WorkspaceStore),
+                                 ZLayer.succeed(svc: RiskTreeService),
+                                 ZLayer.succeed(Scope.global)
+                               )
+          // Advance past TTL + reaper interval, then await latch so the
+          // cascade-delete fiber completes before we read the ref.
+          _                <- TestClock.adjust(4.minutes)
+          _                <- deleted.await
+          result           <- deletedRef.get
+        yield assertTrue(result.contains(treeId))
       }
-    },
+    } @@ TestAspect.withLiveRandom,
 
     test("reaper cascade-deletes trees across multiple expired workspaces") {
       ZIO.scoped {
         for
-          store          <- WorkspaceStoreLive.make(reaperTestConfig)
-          (deletedRef, svc) <- trackingTreeService
+          store            <- WorkspaceStoreLive.make(reaperTestConfig)
+          // Latch fires after the 3rd cascade delete so deletedRef.get is
+          // always called after the reaper fiber has finished its cycle.
+          allDeleted       <- Promise.make[Nothing, Unit]
+          deletedRef       <- Ref.make(List.empty[TreeId])
+          svc               = makeStub((_, id) =>
+                               deletedRef.updateAndGet(_ :+ id).flatMap { updated =>
+                                 allDeleted.succeed(()).when(updated.size >= 3).unit
+                               } *> ZIO.fail(new NoSuchElementException(s"Tree $id not found")))
           // Workspace 1 with 2 trees
-          key1           <- store.create()
-          ids1           <- IdGenerators.batch(2).map(_.map(TreeId(_)))
-          _              <- ZIO.foreachDiscard(ids1)(store.addTree(key1, _))
+          key1             <- store.create()
+          ids1             <- IdGenerators.batch(2).map(_.map(TreeId(_)))
+          _                <- ZIO.foreachDiscard(ids1)(store.addTree(key1, _))
           // Workspace 2 with 1 tree
-          key2           <- store.create()
-          id2            <- IdGenerators.nextTreeId
-          _              <- store.addTree(key2, id2)
-          _              <- WorkspaceReaper.layer.build
-                              .provide(
-                                ZLayer.succeed(reaperTestConfig),
-                                ZLayer.succeed(store: WorkspaceStore),
-                                ZLayer.succeed(svc: RiskTreeService),
-                                ZLayer.succeed(Scope.global)
-                              )
-          _              <- TestClock.adjust(4.minutes)
-          deleted        <- deletedRef.get
+          key2             <- store.create()
+          id2              <- IdGenerators.nextTreeId
+          _                <- store.addTree(key2, id2)
+          _                <- WorkspaceReaper.layer.build
+                               .provide(
+                                 ZLayer.succeed(reaperTestConfig),
+                                 ZLayer.succeed(store: WorkspaceStore),
+                                 ZLayer.succeed(svc: RiskTreeService),
+                                 ZLayer.succeed(Scope.global)
+                               )
+          _                <- TestClock.adjust(4.minutes)
+          _                <- allDeleted.await
+          deleted          <- deletedRef.get
         yield assertTrue(
           deleted.toSet == (ids1 :+ id2).toSet,
           deleted.size == 3
         )
       }
-    },
+    } @@ TestAspect.withLiveRandom,
 
     test("reaper cascade tolerates already-deleted trees without crashing") {
       // The noOp stub's `delete` always fails — simulates trees that were

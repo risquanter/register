@@ -12,7 +12,7 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import fol.parser.VagueQueryParser
 import fol.semantics.VagueSemantics
 import fol.sampling.{SamplingParams, HDRConfig}
-import fol.typed.{FolModel, QueryBinder, TypeCheckError, TypeId, TypeRepr, Value}
+import fol.typed.{FolModel, QueryBinder, TypeCheckError, TypeId, Value}
 
 /** Integration tests for the parse → bind path against a register-side
   * [[RiskTreeKnowledgeBase]] populated with quoted node-name literals.
@@ -88,8 +88,6 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
   private val kb = RiskTreeKnowledgeBase(tree, results)
 
   private val assetSort = TypeId("Asset")
-  private given TypeRepr[String] = new TypeRepr[String]:
-    val typeId: TypeId = assetSort
 
   // ── Direct bypass-tree builder (mirrors RiskTreeKnowledgeBaseSpec.bypassTree) ─
 
@@ -108,17 +106,24 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
     suite("BinderIntegrationSpec — parse + bind against RiskTreeKnowledgeBase")(
 
       test("B1: quoted-literal scope query parses, binds, and evaluates with range = {Cyber, Hardware}") {
-        // BLOCKED on VQL ADR-015 refactor (symmetric value boundaries).
-        // See vague-quantifier-logic/docs/ADR-015-REVISIT-NOTES.md and
-        //     vague-quantifier-logic/docs/PLAN-symmetric-value-boundaries.md (forthcoming).
-        // B1 fails today with: EvaluationError("leaf_descendant_of: expected String at index 1, got TextLiteral")
-        // Root cause: T-002 — QueryBinder named-constant branch synthesises TextLiteral(name)
-        //             instead of routing through literalValidators(sort).
-        // Fix lands when the dedicated VQL plan publishes 0.11.0-SNAPSHOT and register's
-        // dispatcher migrates to args(i).extract[A]. Re-enable as the first step of the
-        // rewritten Phase 5b in register/docs/PLAN-QUERY-NODE-NAME-LITERALS.md.
-        zio.test.assertCompletes
-      } @@ TestAspect.ignore,
+        // PLAN-QUERY-NODE-NAME-LITERALS §5.5. Node names registered as catalog.constants
+        // (Phase 4), so "IT Risk" binds to ConstRef("IT Risk", assetSort) which evaluates
+        // to Value(assetSort, "IT Risk"). Both leaf descendants of IT Risk satisfy
+        // gt_loss(p95(x), 1000) with the 5-trial fixture.
+        val text   = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 1000))"""
+        val parsed = VagueQueryParser.parse(text).toOption.get
+        val result = for
+          folModel <- FolModel(kb.catalog, kb.model)
+          output   <- VagueSemantics.evaluateTyped(parsed, folModel)
+        yield output
+        val rangeNames = result.toOption.map { out =>
+          out.satisfyingElements.flatMap(v => v.raw match { case s: String => Some(s); case _ => None })
+        }
+        assertTrue(
+          result.isRight,
+          rangeNames.contains(Set("Cyber", "Hardware"))
+        )
+      },
 
       test("B2: unknown quoted node name → Left(UnknownConstantOrLiteral)") {
         val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "Nonexistent"), gt_loss(p95(x), 1000))"""
