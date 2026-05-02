@@ -34,16 +34,6 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
   private val noOpTreeServiceLayer: ULayer[RiskTreeService] =
     ZLayer.succeed(makeStub((_, _) => ZIO.fail(new NoSuchElementException("Tree not found"))))
 
-  /** Tracking stub: records deleted tree IDs in a Ref for assertions.
-    * `delete` appends the ID then fails (tree doesn't really exist) — but the
-    * reaper uses `.ignore`, so the failure is swallowed. The ref captures the call.
-    */
-  private def trackingTreeService: UIO[(Ref[List[TreeId]], RiskTreeService)] =
-    Ref.make(List.empty[TreeId]).map { ref =>
-      val svc = makeStub((_, id) => ref.update(_ :+ id) *> ZIO.fail(new NoSuchElementException(s"Tree $id not found")))
-      (ref, svc)
-    }
-
   /** Shared config for all fiber/cascade tests: short TTL, short reaper interval. */
   private val reaperTestConfig = WorkspaceConfig(
     ttl = Duration.ofMinutes(2),

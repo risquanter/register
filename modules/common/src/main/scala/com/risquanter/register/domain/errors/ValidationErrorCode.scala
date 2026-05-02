@@ -46,6 +46,7 @@ enum ValidationErrorCode(val code: String, val description: String):
   // ── FOL query codes (ADR-028) ─────────────────────────────────────────────
   case PARSE_ERROR extends ValidationErrorCode("PARSE_ERROR", "Query syntax is malformed")
   case UNKNOWN_SYMBOL extends ValidationErrorCode("UNKNOWN_SYMBOL", "Query references an unknown predicate or function")
+  case UNKNOWN_REFERENCE extends ValidationErrorCode("UNKNOWN_REFERENCE", "Query references an unknown constant or literal value")
   case BIND_FAILED extends ValidationErrorCode("BIND_FAILED", "Query type-checking failed at bind phase")
   case DOMAIN_NOT_QUANTIFIABLE extends ValidationErrorCode("DOMAIN_NOT_QUANTIFIABLE", "Query quantifies over a non-domain type")
   case MODEL_VALIDATION_FAILED extends ValidationErrorCode("MODEL_VALIDATION_FAILED", "Runtime model does not satisfy catalog contract")

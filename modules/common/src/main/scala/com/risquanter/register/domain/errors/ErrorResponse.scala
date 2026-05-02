@@ -48,6 +48,8 @@ object ErrorResponse {
           FolUnknownSymbol(firstField, Nil)
         case ValidationErrorCode.BIND_FAILED =>
           FolBindFailure(details.map(_.message))
+        case ValidationErrorCode.UNKNOWN_REFERENCE =>
+          FolUnknownReference(firstField)
         case ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE =>
           FolDomainNotQuantifiable(firstField, Set.empty)
         case _ =>
@@ -163,6 +165,7 @@ object ErrorResponse {
   private def encodeFolQueryFailure(error: FolQueryFailure): (StatusCode, ErrorResponse) = error match {
     case FolParseFailure(message, position)          => makeFolParseFailureResponse(message, position)
     case FolUnknownSymbol(symbol, available)          => makeFolUnknownSymbolResponse(symbol, available)
+    case FolUnknownReference(name)                   => makeFolUnknownReferenceResponse(name)
     case FolBindFailure(errors)                       => makeFolBindFailureResponse(errors)
     case FolDomainNotQuantifiable(typeName, available) => makeFolDomainNotQuantifiableResponse(typeName, available)
     case FolModelValidationFailure(errors)            => makeFolModelValidationFailureResponse(errors)
@@ -265,6 +268,10 @@ object ErrorResponse {
   def makeFolUnknownSymbolResponse(symbol: String, available: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.BadRequest, "query", ValidationErrorCode.UNKNOWN_SYMBOL,
       s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}", domain, requestId)
+
+  def makeFolUnknownReferenceResponse(name: String, domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.BadRequest, "query", ValidationErrorCode.UNKNOWN_REFERENCE,
+      s"Unknown constant or literal reference: '$name'", domain, requestId)
 
   def makeFolBindFailureResponse(errors: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     val details = errors.map(e => ErrorDetail(domain, "query", ValidationErrorCode.BIND_FAILED, e, requestId))

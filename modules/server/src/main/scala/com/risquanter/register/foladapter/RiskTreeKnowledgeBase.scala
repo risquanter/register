@@ -170,7 +170,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
       SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort))
     ),
     literalValidators = Map(
-      lossSort        -> ((s: String) => s.toLongOption),
+      lossSort        -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
       probabilitySort -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0))
     )
   )

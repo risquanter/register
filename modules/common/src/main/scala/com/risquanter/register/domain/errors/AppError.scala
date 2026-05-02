@@ -209,6 +209,22 @@ object FolQueryFailure:
     override def getMessage: String =
       s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}"
 
+  /** Maps from `fol.error.QueryError.UnknownConstantOrLiteralError`.
+    *
+    * The query is syntactically valid but contains a constant (e.g. a quoted
+    * node name) that is not present in the `TypeCatalog` constants set. This
+    * is a user-level query error — the named node does not exist in the tree.
+    *
+    * Example: `leaf_descendant_of(x, "NoSuchNode")` where `"NoSuchNode"` is
+    * not a registered node name.
+    *
+    * HTTP 400 — `UNKNOWN_REFERENCE`.
+    */
+  final case class FolUnknownReference(name: String)
+    extends FolQueryFailure:
+    override def getMessage: String =
+      s"Unknown reference: '$name'"
+
   /** Maps from `fol.error.QueryError.BindError`.
     *
     * The query is syntactically valid and all symbols are known, but the
@@ -317,6 +333,8 @@ object FolQueryFailure:
       case e: QE.RelationNotFoundError    => FolUnknownSymbol(e.relationName.value, e.availableRelations.map(_.value).toList)
       case e: QE.UninterpretedSymbolError => FolUnknownSymbol(e.symbolName, e.availableSymbols.toList)
       case e: QE.SchemaError              => FolUnknownSymbol(e.relationName.value, Nil)
+      // ── Unknown constant/literal reference → 400 ────────────────
+      case e: QE.UnknownConstantOrLiteralError => FolUnknownReference(e.name)
       // ── Bind-phase type errors → 400 ────────────────────────────
       case e: QE.BindError                => FolBindFailure(e.errors)
       // ── Domain-not-found → 400 (D14, defensive fallback) ───────

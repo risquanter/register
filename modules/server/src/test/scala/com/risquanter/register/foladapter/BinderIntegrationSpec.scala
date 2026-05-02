@@ -105,7 +105,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
     suite("BinderIntegrationSpec — parse + bind against RiskTreeKnowledgeBase")(
 
-      test("B1: quoted-literal scope query parses, binds, and evaluates with range = {Cyber, Hardware}") {
+      test("B1: quoted-literal scope query parses, binds, and evaluates with satisfying = {Cyber, Hardware}") {
         // PLAN-QUERY-NODE-NAME-LITERALS §5.5. Node names registered as catalog.constants
         // (Phase 4), so "IT Risk" binds to ConstRef("IT Risk", assetSort) which evaluates
         // to Value(assetSort, "IT Risk"). Both leaf descendants of IT Risk satisfy
@@ -116,12 +116,12 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
           folModel <- FolModel(kb.catalog, kb.model)
           output   <- VagueSemantics.evaluateTyped(parsed, folModel)
         yield output
-        val rangeNames = result.toOption.map { out =>
+        val satisfyingNames = result.toOption.map { out =>
           out.satisfyingElements.flatMap(v => v.raw match { case s: String => Some(s); case _ => None })
         }
         assertTrue(
           result.isRight,
-          rangeNames.contains(Set("Cyber", "Hardware"))
+          satisfyingNames.contains(Set("Cyber", "Hardware"))
         )
       },
 
