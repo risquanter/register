@@ -385,6 +385,26 @@ User will confirm at these points:
 5. **Behavioral changes** — Changing how existing code works (not just adding new code)
 6. **"It works but..."** — Any solution with tradeoffs, limitations, or caveats
 7. **Recursive/complex types** — Types that require special handling for serialization
+8. **Weakening, removing, or reframing test assertions** — Including: deleting an `assertTrue` clause, replacing a strict assertion with a weaker one, marking a test ignored/flaky, disabling a test, commenting it out, renaming it to skip discovery, moving it to a "deferred" suite, or reframing what a test verifies (e.g. "structural" instead of "semantic") to make a failure go away. The assertions encode the user's intent for what the system must do. Weakening them silently converts a real failure into hidden behaviour. Even when the failure is caused by a separate underlying bug, hiding it is a design decision belonging to the user, not to the agent. **If there is a plausible reason to rewrite a test in a way that weakens the assertion, hard stop and report the case to the user for decision. Do not decide on your own.**
+
+**Generalisation beyond tests — same rule for any load-bearing contract.**
+The same prohibition applies to anything that encodes a specification or invariant:
+
+- API request/response schemas, error codes, status codes
+- ADR-stated invariants, validation rules, refinement constraints (Iron types)
+- Public type signatures, error ADTs, exhaustive-match arms
+- Build/lint/format rules (no `--no-verify`, no disabling Scalafix rules, no widening `nowarn` scopes)
+- Security boundaries, sanitiser passes, authorization checks
+- Documented behaviours in README/ADR/plan files
+
+**Procedure when encountering a failing assertion or contract violation:**
+
+1. Diagnose the root cause.
+2. Present the diagnosis and candidate fix directions to the user.
+3. Wait for an explicit decision on which direction to take.
+4. Only then implement.
+
+If a quick local change would unblock progress but conflicts with the spec, the answer is to surface it and wait — never to weaken the spec on the agent's own initiative.
 
 **Litmus test:** If the change affects anything a user/consumer of the API would notice → ASK FIRST.
 
@@ -446,6 +466,7 @@ Before ANY of these actions, STOP and ask for explicit approval:
 - [ ] Changing service interfaces
 - [ ] Modifying layer wiring
 - [ ] Removing tests
+- [ ] Weakening, removing, or reframing any test assertion (see Decision Trigger #8)
 
 Format: "I propose to [ACTION]. Approve? (Y/N)"
 
