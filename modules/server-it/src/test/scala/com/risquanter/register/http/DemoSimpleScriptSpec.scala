@@ -2,14 +2,11 @@ package com.risquanter.register.http
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
-import com.risquanter.register.http.support.SttpClientFixture
-import com.risquanter.register.http.HttpTestHarness.HarnessConfig
-import com.risquanter.register.configs.SimulationConfig
+import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
 import io.github.iltotore.iron.*
 
 /** Regression tests reproducing every query in demo-simple-{httpie,curl}.sh.
@@ -18,25 +15,7 @@ import io.github.iltotore.iron.*
   */
 object DemoSimpleScriptSpec extends ZIOSpecDefault:
 
-  // Production-equivalent simulation config (mirrors application.conf defaults).
-  private val productionSimulationConfig = SimulationConfig(
-    defaultNTrials          = 10000.refineUnsafe,
-    maxTreeDepth            = 5.refineUnsafe,
-    defaultTrialParallelism = 8.refineUnsafe,
-    maxConcurrentSimulations = 4.refineUnsafe,
-    maxNTrials              = 1000000.refineUnsafe,
-    maxParallelism          = 16.refineUnsafe,
-    defaultSeed3            = 0L,
-    defaultSeed4            = 0L
-  )
-
-  private val harnessLayer =
-    ZLayer.makeSome[Scope, SttpClientFixture.Client](
-      HttpTestHarness.inMemoryServer(
-        HarnessConfig(simulation = productionSimulationConfig)
-      ),
-      SttpClientFixture.layer
-    )
+  private val harnessLayer = DemoSpecSupport.harnessLayer
 
   /** Reproduces the tree from Step 1 of demo-simple-{httpie,curl}.sh */
   private val demoTreeRequest = RiskTreeDefinitionRequest(
@@ -90,13 +69,7 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
     )
   )
 
-  private def query(client: SttpClientFixture.Client, key: String, treeId: String)(q: String) =
-    basicRequest
-      .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-      .body(QueryRequest(q))
-      .response(asJson[QueryResponse])
-      .send(client.backend)
-      .flatMap(r => ZIO.fromEither(r.body))
+  private def query = DemoSpecSupport.query
 
   override def spec =
     suite("DemoSimpleScriptSpec")(
@@ -135,17 +108,6 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
 
           // Q-S3: both direct children of IT Risk have P99 > $5M
           qs3 <- query(client, key, treeId)("""Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x), 5000000))""")
-
-          _ <- ZIO.logInfo(
-                 s"""DIAG-SIMPLE\n[Q1]  sat=${q1.satisfied}  prop=${q1.proportion}  n=${q1.satisfyingCount}/${q1.rangeSize}\n""" +
-                 s"""[Q2]  sat=${q2.satisfied}  prop=${q2.proportion}  n=${q2.satisfyingCount}/${q2.rangeSize}\n""" +
-                 s"""[Q3]  sat=${q3.satisfied}  prop=${q3.proportion}  n=${q3.satisfyingCount}/${q3.rangeSize}\n""" +
-                 s"""[Q4]  sat=${q4.satisfied}  prop=${q4.proportion}  n=${q4.satisfyingCount}/${q4.rangeSize}\n""" +
-                 s"""[Q5]  sat=${q5.satisfied}  prop=${q5.proportion}  n=${q5.satisfyingCount}/${q5.rangeSize}\n""" +
-                 s"""[QS1] sat=${qs1.satisfied}  prop=${qs1.proportion}  n=${qs1.satisfyingCount}/${qs1.rangeSize}\n""" +
-                 s"""[QS2] sat=${qs2.satisfied}  prop=${qs2.proportion}  n=${qs2.satisfyingCount}/${qs2.rangeSize}\n""" +
-                 s"""[QS3] sat=${qs3.satisfied}  prop=${qs3.proportion}  n=${qs3.satisfyingCount}/${qs3.rangeSize}"""
-               )
 
         yield assertTrue(q1.rangeSize == 4, !q1.satisfied) &&
           assertTrue(q2.rangeSize == 4, q2.satisfied) &&

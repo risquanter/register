@@ -2,14 +2,11 @@ package com.risquanter.register.http
 
 import zio.*
 import zio.test.*
-import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
-import com.risquanter.register.http.support.SttpClientFixture
-import com.risquanter.register.http.HttpTestHarness.HarnessConfig
-import com.risquanter.register.configs.SimulationConfig
+import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
 import io.github.iltotore.iron.*
 
 /** Regression tests reproducing every query in demo-enterprise-{httpie,curl}.sh.
@@ -18,25 +15,7 @@ import io.github.iltotore.iron.*
   */
 object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
 
-  // Production-equivalent simulation config (mirrors application.conf defaults).
-  private val productionSimulationConfig = SimulationConfig(
-    defaultNTrials           = 10000.refineUnsafe,
-    maxTreeDepth             = 5.refineUnsafe,
-    defaultTrialParallelism  = 8.refineUnsafe,
-    maxConcurrentSimulations = 4.refineUnsafe,
-    maxNTrials               = 1000000.refineUnsafe,
-    maxParallelism           = 16.refineUnsafe,
-    defaultSeed3             = 0L,
-    defaultSeed4             = 0L
-  )
-
-  private val harnessLayer =
-    ZLayer.makeSome[Scope, SttpClientFixture.Client](
-      HttpTestHarness.inMemoryServer(
-        HarnessConfig(simulation = productionSimulationConfig)
-      ),
-      SttpClientFixture.layer
-    )
+  private val harnessLayer = DemoSpecSupport.harnessLayer
 
   /** Reproduces the tree from Step 1 of demo-enterprise-{httpie,curl}.sh
     * (21 leaves, 11 portfolios — Financial Services Enterprise Risk)
@@ -201,13 +180,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
     )
   )
 
-  private def query(client: SttpClientFixture.Client, key: String, treeId: String)(q: String) =
-    basicRequest
-      .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
-      .body(QueryRequest(q))
-      .response(asJson[QueryResponse])
-      .send(client.backend)
-      .flatMap(r => ZIO.fromEither(r.body))
+  private def query = DemoSpecSupport.query
 
   override def spec =
     suite("DemoEnterpriseScriptSpec")(
@@ -227,8 +200,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           q1   <- query(client, key, treeId)("""Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 10000000))""")
           // Q2: ~6/21 leaves have >10% chance of exceeding $1M — satisfies <=1/2
           q2   <- query(client, key, treeId)("""Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000000), 0.10))""")
-          // Q3: ~14-16/21 leaves have unconditional P95 > $1M — boundary against 3/4 bar
-          //      (asserts rangeSize only; satisfied flickers near 0.75 due to parallel-trial accumulation)
+          // Q3: ~14/21 leaves have unconditional P95 > $1M — typically false (~62% < 75% threshold) but not asserted; boundary unstable
           q3   <- query(client, key, treeId)("""Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x), 1000000))""")
           // Q4: ~5-6/21 leaves have unconditional P95 > $5M — far below ~1/2
           q4   <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))""")
@@ -268,32 +240,9 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           qdb  <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))""")
 
           // Diagnostic: log actual proportions for calibration (single call to avoid deep for-comprehension)
-          _ <- ZIO.logInfo(
-                 s"""DIAG\n[Q1]   sat=${q1.satisfied}  prop=${q1.proportion}  n=${q1.satisfyingCount}/${q1.rangeSize}\n""" +
-                 s"""[Q2]   sat=${q2.satisfied}  prop=${q2.proportion}  n=${q2.satisfyingCount}/${q2.rangeSize}\n""" +
-                 s"""[Q3]   sat=${q3.satisfied}  prop=${q3.proportion}  n=${q3.satisfyingCount}/${q3.rangeSize}\n""" +
-                 s"""[Q4]   sat=${q4.satisfied}  prop=${q4.proportion}  n=${q4.satisfyingCount}/${q4.rangeSize}\n""" +
-                 s"""[Q4b]  sat=${q4b.satisfied}  prop=${q4b.proportion}  n=${q4b.satisfyingCount}/${q4b.rangeSize}\n""" +
-                 s"""[Q5]   sat=${q5.satisfied}  prop=${q5.proportion}  n=${q5.satisfyingCount}/${q5.rangeSize}\n""" +
-                 s"""[Q6]   sat=${q6.satisfied}  prop=${q6.proportion}  n=${q6.satisfyingCount}/${q6.rangeSize}\n""" +
-                 s"""[Q7]   sat=${q7.satisfied}  prop=${q7.proportion}  n=${q7.satisfyingCount}/${q7.rangeSize}\n""" +
-                 s"""[Q7b]  sat=${q7b.satisfied}  prop=${q7b.proportion}  n=${q7b.satisfyingCount}/${q7b.rangeSize}\n""" +
-                 s"""[Q8]   sat=${q8.satisfied}  prop=${q8.proportion}  n=${q8.satisfyingCount}/${q8.rangeSize}\n""" +
-                 s"""[QA]   sat=${qa.satisfied}  prop=${qa.proportion}  n=${qa.satisfyingCount}/${qa.rangeSize}\n""" +
-                 s"""[QAb]  sat=${qab.satisfied}  prop=${qab.proportion}  n=${qab.satisfyingCount}/${qab.rangeSize}\n""" +
-                 s"""[QB]   sat=${qb.satisfied}  prop=${qb.proportion}  n=${qb.satisfyingCount}/${qb.rangeSize}\n""" +
-                 s"""[QBb]  sat=${qbb.satisfied}  prop=${qbb.proportion}  n=${qbb.satisfyingCount}/${qbb.rangeSize}\n""" +
-                 s"""[QC1]  sat=${qc1.satisfied}  prop=${qc1.proportion}  n=${qc1.satisfyingCount}/${qc1.rangeSize}\n""" +
-                 s"""[QC1b] sat=${qc1b.satisfied}  prop=${qc1b.proportion}  n=${qc1b.satisfyingCount}/${qc1b.rangeSize}\n""" +
-                 s"""[QC2]  sat=${qc2.satisfied}  prop=${qc2.proportion}  n=${qc2.satisfyingCount}/${qc2.rangeSize}\n""" +
-                 s"""[QC2b] sat=${qc2b.satisfied}  prop=${qc2b.proportion}  n=${qc2b.satisfyingCount}/${qc2b.rangeSize}\n""" +
-                 s"""[QD]   sat=${qd.satisfied}  prop=${qd.proportion}  n=${qd.satisfyingCount}/${qd.rangeSize}\n""" +
-                 s"""[QDb]  sat=${qdb.satisfied}  prop=${qdb.proportion}  n=${qdb.satisfyingCount}/${qdb.rangeSize}"""
-               )
-
         yield assertTrue(q1.rangeSize == 21, q1.satisfied) &&   // ~12/21≈57% sat Q[>=]^{1/4}(25%); margin≈0.32 ✓
           assertTrue(q2.rangeSize == 21, q2.satisfied) &&         // 6/21≈29% sat Q[<=]^{1/2}(50%); margin=0.21 ✓
-          assertTrue(q3.rangeSize == 21) &&                       // boundary: 13/21≈62% vs Q[>=]^{3/4}; margin=0.13 ⚠️; sat=false
+          assertTrue(q3.rangeSize == 21) &&                       // typically false (~62% < 75% threshold); not asserted — boundary unstable
           assertTrue(q4.rangeSize == 21, !q4.satisfied) &&
           assertTrue(q4b.rangeSize == 21, q4b.satisfied) &&      // 4-5/21≈19-24% ≈ Q[~]^{1/5}(20%); around tolerance ✓
           assertTrue(q5.rangeSize == 11, q5.satisfied) &&           // p95 replaces p99 for stability
