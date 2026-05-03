@@ -3,7 +3,10 @@
 # demo-enterprise-httpie.sh — Financial Services Enterprise Risk demo (httpie)
 #
 # Bootstraps a realistic 4-domain enterprise risk tree (21 leaves across
-# 11 portfolios) and runs 8 vague-quantifier queries against it.
+# 11 portfolios) and runs 20 vague-quantifier queries against it.
+# Queries Q1–Q8 cover the full surface; Q-A–Q-D demonstrate sub-portfolio
+# scoping; Q-Ab/Q-Bb/Q-C1b/Q-C2b/Q-Db are satisfied contrasts that show
+# how adjusting a threshold, scope, or quantifier direction flips the result.
 #
 # Requires: httpie (https://httpie.io/), jq
 #
@@ -274,13 +277,11 @@ header "Step 2 — Fetch tree summary"
 http --ignore-stdin GET "$BASE/w/$WS_KEY/risk-trees/$TREE_ID"
 
 # ── Step 3: Vague quantifier queries ──────────────────────────────────────────
-# NOTE: queries are intentionally written without quoted node-name literals
-# (e.g. "Technology & Cyber") to avoid the three known parser bugs tracked
-# in docs/PLAN-QUERY-NODE-NAME-LITERALS.md. Once those land, sub-portfolio
-# scoping queries like leaf_descendant_of(x, "Technology & Cyber") will be
-# re-enabled. The remaining queries exercise the full query surface
-# (gt_loss, gt_prob, p95, p99, lec, leaf, portfolio, all four quantifier
-# shapes >=, <=, ~, with thresholds) without referencing node names.
+# Q1–Q8 cover the full query surface without sub-portfolio scoping (gt_loss,
+# gt_prob, p95, p99, lec, leaf, portfolio, all four quantifier shapes).
+# Q-A–Q-D below demonstrate sub-portfolio scoping with quoted node-name
+# literals (leaf_descendant_of, child_of, descendant_of, with negation).
+# Quoted node-name literal support: PLAN-QUERY-NODE-NAME-LITERALS.md §F1–F3.
 header "Step 3 — Vague quantifier queries"
 
 run_query() {
@@ -305,8 +306,8 @@ run_query() {
 
 # Q1 — Enterprise tail severity: how many risks carry catastrophic potential?
 run_query \
-  "Q1: Do at least 1/4 of all leaves have P99 above \$20M?" \
-  'Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 20000000))'
+  "Q1: Do at least 1/4 of all leaves have P99 above \$10M?" \
+  'Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 10000000))'
 
 # Q2 — High-frequency materiality: risks combining likelihood AND size
 run_query \
@@ -330,15 +331,15 @@ run_query \
   "Q4: Do about half of all leaves have unconditional P95 above \$5M?" \
   'Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))'
 
-# Q4b — same $5M threshold, proportion calibrated to the unconditional distribution
+# Q4b — same $5M threshold: ~1/5 of leaves qualify; Q[~]^{1/5} showcases vague "about" tolerance
 run_query \
-  "Q4b: Do at least 1/5 of all leaves have unconditional P95 above \$5M?" \
-  'Q[>=]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))'
+  "Q4b: Do about 1/5 of all leaves have unconditional P95 above \$5M? (around-quantifier contrast)" \
+  'Q[~]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))'
 
 # Q5 — Portfolio aggregation view (board-level filter)
 run_query \
-  "Q5: Do at most 1/3 of portfolio nodes have P99 above \$50M?" \
-  'Q[<=]^{1/3} x (portfolio(x), gt_loss(p99(x), 50000000))'
+  "Q5: Do at most 1/3 of portfolio nodes have P95 above \$50M?" \
+  'Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x), 50000000))'
 
 # Q6 — Catastrophic exceedance breadth
 run_query \
@@ -363,6 +364,65 @@ run_query \
 run_query \
   "Q8 (forall): Do at least half of portfolio nodes have ALL their direct children with P99 above \$1M?" \
   'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y), 1000000)))'
+
+# ── Sub-portfolio scoped queries (Q-A – Q-D, Phase 6) ────────────────────────
+# Scope the quantifier range to a named sub-portfolio via quoted node-name
+# literals. Requires PLAN-QUERY-NODE-NAME-LITERALS.md §F1–F3 (live since
+# vql-engine 0.10.1-SNAPSHOT + Phase 4 catalog.constants population).
+
+# Q-A — descendant scoping + P95: tail severity within the Cyber sub-portfolio
+# NOT SATISFIED: no Cyber leaf has unconditional P95 > $5M (prob ≤ 30% means most are zero at P95)
+run_query \
+  "Q-A: Do at least 2/3 of Technology & Cyber leaf risks have P95 above \$5M?" \
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology & Cyber"), gt_loss(p95(x), 5000000))'
+
+# Q-Ab — same scope, P99 > $1M: all 4 Cyber leaves clear it (Insider Threat P99 well above $1M even at 5% prob)
+run_query \
+  "Q-Ab: Do at least 2/3 of Technology & Cyber leaf risks have P99 above \$1M? (p99 contrast)" \
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology & Cyber"), gt_loss(p99(x), 1000000))'
+
+# Q-B — direct-child scoping + LEC + Probability: Operational Risk immediate sub-units
+# NOT SATISFIED: only 1 of 3 direct children (Technology & Cyber) has high enough aggregate tail
+run_query \
+  "Q-B: Do at least half of direct children of Operational Risk have >5% chance of exceeding \$10M?" \
+  'Q[>=]^{1/2} x (child_of(x, "Operational Risk"), gt_prob(lec(x, 10000000), 0.05))'
+
+# Q-Bb — scope swap to Enterprise Risk: all 4 top-level domains have high aggregate tails
+run_query \
+  "Q-Bb: Do at least half of direct children of Enterprise Risk have >5% chance of exceeding \$10M? (scope swap contrast)" \
+  'Q[>=]^{1/2} x (child_of(x, "Enterprise Risk"), gt_prob(lec(x, 10000000), 0.05))'
+
+# Q-C1 / Q-C2 — cross-branch comparison: same P99 bar across two domains
+# Q-C1 NOT SATISFIED: only 1/5 Financial Risk leaves (Counterparty Default) clears $20M P99
+run_query \
+  "Q-C1: Do at least 2/3 of Financial Risk leaf descendants have P99 above \$20M?" \
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x), 20000000))'
+
+# Q-C1b — quantifier flip: same data satisfies a <=1/3 cap
+run_query \
+  "Q-C1b: Do at most 1/3 of Financial Risk leaf descendants have P99 above \$20M? (quantifier flip contrast)" \
+  'Q[<=]^{1/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x), 20000000))'
+
+# Q-C2 NOT SATISFIED: only 1/10 Operational Risk leaves clear $20M P99 (even fewer than Financial Risk)
+run_query \
+  "Q-C2: Do at least 2/3 of Operational Risk leaf descendants have P99 above \$20M?" \
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x), 20000000))'
+
+# Q-C2b — scope swap to Compliance & Legal Risk + lower threshold: all 3 leaves clear $5M P99
+run_query \
+  "Q-C2b: Do at least 2/3 of Compliance & Legal Risk leaf descendants have P99 above \$5M? (scope+threshold swap contrast)" \
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance & Legal Risk"), gt_loss(p99(x), 5000000))'
+
+# Q-D — exclusion via negation: leaves outside the Cyber cluster
+# NOT SATISFIED: ~9-11/21 non-Cyber leaves have P95 > $1M (~43-52%) — far from "about 1/3"
+run_query \
+  "Q-D: Do about 1/3 of non-Cyber leaves have P95 above \$1M?" \
+  'Q[~]^{1/3} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))'
+
+# Q-Db — same proportion IS "about 1/2"; Q[~]^{1/2} showcases around tolerance vs strict Q[<=]
+run_query \
+  "Q-Db: Do about half of non-Cyber leaves have P95 above \$1M? (around-quantifier contrast)" \
+  'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))'
 
 header "Done"
 info "Re-run anytime — the workspace key above remains valid until expiry."

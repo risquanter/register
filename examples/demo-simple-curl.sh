@@ -109,10 +109,9 @@ header "Step 2 — Fetch tree summary"
 curl -s "$BASE/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
 
 # ── Step 3: Vague quantifier queries ──────────────────────────────────────────
-# NOTE: queries are intentionally written without quoted node-name literals
-# (e.g. "IT Risk") to avoid the three known parser bugs tracked in
-# docs/PLAN-QUERY-NODE-NAME-LITERALS.md. Once those land, sub-portfolio
-# scoping queries like leaf_descendant_of(x, "IT Risk") will be re-enabled.
+# Q1–Q5 cover the full query surface over all leaves / all portfolios.
+# Q-S1–Q-S3 demonstrate sub-portfolio scoping with quoted node-name literals.
+# Quoted node-name literal support: PLAN-QUERY-NODE-NAME-LITERALS.md §F1–F3.
 header "Step 3 — Vague quantifier queries"
 
 run_query() {
@@ -157,6 +156,26 @@ run_query \
 run_query \
   "Universal (forall): Do at least half of portfolio nodes have ALL direct children with P95 above \$1M?" \
   'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y), 1000000)))'
+
+# ── Sub-portfolio scoped queries (Q-S1 – Q-S3) ────────────────────────────────
+# Same thresholds as Q1/Q2 above, but the quantifier is scoped to a named
+# sub-portfolio. Q-S1 vs Q-S2 directly contrast IT Risk (heavy-tailed) with
+# Third Party Risk (lighter-tailed) at the same $2M P95 bar.
+
+# Q-S1 — IT Risk sub-scope: both leaves are heavy-tailed (Ransomware P95=$15M)
+run_query \
+  "Q-S1: Do at least half of IT Risk leaves have P95 above \$2M?" \
+  'Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 2000000))'
+
+# Q-S2 — Third Party Risk sub-scope: same bar, lighter-tailed leaves
+run_query \
+  "Q-S2: Do at least half of Third Party Risk leaves have P95 above \$2M?" \
+  'Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x), 2000000))'
+
+# Q-S3 — child_of scoping: direct children of IT Risk at the $5M P99 bar (cf. Q2)
+run_query \
+  "Q-S3: Do at least half of direct children of IT Risk have P99 above \$5M?" \
+  'Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x), 5000000))'
 
 header "Done"
 info "Re-run anytime — the workspace key above remains valid until expiry."
