@@ -621,3 +621,83 @@ to any code touched by that plan (only `RiskTreeKnowledgeBase`,
    `Instant.now()`).
 
 **Status:** flagged, untouched. Not blocking any current plan.
+
+---
+
+## 12. Simulation outcomes are not reproducible across re-creations of the same tree
+
+**Observed (2026-05-03).**
+`DemoEnterpriseScriptSpec` produces different P95/P99 figures — and
+different `satisfied` verdicts on boundary queries — depending on
+whether `DemoSimpleScriptSpec` runs first in the same JVM process.
+The effect is fully deterministic (same execution order → identical
+values), but cannot be reproduced without knowing which ULID block the
+tree's nodes will land in.
+
+Affected queries in the demo suite (tolerance-boundary cases): Q1
+(`AtLeast(1/4,0.1)` proportion swings 3/21 ↔ 4/21), Q7b
+(`About(2/3,0.1)` proportion swings 6/11 ↔ 7/11), Q-D
+(`AtMost(1/3,0.1)` proportion swings 9/21 ↔ 11/21). All three straddle
+their quantifier's acceptance threshold when the seed shifts.
+
+**Root cause:**
+`Simulator.createSamplerFromLeaf`
+([modules/server/src/main/scala/com/risquanter/register/services/helper/Simulator.scala](modules/server/src/main/scala/com/risquanter/register/services/helper/Simulator.scala))
+derives the HDR entity seed from the leaf's ULID:
+
+```scala
+entitySeed = leaf.id.value.hashCode.toLong
+```
+
+ULIDs are monotonically time-ordered. When two trees are created
+milliseconds apart in the same test run the second tree's nodes receive
+ULIDs in a numerically higher time bucket, so `hashCode()` differs from
+the first run → different `entitySeed` → different HDR sample stream →
+different Monte Carlo outcomes for the same declared parameters
+(`probability`, `distributionType`, `minLoss/maxLoss`, `percentiles/quantiles`).
+
+The same instability occurs for any two real-world users who create
+"the same" risk tree at different wall-clock times, or any single user
+who deletes and recreates their tree. `defaultSeed3=0, defaultSeed4=0`
+in `SimulationConfig` were intended to anchor reproducibility, but they
+are overridden by the per-leaf `entitySeed` derived from the ULID
+timestamp.
+
+There is already a `// TODO: review seed generation (hashcode) to ensure
+good distribution and avoid collisions` comment at that site, so the
+provisionality was known.
+
+**Consequence for end users:**
+- Two runs with identical leaf parameters produce different P50/P90/P95/P99
+  figures and potentially different query verdicts.
+- Quoting P95 figures from a saved report and comparing them against a
+  freshly-simulated tree is meaningless without also recording the
+  `entitySeed` (i.e. the ULID).
+- The `NodeProvenance.entityId` field in `RiskResult` does record the
+  seed that was used, which means reproduction is possible _if_ the
+  provenance is preserved — but this requires callers to explicitly
+  replay from provenance rather than re-simulating from parameters.
+
+**Direction (not yet decided):**
+The correct fix is to derive `entitySeed` from stable content rather
+than from the ULID allocation timestamp. Natural candidates:
+
+- **Leaf name hash** — `leaf.name.value.hashCode.toLong`. Two leaves
+  with the same name always get the same seed; rename = seed change
+  (arguably correct: renamed leaf is a conceptually different entity).
+- **Distribution-parameter hash** — hash of
+  `(name, distributionType, probability, minLoss, maxLoss, percentiles, quantiles)`.
+  Two leaves with identical spec always get identical outcomes.
+- **Explicit caller-supplied seed** — add an optional `seed` field to
+  `RiskLeafDefinitionRequest`; server uses it if present, falls back to
+  a content hash otherwise. This is the most flexible option and
+  cleanly separates "I want reproducibility" from "I want a fresh run".
+
+Whichever approach is chosen, it must be reflected in `NodeProvenance`
+(the `entityId` field already captures the seed used; the _derivation
+rule_ should be documented there too) and the `README.md` "Counter-based
+PRNG" bullet should be updated to state exactly what the seed is derived
+from.
+
+**Status:** root cause confirmed, fix direction not yet decided. Blocks
+reliable `DemoEnterpriseScriptSpec` assertions in combined test runs.
