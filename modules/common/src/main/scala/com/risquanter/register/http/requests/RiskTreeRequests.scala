@@ -1,9 +1,11 @@
 package com.risquanter.register.http.requests
 
 import zio.prelude.Validation
+import com.risquanter.register.common.FolSymbols
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
+import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
 /** ADR-017 DTO validators for hierarchical risk tree operations. */
@@ -117,6 +119,15 @@ object RiskTreeRequests {
       )((id, name, parent, dist) => (id, name, parent, dist))
     }
 
+  // Guard: ensure no node name collides with a reserved FOL query symbol (e.g. "leaf", "p95").
+  private[requests] def requireNoReservedNames(allNames: Seq[SafeName.SafeName]): Validation[ValidationError, Unit] = {
+    val collisions = allNames.filter(n => FolSymbols.reservedNames.contains(n.value))
+    if collisions.nonEmpty then
+      Validation.fail(ValidationError("request.names", ValidationErrorCode.RESERVED_NAME,
+        s"${ValidationMessages.reservedNodeName}: ${collisions.map(_.value).mkString(", ")}"))
+    else Validation.succeed(())
+  }
+
   // Guard: ensure names are unique across all nodes so parent references are unambiguous; returns the deduped set.
   private[requests] def requireUniqueNames(allNames: Seq[SafeName.SafeName]): Validation[ValidationError, Set[SafeName.SafeName]] = {
     val duplicates = allNames.groupBy(identity).collect { case (n, xs) if xs.size > 1 => n }
@@ -186,6 +197,7 @@ object RiskTreeRequests {
     val totalNodes = portfolios.size + leaves.size
 
     for {
+      _ <- requireNoReservedNames(allNames)
       allNameSet <- requireUniqueNames(allNames)
       root <- requireSingleRoot(portfolios, leaves, "request.portfolios")
       _ <- requireLeafParents(leaves, portfolioNames, allNameSet, totalNodes, "request.leaves")
@@ -214,6 +226,7 @@ object RiskTreeRequests {
     val totalNodes = portfolios.size + newPortfolios.size + leaves.size + newLeaves.size
 
     for {
+      _ <- requireNoReservedNames(allNames)
       allNameSet <- requireUniqueNames(allNames)
       root <- requireSingleRoot(
         portfolios = portfolios.map(p => p._2 -> p._3) ++ newPortfolios.map(p => p._1 -> p._2),

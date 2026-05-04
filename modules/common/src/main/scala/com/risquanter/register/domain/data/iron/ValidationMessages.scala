@@ -24,6 +24,11 @@ object ValidationMessages:
   val nameTooLong: String       = s"Name must be at most ${Constants.MaxNameLength} characters"
 
   // ══════════════════════════════════════════════════════════════════
+  // Reserved FOL symbol names
+  // ══════════════════════════════════════════════════════════════════
+  val reservedNodeName: String  = "Node name must not be a reserved query symbol (e.g. 'leaf', 'p95')"
+
+  // ══════════════════════════════════════════════════════════════════
   // Email
   // ══════════════════════════════════════════════════════════════════
   val emailInvalid: String      = "Please enter a valid email address"

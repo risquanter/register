@@ -254,6 +254,32 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val result = resolveUpdate(req, () => safeId("generated"))
 
       assertFailsWith(result)("refers to a leaf")
+    },
+
+    test("resolveCreate fails when a node name collides with a reserved FOL symbol") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
+        leaves = Seq(validLeafDef("leaf", Some("Root"))) // "leaf" is a reserved predicate
+      )
+
+      val result = resolveCreate(req, () => safeId("generated"))
+
+      assertFailsWith(result)("reserved query symbol")
+    },
+
+    test("resolveUpdate fails when an existing node name collides with a reserved FOL symbol") {
+      val req = RiskTreeUpdateRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate("01H0R8Z3F5J2N4R8Z3F5J2N4R9", "p95", Some("Root"))), // "p95" is a reserved function
+        newPortfolios = Seq.empty,
+        newLeaves = Seq.empty
+      )
+
+      val result = resolveUpdate(req, () => safeId("generated"))
+
+      assertFailsWith(result)("reserved query symbol")
     }
   )
 }

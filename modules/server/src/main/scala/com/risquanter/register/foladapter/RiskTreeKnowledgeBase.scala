@@ -4,6 +4,7 @@ import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPo
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
+import com.risquanter.register.common.FolSymbols
 
 import fol.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, RuntimeDispatcher, Value}
 
@@ -103,10 +104,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
     * The set is the union of this catalog's own function and predicate symbol
     * names — see PLAN §5.4 C4 for the expected baseline.
     */
-  val reservedFolNames: Set[String] =
-    Set("p95", "p99", "lec",
-        "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
-        "gt_loss", "gt_prob")
+  val reservedFolNames: Set[String] = FolSymbols.reservedNames
 
   /** Diagnostic record of node names that were skipped (reserved-symbol
     * collision) or coalesced (duplicate name, last-write-wins) when building
