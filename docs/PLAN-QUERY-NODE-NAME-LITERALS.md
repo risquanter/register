@@ -942,23 +942,77 @@ captured as named follow-ups.
   whichever the codebase already uses). If none exists, add a constant
   matching the server limit at the input boundary; do NOT introduce a
   new validation pattern. Run alongside D-8 implementation.
-- **F-R3 — ADR-013 status resolution.** ADR-013 is Proposed (not
-  Accepted) and uses non-standard "wiring test" terminology with zero
-  `*WiringSpec*` files in the codebase. Decide whether to (a) accept it
-  in its current spirit but rename the terminology to
-  "integration-tier", (b) reject and remove, or (c) leave Proposed and
-  defer further. Independent of this plan.
-- **F-R4 — ADR-020 SNAPSHOT-in-prod resolution.** fol-engine remains on
-  `0.X.0-SNAPSHOT` per user direction. Track resolution separately.
-- **F-R5 — Decide whether to tighten `SafeName`'s character class.**
-  `SafeName = String :| (Not[Blank] & MaxLength[50])` (see
-  [OpaqueTypes.scala:101](modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala#L101))
-  imposes no content restriction beyond non-blank + ≤50 chars. After the
-  bug fix lands, a node named `foo,bar)` will be storable and
-  unreferencable from a query (the comma terminates the FOL term, the
-  paren mismatches). Not a security issue (see §11) but a UX one. Decide
-  whether to add a refinement like `Match["[A-Za-z0-9 _-]{1,50}"]` and
-  whether to migrate existing names. Out of scope here.
+- **F-R3 — ADR-013 status resolution.** ADR-013 (`-proposal`) has been
+  hard-deleted (2026-05-05). It was effectively superseded by the
+  `HttpTestHarness`-backed integration tier that emerged organically:
+  `HttpApiIntegrationSpec`, `QueryEndpointSpec`, `DemoSimpleScriptSpec`,
+  `DemoEnterpriseScriptSpec` all boot a full in-process HTTP server via
+  `HttpTestHarness` and exercise every wiring concern the ADR was trying
+  to catch. No action required.
+- **F-R4 — ADR-020 SNAPSHOT-in-prod resolution.** `vql-engine` and
+  `hdr-rng` remain on `0.X.0-SNAPSHOT` per user direction. Resolution
+  is tracked in TODO.md §5b. Track separately.
+- **F-R5 — Tighten `SafeName` character class.**
+
+  **SETTLED (2026-05-05):**
+  - Constraint: `Match["[A-Za-z0-9 _-]{1,50}"]` — letters, digits,
+    space, underscore, hyphen; 1–50 chars.
+  - Spaces explicitly allowed.
+  - No migration required (no existing persisted data).
+
+  **Implementation design (no further user input required):**
+
+  `SafeName` has its own dedicated `object SafeName` in
+  [`OpaqueTypes.scala`](modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala).
+  The underlying opaque type is currently `SafeShortStr` (`Not[Blank] &
+  MaxLength[50]`). `SafeShortStr` is a separate base alias that must
+  remain unchanged (used independently elsewhere). The correct approach
+  is a new dedicated type alias:
+
+  ```scala
+  // OpaqueTypes.scala — new alias; SafeShortStr unchanged
+  type SafeNameStr = String :| Match["[A-Za-z0-9 _-]{1,50}"]
+
+  object SafeName:
+    opaque type SafeName = SafeNameStr          // was SafeShortStr
+    object SafeName:
+      def apply(s: SafeNameStr): SafeName = s   // was SafeShortStr
+      def unapply(sn: SafeName): Option[SafeNameStr] = Some(sn)
+    extension (sn: SafeName)
+      def value: SafeNameStr = sn
+  ```
+
+  `ValidationUtil.refineName` keeps its **multi-step validation** to
+  preserve distinct error codes — a single `Match` refine cannot
+  distinguish between the three failure modes:
+
+  ```scala
+  def refineName(value: String, fieldPath: String = "name")
+      : Either[List[ValidationError], SafeName.SafeName] =
+    val s = nonEmpty(value)
+    if s.isEmpty then
+      Left(List(ValidationError(fieldPath, REQUIRED_FIELD, ValidationMessages.nameRequired)))
+    else if s.length > 50 then
+      Left(List(ValidationError(fieldPath, INVALID_LENGTH, ValidationMessages.nameTooLong)))
+    else
+      s.refineEither[Match["[A-Za-z0-9 _-]{1,50}"]]
+        .map(SafeName.SafeName(_))
+        .left.map(_ => List(ValidationError(
+          fieldPath, INVALID_FORMAT, ValidationMessages.nameInvalidChars)))
+  ```
+
+  New message in `ValidationMessages.scala`:
+  ```scala
+  val nameInvalidChars: String =
+    "Name may only contain letters, numbers, spaces, underscores, and hyphens"
+  ```
+
+  **Files in scope:**
+  - `OpaqueTypes.scala` — new `SafeNameStr` type alias; update `SafeName` opaque type and its `apply`/`unapply`/`value`
+  - `ValidationUtil.scala` — update `refineName` multi-step logic
+  - `ValidationMessages.scala` — add `nameInvalidChars`
+  - `OpaqueTypesSpec.scala` — update `SafeName` suite; `SafeShortStr` suite unchanged
+  - `SimulationResponseSpec.scala` — 3 fixtures use `SafeName.SafeName("…".refineUnsafe)` with the old type; update to `SafeName.fromString("…").toOption.get` or update the `refineUnsafe` type parameter
 
 ---
 
