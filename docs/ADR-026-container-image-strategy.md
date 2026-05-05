@@ -24,12 +24,12 @@ Each service follows a builder / prod / dev separation:
 | Tier | Purpose | Lifetime | Example |
 |------|---------|----------|---------|
 | **Builder** | Cached toolchain + compiled dependencies | Survives `docker builder prune` | `local/graalvm-builder:21`, `local/irmin-builder:3.11` |
-| **Prod** | Multi-stage: `FROM builder` → minimal runtime | Rebuilt on code/config changes | `register-server:prod`, `local/irmin-prod:3.11` |
+| **Prod** | Multi-stage: `FROM builder` → minimal runtime | Rebuilt on code/config changes | `local/register-server:<version>`, `local/irmin-prod:3.11` |
 | **Dev** | Self-contained, full toolchain, debuggable | Built once locally | `local/irmin-dev:3.11` |
 
 **Purge-and-rebuild workflow:**
 ```bash
-docker rmi register-server:prod local/irmin-prod:3.11   # purge deployed
+docker rmi local/register-server:<version> local/irmin-prod:3.11   # purge deployed
 docker compose build                                      # rebuild in seconds
 # Builder images untouched — no 40-min opam reinstall
 ```

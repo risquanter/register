@@ -165,12 +165,12 @@ docker build -f containers/builders/Dockerfile.graalvm-builder \
 #    Context is the parent directory so vague-quantifier-logic/ and hdr-rng/ are in scope.
 #    Requires hdr-rng/ and vague-quantifier-logic/ at ../. Independent of steps 1-3 image-wise.
 docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:dev ..
+  -t local/frontend:<version> ..
 
 # 5. Register server production (native binary on distroless) — ~5-10 min
 #    Requires step 3.
 docker build -f containers/prod/Dockerfile.register-prod \
-  -t register-server:prod .
+  -t local/register-server:<version> .
 
 # Verify all images
 docker images | grep -E 'irmin|register|graalvm|frontend'
@@ -292,10 +292,10 @@ docker compose up --build register-server -d
 
 ```bash
 # Build prod image
-docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod .
+docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> .
 
 # Run
-docker run -p 8090:8090 --name register-server register-server:prod
+docker run -p 8090:8090 --name register-server local/register-server:<version>
 ```
 
 ---
@@ -379,16 +379,16 @@ npm deps → source compile. Only the source layer rebuilds on a code change.
 ```bash
 # Build
 docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:dev ..
+  -t local/frontend:<version> ..
 
 # Run
-docker run --rm -p 18080:8080 local/frontend:dev
+docker run --rm -p 18080:8080 local/frontend:<version>
 
 # Smoke test
 curl -s http://localhost:18080/ | grep -q '<html' && echo OK
 
 # Verify cache headers on a hashed asset
-JS=$(docker run --rm local/frontend:dev sh -c \
+JS=$(docker run --rm local/frontend:<version> sh -c \
   'find /srv/app/assets -name "*.js" | head -1 | sed s|/srv/app||')
 curl -sI "http://localhost:18080${JS}" | grep -E 'Cache-Control|X-Content-Type-Options'
 # Expected:
@@ -718,10 +718,10 @@ services:
 
 ```bash
 # Scan for vulnerabilities
-docker scan register-server:prod
+docker scan local/register-server:<version>
 
 # Or use Trivy
-trivy image register-server:prod
+trivy image local/register-server:<version>
 ```
 
 ---
@@ -882,7 +882,7 @@ docker exec -it register-server /bin/sh
 docker exec register-server id 2>/dev/null || echo "Cannot exec (distroless)"
 
 # Scan for CVEs
-trivy image register-server:prod
+trivy image local/register-server:<version>
 ```
 
 ---
@@ -936,21 +936,21 @@ See the linked sections for full context and prerequisites.
 | Image | When to rebuild | Command | Details |
 |-------|-----------------|---------|---------|
 | `local/graalvm-builder:21` | vql-engine changes, GraalVM/sbt version bump | `docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..` | [Builder base](#one-time-setup-builder-base-image) |
-| `register-server:prod` | Server or common source changes | `docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod .` | [Register server](#standalone-docker) |
-| `local/frontend:dev` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:dev ..` | [Frontend SPA](#standalone-docker-1) |
+| `local/register-server:<version>` | Server or common source changes | `docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> .` | [Register server](#standalone-docker) |
+| `local/frontend:<version>` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:<version> ..` | [Frontend SPA](#standalone-docker-1) |
 | `local/irmin-prod:3.11` | Irmin version changes | `docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11 containers/prod/` | [Irmin server](#irmin-graphql-server-persistence-layer) |
 | `local/irmin-builder:3.11` | OCaml/Irmin version changes | `docker build -f containers/builders/Dockerfile.irmin-builder -t local/irmin-builder:3.11 containers/builders/` | [Irmin builder](#one-time-setup-irmin-builder-base-image) |
 
 **Typical rebuild after server code changes** (vql-engine unchanged):
 ```bash
-docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod . \
+docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> . \
   && docker compose up -d register-server
 ```
 
 **Rebuild after vql-engine changes** (must rebuild builder base first):
 ```bash
 docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 .. \
-  && docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod . \
+  && docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> . \
   && docker compose up -d register-server
 ```
 

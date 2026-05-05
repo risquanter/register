@@ -114,7 +114,7 @@ services:
       # docker-compose --profile observability up
       OTEL_SERVICE_NAME: "risk-register"
       # OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"  # Unused with console exporters
-    image: register-server:prod
+    image: local/register-server:0.1.0
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -165,7 +165,7 @@ services:
     build:
       context: ..
       dockerfile: register/containers/prod/Dockerfile.frontend-prod
-    image: local/frontend:dev
+    image: local/frontend:0.1.0
     pull_policy: build
     container_name: frontend
     ports:

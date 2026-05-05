@@ -542,11 +542,11 @@ the Docker CLI + compose plugin.
 
 ```bash
 # Server (GraalVM native)
-docker build -f Dockerfile.native -t register-server:prod .
+docker build -f Dockerfile.native -t local/register-server:<version> .
 
 # Frontend (nginx)
 docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:dev .
+  -t local/frontend:<version> .
 
 # Irmin builder + prod (needed for suites A and B)
 docker build -f containers/prod/Dockerfile.irmin-builder \

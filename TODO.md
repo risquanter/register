@@ -127,7 +127,7 @@ Current state:
   artifacts from `FROM local/graalvm-builder:21`
 
 **Rebuild rule:** if `hdr-rng` or `vague-quantifier-logic` source changes, rebuild
-`local/graalvm-builder:21` and `local/frontend:dev` before rebuilding dependent images.
+`local/graalvm-builder:21` and `local/frontend:<version>` before rebuilding dependent images.
 
 **Note on Docker context and sibling paths:**  
 Docker's `COPY` instruction cannot reference paths outside the build context —
@@ -220,18 +220,12 @@ tag in sync with `build.sbt` (e.g. a shell script or sbt task that reads the
 version and passes it as a `--build-arg`), which adds complexity not justified
 at the current stage.
 
-**Decided migration path (on hold):**
+**Resolution (implemented):**
 
-1. **Phase 1 — immediate (on hold):** Rename to `local/` + `:latest` for all
-   locally-built app images. Specifically:
-   - `local/frontend:dev` → `local/frontend:latest`
-   - `register-server:prod` → `local/register-server:latest`
-   - Update `docker-compose.yml`, all docs, and test references atomically.
-
-2. **Phase 2 — subsequent:** Migrate to `local/` + app version tag
-   (e.g. `local/register-server:0.1.0-SNAPSHOT`), driven by the sbt project
-   version in `build.sbt`. Implement a helper (script or sbt task) to stamp
-   the tag automatically so it stays in sync without manual edits.
+- `local/frontend:dev` → `local/frontend:<version>` where `<version>` matches `build.sbt`
+- `register-server:prod` → `local/register-server:<version>`
+- `docker-compose.yml` carries the specific version tag and is the **only file to update on a version bump**.
+- All other docs use the generic `<version>` placeholder and require no maintenance.
 
 The Irmin and GraalVM builder images are **not affected** — their version tags
 pin to external software versions (`3.11`, `21`) and are already correct.

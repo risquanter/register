@@ -19,10 +19,10 @@
 #   baked into the image (no ConfigMap required).
 #
 # Build:  docker build -f containers/prod/Dockerfile.frontend-prod \
-#           -t local/frontend:dev ..
+#           -t local/frontend:<version> ..
 #         (run from the register project root; ".." = projects parent dir,
 #          required so vague-quantifier-logic/ and hdr-rng/ are in context)
-# Run:    docker run --rm -p 18080:8080 local/frontend:dev
+# Run:    docker run --rm -p 18080:8080 local/frontend:<version>
 # Test:   curl -s http://localhost:18080/ | grep -q '<html' && echo OK
 # ============================================================================
 
