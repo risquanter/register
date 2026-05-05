@@ -34,9 +34,8 @@ object ErrorBanner:
       case GlobalError.ValidationFailed(errors) =>
         ("⚠", errors.map(_.message).mkString("; "))
 
-      case GlobalError.NetworkError(msg, retryable) =>
-        val hint = if retryable then " — will retry" else ""
-        ("⚡", s"${safe(msg)}$hint")
+      case GlobalError.NetworkError(msg, _) =>
+        ("⚡", safe(msg))
 
       case GlobalError.Conflict(msg) =>
         ("🔄", safe(msg))

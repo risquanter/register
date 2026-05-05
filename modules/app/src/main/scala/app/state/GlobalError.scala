@@ -96,6 +96,8 @@ object GlobalError:
 
     case _: SimError        => ServerError(msg(e))
 
+    case _: FolQueryFailure => ServerError(msg(e))
+
     // ── Catch-all ──
     case _ => NetworkError(msg(e), retryable = false)
 
