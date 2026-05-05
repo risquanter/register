@@ -156,6 +156,7 @@ final class AnalyzeQueryState(
   private def isQueryDomainError(e: FolQueryFailure): Boolean = e match
     case _: FolParseFailure          => true
     case _: FolUnknownSymbol         => true
+    case _: FolUnknownReference      => true
     case _: FolBindFailure           => true
     case _: FolDomainNotQuantifiable => true
     case _: FolModelValidationFailure => false
