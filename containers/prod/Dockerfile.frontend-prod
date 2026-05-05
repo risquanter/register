@@ -58,13 +58,13 @@ WORKDIR /app
 # Build context must be the parent of all sibling projects (see build command).
 # Mirrors the same pattern in containers/builders/Dockerfile.graalvm-builder.
 
-# hdr-rng (com.risquanter:hdr-rng) — required by fol-engine
+# hdr-rng (com.risquanter:hdr-rng) — required by vql-engine
 COPY hdr-rng/ /tmp/hdr-rng/
 RUN cd /tmp/hdr-rng && sbt publishLocal && cd / && rm -rf /tmp/hdr-rng
 
-# fol-engine (com.risquanter:fol-engine) — required by register (JS artifact: fol-engine_sjs1_3)
-COPY vague-quantifier-logic/ /tmp/fol-engine/
-RUN cd /tmp/fol-engine && sbt publishLocal && cd / && rm -rf /tmp/fol-engine
+# vql-engine (com.risquanter:vql-engine) — required by register (JS artifact: vql-engine_sjs1_3)
+COPY vague-quantifier-logic/ /tmp/vql-engine/
+RUN cd /tmp/vql-engine && sbt publishLocal && cd / && rm -rf /tmp/vql-engine
 # ---- end local SNAPSHOT libraries -------------------------------------------
 
 # --------------------------------------------------------------------------

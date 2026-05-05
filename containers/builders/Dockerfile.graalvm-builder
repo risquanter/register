@@ -48,7 +48,7 @@ RUN sbt --version
 COPY hdr-rng/ /tmp/hdr-rng/
 RUN cd /tmp/hdr-rng && sbt publishLocal && cd / && rm -rf /tmp/hdr-rng
 
-# fol-engine (com.risquanter:fol-engine) — required by register
-COPY vague-quantifier-logic/ /tmp/fol-engine/
-RUN cd /tmp/fol-engine && sbt publishLocal && cd / && rm -rf /tmp/fol-engine
+# vql-engine (com.risquanter:vql-engine) — required by register
+COPY vague-quantifier-logic/ /tmp/vql-engine/
+RUN cd /tmp/vql-engine && sbt publishLocal && cd / && rm -rf /tmp/vql-engine
 # ---- end local SNAPSHOT libraries -------------------------------------------

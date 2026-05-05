@@ -157,7 +157,7 @@ docker build -f containers/prod/Dockerfile.irmin-prod \
   -t local/irmin-prod:3.11 containers/prod/
 
 # 3. GraalVM builder base (native-image + sbt) — ~1-2 min
-#    Context is the parent directory so fol-engine source is in scope.
+#    Context is the parent directory so vql-engine source is in scope.
 docker build -f containers/builders/Dockerfile.graalvm-builder \
   -t local/graalvm-builder:21 ..
 
@@ -264,7 +264,7 @@ docker build -f containers/builders/Dockerfile.graalvm-builder \
 This takes ~1–2 minutes and only needs to be repeated when:
 - GraalVM version changes (update the `FROM` in `containers/builders/Dockerfile.graalvm-builder`)
 - sbt version changes (update `SBT_VERSION` arg to match `project/build.properties`)
-- `fol-engine` (or any other local SNAPSHOT library) has a new version to bake in
+- `vql-engine` (or any other local SNAPSHOT library) has a new version to bake in
 
 > **Build context:** the graalvm-builder uses `..` (the parent of the register
 > project) as its Docker build context so that both `register/` and
@@ -935,19 +935,19 @@ See the linked sections for full context and prerequisites.
 
 | Image | When to rebuild | Command | Details |
 |-------|-----------------|---------|---------|
-| `local/graalvm-builder:21` | fol-engine changes, GraalVM/sbt version bump | `docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..` | [Builder base](#one-time-setup-builder-base-image) |
+| `local/graalvm-builder:21` | vql-engine changes, GraalVM/sbt version bump | `docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..` | [Builder base](#one-time-setup-builder-base-image) |
 | `register-server:prod` | Server or common source changes | `docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod .` | [Register server](#standalone-docker) |
 | `local/frontend:dev` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:dev ..` | [Frontend SPA](#standalone-docker-1) |
 | `local/irmin-prod:3.11` | Irmin version changes | `docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11 containers/prod/` | [Irmin server](#irmin-graphql-server-persistence-layer) |
 | `local/irmin-builder:3.11` | OCaml/Irmin version changes | `docker build -f containers/builders/Dockerfile.irmin-builder -t local/irmin-builder:3.11 containers/builders/` | [Irmin builder](#one-time-setup-irmin-builder-base-image) |
 
-**Typical rebuild after server code changes** (fol-engine unchanged):
+**Typical rebuild after server code changes** (vql-engine unchanged):
 ```bash
 docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod . \
   && docker compose up -d register-server
 ```
 
-**Rebuild after fol-engine changes** (must rebuild builder base first):
+**Rebuild after vql-engine changes** (must rebuild builder base first):
 ```bash
 docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 .. \
   && docker build -f containers/prod/Dockerfile.register-prod -t register-server:prod . \
