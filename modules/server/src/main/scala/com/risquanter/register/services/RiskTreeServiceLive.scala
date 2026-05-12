@@ -9,7 +9,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECCurveResponse, LECPoint, LECNodeCurve, Distribution}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, Probability, DistributionType, TreeId, NodeId, WorkspaceId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
@@ -367,42 +367,6 @@ class RiskTreeServiceLive private (
   // ========================================
   // New LEC Query APIs (ADR-015)
   // ========================================
-  
-  // TODO-REMOVE: No real-world clients. Remove along with LECCurveResponse,
-  // getWorkspaceLECCurveEndpoint, RiskTreeService.getLECCurve, and WorkspaceAnalysisController.getLECCurve.
-  @deprecated("No real-world clients. Use getLECCurvesMulti instead.", since = "2026-04-14")
-  override def getLECCurve(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse] =
-    traced("getLECCurve") {
-      for {
-        _ <- tracing.setAttribute("tree_id", treeId.value)
-        _ <- tracing.setAttribute("node_id", nodeId.value)
-        _ <- tracing.setAttribute("include_provenance", includeProvenance)
-        
-        // Fetch requested tree and node
-        (tree, node) <- lookupNodeInTree(wsId, treeId, nodeId)
-        
-        // Ensure result is cached (cache-aside pattern via RiskResultResolver)
-        result <- resolver.ensureCached(tree, nodeId, includeProvenance)
-        _ <- tracing.setAttribute("cache_resolved", true)
-        
-        // Generate LEC curve points from cached result
-        curvePoints = LECGenerator.generateCurvePoints(result)
-        _ <- tracing.setAttribute("curve_points", curvePoints.size.toLong)
-        
-        // Calculate quantiles
-        quantiles = LECGenerator.calculateQuantiles(result)
-        
-        // Convert to response format
-        lecPoints = curvePoints.map { case (loss, prob) => LECPoint(loss, prob) }
-        response = LECCurveResponse(
-          id = nodeId.value,
-          name = node.name,  // Use node.name (display name), not result.nodeId (which is the node ID)
-          curve = lecPoints,
-          quantiles = quantiles,
-          provenances = if (includeProvenance) result.provenances else Nil  // Filter provenance on output
-        )
-      } yield response
-    }
   
   override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[Double] =
     traced("probOfExceedance") {

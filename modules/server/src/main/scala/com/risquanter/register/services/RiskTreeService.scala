@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
-import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve}
+import com.risquanter.register.domain.data.{RiskTree, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId}
 
 /** Service layer for RiskTree business logic.
@@ -57,21 +57,6 @@ trait RiskTreeService {
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)
   // ========================================
-  
-  /** Get LEC curve for a single node.
-    * 
-    * Uses cache-aside pattern: returns cached result if available,
-    * otherwise simulates and caches before returning.
-    * 
-    * @param wsId Workspace that owns the tree
-    * @param nodeId Node identifier (SafeId)
-    * @param includeProvenance Whether to include provenance metadata for reproducibility
-    * @return LEC curve response with quantiles, curve points, and childIds for navigation
-    */
-  // TODO-REMOVE: No real-world clients. Remove along with LECCurveResponse,
-  // getWorkspaceLECCurveEndpoint, and WorkspaceAnalysisController.getLECCurve.
-  @deprecated("No real-world clients. Use getLECCurvesMulti instead.", since = "2026-04-14")
-  def getLECCurve(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean = false): Task[LECCurveResponse]
   
   /** Get exceedance probability at a threshold for a node.
     * 

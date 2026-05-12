@@ -22,39 +22,6 @@ object LECPoint {
   given schema: Schema[LECPoint] = Schema.derived[LECPoint]
 }
 
-/** LEC curve data for a single node (flat, non-recursive)
-  * 
-  * Serialized representation of computed LEC data for API responses.
-  * Contains curve points sampled at specific loss values (ticks).
-  * 
-  * Design (post ADR-004a/005 redesign):
-  * - Flat structure: client reads child navigation from tree structure
-  * - Client fetches child curves separately via node-specific endpoints
-  * - Enables per-node caching and SSE streaming
-  * 
-  * @param id Node identifier (matches RiskNode.id)
-  * @param name Human-readable name
-  * @param curve Loss exceedance curve points (loss → P(Loss >= loss))
-  * @param quantiles Key percentiles (p50, p90, p95, p99) for quick reference
-  * @param provenances Opt-in provenance metadata for reproducibility (via ?includeProvenance=true)
-  */
-// TODO-REMOVE: No real-world clients. All LEC rendering uses the lec-multi endpoint
-// (Map[NodeId, LECNodeCurve]). Remove along with getWorkspaceLECCurveEndpoint,
-// RiskTreeService.getLECCurve, and their tests.
-@deprecated("No real-world clients. Use lec-multi (LECNodeCurve) instead.", since = "2026-04-14")
-final case class LECCurveResponse(
-  id: String,
-  name: String,
-  curve: Vector[LECPoint],
-  quantiles: Map[String, Double],
-  provenances: List[NodeProvenance] = Nil
-)
-
-object LECCurveResponse {
-  given codec: JsonCodec[LECCurveResponse] = DeriveJsonCodec.gen[LECCurveResponse]
-  given schema: Schema[LECCurveResponse] = Schema.derived[LECCurveResponse]
-}
-
 /** Core LEC curve data — identity + drawing data for a single node.
   *
   * This is the universal curve type used for:

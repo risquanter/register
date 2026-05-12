@@ -20,17 +20,6 @@ class WorkspaceAnalysisController private (
 ) extends BaseController
     with WorkspaceAnalysisEndpoints:
 
-  @deprecated("No real-world clients. Use lec-multi instead.", since = "2026-04-14")
-  val getLECCurve: ServerEndpoint[Any, Task] = getWorkspaceLECCurveEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, nodeId, includeProvenance) =>
-      (for
-        userId <- userCtx.extract(maybeUserId)
-        _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        result <- riskTreeService.getLECCurve(ws.id, treeId, nodeId, includeProvenance)
-      yield result).either
-  }
-
   val probOfExceedance: ServerEndpoint[Any, Task] = getWorkspaceProbOfExceedanceEndpoint.serverLogic {
     case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance) =>
       (for
@@ -53,7 +42,6 @@ class WorkspaceAnalysisController private (
 
   override val routes: List[ServerEndpoint[Any, Task]] =
     List(
-      getLECCurve,
       probOfExceedance,
       getLECCurvesMulti
     )
