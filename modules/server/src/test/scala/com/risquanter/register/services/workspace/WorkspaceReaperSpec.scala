@@ -9,7 +9,7 @@ import java.time.Duration
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
-import com.risquanter.register.domain.data.{RiskTree, LECCurveResponse, LECPoint, LECNodeCurve}
+import com.risquanter.register.domain.data.{RiskTree, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.util.IdGenerators
@@ -26,7 +26,6 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]                                  = ZIO.die(new UnsupportedOperationException)
     def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree]                                                              = onDelete(wsId, id)
     def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]]                                                     = ZIO.die(new UnsupportedOperationException)
-    def getLECCurve(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, includeProvenance: Boolean): Task[LECCurveResponse]  = ZIO.die(new UnsupportedOperationException)
     def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[Double] = ZIO.die(new UnsupportedOperationException)
     def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
 

@@ -184,81 +184,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       // ========================================
       // New Query APIs (ADR-015)
       // ========================================
-
-      test("getLECCurve returns curve for leaf node") {
-        val program = for {
-          tree <- service(_.create(stubWsId, validRequest))
-          // RiskTree now has flat nodes with index already built
-          rootId = tree.rootId
-          
-          // Call new getLECCurve API
-          response <- service(_.getLECCurve(stubWsId, tree.id, rootId))
-        } yield (response, rootId)
-
-        program.assert { case (response, rootId) =>
-          response.id == rootId.value.toString &&
-            response.name == "Test Risk" &&
-            response.curve.nonEmpty &&
-            response.quantiles.nonEmpty &&
-            response.quantiles.contains("p50") &&
-            response.quantiles.contains("p90")
-        }
-      },
-
-      test("getLECCurve returns curve data for portfolio node") {
-        val hierarchicalRequest = RiskTreeDefinitionRequest(
-          name = "Portfolio Test",
-          portfolios = Seq(RiskPortfolioDefinitionRequest("Portfolio", None)),
-          leaves = Seq(
-            RiskLeafDefinitionRequest(
-              name = "Child A",
-              parentName = Some("Portfolio"),
-              distributionType = "lognormal",
-              probability = 0.3,
-              minLoss = Some(1000L),
-              maxLoss = Some(20000L),
-              percentiles = None,
-              quantiles = None
-            ),
-            RiskLeafDefinitionRequest(
-              name = "Child B",
-              parentName = Some("Portfolio"),
-              distributionType = "lognormal",
-              probability = 0.2,
-              minLoss = Some(500L),
-              maxLoss = Some(10000L),
-              percentiles = None,
-              quantiles = None
-            )
-          )
-        )
-
-        val program = for {
-          tree <- service(_.create(stubWsId, hierarchicalRequest))
-          rootId = tree.rootId
-          response <- service(_.getLECCurve(stubWsId, tree.id, rootId))
-        } yield (tree, response)
-
-        program.assert { case (tree, response) =>
-          response.id == tree.rootId.value.toString &&
-            response.curve.nonEmpty &&
-            response.quantiles.nonEmpty
-        }
-      },
-
-      test("getLECCurve fails for nonexistent node") {
-        val program = for {
-          tree <- service(_.create(stubWsId, validRequest))
-          invalidId = nodeId("nonexistent")
-          result <- service(_.getLECCurve(stubWsId, tree.id, invalidId)).flip
-        } yield result
-
-        program.assert {
-          case ValidationFailed(errors) => errors.exists(e => e.field == "nodeId")
-          case _ => false
-        }
-      },
-
       test("probOfExceedance returns probability for given threshold") {
         val program = for {
           tree <- service(_.create(stubWsId, validRequest))
@@ -298,46 +223,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       // ========================================
       // Provenance Filtering (Service Layer)
       // ========================================
-
-      // Service layer filters provenance based on includeProvenance flag.
-      // Resolver always captures provenance (for cache consistency),
-      // service layer omits it from response when not requested.
-      test("getLECCurve with includeProvenance=true returns provenances") {
-        val program = for {
-          tree <- service(_.create(stubWsId, validRequest))
-          rootId = tree.rootId
-          response <- service(_.getLECCurve(stubWsId, tree.id, rootId, includeProvenance = true))
-        } yield (response, rootId)
-
-        program.assert { case (response, rootId) =>
-          response.provenances.nonEmpty &&
-            response.provenances.exists(_.riskId.value.toString == rootId.value.toString)
-        }
-      },
-
-      test("getLECCurve with includeProvenance=false returns empty provenances") {
-        val program = for {
-          tree <- service(_.create(stubWsId, validRequest))
-          rootId = tree.rootId
-          response <- service(_.getLECCurve(stubWsId, tree.id, rootId, includeProvenance = false))
-        } yield response
-
-        program.assert { response =>
-          response.provenances.isEmpty
-        }
-      },
-
-      test("getLECCurve defaults to no provenance") {
-        val program = for {
-          tree <- service(_.create(stubWsId, validRequest))
-          rootId = tree.rootId
-          response <- service(_.getLECCurve(stubWsId, tree.id, rootId))  // No includeProvenance arg
-        } yield response
-
-        program.assert { response =>
-          response.provenances.isEmpty  // Default is false
-        }
-      },
 
       test("getLECCurvesMulti returns curves for multiple nodes") {
         val hierarchicalRequest = RiskTreeDefinitionRequest(
