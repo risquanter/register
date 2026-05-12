@@ -317,8 +317,8 @@ Ready-to-run scripts for both examples below — including coloured output, pref
 |---|---|---|
 | [`examples/demo-simple-httpie.sh`](examples/demo-simple-httpie.sh) | httpie | Simple operational risk (4 leaves) |
 | [`examples/demo-simple-curl.sh`](examples/demo-simple-curl.sh) | curl | Simple operational risk (4 leaves) |
-| [`examples/demo-enterprise-httpie.sh`](examples/demo-enterprise-httpie.sh) | httpie | Financial services enterprise risk (20 leaves, 10 portfolios) |
-| [`examples/demo-enterprise-curl.sh`](examples/demo-enterprise-curl.sh) | curl | Financial services enterprise risk (20 leaves, 10 portfolios) |
+| [`examples/demo-enterprise-httpie.sh`](examples/demo-enterprise-httpie.sh) | httpie | Financial services enterprise risk (21 leaves, 11 portfolios) |
+| [`examples/demo-enterprise-curl.sh`](examples/demo-enterprise-curl.sh) | curl | Financial services enterprise risk (21 leaves, 11 portfolios) |
 
 ```bash
 chmod +x examples/*.sh
@@ -477,107 +477,7 @@ Returns the simulation summary for every node in the tree, including P95/P99 qua
 
 ### 3. Run a Vague Quantifier Query
 
-Ask whether most of the leaf risks in the tree have a tail (P95) loss exceeding $2 M:
-
-**httpie:**
-```bash
-http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))'
-```
-
-**curl:**
-```bash
-curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))"}'
-```
-
-This query reads: *"Do at least half of all leaf risks have a P95 loss above \$2 M?"*
-
-A more targeted variant scoped to the tail at P99:
-
-**httpie:**
-```bash
-http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))'
-```
-
-**curl:**
-```bash
-curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))"}'
-```
-
-*"Do at least one third of leaves have a P99 loss above \$5 M?"*
-
-> **Known limitation (tracked in [docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md)):**
-> sub-portfolio scoping queries that reference a node by quoted name
-> (e.g. `leaf_descendant_of(x, "IT Risk")`) are temporarily unsupported.
-> The lexer, term parser, and FOL adapter need three coordinated
-> changes before such queries parse. The demo scripts in `examples/`
-> exercise the rest of the surface in the meantime.
-
-##### Coming soon: sub-portfolio scoping queries
-
-> ⚠️ **The queries below are NOT YET EXECUTABLE.** Running them today
-> against the running server returns either `400 PARSE_ERROR` (multi-word
-> names) or — worse — a *silently wrong* result (single-word names: the
-> name is rebound as a free variable rather than a constant lookup, so the
-> quantifier ranges over the entire domain). Tracked in
-> [docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md);
-> they form that plan's post-fix acceptance set. Naming convention assumed
-> below: the post-fix lexer accepts a `"…"` literal whose inner text is
-> looked up in the catalog of node names registered for the current tree
-> — so any name a user can store via the tree-create API is referenceable.
-
-Against the enterprise demo tree (`Enterprise Risk` root with
-`Operational Risk → Technology & Cyber → {Cyber Breach, …}` etc.):
-
-```
-# Q-A — sub-portfolio scoping (descendants of a named branch)
-Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology & Cyber"),
-               gt_loss(p95(x), 5000000))
-# "Do at least two-thirds of leaves under Technology & Cyber have a P95 loss above $5M?"
-
-# Q-B — direct-child scoping (one level down)
-Q[>=]^{1/2} x (child_of(x, "Operational Risk"),
-               gt_prob(lec(x, 10000000), 0.05))
-# "Is at least half of Operational Risk's direct sub-portfolio more than 5% likely to exceed $10M?"
-
-# Q-C — cross-branch comparison (same shape, different anchor)
-Q[>=]^{2/3} x (leaf_descendant_of(x, "Financial Risk"),
-               gt_loss(p99(x), 20000000))
-Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"),
-               gt_loss(p99(x), 20000000))
-# Compare tail-loss concentration between two named sub-portfolios.
-
-# Q-D — exclusion via negation
-Q[<=]^{1/3} x (leaf(x), ~descendant_of(x, "Technology & Cyber"),
-               gt_loss(p95(x), 1000000))
-# "Of leaves outside Technology & Cyber, do at most one-third have P95 above $1M?"
-
-# Q-E — pinpoint a single named leaf (additionally blocked, see TODO §8)
-Q[>=]^{1} x (eq(x, "Cyber Breach"),
-             gt_loss(p95(x), 5000000))
-# "Does the Cyber Breach leaf have P95 loss above $5M?"
-```
-
-Q-A through Q-D are unblocked once F1 + F2 + F3 from
-[docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md)
-ship and are listed as that plan's post-fix acceptance set.
-
-**Q-E is additionally blocked.** No `eq` predicate is registered in the
-typed FOL dispatcher today (`RiskTreeKnowledgeBase.scala` declares only
-`leaf`, `portfolio`, `child_of`, `descendant_of`, `leaf_descendant_of`,
-`gt_loss`, `gt_prob`). A separate `fol.bridge` / untyped-pipeline layer in
-the sibling `fol-engine` repo *does* register `=`, but is not wired into
-the typed pipeline used here. Why the two paths exist and which should be
-the long-term home for equality is captured as an investigation task —
-see [TODO.md §8](TODO.md). Q-E will become referenceable once that task
-resolves and equality lands in the typed dispatcher.
-
-The response includes the quantifier satisfaction result, the proportion of matching elements, and the set of node IDs that satisfy the predicate (for frontend tree highlighting):
+Queries are submitted via HTTP POST to the tree's query endpoint. The response reports whether the quantifier is satisfied, the exact proportion, and the IDs of matching nodes (useful for tree highlighting in the frontend):
 
 ```json
 {
@@ -600,9 +500,9 @@ The response includes the quantifier satisfaction result, the proportion of matc
 | `Q[~]^{1/2} x (range(x), pred(x))` | True when approximately 1/2 of elements satisfy `pred` (fuzzy) |
 | `leaf(x)` | x is a leaf risk node |
 | `portfolio(x)` | x is a portfolio node |
-| `child_of(x, "Parent Name")` | x is a direct child of the named node *(quoted-name forms temporarily unsupported — see PLAN-QUERY-NODE-NAME-LITERALS.md)* |
-| `descendant_of(x, "Name")` | x is any descendant of the named node *(quoted-name forms temporarily unsupported)* |
-| `leaf_descendant_of(x, "Name")` | x is a leaf anywhere under the named node *(quoted-name forms temporarily unsupported)* |
+| `child_of(x, "Parent Name")` | x is a direct child of the named node |
+| `descendant_of(x, "Name")` | x is any descendant of the named node |
+| `leaf_descendant_of(x, "Name")` | x is a leaf anywhere under the named node |
 | `p95(x)`, `p99(x)` | P95 / P99 loss value for node x (returns Loss) |
 | `lec(x, 1000000)` | Exceedance probability at \$1 M for node x (returns Probability) |
 | `gt_loss(p95(x), 5000000)` | P95 loss exceeds \$5 M (Loss comparison) |
@@ -612,7 +512,7 @@ The response includes the quantifier satisfaction result, the proportion of matc
 
 ### Enterprise Risk Model Example
 
-The following example builds a realistic 4-domain financial services risk tree (21 nodes: 1 root + 10 portfolios + 20 leaves) to demonstrate queries at enterprise complexity.
+The following example builds a realistic 4-domain financial services risk tree (32 nodes: 1 root + 10 portfolios + 21 leaves) to demonstrate queries at enterprise complexity.
 
 ```
 Enterprise Risk  (root)
@@ -734,60 +634,189 @@ curl -s -X POST http://localhost:8090/workspaces \
   ] }' | jq '{workspaceKey: .workspaceKey, treeId: .tree.id, expiresAt: .expiresAt}'
 ```
 
-#### Sample Queries (httpie)
+---
 
-> **Note:** Queries that scope to a sub-portfolio by quoted name
-> (e.g. `leaf_descendant_of(x, "Technology & Cyber")`) are temporarily
-> unsupported — see
-> [docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md).
-> The samples below exercise the full operator surface
-> (`gt_loss`/`gt_prob`, `p95`/`p99`/`lec`, `leaf`/`portfolio`, all
-> three quantifier shapes) without referencing node names.
+## VQL Query Examples
 
-```bash
-# Q1: Do at least 1/4 of all leaves have P99 above $20M?
-http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 20000000))'
+Register's query language is the **Vague Query Language (VQL)**, a proportional first-order logic dialect with fuzzy quantifiers, inspired by Fermüller, Hofer & Ortiz, *"Vague Quantifiers in Query Languages"*, FQAS 2017. Every query has the shape:
 
-# Q2: Do fewer than half of all leaves have a >10% chance of exceeding $1M?
-http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000000), 0.10))'
-
-# Q3: Do at least 3/4 of all leaves have P95 above $1M?
-http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x), 1000000))'
-
-# Q4: Do about half of all leaves have P95 above $5M?
-http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))'
-
-# Q5: Do at most 1/3 of portfolio nodes have P99 above $50M?
-http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[<=]^{1/3} x (portfolio(x), gt_loss(p99(x), 50000000))'
-
-# Q6: Do at most 1/4 of all leaves have a >5% chance of exceeding $10M?
-http POST "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  query='Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000), 0.05))'
+```
+Q[op]^{p/q} x (range(x), predicate(x))
 ```
 
-#### Sample Queries (curl)
+where `op` is `>=` (at least), `<=` (at most), or `~` (approximately); `p/q` is the proportion threshold; `range(x)` restricts the domain; and `predicate(x)` is the condition evaluated against the simulation cache. Query syntax errors are reported at parse time with position information.
+
+### Basic leaf screening
+
+The simplest queries screen all leaf risk nodes against a single simulation statistic. The quantifier operator and fraction set the direction and stringency of the screening.
+
+*"Do at least half of all leaves carry a P95 loss above $2M?"* — only 1 of 4 qualifies in the simple tree, so this is **not satisfied**:
+
+```
+Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))
+```
+
+Relaxing the proportion to 1/3 and targeting the more extreme P99 tail — *"Do at least 1/3 of leaves have a P99 loss above $5M?"* — is **satisfied** (2 of 4):
+
+```
+Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))
+```
+
+This FAIL / PASS pair at the same predicate shape shows how the quantifier fraction directly controls screening stringency.
+
+### Upper-bound queries
+
+The `<=` operator tests whether a proportion stays *below* a ceiling — useful for asserting that severe exposure is not too broadly concentrated.
+
+*"Do at most half of all leaves have a greater-than-5% annual probability of generating a loss above $2M?"*:
+
+```
+Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 2000000), 0.05))
+```
+
+`lec(x, threshold)` returns the Loss Exceedance Curve probability — the unconditional annual probability that node x generates a loss exceeding the threshold.
+
+### Fuzzy "approximately" quantifier
+
+The `~` operator accepts proportions that are *approximately* equal to the stated fraction, with tolerance decreasing as the fraction approaches 0 or 1. It is the formalised counterpart of natural-language hedges like *"roughly half"*.
+
+*"Do about half of all leaves have an unconditional P95 above $5M?"* — only ~24% qualify across the enterprise tree, so this is **not satisfied** even with fuzzy tolerance:
+
+```
+Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))
+```
+
+Restating the same question at the proportion the data actually supports — *"Do about 1/5 of leaves have P95 above $5M?"* — is **satisfied**:
+
+```
+Q[~]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))
+```
+
+This pair shows the key distinction from `>=`: `~` expects the proportion to be *close to* the stated fraction, not merely at or above it.
+
+### Portfolio-level aggregation
+
+Replacing `leaf(x)` with `portfolio(x)` shifts the quantifier range to aggregated portfolio nodes, each of which already incorporates the simulation of all its descendants.
+
+*"Do at most 1/3 of portfolio nodes have an aggregate P95 above $50M?"*:
+
+```
+Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x), 50000000))
+```
+
+### Sub-portfolio scoping with named nodes
+
+`leaf_descendant_of(x, "Name")` and `child_of(x, "Name")` scope the quantifier range to a specific named branch. This is the primary mechanism for cross-branch comparison.
+
+The following pair applies the same P95 bar and the same quantifier to IT Risk (heavy-tailed) and Third Party Risk (lighter-tailed) — one satisfies, the other does not:
+
+```
+Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"),          gt_loss(p95(x), 2000000))
+Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x), 2000000))
+```
+
+`child_of` restricts to direct children only:
+
+```
+Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x), 5000000))
+```
+
+Swapping the named scope while holding the quantifier and predicate constant is a reliable technique for locating which branch drives a risk property.
+
+### Existential and universal quantifiers in scope
+
+The predicate position can contain a second quantified formula over a second variable, enabling structural questions about children of portfolio nodes.
+
+**Existential** — *"Do at least 2/3 of portfolio nodes have at least one direct child with P95 above $1M?"*:
+
+```
+Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 1000000)))
+```
+
+**Universal** — *"Do at least half of portfolio nodes have ALL their direct children above a $1M P95 floor?"*:
+
+```
+Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y), 1000000)))
+```
+
+The `exists` / `forall` forms are particularly useful for asserting structural properties — for example, that no portfolio is composed entirely of low-severity risks.
+
+### Negation and cross-branch exclusion
+
+The predicate can include a negation (`~`) to exclude nodes matching a named branch, enabling queries that scope to everything *outside* a named cluster.
+
+*"Do about half of the non-Cyber leaves have a P95 loss above $1M?"*:
+
+```
+Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))
+```
+
+---
+
+Ready-to-run scripts for both the simple and enterprise trees — including coloured output, all FAIL / PASS contrast pairs, and `jq`-extracted results — are in the [`examples/`](examples/) directory:
+
+| Script | Scenario |
+|---|---|
+| [`examples/demo-simple-httpie.sh`](examples/demo-simple-httpie.sh) / [`demo-simple-curl.sh`](examples/demo-simple-curl.sh) | Simple operational risk (4 leaves) |
+| [`examples/demo-enterprise-httpie.sh`](examples/demo-enterprise-httpie.sh) / [`demo-enterprise-curl.sh`](examples/demo-enterprise-curl.sh) | Financial services enterprise risk (21 leaves, 11 portfolios) |
+
+---
+
+## Getting Started
+
+Register is a source-only project — there are no published binary releases or pre-built container images. Everything is built locally from source.
+
+### Prerequisites
+
+- Docker 20.10+ and Docker Compose 2.0+
+- Git
+
+### 1. Check out the source
 
 ```bash
-# Q1: Do at least 1/4 of all leaves have P99 above $20M?
-curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 20000000))"}'
-
-# Q5: Do at most 1/3 of portfolio nodes have P99 above $50M?
-curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "Q[<=]^{1/3} x (portfolio(x), gt_loss(p99(x), 50000000))"}'
-
-# Q6: Do at most 1/4 of all leaves have a >5% chance of exceeding $10M?
-curl -s -X POST "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID/query" \
-  -H 'Content-Type: application/json' \
-  -d '{"query": "Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000), 0.05))"}'
+git clone <repo-url>
+cd register
 ```
+
+### 2. Configure the environment
+
+The server defaults to in-memory storage with no extra configuration. Copy the bundled in-memory template:
+
+```bash
+cp .env.inmemory.example .env.inmemory
+```
+
+Review `.env.inmemory` — the defaults are usable as-is for a local trial. See `docs/DOCKER-DEVELOPMENT.md` and `docs/ADR-016-config-management.md` for the full variable reference, including the Irmin-backed persistence option.
+
+### 3. Build the container images
+
+Builder base images install heavyweight toolchains (GraalVM, sbt) once and are reused for all subsequent application builds. Build in this order:
+
+```bash
+# Builder base — GraalVM native-image + sbt (~1-2 min, once per GraalVM/sbt version change)
+# Note: context is the parent directory — the vql-engine sibling repo must be present at ../
+docker build -f containers/builders/Dockerfile.graalvm-builder \
+  -t local/graalvm-builder:21 ..
+
+# Register server — GraalVM native binary (~5-10 min)
+docker build -f containers/prod/Dockerfile.register-prod \
+  -t local/register-server:latest .
+```
+
+### 4. Start the server
+
+```bash
+docker compose up -d register-server
+```
+
+The API is now reachable at `http://localhost:8090`. Run the demo script to verify:
+
+```bash
+chmod +x examples/demo-simple-curl.sh
+./examples/demo-simple-curl.sh
+```
+
+For the full stack including the frontend SPA and nginx, see `docs/DOCKER-DEVELOPMENT.md` — it covers the frontend image build, the Irmin persistence option, and observability integration.
 
 ---
 
