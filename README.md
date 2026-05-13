@@ -42,92 +42,270 @@ Analysts can ask proportional screening questions across a live risk tree using 
 Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))
 ```
 
-*"Do at least two-thirds of leaf risks have a P95 loss above $5 M?"*
+*"Do at least two-thirds of all leaf risks carry a loss above $5M in 1-in-20 occurrences?"*
 
 Queries are evaluated server-side against the current simulation cache. Available terms include structural predicates (`leaf`, `portfolio`, `child_of`, `descendant_of`, `leaf_descendant_of`) and simulation-backed functions (`p95`, `p99`, `lec`). Query syntax errors are reported at parse time with position information.
 
 
 ---
 
-## How It Works
 
-### Technology Stack
+## Getting Started (in-memory storage)
 
-| Layer | Technology |
-|---|---|
-| Backend language | Scala 3 / JVM |
-| Effect system | ZIO 2 |
-| HTTP framework | Tapir + ZIO-HTTP (Netty) |
-| Storage | Irmin 3.11 (OCaml, accessed via GraphQL) |
-| Frontend | Scala.js + Laminar + Vite |
-| Simulation | `risquanter/simulation-util` (HDR counter PRNG, QPFitter metalog) |
-| Serialisation | zio-json + Iron refinement types |
-| Production image | GraalVM Native Image on distroless (~118 MB, ~9 ms startup) |
-
-### Module Layout
-
-```
-modules/
-  common/     — shared domain types, DTOs, endpoint definitions (cross-compiled JVM + JS)
-  server/     — JVM backend: simulation, storage, HTTP API
-  app/        — Scala.js frontend (Vite)
-  server-it/  — integration test suite (in-process stub server)
-containers/
-  prod/       — Dockerfiles for production images (register server, Irmin, nginx frontend)
-  dev/        — Dockerfiles for local development images
-  builders/   — OCaml/Irmin builder base image (build once, cache locally)
-```
-
-### Key Architectural Decisions
-
-- **Flat Irmin storage, JVM Merkle cache**: Risk nodes are stored at flat paths (`risk-trees/{id}/nodes/{nodeId}`) so that reparenting is O(1). A separate JVM-side [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree) computes hierarchy-aware content hashes for cache keying — these are independent of Irmin's internal hashes.
-- **Counter-based PRNG (HDR / Splitmix64)**: `f(trial_id, risk_id, seeds) → uniform` — fully deterministic, order-independent, parallelisable without mutable shared state.
-- **Sparse trial storage**: A risk with 1 % occurrence probability stores ~100 non-zero entries per 10 000 trials, not 10 000.
-- **PEP-only authorization (Policy Enforcement Point)**: The application asks external policy systems whether an action is allowed, then enforces allow/deny outcomes. It does not issue grants/revocations or manage relationship tuples itself (see [Operations & Authorization](#operations--authorization)).
-- **Cross-compiled API contracts**: The frontend and backend share endpoint/type definitions via `modules/common`, keeping request/response contracts in one place and reducing drift between client and server.
-- **Computation-heavy backend, reactive frontend**: Simulation, aggregation, query evaluation, and authorization remain server-side; the frontend is not "thin" in UX terms — it manages reactive chart/query/tree state and builds Vega-Lite specs client-side from structured LEC data.
-- **API-first operations and observability**: REST endpoints are documented via OpenAPI/Swagger (`/docs`), health/readiness probes are exposed on port `8091`, and tracing/metrics are instrumented with OpenTelemetry and configurable OTLP export.
-
----
-
-## Running an Instance
+Register is a source-only project — there are no published binary releases or pre-built container images. Everything is built locally from source.
 
 ### Prerequisites
 
 - Docker 20.10+ and Docker Compose 2.0+
-- At least 4 GB RAM available to Docker
+- Git
 
-### One-Time: Build the Irmin Builder Image
+### 1. Check out the source
+
+```bash
+git clone <repo-url>
+cd register
+```
+
+### 2. Configure the environment
+
+The server defaults to in-memory storage with no extra configuration. Copy the bundled in-memory template:
+
+```bash
+cp .env.inmemory.example .env.inmemory
+```
+
+Review `.env.inmemory` — the defaults are usable as-is for a local trial. See `docs/DOCKER-DEVELOPMENT.md` and `docs/ADR-016-config-management.md` for the full variable reference, including the Irmin-backed persistence option.
+
+### 3. Build the container images
+
+Builder base images install heavyweight toolchains (GraalVM, sbt) once and are reused for all subsequent application builds. Build in this order:
+
+```bash
+# GraalVM builder base — installs GraalVM native-image + sbt (~1-2 min)
+# Context is the parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
+docker build -f containers/builders/Dockerfile.graalvm-builder \
+  -t local/graalvm-builder:21 ..
+
+# Register server — compiles GraalVM native binary (~5-10 min)
+docker build -f containers/prod/Dockerfile.register-prod \
+  -t local/register-server:0.1.0 .
+
+# Frontend — builds Scala.js + SPA, packages in nginx (~10-15 min first run)
+# Context is the parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
+docker build -f containers/prod/Dockerfile.frontend-prod \
+  -t local/frontend:0.1.0 ..
+```
+
+### 4. Start the stack
+
+```bash
+docker compose --profile frontend up -d
+```
+
+The application is available at **`http://localhost:18080`**.
+
+> The `examples/` directory contains curl-based API scripts for direct backend testing. For advanced configuration, observability integration, and Kubernetes deployment, see `docs/DOCKER-DEVELOPMENT.md`.
+
+---
+
+## Using Register
+
+Once the stack is running, open **`http://localhost:18080`** to access the application. Register has two main views.
+
+### Design view
+
+The Design view is where a risk expert builds and maintains the risk hierarchy. A risk tree is composed of:
+
+- **Portfolio nodes** — internal nodes that aggregate child risk categories. Each portfolio's loss distribution is the statistical convolution of all its descendants, computed via Monte Carlo simulation.
+- **Leaf nodes** — terminal risk items where the quantitative parameters are specified directly:
+  - **Occurrence probability** — the annual probability that the risk event occurs
+  - **Loss distribution** — the conditional severity given an event occurs, specified as either:
+    - A **log-normal** distribution, parameterised by minimum and maximum expected loss — suited to cases where expert opinion is expressed as a credible confidence range (e.g. *"90 % chance losses fall between $X and $Y"*)
+    - A **quantile-based** (expert) distribution, expressed as percentile–loss pairs — suited to cases where expert opinion is available as multiple point estimates across the loss landscape (e.g. median, 75th, 95th percentile)
+
+Branches can be nested to arbitrary depth, enabling fine-grained decomposition (for example, *Third Party Risk → Supplier Concentration → Single-Source Critical Components*).
+
+### Analyze view
+
+The Analyze view is the primary workspace for risk quantification. It operates against Register's Monte Carlo simulation engine.
+
+**Loss Exceedance Curves** — the central output. Selecting (Ctrl + click) any node in the tree triggers a simulation run and renders the Loss Exceedance Curve (LEC) for that subtree: the probability that aggregate annual loss from that branch exceeds any given threshold. The LEC can be inspected at any level of the hierarchy and compared across sibling branches to identify dominant risk drivers.
+
+**VQL Queries** — the Analyze view includes a query pane where analysts can express structural and quantitative questions about the tree using the Vague Query Language (VQL). Queries are evaluated against the simulation cache and return a pass/fail result with supporting evidence.
+
+---
+
+## VQL Query Examples
+
+Register's query language is the **Vague Query Language (VQL)**, a proportional first-order logic dialect with fuzzy quantifiers, inspired by Fermüller, Hofer & Ortiz, *"Vague Quantifiers in Query Languages"*, FQAS 2017. Every query has the shape:
+
+```
+Q[op]^{p/q} x (range(x), predicate(x))
+```
+
+where `op` is `>=` (at least), `<=` (at most), or `~` (approximately); `p/q` is the proportion threshold; `range(x)` restricts the domain; and `predicate(x)` is the condition evaluated against the simulation cache. Query syntax errors are reported at parse time with position information.
+
+In the examples below we refer to the simple 4-leaf tree and the more complex 21-leaf enterprise tree from the demo scripts in the `examples/` directory. The same query can have different outcomes across the two trees, illustrating how the quantifier fraction controls stringency.
+
+### Running the examples
+
+The `examples/` directory contains ready-to-run scripts that bootstrap a tree and execute a selection of the queries below, printing a pass/fail summary of results. For working through the examples manually, you will only need the workspace key and tree ID they output. Register's first access layer is capability-based: the workspace key is a secret token embedded in the workspace URL. To view the tree in the application, navigate to `http://localhost:18080/w/<workspaceKey>` in a browser. After the app loads, switch to the Analyze view and select the tree from the dropdown. From there you can run VQL queries directly in the query pane.
+
+### Basic leaf screening
+
+The simplest queries check each individual risk against a single condition — for example, whether its P95 loss exceeds a threshold. The P95 is the loss you'd expect to see exceeded only once in twenty occurrences. The operator and fraction then ask: how many pass that check, and is that enough?
+
+*"Do at least half of all leaves carry a loss above $2M in 1-in-20 occurrences?"* — only 1 of 4 qualifies in the simple tree, so this is **not satisfied**:
+
+```
+Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))
+```
+
+Relaxing the proportion to 1/3 and targeting the more extreme 1-in-100 tail — *"Do at least a third of all leaves carry a loss above $5M in 1-in-100 occurrences?"* — is **satisfied** (2 of 4):
+
+```
+Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))
+```
+
+Both queries test the same condition — only the fraction changes. Raising the bar from 1/3 to 1/2 is what tips the result from passing to failing.
+
+### Upper-bound queries
+
+The `<=` operator tests whether a proportion stays *below* a ceiling — useful for asserting that severe exposure is not too broadly concentrated.
+
+*"Do at most half of all leaves have a greater-than-5% annual probability of generating a loss above $2M?"*:
+
+```
+Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 2000000), 0.05))
+```
+
+`lec(x, threshold)` returns the Loss Exceedance Curve probability — the unconditional annual probability that node x generates a loss exceeding the threshold.
+
+### Fuzzy "approximately" quantifier
+
+The ~ operator matches proportions that are roughly equal to the stated fraction — think "about half" rather than "at least half".
+
+*"Do about half of all leaves carry a loss above $5M in 1-in-20 occurrences?"* — only ~24% qualify across the enterprise tree, so this is **not satisfied** even with fuzzy tolerance:
+
+```
+Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))
+```
+
+Restating the same question at the proportion the data actually supports — *"Do about a fifth of all leaves carry a loss above $5M in 1-in-20 occurrences?"* — is **satisfied**:
+
+```
+Q[~]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))
+```
+
+This pair shows the key distinction from `>=`: `~` expects the proportion to be *close to* the stated fraction, not merely at or above it.
+
+### Portfolio-level aggregation
+
+Replacing `leaf(x)` with `portfolio(x)` shifts the quantifier range to aggregated portfolio nodes, each of which already incorporates the simulation of all its descendants.
+
+*"Do at most a third of portfolio nodes carry an aggregate loss above $50M in 1-in-20 occurrences?"*:
+
+```
+Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x), 50000000))
+```
+
+### Sub-portfolio scoping with named nodes
+
+`leaf_descendant_of(x, "Name")` and `child_of(x, "Name")` scope the quantifier range to a specific named branch. This is the primary mechanism for cross-branch comparison.
+
+The following pair applies the same 1-in-20 loss bar and the same quantifier to IT Risk (heavy-tailed) and Third Party Risk (lighter-tailed) — one satisfies, the other does not:
+
+*"Do at least half of IT Risk's leaves carry a loss above $2M in 1-in-20 occurrences?"*
+*"Do at least half of Third Party Risk's leaves carry a loss above $2M in 1-in-20 occurrences?"*
+
+```
+Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"),          gt_loss(p95(x), 2000000))
+Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x), 2000000))
+```
+
+`child_of` restricts to direct children only:
+
+```
+Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x), 5000000))
+```
+
+Swapping the named scope while holding the quantifier and predicate constant is a reliable technique for locating which branch drives a risk property.
+
+### Existential and universal quantifiers in scope
+
+The predicate position can contain a second quantified formula over a second variable, enabling structural questions about children of portfolio nodes.
+
+**Existential** — *"Do at least two-thirds of portfolio nodes have at least one direct child carrying a loss above $1M in 1-in-20 occurrences?"*:
+
+```
+Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 1000000)))
+```
+
+**Universal** — *"Do at least half of portfolio nodes have ALL their direct children carrying a loss above $1M in 1-in-20 occurrences?"*:
+
+```
+Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y), 1000000)))
+```
+
+The `exists` / `forall` forms are particularly useful for asserting structural properties — for example, that no portfolio is composed entirely of low-severity risks.
+
+### Negation and cross-branch exclusion
+
+The predicate can include a negation (`~`) to exclude nodes matching a named branch, enabling queries that scope to everything *outside* a named cluster.
+
+*"Do about half of the non-Cyber leaves carry a loss above $1M in 1-in-20 occurrences?"*:
+
+```
+Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))
+```
+
+---
+
+Ready-to-run scripts for both the simple and enterprise trees — including coloured output, all FAIL / PASS contrast pairs, and `jq`-extracted results — are in the [`examples/`](examples/) directory:
+
+| Script | Scenario |
+|---|---|
+| [`examples/demo-simple-httpie.sh`](examples/demo-simple-httpie.sh) / [`demo-simple-curl.sh`](examples/demo-simple-curl.sh) | Simple operational risk (4 leaves) |
+| [`examples/demo-enterprise-httpie.sh`](examples/demo-enterprise-httpie.sh) / [`demo-enterprise-curl.sh`](examples/demo-enterprise-curl.sh) | Financial services enterprise risk (21 leaves, 11 portfolios) |
+
+---
+
+## Getting Started (with Irmin persistence)
 
 Irmin is a Git-like, content-addressed, versioned data store. Register uses it as the domain content store for risk trees so each change is auditable and historical states remain queryable.
 
-The Irmin base image is not published to any registry and must be built locally before the first production build. This compiles the OCaml toolchain and several opam packages from source — allow 15–40 minutes on first run:
+Complete the [in-memory setup](#getting-started-in-memory-storage) first (builds the GraalVM builder and application images). Then follow these steps.
+
+### 1. Build the Irmin base images
+
+The Irmin builder compiles the OCaml toolchain from source — allow 15–40 minutes on first run. The resulting images are cached locally and survive `docker builder prune`.
 
 ```bash
-docker build \
-  -f containers/builders/Dockerfile.irmin-builder \
+# Irmin builder base — OCaml toolchain + opam packages (~15-40 min, once)
+docker build -f containers/builders/Dockerfile.irmin-builder \
   -t local/irmin-builder:3.11 \
   containers/builders/
+
+# Irmin server (~10s, requires builder base above)
+docker build -f containers/prod/Dockerfile.irmin-prod \
+  -t local/irmin-prod:3.11 \
+  containers/prod/
 ```
 
-The resulting image is cached locally and survives `docker builder prune`.
-
-### Build Production Images
+### 2. Configure Irmin environment
 
 ```bash
-# Build both the register server (GraalVM native image) and Irmin images
+cp .env.irmin.example .env.irmin
+# Review .env.irmin — REGISTER_REPOSITORY_TYPE is set to irmin
+```
+
+### 3. Start the full stack
+
+```bash
 docker compose \
   --profile persistence \
   --profile frontend \
-  build
-```
-
-### Start the Full Stack
-
-```bash
-docker compose \
-  --profile persistence \
-  --profile frontend \
+  --env-file .env.irmin \
   up -d
 ```
 
@@ -136,9 +314,7 @@ This starts:
 - **register-server** (port 8090 API, 8091 health probes) — the simulation backend
 - **nginx** (port 18080) — serves the compiled SPA and proxies API calls
 
-Access the application at **`http://localhost:18080`**.
-
-API documentation (Swagger UI) is available at **`http://localhost:8090/docs`**.
+Access the application at **`http://localhost:18080`**. See [Using Register](#using-register) for a walkthrough of the Design and Analyze views.
 
 ### Configuration
 
@@ -153,12 +329,6 @@ All configuration is driven by environment variables. The key variables with the
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace absolute expiry |
 | `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry |
 | `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated allowed origins |
-
-To start the server without persistent storage (all state is in-memory and lost on restart):
-
-```bash
-docker compose up -d register-server
-```
 
 ---
 
@@ -636,189 +806,6 @@ curl -s -X POST http://localhost:8090/workspaces \
 
 ---
 
-## VQL Query Examples
-
-Register's query language is the **Vague Query Language (VQL)**, a proportional first-order logic dialect with fuzzy quantifiers, inspired by Fermüller, Hofer & Ortiz, *"Vague Quantifiers in Query Languages"*, FQAS 2017. Every query has the shape:
-
-```
-Q[op]^{p/q} x (range(x), predicate(x))
-```
-
-where `op` is `>=` (at least), `<=` (at most), or `~` (approximately); `p/q` is the proportion threshold; `range(x)` restricts the domain; and `predicate(x)` is the condition evaluated against the simulation cache. Query syntax errors are reported at parse time with position information.
-
-### Basic leaf screening
-
-The simplest queries screen all leaf risk nodes against a single simulation statistic. The quantifier operator and fraction set the direction and stringency of the screening.
-
-*"Do at least half of all leaves carry a P95 loss above $2M?"* — only 1 of 4 qualifies in the simple tree, so this is **not satisfied**:
-
-```
-Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))
-```
-
-Relaxing the proportion to 1/3 and targeting the more extreme P99 tail — *"Do at least 1/3 of leaves have a P99 loss above $5M?"* — is **satisfied** (2 of 4):
-
-```
-Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))
-```
-
-This FAIL / PASS pair at the same predicate shape shows how the quantifier fraction directly controls screening stringency.
-
-### Upper-bound queries
-
-The `<=` operator tests whether a proportion stays *below* a ceiling — useful for asserting that severe exposure is not too broadly concentrated.
-
-*"Do at most half of all leaves have a greater-than-5% annual probability of generating a loss above $2M?"*:
-
-```
-Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 2000000), 0.05))
-```
-
-`lec(x, threshold)` returns the Loss Exceedance Curve probability — the unconditional annual probability that node x generates a loss exceeding the threshold.
-
-### Fuzzy "approximately" quantifier
-
-The `~` operator accepts proportions that are *approximately* equal to the stated fraction, with tolerance decreasing as the fraction approaches 0 or 1. It is the formalised counterpart of natural-language hedges like *"roughly half"*.
-
-*"Do about half of all leaves have an unconditional P95 above $5M?"* — only ~24% qualify across the enterprise tree, so this is **not satisfied** even with fuzzy tolerance:
-
-```
-Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))
-```
-
-Restating the same question at the proportion the data actually supports — *"Do about 1/5 of leaves have P95 above $5M?"* — is **satisfied**:
-
-```
-Q[~]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))
-```
-
-This pair shows the key distinction from `>=`: `~` expects the proportion to be *close to* the stated fraction, not merely at or above it.
-
-### Portfolio-level aggregation
-
-Replacing `leaf(x)` with `portfolio(x)` shifts the quantifier range to aggregated portfolio nodes, each of which already incorporates the simulation of all its descendants.
-
-*"Do at most 1/3 of portfolio nodes have an aggregate P95 above $50M?"*:
-
-```
-Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x), 50000000))
-```
-
-### Sub-portfolio scoping with named nodes
-
-`leaf_descendant_of(x, "Name")` and `child_of(x, "Name")` scope the quantifier range to a specific named branch. This is the primary mechanism for cross-branch comparison.
-
-The following pair applies the same P95 bar and the same quantifier to IT Risk (heavy-tailed) and Third Party Risk (lighter-tailed) — one satisfies, the other does not:
-
-```
-Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"),          gt_loss(p95(x), 2000000))
-Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x), 2000000))
-```
-
-`child_of` restricts to direct children only:
-
-```
-Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x), 5000000))
-```
-
-Swapping the named scope while holding the quantifier and predicate constant is a reliable technique for locating which branch drives a risk property.
-
-### Existential and universal quantifiers in scope
-
-The predicate position can contain a second quantified formula over a second variable, enabling structural questions about children of portfolio nodes.
-
-**Existential** — *"Do at least 2/3 of portfolio nodes have at least one direct child with P95 above $1M?"*:
-
-```
-Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 1000000)))
-```
-
-**Universal** — *"Do at least half of portfolio nodes have ALL their direct children above a $1M P95 floor?"*:
-
-```
-Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y), 1000000)))
-```
-
-The `exists` / `forall` forms are particularly useful for asserting structural properties — for example, that no portfolio is composed entirely of low-severity risks.
-
-### Negation and cross-branch exclusion
-
-The predicate can include a negation (`~`) to exclude nodes matching a named branch, enabling queries that scope to everything *outside* a named cluster.
-
-*"Do about half of the non-Cyber leaves have a P95 loss above $1M?"*:
-
-```
-Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))
-```
-
----
-
-Ready-to-run scripts for both the simple and enterprise trees — including coloured output, all FAIL / PASS contrast pairs, and `jq`-extracted results — are in the [`examples/`](examples/) directory:
-
-| Script | Scenario |
-|---|---|
-| [`examples/demo-simple-httpie.sh`](examples/demo-simple-httpie.sh) / [`demo-simple-curl.sh`](examples/demo-simple-curl.sh) | Simple operational risk (4 leaves) |
-| [`examples/demo-enterprise-httpie.sh`](examples/demo-enterprise-httpie.sh) / [`demo-enterprise-curl.sh`](examples/demo-enterprise-curl.sh) | Financial services enterprise risk (21 leaves, 11 portfolios) |
-
----
-
-## Getting Started
-
-Register is a source-only project — there are no published binary releases or pre-built container images. Everything is built locally from source.
-
-### Prerequisites
-
-- Docker 20.10+ and Docker Compose 2.0+
-- Git
-
-### 1. Check out the source
-
-```bash
-git clone <repo-url>
-cd register
-```
-
-### 2. Configure the environment
-
-The server defaults to in-memory storage with no extra configuration. Copy the bundled in-memory template:
-
-```bash
-cp .env.inmemory.example .env.inmemory
-```
-
-Review `.env.inmemory` — the defaults are usable as-is for a local trial. See `docs/DOCKER-DEVELOPMENT.md` and `docs/ADR-016-config-management.md` for the full variable reference, including the Irmin-backed persistence option.
-
-### 3. Build the container images
-
-Builder base images install heavyweight toolchains (GraalVM, sbt) once and are reused for all subsequent application builds. Build in this order:
-
-```bash
-# Builder base — GraalVM native-image + sbt (~1-2 min, once per GraalVM/sbt version change)
-# Note: context is the parent directory — the vql-engine sibling repo must be present at ../
-docker build -f containers/builders/Dockerfile.graalvm-builder \
-  -t local/graalvm-builder:21 ..
-
-# Register server — GraalVM native binary (~5-10 min)
-docker build -f containers/prod/Dockerfile.register-prod \
-  -t local/register-server:latest .
-```
-
-### 4. Start the server
-
-```bash
-docker compose up -d register-server
-```
-
-The API is now reachable at `http://localhost:8090`. Run the demo script to verify:
-
-```bash
-chmod +x examples/demo-simple-curl.sh
-./examples/demo-simple-curl.sh
-```
-
-For the full stack including the frontend SPA and nginx, see `docs/DOCKER-DEVELOPMENT.md` — it covers the frontend image build, the Irmin persistence option, and observability integration.
-
----
 
 ## License
 
