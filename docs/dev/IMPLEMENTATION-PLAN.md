@@ -2159,74 +2159,56 @@ Tier 2 connects Irmin watch notifications to cache invalidation and SSE broadcas
 
 ### Phase 5: Cache Invalidation Pipeline
 
-**Status:** Not started
-**Blocked on:** WebSocket transport decision for `IrminClient.watch`
+**Status:** Partially complete — `InvalidationHandler` and `SSEHub` are implemented and wired into `RiskTreeServiceLive`. The remaining work is `LECRecomputer` (eager push) and SSE integration tests.
 
-**Objective:** Connect Irmin watch notifications to cache invalidation and SSE broadcast.
+**Objective:** Ensure cache invalidation and SSE broadcast fire reliably on every mutation, with optional eager LEC recomputation.
 
-#### Task 0: `IrminClient.watch` — GraphQL Subscription
+#### Task 0: `IrminClient.watch` — DEFERRED (not needed for current architecture)
 
-Extends `IrminClient` trait with:
-```scala
-def watch(path: Option[IrminPath]): ZStream[Any, IrminError, IrminCommit]
+**Decision (2026-05-14): Do not implement for single-container deployment.**
+
+In the current architecture, Register is the sole writer to Irmin — all mutations go through `RiskTreeServiceLive` via the Register HTTP API. Register already knows about every Irmin write because it caused it. A watch subscription would never fire anything that Register doesn't already handle via `InvalidationHandler`.
+
+`IrminClient.watch` becomes necessary only under **horizontal scaling**. The problem is not HTTP sessions (Register has none) — it is in-process heap state. `RiskResultCache` is a `Ref[Map[...]]` on the JVM heap inside one container process. `SSEHub` is a `Ref[Map[TreeId, Hub[SSEEvent]]]` on the same heap. With two containers behind a load balancer:
+
+```
+Browser 1 ──LB──▶ Container A  (Cache A, SSEHub A)
+Browser 2 ──LB──▶ Container B  (Cache B, SSEHub B)
+                       │
+                  Irmin (shared, port 9080)
 ```
 
-Irmin schema: `subscription { watch(path: Path, branch: BranchName): Diff! }` where `Diff { commit: Commit! }`
+Browser 2 edits a node → Container B handles it → Container B invalidates Cache B → Container B's SSEHub fires to Browser 2. Container A is completely unaware. Browser 1, connected to Container A, sees nothing. Cache A is stale.
 
-**Transport decision required:**
-- **Option A:** Caliban client (built-in ZIO subscription + graphql-ws protocol)
-- **Option B:** sttp-ws (raw WebSocket, manual graphql-ws framing)
-- **Option C:** HTTP polling fallback (simplest, no new dep, higher latency)
+The watch subscription solves this: each container independently watches Irmin and invalidates its own cache when it detects a commit from any container — including commits made by the other container. An alternative is an external shared cache (Redis), but that replaces the ZIO `Ref` cache entirely and is a larger architectural change.
 
-Decision criteria: Does Tier 4 (WebSocket Enhancement / ADR-004b) also need the same dependency? If yes → choose a dep that serves both. If Tier 4 is distant → polling fallback is fine.
+**Implementation note when horizontal scaling is added:**
+- Transport: sttp-ws (already in build) with manual graphql-ws framing (~50 lines). Do not add Caliban — it is a full GraphQL framework for one subscription.
+- Irmin schema: `subscription { watch(path: Path, branch: BranchName): Diff! }` where `Diff { commit: Commit! }`
+- Each container opens a persistent WebSocket to Irmin on startup, watches the root path, routes commits through `InvalidationHandler`.
 
-**Why deferred:** No consumer exists until `TreeUpdatePipeline`; implementing in isolation would create dead code and force a premature transport decision.
-
-#### Task 1: Invalidation Handler Wiring
-
-`InvalidationHandler` already exists and works. This task connects it to the Irmin watch stream instead of manual API triggers.
-
-- Receives Irmin watch events from `IrminClient.watch` ZStream
-- Calls `TreeCacheManager.onTreeStructureChanged(treeId)` (invalidates cached results)
-- Triggers recomputation for affected path
-
-#### Task 2: LECRecomputer
+#### Task 1: LECRecomputer
 
 ```
 service/pipeline/LECRecomputer.scala
 ```
-- Recomputation strategy: **deferred** (DP-2 decision) — decide eager vs lazy when implementing
-- Uses existing `Simulator` for LEC computation
-- Updates cache after computation
-- Broadcasts `LECUpdated` via SSEHub
 
-**Open question (deferred):** Should recomputation be eager (immediate, better UX for visible nodes) or lazy (on next read, consistent with ADR-015 cache-aside)?
+After `InvalidationHandler` invalidates the cache, LEC curves are currently recomputed lazily (cache-aside: next fetch triggers simulation). `LECRecomputer` would proactively recompute and push fresh curves to connected clients via `SSEEvent.LECUpdated`.
 
-#### Task 3: TreeUpdatePipeline
+**Decision required at implementation time:** eager (better UX — curves appear automatically after a peer's edit) vs lazy (consistent with ADR-015, lower server load). Eager is the better choice once the SSEClient exists on the frontend.
 
-```
-service/pipeline/TreeUpdatePipeline.scala
-```
-- Subscribes to `IrminClient.watch` (Task 0)
-- Routes events to InvalidationHandler
-- Manages pipeline lifecycle (background fiber, graceful shutdown)
+#### Task 2: Integration Tests
 
-#### Task 4: Application Integration
-
-- Start pipeline as background fiber in `Main.scala`
-- Graceful shutdown on app termination
-
-#### Task 5: Integration Tests
-
-- Simulate Irmin change → verify SSE event emitted
-- Verify cache invalidated for correct ancestor path
+- Mutation → `CacheInvalidated` SSE event received by subscriber
+- Mutation → `NodeChanged` SSE event received by subscriber
+- Cache invalidated for correct ancestor path after node update
 - Pipeline handles errors without crashing
 
 **Deliverables:**
-- [ ] Irmin change triggers cache invalidation
-- [ ] Recomputation uses O(depth) path, not full tree
-- [ ] SSE clients receive events
-- [ ] Pipeline handles errors gracefully
+- [ ] `LECRecomputer` implemented (eager or lazy — decision at implementation time)
+- [ ] SSE integration test: mutation → event received
+- [ ] `NodeChanged` event fired on tree structure mutations (currently only `CacheInvalidated` is published)
+- [ ] `IrminClient.watch` deferred until horizontal scaling is needed
 
 ### Outstanding Integration Test Coverage
 
@@ -2296,6 +2278,72 @@ Event types for multi-user awareness:
 - `UserJoined(userId, treeId)` — user started editing
 - `UserLeft(userId, treeId)` — user stopped editing
 - `ConflictDetected(nodeId, treeId, userId, conflictType)` — concurrent edit conflict
+
+**Presence identity: auth-mode-agnostic design**
+
+The event types above use `userId`, which assumes Layer 1 (Keycloak JWT). In Layer 0
+(`capability-only` mode) no authenticated identity exists. The presence mechanism must
+compose with all auth modes:
+
+| Auth mode | Identity available | Presence key |
+|-----------|-------------------|--------------|
+| `capability-only` (Layer 0) | None | Ephemeral `SessionId` (random UUID, generated at connect, discarded on disconnect) |
+| `identity` (Layer 0+1) | `UserId` from `x-user-id` mesh header | `UserId` |
+| `fine-grained` (Layer 0+1+2) | `UserId` from `x-user-id` mesh header | `UserId` |
+
+**Implementation:** Use a sum type `type PresenceKey = UserId | SessionId`. The presence
+service itself is auth-mode-agnostic — it receives whatever key the connection provides
+at subscribe time. Display follows: named user at Layer 1+, "anonymous" colored marker at
+Layer 0 (Google Docs anonymous mode pattern). Layer 0 presence still shows "you + 2 others"
+without identity.
+
+**Impact on event types:** `UserJoined`, `UserLeft`, `ConflictDetected` should carry
+`PresenceKey` rather than `UserId` to avoid hardcoding a Layer 1 assumption.
+
+---
+
+**ETag / `baseVersion` conflict detection — how it works**
+
+This is the core of Phase 6 correctness. "ETag" is borrowed from HTTP semantics: an
+opaque token that identifies a specific version of a resource. Here the token is the
+**Irmin commit hash** of the tree at the moment a user loaded it.
+
+**Wire protocol:**
+```
+GET  /w/{key}/trees/{id}          →  200 { ...treeData, "version": "a3f9c2..." }
+PUT  /w/{key}/trees/{id}/nodes/{n}  body: { ...edit, "baseVersion": "a3f9c2..." }
+```
+
+**Server-side check (ConflictDetector):**
+```
+1. Client loads tree at commit C1 ("a3f9c2...") — server returns version in response
+2. Client edits a node and submits PUT with baseVersion = "a3f9c2..."
+3. Server asks Irmin: what is current head?
+   a. Head == C1 → no concurrent edit → apply mutation → new commit C2 → 200 OK
+   b. Head == C2 (someone else committed) → fetch C1..C2 diff
+      - diff touches a DIFFERENT path  → apply mutation (clean merge) → 200 OK
+      - diff touches the SAME path     → 409 Conflict { "currentVersion": "...", "conflictingUserId": "..." }
+4. On 409: client reloads node at current version, user re-applies their change, resubmits
+```
+
+**Concrete timeline:**
+```
+t=0   Alice loads node X at commit C1
+t=0   Bob   loads node X at commit C1
+
+t=5s  Alice submits PUT { nodeX edit, baseVersion: C1 }
+      → head == C1 → accepted → head advances to C2
+
+t=6s  Bob   submits PUT { nodeX edit, baseVersion: C1 }
+      → head == C2 ≠ C1, same path → 409 Conflict
+      → Bob sees "conflict — Alice just updated this node" → reloads → retries
+```
+
+This is optimistic concurrency control: no locks, no coordination, just a version check
+at commit time. Irmin's content-addressed DAG makes the version check a single hash
+comparison. The soft lock (pre-commit warning) is the UX complement that would reduce
+the frequency of step 4, but is not needed for correctness — see soft lock deferral
+analysis in Tier 4.
 
 #### Task 2: EventHub Service
 
@@ -2569,7 +2617,7 @@ Upon completing Tier 3, promote the following proposals:
 **WebSocket advantages over SSE:**
 - Bidirectional (client→server messages for cursor, presence)
 - Single connection (SSE + REST requires two)
-- Pre-commit conflict detection (soft locks)
+- Pre-commit soft locks — see analysis below (DEFERRED: low-priority, post-Tier-4)
 - Same `TreeOp` schema works across both HTTP batch and WebSocket
 
 **Deliverables:**
@@ -2577,6 +2625,27 @@ Upon completing Tier 3, promote the following proposals:
 - [ ] Bidirectional message flow
 - [ ] Presence tracking (who's online)
 - [ ] Cursor sharing (optional)
+
+---
+
+### Pre-Commit Soft Locks — Analysis & Deferral
+
+**Status: DEFERRED — post-Tier-4, low priority**
+
+A soft lock would warn User B ("Alice is editing this node") before they begin typing, reducing the chance of hitting the `baseVersion` ETag rejection. The concept was listed as a WebSocket advantage, but analysis shows its value is substantially superseded by other mechanisms already in the plan:
+
+**Use cases and what already handles them:**
+
+| Case | Soft lock prevents | What actually handles it |
+|------|--------------------|--------------------------|
+| Two users edit **different nodes** on the same tree | Not applicable | Irmin: different paths → clean three-way merge, zero conflict |
+| Two users edit **same node** concurrently on main | Race to same field | Phase 6 `ConflictDetector`: `baseVersion` ETag check rejects stale submitter — correct outcome, user retries |
+| User A edits, User B working on a scenario branch | Not applicable | Irmin scenario branch gives complete isolation — no conflict possible until deliberate merge |
+| User A edits node, User B deletes it | Deletion not lockable | Neither mechanism covers this cleanly; both leave residual conflict at UX layer |
+
+**Verdict:** For risk trees (infrequent concurrent edits, branches as the preferred collaboration model) the cost-benefit ratio is unfavorable. The lock state lifecycle alone is non-trivial: acquire, timeout/TTL, release on disconnect, granularity (node? field?), lock event fan-out. What remains after Irmin branching and ETag detection is pure UX polish — reducing the round-trip that produces a "conflict, please reload" message. That is not zero value, but it does not justify implementation before Tier 4 is complete and real usage patterns are observable.
+
+**Do not implement until:** Tier 4 is shipped, scenario branching is in production, and user feedback indicates the ETag rejection UX is causing meaningful friction.
 
 ---
 
