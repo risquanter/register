@@ -12,8 +12,8 @@
 
 All runtime images are built locally. Builder base images avoid re-installing heavyweight
 toolchains (OCaml/opam, GraalVM, sbt) on every source change — they are built once and
-reused for all subsequent application image builds. See [ADR-026](ADR-026-container-image-strategy.md)
-for the image strategy and [ADR-020](ADR-020-supply-chain-security.md) for supply chain
+reused for all subsequent application image builds. See [ADR-026](../dev/ADR-026-container-image-strategy.md)
+for the image strategy and [ADR-020](../dev/ADR-020-supply-chain-security.md) for supply chain
 security policy.
 
 Build in this order — steps 1, 3, and 4 are independent; step 2 requires step 1; step 5
@@ -191,13 +191,13 @@ docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docke
 
 ## Rebuild Images
 
-| Image | When to rebuild | Command | Details |
-|-------|-----------------|---------|---------|
-| `local/graalvm-builder:21` | vql-engine changes, GraalVM/sbt version bump | `docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..` | [Builder base](#one-time-setup-builder-base-image) |
-| `local/register-server:<version>` | Server or common source changes | `docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> .` | [Register server](#standalone-docker) |
-| `local/frontend:<version>` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:<version> ..` | [Frontend SPA](#standalone-docker-1) |
-| `local/irmin-prod:3.11` | Irmin version changes | `docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11 containers/prod/` | [Irmin server](#irmin-graphql-server-persistence-layer) |
-| `local/irmin-builder:3.11` | OCaml/Irmin version changes | `docker build -f containers/builders/Dockerfile.irmin-builder -t local/irmin-builder:3.11 containers/builders/` | [Irmin builder](#one-time-setup-irmin-builder-base-image) |
+| Image | When to rebuild | Command |
+|-------|-----------------|---------|
+| `local/graalvm-builder:21` | vql-engine changes, GraalVM/sbt version bump | `docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..` |
+| `local/register-server:<version>` | Server or common source changes | `docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> .` |
+| `local/frontend:<version>` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:<version> ..` |
+| `local/irmin-prod:3.11` | Irmin version changes | `docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11 containers/prod/` |
+| `local/irmin-builder:3.11` | OCaml/Irmin version changes | `docker build -f containers/builders/Dockerfile.irmin-builder -t local/irmin-builder:3.11 containers/builders/` |
 
 **After server source changes** (vql-engine unchanged):
 ```bash

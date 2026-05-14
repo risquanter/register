@@ -2,7 +2,7 @@
 
 [![Last commit](https://img.shields.io/github/last-commit/risquanter/register)](https://github.com/risquanter/register/commits/main) [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE.md)
 
-A quantitative risk analysis tool. Domain experts build hierarchical risk trees — each leaf is a parameterised risk event (occurrence probability + loss range expressed as a lognormal or metalog distribution), portfolio nodes aggregate their children. The server runs Monte Carlo simulations and reports Loss Exceedance Curves (LECs) and overview statistics at every level of the hierarchy, from individual risk events to the enterprise total.
+A quantitative risk analysis tool. Domain experts build hierarchical risk trees — each leaf is a parameterised risk event (occurrence probability + loss range expressed as a log-normal or metalog distribution), portfolio nodes aggregate their children. The server runs Monte Carlo simulations and reports Loss Exceedance Curves (LECs) and overview statistics at every level of the hierarchy, from individual risk events to the enterprise total.
 
 ---
 
@@ -26,7 +26,7 @@ If you know roughly what a bad year looks like and what a catastrophic year look
 
 ### Monte Carlo Simulation & Loss Exceedance Curves
 
-Each leaf is sampled independently across N trials (default 10 000). Portfolio results are composed by *trial-aligned summation*: the portfolio's loss on trial 7 equals the sum of every child's loss on trial 7. This is mathematically exact — it preserves the joint distribution without re-sampling or distribution-fitting, correctly modelling co-occurrence structure. The N trials can be thought of as simulations of N parallel worlds or simulating the occurances over N years. The server computes from this simulated data various statistics and so called Loss Exceedance Curves (LECs). These curves map loss-tresholds to probabilities, answering the question "what is the probability of losing more than $X?" considering a risk or a risk portfolio as a whole. The LEC is the central output of the system, and can be inspected at any level of the hierarchy — from individual risk events to the enterprise total. This allows analysts to identify dominant risk drivers and understand how risks combine across the organisation.
+Each leaf is sampled independently across N trials (default 10 000). Portfolio results are composed by *trial-aligned summation*: the portfolio's loss on trial 7 equals the sum of every child's loss on trial 7. This is mathematically exact — it preserves the joint distribution without re-sampling or distribution-fitting, correctly modelling co-occurrence structure. The N trials can be thought of as simulations of N parallel worlds or simulating the occurances over N years. The server computes from this simulated data various statistics and so called Loss Exceedance Curves (LECs). These curves map loss-thresholds to probabilities, answering the question "what is the probability of losing more than $X?" considering a risk or a risk portfolio as a whole. The LEC is the central output of the system, and can be inspected at any level of the hierarchy — from individual risk events to the enterprise total. This allows analysts to identify dominant risk drivers and understand how risks combine across the organisation.
 
 ### Incremental Re-Simulation
 
@@ -57,7 +57,7 @@ The storage layer is [Irmin](https://irmin.org/) — a Git-like content-addresse
 
 Risquanter is a source-only project — there are no published binary releases or pre-built container images. Everything is built locally from source. This will change after the first stable release, but for now the quickest way to get up and running is to follow the instructions below to build the container images yourself. The resulting stack is production-equivalent — the same application binary as would run in a cloud deployment, just with a different configuration and without the orchestration layer.
 
-The the Register component is designed to run in two modes: an in-memory storage mode for quick local trials and a persistent mode backed by Irmin. The instructions below cover both modes, starting with the in-memory setup.
+Register runs in two modes: in-memory storage for quick local trials, and a persistent mode backed by Irmin. The instructions below cover in-memory; for Irmin persistence see [docs/user/PERSISTENT-SETUP.md](docs/user/PERSISTENT-SETUP.md).
 
 ### Prerequisites
 
@@ -128,8 +128,10 @@ The Design view is where a risk expert builds and maintains the risk hierarchy. 
 - **Leaf nodes** — terminal risk items where the quantitative parameters are specified directly:
   - **Occurrence probability** — the annual probability that the risk event occurs
   - **Loss distribution** — the conditional severity given an event occurs, specified as either:
-    - The **Confidence interval mode** uses underneath a **log-normal** distribution, parameterised by minimum and maximum expected loss — suited to cases where expert opinion is expressed as a credible confidence range (e.g. *"90 % chance losses fall between $X and $Y"*)
-    - The **Quantile mode** sometimes referred to tas **expert opinion mode** uses a metalog distribution, that can be parametrized by percentile–loss pairs (quantiles) — suited to cases where expert opinion is available as multiple point estimates across the loss landscape (e.g. median, 75th, 95th percentile). Or put it simply when the expert can phrase their experiences in form resembling *"Only one time in twenty **(P95)** would losses exceed $C. About half the time **(P50)** they stay below $B. Only in one case out of four **(P25)** are losses as low as $A."*
+    - **Confidence interval mode** — parameterised by a lower and upper bound representing a 90 % credible range on conditional loss, underpinned by a log-normal distribution
+    - **Quantile mode** (also called **expert opinion mode**) — parameterised by percentile–loss pairs, underpinned by a flexible metalog distribution
+
+    See [Parameterising a leaf node](#parameterising-a-leaf-node) below for full details on each mode.
 
 #### Parameterising a leaf node
 
@@ -147,9 +149,9 @@ Branches can be nested to arbitrary depth, enabling fine-grained decomposition (
 
 The Analyze view is the primary workspace for risk quantification. It operates against Register's Monte Carlo simulation engine. The subject of an analysis session is a single tree from the Design view. Available trees can be selected from a dropdown menu. 
 
-This view is centered around the concept of **Loss Exceedance Curves (LECs)**.  Selecting (Ctrl + click) any node in the tree triggers a simulation run and renders the Loss Exceedance Curve (LEC) for that subtree: the curve describes the probability that aggregate annual loss from that branch exceeds any given threshold. The LEC can be inspected at any level of the hierarchy and compared across sibling branches to identify dominant risk drivers.
+This view is centered around the concept of **Loss Exceedance Curves (LECs)**. Selecting (Ctrl + click) any node in the tree triggers a simulation run and renders the Loss Exceedance Curve (LEC) for that subtree: the curve describes the probability that aggregate annual loss from that branch exceeds any given threshold. The LEC can be inspected at any level of the hierarchy and compared across sibling branches to identify dominant risk drivers.
 
-LECs can be also generated by executing **VQL Queries**  (Vague Query Language; the Risquanter internal DSL based on first order logic). VQL queries return the set of nodes satisfying the expression and these get added to the LEC view. Nodes selected manually from the tree and nodes returned by VQL queries can be compared side-by-side in the LEC view, enabling analysts to understand the risk properties of the nodes returned by a query in the context of the overall tree. 
+LECs can also be generated by executing **VQL Queries** (Vague Query Language; the Risquanter internal DSL based on first order logic). VQL queries return the set of nodes satisfying the expression and these get added to the LEC view. Nodes selected manually from the tree and nodes returned by VQL queries can be compared side-by-side in the LEC view, enabling analysts to understand the risk properties of the nodes returned by a query in the context of the overall tree. 
 
 ---
 
@@ -170,12 +172,6 @@ Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 2000000))
 ```
 
 For the full query reference — all operators, predicates, fuzzy quantifier, nested quantifiers, and annotated PASS/FAIL contrast pairs — see [docs/user/VQL-QUERY-EXAMPLES.md](docs/user/VQL-QUERY-EXAMPLES.md).
-
----
-
-## Getting Started (with Irmin persistence)
-
-For full instructions on enabling Irmin-backed persistence — including building the OCaml toolchain images, environment configuration, and the complete variable reference — see [docs/user/PERSISTENT-SETUP.md](docs/user/PERSISTENT-SETUP.md). Complete the [in-memory setup](#getting-started-in-memory-storage) first.
 
 ---
 

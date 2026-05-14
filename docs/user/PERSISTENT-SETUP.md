@@ -62,7 +62,7 @@ All configuration is driven by environment variables. The key variables with the
 | Variable | Default | Description |
 |---|---|---|
 | `REGISTER_REPOSITORY_TYPE` | `in-memory` | Set to `irmin` for persistent storage |
-| `IRMIN_URL` | `http://irmin:8080` | Irmin GraphQL endpoint |
+| `IRMIN_URL` | `http://localhost:9080` | Irmin GraphQL endpoint. Use `http://irmin:8080` inside Docker Compose (set by `.env.irmin.example`). |
 | `REGISTER_AUTH_MODE` | `capability-only` | Authorization layer: `capability-only`, `identity`, or `fine-grained` |
 | `REGISTER_DEFAULT_NTRIALS` | `10000` | Monte Carlo trial count |
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace absolute expiry |
