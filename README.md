@@ -2,7 +2,11 @@
 
 [![Last commit](https://img.shields.io/github/last-commit/risquanter/register)](https://github.com/risquanter/register/commits/main) [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE.md)
 
-A quantitative risk analysis tool. Domain experts build hierarchical risk trees — each leaf is a parameterised risk event (occurrence probability + loss range expressed as a log-normal or metalog distribution), portfolio nodes aggregate their children. The server runs Monte Carlo simulations and reports Loss Exceedance Curves (LECs) and overview statistics at every level of the hierarchy, from individual risk events to the enterprise total.
+A quantitative risk analysis platform designed for decision support rather than prediction: sensitivity analysis, mitigation cost-benefit, and comparative risk ranking against explicitly stated expert beliefs.
+
+Domain experts describe hierarchical risk models — each leaf is a risk event (occurrence probability + conditional loss distribution), portfolio nodes aggregate their children via Monte Carlo simulation. The design emphasis is on translating natural expert statements and domain knowledge directly into the mathematical structures that drive the simulations.
+
+Simulations yield Loss Exceedance Curves (LECs) and quantile statistics at every level of the hierarchy — from individual events to the enterprise total — surfacing how each risk contributes to the aggregate loss landscape. The first-class integration targets are cyber risk and security operations — EPSS-informed likelihood estimates, SBOMs and threat models, and CISO decision workflows. Integration candidates from other risk domains are actively welcomed.
 
 ---
 
