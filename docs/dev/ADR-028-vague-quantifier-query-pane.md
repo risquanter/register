@@ -11,7 +11,7 @@
 > earlier `p50`/`p90` listing was never implemented). All examples in
 > this document and the appendix have been updated. The three open bugs
 > blocking node-name literals (`"IT Risk"` etc.) remain — see
-> `docs/PLAN-QUERY-NODE-NAME-LITERALS.md`.
+> `docs/dev/PLAN-QUERY-NODE-NAME-LITERALS.md`.
 
 ---
 

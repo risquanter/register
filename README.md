@@ -8,7 +8,7 @@ A quantitative risk analysis tool. Domain experts build hierarchical risk trees 
 
 ### Risk Tree Modelling
 
-Users describe their risk taxonomy as a tree. Interior nodes (**portfolios**) correspond to organisational groupings such as business units, geographical regions, or operational categories. Leaf nodes represent individual risk events.
+Users describe their risk taxonomy as a tree. Interior nodes (**portfolios**) can be used to model organisational groupings such as business units, geographical regions, or operational categories. Most often they are used to represent aggregations of risk events, forming a hierarchical structure of risk portfolios. Leaf nodes represent individual risk events. Portfolios aggregate the losses of their children, so the tree structure encodes how risks combine and interact across the organisation.
 
 The interface is intentionally non-statistical. A subject-matter expert who has never heard of a lognormal distribution or a metalog can fully parameterise a risk model. Each leaf node requires only two inputs from the expert's own vocabulary:
 
@@ -16,23 +16,20 @@ The interface is intentionally non-statistical. A subject-matter expert who has 
 
 **Loss range** — in one of two modes, depending on how the expert best articulates their uncertainty:
 
-- **Confidence interval mode** — *"When this risk occurs, I'm 90 % confident the financial impact falls somewhere between $X and $Y."* Supply the lower and upper bounds; the system derives the loss distribution internally. This is the natural language of insurance and risk committees: a best-case and a credible worst-case, with no assumptions beyond that losses of this type tend to be right-skewed.
+- **Confidence interval mode** — *"When this risk occurs, I'm 90 % confident the financial impact falls somewhere between $X and $Y. There can be rare events below $X and in case of $Y even way above in very rare extreme cases, but the overwhelming majority of losses will fall within this range."* Supply the lower and upper bounds; the system derives the loss distribution internally. This is the natural language of insurance and risk committees: a best-case and a credible worst-case, with no assumptions beyond that losses of this type tend to be right-skewed and are always positive. Thus we will never get a "negative loss", and we expect a long tail describing the possibility of rare but severe events beyond the upper bound. 
 
-- **Quantile mode** — *"I can tell you that in a quarter of occurrences losses stay below $A, in half below $B, and only one time in ten would I expect to see losses above $C."* Supply as many or as few percentile-quantile pairs as the expert can reasonably support (minimum two). The system fits a flexible distribution that honours every stated point exactly, without imposing any parametric shape.
+- **Quantile mode** — *"Nine times out of ten **(P90)**, losses stay below $C. About half the time **(P50)**, they stay below $B. Only in one case out of ten **(P10)** would losses be as low as $A."* Supply as many or as few percentile-quantile pairs as the expert can reasonably support (minimum two, three are common). The system fits a flexible distribution that honours every stated point exactly, without imposing any parametric shape.
 
 If you know roughly what a bad year looks like and what a catastrophic year looks like, confidence interval mode gets you running in seconds. If you have a richer picture of the loss landscape — a view on the median, a tail estimate, perhaps a regulatory threshold — quantile mode lets you encode all of it directly. Either way, no distribution theory is required.
 
 ### Monte Carlo Simulation & Loss Exceedance Curves
 
-Each leaf is sampled independently across N trials (default 10 000). Portfolio results are composed by *trial-aligned summation*: the portfolio's loss on trial 7 equals the sum of every child's loss on trial 7. This is mathematically exact — it preserves the joint distribution without re-sampling or distribution-fitting, correctly modelling co-occurrence structure. The server computes Loss Exceedance Curves (LECs) — "what is the probability of losing more than $X?" — and P50/P90/P95/P99 quantile statistics for every node in the tree.
+Each leaf is sampled independently across N trials (default 10 000). Portfolio results are composed by *trial-aligned summation*: the portfolio's loss on trial 7 equals the sum of every child's loss on trial 7. This is mathematically exact — it preserves the joint distribution without re-sampling or distribution-fitting, correctly modelling co-occurrence structure. The N trials can be thought of as simulations of N parallel worlds or simulating the occurances over N years. The server computes from this simulated data various statistics and so called Loss Exceedance Curves (LECs). These curves map loss-tresholds to probabilities, answering the question "what is the probability of losing more than $X?" considering a risk or a risk portfolio as a whole. The LEC is the central output of the system, and can be inspected at any level of the hierarchy — from individual risk events to the enterprise total. This allows analysts to identify dominant risk drivers and understand how risks combine across the organisation.
 
 ### Incremental Re-Simulation
 
-Only the edited node and its ancestors are re-simulated when a parameter changes; siblings and unrelated subtrees are served from a content-addressed [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree) cache. Editing a single leaf's probability produces updated results within seconds, not minutes.
+Only the edited node and its ancestors are re-simulated when a parameter changes; siblings and unrelated subtrees are served from a content-addressed [Merkle tree](https://en.wikipedia.org/wiki/Merkle_tree) cache. Editing a single leaf's probability produces updated results within milliseconds, not minutes.
 
-### Scenario Branching
-
-The storage layer is [Irmin](https://irmin.org/) — a Git-like content-addressed store. Branch creation is O(1); two scenarios sharing 90 % of their tree share 90 % of their storage and their cached computation. Merging a scenario back into the main model is a supported operation with 3-way merge semantics. The complete edit history is preserved as immutable commits, enabling time travel and revert.
 
 ### Vague Quantifier Queries
 
@@ -47,42 +44,51 @@ Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))
 Queries are evaluated server-side against the current simulation cache. Available terms include structural predicates (`leaf`, `portfolio`, `child_of`, `descendant_of`, `leaf_descendant_of`) and simulation-backed functions (`p95`, `p99`, `lec`). Query syntax errors are reported at parse time with position information.
 
 
+### Scenario Branching (next planned feature)
+
+The storage layer is [Irmin](https://irmin.org/) — a Git-like content-addressed store. Branch creation is O(1); two scenarios sharing 90 % of their tree share 90 % of their storage and their cached computation. Merging a scenario back into the main model is a supported operation with 3-way merge semantics. The complete edit history is preserved as immutable commits, enabling time travel and revert.
+
 ---
 
 
 ## Getting Started (in-memory storage)
 
-Register is a source-only project — there are no published binary releases or pre-built container images. Everything is built locally from source.
+Risquanter is a source-only project — there are no published binary releases or pre-built container images. Everything is built locally from source. This will change after the first stable release, but for now the quickest way to get up and running is to follow the instructions below to build the container images yourself. The resulting stack is production-equivalent — the same application binary as would run in a cloud deployment, just with a different configuration and without the orchestration layer.
+
+The the Register component is designed to run in two modes: an in-memory storage mode for quick local trials and a persistent mode backed by Irmin. The instructions below cover both modes, starting with the in-memory setup.
 
 ### Prerequisites
 
 - Docker 20.10+ and Docker Compose 2.0+
 - Git
 
-### 1. Check out the source
+### 1. Check out the sources
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/risquanter/register.git
+git clone https://github.com/risquanter/vague-quantifier-logic.git
+git clone https://github.com/risquanter/hdr-rng.git
 cd register
 ```
 
 ### 2. Configure the environment
 
-The server defaults to in-memory storage with no extra configuration. Copy the bundled in-memory template:
+The server defaults to in-memory storage with no extra configuration. Copy the bundled in-memory templates for the default values for the environment variables:
 
 ```bash
 cp .env.inmemory.example .env.inmemory
 ```
 
-Review `.env.inmemory` — the defaults are usable as-is for a local trial. See `docs/DOCKER-DEVELOPMENT.md` and `docs/ADR-016-config-management.md` for the full variable reference, including the Irmin-backed persistence option.
+Review `.env.inmemory` — the defaults are usable as-is for a local trial. See `docs/user/DOCKER-DEVELOPMENT.md` and `docs/dev/ADR-016-config-management.md` for the full variable reference, including the Irmin-backed persistence option.
 
 ### 3. Build the container images
 
 Builder base images install heavyweight toolchains (GraalVM, sbt) once and are reused for all subsequent application builds. Build in this order:
 
 ```bash
-# GraalVM builder base — installs GraalVM native-image + sbt (~1-2 min)
-# Context is the parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
+# GraalVM builder base — installs GraalVM native-image + sbt (~10-20 min)
+# Context is the register projects parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
+# If you used the above commands to clone the repos, you need to run a "cd .." to be in the correct directory before running this command
 docker build -f containers/builders/Dockerfile.graalvm-builder \
   -t local/graalvm-builder:21 ..
 
@@ -104,7 +110,7 @@ docker compose --profile frontend up -d
 
 The application is available at **`http://localhost:18080`**.
 
-> The `examples/` directory contains curl-based API scripts for direct backend testing. For advanced configuration, observability integration, and Kubernetes deployment, see `docs/DOCKER-DEVELOPMENT.md`.
+> The `examples/` directory contains curl-based API scripts for direct backend testing. For advanced configuration, observability integration, and Kubernetes deployment, see `docs/user/DOCKER-DEVELOPMENT.md`.
 
 ---
 
@@ -115,23 +121,33 @@ Once the stack is running, open **`http://localhost:18080`** to access the appli
 ### Design view
 
 The Design view is where a risk expert builds and maintains the risk hierarchy. A risk tree is composed of:
-
-- **Portfolio nodes** — internal nodes that aggregate child risk categories. Each portfolio's loss distribution is the statistical convolution of all its descendants, computed via Monte Carlo simulation.
+- A root node representing the entire enterprise (unnamed and mandatory parent of the first node)
+- **Portfolio nodes** — internal nodes that aggregate child risk categories. Each portfolio's loss distribution is the statistical convolution of all its descendants, computed via Monte Carlo simulation. If you want to model more than one risk you need at least one portfolio to hold them. Portfolios can be used to represent organisational groupings such as business units, geographical regions, or operational categories. They can also be used to represent aggregations of risk events, forming a hierarchical structure of risk portfolios. Portfolios have no parameters of their own — their loss distribution is entirely derived from their children.
 - **Leaf nodes** — terminal risk items where the quantitative parameters are specified directly:
   - **Occurrence probability** — the annual probability that the risk event occurs
   - **Loss distribution** — the conditional severity given an event occurs, specified as either:
-    - A **log-normal** distribution, parameterised by minimum and maximum expected loss — suited to cases where expert opinion is expressed as a credible confidence range (e.g. *"90 % chance losses fall between $X and $Y"*)
-    - A **quantile-based** (expert) distribution, expressed as percentile–loss pairs — suited to cases where expert opinion is available as multiple point estimates across the loss landscape (e.g. median, 75th, 95th percentile)
+    - The **Confidence interval mode** uses underneath a **log-normal** distribution, parameterised by minimum and maximum expected loss — suited to cases where expert opinion is expressed as a credible confidence range (e.g. *"90 % chance losses fall between $X and $Y"*)
+    - The **Quantile mode** sometimes referred to tas **expert opinion mode** uses a metalog distribution, that can be parametrized by percentile–loss pairs (quantiles) — suited to cases where expert opinion is available as multiple point estimates across the loss landscape (e.g. median, 75th, 95th percentile). Or put it simply when the expert can phrase their experiences in form resembling *"Only one time in twenty **(P95)** would losses exceed $C. About half the time **(P50)** they stay below $B. Only in one case out of four **(P25)** are losses as low as $A."*
+
+#### Parameterising a leaf node
+
+Each leaf requires an **occurrence probability** — the annual chance the event occurs, entered as a number between 0 and 1 (e.g. `0.20` for a 20 % chance per year) — and a **loss characterisation** in one of two modes:
+
+**Confidence interval mode** is the right choice when your expert can give you a credible range. You enter a lower bound and an upper bound representing a 90 % confidence interval on the loss conditional on the event occurring — *"if a breach happens, we're 90 % confident the financial damage falls somewhere between $500 K and $8 M."* The system derives a right-skewed loss distribution from those two numbers. This is the natural language of insurance and risk committees, and requires no statistical knowledge.
+
+**Quantile mode** is the right choice when your expert can speak to several points on the loss landscape. You enter a list of percentile levels and the corresponding loss amounts; the system fits a flexible distribution that passes exactly through every stated point without imposing any parametric shape. *"Only one time in twenty **(P95)** would losses exceed $15 M. About half the time **(P50)** they stay below $1 M. Only in one case out of four **(P25)** are losses as low as $200 K."* translates directly into three pairs. The minimum is two pairs; a median and a 95th percentile is already enough to get started.
+
+If you know roughly what a bad year and a catastrophic year look like, confidence interval mode gets you running in seconds. If you have a richer picture of the loss landscape — a view on the median, a tail estimate, perhaps a regulatory threshold — quantile mode lets you encode all of it directly.
 
 Branches can be nested to arbitrary depth, enabling fine-grained decomposition (for example, *Third Party Risk → Supplier Concentration → Single-Source Critical Components*).
 
 ### Analyze view
 
-The Analyze view is the primary workspace for risk quantification. It operates against Register's Monte Carlo simulation engine.
+The Analyze view is the primary workspace for risk quantification. It operates against Register's Monte Carlo simulation engine. The subject of an analysis session is a single tree from the Design view. Available trees can be selected from a dropdown menu. 
 
-**Loss Exceedance Curves** — the central output. Selecting (Ctrl + click) any node in the tree triggers a simulation run and renders the Loss Exceedance Curve (LEC) for that subtree: the probability that aggregate annual loss from that branch exceeds any given threshold. The LEC can be inspected at any level of the hierarchy and compared across sibling branches to identify dominant risk drivers.
+This view is centered around the concept of **Loss Exceedance Curves (LECs)**.  Selecting (Ctrl + click) any node in the tree triggers a simulation run and renders the Loss Exceedance Curve (LEC) for that subtree: the curve describes the probability that aggregate annual loss from that branch exceeds any given threshold. The LEC can be inspected at any level of the hierarchy and compared across sibling branches to identify dominant risk drivers.
 
-**VQL Queries** — the Analyze view includes a query pane where analysts can express structural and quantitative questions about the tree using the Vague Query Language (VQL). Queries are evaluated against the simulation cache and return a pass/fail result with supporting evidence.
+LECs can be also generated by executing **VQL Queries**  (Vague Query Language; the Risquanter internal DSL based on first order logic). VQL queries return the set of nodes satisfying the expression and these get added to the LEC view. Nodes selected manually from the tree and nodes returned by VQL queries can be compared side-by-side in the LEC view, enabling analysts to understand the risk properties of the nodes returned by a query in the context of the overall tree. 
 
 ---
 
@@ -272,7 +288,7 @@ Ready-to-run scripts for both the simple and enterprise trees — including colo
 
 ## Getting Started (with Irmin persistence)
 
-Irmin is a Git-like, content-addressed, versioned data store. Register uses it as the domain content store for risk trees so each change is auditable and historical states remain queryable.
+Irmin is a Git-like, content-addressed, versioned data store. Risquanter uses it as the domain content store for risk trees so each change is auditable and historical states remain queryable.
 
 Complete the [in-memory setup](#getting-started-in-memory-storage) first (builds the GraalVM builder and application images). Then follow these steps.
 
@@ -434,7 +450,7 @@ open http://localhost:18080
 
 ### Layered Authorization Model
 
-Register is designed to serve three distinct deployment contexts from one codebase, selected by a single configuration value (`register.auth.mode`). The authorization model is **additive** — each layer adds a gate on top of the previous one without replacing it.
+Risquanter is designed to serve three distinct deployment contexts from one codebase, selected by a single configuration value (`register.auth.mode`). The authorization model is **additive** — each layer adds a gate on top of the previous one without replacing it.
 
 ```
 Layer 0 — Workspace Capability (free tier / demo)
@@ -459,7 +475,7 @@ Layer 2 — Fine-Grained Authorization (enterprise tier)
   and contains no grant/revoke endpoints.
 ```
 
-Fail-closed by design: if the identity service or SpiceDB are unreachable, access is denied. There is no fallback to a less restrictive mode.
+Fail-closed by design: SpiceDB errors (timeout, 5xx, network failure) are mapped to 403 — never 503, which would reveal that SpiceDB is down. JWT validation at Layer 1 is enforced by the Istio service mesh before requests reach the application. Once a higher mode is configured (`identity` or `fine-grained`), the application does not fall back to `capability-only` at runtime if an expected upstream service is unavailable.
 
 ### Incremental Complexity
 
@@ -467,21 +483,21 @@ The system is designed to be deployed with as much or as little infrastructure a
 
 | Profile | Config | Required infrastructure |
 |---|---|---|
-| Free tier / demo | `capability-only` | None beyond the application itself |
-| Team | `identity` | Keycloak + Istio service mesh |
-| Enterprise | `fine-grained` | Keycloak + Istio + SpiceDB |
+| Free tier / demo | `capability-only` | Docker |
+| Team | `identity` | Keycloak + Istio service mesh on K3S |
+| Enterprise | `fine-grained` | Keycloak + Istio + SpiceDB on K3S|
 
-**The currently open-sourced version of Register ships with full Layer 0 support.** Layer 0 provides a complete, production-ready deployment profile with automatic workspace expiry, rate limiting, key rotation, and all simulation and query features.
+**The currently open-sourced version of Risquanter ships with full Layer 0 support.** Layer 0 provides a complete, production-ready deployment profile with automatic workspace expiry, rate limiting, key rotation, and all simulation and query features.
 
-Layer 1 (Keycloak identity) and Layer 2 (SpiceDB fine-grained ACL) infrastructure and application wiring are implemented in the codebase and documented in [docs/AUTHORIZATION-PLAN.md](docs/AUTHORIZATION-PLAN.md), but their supporting infrastructure components (Keycloak realm provisioning, Istio mesh configuration, SpiceDB schema and CI/CD provisioning) are planned to be open-sourced as a separate repository upon completion and release.
+Layer 1 (Keycloak identity) and Layer 2 (SpiceDB fine-grained ACL) infrastructure and application wiring are implemented in the codebase and documented in [docs/dev/AUTHORIZATION-PLAN.md](docs/dev/AUTHORIZATION-PLAN.md), but their supporting infrastructure components (Keycloak realm provisioning, Istio mesh configuration, SpiceDB schema and CI/CD provisioning) are planned to be open-sourced as a separate repository upon completion and release.
 
 ---
 
-## API Quick-Start
+## Going Further
 
-The following examples bootstrap a workspace containing a risk tree, then run vague quantifier queries against the simulation results. Replace `localhost:8090` with your server address.
+### Examples
 
-Ready-to-run scripts for both examples below — including coloured output, preflight checks, and `jq`-extracted results — live in the [`examples/`](examples/) directory:
+Ready-to-run scripts for examples live in the [`examples/`](examples/) directory:
 
 | Script | Tool | Scenario |
 |---|---|---|
@@ -498,311 +514,18 @@ chmod +x examples/*.sh
 
 > **Note:** The `workspaceKey` returned by the bootstrap step is a 128-bit capability token embedded in every subsequent URL. Treat it like a shared secret.
 
-### Leaf Risk Parameters: A Modeller's Guide
+### API Tutorial
 
-Every leaf node requires three things: a name, an occurrence probability, and a loss characterisation. The loss characterisation comes in two forms — pick whichever matches how your expert articulates their knowledge.
+For a step-by-step guide to the HTTP API — including leaf parameterisation reference, bootstrap scripts, and a 21-leaf enterprise example — see [docs/user/API-TUTORIAL.md](docs/user/API-TUTORIAL.md).
 
-#### Confidence interval mode (`distributionType: "lognormal"`)
+### Further Reading
 
-Use this when your expert can bound the loss outcome with a confidence statement. The two fields are:
-
-| Field | What it means |
+| Document | Contents |
 |---|---|
-| `probability` | The chance this risk event occurs in the modelling period. `0.20` means a 1-in-5 chance per year. |
-| `minLoss` | The lower end of a **90 % confidence interval** on loss size — "when this event occurs, I'd be surprised if losses were below this." |
-| `maxLoss` | The upper end of that same interval — "when this event occurs, I'd be surprised if losses exceeded this." |
-
-Concretely: a cyber breach team says *"we think there's a 20 % chance of a breach this year; if one happens, we're 90 % confident the financial damage falls somewhere between $500 K and $8 M."*
-
-```json
-{
-  "name": "Cyber Breach",
-  "distributionType": "lognormal",
-  "probability": 0.20,
-  "minLoss": 500000,
-  "maxLoss": 8000000,
-  "percentiles": null,
-  "quantiles": null
-}
-```
-
-The system constructs a right-skewed loss distribution from those two bounds. Nothing else is needed. The simulation will reflect not just the expected loss but the full spread — including the tail scenarios that matter for capital planning.
-
-#### Quantile mode (`distributionType: "expert"`)
-
-Use this when your expert can speak to several points on the loss landscape, not just the credible range. The two fields are:
-
-| Field | What it means |
-|---|---|
-| `probability` | The chance this risk event occurs, same as above. |
-| `percentiles` | The probability levels your expert is making statements at, as decimal fractions. `[0.25, 0.50, 0.75, 0.95]` means the 25th, 50th, 75th, and 95th percentiles of the conditional loss distribution. |
-| `quantiles` | The loss amounts at each of those percentiles, in the same order. |
-
-Concretely: a supply chain analyst says *"there's a 10 % chance of a major disruption this year; if it happens, a quarter of the time losses stay below $200 K, half the time below $1 M, three-quarters of the time below $4 M, and only one time in twenty would I expect to see losses beyond $15 M."*
-
-```json
-{
-  "name": "Ransomware",
-  "distributionType": "expert",
-  "probability": 0.10,
-  "minLoss": null,
-  "maxLoss": null,
-  "percentiles": [0.25, 0.50, 0.75, 0.95],
-  "quantiles":   [200000, 1000000, 4000000, 15000000]
-}
-```
-
-The system fits a flexible distribution that passes exactly through every stated point, honouring the expert's full picture of the loss landscape without imposing any parametric assumption.
-
-**Minimum requirement:** two percentile-quantile pairs. A view on the median and the 95th percentile is already enough. Add more pairs wherever the expert has a well-formed opinion — each additional point sharpens the fitted shape.
-
----
-
-### 1. Bootstrap a Workspace & First Tree
-
-Create a workspace with a two-level risk tree: one portfolio ("Operations") containing three leaf risks — a cyber breach (lognormal distribution), a supply chain disruption (expert quantiles), and a regulatory fine (lognormal distribution):
-
-```bash
-http POST localhost:8090/workspaces \
-  name="Operational Risk Model" \
-  portfolios:='[
-    {"name": "Operations", "parentName": null},
-    {"name": "IT Risk",    "parentName": "Operations"},
-    {"name": "Third Party Risk", "parentName": "Operations"}
-  ]' \
-  leaves:='[
-    {
-      "name": "Cyber Breach",
-      "parentName": "IT Risk",
-      "distributionType": "lognormal",
-      "probability": 0.20,
-      "minLoss": 500000,
-      "maxLoss": 8000000,
-      "percentiles": null,
-      "quantiles": null
-    },
-    {
-      "name": "Ransomware",
-      "parentName": "IT Risk",
-      "distributionType": "expert",
-      "probability": 0.10,
-      "minLoss": null,
-      "maxLoss": null,
-      "percentiles": [0.25, 0.50, 0.75, 0.95],
-      "quantiles":   [200000, 1000000, 4000000, 15000000]
-    },
-    {
-      "name": "Supply Chain Disruption",
-      "parentName": "Third Party Risk",
-      "distributionType": "lognormal",
-      "probability": 0.15,
-      "minLoss": 300000,
-      "maxLoss": 3000000,
-      "percentiles": null,
-      "quantiles": null
-    },
-    {
-      "name": "Regulatory Fine",
-      "parentName": "Third Party Risk",
-      "distributionType": "lognormal",
-      "probability": 0.08,
-      "minLoss": 100000,
-      "maxLoss": 2000000,
-      "percentiles": null,
-      "quantiles": null
-    }
-  ]'
-```
-
-The response contains your workspace key and the auto-assigned tree ID:
-
-```json
-{
-  "workspaceKey": "aB3x7kLm2Pq9RwZvNsYt8u",
-  "tree": { "id": "01J...", "name": "Operational Risk Model", ... },
-  "expiresAt": "2026-04-22T10:00:00Z"
-}
-```
-
-Store both values — every subsequent request uses them:
-
-```bash
-export WS_KEY=aB3x7kLm2Pq9RwZvNsYt8u
-export TREE_ID=01J...
-```
-
-### 2. Fetch Tree Summary
-
-**httpie:**
-```bash
-http GET "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID"
-```
-
-**curl:**
-```bash
-curl -s "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
-```
-
-Returns the simulation summary for every node in the tree, including P95/P99 quantile statistics and LEC curve points.
-
-### 3. Run a Vague Quantifier Query
-
-Queries are submitted via HTTP POST to the tree's query endpoint. The response reports whether the quantifier is satisfied, the exact proportion, and the IDs of matching nodes (useful for tree highlighting in the frontend):
-
-```json
-{
-  "satisfied": true,
-  "proportion": 0.667,
-  "satisfyingNodeIds": ["<Cyber Breach node id>", "<Ransomware node id>"],
-  "rangeSize": 3,
-  "satisfyingCount": 2,
-  "sampleSize": 3,
-  "queryEcho": "Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))"
-}
-```
-
-#### Query Language Reference
-
-| Syntax element | Meaning |
-|---|---|
-| `Q[>=]^{2/3} x (range(x), pred(x))` | True when at least 2/3 of elements in `range` satisfy `pred` |
-| `Q[<=]^{1/2} x (range(x), pred(x))` | True when at most 1/2 of elements in `range` satisfy `pred` |
-| `Q[~]^{1/2} x (range(x), pred(x))` | True when approximately 1/2 of elements satisfy `pred` (fuzzy) |
-| `leaf(x)` | x is a leaf risk node |
-| `portfolio(x)` | x is a portfolio node |
-| `child_of(x, "Parent Name")` | x is a direct child of the named node |
-| `descendant_of(x, "Name")` | x is any descendant of the named node |
-| `leaf_descendant_of(x, "Name")` | x is a leaf anywhere under the named node |
-| `p95(x)`, `p99(x)` | P95 / P99 loss value for node x (returns Loss) |
-| `lec(x, 1000000)` | Exceedance probability at \$1 M for node x (returns Probability) |
-| `gt_loss(p95(x), 5000000)` | P95 loss exceeds \$5 M (Loss comparison) |
-| `gt_prob(lec(x, 1000000), 0.05)` | Exceedance probability at \$1 M exceeds 5 % (Probability comparison) |
-
----
-
-### Enterprise Risk Model Example
-
-The following example builds a realistic 4-domain financial services risk tree (32 nodes: 1 root + 10 portfolios + 21 leaves) to demonstrate queries at enterprise complexity.
-
-```
-Enterprise Risk  (root)
-├── Operational Risk
-│   ├── Technology & Cyber
-│   │   ├── Ransomware Attack             expert  15%  P25=$500K P50=$2M P75=$8M  P95=$25M
-│   │   ├── Cloud Provider Outage         lognorm 30%  $200K–$4M
-│   │   ├── Data Breach (PII)             lognorm 10%  $1M–$15M
-│   │   └── Insider Threat                lognorm  5%  $2M–$20M
-│   ├── Process & People
-│   │   ├── Key Person Departure          lognorm 20%  $100K–$800K
-│   │   ├── Internal Fraud                expert   8%  P25=$200K P50=$1M P75=$4M  P95=$18M
-│   │   └── Process Failure               lognorm 25%  $50K–$500K
-│   └── Third-Party & Supply Chain
-│       ├── Critical Vendor Failure       lognorm 12%  $500K–$5M
-│       ├── Outsourcing SLA Breach        lognorm 20%  $100K–$1.5M
-│       └── Concentration Risk            expert   8%  P25=$1M   P50=$4M          P95=$18M
-├── Financial Risk
-│   ├── Market Risk
-│   │   ├── Equity Portfolio Drawdown     expert  35%  P25=$1M P50=$4M P75=$12M  P95=$28M
-│   │   └── FX Adverse Move               lognorm 40%  $500K–$8M
-│   ├── Credit Risk
-│   │   ├── Counterparty Default          lognorm  5%  $3M–$30M
-│   │   └── Credit Downgrade Wave         expert  15%  P25=$800K P50=$3M          P95=$20M
-│   └── Liquidity Risk
-│       └── Funding Squeeze               lognorm  8%  $2M–$25M
-├── Compliance & Legal Risk
-│   ├── Regulatory Action                 lognorm 12%  $2M–$50M
-│   ├── Litigation                        expert   8%  P25=$300K P50=$2M P75=$8M  P95=$40M
-│   └── GDPR / Data Protection Fine       lognorm 15%  $500K–$10M
-└── Strategic & Reputational Risk
-    ├── ESG Controversy                   lognorm 10%  $1M–$12M
-    ├── M&A Integration Failure           lognorm  5%  $5M–$40M
-    └── Product Recall / Liability        expert   6%  P25=$1M   P50=$5M          P95=$35M
-```
-
-#### Bootstrap (httpie)
-
-```bash
-http POST localhost:8090/workspaces \
-  name="Financial Services Enterprise Risk" \
-  portfolios:='[
-    {"name": "Enterprise Risk",               "parentName": null},
-    {"name": "Operational Risk",              "parentName": "Enterprise Risk"},
-    {"name": "Technology & Cyber",            "parentName": "Operational Risk"},
-    {"name": "Process & People",              "parentName": "Operational Risk"},
-    {"name": "Third-Party & Supply Chain",    "parentName": "Operational Risk"},
-    {"name": "Financial Risk",                "parentName": "Enterprise Risk"},
-    {"name": "Market Risk",                   "parentName": "Financial Risk"},
-    {"name": "Credit Risk",                   "parentName": "Financial Risk"},
-    {"name": "Liquidity Risk",                "parentName": "Financial Risk"},
-    {"name": "Compliance & Legal Risk",       "parentName": "Enterprise Risk"},
-    {"name": "Strategic & Reputational Risk", "parentName": "Enterprise Risk"}
-  ]' \
-  leaves:='[
-    {"name":"Ransomware Attack","parentName":"Technology & Cyber","distributionType":"expert","probability":0.15,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[500000,2000000,8000000,25000000]},
-    {"name":"Cloud Provider Outage","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.30,"minLoss":200000,"maxLoss":4000000,"percentiles":null,"quantiles":null},
-    {"name":"Data Breach (PII)","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.10,"minLoss":1000000,"maxLoss":15000000,"percentiles":null,"quantiles":null},
-    {"name":"Insider Threat","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.05,"minLoss":2000000,"maxLoss":20000000,"percentiles":null,"quantiles":null},
-    {"name":"Key Person Departure","parentName":"Process & People","distributionType":"lognormal","probability":0.20,"minLoss":100000,"maxLoss":800000,"percentiles":null,"quantiles":null},
-    {"name":"Internal Fraud","parentName":"Process & People","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[200000,1000000,4000000,18000000]},
-    {"name":"Process Failure","parentName":"Process & People","distributionType":"lognormal","probability":0.25,"minLoss":50000,"maxLoss":500000,"percentiles":null,"quantiles":null},
-    {"name":"Critical Vendor Failure","parentName":"Third-Party & Supply Chain","distributionType":"lognormal","probability":0.12,"minLoss":500000,"maxLoss":5000000,"percentiles":null,"quantiles":null},
-    {"name":"Outsourcing SLA Breach","parentName":"Third-Party & Supply Chain","distributionType":"lognormal","probability":0.20,"minLoss":100000,"maxLoss":1500000,"percentiles":null,"quantiles":null},
-    {"name":"Concentration Risk","parentName":"Third-Party & Supply Chain","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[1000000,4000000,18000000]},
-    {"name":"Equity Portfolio Drawdown","parentName":"Market Risk","distributionType":"expert","probability":0.35,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[1000000,4000000,12000000,28000000]},
-    {"name":"FX Adverse Move","parentName":"Market Risk","distributionType":"lognormal","probability":0.40,"minLoss":500000,"maxLoss":8000000,"percentiles":null,"quantiles":null},
-    {"name":"Counterparty Default","parentName":"Credit Risk","distributionType":"lognormal","probability":0.05,"minLoss":3000000,"maxLoss":30000000,"percentiles":null,"quantiles":null},
-    {"name":"Credit Downgrade Wave","parentName":"Credit Risk","distributionType":"expert","probability":0.15,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[800000,3000000,20000000]},
-    {"name":"Funding Squeeze","parentName":"Liquidity Risk","distributionType":"lognormal","probability":0.08,"minLoss":2000000,"maxLoss":25000000,"percentiles":null,"quantiles":null},
-    {"name":"Regulatory Action","parentName":"Compliance & Legal Risk","distributionType":"lognormal","probability":0.12,"minLoss":2000000,"maxLoss":50000000,"percentiles":null,"quantiles":null},
-    {"name":"Litigation","parentName":"Compliance & Legal Risk","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[300000,2000000,8000000,40000000]},
-    {"name":"GDPR / Data Protection Fine","parentName":"Compliance & Legal Risk","distributionType":"lognormal","probability":0.15,"minLoss":500000,"maxLoss":10000000,"percentiles":null,"quantiles":null},
-    {"name":"ESG Controversy","parentName":"Strategic & Reputational Risk","distributionType":"lognormal","probability":0.10,"minLoss":1000000,"maxLoss":12000000,"percentiles":null,"quantiles":null},
-    {"name":"M&A Integration Failure","parentName":"Strategic & Reputational Risk","distributionType":"lognormal","probability":0.05,"minLoss":5000000,"maxLoss":40000000,"percentiles":null,"quantiles":null},
-    {"name":"Product Recall / Liability","parentName":"Strategic & Reputational Risk","distributionType":"expert","probability":0.06,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[1000000,5000000,35000000]}
-  ]'
-```
-
-#### Bootstrap (curl)
-
-```bash
-curl -s -X POST http://localhost:8090/workspaces \
-  -H 'Content-Type: application/json' \
-  -d '{ "name": "Financial Services Enterprise Risk", "portfolios": [
-    {"name":"Enterprise Risk","parentName":null},
-    {"name":"Operational Risk","parentName":"Enterprise Risk"},
-    {"name":"Technology & Cyber","parentName":"Operational Risk"},
-    {"name":"Process & People","parentName":"Operational Risk"},
-    {"name":"Third-Party & Supply Chain","parentName":"Operational Risk"},
-    {"name":"Financial Risk","parentName":"Enterprise Risk"},
-    {"name":"Market Risk","parentName":"Financial Risk"},
-    {"name":"Credit Risk","parentName":"Financial Risk"},
-    {"name":"Liquidity Risk","parentName":"Financial Risk"},
-    {"name":"Compliance & Legal Risk","parentName":"Enterprise Risk"},
-    {"name":"Strategic & Reputational Risk","parentName":"Enterprise Risk"}
-  ], "leaves": [
-    {"name":"Ransomware Attack","parentName":"Technology & Cyber","distributionType":"expert","probability":0.15,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[500000,2000000,8000000,25000000]},
-    {"name":"Cloud Provider Outage","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.30,"minLoss":200000,"maxLoss":4000000,"percentiles":null,"quantiles":null},
-    {"name":"Data Breach (PII)","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.10,"minLoss":1000000,"maxLoss":15000000,"percentiles":null,"quantiles":null},
-    {"name":"Insider Threat","parentName":"Technology & Cyber","distributionType":"lognormal","probability":0.05,"minLoss":2000000,"maxLoss":20000000,"percentiles":null,"quantiles":null},
-    {"name":"Key Person Departure","parentName":"Process & People","distributionType":"lognormal","probability":0.20,"minLoss":100000,"maxLoss":800000,"percentiles":null,"quantiles":null},
-    {"name":"Internal Fraud","parentName":"Process & People","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[200000,1000000,4000000,18000000]},
-    {"name":"Process Failure","parentName":"Process & People","distributionType":"lognormal","probability":0.25,"minLoss":50000,"maxLoss":500000,"percentiles":null,"quantiles":null},
-    {"name":"Critical Vendor Failure","parentName":"Third-Party & Supply Chain","distributionType":"lognormal","probability":0.12,"minLoss":500000,"maxLoss":5000000,"percentiles":null,"quantiles":null},
-    {"name":"Outsourcing SLA Breach","parentName":"Third-Party & Supply Chain","distributionType":"lognormal","probability":0.20,"minLoss":100000,"maxLoss":1500000,"percentiles":null,"quantiles":null},
-    {"name":"Concentration Risk","parentName":"Third-Party & Supply Chain","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[1000000,4000000,18000000]},
-    {"name":"Equity Portfolio Drawdown","parentName":"Market Risk","distributionType":"expert","probability":0.35,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[1000000,4000000,12000000,28000000]},
-    {"name":"FX Adverse Move","parentName":"Market Risk","distributionType":"lognormal","probability":0.40,"minLoss":500000,"maxLoss":8000000,"percentiles":null,"quantiles":null},
-    {"name":"Counterparty Default","parentName":"Credit Risk","distributionType":"lognormal","probability":0.05,"minLoss":3000000,"maxLoss":30000000,"percentiles":null,"quantiles":null},
-    {"name":"Credit Downgrade Wave","parentName":"Credit Risk","distributionType":"expert","probability":0.15,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[800000,3000000,20000000]},
-    {"name":"Funding Squeeze","parentName":"Liquidity Risk","distributionType":"lognormal","probability":0.08,"minLoss":2000000,"maxLoss":25000000,"percentiles":null,"quantiles":null},
-    {"name":"Regulatory Action","parentName":"Compliance & Legal Risk","distributionType":"lognormal","probability":0.12,"minLoss":2000000,"maxLoss":50000000,"percentiles":null,"quantiles":null},
-    {"name":"Litigation","parentName":"Compliance & Legal Risk","distributionType":"expert","probability":0.08,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.75,0.95],"quantiles":[300000,2000000,8000000,40000000]},
-    {"name":"GDPR / Data Protection Fine","parentName":"Compliance & Legal Risk","distributionType":"lognormal","probability":0.15,"minLoss":500000,"maxLoss":10000000,"percentiles":null,"quantiles":null},
-    {"name":"ESG Controversy","parentName":"Strategic & Reputational Risk","distributionType":"lognormal","probability":0.10,"minLoss":1000000,"maxLoss":12000000,"percentiles":null,"quantiles":null},
-    {"name":"M&A Integration Failure","parentName":"Strategic & Reputational Risk","distributionType":"lognormal","probability":0.05,"minLoss":5000000,"maxLoss":40000000,"percentiles":null,"quantiles":null},
-    {"name":"Product Recall / Liability","parentName":"Strategic & Reputational Risk","distributionType":"expert","probability":0.06,"minLoss":null,"maxLoss":null,"percentiles":[0.25,0.50,0.95],"quantiles":[1000000,5000000,35000000]}
-  ] }' | jq '{workspaceKey: .workspaceKey, treeId: .tree.id, expiresAt: .expiresAt}'
-```
+| [docs/user/DOCKER-DEVELOPMENT.md](docs/user/DOCKER-DEVELOPMENT.md) | Container configuration, observability stack, and Kubernetes deployment |
+| [docs/dev/AUTHORIZATION-PLAN.md](docs/dev/AUTHORIZATION-PLAN.md) | Layer 1 / Layer 2 authorisation infrastructure |
+| [docs/dev/ARCHITECTURE.md](docs/dev/ARCHITECTURE.md) | System design and component overview |
+| [docs/dev/](docs/dev/) | Architectural Decision Records (ADR-001 through ADR-028) |
 
 ---
 
