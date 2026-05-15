@@ -15,10 +15,27 @@ This document defines the working protocol for implementing the ADR proposals.
 
 ### Decision Protocol
 
-1. Agent presents options or proposed approach
-2. User reviews and either approves, requests changes, or asks questions
-3. Agent implements only after approval
-4. Agent presents results for review before marking phase complete
+**The user owns every decision. The agent owns none.**
+
+When any decision, ambiguity, or trade-off arises — planned or unplanned — the agent must:
+
+1. **Stop.** Do not resolve the ambiguity unilaterally. Do not pick the "obvious" option.
+2. **State the decision point clearly.** One sentence: what needs to be decided and why the agent cannot proceed without input.
+3. **Present every viable option.** For each option:
+   - What it does concretely (not abstractly)
+   - Pros
+   - Cons
+   - Which ADR, constraint, or principle it satisfies or compromises
+4. **State which trade-off dimension only the user can weigh.** The agent must identify what value judgement separates the options (e.g. "strictness vs. API convenience", "consistency vs. implementation cost").
+5. **Ask a single, specific, closed question.** Not "what do you think?" — "Which option: A, B, or C?"
+6. **Wait.** Do not guess. Do not default. Do not implement while waiting.
+
+This protocol applies to:
+- every design decision or 
+- wether and when to deviate from the design or 
+- how to resolve ambiguities regardless of how small or obvious it seems to the agent. 
+
+"Obvious" decisions made silently are protocol violations.
 
 ### Mandatory Review Halt (Hard Gate)
 
@@ -177,26 +194,18 @@ After implementing changes, agent must:
    - [ ] All cross-cutting transforms (pairing, filtering, projection) live as
          named functions on domain companions, not buried in state/view wiring
 
+### ADR Status Interpretation
+
+**All ADRs present in `docs/dev/` are live and must be respected regardless of the
+"Status:" field in their header.** Deletion is the only form of archival — a file that
+exists is in force. Do not use the "Proposed" vs "Accepted" label as a gate for
+compliance review. Treat every existing ADR document as accepted for alignment purposes.
+
 ### Validation Requirements
 
-At each phase, validate implementation against:
-
-1. **Accepted ADRs** (currently implemented):
-   - ADR-001: Validation with Iron types & smart constructors
-   - ADR-002: Logging strategy (ZIO logging + OpenTelemetry)
-   - ADR-003: Provenance & reproducibility (HDR seeds)
-   - ADR-009: Compositional Risk Aggregation via Identity
-   - ADR-010: Error Handling Strategy (hybrid error channels)
-   - ADR-011: Import Conventions (top-level imports, no FQNs)
-
-2. **Proposals being implemented** (validate as they're accepted):
-   - ADR-004a-proposal: Persistence Architecture (SSE)
-   - ADR-004b-proposal: Persistence Architecture (WebSocket)
-   - ADR-005-proposal: Cached Subtree Aggregates
-   - ADR-006-proposal: Real-Time Collaboration
-   - ADR-007-proposal: Scenario Branching
-   - ADR-008-proposal: Error Handling & Resilience
-   - ADR-012: Service Mesh Strategy (Istio Ambient Mode)
+At each phase, validate implementation against **all ADR files present in `docs/dev/`**.
+The file listing is the authoritative set — not any static enumeration in this document.
+When beginning a phase, list the ADR files found on disk and confirm alignment with each.
 
 ### ADR Lifecycle
 
@@ -221,7 +230,10 @@ When a phase completes and its ADR is validated:
 
 - Small, reviewable changes per phase
 - Each phase produces **working, testable code**
-- Tests accompany implementation (not deferred)
+- **Tests are part of the definition of done, always.** A phase is not complete without tests. This applies even when the task description does not mention tests. No exceptions.
+- Tests must follow existing project patterns — test framework, layer construction, assertion style, fixture idioms. Before writing a test, read an existing test in the same module for reference. Deviations from the established pattern require user approval.
+- Test quality is not negotiable. Happy path alone is not sufficient. Every new codec, validation path, domain rule, and error branch requires test coverage.
+- If writing a test reveals a design tension, naming ambiguity, or scope question, apply the Decision Protocol — stop and ask. Do not resolve test design questions unilaterally.
 - Compile and test before presenting for review
 
 ### Dependency Order
@@ -256,9 +268,9 @@ Implement in order of dependencies:
 [Which proposals this implements]
 
 ### ADR Compliance Review (Planning Phase)
-**Reviewed ADRs:** ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011
+**Reviewed ADRs:** all files present in `docs/dev/` at time of review
 **Deviations detected:** None / [List of deviations with decisions required]
-**Alignment notes:** [How this phase aligns with existing ADRs]
+**Alignment notes:** [How this phase aligns with the live ADR set]
 
 ### Validation Checklist
 - [ ] Compliant with ADR-001 (Iron types)
@@ -333,7 +345,7 @@ sbt test
 - [Test file and coverage]
 
 ### ADR Compliance Review (Post-Implementation)
-**Re-validated ADRs:** ADR-001, ADR-002, ADR-003, ADR-009, ADR-010, ADR-011
+**Re-validated ADRs:** all files present in `docs/dev/` at time of review
 **Compliance status:** ✅ All ADRs compliant / ⚠️ [Deviations found - see below]
 **Issues detected:** None / [List of compliance issues requiring user decision]
 
@@ -352,9 +364,53 @@ When agent encounters ambiguity:
 
 1. **Stop implementation** at the unclear point
 2. **Present context** — what was being attempted
-3. **List options** — if applicable
-4. **Ask specific question** — not open-ended
-5. **Wait for answer** — do not assume
+3. **List options with pros and cons** — as specified in Decision Protocol above
+4. **Identify the trade-off dimension** the user must weigh
+5. **Ask a single specific closed question** — not open-ended
+6. **Wait for answer** — do not assume, do not pick a default silently
+
+---
+
+## Blocked / Failing-State Protocol
+
+**This section covers any situation where progress is blocked — including failing tests, compilation errors, unexpected behaviour, or pre-existing failures discovered during a task.**
+
+### Prohibited behaviours — judged by action, not words
+
+The following **actions** are forbidden. They are forbidden whether or not the agent mentions them, explains them, or frames them politely. The words do not matter; the behaviour does.
+
+- Continuing implementation while a test is failing, for any reason. 
+- Continuing implementation while compilation is broken, for any reason.
+- Modifying a test — its assertions, its scope, its name, its enabled state — to make a failure go away, without explicit user approval.
+- Treating a pre-existing failure as out of scope and not reporting it.
+- Treating a failure as "likely unrelated" and not reporting it.
+- Treating a failure as "intermittent" and proceeding.
+- Forming a diagnosis and applying a fix without presenting the diagnosis to the user first.
+- Resuming the original task before the failure is fully resolved and the suite is green.
+
+There is no phrasing, framing, or contextual justification that makes any of the above acceptable. If the agent finds itself about to do any of these things, the correct action is to stop and apply the mandatory protocol below.
+
+### Mandatory protocol when any test fails or progress is blocked
+
+1. **Save execution context.** Summarise in the conversation: what was being implemented, what phase/task was in progress, what the last known-good state was.
+2. **Stop all implementation work.** Do not continue with the current task while a failure is open.
+3. **Investigate the root cause.** Read the failing test, read the code it exercises, form a diagnosis. Do not guess — confirm.
+4. **Report findings.** State:
+   - Which test(s) fail and the exact failure message
+   - Root cause diagnosis (confirmed, not speculative)
+   - Whether the failure pre-dates the current changes or was introduced by them
+   - Candidate fix directions (each with pros/cons per Decision Protocol)
+5. **Wait for explicit user approval** before applying any fix.
+6. **After approval, apply the fix**, re-run the full suite, confirm green.
+7. **Resume from the saved execution context** — continue the original task from exactly where it was paused.
+
+### Pre-existing failures
+
+A pre-existing failure is not a lower-priority failure. Discovering that a test was already red before the current change makes it **more urgent to report**, not less — it means a contract violation has been silently accumulating. Apply the full protocol above.
+
+### Interaction with Decision Triggers §8
+
+The test-weakening prohibition in Decision Triggers §8 is a specific application of this protocol. Both rules apply simultaneously. If a fix to a failing test would weaken an assertion, that is a decision point requiring user approval under both this section and §8.
 
 ---
 

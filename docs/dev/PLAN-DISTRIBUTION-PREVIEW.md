@@ -485,6 +485,36 @@ accordingly.
 `PositiveInt` is already defined at `com.risquanter.register.domain.data.iron.PositiveInt` —
 no new types needed.
 
+**Exact wiring pattern for `terms` through `Distribution.create` (item #3):**
+
+Mirrors the `minV`/`maxV` pattern exactly — individual refinement via `toValidation`, then
+cross-field check inside the existing `"expert"` branch of `crossV`:
+
+```scala
+// Independent field validation (parallel with distTypeV, probV, minV, maxV)
+val termsV: Validation[ValidationError, Option[PositiveInt]] = terms match
+  case Some(v) => toValidation(ValidationUtil.refinePositiveInt(v, s"$fieldPrefix.terms")).map(Some(_))
+  case None    => Validation.succeed(None)
+
+// Inside the existing "expert" branch of crossV, after the existing length-mismatch check:
+// terms cross-field: terms must not exceed the number of anchor points
+termsV match
+  case Validation.Success(_, Some(t)) if t.toInt > pct.length =>
+    Validation.fail(ValidationError(s"$fieldPrefix.terms", ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.termsOutOfRange))
+  case _ => Validation.succeed(())
+
+// Validation.validateWith gains termsV as the fifth argument:
+Validation.validateWith(distTypeV, probV, minV, maxV, termsV, crossV) { (dt, prob, min, max, t, _) =>
+  Distribution(dt, prob, min, max, percentiles, quantiles, t)
+}
+```
+
+For `RiskLeaf.create` (item #4): `terms` is re-validated independently with
+`refinePositiveInt` and stored as `Option[PositiveInt]`. No cross-field check in
+`RiskLeaf.create` — that already happened in `Distribution.create`. This is the same
+pattern used for `minLoss`/`maxLoss`: individual refinement, no business rule
+re-checking at the leaf level.
+
 **`termsErrorRaw` reactive logic (item #13):**
 
 ```scala
