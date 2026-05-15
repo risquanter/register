@@ -284,7 +284,8 @@ class RiskTreeServiceLive private (
             quantiles = dist.quantiles,
             minLoss = dist.minLoss.map(_.toLong),
             maxLoss = dist.maxLoss.map(_.toLong),
-            parentId = parentIdFor(node)
+            parentId = parentIdFor(node),
+            terms = dist.terms.map(_.toInt)
           )
 
         case RiskTreeRequests.NodeKind.Portfolio =>

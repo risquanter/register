@@ -240,7 +240,7 @@ object Simulator {
               ZIO.fail(ValidationFailed(percentileErrors.toList))
             } else {
               val percentiles = percentileResults.collect { case Right(p) => p }
-              val terms = ps.length.asInstanceOf[PositiveInt]
+              val terms: PositiveInt = leaf.terms.getOrElse(math.min(ps.length, 4).refineUnsafe)
               
               MetalogDistribution.fromPercentiles(
                 percentiles = percentiles,
@@ -252,7 +252,7 @@ object Simulator {
                   val params = ExpertDistributionParams(
                     percentiles = ps,
                     quantiles = qs,
-                    terms = ps.length
+                    terms = terms
                   )
                   ZIO.succeed((metalog, params))
                 case Left(validationError) => ZIO.fail(ValidationFailed(List(ValidationError(

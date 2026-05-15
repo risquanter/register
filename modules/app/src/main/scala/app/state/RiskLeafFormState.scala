@@ -8,7 +8,7 @@ import app.state.LeafDistributionDraft
 
 /** Type-safe field identifiers for the risk leaf form. */
 enum RiskLeafField:
-  case Name, Probability, Percentiles, Quantiles, MinLoss, MaxLoss
+  case Name, Probability, Percentiles, Quantiles, MinLoss, MaxLoss, Terms
 
 /**
  * Reactive form state for creating a RiskLeaf.
@@ -46,6 +46,9 @@ class RiskLeafFormState extends FormState[RiskLeafField]:
   val minLossVar: Var[String] = Var("")
   val maxLossVar: Var[String] = Var("")
 
+  // Metalog terms (expert mode only; blank = server applies min(n, 4) default)
+  val termsVar: Var[String] = Var("")
+
   /** Reset all form fields and error display to initial state. */
   def resetFields(): Unit =
     nameVar.set("")
@@ -55,6 +58,7 @@ class RiskLeafFormState extends FormState[RiskLeafField]:
     quantilesVar.set("")
     minLossVar.set("")
     maxLossVar.set("")
+    termsVar.set("")
     resetTouched()
 
   // ============================================================
@@ -178,6 +182,20 @@ class RiskLeafFormState extends FormState[RiskLeafField]:
       case _ => None
     }
   
+  /** Expert mode: terms validation — blank means use server default; otherwise integer in [2, n] */
+  private val termsErrorRaw: Signal[Option[String]] =
+    distributionModeVar.signal.combineWith(termsVar.signal, percentilesVar.signal).map {
+      case (DistributionMode.Expert, tStr, pStr) =>
+        if tStr.isBlank then None
+        else tStr.toIntOption match
+          case None    => Some("Terms must be a whole number")
+          case Some(t) =>
+            val n = pStr.split(",").count(_.trim.nonEmpty)
+            if t < 2 || t > n then Some(ValidationMessages.termsOutOfRange)
+            else None
+      case _ => None
+    }
+
   /** Lognormal mode: cross-field validation (minLoss < maxLoss) */
   private val lognormalCrossFieldErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal
@@ -218,6 +236,7 @@ class RiskLeafFormState extends FormState[RiskLeafField]:
   val maxLossError: Signal[Option[String]] = withSubmitErrors(MaxLoss,
     maxLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
   )
+  val termsError: Signal[Option[String]] = withSubmitErrors(Terms, termsErrorRaw)
 
   // ============================================================
   // FormState Implementation
@@ -233,6 +252,7 @@ class RiskLeafFormState extends FormState[RiskLeafField]:
     percentilesErrorRaw,
     quantilesErrorRaw,
     expertCrossFieldErrorRaw,
+    termsErrorRaw,
     minLossErrorRaw,
     maxLossErrorRaw,
     lognormalCrossFieldErrorRaw
@@ -275,7 +295,8 @@ class RiskLeafFormState extends FormState[RiskLeafField]:
           minLoss = minL,
           maxLoss = maxL,
           percentiles = pcts,
-          quantiles = quants
+          quantiles = quants,
+          terms = if termsVar.now().isBlank then None else termsVar.now().toIntOption
         )
     }
 

@@ -16,7 +16,8 @@ final case class LeafDistributionDraft(
   minLoss: Option[Long],
   maxLoss: Option[Long],
   percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]]
+  quantiles: Option[Array[Double]],
+  terms: Option[Int] = None
 )
 final case class LeafDraft(name: String, parent: Option[String], distribution: LeafDistributionDraft)
 
@@ -153,7 +154,8 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       maxLoss = dist.maxLoss,
       percentiles = dist.percentiles,
       quantiles = dist.quantiles,
-      fieldPrefix = "leaf"
+      fieldPrefix = "leaf",
+      terms = dist.terms
     )
 
   private def toPortfolioRequest(draft: PortfolioDraft): Validation[ValidationError, RiskPortfolioDefinitionRequest] =
@@ -169,7 +171,8 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
         minLoss = draft.distribution.minLoss,
         maxLoss = draft.distribution.maxLoss,
         percentiles = draft.distribution.percentiles,
-        quantiles = draft.distribution.quantiles
+        quantiles = draft.distribution.quantiles,
+        terms = draft.distribution.terms
       )
     }
 

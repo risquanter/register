@@ -1,8 +1,9 @@
 package com.risquanter.register.domain.data
 
 import zio.prelude.Validation
-import com.risquanter.register.domain.data.iron.{DistributionType, Probability, NonNegativeLong, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{DistributionType, Probability, NonNegativeLong, PositiveInt, ValidationUtil}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
+import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
 /**
@@ -15,7 +16,8 @@ final case class Distribution(
   minLoss: Option[NonNegativeLong],
   maxLoss: Option[NonNegativeLong],
   percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]]
+  quantiles: Option[Array[Double]],
+  terms: Option[PositiveInt]
 )
 
 object Distribution {
@@ -26,7 +28,8 @@ object Distribution {
     maxLoss: Option[Long],
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
-    fieldPrefix: String = "request"
+    fieldPrefix: String = "request",
+    terms: Option[Int] = None
   ): Validation[ValidationError, Distribution] = {
     val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
     val probV = toValidation(ValidationUtil.refineProbability(probability, s"$fieldPrefix.probability"))
@@ -38,11 +41,20 @@ object Distribution {
       case Some(v) => toValidation(ValidationUtil.refineNonNegativeLong(v, s"$fieldPrefix.maxLoss")).map(Some(_))
       case None    => Validation.succeed(None)
     }
+    val termsV: Validation[ValidationError, Option[PositiveInt]] = terms match {
+      case Some(v) => toValidation(ValidationUtil.refinePositiveInt(v, s"$fieldPrefix.terms")).map(Some(_))
+      case None    => Validation.succeed(None)
+    }
 
     val crossV: Validation[ValidationError, Unit] = distTypeV.map(_.toString).flatMap {
       case "expert" =>
         (percentiles, quantiles) match {
-          case (Some(pct), Some(q)) if pct.nonEmpty && q.nonEmpty && pct.length == q.length => Validation.succeed(())
+          case (Some(pct), Some(q)) if pct.nonEmpty && q.nonEmpty && pct.length == q.length =>
+            termsV match {
+              case Validation.Success(_, Some(t)) if t.toInt > pct.length =>
+                Validation.fail(ValidationError(s"$fieldPrefix.terms", ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.termsOutOfRange))
+              case _ => Validation.succeed(())
+            }
           case (Some(_), Some(q)) if q.isEmpty => Validation.fail(ValidationError(s"$fieldPrefix.quantiles", ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires quantiles"))
           case (Some(pct), Some(q)) if pct.length != q.length =>
             Validation.fail(ValidationError(s"$fieldPrefix.distributionType", ValidationErrorCode.INVALID_COMBINATION, s"percentiles and quantiles length mismatch (${pct.length} vs ${q.length})"))
@@ -60,8 +72,8 @@ object Distribution {
       case other => Validation.fail(ValidationError(s"$fieldPrefix.distributionType", ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE, s"Unsupported distribution type: $other"))
     }
 
-    Validation.validateWith(distTypeV, probV, minV, maxV, crossV) { (dt, prob, min, max, _) =>
-      Distribution(dt, prob, min, max, percentiles, quantiles)
+    Validation.validateWith(distTypeV, probV, minV, maxV, termsV, crossV) { (dt, prob, min, max, t, _) =>
+      Distribution(dt, prob, min, max, percentiles, quantiles, t)
     }
   }
 }

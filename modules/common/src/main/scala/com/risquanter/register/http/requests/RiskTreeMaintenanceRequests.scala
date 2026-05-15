@@ -13,7 +13,8 @@ final case class DistributionUpdateRequest(
   minLoss: Option[Long],
   maxLoss: Option[Long],
   percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]]
+  quantiles: Option[Array[Double]],
+  terms: Option[Int] = None
 )
 object DistributionUpdateRequest:
   given JsonCodec[DistributionUpdateRequest] = DeriveJsonCodec.gen
@@ -26,7 +27,8 @@ object DistributionUpdateRequest:
       maxLoss = req.maxLoss,
       percentiles = req.percentiles,
       quantiles = req.quantiles,
-      fieldPrefix = "request"
+      fieldPrefix = "request",
+      terms = req.terms
     )
 
 final case class NodeRenameRequest(

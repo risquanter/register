@@ -88,7 +88,7 @@ object RiskTreeRequests {
       Validation.validateWith(
         refineNameField(l.name, s"$base.name"),
         refineParentName(l.parentName, s"$base.parentName"),
-        Distribution.create(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base)
+        Distribution.create(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base, terms = l.terms)
       )((name, parent, dist) => (name, parent, dist))
     }
 
@@ -115,7 +115,7 @@ object RiskTreeRequests {
         toValidation(ValidationUtil.refineId(l.id, s"$base.id")),
         refineNameField(l.name, s"$base.name"),
         refineParentName(l.parentName, s"$base.parentName"),
-        Distribution.create(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base)
+        Distribution.create(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base, terms = l.terms)
       )((id, name, parent, dist) => (id, name, parent, dist))
     }
 

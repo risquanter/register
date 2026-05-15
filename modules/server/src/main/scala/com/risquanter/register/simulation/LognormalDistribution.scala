@@ -43,6 +43,13 @@ case class LognormalDistribution(meanLog: Double, stdLog: Double) extends Distri
     * @return The value x such that P(X ≤ x) = p
     */
   def quantile(p: Double): Double = underlying.inverseCumulativeProbability(p)
+
+  /** Compute the probability density at a given loss value.
+    *
+    * @param x Loss value (must be positive for a lognormal distribution)
+    * @return Probability density f(x)
+    */
+  def density(x: Double): Double = underlying.density(x)
 }
 
 object LognormalDistribution {

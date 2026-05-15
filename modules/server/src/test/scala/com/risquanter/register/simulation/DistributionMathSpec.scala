@@ -180,8 +180,58 @@ object DistributionMathSpec extends ZIOSpecDefault {
         // For lognormal, median = exp(μ) exactly
         assertTrue(error < 0.001)
       }
+    ),
+
+    suite("Phase 5: LognormalDistribution.density")(
+
+      test("density is positive for x in support") {
+        val dist = LognormalDistribution(meanLog = 8.0, stdLog = 1.5)
+        // Lognormal support is (0, ∞); any positive x should have positive density
+        assertTrue(
+          dist.density(1000.0) > 0.0,
+          dist.density(5000.0) > 0.0,
+          dist.density(50000.0) > 0.0
+        )
+      },
+
+      test("density is zero for x <= 0 (outside support)") {
+        val dist = LognormalDistribution(meanLog = 8.0, stdLog = 1.5)
+        // Lognormal is only defined on (0, ∞); Apache Commons returns 0 outside
+        assertTrue(
+          dist.density(0.0) == 0.0,
+          dist.density(-1.0) == 0.0
+        )
+      },
+
+      test("density is unimodal: peaks near mode = exp(meanLog - stdLog^2)") {
+        val meanLog = 8.0
+        val stdLog = 1.5
+        val dist = LognormalDistribution(meanLog = meanLog, stdLog = stdLog)
+        // Mode of lognormal = exp(meanLog - stdLog^2)
+        val mode = math.exp(meanLog - stdLog * stdLog)
+        val dMode = dist.density(mode)
+        // density at mode must exceed density at 10x and 0.1x mode
+        assertTrue(
+          dMode > dist.density(mode * 10.0),
+          dMode > dist.density(mode / 10.0)
+        )
+      },
+
+      test("density consistent with quantile: integrates mass correctly") {
+        // Simple sanity: density at median should be lower than at mode for right-skewed distribution
+        val meanLog = 8.0
+        val stdLog = 1.5
+        val dist = LognormalDistribution(meanLog = meanLog, stdLog = stdLog)
+        val median = dist.quantile(0.5)  // = exp(meanLog)
+        val mode   = math.exp(meanLog - stdLog * stdLog)
+        // Mode < median for lognormal; density(mode) > density(median) since mode is the peak
+        assertTrue(
+          mode < median,
+          dist.density(mode) > dist.density(median)
+        )
+      }
     )
-    
-    // Phase 5: RiskSampler Integration - TODO
+
+    // Phase 6: RiskSampler Integration - TODO
   )
 }

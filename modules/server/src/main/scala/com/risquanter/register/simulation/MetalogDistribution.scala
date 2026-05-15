@@ -55,7 +55,7 @@ object MetalogDistribution {
    * 
    * @param percentiles Probabilities in (0, 1) (exclusive), must be sorted ascending
    * @param quantiles Corresponding quantile values
-   * @param terms Number of terms in the Metalog expansion (default 9, max = percentiles.length)
+   * @param terms Number of terms in the Metalog expansion (default 4; callers should pass min(n, 4) explicitly)
    * @param lower Optional lower bound for bounded distribution
    * @param upper Optional upper bound for bounded distribution
    * @return Either validation error or fitted Metalog distribution
@@ -74,7 +74,7 @@ object MetalogDistribution {
   def fromPercentiles(
     percentiles: Array[Probability],
     quantiles: Array[Double],
-    terms: PositiveInt = 9.refineUnsafe,
+    terms: PositiveInt,
     lower: Option[Double] = None,
     upper: Option[Double] = None
   ): Either[ValidationError, MetalogDistribution] = {
@@ -119,7 +119,7 @@ object MetalogDistribution {
   def fromPercentilesUnsafe(
     percentiles: Array[Double],
     quantiles: Array[Double],
-    terms: Int = 9,
+    terms: Int = 4,
     lower: Option[Double] = None,
     upper: Option[Double] = None
   ): Either[ValidationError, MetalogDistribution] = {
@@ -132,7 +132,7 @@ object MetalogDistribution {
     } else {
       // Cast to refined array (unsafe but validated above)
       val refinedPercentiles: Array[Probability] = percentiles.asInstanceOf[Array[Probability]]
-      val refinedTerms: PositiveInt = terms.asInstanceOf[PositiveInt]
+      val refinedTerms: PositiveInt = terms.refineUnsafe
       fromPercentiles(refinedPercentiles, quantiles, refinedTerms, lower, upper)
     }
   }

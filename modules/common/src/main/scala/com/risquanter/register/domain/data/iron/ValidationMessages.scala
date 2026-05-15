@@ -99,3 +99,17 @@ object ValidationMessages:
 
   def expertLengthMismatch(pLen: Int, qLen: Int): String =
     s"Percentiles and quantiles must have same length ($pLen vs $qLen)"
+
+  // ══════════════════════════════════════════════════════════════════
+  // Expert mode — Metalog terms
+  // ══════════════════════════════════════════════════════════════════
+  val termsOutOfRange: String =
+    "Terms must be between 2 and the number of anchor points"
+
+  // ══════════════════════════════════════════════════════════════════
+  // Distribution fit failure
+  // ══════════════════════════════════════════════════════════════════
+  val distributionFitFailed: String =
+    "The inputs could not be fitted to a valid distribution. " +
+    "Try reducing Terms, check that quantile values are strictly increasing, " +
+    "or remove conflicting estimates."

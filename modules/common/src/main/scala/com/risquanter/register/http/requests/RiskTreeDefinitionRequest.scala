@@ -49,7 +49,8 @@ final case class RiskLeafDefinitionRequest(
   minLoss: Option[Long],
   maxLoss: Option[Long],
   percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]]
+  quantiles: Option[Array[Double]],
+  terms: Option[Int] = None
 )
 object RiskLeafDefinitionRequest:
   given JsonCodec[RiskLeafDefinitionRequest] = DeriveJsonCodec.gen

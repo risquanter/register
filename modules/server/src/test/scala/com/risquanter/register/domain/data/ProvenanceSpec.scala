@@ -47,8 +47,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           globalSeed4 = 0L,
           distributionType = "lognormal",
           distributionParams = LognormalDistributionParams(
-            minLoss = 1000000L,
-            maxLoss = 50000000L,
+            minLoss = 1000000L.refineUnsafe,
+            maxLoss = 50000000L.refineUnsafe,
             confidenceInterval = 0.90
           ),
           timestamp = Instant.parse("2026-01-04T12:34:56Z"),
@@ -68,7 +68,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val params = ExpertDistributionParams(
           percentiles = Array(0.05, 0.5, 0.95),
           quantiles = Array(1000.0, 5000.0, 25000.0),
-          terms = 3
+          terms = 3.refineUnsafe
         )
         
         val json = params.toJson
@@ -79,11 +79,21 @@ object ProvenanceSpec extends ZIOSpecDefault {
         assertTrue(decoded.toOption.get.quantiles.length == 3) &&
         assertTrue(decoded.toOption.get.terms == 3)
       },
+
+      test("ExpertDistributionParams rejects terms = 0") {
+        val json = """{"percentiles":[0.05,0.5,0.95],"quantiles":[1000.0,5000.0,25000.0],"terms":0}"""
+        assertTrue(json.fromJson[ExpertDistributionParams].isLeft)
+      },
+
+      test("ExpertDistributionParams rejects terms < 0") {
+        val json = """{"percentiles":[0.05,0.5,0.95],"quantiles":[1000.0,5000.0,25000.0],"terms":-1}"""
+        assertTrue(json.fromJson[ExpertDistributionParams].isLeft)
+      },
       
       test("LognormalDistributionParams serializes correctly") {
         val params = LognormalDistributionParams(
-          minLoss = 1000000L,
-          maxLoss = 50000000L,
+          minLoss = 1000000L.refineUnsafe,
+          maxLoss = 50000000L.refineUnsafe,
           confidenceInterval = 0.90
         )
         
@@ -95,17 +105,27 @@ object ProvenanceSpec extends ZIOSpecDefault {
         assertTrue(decoded.toOption.get.maxLoss == 50000000L) &&
         assertTrue(decoded.toOption.get.confidenceInterval == 0.90)
       },
+
+      test("LognormalDistributionParams rejects negative minLoss") {
+        val json = """{"minLoss":-1,"maxLoss":50000000,"confidenceInterval":0.9}"""
+        assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
+      },
+
+      test("LognormalDistributionParams rejects negative maxLoss") {
+        val json = """{"minLoss":1000000,"maxLoss":-1,"confidenceInterval":0.9}"""
+        assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
+      },
       
       test("DistributionParams sealed trait handles both subtypes") {
         val expert: DistributionParams = ExpertDistributionParams(
           percentiles = Array(0.5),
           quantiles = Array(1000.0),
-          terms = 1
+          terms = 1.refineUnsafe
         )
         
         val lognormal: DistributionParams = LognormalDistributionParams(
-          minLoss = 1000L,
-          maxLoss = 10000L,
+          minLoss = 1000L.refineUnsafe,
+          maxLoss = 10000L.refineUnsafe,
           confidenceInterval = 0.90
         )
         

@@ -4,7 +4,8 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution}
 import com.risquanter.register.domain.data.iron.Probability
-import com.risquanter.register.testutil.TestHelpers.nodeId
+import com.risquanter.register.domain.data.{RiskLeaf, ExpertDistributionParams}
+import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -331,6 +332,102 @@ object SimulatorSpec extends ZIOSpecDefault {
             result.outcomes.size <= 1
           )
         }
+      }
+    ),
+
+    suite("createSamplerFromLeaf - terms resolution")(
+
+      test("uses explicit terms from leaf (terms = Some(3))") {
+        val leaf = RiskLeaf.create(
+          id = idStr("terms-explicit"),
+          name = "Terms Explicit",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = Some(3)
+        ).toOption.get
+
+        for {
+          (_, prov) <- Simulator.createSamplerFromLeaf(leaf)
+        } yield assertTrue(
+          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 3
+        )
+      },
+
+      test("uses explicit terms = 2 (minimum valid)") {
+        val leaf = RiskLeaf.create(
+          id = idStr("terms-two"),
+          name = "Terms Two",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = Some(2)
+        ).toOption.get
+
+        for {
+          (_, prov) <- Simulator.createSamplerFromLeaf(leaf)
+        } yield assertTrue(
+          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 2
+        )
+      },
+
+      test("defaults to min(n=3, 4) = 3 when terms is None") {
+        // 3 anchor points, no explicit terms → Simulator uses min(3, 4) = 3
+        val leaf = RiskLeaf.create(
+          id = idStr("terms-default-3"),
+          name = "Terms Default 3",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = None
+        ).toOption.get
+
+        for {
+          (_, prov) <- Simulator.createSamplerFromLeaf(leaf)
+        } yield assertTrue(
+          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 3
+        )
+      },
+
+      test("defaults to min(n=5, 4) = 4 when terms is None and n = 5") {
+        // 5 anchor points, no explicit terms → Simulator uses min(5, 4) = 4
+        val leaf = RiskLeaf.create(
+          id = idStr("terms-default-4"),
+          name = "Terms Default 4",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.05, 0.25, 0.5, 0.75, 0.95)),
+          quantiles = Some(Array(50.0, 200.0, 500.0, 1500.0, 5000.0)),
+          terms = None
+        ).toOption.get
+
+        for {
+          (_, prov) <- Simulator.createSamplerFromLeaf(leaf)
+        } yield assertTrue(
+          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 4
+        )
+      },
+
+      test("defaults to min(n=9, 4) = 4 when terms is None and n = 9") {
+        // 9 anchor points, no explicit terms → Simulator uses min(9, 4) = 4
+        val leaf = RiskLeaf.create(
+          id = idStr("terms-default-9pts"),
+          name = "Terms Default 9pts",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99)),
+          quantiles = Some(Array(10.0, 50.0, 100.0, 300.0, 700.0, 2000.0, 5000.0, 10000.0, 30000.0)),
+          terms = None
+        ).toOption.get
+
+        for {
+          (_, prov) <- Simulator.createSamplerFromLeaf(leaf)
+        } yield assertTrue(
+          prov.distributionParams.asInstanceOf[ExpertDistributionParams].terms == 4
+        )
       }
     )
   )

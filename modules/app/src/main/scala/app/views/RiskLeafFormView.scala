@@ -137,6 +137,16 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched(RiskLeafField.Quantiles),
         placeholderText = "e.g., 50, 200, 1000 ($50M, $200M, $1B)",
         inputModeAttr = "decimal"
+      ),
+
+      textInput(
+        labelText = "Terms (optional)",
+        valueVar = state.termsVar,
+        errorSignal = state.termsError,
+        filter = state.lossFilter,
+        onBlurCallback = () => state.markTouched(RiskLeafField.Terms),
+        placeholderText = "e.g. 3",
+        inputModeAttr = "numeric"
       )
     )
   

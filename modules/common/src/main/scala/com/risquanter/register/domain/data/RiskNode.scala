@@ -2,7 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
 import sttp.tapir.Schema
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, NonNegativeLong, NodeId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, NonNegativeLong, NodeId, PositiveInt}
+import com.risquanter.register.domain.data.iron.ValidationMessages
 
 /** Recursive ADT representing a risk hierarchy tree.
   * 
@@ -79,7 +80,8 @@ final case class RiskLeaf private (
   percentiles: Option[Array[Double]],
   quantiles: Option[Array[Double]],
   minLoss: Option[NonNegativeLong],
-  maxLoss: Option[NonNegativeLong]
+  maxLoss: Option[NonNegativeLong],
+  terms: Option[PositiveInt]
 ) extends RiskNode {
   // Defense in depth: invariant check as safety net
   // Should never trigger if custom decoder works correctly
@@ -117,10 +119,11 @@ object RiskLeaf {
     quantiles: Option[Array[Double]] = None,
     minLoss: Option[Long] = None,
     maxLoss: Option[Long] = None,
-    parentId: Option[NodeId] = None
+    parentId: Option[NodeId] = None,
+    terms: Option[Int] = None
   ): RiskLeaf = {
     // Unsafe: Assumes valid input (for backward compatibility only)
-    create(id, name, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, parentId = parentId)
+    create(id, name, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, parentId = parentId, terms = terms)
       .toEither
       .fold(
         errors => throw new IllegalArgumentException(s"Invalid RiskLeaf: $errors"),
@@ -151,7 +154,8 @@ object RiskLeaf {
     minLoss: Option[Long] = None,
     maxLoss: Option[Long] = None,
     parentId: Option[NodeId] = None,
-    fieldPrefix: String = "root"
+    fieldPrefix: String = "root",
+    terms: Option[Int] = None
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskLeaf] = {
     
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
@@ -162,20 +166,35 @@ object RiskLeaf {
     val nameV = toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
     val probV = toValidation(ValidationUtil.refineProbability(probability, s"$fieldPrefix.probability"))
     val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
+    val termsV: Validation[ValidationError, Option[PositiveInt]] = terms match {
+      case Some(v) => toValidation(ValidationUtil.refinePositiveInt(v, s"$fieldPrefix.terms")).map(Some(_))
+      case None    => Validation.succeed(None)
+    }
     
     // Step 2: Apply cross-field business rules based on distribution type
     // Use flatMap for dependent validation (requires distTypeV to succeed first)
     val crossFieldV = distTypeV.flatMap { dt =>
       dt.toString match {
-        case "expert" => validateExpertMode(percentiles, quantiles, fieldPrefix)
+        case "expert" =>
+          validateExpertMode(percentiles, quantiles, fieldPrefix).flatMap { result =>
+            termsV match {
+              case Validation.Success(_, Some(t)) if percentiles.exists(pct => t.toInt > pct.length) =>
+                Validation.fail(ValidationError(
+                  field = s"$fieldPrefix.terms",
+                  code = ValidationErrorCode.INVALID_COMBINATION,
+                  message = ValidationMessages.termsOutOfRange
+                ))
+              case _ => Validation.succeed(result)
+            }
+          }
         case "lognormal" => validateLognormalMode(minLoss, maxLoss, fieldPrefix)
         case unknown => failOnUnknownDistributionType(unknown, fieldPrefix)
       }
     }
     
     // Step 3: Combine all validations (parallel accumulation where possible)
-    Validation.validateWith(idV, nameV, probV, distTypeV, crossFieldV) {
-      case (validId, validName, validProb, validDistType, (validMinLoss, validMaxLoss)) =>
+    Validation.validateWith(idV, nameV, probV, distTypeV, termsV, crossFieldV) {
+      case (validId, validName, validProb, validDistType, validTerms, (validMinLoss, validMaxLoss)) =>
         new RiskLeaf(
           safeId = validId,
           safeName = validName,
@@ -185,7 +204,8 @@ object RiskLeaf {
           percentiles = percentiles,
           quantiles = quantiles,
           minLoss = validMinLoss,
-          maxLoss = validMaxLoss
+          maxLoss = validMaxLoss,
+          terms = validTerms
         )
     }
   }
@@ -321,7 +341,8 @@ object RiskLeaf {
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
     minLoss: Option[Long],
-    maxLoss: Option[Long]
+    maxLoss: Option[Long],
+    terms: Option[Int]
   )
   private object RiskLeafRaw {
     given rawCodec: JsonCodec[RiskLeafRaw] = DeriveJsonCodec.gen[RiskLeafRaw]
@@ -339,7 +360,8 @@ object RiskLeaf {
         raw.id, raw.name, raw.distributionType, raw.probability,
         raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss,
         parentId = validParentId,
-        fieldPrefix = s"riskLeaf[id=${raw.id}]"
+        fieldPrefix = s"riskLeaf[id=${raw.id}]",
+        terms = raw.terms
       ).toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
     }
   }
@@ -355,7 +377,8 @@ object RiskLeaf {
       percentiles = leaf.percentiles,
       quantiles = leaf.quantiles,
       minLoss = leaf.minLoss.map(identity),
-      maxLoss = leaf.maxLoss.map(identity)
+      maxLoss = leaf.maxLoss.map(identity),
+      terms = leaf.terms.map(_.toInt)
     )
   }
   

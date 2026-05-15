@@ -2,7 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import java.time.Instant
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt, NonNegativeLong, ValidationUtil}
+import io.github.iltotore.iron.*
 
 /**
  * Per-node provenance metadata for reproducible Monte Carlo simulations.
@@ -54,7 +55,7 @@ case class NodeProvenance(
  * 1. **Expert opinion (Metalog)**: Quantile-parameterized distribution
  *    - percentiles: Array of probability values [0.0, 1.0]
  *    - quantiles: Corresponding loss amounts
- *    - terms: Number of Metalog terms (3-16, default 9)
+ *    - terms: Number of Metalog terms (2–n, default min(n, 4))
  * 
  * 2. **Lognormal (BCG)**: 90% confidence interval parameterization
  *    - minLoss: Lower bound (10th percentile)
@@ -68,12 +69,12 @@ sealed trait DistributionParams
  * 
  * @param percentiles Probability levels (e.g., [0.05, 0.5, 0.95])
  * @param quantiles Loss amounts at those percentiles (e.g., [1M, 5M, 25M])
- * @param terms Number of Metalog terms (3-16, higher = more flexible)
+ * @param terms Number of Metalog terms (2–n, default min(n, 4))
  */
 case class ExpertDistributionParams(
   percentiles: Array[Double],
   quantiles: Array[Double],
-  terms: Int
+  terms: PositiveInt
 ) extends DistributionParams
 
 /**
@@ -84,17 +85,41 @@ case class ExpertDistributionParams(
  * @param confidenceInterval Confidence level (always 0.90 for BCG)
  */
 case class LognormalDistributionParams(
-  minLoss: Long,
-  maxLoss: Long,
+  minLoss: NonNegativeLong,
+  maxLoss: NonNegativeLong,
   confidenceInterval: Double
 ) extends DistributionParams
 
 object ExpertDistributionParams {
-  given codec: JsonCodec[ExpertDistributionParams] = DeriveJsonCodec.gen[ExpertDistributionParams]
+  private case class Raw(percentiles: Array[Double], quantiles: Array[Double], terms: Int)
+  private object Raw { given rawCodec: JsonCodec[Raw] = DeriveJsonCodec.gen[Raw] }
+
+  given codec: JsonCodec[ExpertDistributionParams] = JsonCodec(
+    JsonEncoder[Raw].contramap(p => Raw(p.percentiles, p.quantiles, p.terms.toInt)),
+    Raw.rawCodec.decoder.mapOrFail { raw =>
+      ValidationUtil.refinePositiveInt(raw.terms, "terms")
+        .map(t => ExpertDistributionParams(raw.percentiles, raw.quantiles, t))
+        .left.map(_.map(_.message).mkString("; "))
+    }
+  )
 }
 
 object LognormalDistributionParams {
-  given codec: JsonCodec[LognormalDistributionParams] = DeriveJsonCodec.gen[LognormalDistributionParams]
+  private case class Raw(minLoss: Long, maxLoss: Long, confidenceInterval: Double)
+  private object Raw { given rawCodec: JsonCodec[Raw] = DeriveJsonCodec.gen[Raw] }
+
+  given codec: JsonCodec[LognormalDistributionParams] = JsonCodec(
+    JsonEncoder[Raw].contramap(p => Raw(p.minLoss, p.maxLoss, p.confidenceInterval)),
+    Raw.rawCodec.decoder.mapOrFail { raw =>
+      (ValidationUtil.refineNonNegativeLong(raw.minLoss, "minLoss"),
+       ValidationUtil.refineNonNegativeLong(raw.maxLoss, "maxLoss")) match {
+        case (Right(min), Right(max)) => Right(LognormalDistributionParams(min, max, raw.confidenceInterval))
+        case (Left(e1), Left(e2))     => Left((e1 ++ e2).map(_.message).mkString("; "))
+        case (Left(e), _)             => Left(e.map(_.message).mkString("; "))
+        case (_, Left(e))             => Left(e.map(_.message).mkString("; "))
+      }
+    }
+  )
 }
 
 object DistributionParams {

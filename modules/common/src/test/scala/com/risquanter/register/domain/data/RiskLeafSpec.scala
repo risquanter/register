@@ -586,6 +586,114 @@ object RiskLeafSpec extends ZIOSpecDefault {
           errorMsg.contains("children[0].id")
         )
       }
+    ),
+    suite("Terms Validation (Expert Mode)")(
+      test("accepts explicit terms equal to anchor count") {
+        val result = RiskLeaf.create(
+          id = idStr("terms-exact"),
+          name = "Terms Exact",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = Some(3)
+        )
+        assertTrue(result.isSuccess)
+      },
+      test("accepts terms less than anchor count") {
+        val result = RiskLeaf.create(
+          id = idStr("terms-less"),
+          name = "Terms Less",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = Some(2)
+        )
+        assertTrue(result.isSuccess)
+      },
+      test("accepts terms = None (server chooses min(n, 4) default)") {
+        val result = RiskLeaf.create(
+          id = idStr("terms-none"),
+          name = "Terms None",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = None
+        )
+        assertTrue(result.isSuccess)
+      },
+      test("preserves terms value on created RiskLeaf") {
+        val result = RiskLeaf.create(
+          id = idStr("terms-preserved"),
+          name = "Terms Preserved",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = Some(3)
+        )
+        assertTrue(
+          result.isSuccess,
+          result.toOption.get.terms.exists(_.toInt == 3)
+        )
+      },
+      test("terms = None produces None on RiskLeaf") {
+        val result = RiskLeaf.create(
+          id = idStr("terms-none-field"),
+          name = "Terms None Field",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0))
+        )
+        assertTrue(
+          result.isSuccess,
+          result.toOption.get.terms.isEmpty
+        )
+      },
+      test("rejects terms exceeding anchor count") {
+        // 3 anchor points, but terms = 5 — exceeds n
+        val result = RiskLeaf.create(
+          id = idStr("terms-too-high"),
+          name = "Terms Too High",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = Some(5)
+        )
+        assertTrue(result.isFailure)
+      },
+      test("rejects terms = 0 (not PositiveInt)") {
+        val result = RiskLeaf.create(
+          id = idStr("terms-zero"),
+          name = "Terms Zero",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = Some(0)
+        )
+        assertTrue(result.isFailure)
+      },
+      test("terms error includes field path") {
+        val result = RiskLeaf.create(
+          id = idStr("terms-field-path"),
+          name = "Terms Field Path",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          terms = Some(5)
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("terms")
+        )
+      }
     )
   )
 }
