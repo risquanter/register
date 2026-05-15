@@ -57,7 +57,65 @@ should suppress when the other is active, is an open design question.
 
 ---
 
-## 3. PostgreSQL workspace TTL/idle interval handling uses a DB-specific text round-trip
+## 3. [DEFERRED] Reference-class anchoring for distribution preview
+
+**Description:** When a user is fitting a distribution to a risk leaf, show a
+reference band drawn from anonymised distributions of "similar" leaves across
+other workspaces (or a curated reference library). This grounds the user's
+expert estimate in empirical base rates, directly countering planning-fallacy
+and inside-view bias (Kahneman / Flyvbjerg reference-class forecasting).
+
+**Design sketch:**
+- Requires a reference-distribution store (aggregated, anonymised percentile
+  statistics per risk category or industry label).
+- The distribution preview endpoint could accept an optional `referenceClass`
+  parameter. The server fetches the reference band (p10/p50/p90 envelope) from
+  the store and includes it in the `DistributionPreviewResponse`.
+- In the Vega-Lite PDF/CDF spec, the reference band appears as a shaded region
+  behind the user's fitted curve.
+
+**Prerequisites:** The distribution preview panel (PLAN-DISTRIBUTION-PREVIEW.md)
+must be live first. A reference-distribution data store (schema + seed data)
+must be designed. User consent / opt-in mechanism for anonymised contribution.
+
+**Related IMPLEMENTATION-PLAN.md items:** Not yet planned. This is Phase 3+
+functionality (post-Tier 2). Nearest anchor is Phase 7 (Scenario Branching,
+§2403) for the aggregation/comparison infrastructure, but reference-class
+anchoring is a distinct feature requiring a separate data pipeline.
+
+---
+
+## 4. [DEFERRED] Sensitivity labelling (tornado chart) for risk leaves
+
+**Description:** Once a tree is simulated, show which leaf nodes contribute the
+most variance to the aggregate LEC. Varying each leaf ±1σ while holding others
+at their mean produces a ranked bar chart (tornado) of sensitivity. This tells
+the user where to invest modelling effort and where to invest risk controls.
+
+**Design sketch:**
+- Compute by perturbing each leaf's distribution (shift quantiles or scale
+  parameters) and re-running a partial simulation (or analytically via variance
+  decomposition if the independence assumption holds).
+- Display as a horizontal ranked bar chart in a dedicated "Sensitivity" panel
+  (separate from the distribution preview, tree-level not leaf-level).
+- Per-leaf sensitivity could also be shown as a colour-coded heatmap overlay on
+  the tree structure.
+
+**Prerequisites:** The scenario comparison infrastructure (IMPLEMENTATION-PLAN.md
+Phase 7: Scenario Branching, §2403) is directly related — the `ScenarioComparator`
+planned there already diffs LECs between tree variants. Sensitivity analysis is
+essentially automated scenario comparison with systematic single-leaf
+perturbations.
+
+**Related IMPLEMENTATION-PLAN.md items:**
+- Phase 7: Scenario Branching (§2403) — `ScenarioComparator.compare(a, b)` diffs
+  LECs at p50/p90/p95/p99; this infrastructure is reusable for sensitivity.
+- IMPLEMENTATION-PLAN.md §2523 (post-Tier 3 items): "sensitivity analysis becomes
+  higher-value once content-addressed caching and scenario branching are in place."
+
+---
+
+## 5. PostgreSQL workspace TTL/idle interval handling uses a DB-specific text round-trip
 
 **Observed:** The PostgreSQL workspace store currently writes `ttl` and
 `idle_timeout` via a Quill `infix` insert that casts lifted string parameters
