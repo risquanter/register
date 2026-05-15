@@ -135,10 +135,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                        ZLayer.succeed(Scope.global)
                      )
           key   <- store.create()
-          // Advance past TTL + reaper interval.
-          // TestClock.adjust wakes all sleeping fibers deterministically —
-          // the reaper's ZIO.sleep completes and evictExpired runs within
-          // the same adjust call, no yielding required.
+          // yield so the reaper fiber can run until it blocks on ZIO.sleep
+          _     <- ZIO.yieldNow
           _     <- TestClock.adjust(4.minutes)
           exit  <- store.resolve(key).exit
         yield assert(exit)(fails(anything))
@@ -169,8 +167,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                                  ZLayer.succeed(svc: RiskTreeService),
                                  ZLayer.succeed(Scope.global)
                                )
-          // Advance past TTL + reaper interval, then await latch so the
-          // cascade-delete fiber completes before we read the ref.
+          // yield so the reaper fiber reaches ZIO.sleep, then advance
+          _                <- ZIO.yieldNow
           _                <- TestClock.adjust(4.minutes)
           _                <- deleted.await
           result           <- deletedRef.get
@@ -205,6 +203,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                                  ZLayer.succeed(svc: RiskTreeService),
                                  ZLayer.succeed(Scope.global)
                                )
+          _                <- ZIO.yieldNow
           _                <- TestClock.adjust(4.minutes)
           _                <- allDeleted.await
           deleted          <- deletedRef.get
@@ -232,6 +231,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                         noOpTreeServiceLayer,  // delete always fails
                         ZLayer.succeed(Scope.global)
                       )
+          _      <- ZIO.yieldNow
           _      <- TestClock.adjust(4.minutes)
           exit   <- store.resolve(key).exit
         yield assert(exit)(fails(anything))

@@ -76,7 +76,7 @@ object WorkspaceReaper:
     val cycle =
       for
         evicted <- store.evictExpired
-        _       <- ZIO.foreachDiscard(evicted.values)(ws =>
+        _       <- ZIO.foreachDiscard(evicted)(ws =>
                      treeService.cascadeDeleteTrees(ws.id, ws.trees))
       yield ()
     (ZIO.sleep(zio.Duration.fromJava(interval)) *> cycle).forever

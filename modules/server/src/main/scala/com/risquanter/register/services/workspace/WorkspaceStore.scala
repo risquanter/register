@@ -68,14 +68,14 @@ trait WorkspaceStore:
 
   /** Evict all expired workspaces (absolute + idle). Returns evicted entries.
     *
-    * Returns the full `Map[WorkspaceId, WorkspaceRecord]` of evicted entries so that
-    * callers (e.g. `WorkspaceReaper`) can cascade-delete associated trees. Count is
+    * Returns the full list of evicted `WorkspaceRecord`s so that callers
+    * (e.g. `WorkspaceReaper`) can cascade-delete associated trees. Count is
     * derivable via `.size`.
     *
     * Called by both the background reaper fiber and the admin endpoint.
     * Security: logs eviction events (A31).
     */
-  def evictExpired: UIO[Map[WorkspaceId, WorkspaceRecord]]
+  def evictExpired: UIO[List[WorkspaceRecord]]
 
   /** Hard delete. Removes workspace from the store.
     * Tree cascade-deletion is orchestrated by the controller (Option B).
@@ -120,7 +120,7 @@ object WorkspaceStore:
   def resolveTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolveTree(key, treeId))
 
-  def evictExpired: ZIO[WorkspaceStore, Nothing, Map[WorkspaceId, WorkspaceRecord]] =
+  def evictExpired: ZIO[WorkspaceStore, Nothing, List[WorkspaceRecord]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.evictExpired)
 
   def delete(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, Unit] =

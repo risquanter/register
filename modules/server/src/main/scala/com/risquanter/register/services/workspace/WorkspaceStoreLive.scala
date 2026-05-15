@@ -159,14 +159,14 @@ final class WorkspaceStoreLive private (
     resolveInternal(key).map(_.trees.contains(treeId))
 
   /** Evict all expired workspaces. Returns evicted entries for cascade. (A31: logs eviction) */
-  override def evictExpired: UIO[Map[WorkspaceId, WorkspaceRecord]] =
+  override def evictExpired: UIO[List[WorkspaceRecord]] =
     for
       now     <- Clock.instant
       evicted <- ref.modify { map =>
         val (expired, aliveByHash) = map.byHash.partition((_, ws) => ws.isExpired(now))
         val expiredIds = expired.values.map(_.id).toSet
         val aliveById = map.byId.filter((id, _) => !expiredIds.contains(id))
-        (expired.values.map(ws => ws.id -> ws).toMap, map.copy(byHash = aliveByHash, byId = aliveById))
+        (expired.values.toList, map.copy(byHash = aliveByHash, byId = aliveById))
       }
       _ <- logSecurity("workspace.eviction", "evicted_count" -> evicted.size.toString)(
              s"Workspace reaper: evicted ${evicted.size} expired workspaces"

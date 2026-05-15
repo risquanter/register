@@ -99,6 +99,6 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         ws      <- store.resolve(key)
         _       <- ZIO.sleep(2.seconds)
         evicted <- store.evictExpired
-      yield assertTrue(evicted.contains(ws.id))
+      yield assertTrue(evicted.exists(_.id == ws.id))
     }
   ).provideLayerShared(storeLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.withLiveRandom

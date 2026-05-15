@@ -116,19 +116,19 @@ final class WorkspaceStorePostgres private (
   override def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Boolean] =
     resolveInternal(key).map(_.trees.contains(treeId))
 
-  override def evictExpired: UIO[Map[WorkspaceId, WorkspaceRecord]] =
+  override def evictExpired: UIO[List[WorkspaceRecord]] =
     (for
       rows    <- db(run(query[WorkspaceRow]))
       now     <- Clock.instant
       evicted <- ZIO.foreach(rows.toList) { row =>
-                   toRecord(row).either.map(_.toOption.filter(_.isExpired(now)).map(ws => ws.id -> ws))
+                   toRecord(row).either.map(_.toOption.filter(_.isExpired(now)))
                  }
       doomed   = evicted.flatten
-      doomedIds = doomed.map(_._2.id)
+      doomedIds = doomed.map(_.id)
       _       <- ZIO.foreachDiscard(doomedIds)(id =>
                    db(run(query[WorkspaceRow].filter(_.id == lift(id)).delete)).unit
                  )
-    yield doomed.toMap).orDie
+    yield doomed).orDie
 
   override def delete(key: WorkspaceKeySecret): IO[AppError, Unit] =
     for

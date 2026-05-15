@@ -179,6 +179,6 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         ws      <- store.resolve(key)
         _       <- TestClock.adjust(2.minutes)
         evicted <- store.evictExpired
-      yield assertTrue(evicted.size == 1, evicted.contains(ws.id))
+      yield assertTrue(evicted.size == 1, evicted.exists(_.id == ws.id))
     }
   )
