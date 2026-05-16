@@ -14,7 +14,7 @@ Execute phases in strict order. Each phase unblocks the next.
 
 | Phase | Goal | New files | Edits | Depends on | Status |
 |---|---|---|---|---|---|
-| **A** | Domain foundation — thread `terms` through existing stack | 0 | 15 | — | ☐ Not started |
+| **A** | Domain foundation — thread `terms` through existing stack | 0 | 15 | — | ✅ Complete |
 | **B** | Preview endpoint — DTOs + service + controller | 5 | 2 | A | ✅ Complete |
 | **C** | Frontend chart — state + spec builder + view + wiring | 3 | 3 | A, B | ✅ Complete |
 | **D** | Decision science — coherence echo + ratio warning | 0 | 3 | C | ✅ Complete |
