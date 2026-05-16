@@ -144,6 +144,11 @@ object RiskLeafFormView:
         inputModeAttr = "decimal"
       ),
 
+      // Implied ratio warning: shown when P90/P10 ratio exceeds 100×
+      child.maybe <-- state.impliedRatioWarning.map(_.map { msg =>
+        div(cls := "form-warning", msg)
+      }),
+
       textInput(
         labelText = "Terms (optional)",
         valueVar = state.termsVar,

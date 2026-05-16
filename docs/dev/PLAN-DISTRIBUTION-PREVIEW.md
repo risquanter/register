@@ -15,9 +15,9 @@ Execute phases in strict order. Each phase unblocks the next.
 | Phase | Goal | New files | Edits | Depends on | Status |
 |---|---|---|---|---|---|
 | **A** | Domain foundation — thread `terms` through existing stack | 0 | 15 | — | ☐ Not started |
-| **B** | Preview endpoint — DTOs + service + controller | 5 | 2 | A | ☐ Not started |
-| **C** | Frontend chart — state + spec builder + view + wiring | 3 | 3 | A, B | ☐ Not started |
-| **D** | Decision science — coherence echo + ratio warning | 0 | 3 | C | ☐ Not started |
+| **B** | Preview endpoint — DTOs + service + controller | 5 | 2 | A | ✅ Complete |
+| **C** | Frontend chart — state + spec builder + view + wiring | 3 | 3 | A, B | ✅ Complete |
+| **D** | Decision science — coherence echo + ratio warning | 0 | 3 | C | ✅ Complete |
 
 Update status as: `☐ Not started` → `⏳ In progress` → `✅ Complete`
 
@@ -56,9 +56,9 @@ Update status as: `☐ Not started` → `⏳ In progress` → `✅ Complete`
 - [ ] C6 Construction site — instantiate `DistributionChartState`, pass to `DesignView`
 
 ### Phase D task list
-- [ ] D1 `app/.../views/DistributionChartView.scala` — coherence echo caption
-- [ ] D2 `app/.../state/RiskLeafFormState.scala` — `impliedRatioWarning` signal
-- [ ] D3 `app/.../views/RiskLeafFormView.scala` — ratio warning badge
+- [x] D1 `app/.../views/DistributionChartView.scala` — coherence echo caption
+- [x] D2 `app/.../state/RiskLeafFormState.scala` — `impliedRatioWarning` signal
+- [x] D3 `app/.../views/RiskLeafFormView.scala` — ratio warning badge
 
 ---
 

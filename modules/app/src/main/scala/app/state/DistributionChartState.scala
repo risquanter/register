@@ -62,3 +62,20 @@ final class DistributionChartState(
 
   /** Reset the preview to Idle (e.g. when the form is unmounted). */
   def reset(): Unit = previewVar.set(LoadState.Idle)
+
+  /** Coherence echo caption for the chart panel.
+    *
+    * - `Some("Exact fit with N terms")` when `resolvedTerms == anchorCount`
+    * - `Some("Smoothed with N terms (M anchor points)")` when `resolvedTerms < anchorCount`
+    * - `None` for lognormal mode or when no preview is loaded.
+    */
+  val coherenceCaptionSignal: Signal[Option[String]] =
+    previewVar.signal.map {
+      case LoadState.Loaded(resp) =>
+        (resp.resolvedTerms, resp.anchorCount) match
+          case (Some(t), Some(n)) =>
+            if t == n then Some(s"Exact fit with $t terms")
+            else Some(s"Smoothed with $t terms ($n anchor points)")
+          case _ => None
+      case _ => None
+    }

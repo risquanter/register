@@ -64,13 +64,13 @@ object DistributionPreviewRequestSpec extends ZIOSpecDefault:
         assertTrue(DistributionPreviewRequest.validate(expertReq(terms = Some(3))).isSuccess)
       },
 
-      test("accepts expert request with terms equal to 1") {
-        // Edge: minimum plausible terms value
-        assertTrue(
-          DistributionPreviewRequest.validate(
-            expertReq(terms = Some(1))
-          ).isSuccess
-        )
+      test("accepts expert request with terms equal to 2 (minimum valid)") {
+        assertTrue(DistributionPreviewRequest.validate(expertReq(terms = Some(2))).isSuccess)
+      },
+
+      test("rejects expert request with terms equal to 1 (below minimum)") {
+        val result = DistributionPreviewRequest.validate(expertReq(terms = Some(1)))
+        assertTrue(isFailWithCode(result, ValidationErrorCode.INVALID_COMBINATION))
       }
     ),
 

@@ -70,20 +70,29 @@ object DistributionChartView:
           }(ctx.owner)
       },
 
+      // Clear render error when a new spec arrives (new fetch attempt started).
+      // Must be a separate subscription — mutating renderError$ inside the child <-- .map
+      // would re-trigger the combined signal and dispose the chart element just built.
+      chartState.specSignal.changes --> { _ => renderError$.set(None) },
+
       // Spec → DOM: dispose previous chart then render next state.
-      child <-- chartState.specSignal.combineWith(renderError$.signal).map { (state, renderErr) =>
+      child <-- chartState.specSignal.combineWith(renderError$.signal).map { (specState, renderErr) =>
         disposeChart()
-        renderError$.set(None)
         renderErr match
           case Some(msg) => renderError(msg)
           case None =>
-            state match
+            specState match
               case LoadState.Idle        => renderIdle
               case LoadState.Loading     => renderLoading
               case LoadState.Failed(msg) => renderError(msg)
               case LoadState.Loaded(sp)  =>
                 renderChart(sp, result => currentResult = result, msg => renderError$.set(Some(msg)))
       },
+
+      // Coherence echo caption: Exact/Smoothed fit summary from the server response.
+      child.maybe <-- chartState.coherenceCaptionSignal.map(_.map { caption =>
+        p(cls := "distribution-chart-caption", caption)
+      }),
 
       onUnmountCallback(_ => disposeChart())
     )

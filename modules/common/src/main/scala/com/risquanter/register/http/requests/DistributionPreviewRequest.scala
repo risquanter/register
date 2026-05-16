@@ -44,21 +44,16 @@ object DistributionPreviewRequest:
     * - Lognormal mode: `minLoss` required, `maxLoss` required
     */
   def validate(req: DistributionPreviewRequest): Validation[ValidationError, DistributionPreviewRequest] =
-    val distTypeV: Validation[ValidationError, String] = req.distributionType match
-      case "expert" | "lognormal" => Validation.succeed(req.distributionType)
-      case other                  =>
-        Validation.fail(ValidationError(
-          "request.distributionType",
-          ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE,
-          s"Unsupported distribution type: $other"
-        ))
     val termsV: Validation[ValidationError, Option[Int]] = req.terms match
       case Some(t) =>
         toValidation(ValidationUtil.refinePositiveInt(t, "request.terms")).map(pi => Some(pi.toInt))
       case None =>
         Validation.succeed(None)
 
-    val crossV: Validation[ValidationError, Unit] = distTypeV.map(_.toString).flatMap {
+    // crossV owns the distributionType check — keeping it here (not in a separate
+    // distTypeV) prevents the same UNSUPPORTED_DISTRIBUTION_TYPE error from being
+    // accumulated twice when validateWith collects failures independently.
+    val crossV: Validation[ValidationError, Unit] = req.distributionType match
       case "expert" =>
         (req.percentiles, req.quantiles) match
           case (Some(pct), Some(q)) if pct.nonEmpty && q.nonEmpty && pct.length == q.length =>
@@ -71,6 +66,12 @@ object DistributionPreviewRequest:
               ))
             else req.terms match
               case Some(t) if t > pct.length =>
+                Validation.fail(ValidationError(
+                  "request.terms",
+                  ValidationErrorCode.INVALID_COMBINATION,
+                  ValidationMessages.termsOutOfRange
+                ))
+              case Some(t) if t < 2 =>
                 Validation.fail(ValidationError(
                   "request.terms",
                   ValidationErrorCode.INVALID_COMBINATION,
@@ -130,6 +131,5 @@ object DistributionPreviewRequest:
           ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE,
           s"Unsupported distribution type: $other"
         ))
-    }
 
-    Validation.validateWith(distTypeV, termsV, crossV) { (_, _, _) => req }
+    Validation.validateWith(termsV, crossV) { (_, _) => req }

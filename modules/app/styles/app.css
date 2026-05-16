@@ -1130,6 +1130,14 @@ select.form-input option {
   margin-top: var(--sp-1);
 }
 
+.form-warning {
+  display: block;
+  color: var(--curve-yellow-500);
+  font-size: var(--text-xs);
+  margin-top: var(--sp-1);
+  margin-bottom: var(--sp-1);
+}
+
 .cross-field-error {
   margin-bottom: var(--sp-4);
 }
@@ -1728,6 +1736,15 @@ select.form-input option {
 .distribution-chart-error {
   color: var(--danger, #e06a5a);
   border-color: var(--danger, #e06a5a);
+}
+
+.distribution-chart-caption {
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+  font-family: var(--font-mono);
+  text-align: center;
+  margin-top: var(--sp-2);
+  margin-bottom: 0;
 }
 
 .distribution-chart-placeholder h3 {

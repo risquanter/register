@@ -54,7 +54,7 @@ object DistributionSpecBuilder:
       )
     )
 
-    val annotationLayers = anchorAnnotations(response, draft, viewMode = "pdf")
+    val annotationLayers = anchorAnnotations(response, draft, DistributionViewMode.PDF)
 
     val allLayers = js.Array[js.Any]()
     allLayers.push(mainLayer)
@@ -101,7 +101,7 @@ object DistributionSpecBuilder:
       )
     )
 
-    val annotationLayers = anchorAnnotations(response, draft, viewMode = "cdf")
+    val annotationLayers = anchorAnnotations(response, draft, DistributionViewMode.CDF)
 
     val allLayers = js.Array[js.Any]()
     allLayers.push(mainLayer)
@@ -151,7 +151,7 @@ object DistributionSpecBuilder:
   private def anchorAnnotations(
     response: DistributionPreviewResponse,
     draft:    Option[LeafDistributionDraft],
-    viewMode: String  // "pdf" or "cdf"
+    viewMode: DistributionViewMode
   ): js.Array[js.Any] =
     val layers = js.Array[js.Any]()
     draft.foreach { d =>
@@ -161,15 +161,16 @@ object DistributionSpecBuilder:
         val quants = d.quantiles.getOrElse(Array.empty[Double])
         pcts.zip(quants).foreach { case (p, q) =>
           val label = f"P${(p * 100).round}%d"
-          if viewMode == "pdf" then
-            // Vertical dashed rule + text label
-            ruleAnnotation(q, label).foreach(layers.push(_))
-          else
-            // CDF: filled dot at (quantile_x, percentile) for exact-fit verification
-            layers.push(cdfAnchorDot(q, p))
+          viewMode match
+            case DistributionViewMode.PDF =>
+              // Vertical dashed rule + text label
+              ruleAnnotation(q, label).foreach(layers.push(_))
+            case DistributionViewMode.CDF =>
+              // Filled dot at (quantile_x, percentile) for exact-fit verification
+              layers.push(cdfAnchorDot(q, p))
         }
       else
-        // Lognormal: rules at minLoss (P05) and maxLoss (P95)
+        // Lognormal: rules at minLoss (P05) and maxLoss (P95) — same in both views
         d.minLoss.foreach { min => ruleAnnotation(min.toDouble, "P05").foreach(layers.push(_)) }
         d.maxLoss.foreach { max => ruleAnnotation(max.toDouble, "P95").foreach(layers.push(_)) }
     }

@@ -321,6 +321,29 @@ class RiskLeafFormState extends FormState[RiskLeafField]:
           case _                            => None
       }
 
+  /** Signal emitting an advisory warning when the implied P90/P10 loss ratio is
+    * unusually high (> 100×), suggesting the expert estimates encode extreme tail
+    * behaviour. Visible only in expert mode; None in lognormal mode or when
+    * insufficient data is available to compute the ratio.
+    */
+  val impliedRatioWarning: Signal[Option[String]] =
+    distributionModeVar.signal.combineWith(quantilesVar.signal, percentilesVar.signal).map {
+      case (DistributionMode.Expert, qStr, pStr) =>
+        val qs = qStr.split(",").flatMap(_.trim.toDoubleOption)
+        val ps = pStr.split(",").flatMap(_.trim.toDoubleOption)
+        if qs.length >= 2 && qs.length == ps.length then
+          val p10idx = ps.indexWhere(_ <= 10)
+          val p90idx = ps.lastIndexWhere(_ >= 90)
+          if p10idx >= 0 && p90idx >= 0 && p10idx != p90idx && qs(p10idx) > 0 then
+            val ratio = qs(p90idx) / qs(p10idx)
+            if ratio > 100 then
+              Some(f"P90/P10 ratio is $ratio%.0f\u00d7 \u2014 very high. Review whether this reflects expert judgment.")
+            else None
+          else None
+        else None
+      case _ => None
+    }
+
   private def parseDoubleField(raw: String, field: String): Validation[ValidationError, Double] =
     this.parseDouble(raw) match
       case Some(v) => Validation.succeed(v)
