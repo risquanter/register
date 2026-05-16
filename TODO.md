@@ -214,6 +214,34 @@ from a Maven registry (GitHub Packages or Maven Central):
 
 ---
 
+## 5a. [LOW PRIO / EXTERNAL] `vague-quantifier-logic` — characterise non-feasible metalog behaviour
+
+**Context (external project):** `MetalogDistribution.fromPercentilesUnsafe` in
+`vague-quantifier-logic` accepts quantile arrays that are non-monotone (decreasing
+or flat). It fits a distribution to the supplied data regardless of whether the
+resulting quantile function is itself monotone. This is mathematically correct for
+a general fitting library — the name "unsafe" signals that no domain-level
+semantic validation is performed.
+
+**What's missing:** There are no tests in `vague-quantifier-logic` that *document*
+this behaviour. A future maintainer could mistakenly add an early-rejection guard
+on quantile ordering, which would silently break callers that rely on the library
+fitting degenerate inputs (e.g. stress-testing or boundary exploration use cases).
+
+**Suggested addition to `vague-quantifier-logic`:**
+A characterisation test that verifies:
+1. `fromPercentilesUnsafe` with strictly decreasing quantiles returns `Right(_)` (fits without error).
+2. The resulting distribution's quantile function is non-monotone (i.e. the CDF
+   is not well-formed), serving as an explicit documentation of the library's
+   contract boundary.
+
+**Relation to this repo:** `DistributionPreviewRequest.validate()` (register)
+enforces strict quantile monotonicity at the request layer precisely *because* the
+library does not. The two invariants are complementary and intentionally at
+different layers.
+
+---
+
 ## 6. Inconsistent Docker image naming convention
 
 **Observed:** Locally-built images use inconsistent tag conventions:

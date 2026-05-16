@@ -3,7 +3,8 @@ package com.risquanter.register.http.controllers
 import zio.*
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.auth.UserContextExtractor
+import com.risquanter.register.auth.{ AuthorizationService, Permission, UserContextExtractor }
+import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
 import com.risquanter.register.services.RiskTreeService
@@ -11,14 +12,30 @@ import com.risquanter.register.services.workspace.{RateLimiter, WorkspaceStore}
 
 /** Workspace lifecycle controller.
   *
-  * Owns workspace bootstrap, workspace lifecycle, and workspace-level
+  * Owns workspace bootstrap, key rotation, workspace deletion, and workspace-level
   * tree listing/creation routes.
+  *
+  * Authorization layers (all three now wired; SpiceDB backend is NoOp until Phase K):
+  *  - Layer 0 (capability-only): [[WorkspaceStore.resolve]] (or `create`/`rotate`)
+  *    validates the workspace key. `bootstrapWorkspace` is intentionally unauthenticated
+  *    (it creates the credential). `evictExpired` is an internal maintenance route.
+  *  - Layer 1 (identity): [[UserContextExtractor.extract]] enforces JWT presence on all
+  *    workspace-keyed routes when `requirePresent` is injected via
+  *    `register.auth.mode=identity`. The extracted [[UserId]] is passed to `authzService.check`.
+  *  - Layer 2 (fine-grained): [[AuthorizationService.check]] enforces per-operation
+  *    permissions (`ViewWorkspace`, `DesignWrite`, `AdminWorkspace`) on the resolved
+  *    workspace resource. Currently wired with [[AuthorizationServiceNoOp]]
+  *    (always-permit stub); live enforcement activates in Phase K.
+  *
+  * @see AUTHORIZATION-PLAN.md — Layered Model
+  * @see ADR-024 — Application as Pure PEP
   */
 class WorkspaceLifecycleController private (
   riskTreeService: RiskTreeService,
-  workspaceStore: WorkspaceStore,
-  rateLimiter: RateLimiter,
-  userCtx: UserContextExtractor
+  workspaceStore:  WorkspaceStore,
+  rateLimiter:     RateLimiter,
+  userCtx:         UserContextExtractor,
+  authzService:    AuthorizationService
 ) extends BaseController
     with WorkspaceLifecycleEndpoints:
 
@@ -44,8 +61,9 @@ class WorkspaceLifecycleController private (
   val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.serverLogic {
     case (maybeUserId, key) =>
       (for
-        _        <- userCtx.extract(maybeUserId)
+        userId   <- userCtx.extract(maybeUserId)
         ws       <- workspaceStore.resolve(key)
+        _        <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         ids      <- workspaceStore.listTrees(key)
         trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id))
         existing  = trees.collect { case Some(t) => SimulationResponse.fromRiskTree(t) }
@@ -55,28 +73,32 @@ class WorkspaceLifecycleController private (
   val createWorkspaceTree: ServerEndpoint[Any, Task] = createWorkspaceTreeEndpoint.serverLogic {
     case (maybeUserId, key, req) =>
       (for
-        _    <- userCtx.extract(maybeUserId)
-        ws   <- workspaceStore.resolve(key)
-        tree <- riskTreeService.create(ws.id, req)
-        _    <- workspaceStore.addTree(key, tree.id)
+        userId <- userCtx.extract(maybeUserId)
+        ws     <- workspaceStore.resolve(key)
+        _      <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
+        tree   <- riskTreeService.create(ws.id, req)
+        _      <- workspaceStore.addTree(key, tree.id)
       yield SimulationResponse.fromRiskTree(tree)).either
   }
 
   val rotateWorkspace: ServerEndpoint[Any, Task] = rotateWorkspaceKeySecretEndpoint.serverLogic { case (maybeUserId, key) =>
     (for
-      _      <- userCtx.extract(maybeUserId)
+      userId <- userCtx.extract(maybeUserId)
+      ws     <- workspaceStore.resolve(key)
+      _      <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       newKey <- workspaceStore.rotate(key)
-      ws     <- workspaceStore.resolve(newKey)
-    yield WorkspaceRotateResponse(newKey, ws.expiresAt)).either
+      newWs  <- workspaceStore.resolve(newKey)
+    yield WorkspaceRotateResponse(newKey, newWs.expiresAt)).either
   }
 
   val deleteWorkspace: ServerEndpoint[Any, Task] = deleteWorkspaceEndpoint.serverLogic { case (maybeUserId, key) =>
     (for
-      _   <- userCtx.extract(maybeUserId)
-      ws  <- workspaceStore.resolve(key)
-      ids <- workspaceStore.listTrees(key)
-      _   <- riskTreeService.cascadeDeleteTrees(ws.id, ids)
-      _   <- workspaceStore.delete(key)
+      userId <- userCtx.extract(maybeUserId)
+      ws     <- workspaceStore.resolve(key)
+      _      <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
+      ids    <- workspaceStore.listTrees(key)
+      _      <- riskTreeService.cascadeDeleteTrees(ws.id, ids)
+      _      <- workspaceStore.delete(key)
     yield ()).either
   }
 
@@ -95,10 +117,11 @@ class WorkspaceLifecycleController private (
     )
 
 object WorkspaceLifecycleController:
-  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & RateLimiter & UserContextExtractor, Nothing, WorkspaceLifecycleController] =
+  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & RateLimiter & UserContextExtractor & AuthorizationService, Nothing, WorkspaceLifecycleController] =
     for
       riskTreeService <- ZIO.service[RiskTreeService]
       workspaceStore  <- ZIO.service[WorkspaceStore]
       rateLimiter     <- ZIO.service[RateLimiter]
       userCtx         <- ZIO.service[UserContextExtractor]
-    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, rateLimiter, userCtx)
+      authzService    <- ZIO.service[AuthorizationService]
+    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, rateLimiter, userCtx, authzService)

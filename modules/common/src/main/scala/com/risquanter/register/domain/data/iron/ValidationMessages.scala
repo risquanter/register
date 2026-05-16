@@ -96,6 +96,8 @@ object ValidationMessages:
   val quantilesRequired: String         = "Quantiles are required for expert mode"
   val quantilesFormat: String           = "Enter comma-separated quantile values (loss amounts)"
   val quantilesMustBeNonNegative: String = "Quantiles must be non-negative"
+  val quantilesMustBeStrictlyIncreasing: String =
+    "Quantiles must be strictly increasing — a higher percentile must correspond to a higher loss value"
 
   def expertLengthMismatch(pLen: Int, qLen: Int): String =
     s"Percentiles and quantiles must have same length ($pLen vs $qLen)"

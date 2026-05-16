@@ -10,12 +10,13 @@ import io.getquill.SnakeCase
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
 import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, UserContextExtractor}
 import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
-import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController}
+import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.infra.persistence.{FlywayService, FlywayServiceLive, Repository}
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.QueryServiceLive
+import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.cache.{TreeCacheManager, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
@@ -136,8 +137,8 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig] =
-    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig](
+  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & DistributionPreviewController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig] =
+    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & DistributionPreviewController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
@@ -183,7 +184,9 @@ object Application extends ZIOAppDefault {
       ZLayer.fromZIO(WorkspaceAnalysisController.makeZIO),
       SSEController.layer,
       CacheController.layer,
-      ZLayer.fromZIO(QueryController.makeZIO)
+      ZLayer.fromZIO(QueryController.makeZIO),
+      DistributionPreviewService.layer,
+      ZLayer.fromZIO(DistributionPreviewController.makeZIO)
     )
 
   def startServer = for {

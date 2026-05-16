@@ -4,7 +4,7 @@ import zio.*
 import sttp.tapir.swagger.bundle.SwaggerInterpreter
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.http.controllers.{BaseController, SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController}
+import com.risquanter.register.http.controllers.{BaseController, SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
 
@@ -28,7 +28,7 @@ object HttpApi {
     * 
     * @return ZIO effect that provides list of all controllers
     */
-  def makeControllers: ZIO[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController, Nothing, List[BaseController]] = for {
+  def makeControllers: ZIO[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & DistributionPreviewController, Nothing, List[BaseController]] = for {
     system <- ZIO.service[SystemController]
     lifecycle <- ZIO.service[WorkspaceLifecycleController]
     trees <- ZIO.service[WorkspaceTreeController]
@@ -36,12 +36,13 @@ object HttpApi {
     sse <- ZIO.service[SSEController]
     cache <- ZIO.service[CacheController]
     query <- ZIO.service[QueryController]
-  } yield List(system, lifecycle, trees, analysis, sse, cache, query)
+    distPreview <- ZIO.service[DistributionPreviewController]
+  } yield List(system, lifecycle, trees, analysis, sse, cache, query, distPreview)
 
   /** Complete application endpoints including business logic and documentation
     * 
     * @return ZIO effect providing all HTTP endpoints
     */
-  val endpointsZIO: ZIO[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController, Nothing, List[ServerEndpoint[Any, Task]]] =
+  val endpointsZIO: ZIO[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & DistributionPreviewController, Nothing, List[ServerEndpoint[Any, Task]]] =
     makeControllers.map(gatherRoutes)
 }

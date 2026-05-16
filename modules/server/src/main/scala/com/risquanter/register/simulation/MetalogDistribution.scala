@@ -40,6 +40,14 @@ case class MetalogDistribution private(fitter: Metalog) extends Distribution {
    * @return The value x such that P(X ≤ x) = p
    */
   def quantile(p: Double): Double = fitter.quantile(p)
+
+  /**
+   * Compute the probability density at a given probability level.
+   *
+   * @param p Probability in (0, 1) — same domain as [[quantile]]
+   * @return Probability density dQ/dp evaluated at p
+   */
+  def pdf(p: Double): Double = fitter.pdf(p)
 }
 
 object MetalogDistribution {

@@ -760,11 +760,19 @@ object DistributionPreviewController:
       previewService <- ZIO.service[DistributionPreviewService]
       workspaceStore <- ZIO.service[WorkspaceStore]
       userCtx        <- ZIO.service[UserContextExtractor]
-    yield DistributionPreviewController(previewService, workspaceStore, userCtx)
+      authzService   <- ZIO.service[AuthorizationService]
+    yield DistributionPreviewController(previewService, workspaceStore, userCtx, authzService)
 ```
 
-Note: no `AuthorizationService` — the preview endpoint is workspace-scoped (auth gate
-via `workspaceStore.resolve`) but not tree-scoped. No `authzService.check()` call.
+All three authorization layers are now wired:
+- Layer 0: `workspaceStore.resolve(key)` validates the workspace key.
+- Layer 1: `userCtx.extract(maybeUserId)` enforces JWT presence in identity/fine-grained modes.
+- Layer 2: `authzService.check(userId, Permission.AnalyzeRun, ws.id.asResource)` is wired;
+  the live SpiceDB backend is replaced by `AuthorizationServiceNoOp` (always-permit) until
+  Phase K, consistent with all other workspace-scoped controllers.
+
+`AuthorizationService` is already present in `Application.appLayer` via `chooseAuthorizationService`;
+`ZLayer.make` satisfies the new dependency automatically without changes to `Application.scala`.
 
 **`HttpApi.scala` changes** — add `DistributionPreviewController` to the controller registry:
 ```scala

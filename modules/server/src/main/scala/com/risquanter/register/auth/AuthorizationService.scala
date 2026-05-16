@@ -11,13 +11,14 @@ import com.risquanter.register.domain.errors.AuthError
   * @see AUTHORIZATION-PLAN.md — Task L2.2: Authorization Service
   */
 enum Permission(val zedName: String):
-  case DesignWrite   extends Permission("design_write")
-  case AnalyzeRun    extends Permission("analyze_run")
-  case ViewWorkspace extends Permission("view_workspace")
-  case ViewTree      extends Permission("view_tree")
-  case ViewOrg       extends Permission("view_org")
-  case ViewTeam      extends Permission("view_team")
-  case ManageTeam    extends Permission("manage_team")
+  case DesignWrite      extends Permission("design_write")
+  case AnalyzeRun       extends Permission("analyze_run")
+  case ViewWorkspace    extends Permission("view_workspace")
+  case AdminWorkspace   extends Permission("admin_workspace")
+  case ViewTree         extends Permission("view_tree")
+  case ViewOrg          extends Permission("view_org")
+  case ViewTeam         extends Permission("view_team")
+  case ManageTeam       extends Permission("manage_team")
 
 /** Resource type identifiers — values match SpiceDB Zed schema `definition` names exactly.
   *

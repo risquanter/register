@@ -14,6 +14,20 @@ import com.risquanter.register.domain.errors.TreeNotInWorkspace
 /** Workspace tree controller.
   *
   * Owns workspace-scoped CRUD and cache invalidation for trees.
+  *
+  * Authorization layers:
+  *  - Layer 0: [[WorkspaceStore.resolveTreeWorkspace]] validates the workspace key
+  *    and asserts the tree belongs to that workspace.
+  *  - Layer 1: [[UserContextExtractor.extract]] fails closed when `requirePresent`
+  *    is injected via `register.auth.mode=identity`. The `UserId` is bound as
+  *    `userId` because it is immediately consumed by the Layer 2 check.
+  *  - Layer 2: `authzService.check(userId, Permission.*, ResourceRef(RiskTree, treeId))`
+  *    calls are present in this controller, but the SpiceDB backend is not yet
+  *    deployed (Phase K). Currently resolved by [[AuthorizationServiceNoOp]]
+  *    (always-permit). Full enforcement activates when Phase K infra is provisioned.
+  *
+  * @see AUTHORIZATION-PLAN.md — Layered Model
+  * @see ADR-024 — Application as Pure PEP
   */
 class WorkspaceTreeController private (
   riskTreeService: RiskTreeService,
