@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.AppShell
-import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState}
+import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState, DistributionChartState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -67,7 +67,16 @@ object Main:
       onDismissError = () => globalError.set(None),
       healthStatus = healthState.status.signal,
       workspaceBadge = workspaceBadge,
-      designView = DesignView(builderState, treeViewState, wsState),
+      designView = DesignView(
+        builderState,
+        treeViewState,
+        wsState,
+        new DistributionChartState(
+          draftSignal    = builderState.draftSignal,
+          keySignal      = wsState.keySignal,
+          userIdAccessor = () => wsState.currentUserId
+        )
+      ),
       analyzeView = AnalyzeView(treeViewState, analyzeQueryState)
     )
 

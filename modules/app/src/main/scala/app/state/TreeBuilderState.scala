@@ -45,6 +45,15 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   /** Whether the builder is in update mode (previously created tree). */
   val isUpdateMode: Signal[Boolean] = editingTreeId.signal.map(_.isDefined)
 
+  /** Current in-flight distribution draft from the active leaf form, or None.
+    *
+    * Written by [[app.views.RiskLeafFormView]] via its `state.draftSignal` subscription.
+    * Reset to None on form unmount. Read by [[app.state.DistributionChartState]] for
+    * debounced preview fetches.
+    */
+  val currentDraftVar: Var[Option[LeafDistributionDraft]] = Var(None)
+  val draftSignal: StrictSignal[Option[LeafDistributionDraft]] = currentDraftVar.signal
+
   val rootLabel = "(root)"
 
   // ── Tree-name validation ──────────────────────────────────────

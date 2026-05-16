@@ -1651,6 +1651,85 @@ select.form-input option {
   flex-direction: column;
 }
 
+/* =============================================
+   Distribution Chart View (replaces Placeholder)
+   ============================================= */
+.distribution-chart-view {
+  background-color: var(--surface-raised);
+  padding: var(--sp-6);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-mode-toggle {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: var(--sp-3);
+}
+
+.toggle-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--foreground-muted);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  padding: var(--sp-1) var(--sp-3);
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.toggle-btn:hover {
+  border-color: var(--foreground-muted);
+  color: var(--foreground);
+}
+
+.toggle-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--foreground);
+}
+
+.distribution-chart-canvas {
+  flex: 1;
+  min-height: 0;
+}
+
+.distribution-chart-canvas .vega-embed {
+  width: 100%;
+}
+
+.distribution-chart-message {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--surface-overlay);
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground-muted);
+  font-size: var(--text-sm);
+  gap: var(--sp-2);
+  text-align: center;
+  padding: var(--sp-6);
+}
+
+.distribution-chart-icon {
+  font-size: 2rem;
+  opacity: 0.5;
+}
+
+.distribution-chart-error {
+  color: var(--danger, #e06a5a);
+  border-color: var(--danger, #e06a5a);
+}
+
 .distribution-chart-placeholder h3 {
   font-family: var(--font-mono);
   font-size: var(--text-lg);

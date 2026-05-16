@@ -300,6 +300,27 @@ class RiskLeafFormState extends FormState[RiskLeafField]:
         )
     }
 
+  /** Reactive signal of the current distribution draft, derived from all distribution
+    * form fields.
+    *
+    * Emits `Some(draft)` when the current field values produce a valid draft,
+    * `None` when the form is incomplete or invalid.
+    *
+    * Used by [[app.state.DistributionChartState]] to trigger debounced preview fetches
+    * as the user types. [[toDistributionDraft]] reads all vars via `.now()` — because
+    * Laminar signal updates are synchronous, `.now()` calls inside `.map` reflect the
+    * value that triggered the update. This avoids duplicating parse/normalize logic.
+    */
+  val draftSignal: Signal[Option[LeafDistributionDraft]] =
+    distributionModeVar.signal
+      .combineWith(percentilesVar.signal, quantilesVar.signal, minLossVar.signal)
+      .combineWith(maxLossVar.signal, termsVar.signal)
+      .map { _ =>
+        toDistributionDraft match
+          case Validation.Success(_, draft) => Some(draft)
+          case _                            => None
+      }
+
   private def parseDoubleField(raw: String, field: String): Validation[ValidationError, Double] =
     this.parseDouble(raw) match
       case Some(v) => Validation.succeed(v)

@@ -52,6 +52,11 @@ object RiskLeafFormView:
       state.distributionModeVar.signal.changes --> { _ => submitError.set(None) },
       parentVar.signal.changes --> { _ => submitError.set(None) },
 
+      // Push reactive draft up to TreeBuilderState for DistributionChartState to observe.
+      // Cleared on unmount so the chart returns to Idle when the leaf form is not active.
+      state.draftSignal --> builderState.currentDraftVar.writer,
+      onUnmountCallback { _ => builderState.currentDraftVar.set(None) },
+
       // Common Fields
       textInput(
         labelText = "Name",

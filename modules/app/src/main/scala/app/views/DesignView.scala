@@ -2,7 +2,7 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import app.components.SplitPane
-import app.state.{TreeBuilderState, TreeViewState, WorkspaceState}
+import app.state.{DistributionChartState, TreeBuilderState, TreeViewState, WorkspaceState}
 
 /** Design view — tree creation and editing workflow.
   *
@@ -22,7 +22,8 @@ object DesignView:
   def apply(
     builderState: TreeBuilderState,
     treeViewState: TreeViewState,
-    wsState: WorkspaceState
+    wsState: WorkspaceState,
+    distributionChartState: DistributionChartState
   ): HtmlElement =
     val previewPanel = div(
       cls := "design-preview-panel",
@@ -36,7 +37,7 @@ object DesignView:
         left = TreeBuilderView(builderState, treeViewState, wsState),
         right = SplitPane.vertical(
           top = previewPanel,
-          bottom = DistributionChartPlaceholder(),
+          bottom = DistributionChartView(distributionChartState),
           topPercent = 60
         ),
         leftPercent = 40
