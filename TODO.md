@@ -750,3 +750,50 @@ from.
 
 **Status:** root cause confirmed, fix direction not yet decided. Blocks
 reliable `DemoEnterpriseScriptSpec` assertions in combined test runs.
+
+---
+
+## 13. [POST USER-DOCS] Document threshold-pie normalisation behaviour in user documentation
+
+**Context:** The threshold-linked pie chart (ECharts migration Phase E5) shows each
+direct child of the focus portfolio as a slice sized by its individual exceedance
+probability `P(loss > X)` at the current crosshair position. ECharts normalises all
+slices to 100% regardless of their absolute values.
+
+**Consequence:** When the user drills into a child portfolio C2 (expanding C2 into C2a
+and C2b), the visual proportions of the remaining siblings (C1, C3) will shift. This is
+expected — the displayed percentage is each node's share of the total of all displayed
+exceedance values, not a probability partition. Critically, `P(C2 > X) ≠ P(C2a > X) +
+P(C2b > X)` in general (the children are independent random variables, not a mutually
+exclusive decomposition), so the total changes when a portfolio is expanded.
+
+**User documentation should clarify:**
+- The pie is a proportional comparison of individual exceedance probabilities, not a
+  true probabilistic decomposition.
+- Proportions change when expanding a portfolio because the total of displayed values
+  changes.
+- Tooltip raw-probability values (planned: shown alongside percentages) are the
+  authoritative figures; the pie angles are for visual comparison only.
+
+**Prerequisite:** User documentation section for the Analyze view must exist first.
+Placeholder until then.
+
+---
+
+## 14. [POST E1–E5] Evaluate ECharts modular tree-shaking (Option B bundle strategy)
+
+**Context:** The ECharts migration (Phase E1, PLAN-ECHARTS-MIGRATION.md) chose Option A
+(full bundle, `import * as echarts from 'echarts'`, ~500 KB gzip) for simplicity. Option
+B (modular imports via `echarts/core` + explicit `LineChart`, `PieChart`,
+`CanvasRenderer` registrations + `echarts.use([...])`) was estimated to produce a
+~200–300 KB gzip bundle.
+
+**Follow-up required once Phases E1–E5 are stable:**
+1. Profile the actual bundle size with Option A via `vite build --report`.
+2. Determine how many chart types are actually used (line + pie in E1–E5; any others?).
+3. If the size delta is material (> ~150 KB gzip), assess the complexity cost of
+   switching the Scala.js facade to modular imports and weigh against the saving.
+4. Note: switching from Option A to Option B is a facade-only change — no option-builder
+   or view code needs to change.
+
+**No action required until E1–E5 are complete and deployed.**

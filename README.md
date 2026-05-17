@@ -93,8 +93,7 @@ Builder base images install heavyweight toolchains (GraalVM, sbt) once and are r
 
 ```bash
 # GraalVM builder base — installs GraalVM native-image + sbt (~10-20 min)
-# Context is the register projects parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
-# If you used the above commands to clone the repos, you need to run a "cd .." to be in the correct directory before running this command
+# Context is the register projects  directory — but the sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
 docker build -f containers/builders/Dockerfile.graalvm-builder \
   -t local/graalvm-builder:21 ..
 
@@ -114,7 +113,6 @@ docker build -f containers/prod/Dockerfile.frontend-prod \
 docker compose --profile frontend up -d
 ```
 
-The application is available at **`http://localhost:18080`**.
 
 > The `examples/` directory contains curl-based API scripts for direct backend testing. For advanced configuration, observability integration, and Kubernetes deployment, see `docs/user/DOCKER-DEVELOPMENT.md`.
 
