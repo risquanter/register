@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.{Validation, ForEach}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
-import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.data.{Distribution, RiskTree, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
@@ -142,6 +142,48 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
         newLeaves = createReq.leaves
       )
     }
+
+  /** True if the builder contains any unsaved content. */
+  def isDirty: Boolean =
+    treeNameVar.now().trim.nonEmpty || portfoliosVar.now().nonEmpty || leavesVar.now().nonEmpty
+
+  /** Populate builder vars from a server-loaded tree.
+    *
+    * Partitions the tree's nodes into portfolios and leaves, resolves each
+    * node's parent name via the tree index, and sets all vars atomically.
+    * Clears any in-flight leaf-form preview and resets touched/error state.
+    */
+  def loadFromTree(tree: RiskTree): Unit =
+    val portfolios = tree.nodes.collect { case p: RiskPortfolio => p }.map { p =>
+      PortfolioDraft(
+        name   = p.name,
+        parent = p.parentId.flatMap(id => tree.index.nodes.get(id).map(_.name))
+      )
+    }.toList
+
+    val leaves = tree.nodes.collect { case l: RiskLeaf => l }.map { l =>
+      val dist = LeafDistributionDraft(
+        distributionType = l.distributionType.toString,
+        probability      = l.probability,
+        minLoss          = l.minLoss.map(identity),
+        maxLoss          = l.maxLoss.map(identity),
+        percentiles      = l.percentiles,
+        quantiles        = l.quantiles,
+        terms            = l.terms.map(_.toInt)
+      )
+      LeafDraft(
+        name         = l.name,
+        parent       = l.parentId.flatMap(id => tree.index.nodes.get(id).map(_.name)),
+        distribution = dist
+      )
+    }.toList
+
+    currentDraftVar.set(None)
+    treeNameVar.set(tree.name.value.toString)
+    portfoliosVar.set(portfolios)
+    leavesVar.set(leaves)
+    editingTreeId.set(Some(tree.id))
+    resetTouched()
 
   // ------------------------------------------------------------
   // Helpers

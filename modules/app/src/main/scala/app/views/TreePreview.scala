@@ -2,14 +2,15 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft}
-import app.components.Icons
+import app.components.{Icons, TreeNodeRow}
 
 /**
  * Hierarchical tree preview rendered from TreeBuilderState signals.
  *
- * Displays an ASCII-style tree structure with box-drawing characters (├── └──)
- * showing portfolios and leaves in their parent-child hierarchy.
- * Each node has a remove button that triggers cascade deletion.
+ * Displays a structured tree with one DOM row per node. Each row carries
+ * depth-aware CSS classes (`.tree-node-row--depth-{n}`) and a `data-depth`
+ * attribute on the indent span so Phase D can draw connector lines in CSS
+ * without touching Scala code again.
  *
  * Pure derived view — owns no state (ADR-019 Pattern 4).
  */
@@ -50,8 +51,6 @@ object TreePreview:
       h3("Tree Preview"),
       div(
         cls := "tree-container",
-        fontFamily := "monospace",
-        whiteSpace.pre,
         children <-- treeSignal
       )
     )
@@ -73,43 +72,40 @@ object TreePreview:
     val childrenOf: Map[Option[String], List[TreeNode]] =
       allNodes.groupMap(_._2)(_._1)
 
-    // Root line
-    val rootLine = div(
-      cls := "tree-node tree-root",
+    // Root row
+    val rootRow = div(
+      cls := "tree-node-row tree-node-row--depth-0 tree-root",
+      dataAttr("depth") := "0",
       Icons.treeRoot("tree-root-icon"),
-      span(displayName)
+      span(cls := "tree-node-label", displayName)
     )
 
     // Render children of root (parent = None)
     val rootChildren = childrenOf.getOrElse(None, Nil)
-    val childElements = renderChildren(rootChildren, childrenOf, prefix = "", builderState)
+    val childRows = renderChildren(rootChildren, childrenOf, depth = 1, builderState)
 
-    rootLine :: childElements
+    rootRow :: childRows
 
-  /** Recursively render children with box-drawing prefixes. */
+  /** Recursively render children as individual DOM rows. */
   private def renderChildren(
     nodes: List[TreeNode],
     childrenOf: Map[Option[String], List[TreeNode]],
-    prefix: String,
+    depth: Int,
     builderState: TreeBuilderState
   ): List[HtmlElement] =
-    nodes.zipWithIndex.flatMap { case (node, idx) =>
-      val isLast = idx == nodes.size - 1
-      val connector = if isLast then "└── " else "├── "
-      val childPrefix = prefix + (if isLast then "    " else "│   ")
+    nodes.flatMap { node =>
+      val nodeKind = node match
+        case _: TreeNode.Portfolio => TreeNodeRow.NodeKind.Portfolio
+        case _: TreeNode.Leaf      => TreeNodeRow.NodeKind.Leaf
 
-      val nodeLine = div(
-        cls := "tree-node",
-        span(cls := "tree-branch", s"$prefix$connector"),
-        node.iconSvg,
-        span(cls := "tree-label", title := node.tooltip, s" ${node.label} "),
-        button(
-          cls := "remove-btn",
-          "✕",
-          onClick --> (_ => builderState.removeNode(node.name))
-        )
+      val nodeRow = TreeNodeRow(
+        label   = node.label,
+        kind    = nodeKind,
+        depth   = depth,
+        tooltip = Some(node.tooltip),
+        onRemove = Some(() => builderState.removeNode(node.name))
       )
 
       val grandchildren = childrenOf.getOrElse(Some(node.name), Nil)
-      nodeLine :: renderChildren(grandchildren, childrenOf, childPrefix, builderState)
+      nodeRow :: renderChildren(grandchildren, childrenOf, depth + 1, builderState)
     }

@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{TreeViewState, LoadState, ChartHoverBridge}
-import app.components.{Icons, ColorSwatchPicker}
+import app.components.{Icons, ColorSwatchPicker, TreeNodeRow}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
@@ -134,7 +134,7 @@ object TreeDetailView:
         case Some(root) =>
           div(
             cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, prefix = "", isLast = true, isRoot = true)
+            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, depth = 0)
           )
         case None =>
           div(cls := "tree-detail-error", p("Root node not found"))
@@ -142,25 +142,20 @@ object TreeDetailView:
 
   /** Recursively render a node and its children. */
   private def renderNode(
-    node: RiskNode,
-    childrenOf: Map[Option[NodeId], Seq[RiskNode]],
-    state: TreeViewState,
+    node:              RiskNode,
+    childrenOf:        Map[Option[NodeId], Seq[RiskNode]],
+    state:             TreeViewState,
     queryMatchedNodes: Signal[Set[NodeId]],
-    hoverBridge: ChartHoverBridge,
-    pickerOpenFor: Var[Option[NodeId]],
-    prefix: String,
-    isLast: Boolean,
-    isRoot: Boolean
+    hoverBridge:       ChartHoverBridge,
+    pickerOpenFor:     Var[Option[NodeId]],
+    depth:             Int
   ): HtmlElement =
-    val nodeId   = node.id
-    val children = childrenOf.getOrElse(Some(nodeId), Seq.empty)
+    val nodeId      = node.id
+    val children    = childrenOf.getOrElse(Some(nodeId), Seq.empty)
     val hasChildren = isPortfolio(node) && children.nonEmpty
 
     val isExpanded: Signal[Boolean] = state.expandedNodes.signal.map(_.contains(nodeId))
     val isSelected: Signal[Boolean] = state.selectedNodeId.signal.map(_.contains(nodeId))
-
-    val lineCls: Signal[String] =
-      isSelected.map(sel => if sel then "tree-detail-inline node-selected" else "tree-detail-inline")
 
     val borderStyle: Signal[String] =
       state.nodeColorMap
@@ -169,12 +164,6 @@ object TreeDetailView:
           borderStyleFor(nodeId, colorMap, queryMatched, hoveredId.contains(nodeId))
         }
 
-    val connector = if isRoot then "" else if isLast then "└── " else "├── "
-    val branchText = s"$prefix$connector"
-    val childPrefix =
-      if isRoot then ""
-      else prefix + (if isLast then "    " else "│   ")
-
     def handleNodeClick(ev: org.scalajs.dom.MouseEvent): Unit =
       if ev.ctrlKey || ev.metaKey then
         ev.preventDefault()
@@ -182,63 +171,57 @@ object TreeDetailView:
       else
         state.selectNode(nodeId)
 
-    // Is this node charted (has a colour)?
-    val isCharted: Signal[Boolean] = state.nodeColorMap.map(_.contains(nodeId))
-    // Current colour for this node (used by picker to show active swatch)
+    val isCharted: Signal[Boolean]             = state.nodeColorMap.map(_.contains(nodeId))
     val currentColor: Signal[Option[HexColor]] = state.nodeColorMap.map(_.get(nodeId))
-    // Is the picker open for this node?
-    val pickerOpen: Signal[Boolean] = pickerOpenFor.signal.map(_.contains(nodeId))
+    val pickerOpen: Signal[Boolean]            = pickerOpenFor.signal.map(_.contains(nodeId))
+
+    val nodeKind = node match
+      case _: RiskPortfolio => TreeNodeRow.NodeKind.Portfolio
+      case _: RiskLeaf      => TreeNodeRow.NodeKind.Leaf
+
+    val toggleSpan: HtmlElement =
+      if hasChildren then
+        span(
+          cls := "node-toggle",
+          cursor.pointer,
+          child <-- isExpanded.map {
+            case true  => Icons.chevronDown("toggle-icon")
+            case false => Icons.chevronRight("toggle-icon")
+          },
+          onClick --> (_ => state.toggleExpanded(nodeId))
+        )
+      else
+        span(cls := "node-toggle node-toggle-spacer", Icons.chevronRight("toggle-icon"))
+
+    val row = TreeNodeRow(
+      label         = nodeLabel(node),
+      kind          = nodeKind,
+      depth         = depth,
+      tooltip       = Some(nodeTooltip(node)),
+      onNodeClick   = Some(handleNodeClick),
+      isSelected    = isSelected,
+      prefixContent = List(toggleSpan),
+      suffixContent = List(
+        child.maybe <-- isCharted.combineWith(currentColor).map(renderSwatchTrigger(nodeId, pickerOpenFor, _, _)),
+        child.maybe <-- pickerOpen.combineWith(currentColor).map(renderPickerPopover(nodeId, state, pickerOpenFor, _, _))
+      )
+    ).amend(
+      cls := "tree-detail-inline",
+      styleAttr <-- borderStyle,
+      onMouseEnter --> { _ => hoverBridge.hoveredCurveId.set(Some(nodeId)) },
+      onMouseLeave --> { _ => hoverBridge.hoveredCurveId.set(None) },
+      position.relative
+    )
 
     div(
       cls := "tree-detail-node",
-      div(
-        cls := "tree-node",
-        span(cls := "tree-branch", branchText),
-        div(
-          cls <-- lineCls,
-          styleAttr <-- borderStyle,
-          position.relative,
-          onMouseEnter --> { _ => hoverBridge.hoveredCurveId.set(Some(nodeId)) },
-          onMouseLeave --> { _ => hoverBridge.hoveredCurveId.set(None) },
-          if hasChildren then
-            span(
-              cls := "node-toggle",
-              cursor.pointer,
-              child <-- isExpanded.map {
-                case true  => Icons.chevronDown("toggle-icon")
-                case false => Icons.chevronRight("toggle-icon")
-              },
-              onClick --> (_ => state.toggleExpanded(nodeId))
-            )
-          else
-            span(cls := "node-toggle node-toggle-spacer", Icons.chevronRight("toggle-icon")),
-          span(
-            cls := "node-icon-click-target",
-            cursor.pointer,
-            nodeIcon(node),
-            onClick --> handleNodeClick
-          ),
-          span(
-            cls := "node-label",
-            cursor.pointer,
-            title := nodeTooltip(node),
-            nodeLabel(node),
-            onClick --> handleNodeClick
-          ),
-          // Colour-swatch trigger icon — visible on hover for charted nodes (PD1(b))
-          child.maybe <-- isCharted.combineWith(currentColor).map(renderSwatchTrigger(nodeId, pickerOpenFor, _, _)),
-          // Picker popover — rendered when open for this node
-          child.maybe <-- pickerOpen.combineWith(currentColor).map(renderPickerPopover(nodeId, state, pickerOpenFor, _, _))
-        )
-      ),
-      // Children (only rendered when expanded)
+      row,
       if hasChildren then
         div(
           cls := "node-children",
           display <-- isExpanded.map(if _ then "block" else "none"),
-          children.toList.zipWithIndex.map { case (c, idx) =>
-            val childIsLast = idx == children.size - 1
-            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, childPrefix, childIsLast, isRoot = false)
+          children.toList.map { c =>
+            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, depth + 1)
           }
         )
       else

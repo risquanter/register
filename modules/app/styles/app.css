@@ -1329,6 +1329,39 @@ select.form-input option {
   min-width: 0;
 }
 
+/* ── Structural row classes (Phase B) ───────────────────────────────── */
+
+/* One row per node. depth variant applied dynamically by Scala. */
+.tree-node-row {
+  display: flex;
+  align-items: center;
+  padding: var(--sp-0-5) var(--sp-1);
+  border-radius: var(--radius-sm);
+}
+
+/* Indent spacer. Width = --_depth × indent-unit.
+   Vertical connector rails via repeating-linear-gradient (Phase D).
+   Depth-0 indent has width 0, so no rail renders for root-level nodes. */
+.tree-node-indent {
+  display: inline-block;
+  flex-shrink: 0;
+  width: calc(var(--_depth, 0) * var(--tree-indent-unit, 16px));
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent calc(var(--tree-indent-unit, 16px) / 2 - 0.5px),
+    var(--foreground-muted) calc(var(--tree-indent-unit, 16px) / 2 - 0.5px),
+    var(--foreground-muted) calc(var(--tree-indent-unit, 16px) / 2 + 0.5px),
+    transparent calc(var(--tree-indent-unit, 16px) / 2 + 0.5px),
+    transparent var(--tree-indent-unit, 16px)
+  );
+}
+
+.tree-node-label {
+  color: var(--foreground-variant);
+}
+
+/* Keep legacy .tree-node alias so any other consumers aren't broken. */
 .tree-node {
   display: flex;
   align-items: center;
@@ -1374,6 +1407,7 @@ select.form-input option {
   transition: opacity 0.15s, color 0.15s, background-color 0.15s;
 }
 
+.tree-node-row:hover .remove-btn,
 .tree-node:hover .remove-btn {
   opacity: 1;
 }
@@ -1535,11 +1569,11 @@ select.form-input option {
   transition: background-color 0.1s, border-width 80ms ease, padding-left 80ms ease;
 }
 
-.tree-detail-inline:hover {
+.tree-node-row:hover {
   background-color: var(--surface-overlay-hover);
 }
 
-.tree-detail-inline.node-selected {
+.tree-node-row.node-selected {
   background-color: var(--surface-overlay-active);
 }
 
