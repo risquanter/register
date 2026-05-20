@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import zio.prelude.Validation
 import zio.telemetry.opentelemetry.tracing.Tracing
-import zio.telemetry.opentelemetry.metrics.{Meter, Counter, Histogram}
+import zio.telemetry.opentelemetry.metrics.{Meter, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -37,9 +37,7 @@ class RiskTreeServiceLive private (
   tracing: Tracing,
   semaphore: SimulationSemaphore,
   // Pre-created metric instruments (cached at construction time)
-  operationsCounter: Counter[Long],
-  simulationDuration: Histogram[Double],
-  trialsCounter: Counter[Long]
+  operationsCounter: Counter[Long]
 ) extends RiskTreeService {
   
   import RiskTreeServiceLive.ErrorContext
@@ -130,32 +128,28 @@ class RiskTreeServiceLive private (
     success: Boolean,
     errorInfo: Option[ErrorContext] = None
   ): UIO[Unit] = {
-    // Build attributes list starting with base attributes
-    val baseAttrs = Vector(
-      Attribute.string("operation", operation),
-      Attribute.boolean("success", success)
-    )
-    
-    // Append error attributes if present
-    val allAttrs = errorInfo match {
-      case Some(ctx) =>
-        val errorAttrs = Vector(
-          Attribute.string("error_type", ctx.errorType),
-          Attribute.string("error_code", ctx.errorCode)
-        ) ++ ctx.errorField.map(field => Vector(Attribute.string("error_field", field))).getOrElse(Vector.empty)
-        baseAttrs ++ errorAttrs
-      
-      case None => baseAttrs
+    val attrs = errorInfo match {
+      case None =>
+        Attributes(
+          Attribute.string("operation", operation),
+          Attribute.boolean("success", success)
+        )
+      case Some(ErrorContext(errorType, errorCode, None)) =>
+        Attributes(
+          Attribute.string("operation", operation),
+          Attribute.boolean("success", success),
+          Attribute.string("error_type", errorType),
+          Attribute.string("error_code", errorCode)
+        )
+      case Some(ErrorContext(errorType, errorCode, Some(errorField))) =>
+        Attributes(
+          Attribute.string("operation", operation),
+          Attribute.boolean("success", success),
+          Attribute.string("error_type", errorType),
+          Attribute.string("error_code", errorCode),
+          Attribute.string("error_field", errorField)
+        )
     }
-    
-    // Convert Vector to individual arguments for Attributes constructor
-    val attrs = allAttrs match {
-      case v if v.size == 2 => Attributes(v(0), v(1))
-      case v if v.size == 4 => Attributes(v(0), v(1), v(2), v(3))
-      case v if v.size == 5 => Attributes(v(0), v(1), v(2), v(3), v(4))
-      case _ => Attributes(allAttrs.head) // Fallback, should not happen
-    }
-    
     operationsCounter.add(1, attrs)
   }
   
@@ -232,22 +226,6 @@ class RiskTreeServiceLive private (
       _ => recordOperation(name, success = true)
     )
   
-  /** Record simulation performance metrics
-    * 
-    * Tracks:
-    * - Simulation duration (histogram for percentiles)
-    * - Number of trials executed (counter for aggregation)
-    * 
-    * @param treeName Name of risk tree being simulated
-    * @param nTrials Number of Monte Carlo trials
-    * @param durationMs Elapsed time in milliseconds
-    */
-  private def recordSimulationMetrics(treeName: String, nTrials: Int, durationMs: Long): UIO[Unit] = {
-    val attrs = Attributes(Attribute.string("tree_name", treeName))
-    simulationDuration.record(durationMs.toDouble, attrs) *>
-      trialsCounter.add(nTrials.toLong, attrs)
-  }
-
   /** Allocate a fixed pool of SafeIds for request resolution. */
   private def allocateIds(count: Int): Task[List[SafeId.SafeId]] =
     IdGenerators.batch(count)
@@ -275,24 +253,24 @@ class RiskTreeServiceLive private (
       node.kind match {
         case RiskTreeRequests.NodeKind.Leaf =>
           val dist = leafDistributions(node.name)
-          RiskLeaf.unsafeApply(
-            id = node.id.value.toString,
-            name = node.name.value.toString,
-            distributionType = dist.distributionType.toString,
+          RiskLeaf.fromValidated(
+            id = node.id,
+            name = node.name,
+            distributionType = dist.distributionType,
             probability = dist.probability,
             percentiles = dist.percentiles,
             quantiles = dist.quantiles,
-            minLoss = dist.minLoss.map(_.toLong),
-            maxLoss = dist.maxLoss.map(_.toLong),
+            minLoss = dist.minLoss,
+            maxLoss = dist.maxLoss,
             parentId = parentIdFor(node),
-            terms = dist.terms.map(_.toInt)
+            terms = dist.terms
           )
 
         case RiskTreeRequests.NodeKind.Portfolio =>
           val childIds: Array[NodeId] = childrenByParent.get(Some(node.name)).toList.flatten.flatMap(nameToId.get).toArray
-          RiskPortfolio.unsafeApply(
-            id = node.id.value.toString,
-            name = node.name.value.toString,
+          RiskPortfolio.fromValidated(
+            id = node.id,
+            name = node.name,
             childIds = childIds,
             parentId = parentIdFor(node)
           )
@@ -451,14 +429,6 @@ object RiskTreeServiceLive {
     val operationsCounter = "risk_tree.operations"
     val operationsUnit = "1"
     val operationsDesc = "Number of risk tree operations"
-    
-    val simulationDuration = "risk_tree.simulation.duration_ms"
-    val simulationDurationUnit = "ms"
-    val simulationDurationDesc = "Duration of LEC simulation in milliseconds"
-    
-    val trialsCounter = "risk_tree.simulation.trials"
-    val trialsUnit = "1"
-    val trialsDesc = "Total number of simulation trials executed"
   }
   
   val layer: ZLayer[RiskTreeRepository & SimulationConfig & RiskResultResolver & InvalidationHandler & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
@@ -477,16 +447,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.operationsUnit),
         Some(MetricNames.operationsDesc)
       )
-      simDuration <- meter.histogram(
-        MetricNames.simulationDuration,
-        Some(MetricNames.simulationDurationUnit),
-        Some(MetricNames.simulationDurationDesc)
-      )
-      trials <- meter.counter(
-        MetricNames.trialsCounter,
-        Some(MetricNames.trialsUnit),
-        Some(MetricNames.trialsDesc)
-      )
-    } yield new RiskTreeServiceLive(repo, config, resolver, invalidationHandler, tracing, semaphore, opsCounter, simDuration, trials)
+    } yield new RiskTreeServiceLive(repo, config, resolver, invalidationHandler, tracing, semaphore, opsCounter)
   }
 }

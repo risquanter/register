@@ -41,12 +41,13 @@ sealed trait RiskNode {
 }
 
 object RiskNode {
+  import sttp.tapir.generic.auto.*
+  import com.risquanter.register.http.codecs.IronTapirCodecs.given
+
   // Recursive JSON codec - handles nested structures
   given codec: JsonCodec[RiskNode] = DeriveJsonCodec.gen[RiskNode]
-  
-  // Tapir schema: Use Schema.any to avoid recursive derivation
-  // This tells Tapir to skip validation and just pass through the JSON
-  given schema: Schema[RiskNode] = Schema.any[RiskNode]
+
+  given schema: Schema[RiskNode] = Schema.derived[RiskNode]
 }
 
 /** Leaf node: Represents an actual risk with a loss distribution.
@@ -109,7 +110,7 @@ object RiskLeaf {
   // TreeId/NodeId codecs live in their companion objects (OpaqueTypes.scala).
   
   // Temporary: Unsafe constructor for backward compatibility during migration
-  // TODO: Remove this in Step 3 when service is refactored
+  // Test-only helper: Use fromValidated in production code
   def unsafeApply(
     id: String,
     name: String,
@@ -130,6 +131,23 @@ object RiskLeaf {
         identity
       )
   }
+
+  /** Production constructor: accepts already-validated Iron types, bypasses re-validation.
+    * Use when domain types are already refined (e.g., from Distribution in buildNodes).
+    */
+  def fromValidated(
+    id: SafeId.SafeId,
+    name: SafeName.SafeName,
+    distributionType: DistributionType,
+    probability: Probability,
+    percentiles: Option[Array[Double]],
+    quantiles: Option[Array[Double]],
+    minLoss: Option[NonNegativeLong],
+    maxLoss: Option[NonNegativeLong],
+    parentId: Option[NodeId],
+    terms: Option[PositiveInt]
+  ): RiskLeaf =
+    new RiskLeaf(id, name, parentId, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, terms)
   
   /**
    * Smart constructor - validates all fields and constructs RiskLeaf with Iron types.
@@ -551,10 +569,7 @@ object RiskPortfolio {
   
   given codec: JsonCodec[RiskPortfolio] = JsonCodec(encoder, decoder)
   
-  /** Temporary backward compatibility method - bypasses validation.
-    * 
-    * WARNING: This method will be removed once service layer is refactored.
-    * Use create() for new code.
+  /** Test-only helper: Use fromValidated in production code.
     */
   def unsafeApply(
     id: String,
@@ -571,6 +586,17 @@ object RiskPortfolio {
     )
     new RiskPortfolio(safeId = validId, safeName = validName, parentId = parentId, childIds = childIds)
   }
+
+  /** Production constructor: accepts already-validated Iron types, bypasses re-validation.
+    * Use when domain types are already refined (e.g., from Distribution in buildNodes).
+    */
+  def fromValidated(
+    id: SafeId.SafeId,
+    name: SafeName.SafeName,
+    childIds: Array[NodeId],
+    parentId: Option[NodeId]
+  ): RiskPortfolio =
+    new RiskPortfolio(safeId = id, safeName = name, parentId = parentId, childIds = childIds)
   
   /** Helper: Create portfolio from string child IDs (for test convenience) */
   def unsafeFromStrings(

@@ -14,7 +14,7 @@ import io.opentelemetry.semconv.ServiceAttributes
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api
 import com.risquanter.register.configs.TelemetryConfig
-import com.risquanter.register.domain.data.iron.SafeUrl.*
+import com.risquanter.register.domain.data.iron.Url.*
 
 /** OpenTelemetry metrics layer using ZIO Telemetry
   * 
@@ -113,7 +113,7 @@ object MetricsLive {
       metricExporter <- ZIO.fromAutoCloseable(
         ZIO.succeed(
           OtlpGrpcMetricExporter.builder()
-            .setEndpoint(config.otlpEndpoint.asString)
+            .setEndpoint(config.otlpEndpoint.value)
             .build()
         )
       )

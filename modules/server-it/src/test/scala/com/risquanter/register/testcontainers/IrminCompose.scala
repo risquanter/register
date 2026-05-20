@@ -7,7 +7,7 @@ import scala.sys.process.*
 import zio.*
 
 import com.risquanter.register.configs.IrminConfig
-import com.risquanter.register.domain.data.iron.SafeUrl
+import com.risquanter.register.domain.data.iron.Url
 
 /**
  * Starts the repo's docker-compose (persistence profile) via local docker compose CLI and exposes IRMIN_URL.
@@ -26,7 +26,7 @@ object IrminCompose:
   val irminConfigLayer: ZLayer[Any, Throwable, IrminConfig] =
     layer >>> ZLayer.fromZIO(
       ZIO.serviceWithZIO[Resource] { res =>
-        ZIO.fromEither(SafeUrl.fromString(res.irminUrl).left.map(errs => new RuntimeException(errs.map(_.message).mkString("; "))))
+        ZIO.fromEither(Url.fromString(res.irminUrl).left.map(errs => new RuntimeException(errs.map(_.message).mkString("; "))))
           .map(url => IrminConfig(url = url))
       }
     )

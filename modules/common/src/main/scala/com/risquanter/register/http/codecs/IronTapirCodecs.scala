@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -149,4 +149,34 @@ object IronTapirCodecs {
     )(_.value)
 
   given Schema[UserId] = Schema.string
+
+  /** Schema for SafeName.SafeName for JSON body derivation. */
+  given Schema[SafeName.SafeName] = Schema.string.map[SafeName.SafeName](
+    (s: String) => SafeName.fromString(s).toOption
+  )(_.value)
+
+  /** Schema for DistributionType for JSON body derivation. */
+  given Schema[DistributionType] = Schema.string.map[DistributionType](
+    (s: String) => ValidationUtil.refineDistributionType(s).toOption
+  )(identity)
+
+  /** Schema for Probability for JSON body derivation. */
+  given Schema[Probability] = Schema.schemaForDouble.map[Probability](
+    d => ValidationUtil.refineProbability(d).toOption
+  )(identity)
+
+  /** Schema for NonNegativeLong for JSON body derivation. */
+  given Schema[NonNegativeLong] = Schema.schemaForLong.map[NonNegativeLong](
+    l => ValidationUtil.refineNonNegativeLong(l).toOption
+  )(identity)
+
+  /** Schema for PositiveInt for JSON body derivation. */
+  given Schema[PositiveInt] = Schema.schemaForInt.map[PositiveInt](
+    i => ValidationUtil.refinePositiveInt(i).toOption
+  )(identity)
+
+  /** Schema for NonNegativeInt for JSON body derivation. */
+  given Schema[NonNegativeInt] = Schema.schemaForInt.map[NonNegativeInt](
+    i => ValidationUtil.refineNonNegativeInt(i).toOption
+  )(identity)
 }

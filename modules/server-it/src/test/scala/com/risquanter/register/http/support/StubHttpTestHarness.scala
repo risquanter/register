@@ -8,7 +8,7 @@ import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig}
-import com.risquanter.register.domain.data.iron.SafeUrl
+import com.risquanter.register.domain.data.iron.Url
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController}
@@ -99,7 +99,7 @@ object StubHttpTestHarness {
       case None => ZIO.succeed(None)
       case Some(urlStr) =>
         for
-          url <- ZIO.fromEither(SafeUrl.fromString(urlStr).left.map(errs => new RuntimeException(errs.map(_.message).mkString("; "))))
+          url <- ZIO.fromEither(Url.fromString(urlStr).left.map(errs => new RuntimeException(errs.map(_.message).mkString("; "))))
           cfg  = IrminConfig(url = url)
           backend <- backendFor(ZLayer.succeed(cfg) >>> IrminClientLive.layer >>> RiskTreeRepositoryIrmin.layer, simConfig)
         yield Some(backend)

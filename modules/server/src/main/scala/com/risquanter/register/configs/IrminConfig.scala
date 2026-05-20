@@ -3,8 +3,8 @@ package com.risquanter.register.configs
 import zio.*
 import zio.config.*
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
-import com.risquanter.register.domain.data.iron.{BranchRef, SafeUrl}
-import com.risquanter.register.domain.data.iron.SafeUrl.*
+import com.risquanter.register.domain.data.iron.{BranchRef, Url}
+import com.risquanter.register.domain.data.iron.Url.*
 
 /**
   * Configuration for Irmin GraphQL client.
@@ -18,14 +18,14 @@ import com.risquanter.register.domain.data.iron.SafeUrl.*
   * @param healthCheckRetries Number of retries for startup health check (default 0; bounded to non-negative)
   */
 final case class IrminConfig(
-  url: SafeUrl,
+  url: Url.Url,
   branch: BranchRef = BranchRef.Main,
   timeoutSeconds: Int = 30,
   healthCheckTimeoutMillis: Int = 5000,
   healthCheckRetries: Int = 0
 ) {
   /** Full GraphQL endpoint URL */
-  def graphqlUrl: String = s"${url.asString}/graphql"
+  def graphqlUrl: String = s"${url.value}/graphql"
   
   /** Request timeout as Duration */
   def timeout: Duration = timeoutSeconds.seconds
@@ -35,17 +35,17 @@ final case class IrminConfig(
 }
 
 object IrminConfig {
-  // SafeUrl config descriptor — reads a string and validates through Iron URL constraint.
-  // IMPORTANT: Exposed as DeriveConfig[SafeUrl], NOT Config[SafeUrl].
-  // A bare `given Config[SafeUrl]` in this companion would leak through the
+  // Url config descriptor — reads a string and validates through Iron URL constraint.
+  // IMPORTANT: Exposed as DeriveConfig[Url.Url], NOT Config[Url.Url].
+  // A bare `given Config[Url.Url]` in this companion would leak through the
   // `deriveConfigFromConfig` bridge in zio-config-magnolia's package object,
   // causing Magnolia's `summonInline[DeriveConfig[String]]` to resolve the
   // URL-validating descriptor for ALL string fields (branch, etc.) — since
-  // SafeUrl erases to String at runtime.  This follows the same pattern as
+  // Url.Url erases to String at runtime.  This follows the same pattern as
   // SimulationConfig's `given DeriveConfig[PositiveInt]`.
-  private val safeUrlConfig: zio.Config[SafeUrl] =
+  private val urlConfig: zio.Config[Url.Url] =
     zio.Config.string.mapOrFail { s =>
-      SafeUrl
+      Url
         .fromString(s, "url")
         .left
         .map(errs => zio.Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
@@ -59,7 +59,7 @@ object IrminConfig {
         .map(errs => zio.Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
     }
 
-  given DeriveConfig[SafeUrl] = DeriveConfig(safeUrlConfig)
+  given DeriveConfig[Url.Url] = DeriveConfig(urlConfig)
   given DeriveConfig[BranchRef] = DeriveConfig(branchRefConfig)
   given DeriveConfig[IrminConfig] = DeriveConfig.derived
 

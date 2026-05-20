@@ -4,9 +4,9 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 
-object SafeUrlSpec extends ZIOSpecDefault:
+object UrlSpec extends ZIOSpecDefault:
   override def spec =
-    suite("SafeUrlSpec")(
+    suite("UrlSpec")(
       test("accepts valid http/https service URLs") {
         val valid = List(
           "http://localhost:9080",
@@ -21,7 +21,7 @@ object SafeUrlSpec extends ZIOSpecDefault:
           "http://service:3000",
           "http://service:3000/path/to/resource?x=1#frag"
         )
-        val results = valid.map(SafeUrl.fromString(_))
+        val results = valid.map(Url.fromString(_))
         assertTrue(results.forall(_.isRight))
       },
       test("rejects unsupported or malformed URLs") {
@@ -38,7 +38,7 @@ object SafeUrlSpec extends ZIOSpecDefault:
           "http://exa mple.com", // embedded space
           "https://[::1" // malformed ipv6
         )
-        val results = invalid.map(SafeUrl.fromString(_))
+        val results = invalid.map(Url.fromString(_))
         assertTrue(results.forall(_.isLeft))
       }
     )

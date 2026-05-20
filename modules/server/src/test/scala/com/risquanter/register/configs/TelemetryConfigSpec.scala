@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 
-import com.risquanter.register.domain.data.iron.SafeUrl.*
+import com.risquanter.register.domain.data.iron.Url.*
 
 object TelemetryConfigSpec extends ZIOSpecDefault {
 
@@ -17,7 +17,7 @@ object TelemetryConfigSpec extends ZIOSpecDefault {
       } yield assertTrue(
         config.serviceName == "risk-register-test",
         config.instrumentationScope == "com.risquanter.register.test",
-        config.otlpEndpoint.asString == "http://localhost:4317",
+        config.otlpEndpoint.value == "http://localhost:4317",
         config.devExportIntervalSeconds == 1,
         config.prodExportIntervalSeconds == 10
       )
@@ -50,7 +50,7 @@ object TelemetryConfigSpec extends ZIOSpecDefault {
       assertTrue(
         config.serviceName == "test-service",
         config.instrumentationScope == "test.scope",
-        config.otlpEndpoint.asString == "http://test:4317",
+        config.otlpEndpoint.value == "http://test:4317",
         config.devExportInterval.toSeconds == 2L,
         config.prodExportInterval.toSeconds == 30L
       )

@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, SafeUrl, NodeId, TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.domain.data.RiskPortfolio

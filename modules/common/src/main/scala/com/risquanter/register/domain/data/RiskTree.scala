@@ -36,15 +36,29 @@ final case class RiskTree(
 
 object RiskTree {
   import sttp.tapir.Schema
+  import sttp.tapir.generic.auto.*
+  import com.risquanter.register.http.codecs.IronTapirCodecs.given
   import com.risquanter.register.domain.data.iron.SafeId
-  
-  // Tapir schema: Use Schema.any to avoid recursive derivation issues with Iron types
-  // TODO: Phase D - Replace with proper Schema derivation once Iron type schemas are implemented
-  given schema: Schema[RiskTree] = Schema.any[RiskTree]
-  
+
+  // Wire-shape DTO: mirrors JSON wire format (omits non-serialized TreeIndex)
+  private case class RiskTreeJson(
+    id: TreeId,
+    name: SafeName.SafeName,
+    nodes: Seq[RiskNode],
+    rootId: NodeId
+  )
+  private object RiskTreeJson:
+    given jsonCodec: JsonCodec[RiskTreeJson] = DeriveJsonCodec.gen[RiskTreeJson]
+
+  given schema: Schema[RiskTree] =
+    Schema.derived[RiskTreeJson]
+      .map(w => RiskTree.fromNodes(w.id, w.name, w.nodes, w.rootId).toEither.toOption)(
+        t => RiskTreeJson(t.id, t.name, t.nodes, t.rootId)
+      )
+
   // JSON codecs for Iron refined types
   // TreeId and NodeId codecs are in their companion objects (OpaqueTypes.scala)
-  
+
   given safeNameEncoder: JsonEncoder[SafeName.SafeName] = 
     JsonEncoder[String].contramap(_.value)
   
@@ -54,16 +68,6 @@ object RiskTree {
   // TreeIndex is NOT serialized (reconstructed from nodes on load)
   // Custom codec that omits index field and rebuilds it from nodes on deserialization
   given codec: JsonCodec[RiskTree] = {
-    // Create temporary struct without index for serialization
-    case class RiskTreeJson(
-      id: TreeId,
-      name: SafeName.SafeName,
-      nodes: Seq[RiskNode],
-      rootId: NodeId
-    )
-    
-    given jsonCodec: JsonCodec[RiskTreeJson] = DeriveJsonCodec.gen[RiskTreeJson]
-    
     JsonCodec(
       // Encoder: Serialize without index
       JsonEncoder[RiskTreeJson].contramap[RiskTree] { tree =>

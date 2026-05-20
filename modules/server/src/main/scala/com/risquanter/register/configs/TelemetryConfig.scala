@@ -5,7 +5,7 @@ import java.time.Duration
 import zio.Config
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
 
-import com.risquanter.register.domain.data.iron.SafeUrl
+import com.risquanter.register.domain.data.iron.Url
 
 /** OpenTelemetry configuration
   * 
@@ -19,7 +19,7 @@ import com.risquanter.register.domain.data.iron.SafeUrl
 final case class TelemetryConfig(
   serviceName: String,
   instrumentationScope: String,
-  otlpEndpoint: SafeUrl,
+  otlpEndpoint: Url.Url,
   devExportIntervalSeconds: Int,
   prodExportIntervalSeconds: Int
 ) {
@@ -32,13 +32,13 @@ final case class TelemetryConfig(
 }
 
 object TelemetryConfig:
-  private val safeUrlConfig: Config[SafeUrl] =
+  private val urlConfig: Config[Url.Url] =
     Config.string.mapOrFail { s =>
-      SafeUrl
+      Url
         .fromString(s, "otlpEndpoint")
         .left
         .map(errs => Config.Error.InvalidData(message = errs.map(_.message).mkString("; ")))
     }
 
-  given DeriveConfig[SafeUrl] = DeriveConfig(safeUrlConfig)
+  given DeriveConfig[Url.Url] = DeriveConfig(urlConfig)
   given DeriveConfig[TelemetryConfig] = DeriveConfig.derived

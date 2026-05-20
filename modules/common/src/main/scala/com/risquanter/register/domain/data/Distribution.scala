@@ -50,11 +50,24 @@ object Distribution {
       case "expert" =>
         (percentiles, quantiles) match {
           case (Some(pct), Some(q)) if pct.nonEmpty && q.nonEmpty && pct.length == q.length =>
-            termsV match {
+            val pctErrors = pct.toList.zipWithIndex.collect {
+              case (p, i) if p.isNaN || p.isInfinite || p <= 0.0 || p >= 1.0 =>
+                ValidationError(s"$fieldPrefix.percentiles[$i]", ValidationErrorCode.INVALID_RANGE, "Percentile must be strictly in (0, 1)")
+            }
+            val qtErrors = q.toList.zipWithIndex.collect {
+              case (qt, i) if qt.isNaN || qt.isInfinite || qt < 0.0 =>
+                ValidationError(s"$fieldPrefix.quantiles[$i]", ValidationErrorCode.INVALID_RANGE, "Quantile loss amount must be non-negative")
+            }
+            val allElementErrors = pctErrors ++ qtErrors
+            val elementV: Validation[ValidationError, Unit] = toValidation(
+              if allElementErrors.isEmpty then Right(()) else Left(allElementErrors)
+            )
+            val termsCheck: Validation[ValidationError, Unit] = termsV match {
               case Validation.Success(_, Some(t)) if t.toInt > pct.length =>
                 Validation.fail(ValidationError(s"$fieldPrefix.terms", ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.termsOutOfRange))
               case _ => Validation.succeed(())
             }
+            Validation.validateWith(elementV, termsCheck)((_, _) => ())
           case (Some(_), Some(q)) if q.isEmpty => Validation.fail(ValidationError(s"$fieldPrefix.quantiles", ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires quantiles"))
           case (Some(pct), Some(q)) if pct.length != q.length =>
             Validation.fail(ValidationError(s"$fieldPrefix.distributionType", ValidationErrorCode.INVALID_COMBINATION, s"percentiles and quantiles length mismatch (${pct.length} vs ${q.length})"))

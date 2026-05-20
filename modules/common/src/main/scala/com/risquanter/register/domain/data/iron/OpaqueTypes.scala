@@ -22,15 +22,12 @@ type ValidEmail = String :| (Not[Blank] & MaxLength[50] & Match["[^@]+@[^@]+"])
 // URL constraints for service/internal calls (http/https with hostname, IPv4, or IPv6, optional port/path)
 type UrlConstraint = Not[Blank] & MaxLength[200] & Match["^(?i)https?://(?:\\[[0-9a-fA-F:]+\\]|[^/:#?\\s]+)(?::\\d+)?(?:/[^\\s]*)?$"]
 
-// Service URL (absolute http/https with host, optional port)
-type SafeUrl = String :| UrlConstraint
-
 type BranchRefConstraint =
   Not[Blank] & MaxLength[160] & Match["^(main|scenarios/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63})$"]
 
 type BranchRefStr = String :| BranchRefConstraint
 
-// General URL alias (kept for API parity; same constraint set as SafeUrl)
+// Validated URL string — base alias underlying object Url
 type ValidUrl = String :| UrlConstraint
 
 // Non-negative long values (IDs, counts, amounts)
@@ -128,49 +125,29 @@ object Email:
   def fromString(s: String): Either[List[ValidationError], Email] = 
     ValidationUtil.refineEmail(s)
 
-// Opaque type for URLs
+// Opaque type for URLs (service endpoints, config, and domain URL fields)
 object Url:
   opaque type Url = ValidUrl
-  
+
   object Url:
     def apply(s: ValidUrl): Url = s
     def unapply(u: Url): Option[ValidUrl] = Some(u)
-    
+
   extension (u: Url)
     def value: ValidUrl = u
-  
+
+  given JsonEncoder[Url] = JsonEncoder[String].contramap(_.value.toString)
+  given JsonDecoder[Url] = JsonDecoder[String].mapOrFail(s =>
+    fromString(s).left.map(_.map(_.message).mkString(", ")))
+
   // Convenience constructor from plain String
-  def fromString(s: String): Either[List[ValidationError], Url] = 
-    ValidationUtil.refineUrl(s)
-
-// Opaque type for service URLs
-object SafeUrl:
-  def apply(s: SafeUrl): SafeUrl = s
-  def unapply(u: SafeUrl): Option[SafeUrl] = Some(u)
-
-  extension (u: SafeUrl)
-    def value: SafeUrl = u
-    def asString: String = u
-
-  def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], SafeUrl] =
-    val sanitized = if s == null then "" else s.trim
-    sanitized
-      .refineEither[UrlConstraint]
-      .left
-      .map(err =>
-        List(
-          ValidationError(
-            field = fieldPath,
-            code = ValidationErrorCode.INVALID_FORMAT,
-            message = s"URL '$sanitized' is invalid: $err"
-          )
-        )
-      )
+  def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], Url] =
+    ValidationUtil.refineUrl(s, fieldPath)
 
 case class BranchRef(toBranchRef: BranchRefStr)
 
 object BranchRef:
-  val Main: BranchRef = BranchRef("main".refineUnsafe[BranchRefConstraint])
+  val Main: BranchRef = BranchRef("main")
 
   def fromString(s: String, fieldPath: String = "branch"): Either[List[ValidationError], BranchRef] =
     val sanitized = if s == null then "" else s.trim

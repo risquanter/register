@@ -6,7 +6,7 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.domain.data.iron.BranchRef
-import com.risquanter.register.domain.data.iron.SafeUrl.*
+import com.risquanter.register.domain.data.iron.Url.*
 
 object ValidatedConfigSpec extends ZIOSpecDefault {
 
@@ -22,7 +22,7 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
     deriveConfig[IrminConfig].nested("register", "irmin")
 
   def spec = suite("ValidatedConfig")(
-    test("loads TelemetryConfig with validated SafeUrl endpoint") {
+    test("loads TelemetryConfig with validated Url endpoint") {
       withConfig(
         "register.telemetry.serviceName" -> "risk-register",
         "register.telemetry.instrumentationScope" -> "com.risquanter.register",
@@ -30,7 +30,7 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
         "register.telemetry.devExportIntervalSeconds" -> "5",
         "register.telemetry.prodExportIntervalSeconds" -> "60"
       ) {
-        ZIO.config(telemetryConfig).map(config => assertTrue(config.otlpEndpoint.asString == "http://localhost:4317"))
+        ZIO.config(telemetryConfig).map(config => assertTrue(config.otlpEndpoint.value == "http://localhost:4317"))
       }
     },
     test("rejects invalid telemetry OTLP endpoint") {
