@@ -6,7 +6,8 @@ description: >
   completed implementation work. Covers: algebraic design-first pass,
   ADR compliance, type safety, functional design, API surface, duplication,
   security, compiler hygiene, test quality, plan fidelity.
-user-invocable: false
+user-invocable: true
+argument-hint: "files or diff to review (attach changed files, or describe the scope)"
 ---
 
 # Code Quality Review — Register
@@ -28,7 +29,36 @@ practices to catch issues the checklist has not yet anticipated.
 
 ---
 
-## Pass 0 — Algebraic design-first (run before all other criteria)
+## Pass 0a — Domain primitive typing (Layer A₀, run first)
+
+For every **new field, parameter, case class member, or function parameter** in the
+diff, apply the Layer A₀ questions from `scala-algebraic-design.instructions.md`:
+
+- Is the type `String`, `Int`, `Long`, or `Double` for a concept that has a natural
+  valid-value subset? → Missing Iron refinement. **MUST-FIX.**
+  Signal words: `name`, `label`, `slug`, `id`, `email`, `url`, `probability`,
+  `count`, `weight`, `rate`, `score`, `description`, `title`, `path`.
+- Is there a maximum/minimum length implied by a DB column, protocol, or UI limit
+  that is not expressed in the type? **MUST-FIX.**
+- Is there a character-set restriction (HTML rendering, path, URL segment) that is
+  not expressed in the type? **MUST-FIX** — missing restriction is an injection
+  surface before any processing runs.
+- Could this field be confused with another field of the same raw type? (Two
+  `String` IDs for distinct concepts.) → Missing nominal wrapper per ADR-018.
+  **MUST-FIX.**
+- Does the field originate from user input and lack an Iron refinement? **MUST-FIX.**
+
+**Within-domain adhesion:**
+- Is `.value` called on an Iron type outside of: (a) a Tapir codec or JSON
+  encoder, (b) a repository query, (c) a third-party library bridge?
+  Every other `.value` call is a within-domain widening. **SHOULD-FIX.**
+- Is there a helper function / private method that accepts `String` where the
+  caller is passing a refined type's raw value? The function signature should
+  accept the refined type. **SHOULD-FIX.**
+
+---
+
+## Pass 0b — Algebraic structure (Layers A/B, run after 0a)
 
 Ask: did the implementation reach for algebraic structures proactively, or did it
 invent ad-hoc logic that a Monoid / Functor / Validation would have eliminated?
@@ -41,8 +71,8 @@ invent ad-hoc logic that a Monoid / Functor / Validation would have eliminated?
   collapse to a single line? **SHOULD-FIX** — structural gap, not style.
 - Is there an inline multi-line lambda where a named companion function would make
   the operation testable and the call site a one-liner? **SHOULD-FIX.**
-- Was `scala-algebraic-design.instructions.md` consulted when the new type was
-  introduced? Check: does the type have the algebraic instances its usage implies?
+- Does the new type have the algebraic instances its usage implies? A type that is
+  folded over a collection but has no `Identity` instance is incomplete. **SHOULD-FIX.**
 
 ---
 
@@ -64,6 +94,7 @@ invent ad-hoc logic that a Monoid / Functor / Validation would have eliminated?
 - Are variance annotations (`+A`, `-A`) correct and intentional?
 - Does new generic code introduce unchecked type erasure at runtime?
 - Are service / repository method parameters Iron types, never raw `String` or `Int`?
+  (If not, this is also a Pass 0a MUST-FIX.)
 
 ---
 
@@ -143,3 +174,40 @@ This is a **MUST-FIX** criterion by default.
   plan: does the implementation match?
 - Were all Decision Triggers honoured (no silent deviations)?
 - Were all Mandatory Review Halts observed?
+
+---
+
+## 11. Placement & Holistic Improvement
+
+### Co-location
+
+New Iron refinements, opaque types, nominal wrappers, and smart constructors must
+be co-located with existing definitions of the same kind. Follow existing file and
+naming conventions unless there is an explicit improvement reason:
+
+| New definition | Where it lives |
+|---|---|
+| Iron type alias / opaque type | Alongside existing refined types in the relevant `Types.scala` or companion object |
+| Smart constructor | Companion object of the domain type it validates |
+| Tapir codec for an Iron type | `IronTapirCodecs.scala` or the relevant codec file |
+| Validation utility / refiner | `ValidationUtil` alongside existing refiners |
+| Nominal wrapper (`case class NodeId`) | Alongside other ID wrappers in the same file |
+
+A new Iron type that is not co-located with its siblings creates a split source of
+truth and makes the Layer A₀ recognition questions harder to answer in future.
+**SHOULD-FIX** if misplaced; **MUST-FIX** if it duplicates an existing definition.
+
+### Holistic improvement protocol
+
+If a systemic issue is identified during review — e.g., multiple fields across
+several files that should be Iron-refined, a pattern violation repeated in N places,
+or a naming inconsistency in all existing wrappers —:
+
+1. **Do not fix individual instances silently or piecemeal.** A partial fix creates
+   inconsistency and will be harder to complete later.
+2. **Surface the full scope:** count the occurrences, name the files and line ranges.
+3. **Present a holistic fix plan** using the standard Decision Required format.
+4. **Await user approval** before touching any instance.
+
+Piecemeal fixes of systemic issues are themselves a **SHOULD-FIX** finding—
+they introduce partial states that are worse than the original consistency.
