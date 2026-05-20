@@ -4,12 +4,15 @@ import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.{Validation, ForEach}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.{Distribution, RiskTree, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
 import com.risquanter.register.frontend.TreeBuilderLogic
 
-final case class PortfolioDraft(name: String, parent: Option[String])
+final case class PortfolioDraft(
+  name: SafeName.SafeName,
+  parent: Option[SafeName.SafeName]
+)
 final case class LeafDistributionDraft(
   distributionType: String,
   probability: Double,
@@ -19,7 +22,11 @@ final case class LeafDistributionDraft(
   quantiles: Option[Array[Double]],
   terms: Option[Int] = None
 )
-final case class LeafDraft(name: String, parent: Option[String], distribution: LeafDistributionDraft)
+final case class LeafDraft(
+  name: SafeName.SafeName,
+  parent: Option[SafeName.SafeName],
+  distribution: LeafDistributionDraft
+)
 
 /** Type-safe field identifiers for the tree builder form. */
 enum TreeBuilderField:
@@ -73,22 +80,18 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   val parentOptions: Signal[List[String]] =
     portfoliosVar.signal.combineWith(leavesVar.signal).map { (ps, ls) =>
       val rootTaken = ps.exists(_.parent.isEmpty) || ls.exists(_.parent.isEmpty)
-      val base = ps.map(_.name)
+      val base = ps.map(_.name.value)   // .value at UI-string boundary: parentSelect takes Signal[List[String]]
       if rootTaken then base else rootLabel :: base
     }
 
-  def addPortfolio(rawName: String, rawParent: Option[String]): Validation[ValidationError, PortfolioDraft] =
-    val result = for
-      name <- validateName(rawName, "portfolio.name")
-      parent <- validateParentName(rawParent, "portfolio.parentName")
-      draft = PortfolioDraft(name, parent)
-      _ <- TreeBuilderLogic.preValidateTopology(
-        (portfoliosVar.now() :+ draft).map(p => p.name -> p.parent),
-        leavesVar.now().map(l => l.name -> l.parent)
-      )
-    yield draft
+  def addPortfolio(name: SafeName.SafeName, parent: Option[SafeName.SafeName]): Validation[ValidationError, PortfolioDraft] =
+    val draft = PortfolioDraft(name, parent)
+    val result = TreeBuilderLogic.preValidateTopology(
+      (portfoliosVar.now() :+ draft).map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
+      leavesVar.now().map(l => l.name.value.toString -> l.parent.map(_.value.toString))
+    ).map(_ => draft)
     result match
-      case Validation.Success(_, draft) => portfoliosVar.update(_ :+ draft)
+      case Validation.Success(_, _) => portfoliosVar.update(_ :+ draft)
       case _ => ()
     result
 
@@ -99,8 +102,8 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       _ <- validateDistribution(dist)
       draft = LeafDraft(name, parent, dist)
       _ <- TreeBuilderLogic.preValidateTopology(
-        portfoliosVar.now().map(p => p.name -> p.parent),
-        (leavesVar.now() :+ draft).map(l => l.name -> l.parent)
+        portfoliosVar.now().map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
+        (leavesVar.now() :+ draft).map(l => l.name.value.toString -> l.parent.map(_.value.toString))
       )
     yield draft
     result match
@@ -112,9 +115,9 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   def removeNode(name: String): Unit =
     val portfolios = portfoliosVar.now()
     val leaves = leavesVar.now()
-    val toRemove = TreeBuilderLogic.collectCascade(Set(name), portfolios.map(p => p.name -> p.parent))
-    portfoliosVar.set(portfolios.filterNot(p => toRemove.contains(p.name)))
-    leavesVar.set(leaves.filterNot(l => toRemove.contains(l.name) || l.parent.exists(toRemove.contains)))
+    val toRemove = TreeBuilderLogic.collectCascade(Set(name), portfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)))
+    portfoliosVar.set(portfolios.filterNot(p => toRemove.contains(p.name.value.toString)))
+    leavesVar.set(leaves.filterNot(l => toRemove.contains(l.name.value.toString) || l.parent.exists(n => toRemove.contains(n.value.toString))))
 
   /** Build backend request with client-side validation. */
   def toRequest(): Validation[ValidationError, RiskTreeDefinitionRequest] =
@@ -123,10 +126,10 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val treeNameV = validateName(treeNameVar.now(), "tree.name")
     val portfoliosV = Validation.validateAll(portfolios.map(toPortfolioRequest))
     val leavesV = Validation.validateAll(leaves.map(toLeafRequest))
-    val topologyV = TreeBuilderLogic.fullValidateTopology(portfolios.map(p => p.name -> p.parent), leaves.map(l => l.name -> l.parent))
+    val topologyV = TreeBuilderLogic.fullValidateTopology(portfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)), leaves.map(l => l.name.value.toString -> l.parent.map(_.value.toString)))
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, topologyV) { (treeName, ports, leafs, _) =>
-      RiskTreeDefinitionRequest(treeName, ports, leafs)
+      RiskTreeDefinitionRequest(treeName.value, ports, leafs)
     }
 
   /** Build update request — full replacement with all nodes as "new"
@@ -179,7 +182,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     }.toList
 
     currentDraftVar.set(None)
-    treeNameVar.set(tree.name.value.toString)
+    treeNameVar.set(tree.name.value)
     portfoliosVar.set(portfolios)
     leavesVar.set(leaves)
     editingTreeId.set(Some(tree.id))
@@ -189,10 +192,10 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   // Helpers
   // ------------------------------------------------------------
 
-  private def validateName(value: String, field: String): Validation[ValidationError, String] =
-    toValidation(ValidationUtil.refineName(value, field)).map(_.value)
+  private def validateName(value: String, field: String): Validation[ValidationError, SafeName.SafeName] =
+    toValidation(ValidationUtil.refineName(value, field))
 
-  private def validateParentName(raw: Option[String], field: String): Validation[ValidationError, Option[String]] =
+  private def validateParentName(raw: Option[String], field: String): Validation[ValidationError, Option[SafeName.SafeName]] =
     raw match
       case Some(v) if v.trim.nonEmpty => validateName(v, field).map(Some(_))
       case _ => Validation.succeed(None)
@@ -210,20 +213,20 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     )
 
   private def toPortfolioRequest(draft: PortfolioDraft): Validation[ValidationError, RiskPortfolioDefinitionRequest] =
-    Validation.succeed(RiskPortfolioDefinitionRequest(draft.name, draft.parent))
+    Validation.succeed(RiskPortfolioDefinitionRequest(draft.name.value, draft.parent.map(_.value)))
 
   private def toLeafRequest(draft: LeafDraft): Validation[ValidationError, RiskLeafDefinitionRequest] =
-    validateDistribution(draft.distribution).map { _ =>
+    validateDistribution(draft.distribution).map { dist =>
       RiskLeafDefinitionRequest(
-        name = draft.name,
-        parentName = draft.parent,
-        distributionType = draft.distribution.distributionType,
-        probability = draft.distribution.probability,
-        minLoss = draft.distribution.minLoss,
-        maxLoss = draft.distribution.maxLoss,
-        percentiles = draft.distribution.percentiles,
-        quantiles = draft.distribution.quantiles,
-        terms = draft.distribution.terms
+        name             = draft.name.value,
+        parentName       = draft.parent.map(_.value),
+        distributionType = dist.distributionType.toString,
+        probability      = dist.probability,
+        minLoss          = dist.minLoss.map(identity),
+        maxLoss          = dist.maxLoss.map(identity),
+        percentiles      = dist.percentiles,
+        quantiles        = dist.quantiles,
+        terms            = dist.terms.map(_.toInt)
       )
     }
 

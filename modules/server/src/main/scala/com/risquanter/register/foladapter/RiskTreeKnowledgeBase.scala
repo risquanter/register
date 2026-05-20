@@ -61,12 +61,12 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
 
   /** Maps node name → NodeId for reverse lookups from evaluation output. */
   val nameToNodeId: Map[String, NodeId] =
-    tree.index.nodes.map { case (nodeId, node) => node.name -> nodeId }
+    tree.index.nodes.map { case (nodeId, node) => node.name.value -> nodeId }
 
   /** Maps node name → RiskResult for simulation dispatch. */
   private val nameToResult: Map[String, RiskResult] =
     results.flatMap { case (nodeId, result) =>
-      tree.index.nodes.get(nodeId).map(_.name -> result)
+      tree.index.nodes.get(nodeId).map(_.name.value -> result)
     }
 
   // ── Percentile computation ─────────────────────────────────────────
@@ -115,7 +115,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
     * via `ZIO.logWarning` so any DTO-bypass path is observable.
     */
   val nameCollisions: List[String] =
-    val allNames = tree.index.nodes.values.map(_.name).toList
+    val allNames = tree.index.nodes.values.map(_.name.value).toList
     val reserved = allNames.filter(reservedFolNames.contains).distinct.sorted
       .map(n => s"reserved:$n")
     val duplicates = allNames
@@ -140,7 +140,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
     */
   private val nodeNameConstants: Map[String, TypeId] =
     tree.index.nodes.values.iterator
-      .map(_.name)
+      .map(_.name.value)
       .filterNot(reservedFolNames.contains)
       .map(_ -> assetSort)
       .toMap
@@ -178,16 +178,16 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
   private val index: TreeIndex = tree.index
 
   private val leafNames: Set[String] =
-    index.leafIds.flatMap(id => index.nodes.get(id).map(_.name))
+    index.leafIds.flatMap(id => index.nodes.get(id).map(_.name.value))
 
   private val portfolioNames: Set[String] =
-    index.nodes.collect { case (_, p: RiskPortfolio) => p.name }.toSet
+    index.nodes.collect { case (_, p: RiskPortfolio) => p.name.value }.toSet
 
   /** Pre-computed children lookup: parent name → Set[child name]. */
   private val childrenByName: Map[String, Set[String]] =
     index.children.map { case (parentId, childIds) =>
-      val parentName = index.nodes.get(parentId).map(_.name).getOrElse("")
-      val childNames = childIds.flatMap(id => index.nodes.get(id).map(_.name)).toSet
+      val parentName = index.nodes.get(parentId).map(_.name.value).getOrElse("")
+      val childNames = childIds.flatMap(id => index.nodes.get(id).map(_.name.value.toString)).toSet
       parentName -> childNames
     }
 
@@ -200,8 +200,8 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
   private val descendantsByName: Map[String, Set[String]] =
     index.nodes.map { case (nodeId, node) =>
       val descIds = index.descendants(nodeId) - nodeId  // strict (irreflexive)
-      val descNames = descIds.flatMap(id => index.nodes.get(id).map(_.name))
-      node.name -> descNames
+      val descNames = descIds.flatMap(id => index.nodes.get(id).map(_.name.value.toString))
+      node.name.value.toString -> descNames
     }
 
   val dispatcher: RuntimeDispatcher = new RuntimeDispatcher:
@@ -316,7 +316,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
 
   /** Domain elements: one `Value(Asset, nodeName)` per tree node. */
   private val assetDomain: Set[Value] =
-    tree.index.nodes.values.map(node => Value(assetSort, node.name)).toSet
+    tree.index.nodes.values.map(node => Value(assetSort, node.name.value)).toSet
 
   val model: RuntimeModel = RuntimeModel(
     domains = Map(assetSort -> assetDomain),

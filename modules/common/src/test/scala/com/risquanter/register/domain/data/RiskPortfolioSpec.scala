@@ -20,7 +20,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
 
         assertTrue(result.isSuccess) &&
         assertTrue(result.toEither.toOption.get.id == nodeId("portfolio-1")) &&
-        assertTrue(result.toEither.toOption.get.name == "Test Portfolio") &&
+        assertTrue(result.toEither.toOption.get.name.value == "Test Portfolio") &&
         assertTrue(result.toEither.toOption.get.childIds.length == 1)
       },
 
@@ -325,7 +325,7 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         )
 
         assertTrue(result.isSuccess) &&
-        assertTrue(result.toEither.toOption.get.name == "Test Name")
+        assertTrue(result.toEither.toOption.get.name.value == "Test Name")
       },
 
       test("preserve childIds array correctly") {

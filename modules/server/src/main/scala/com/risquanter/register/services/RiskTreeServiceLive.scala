@@ -419,7 +419,7 @@ class RiskTreeServiceLive private (
         
         // Enrich with id + name + quantiles to produce LECNodeCurve per node
         enriched = curvesData.map { case (nodeId, points) =>
-          val name = nodesMap.get(nodeId).map(_.name).getOrElse(nodeId.value)
+          val name = nodesMap.get(nodeId).map(_.name.value.toString).getOrElse(nodeId.value)
           val curvePoints = points.map { case (loss, prob) => LECPoint(loss, prob) }
           val quantiles = results.get(nodeId).map(LECGenerator.calculateQuantiles).getOrElse(Map.empty)
           nodeId -> LECNodeCurve(nodeId, name, curvePoints, quantiles)

@@ -99,7 +99,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         assertTrue(state.portfoliosVar.now().isEmpty) &&
         assertTrue(state.leavesVar.now().length == 1) &&
         assertTrue(state.leavesVar.now().head.parent.isEmpty) &&
-        assertTrue(state.leavesVar.now().head.name == "Cyber Risk") &&
+        assertTrue(state.leavesVar.now().head.name.value == "Cyber Risk") &&
         assertTrue(state.treeNameVar.now() == "My Tree") &&
         assertTrue(state.editingTreeId.now().isDefined)
       },
@@ -130,7 +130,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         assertTrue(state.portfoliosVar.now().length == 1) &&
         assertTrue(state.portfoliosVar.now().head.parent.isEmpty) &&
         assertTrue(state.leavesVar.now().length == 1) &&
-        assertTrue(state.leavesVar.now().head.parent == Some("Operational Risk"))
+        assertTrue(state.leavesVar.now().head.parent.map(_.value) == Some("Operational Risk"))
       },
 
       test("root portfolio + child portfolio + leaf under child: hierarchy resolved") {
@@ -142,10 +142,10 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         assertTrue(state.portfoliosVar.now().length == 2) &&
-        assertTrue(state.portfoliosVar.now().exists(p => p.name == "Operational Risk" && p.parent.isEmpty)) &&
-        assertTrue(state.portfoliosVar.now().exists(p => p.name == "IT Risk" && p.parent == Some("Operational Risk"))) &&
+        assertTrue(state.portfoliosVar.now().exists(p => p.name.value == "Operational Risk" && p.parent.isEmpty)) &&
+        assertTrue(state.portfoliosVar.now().exists(p => p.name.value == "IT Risk" && p.parent.map(_.value) == Some("Operational Risk"))) &&
         assertTrue(state.leavesVar.now().length == 1) &&
-        assertTrue(state.leavesVar.now().head.parent == Some("IT Risk"))
+        assertTrue(state.leavesVar.now().head.parent.map(_.value) == Some("IT Risk"))
       },
 
       test("round-trip: after loadFromTree, toUpdateRequest() succeeds") {

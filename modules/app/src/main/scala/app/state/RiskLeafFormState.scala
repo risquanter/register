@@ -24,7 +24,7 @@ enum RiskLeafField:
  * - Expert mode: requires percentiles + quantiles of equal length
  * - Lognormal mode: requires minLoss < maxLoss (both non-negative)
  */
-class RiskLeafFormState extends FormState[RiskLeafField]:
+final class RiskLeafFormState extends FormState[RiskLeafField]:
   import RiskLeafField.*
 
   // ============================================================

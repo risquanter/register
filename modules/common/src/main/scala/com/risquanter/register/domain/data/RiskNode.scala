@@ -36,7 +36,7 @@ import com.risquanter.register.domain.data.iron.ValidationMessages
   */
 sealed trait RiskNode {
   def id: NodeId
-  def name: String
+  def name: SafeName.SafeName
   def parentId: Option[NodeId]
 }
 
@@ -96,7 +96,7 @@ final case class RiskLeaf private (
   
   // Public API: Extract values from Iron types
   override def id: NodeId = NodeId(safeId)
-  override def name: String = safeName.value.toString
+  override def name: SafeName.SafeName = safeName
 }
 
 object RiskLeaf {
@@ -370,7 +370,7 @@ object RiskLeaf {
   given encoder: JsonEncoder[RiskLeaf] = JsonEncoder[RiskLeafRaw].contramap { leaf =>
     RiskLeafRaw(
       id = leaf.id.value,
-      name = leaf.name,
+      name = leaf.name.value,
       parentId = leaf.parentId.map(_.value),
       distributionType = leaf.distributionType.toString,
       probability = leaf.probability,
@@ -414,7 +414,7 @@ final case class RiskPortfolio private (
   
   // Public API: Extract values from Iron types
   override def id: NodeId = NodeId(safeId)
-  override def name: String = safeName.value.toString
+  override def name: SafeName.SafeName = safeName
 }
 
 object RiskPortfolio {
@@ -543,7 +543,7 @@ object RiskPortfolio {
   given encoder: JsonEncoder[RiskPortfolio] = JsonEncoder[RiskPortfolioRaw].contramap { portfolio =>
     RiskPortfolioRaw(
       id = portfolio.id.value,
-      name = portfolio.name,
+      name = portfolio.name.value,
       parentId = portfolio.parentId.map(_.value),
       childIds = portfolio.childIds.map(_.value)
     )

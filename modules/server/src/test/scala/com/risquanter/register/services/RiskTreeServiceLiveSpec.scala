@@ -254,7 +254,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(stubWsId, hierarchicalRequest))
-          idsByName = tree.index.nodes.map((nid, n) => n.name -> nid).toMap
+          idsByName = tree.index.nodes.map((nid, n) => n.name.value.toString -> nid).toMap
           leaf1Id = idsByName("Leaf 1")
           leaf2Id = idsByName("Leaf 2")
           curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(leaf1Id, leaf2Id)))
@@ -296,7 +296,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
         val program = for {
           tree <- service(_.create(stubWsId, hierarchicalRequest))
-          idsByName = tree.index.nodes.map((nid, n) => n.name -> nid).toMap
+          idsByName = tree.index.nodes.map((nid, n) => n.name.value.toString -> nid).toMap
           nodeAId = idsByName("Node A")
           nodeBId = idsByName("Node B")
           
