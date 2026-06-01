@@ -67,7 +67,7 @@ object TreePreview:
     // Build child lookup: parent name → children (portfolios + leaves unified)
     val allNodes: List[(TreeNode, Option[String])] =
       portfolios.map(p => (TreeNode.Portfolio(p.name.value.toString), p.parent.map(_.value.toString))) ++
-      leaves.map(l => (TreeNode.Leaf(l.name.value.toString, l.distribution.distributionType, l.distribution.probability), l.parent.map(_.value.toString)))
+      leaves.map(l => (TreeNode.Leaf(l.name.value.toString, l.distribution.shape.distributionType, l.distribution.probability), l.parent.map(_.value.toString)))
 
     val childrenOf: Map[Option[String], List[TreeNode]] =
       allNodes.groupMap(_._2)(_._1)

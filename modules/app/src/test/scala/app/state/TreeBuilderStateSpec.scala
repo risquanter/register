@@ -110,8 +110,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         assertTrue(state.leavesVar.now().length == 1) &&
         assertTrue(state.leavesVar.now().head.parent.isEmpty) &&
-        assertTrue(state.leavesVar.now().head.distribution.terms == Some(3)) &&
-        assertTrue(state.leavesVar.now().head.distribution.distributionType == "expert")
+        assertTrue(state.leavesVar.now().head.distribution.shape.terms == Some(3)) &&
+        assertTrue(state.leavesVar.now().head.distribution.shape.distributionType == "expert")
       },
 
       test("root portfolio + leaf under root: parent resolved correctly") {

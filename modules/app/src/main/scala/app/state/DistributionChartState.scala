@@ -30,7 +30,7 @@ enum DistributionViewMode:
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   */
 final class DistributionChartState(
-  val draftSignal:    StrictSignal[Option[LeafDistributionDraft]],
+  val draftSignal:    StrictSignal[Option[DistributionDraft]],
   val keySignal:      StrictSignal[Option[WorkspaceKeySecret]],
   val userIdAccessor: () => Option[UserId] = () => None
 ) extends DistributionPreviewEndpoints:

@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import com.risquanter.register.domain.data.iron.{ValidationUtil, ValidationMessages}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
-import app.state.LeafDistributionDraft
+import app.state.{DistributionDraft, LeafDistributionDraft}
 
 /** Type-safe field identifiers for the risk leaf form. */
 enum RiskLeafField:
@@ -265,39 +265,49 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   /** Check if form is valid (for submit button) */
   val isValid: Signal[Boolean] = hasErrors.map(!_)
 
-  /** Build a distribution draft from current fields (lightweight parsing; full validation happens in TreeBuilderState). */
-  def toDistributionDraft: Validation[ValidationError, LeafDistributionDraft] =
+  /** Build a shape-only draft (no probability) from the distribution fields.
+    *
+    * Used by [[draftSignal]] to drive the preview chart without requiring a
+    * valid probability. Called from [[toDistributionDraft]] to avoid duplicating
+    * parse/normalize logic.
+    */
+  private def toShapeDraft: Validation[ValidationError, DistributionDraft] =
     val mode = distributionModeVar.now()
     val distType = mode match
-      case DistributionMode.Expert => "expert"
+      case DistributionMode.Expert    => "expert"
       case DistributionMode.Lognormal => "lognormal"
 
-    val probabilityV = parseDoubleField(probabilityVar.now(), "leaf.probability")
     val minLossV = mode match
       case DistributionMode.Lognormal => parseLongField(minLossVar.now(), "leaf.minLoss").map(Some(_))
-      case _ => Validation.succeed(None)
+      case _                          => Validation.succeed(None)
     val maxLossV = mode match
       case DistributionMode.Lognormal => parseLongField(maxLossVar.now(), "leaf.maxLoss").map(Some(_))
-      case _ => Validation.succeed(None)
+      case _                          => Validation.succeed(None)
     val percentilesV = mode match
       // UI uses 0-100 scale; domain model requires 0-1 scale (refineProbability expects exclusive (0,1))
       case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(percentilesVar.now()).map(_ / 100.0)))
-      case _ => Validation.succeed(None)
+      case _                       => Validation.succeed(None)
     val quantilesV = mode match
       case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(quantilesVar.now())))
-      case _ => Validation.succeed(None)
+      case _                       => Validation.succeed(None)
 
-    Validation.validateWith(probabilityV, minLossV, maxLossV, percentilesV, quantilesV) {
-      (prob, minL, maxL, pcts, quants) =>
-        LeafDistributionDraft(
+    Validation.validateWith(minLossV, maxLossV, percentilesV, quantilesV) {
+      (minL, maxL, pcts, quants) =>
+        DistributionDraft(
           distributionType = distType,
-          probability = prob,
-          minLoss = minL,
-          maxLoss = maxL,
-          percentiles = pcts,
-          quantiles = quants,
-          terms = if termsVar.now().isBlank then None else termsVar.now().toIntOption
+          minLoss          = minL,
+          maxLoss          = maxL,
+          percentiles      = pcts,
+          quantiles        = quants,
+          terms            = if termsVar.now().isBlank then None else termsVar.now().toIntOption
         )
+    }
+
+  /** Build a distribution draft from current fields (lightweight parsing; full validation happens in TreeBuilderState). */
+  def toDistributionDraft: Validation[ValidationError, LeafDistributionDraft] =
+    val probabilityV = parseDoubleField(probabilityVar.now(), "leaf.probability")
+    Validation.validateWith(probabilityV, toShapeDraft) { (prob, shape) =>
+      LeafDistributionDraft(shape = shape, probability = prob)
     }
 
   /** Reactive signal of the current distribution draft, derived from all distribution
@@ -311,12 +321,12 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     * Laminar signal updates are synchronous, `.now()` calls inside `.map` reflect the
     * value that triggered the update. This avoids duplicating parse/normalize logic.
     */
-  val draftSignal: Signal[Option[LeafDistributionDraft]] =
+  val draftSignal: Signal[Option[DistributionDraft]] =
     distributionModeVar.signal
       .combineWith(percentilesVar.signal, quantilesVar.signal, minLossVar.signal)
       .combineWith(maxLossVar.signal, termsVar.signal)
       .map { _ =>
-        toDistributionDraft match
+        toShapeDraft match
           case Validation.Success(_, draft) => Some(draft)
           case _                            => None
       }

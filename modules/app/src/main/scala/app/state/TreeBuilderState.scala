@@ -13,14 +13,17 @@ final case class PortfolioDraft(
   name: SafeName.SafeName,
   parent: Option[SafeName.SafeName]
 )
-final case class LeafDistributionDraft(
+final case class DistributionDraft(
   distributionType: String,
-  probability: Double,
-  minLoss: Option[Long],
-  maxLoss: Option[Long],
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]],
-  terms: Option[Int] = None
+  minLoss:          Option[Long],
+  maxLoss:          Option[Long],
+  percentiles:      Option[Array[Double]],
+  quantiles:        Option[Array[Double]],
+  terms:            Option[Int] = None
+)
+final case class LeafDistributionDraft(
+  shape:       DistributionDraft,
+  probability: Double
 )
 final case class LeafDraft(
   name: SafeName.SafeName,
@@ -58,8 +61,8 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * Reset to None on form unmount. Read by [[app.state.DistributionChartState]] for
     * debounced preview fetches.
     */
-  val currentDraftVar: Var[Option[LeafDistributionDraft]] = Var(None)
-  val draftSignal: StrictSignal[Option[LeafDistributionDraft]] = currentDraftVar.signal
+  val currentDraftVar: Var[Option[DistributionDraft]] = Var(None)
+  val draftSignal: StrictSignal[Option[DistributionDraft]] = currentDraftVar.signal
 
   val rootLabel = "(root)"
 
@@ -99,7 +102,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val result = for
       name <- validateName(rawName, "leaf.name")
       parent <- validateParentName(rawParent, "leaf.parentName")
-      _ <- validateDistribution(dist)
+      _ <- validateDistribution(dist.shape, dist.probability)
       draft = LeafDraft(name, parent, dist)
       _ <- TreeBuilderLogic.preValidateTopology(
         portfoliosVar.now().map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
@@ -165,15 +168,15 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     }.toList
 
     val leaves = tree.nodes.collect { case l: RiskLeaf => l }.map { l =>
-      val dist = LeafDistributionDraft(
+      val shape = DistributionDraft(
         distributionType = l.distributionType.toString,
-        probability      = l.probability,
         minLoss          = l.minLoss.map(identity),
         maxLoss          = l.maxLoss.map(identity),
         percentiles      = l.percentiles,
         quantiles        = l.quantiles,
         terms            = l.terms.map(_.toInt)
       )
+      val dist = LeafDistributionDraft(shape = shape, probability = l.probability)
       LeafDraft(
         name         = l.name,
         parent       = l.parentId.flatMap(id => tree.index.nodes.get(id).map(_.name)),
@@ -200,23 +203,23 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case Some(v) if v.trim.nonEmpty => validateName(v, field).map(Some(_))
       case _ => Validation.succeed(None)
 
-  private def validateDistribution(dist: LeafDistributionDraft): Validation[ValidationError, Distribution] =
+  private def validateDistribution(shape: DistributionDraft, probability: Double): Validation[ValidationError, Distribution] =
     Distribution.create(
-      distributionType = dist.distributionType,
-      probability = dist.probability,
-      minLoss = dist.minLoss,
-      maxLoss = dist.maxLoss,
-      percentiles = dist.percentiles,
-      quantiles = dist.quantiles,
+      distributionType = shape.distributionType,
+      probability = probability,
+      minLoss = shape.minLoss,
+      maxLoss = shape.maxLoss,
+      percentiles = shape.percentiles,
+      quantiles = shape.quantiles,
       fieldPrefix = "leaf",
-      terms = dist.terms
+      terms = shape.terms
     )
 
   private def toPortfolioRequest(draft: PortfolioDraft): Validation[ValidationError, RiskPortfolioDefinitionRequest] =
     Validation.succeed(RiskPortfolioDefinitionRequest(draft.name.value, draft.parent.map(_.value)))
 
   private def toLeafRequest(draft: LeafDraft): Validation[ValidationError, RiskLeafDefinitionRequest] =
-    validateDistribution(draft.distribution).map { dist =>
+    validateDistribution(draft.distribution.shape, draft.distribution.probability).map { dist =>
       RiskLeafDefinitionRequest(
         name             = draft.name.value,
         parentName       = draft.parent.map(_.value),

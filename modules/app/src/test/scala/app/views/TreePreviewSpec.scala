@@ -1,7 +1,7 @@
 package app.views
 
 import zio.test.*
-import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, LeafDistributionDraft}
+import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, DistributionDraft, LeafDistributionDraft}
 import com.risquanter.register.domain.data.iron.SafeName
 
 /** Structural tests for TreePreview rendering logic.
@@ -34,13 +34,15 @@ object TreePreviewSpec extends ZIOSpecDefault:
     SafeName.fromString(s).toOption.getOrElse(throw new AssertionError(s"Invalid SafeName: $s"))
 
   private def lognormalDist: LeafDistributionDraft = LeafDistributionDraft(
-    distributionType = "lognormal",
-    probability      = 0.3,
-    minLoss          = Some(1000L),
-    maxLoss          = Some(50000L),
-    percentiles      = None,
-    quantiles        = None,
-    terms            = None
+    shape = DistributionDraft(
+      distributionType = "lognormal",
+      minLoss          = Some(1000L),
+      maxLoss          = Some(50000L),
+      percentiles      = None,
+      quantiles        = None,
+      terms            = None
+    ),
+    probability = 0.3
   )
 
   /** Replication of renderTree's groupBy logic for structural assertion. */
