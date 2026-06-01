@@ -1,12 +1,7 @@
 ---
 name: working-protocol
-description: >
-  Governance protocol for the register project. Load for: Decision Protocol
-  questions, Mandatory Review Halt reminders, Signature Echo Protocol steps,
-  Blocked/Failing State handling, ADR compliance process, phase completion
-  criteria. Use when: unsure whether to stop and ask, executing the pre-commit
-  review checklist, or handling any test failure or design tension.
-user-invocable: false
+description: "Governance protocol for the register project. Load for: Decision Protocol questions, Mandatory Review Halt reminders, Signature Echo Protocol steps, Blocked/Failing State handling, ADR compliance process, phase completion criteria. Use when: unsure whether to stop and ask, executing the pre-commit review checklist, or handling any test failure or design tension."
+user-invokable: false
 ---
 
 # Working Protocol — Register
@@ -70,6 +65,10 @@ options:
 Accepted signals: "proceed" · "approved" · "continue" · "implement option X"
 
 Anything else is not a signal. Default action when unclear: **stop and ask.**
+
+Presenting a plan and implementing it in the same response is a protocol violation,
+even if the plan appears unambiguous. Presentation and implementation are always
+separate turns.
 
 ---
 

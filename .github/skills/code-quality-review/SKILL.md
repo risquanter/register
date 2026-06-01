@@ -1,12 +1,7 @@
 ---
 name: code-quality-review
-description: >
-  Critical code quality review for Scala 3 / ZIO / Laminar codebase.
-  Load when performing a pre-commit review, reviewing a diff, or auditing
-  completed implementation work. Covers: algebraic design-first pass,
-  ADR compliance, type safety, functional design, API surface, duplication,
-  security, compiler hygiene, test quality, plan fidelity.
-user-invocable: true
+description: "Critical code quality review for Scala 3 / ZIO / Laminar codebase. Load when performing a pre-commit review, reviewing a diff, or auditing completed implementation work. Covers: algebraic design-first pass, ADR compliance, type safety, functional design, API surface, duplication, security, compiler hygiene, test quality, plan fidelity."
+user-invokable: true
 argument-hint: "files or diff to review (attach changed files, or describe the scope)"
 ---
 

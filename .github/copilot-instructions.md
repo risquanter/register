@@ -9,6 +9,22 @@ from first principles.
 
 ---
 
+## Working protocol — load before any file edit
+
+Load the **working-protocol** skill unconditionally before making any edit to any file.
+This is not optional and does not require explicit instruction. A file edit made without
+first loading the working-protocol is a protocol violation regardless of outcome.
+
+Load the **adr-constraints** skill during any planning or implementation phase that
+introduces new types, endpoints, services, or changes to existing code. Must be loaded
+before the first edit in any such session.
+
+Load the **code-quality-review** skill after completing any set of code changes, before
+reporting work as done. The review is mandatory and automatic — it does not require
+explicit instruction from the user.
+
+---
+
 ## Decision triggers — stop and ask before proceeding
 
 Stop immediately, present options, and wait for an explicit decision before taking any

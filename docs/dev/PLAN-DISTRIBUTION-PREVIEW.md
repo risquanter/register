@@ -1,7 +1,7 @@
 # Distribution Preview Panel — Planning Context
 
 **Date:** May 2026  
-**Status:** IN-DEPTH DESIGN COMPLETE — awaiting explicit approval before any code is touched  
+**Status:** FULLY IMPLEMENTED — behavioral bug identified (see §13 below)  
 **Feature:** Replace `DistributionChartPlaceholder` with a live distribution visualisation
 panel in the Design view, giving non-statistical users graphical feedback on the shape
 of the distribution they are modelling as they type.
@@ -14,10 +14,10 @@ Execute phases in strict order. Each phase unblocks the next.
 
 | Phase | Goal | New files | Edits | Depends on | Status |
 |---|---|---|---|---|---|
-| **A** | Domain foundation — thread `terms` through existing stack | 0 | 15 | — | ✅ Complete |
-| **B** | Preview endpoint — DTOs + service + controller | 5 | 2 | A | ✅ Complete |
-| **C** | Frontend chart — state + spec builder + view + wiring | 3 | 3 | A, B | ✅ Complete |
-| **D** | Decision science — coherence echo + ratio warning | 0 | 3 | C | ✅ Complete |
+| **A** | Domain foundation — thread `terms` through existing stack | 0 | 15 | — | ✅ Complete (code-verified) |
+| **B** | Preview endpoint — DTOs + service + controller | 5 | 2 | A | ✅ Complete (code-verified) |
+| **C** | Frontend chart — state + spec builder + view + wiring | 3 | 3 | A, B | ✅ Complete (code-verified) |
+| **D** | Decision science — coherence echo + ratio warning | 0 | 3 | C | ✅ Complete (code-verified) |
 
 Update status as: `☐ Not started` → `⏳ In progress` → `✅ Complete`
 
@@ -386,6 +386,36 @@ new endpoint.
 ---
 
 *Context capture complete. Solution design below.*
+
+---
+
+## 13. Post-Implementation Bug — Preview Never Triggers
+
+**Status:** Identified, not yet fixed.
+
+**Symptom:** The distribution preview chart never populates, even when all distribution
+parameters (percentiles, quantiles, or min/max loss) are entered and valid.
+
+**One bug:** `toDistributionDraft` includes `probabilityV` in its `Validation.validateWith`
+call, so `draftSignal` only emits `Some(draft)` when probability is also a valid
+parseable number. `DistributionPreviewRequest` has no `probability` field (intentionally
+— preview is pure distribution shape). This is an accidental coupling introduced because
+`toDistributionDraft` was designed for the full leaf submission, not for the preview
+trigger path.
+
+The `probabilityVar.signal` is correspondingly absent from `draftSignal`'s `combineWith`,
+which is correct given that probability is irrelevant to the preview. If the user fills
+distribution fields before entering probability, the signal never re-evaluates after
+probability is typed and the preview remains stuck at `None`. This is not a second
+independent bug — it is the direct, expected consequence of requiring a field that does
+not belong in the signal at all. Removing probability from the validation removes the
+problem entirely; there is no reason to add `probabilityVar.signal` to the `combineWith`.
+
+**Fix needed (decision required):** Introduce a dedicated `previewDraftSignal` in
+`RiskLeafFormState` derived from distribution vars only (mode, percentiles/quantiles or
+minLoss/maxLoss, terms) — no `probabilityV` in the `validateWith`, no `probabilityVar`
+in the `combineWith`. The existing `draftSignal` (used for leaf submission, which does
+require probability) is unchanged.
 
 ---
 

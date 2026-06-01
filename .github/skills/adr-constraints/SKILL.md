@@ -1,12 +1,7 @@
 ---
 name: adr-constraints
-description: >
-  Agent-efficient distillation of all accepted ADRs for the register project.
-  Load during any planning or implementation phase that introduces new types,
-  endpoints, services, or infrastructure changes. Use for: ADR compliance review,
-  pre-implementation planning, architecture alignment checks, boundary ownership
-  questions.
-user-invocable: false
+description: "Agent-efficient distillation of all accepted ADRs for the register project. Load during any planning or implementation phase that introduces new types, endpoints, services, or infrastructure changes. Use for: ADR compliance review, pre-implementation planning, architecture alignment checks, boundary ownership questions."
+user-invokable: true
 ---
 
 # ADR Constraints Reference — Register
