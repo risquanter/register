@@ -25,9 +25,8 @@ docker build -f containers/builders/Dockerfile.irmin-builder \
 
 ## Application images (versioned)
 
-These are built automatically by `docker compose up` in local development. The commands
-below are needed when building outside compose — for example, to build immutable images for
-CI push workflows or to pre-build outside a compose context.
+The commands below are needed when building outside compose — for example, to build immutable images for CI push workflows or to pre-build outside a compose context.
+These are built automatically by `docker compose up` in local development. 
 
 `APP_VERSION` is read from the `.env` file in the project root. Set it first if `.env`
 is absent or out of date:
