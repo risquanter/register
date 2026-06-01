@@ -8,48 +8,52 @@
 
 ---
 
-## Build from Scratch
+## How images are built
 
-All runtime images are built locally. Builder base images avoid re-installing heavyweight
-toolchains (OCaml/opam, GraalVM, sbt) on every source change — they are built once and
-reused for all subsequent application image builds. See [ADR-026](../dev/ADR-026-container-image-strategy.md)
-for the image strategy and [ADR-020](../dev/ADR-020-supply-chain-security.md) for supply chain
-security policy.
+All images are built locally from source. There are two distinct tiers:
 
-Build in this order — steps 1, 3, and 4 are independent; step 2 requires step 1; step 5
-requires step 3.
+**Builder bases** — `local/graalvm-builder:21` and `local/irmin-builder:3.11` — install
+heavyweight toolchains (GraalVM/sbt, OCaml/opam) once and are reused across all application
+builds. You build these manually; they rarely change. See
+[ADR-026](../dev/ADR-026-container-image-strategy.md) for the image strategy and
+[ADR-020](../dev/ADR-020-supply-chain-security.md) for supply chain security policy.
+
+**Application images** — `local/register-server`, `local/frontend`, `local/irmin-prod` — are
+built automatically by `docker compose up`. The compose file uses `pull_policy: build` for
+these services, which means every `docker compose up` rebuilds them from the Dockerfile using
+Docker layer cache. You do not need to pre-build them; they are always up to date with the
+current source.
+
+**Versioning:** The `.env` file at the project root sets `APP_VERSION`, which compose uses to
+tag application images. After a version bump in `build.sbt`, sync `.env`:
 
 ```bash
-# 1. Irmin builder base (OCaml + opam packages) — ~15-40 min first run
-#    Rebuild only when Irmin or OCaml versions change.
-docker build -f containers/builders/Dockerfile.irmin-builder \
-  -t local/irmin-builder:3.11 containers/builders/
+sed -n 's/ThisBuild \/ version := "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
+```
 
-# 2. Irmin production image (slim Alpine runtime) — ~10s
-#    Requires step 1.
-docker build -f containers/prod/Dockerfile.irmin-prod \
-  -t local/irmin-prod:3.11 containers/prod/
+For local development, `.env` is optional — compose falls back to the `dev` tag when absent.
+The file is needed when version tags must match a `build.sbt` bump, and in CI.
 
-# 3. GraalVM builder base (GraalVM native-image + sbt) — ~1-2 min
-#    Context is the parent directory — vql-engine source must be in scope.
-#    Rebuild when GraalVM/sbt version changes or vql-engine SNAPSHOT bumps.
+---
+
+## One-time setup: Builder base images
+
+Build these once after cloning. Rebuild only when the toolchain version changes — see
+[Image Build Reference](IMAGE-BUILD-REFERENCE.md) for the full command reference and rebuild
+triggers.
+
+```bash
+# GraalVM builder base — GraalVM native-image + sbt (~10-20 min, once)
+# Context is the parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/
+# must be present at ../
 docker build -f containers/builders/Dockerfile.graalvm-builder \
   -t local/graalvm-builder:21 ..
-
-# 4. Frontend SPA (node:22-alpine builder + nginx:1.27.5-alpine-slim runtime) — ~10-15 min first run
-#    Context is the parent directory — vague-quantifier-logic/ and hdr-rng/ must be at ../.
-#    Rebuild when frontend or common source changes.
-docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:<version> ..
-
-# 5. Register server (GraalVM native binary on distroless) — ~5-10 min
-#    Requires step 3. Rebuild when server or common source changes.
-docker build -f containers/prod/Dockerfile.register-prod \
-  -t local/register-server:<version> .
-
-# Verify
-docker images | grep -E 'irmin|register|graalvm|frontend'
 ```
+
+For Irmin persistence, the Irmin builder base is also required. See
+[Persistent Setup](PERSISTENT-SETUP.md).
+
+---
 
 ## Docker Compose — Use Cases
 
@@ -157,12 +161,39 @@ docker compose \
 
 ---
 
+## Frontend Modes: Vite vs nginx
+
+| | Vite dev mode | nginx prod mode |
+|---|---|---|
+| Frontend port | 5173 | 18080 |
+| API calls | Browser → 8090 directly (cross-origin) | Browser → 18080 → nginx → 8090 (same-origin) |
+| CORS | Required — browser enforces it | Not involved — nginx proxies internally |
+| Frontend updates | HMR on every Scala.js save | Requires image rebuild + `up -d` |
+| Use for | Day-to-day development | Testing nginx routing, security headers, prod parity |
+
+**Why CORS doesn't apply in nginx mode:** the browser only ever talks to port 18080. nginx
+proxies API calls on the Docker network internally. No cross-origin request reaches the browser,
+so CORS is not triggered and `REGISTER_CORS_ORIGINS` is irrelevant for that mode.
+
+**Remote backend (Vite only):** if the Docker cluster runs on a different machine (e.g. a VM
+at `192.168.1.50`) while your browser loads Vite from `192.168.1.100:5173`, the browser sees
+a different origin and the backend will reject the request. Add the Vite origin explicitly:
+
+```bash
+REGISTER_CORS_ORIGINS=http://192.168.1.100:5173 docker compose up -d register-server
+```
+
+This does not apply to nginx mode.
+
+---
+
 ## Integration Tests (serverIt)
 
 `IrminCompose` auto-starts and stops a scoped Irmin container per test run — no manual
 management needed. Each run uses a unique compose project (`register_it_<uuid>`) for isolation.
 
-**Prerequisite:** `local/irmin-prod:3.11` must exist (step 2 in Build from Scratch above).
+**Prerequisite:** `local/irmin-prod:3.11` must exist. Build it with the commands in
+[Image Build Reference](IMAGE-BUILD-REFERENCE.md) if you have not already.
 
 ```bash
 # Run all integration tests
@@ -185,31 +216,6 @@ docker ps -a --filter name=register_it_ --format '{{.ID}}' | xargs -r docker rm 
 
 # Remove leaked integration test networks
 docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docker network rm
-```
-
----
-
-## Rebuild Images
-
-| Image | When to rebuild | Command |
-|-------|-----------------|---------|
-| `local/graalvm-builder:21` | vql-engine changes, GraalVM/sbt version bump | `docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..` |
-| `local/register-server:<version>` | Server or common source changes | `docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> .` |
-| `local/frontend:<version>` | Frontend or common source changes | `docker build -f containers/prod/Dockerfile.frontend-prod -t local/frontend:<version> ..` |
-| `local/irmin-prod:3.11` | Irmin version changes | `docker build -f containers/prod/Dockerfile.irmin-prod -t local/irmin-prod:3.11 containers/prod/` |
-| `local/irmin-builder:3.11` | OCaml/Irmin version changes | `docker build -f containers/builders/Dockerfile.irmin-builder -t local/irmin-builder:3.11 containers/builders/` |
-
-**After server source changes** (vql-engine unchanged):
-```bash
-docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> . \
-  && docker compose up -d register-server
-```
-
-**After vql-engine changes** (rebuild graalvm-builder first):
-```bash
-docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 .. \
-  && docker build -f containers/prod/Dockerfile.register-prod -t local/register-server:<version> . \
-  && docker compose up -d register-server
 ```
 
 ---
@@ -304,27 +310,9 @@ docker compose logs -f irmin               # Irmin only
 
 ---
 
-## Appendix: Vite vs nginx and CORS
+## See also
 
-| | Vite dev mode | nginx prod mode |
-|---|---|---|
-| Frontend port | 5173 | 18080 |
-| API calls | Browser → 8090 directly (cross-origin) | Browser → 18080 → nginx → 8090 (same-origin) |
-| CORS | Required — browser enforces it | Not involved — nginx proxies internally |
-| Frontend updates | HMR on every Scala.js save | Requires image rebuild + `up -d` |
-| Use for | Day-to-day development | Testing nginx routing, security headers, prod parity |
-
-**Why CORS doesn't apply in nginx mode:** the browser only ever talks to port 18080. nginx
-proxies API calls on the Docker network internally. No cross-origin request reaches the browser,
-so CORS is not triggered and `REGISTER_CORS_ORIGINS` is irrelevant for that mode.
-
-**Remote backend (Vite only):** if the Docker cluster runs on a different machine (e.g. a VM
-at `192.168.1.50`) while your browser loads Vite from `192.168.1.100:5173`, the browser sees
-a different origin and the backend will reject the request. Add the Vite origin explicitly:
-
-```bash
-REGISTER_CORS_ORIGINS=http://192.168.1.100:5173 docker compose up -d register-server
-```
-
-This does not apply to nginx mode.
+- [Image Build Reference](IMAGE-BUILD-REFERENCE.md) — complete build command reference,
+  rebuild triggers, and CI workflow
+- [Persistent Setup](PERSISTENT-SETUP.md) — Irmin-backed persistence setup
 

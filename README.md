@@ -87,24 +87,17 @@ cp .env.inmemory.example .env.inmemory
 
 Review `.env.inmemory` — the defaults are usable as-is for a local trial. See `docs/user/DOCKER-DEVELOPMENT.md` and `docs/dev/ADR-016-config-management.md` for the full variable reference, including the Irmin-backed persistence option.
 
-### 3. Build the container images
+### 3. Build the GraalVM builder base
 
-Builder base images install heavyweight toolchains (GraalVM, sbt) once and are reused for all subsequent application builds. Build in this order:
+This image installs GraalVM and sbt once and is reused for all subsequent server builds.
+It is the only image you need to build manually — `docker compose` builds the application
+images itself on first start.
 
 ```bash
-# GraalVM builder base — installs GraalVM native-image + sbt (~10-20 min)
-# Context is the register projects  directory — but the sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
+# ~10-20 min on first run. Sibling repos vague-quantifier-logic/ and hdr-rng/
+# must be present at ../ (cloned in step 1).
 docker build -f containers/builders/Dockerfile.graalvm-builder \
   -t local/graalvm-builder:21 ..
-
-# Register server — compiles GraalVM native binary (~5-10 min)
-docker build -f containers/prod/Dockerfile.register-prod \
-  -t local/register-server:0.1.0 .
-
-# Frontend — builds Scala.js + SPA, packages in nginx (~10-15 min first run)
-# Context is the parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
-docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:0.1.0 ..
 ```
 
 ### 4. Start the stack
@@ -112,6 +105,10 @@ docker build -f containers/prod/Dockerfile.frontend-prod \
 ```bash
 docker compose --profile frontend up -d
 ```
+
+> **First run takes 10–15 minutes.** Docker Compose builds the server (GraalVM native
+> compilation) and frontend on first start. Subsequent starts use the Docker layer cache
+> and complete in seconds.
 
 
 > The `examples/` directory contains curl-based API scripts for direct backend testing. For advanced configuration, observability integration, and Kubernetes deployment, see `docs/user/DOCKER-DEVELOPMENT.md`.

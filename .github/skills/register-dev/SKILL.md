@@ -197,44 +197,78 @@ docker compose --profile persistence --profile frontend --profile observability 
 
 ---
 
-## Container Image Builds
+## Versioning
 
-Build order: steps 1, 3, 4 are independent; step 2 requires step 1; step 5 requires step 3.
+`build.sbt` (`ThisBuild / version`) is the single source of truth. `.env` at the project
+root must be kept in sync — Docker Compose reads `APP_VERSION` from it to tag images.
+
+### When to bump
+
+| Change type | Bump |
+|-------------|------|
+| Bug fix, security patch, dependency version bump, perf improvement (no API change) | PATCH `x.y.Z` |
+| New endpoint, new configurable behaviour, new feature visible to API consumers, new infrastructure service | MINOR `x.Y.0` |
+| Breaking API or behaviour change | MAJOR `X.0.0` |
+| Docs only, test additions, internal refactoring (no behaviour change), code quality, skill/tooling edits | **No bump** |
+
+Version bumps are **user-owned decisions**. When a completed task qualifies for a bump,
+flag it — do not bump autonomously.
+
+### Bump procedure
 
 ```bash
-# 1. Irmin builder base (~15-40 min first run; rebuild only on Irmin/OCaml version change)
-docker build -f containers/builders/Dockerfile.irmin-builder \
-  -t local/irmin-builder:3.11 containers/builders/
+# 1. Edit build.sbt — change ThisBuild / version := "x.y.z"
 
-# 2. Irmin production image (~10s; requires step 1)
-docker build -f containers/prod/Dockerfile.irmin-prod \
-  -t local/irmin-prod:3.11 containers/prod/
+# 2. Sync .env
+sed -n 's/ThisBuild \/ version := "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
 
-# 3. GraalVM builder base (~1-2 min; context is parent dir — vql-engine must be in scope)
+# 3. Verify
+cat .env   # should print APP_VERSION=x.y.z
+```
+
+After this, `docker compose up` tags all application images with the new version.
+
+---
+
+## Container Image Builds
+
+For day-to-day development, `docker compose up` builds application images automatically
+(`pull_policy: build`). The explicit commands below are needed for one-time builder base
+setup and CI. See `docs/user/IMAGE-BUILD-REFERENCE.md` for the full reference.
+
+Builder bases are independent of each other; app images require the corresponding builder.
+
+```bash
+# GraalVM builder base (~1-2 min; context is parent dir — vql-engine must be in scope)
 docker build -f containers/builders/Dockerfile.graalvm-builder \
   -t local/graalvm-builder:21 ..
 
-# 4. Frontend SPA (~10-15 min first run; context is parent dir)
-docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:<version> ..
+# Irmin builder base (~15-40 min first run; rebuild only on Irmin/OCaml version change)
+docker build -f containers/builders/Dockerfile.irmin-builder \
+  -t local/irmin-builder:3.11 containers/builders/
 
-# 5. Register server native binary (~5-10 min; requires step 3)
+# Irmin production image (~10s; requires irmin-builder)
+docker build -f containers/prod/Dockerfile.irmin-prod \
+  -t local/irmin-prod:3.11 containers/prod/
+
+# Frontend SPA (~10-15 min first run; context is parent dir)
+source .env
+docker build -f containers/prod/Dockerfile.frontend-prod \
+  -t local/frontend:${APP_VERSION} ..
+
+# Register server native binary (~5-10 min; requires graalvm-builder)
 docker build -f containers/prod/Dockerfile.register-prod \
-  -t local/register-server:<version> .
+  -t local/register-server:${APP_VERSION} .
 ```
 
 **After server source changes** (vql-engine unchanged):
 ```bash
-docker build -f containers/prod/Dockerfile.register-prod \
-  -t local/register-server:<version> . \
-  && docker compose up -d register-server
+docker compose up -d register-server   # compose rebuilds via pull_policy: build
 ```
 
 **After vql-engine changes** (rebuild graalvm-builder first):
 ```bash
 docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 .. \
-  && docker build -f containers/prod/Dockerfile.register-prod \
-     -t local/register-server:<version> . \
   && docker compose up -d register-server
 ```
 
