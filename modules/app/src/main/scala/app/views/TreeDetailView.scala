@@ -3,6 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{TreeViewState, LoadState, ChartHoverBridge}
+import app.state.DistributionMode
 import app.components.{Icons, ColorSwatchPicker, TreeNodeRow}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
@@ -42,21 +43,22 @@ object TreeDetailView:
   /** Build a structured tooltip showing all node params (D2(a): native title). */
   private def nodeTooltip(node: RiskNode): String = node match
     case leaf: RiskLeaf =>
-      val base = s"${leaf.name}\n" +
-        s"─────────────────────\n" +
-        s"ID:           ${leaf.id.value}\n" +
-        s"Type:         ${leaf.distributionType}\n" +
-        s"Probability:  ${leaf.probability}"
-      val pcts = leaf.percentiles.fold("")(arr => s"\nPercentiles:  [${arr.mkString(", ")}]")
-      val qtls = leaf.quantiles.fold("")(arr => s"\nQuantiles:    [${arr.mkString(", ")}]")
-      val minL = leaf.minLoss.fold("")(v => s"\nMin Loss:     $v")
-      val maxL = leaf.maxLoss.fold("")(v => s"\nMax Loss:     $v")
-      s"$base$pcts$qtls$minL$maxL"
+      TreeNodeRow.leafTooltip(
+        name        = leaf.name,
+        distType    = DistributionMode.fromString(leaf.distributionType.toString).getOrElse(DistributionMode.Expert),
+        probability = leaf.probability,
+        id          = Some(leaf.id),
+        percentiles = leaf.percentiles,
+        quantiles   = leaf.quantiles,
+        minLoss     = leaf.minLoss,
+        maxLoss     = leaf.maxLoss
+      )
     case portfolio: RiskPortfolio =>
-      s"${portfolio.name}\n" +
-        s"─────────────────────\n" +
-        s"ID:           ${portfolio.id.value}\n" +
-        s"Children:     ${portfolio.childIds.length}"
+      TreeNodeRow.portfolioTooltip(
+        name       = portfolio.name,
+        id         = Some(portfolio.id),
+        childCount = Some(portfolio.childIds.length)
+      )
 
   private def isPortfolio(node: RiskNode): Boolean = node match
     case _: RiskPortfolio => true

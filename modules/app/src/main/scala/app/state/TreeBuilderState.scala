@@ -14,7 +14,7 @@ final case class PortfolioDraft(
   parent: Option[SafeName.SafeName]
 )
 final case class DistributionDraft(
-  distributionType: String,
+  distributionType: DistributionMode,
   minLoss:          Option[Long],
   maxLoss:          Option[Long],
   percentiles:      Option[Array[Double]],
@@ -169,7 +169,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
     val leaves = tree.nodes.collect { case l: RiskLeaf => l }.map { l =>
       val shape = DistributionDraft(
-        distributionType = l.distributionType.toString,
+        distributionType = DistributionMode.fromString(l.distributionType.toString).getOrElse(DistributionMode.Expert),
         minLoss          = l.minLoss.map(identity),
         maxLoss          = l.maxLoss.map(identity),
         percentiles      = l.percentiles,
@@ -205,7 +205,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
   private def validateDistribution(shape: DistributionDraft, probability: Double): Validation[ValidationError, Distribution] =
     Distribution.create(
-      distributionType = shape.distributionType,
+      distributionType = shape.distributionType.toApiString,
       probability = probability,
       minLoss = shape.minLoss,
       maxLoss = shape.maxLoss,

@@ -2,7 +2,7 @@ package app.chart
 
 import scala.scalajs.js
 
-import app.state.{DistributionViewMode, DistributionDraft}
+import app.state.{DistributionViewMode, DistributionDraft, DistributionMode}
 import com.risquanter.register.http.requests.{DistributionPreviewPoint, DistributionPreviewResponse}
 
 /** Client-side Vega-Lite v6 specification builder for distribution preview charts.
@@ -155,7 +155,7 @@ object DistributionSpecBuilder:
   ): js.Array[js.Any] =
     val layers = js.Array[js.Any]()
     draft.foreach { d =>
-      if d.distributionType == "expert" then
+      if d.distributionType == DistributionMode.Expert then
         // Expert mode: vertical rules at each input quantile x-position
         val pcts   = d.percentiles.getOrElse(Array.empty[Double])
         val quants = d.quantiles.getOrElse(Array.empty[Double])

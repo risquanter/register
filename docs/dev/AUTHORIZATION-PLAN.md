@@ -75,6 +75,44 @@ This design addresses the "leaked URL" concern progressively:
 - **Layer 0+1:** The key acts as an invitation link. A leaked URL grants access only to users with a valid session in the right Keycloak realm — analogous to Google Docs "anyone with the link who is signed in."
 - **Layer 0+1+2:** The key is purely a routing token. Access is determined by explicit SpiceDB relationships. A leaked URL grants nothing — the user must be explicitly added as a workspace member by the owner.
 
+### Alignment with Industry Standards
+
+| Design Decision | Standard / Reference | Assessment |
+|-----------------|----------------------|------------|
+| Capability URL as sole credential (Layer 0) | W3C TAG; OWASP time-limited token guidance | Compliant. 24-hour TTL and atomic key rotation follow OWASP guidance. Accepted limitation: rotation is workspace-wide (see gap below). |
+| JWT validation at mesh layer, not application | NIST SP 800-207 Zero Trust Architecture | Compliant. "Verify at perimeter, trust injected assertion internally" pattern. Risk: traffic bypassing the mesh can spoof headers — mitigated by `requirePresent` being fail-closed rather than falling back to anonymous. |
+| PEP-only design, no `grant()`/`revoke()` in app | XACML / NIST PEP–PDP–PAP–PIP separation; OWASP Broken Access Control (Top 10 #1) | Compliant. Eliminates privilege-escalation attack surface in the application. PAP is fully external (CI/CD + `zed` CLI). |
+| SpiceDB / Zanzibar ReBAC for fine-grained layer | Google Zanzibar (2019); SpiceDB open-source implementation | Compliant. Relationship graph (`org → team → workspace → tree`) avoids application-level graph traversal. Zookies provide causal consistency. |
+| Fail-closed on connectivity and identity errors | OWASP Secure Defaults; NIST 800-53 AC-17 | Compliant. `check()` fails the ZIO effect on network error (→ 503). Missing `x-user-id` header fails the request (→ 503), never falls back to anonymous. |
+
+### Known Design Constraint — Layer 1 Tenant Isolation
+
+#### Expected Layer 0 behaviour (free tier, `capability-only` mode)
+
+In Layer 0, the workspace key IS the access credential. Anyone who possesses the URL can read and collaborate — no identity required. This is deliberate and fully documented. A leaked or shared URL grants access to whoever holds it; the TTL and atomic key rotation are the only mitigations. This is the correct and intended behaviour for the free tier.
+
+#### What Layer 1 actually delivers (`identity` mode)
+
+Layer 1 adds an identity gate on top of Layer 0: the user must additionally present a valid Keycloak JWT from the correct realm. Within a deployment where each customer occupies its own Keycloak realm, this is meaningfully stronger — a leaked URL grants nothing to someone without a session in that realm.
+
+However, **Layer 1's access pattern is structurally identical to Layer 0 within a shared realm.** Any user who has a valid session in `register-saas` and obtains the workspace key — by any means — gets in. The key still functions as a true capability; identity verification only filters by realm membership, not by intended recipient.
+
+**Concrete example:** Acme Corp and Beta GmbH are both team-tier customers in the shared realm `register-saas`. A consultant, `carlos@acme.com`, works for both companies and therefore has a valid session in `register-saas`. Beta GmbH's workspace key `wk-beta-annual` leaks via a public Slack message. Carlos pastes it into his browser: his JWT is valid, the key resolves, and Layer 1 grants him full access to Beta GmbH's confidential risk analysis. Neither company misconfigured anything. The realm boundary was the only isolation mechanism, and it was insufficient because Carlos legitimately belongs to that realm.
+
+This is the same behaviour as Layer 0 — the key is still the effective credential — with the sole addition that unauthenticated outsiders are blocked.
+
+#### Proposed mitigation at the infrastructure level
+
+The application code requires no change. The constraint is a deployment topology concern. For any SaaS installation serving multiple independent customers on `identity` mode:
+
+**Each customer must be provisioned into its own dedicated Keycloak realm.**
+
+With one realm per customer, Carlos cannot hold a valid session in Beta GmbH's realm regardless of how the key leaks. The identity gate becomes a true tenant boundary. This is enforced entirely at the Keycloak provisioning layer — no application code, no new dependencies, no PAP creep into the application.
+
+Alternatives (per-workspace Keycloak groups, HMAC-derived user-scoped tokens, in-app allowlists) all either recreate Layer 2 with worse tooling or violate the PEP-only principle by introducing authorization state into the application. They are explicitly rejected. The correct answer for multi-tenant team-tier deployments is one realm per customer.
+
+**Layer 2 (`fine-grained` mode) eliminates this constraint entirely:** even with a valid JWT and the leaked key, a user with no explicit SpiceDB relationship to `workspace:wk-beta-annual` receives `PermissionDenied`. The key becomes a pure routing token with no authorization power.
+
 ---
 
 ## Infrastructure Foundation (Phase K, k3s-first)

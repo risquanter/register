@@ -273,9 +273,6 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     */
   private def toShapeDraft: Validation[ValidationError, DistributionDraft] =
     val mode = distributionModeVar.now()
-    val distType = mode match
-      case DistributionMode.Expert    => "expert"
-      case DistributionMode.Lognormal => "lognormal"
 
     val minLossV = mode match
       case DistributionMode.Lognormal => parseLongField(minLossVar.now(), "leaf.minLoss").map(Some(_))
@@ -294,7 +291,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     Validation.validateWith(minLossV, maxLossV, percentilesV, quantilesV) {
       (minL, maxL, pcts, quants) =>
         DistributionDraft(
-          distributionType = distType,
+          distributionType = mode,
           minLoss          = minL,
           maxLoss          = maxL,
           percentiles      = pcts,

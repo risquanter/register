@@ -2,6 +2,8 @@ package app.components
 
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom.MouseEvent
+import app.state.DistributionMode
+import com.risquanter.register.domain.data.iron.{SafeName, NodeId, Probability, NonNegativeLong}
 
 /** Unified tree-node row used by both TreePreview (draft state) and
   * TreeDetailView (persisted tree).
@@ -25,6 +27,43 @@ object TreeNodeRow:
 
   enum NodeKind:
     case Portfolio, Leaf
+
+  /** Structured leaf tooltip for native `title` attribute (D2(a)).
+    *
+    * Used by both TreePreview (draft nodes — no ID) and TreeDetailView (persisted nodes — with ID).
+    * Optional fields are omitted when absent.
+    */
+  def leafTooltip(
+    name:        SafeName.SafeName,
+    distType:    DistributionMode,
+    probability: Probability,
+    id:          Option[NodeId]          = None,
+    percentiles: Option[Array[Double]]   = None,
+    quantiles:   Option[Array[Double]]   = None,
+    minLoss:     Option[NonNegativeLong] = None,
+    maxLoss:     Option[NonNegativeLong] = None
+  ): String =
+    val idLine = id.fold("")(n => s"\nID:           ${n.toSafeId.value}")
+    val base   = s"${name.value}\n─────────────────────$idLine\nType:         ${distType.toApiString}\nProbability:  $probability"
+    val pLine  = percentiles.fold("")(arr => s"\nPercentiles:  [${arr.mkString(", ")}]")
+    val qLine  = quantiles.fold("")(arr => s"\nQuantiles:    [${arr.mkString(", ")}]")
+    val mnLine = minLoss.fold("")(v => s"\nMin Loss:     $v")
+    val mxLine = maxLoss.fold("")(v => s"\nMax Loss:     $v")
+    s"$base$pLine$qLine$mnLine$mxLine"
+
+  /** Structured portfolio tooltip for native `title` attribute (D2(a)).
+    *
+    * Used by both TreePreview (draft nodes — no ID) and TreeDetailView (persisted nodes — with ID).
+    */
+  def portfolioTooltip(
+    name:       SafeName.SafeName,
+    id:         Option[NodeId] = None,
+    childCount: Option[Int]    = None
+  ): String =
+    val sep       = "\n─────────────────────"
+    val idLine    = id.fold("")(n => s"\nID:           ${n.toSafeId.value}")
+    val childLine = childCount.fold("")(n => s"\nChildren:     $n")
+    s"${name.value}$sep$idLine$childLine"
 
   def apply(
     label:         String,

@@ -156,7 +156,7 @@ object DistributionChartView:
     */
   private def toPreviewRequest(draft: DistributionDraft): DistributionPreviewRequest =
     DistributionPreviewRequest(
-      distributionType = draft.distributionType,
+      distributionType = draft.distributionType.toApiString,
       percentiles      = draft.percentiles.map(_.map(_ * 100.0)),
       quantiles        = draft.quantiles,
       terms            = draft.terms,
