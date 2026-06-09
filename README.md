@@ -1,6 +1,8 @@
 # Risquanter Register
 
-[![Last commit](https://img.shields.io/github/last-commit/risquanter/register)](https://github.com/risquanter/register/commits/main) [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE.md)
+[![GitHub last commit](https://github.com/risquanter/register/commits/main/badge.svg)](https://github.com/risquanter/register/commits/main)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE.md)
+
 
 A quantitative risk analysis platform designed for decision support rather than prediction: sensitivity analysis, mitigation cost-benefit, and comparative risk ranking against explicitly stated expert beliefs.
 
