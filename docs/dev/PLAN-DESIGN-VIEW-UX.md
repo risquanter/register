@@ -362,7 +362,15 @@ Issue 1  (idle text)                 ────► Issue +1 (idle text enum re
 Issue 4  (leaf edit) ─────────────────── independent
 Issue 5  (portfolio edit) ─────────────── independent; implement after Issue 4
                                           to reuse the selection toggle pattern
+
+Prerequisite (preserve node identity) ──► Option A (distribution refactor)
+                                      └──► Issues 4 & 5 (edit loaded trees)
 ```
+
+The **prerequisite** (preserve node identity on update) lands before Option A and
+before Issues 4 & 5, because all three operate on trees loaded from the server and
+are only correct once a node's identity survives an edit (see the prerequisite
+section below).
 
 Issues 2a, 2b, and 3 are quick wins (state initialisations + one signal combinator)
 and should be done first — they remove noise that obscures the behaviour of
@@ -371,76 +379,245 @@ everything that follows. Issues 4 and 5 are the largest changes and share the
 
 ---
 
+## Prerequisite — Preserve node identity on update (approved, not yet implemented)
+
+**Lands before Option A and before Issues 4 & 5.**
+
+### Why this is a prerequisite, not a feature
+
+Issues 4 and 5 (in-place leaf / portfolio editing) and Option A's `loadFromTree`
+rewrite all operate on a tree **loaded from the server**. Editing a loaded tree is
+only correct if a node's identity survives the edit. Today it does not — so this
+must land first.
+
+### The defect (verified by codebase audit)
+
+`RiskTreeUpdateRequest` has two buckets:
+
+- `portfolios` / `leaves` — carry `id: String`; `RiskTreeUpdateRequest.resolve` keeps
+  these ids verbatim → `NodeId(id)` → the **same** Irmin path `nodes/{id}`.
+  (Identity-preserving.)
+- `newPortfolios` / `newLeaves` — no id; each node gets a freshly minted `SafeId`.
+
+The frontend never uses the identity-preserving bucket:
+
+- `loadFromTree` discards every `NodeId` (`LeafDraft` / `PortfolioDraft` hold only
+  name + parent-name).
+- `toUpdateRequest` routes **everything** into `newPortfolios` / `newLeaves` (its own
+  comment: *"full replacement with all nodes as 'new'"*).
+
+**Consequence:** editing one distribution param reassigns **every** `NodeId` in the
+tree. In `RiskTreeRepositoryIrmin.update`, `obsoleteNodeIds = before.diff(after)` is
+then the *entire* old node set → every `nodes/{old}` removed, every `nodes/{new}`
+written. This:
+
+- **Destroys per-node git history** — `git log nodes/{id}` cannot follow a leaf across
+  edits (defeats ADR-004a per-node storage and ADR-021 node capability URLs).
+- **Over-invalidates the cache** — `InvalidationHandler.computeAffectedNodes` sees
+  "all removed + all added" instead of its "common node, data changed → invalidate
+  just this node" branch, flushing the whole tree's LEC cache on every edit.
+
+### What is already correct (do not touch)
+
+- **Whole-tree submission + whole-graph validation is the correctness-by-construction
+  mechanism and stays.** `validateTopologyUpdate` enforces graph-global invariants
+  (unique names, single root, parent references resolve, no cycles, non-empty
+  portfolios) that cannot be checked from one node in isolation; `RiskTree.fromNodes`
+  re-validates the rebuilt index. An accepted update is always a fully-valid tree. A
+  per-node PATCH could not escape this — it would still have to load, patch, and re-run
+  the same whole-graph validation.
+- **Deletion-by-omission is the intended delete verb.** The persisted set is exactly
+  `existing ++ added`; a node absent from the submitted tree is removed by
+  `obsoleteNodeIds`. Correct and unchanged.
+- **The server already supports identity-preserving update.** No server, endpoint, or
+  Irmin change is required. The fix is entirely frontend.
+
+### The fix — frontend only
+
+Make the loaded `NodeId` survive the round-trip, so edit / add / remove map to clean
+git-like per-path semantics:
+
+| User action | Bucket | Irmin effect | History |
+|-------------|--------|--------------|---------|
+| Edit a loaded node (param / name / reparent) | `existing` (same id) | re-write **same** `nodes/{id}` | chain continues |
+| Add a node this session | `new*` (no id) | new path | new chain |
+| Remove a node | omitted | path removed | chain ends |
+| Untouched loaded node | `existing` (same id) | identical content → blob dedup | no-op |
+
+Whole-tree submission and full validation are untouched — the complete node set is
+still sent and validated as a graph. **Only the id-bucketing changes.**
+
+### Change map (`app` module only)
+
+| File | Change |
+|------|--------|
+| `state/TreeBuilderState.scala` | Add `id: Option[NodeId]` to `LeafDraft` and `PortfolioDraft` (`None` = added this session, `Some` = loaded from server). `loadFromTree` populates `id = Some(node.id)` for every node. `toUpdateRequest` stops delegating wholesale to `new*`: it **partitions** drafts on `id` — `Some` → `RiskLeafUpdateRequest` / `RiskPortfolioUpdateRequest` (carrying the node's id string as their `id: String`) into the `leaves` / `portfolios` buckets; `None` → the existing `RiskLeafDefinitionRequest` / `RiskPortfolioDefinitionRequest` into `newLeaves` / `newPortfolios`. `toRequest` (create flow) is unchanged — every draft has `id = None`. Add imports for `NodeId`, `RiskLeafUpdateRequest`, `RiskPortfolioUpdateRequest`. |
+
+### Verification step (before relying on the round-trip)
+
+Confirm a `NodeId` rendered to its underlying string and re-refined server-side via
+`ValidationUtil.refineId` yields the **same** `SafeId` (both wrap the same ULID-style
+string). If `refineId` is stricter than `NodeId`'s own constructor, surface it as a
+Blocked State decision rather than working around it.
+
+### Interaction with Option A
+
+Both rewrite `loadFromTree` and the `LeafDraft` / `PortfolioDraft` shapes. Because this
+prerequisite lands **first**:
+
+- The drafts already carry `id: Option[NodeId]` when Option A retypes
+  `LeafDraft.distribution` to `Distribution` and adds `probability: Probability`.
+- Option A's `loadFromTree` rewrite **preserves** the `NodeId` set here — it no longer
+  "drops the NodeId"; it projects shape fields directly **and** keeps identity.
+
+### Non-goal (dropped)
+
+Per-node update **endpoints** (a net-new `updateNode` repo method + Tapir endpoint +
+controller + ADR) are **not** pursued. The unwired `DistributionUpdateRequest` /
+`NodeRenameRequest` request types remain dead scaffolding; Option A only keeps them
+type-consistent. This identity-preservation fix delivers working, per-node-correct
+editing through the existing whole-tree path, making per-node endpoints an optional
+future nicety rather than a correctness need.
+
+---
+
 ## Option A — Remove `probability` from `Distribution` (approved, not yet implemented)
 
 ### Decision
 
-`Distribution.probability: Probability` is removed. `Distribution` becomes a pure
-shape type — it describes how losses are distributed, not how frequently the event
-occurs. Probability is a leaf-level property orthogonal to the loss shape.
+**The goal is to dissolve a conflation, not to remove a field.** `Distribution`
+currently means two orthogonal things at once:
+
+- **shape** — *how* a loss is distributed (expert percentiles/quantiles, or
+  lognormal min/max bounds)
+- **frequency** — *how often* the event occurs (`probability`)
+
+These are independent axes. A loss shape is fully meaningful with no probability
+attached — that is exactly what the distribution preview chart renders. Bundling
+`probability` into `Distribution` forces every consumer of "the shape" to also
+carry a frequency it does not need, and it is the root cause of the entire
+draft-shadow apparatus (see below).
+
+`Distribution.probability: Probability` is therefore removed. `Distribution` becomes
+a pure **shape** type. Frequency becomes a separate leaf-level field
+(`probability: Probability`) carried alongside it.
+
+**`DistributionDraft` / `LeafDistributionDraft` are scar tissue of the conflation,
+and their deletion is a direct entailment of this separation — not a separate
+cleanup task.** The reasoning is a single causal chain:
+
+1. The preview pipeline has a *shape* but no *frequency*.
+2. `Distribution.create()` refused to produce a `Distribution` without a
+   `probability`.
+3. So a probability-free shadow of `Distribution` (`DistributionDraft`) had to be
+   invented to carry shape alone, and a wrapper (`LeafDistributionDraft`) to staple
+   probability back on.
+4. That shadow then leaked into `leavesVar` storage, where committed nodes were held
+   as *unvalidated* drafts and re-validated on every `toLeafRequest` — a
+   validated → unvalidated → validated round-trip (most visible in `loadFromTree`,
+   which downgrades an already-Iron-typed `RiskLeaf` into raw primitives).
+
+Once probability leaves `Distribution`, step 2's obstacle is gone: `Distribution`
+*is* the probability-free shape type, the preview pipeline can hold a real
+`Distribution`, and the reason `DistributionDraft` ever existed no longer exists.
+It vanishes as a consequence of the separation, taking `LeafDistributionDraft` with
+it.
 
 **Rationale (confirmed by codebase audit):**
 - `Simulator.createSamplerFromLeaf` already calls
   `RiskSampler.fromDistribution(occurrenceProb = leaf.probability, lossDistribution = distribution)`.
-  The simulation layer never reads `distribution.probability`. The field is wrong
-  by construction — it exists only because `Distribution.create()` happened to
-  validate it.
+  The simulation layer never reads `distribution.probability` — shape and frequency
+  are already separate at the point of use. The field on `Distribution` exists only
+  because `Distribution.create()` happened to validate it.
 - `DistributionPreviewRequest` has no probability field, confirming probability is
   not a property of the shape for preview purposes.
-- Removing `probability` from `Distribution` allows `DistributionDraft` to be
-  eliminated entirely: `Distribution.create()` without probability can be called
-  directly from `RiskLeafFormState`, making `draftSignal` emit `Option[Distribution]`.
-  The form accumulator layer collapses into `Distribution` itself.
+- With probability removed, `Distribution.create()` can be called directly from
+  `RiskLeafFormState`, making `draftSignal` emit `Option[Distribution]`. The form
+  accumulator layer collapses into `Distribution` itself.
 
-### What is eliminated
+### What stays, what goes — the `*Draft` family
+
+The `Draft` suffix conflates two unrelated ideas. Separating them is the whole point:
+
+| Type | Decision | Why |
+|------|----------|-----|
+| `PortfolioDraft` | **Keep** (the prerequisite adds `id: Option[NodeId]`) | Already fully Iron-typed (`SafeName` fields). It is the proof that a builder "Draft" *should* be fully validated. Represents a node addressed by name in the builder; the prerequisite's `id` distinguishes a loaded node (`Some`) from one added this session (`None`). |
+| `LeafDraft` | **Keep, fully typed** (the prerequisite adds `id: Option[NodeId]`) | Genuine concept (a builder node, parent-by-name, identity carried as `Option[NodeId]`). Its `distribution` field changes from the raw `LeafDistributionDraft` to the validated `Distribution`; a separate `probability: Probability` field is added. After this it carries no raw primitives. |
+| `LeafDistributionDraft` | **Deleted** | Encoded no genuine difference from "a `Distribution` plus a `Probability`". Existed only to staple probability onto the shadow shape. With `LeafDraft` holding `distribution: Distribution` and `probability: Probability` as two clean fields, there is nothing left to staple. |
+| `DistributionDraft` | **Deleted** | The probability-free shadow of `Distribution`. Its entire reason for existence was step 2 above. Gone once `Distribution` itself is probability-free. |
+
+### Other eliminations
 
 | Type | Status | Reason |
 |------|--------|--------|
-| `DistributionDraft` | **Deleted** | Was a raw-primitive accumulator so `Distribution.create()` could be called later. With probability removed, `Distribution.create()` can be called immediately from `RiskLeafFormState`. |
-| `LeafDistributionDraft` | **Deleted** | Was a wrapper around `DistributionDraft` + `probability: Double`. `LeafDraft` will hold `distribution: Distribution` and `probability: Probability` as separate fields. |
-| `toDistributionDraft` method | **Deleted** | In `RiskLeafFormState`. The method constructed a `LeafDistributionDraft`; no longer needed. |
-| `toShapeDraft` method | **Deleted** | In `RiskLeafFormState`. Was a sub-step used by `toDistributionDraft`. Replaced by inline `Distribution.create()` call. |
-| `DistributionMode.fromString` conversion | **Deleted** | Was added to `TreeDetailView` as a bridge from `DistributionType` (domain) to `DistributionMode` (form enum). `DistributionMode` no longer appears in call sites receiving `DistributionType`. |
-| `DistributionMode` enum | **Scope reduced** | `DistributionMode` was also used in `DistributionDraft.distributionType`. With `DistributionDraft` deleted, `DistributionMode` becomes unused and should be deleted too. |
+| `toDistributionDraft` method | **Deleted** | In `RiskLeafFormState`. Constructed a `LeafDistributionDraft`; no longer needed. |
+| `toShapeDraft` method | **Deleted** | In `RiskLeafFormState`. Was a sub-step of `toDistributionDraft`. Replaced by an inline `Distribution.create()` call in `draftSignal`. |
+| `DistributionMode.fromString` bridge in `TreeDetailView` | **Deleted** | Was added only to convert `DistributionType` (domain) → `DistributionMode` (form enum) for the tooltip helper. The display helpers move to `DistributionType` directly, so the bridge disappears. |
 
-### Named wrapper for HTTP resolution layer
+### `DistributionMode` — kept (correction to earlier draft of this plan)
 
-`Distribution.create()` no longer validates probability. HTTP resolution code
-(`RiskTreeRequests`, `RiskTreeMaintenanceRequests`) validates probability separately.
-To keep maps well-typed, introduce a small wrapper in the `common` module (alongside
-`Distribution.scala`):
+`DistributionMode` is **not** deleted. It is the form's Expert/Lognormal mode-toggle
+enum and is load-bearing in the form layer, independent of `DistributionDraft`:
 
-```scala
-final case class ResolvedLeafDistribution(
-  probability: Probability,
-  shape:       Distribution
-)
-```
+- `RiskLeafFormState.distributionModeVar: Var[DistributionMode]` — the toggle state,
+  read by ~10 reactive validation signals (`percentilesErrorRaw`, `quantilesErrorRaw`,
+  cross-field checks, `minLoss`/`maxLoss` errors) and `resetFields`.
+- `RiskLeafFormView` — the radio group (`selectedVar = state.distributionModeVar`)
+  and the field-switching `child <-- distributionModeVar.signal.map { … }`.
 
-This replaces `Distribution` wherever a post-resolution map previously bundled the
-two together. All three resolution maps in `RiskTreeRequests` change type:
+Only the three **display-layer** usages of `DistributionMode` migrate to the domain
+`DistributionType`: `TreeNodeRow.leafTooltip`, `TreePreview.TreeNode.Leaf`, and
+`DistributionSpecBuilder`'s mode check. `DistributionMode` remains the form toggle
+and is the boundary type between the radio UI and the domain `DistributionType`.
+
+### HTTP resolution layer — carry probability as a bare tuple (no new type)
+
+`Distribution.create()` no longer validates probability, so the HTTP resolution code
+(`RiskTreeRequests`, `RiskTreeMaintenanceRequests`) must carry the refined
+`Probability` *next to* the `Distribution` shape from the point of resolution to
+`buildNodes`.
+
+**No new named type is introduced.** This layer already passes resolved leaf data as
+tuples and name-keyed maps; the only change is widening them to carry `Probability`
+alongside `Distribution`. The two correct types — `Probability` and `Distribution` —
+travel together as a bare pair:
 
 ```
 Map[SafeName.SafeName, Distribution]
-  → Map[SafeName.SafeName, ResolvedLeafDistribution]
+  → Map[SafeName.SafeName, (Probability, Distribution)]
 ```
+
+`buildNodes` destructures `val (prob, shape) = leafDistributions(node.name)` and
+passes both to `RiskLeaf.fromValidated`. (An earlier draft of this plan proposed a
+`ResolvedLeafDistribution` wrapper — rejected: it is exactly the kind of
+bundling-only type this refactor exists to remove.)
 
 ### `DistributionType` constants (new — `common` module)
 
 `DistributionSpecBuilder` (app) currently checks distribution type with
-`d.distributionType == DistributionMode.Expert`. With `DistributionMode` deleted and
-`distributionType` now typed as `DistributionType` (`String :| Match["^(expert|lognormal)$"]`),
-the check must compare against a typed constant.
+`d.distributionType == DistributionMode.Expert`. After the migration its `draft`
+field is a `Distribution`, so `d.distributionType` is a `DistributionType`
+(`String :| Match["^(expert|lognormal)$"]`). The check must compare against a typed
+constant rather than a `DistributionMode` case.
 
-Add a companion for `DistributionType` in `Distribution.scala`:
+The codebase already has the established home for Iron-typed literal constants:
+`object IronConstants` in `domain/data/iron/OpaqueTypes.scala` (documented purpose:
+*"use these instead of `1.refineUnsafe[…]` scattered throughout the codebase …
+compile-time safe since Iron validates literal values at compile time"*). Add the
+two distribution-type constants there, as plain literal assignments — Iron validates
+the literal against the `Match` constraint at compile time, so **no `.assume` is
+needed**:
 
 ```scala
-object DistributionType:
-  val Expert:    DistributionType = "expert".assume
-  val Lognormal: DistributionType = "lognormal".assume
+// in IronConstants, under a "DistributionType constants" header
+val Expert:    DistributionType = "expert"
+val Lognormal: DistributionType = "lognormal"
 ```
 
-`DistributionSpecBuilder` then uses `d.distributionType == DistributionType.Expert`.
+`DistributionSpecBuilder` then uses `d.distributionType == IronConstants.Expert`.
+This supersedes any earlier suggestion of a companion object in `Distribution.scala`
+— `IronConstants` is the convention-aligned location and `DistributionType` is
+defined in that same file.
 
 ---
 
@@ -450,35 +627,35 @@ object DistributionType:
 
 | File | Change |
 |------|--------|
-| `domain/data/Distribution.scala` | Remove `probability: Probability` from case class; remove `probability: Double` from `create()` signature; remove `probV` validation; remove from `Validation.validateWith` call. Add `DistributionType` companion object with `Expert` and `Lognormal` constants. |
-| `domain/data/Distribution.scala` | Add `final case class ResolvedLeafDistribution(probability: Probability, shape: Distribution)` in the same file (or adjacent companion file). |
-| `http/requests/RiskTreeRequests.scala` | `refineLeafDefs` return type: `Seq[(SafeName.SafeName, Option[SafeName.SafeName], Distribution)]` → `Seq[(SafeName.SafeName, Option[SafeName.SafeName], ResolvedLeafDistribution)]`. Same change to `refineExistingLeaves`. Remove `l.probability` from `Distribution.create()` calls in both methods. Construct `ResolvedLeafDistribution(Probability.refined(l.probability), shape)` at each call site. |
-| `http/requests/RiskTreeRequests.scala` | `ResolvedCreate.leafDistributions: Map[SafeName.SafeName, Distribution]` → `Map[SafeName.SafeName, ResolvedLeafDistribution]`. Same for `ResolvedUpdate.existingLeafDistributions` and `addedLeafDistributions`. |
-| `http/requests/RiskTreeMaintenanceRequests.scala` | `DistributionUpdateRequest.validate()` currently returns `Distribution`. After: returns `ResolvedLeafDistribution`. Remove `probability` from `Distribution.create()` call; refine probability separately; construct `ResolvedLeafDistribution`. |
-| `http/requests/RiskTreeRequests.scala` | `validateDistributionUpdate` (line 54) is a one-liner that delegates directly to `DistributionUpdateRequest.validate()` and declares its return type as `Distribution`. When `DistributionUpdateRequest.validate()` changes to return `ResolvedLeafDistribution`, this method's return type annotation and any call sites must be updated to match. |
+| `domain/data/iron/OpaqueTypes.scala` | Add `Expert` / `Lognormal` `DistributionType` constants to `object IronConstants` (plain literal assignments; no `.assume`). |
+| `domain/data/Distribution.scala` | Remove `probability: Probability` from case class; remove `probability: Double` from `create()` signature; remove `probV` validation; remove from `Validation.validateWith` call. No new type added — probability travels as a bare `(Probability, Distribution)` pair in the resolution layer. |
+| `http/requests/RiskTreeRequests.scala` | `refineLeafDefs` return type: `Seq[(SafeName.SafeName, Option[SafeName.SafeName], Distribution)]` → `Seq[(SafeName.SafeName, Option[SafeName.SafeName], Probability, Distribution)]`. Same change to `refineExistingLeaves` (its tuple already carries a `SafeId.SafeId` first). Remove `l.probability` from `Distribution.create()` calls in both methods; refine it separately with `ValidationUtil.refineProbability` and add it to the tuple via the same `Validation.validateWith`. |
+| `http/requests/RiskTreeRequests.scala` | `ResolvedCreate.leafDistributions: Map[SafeName.SafeName, Distribution]` → `Map[SafeName.SafeName, (Probability, Distribution)]`. Same for `ResolvedUpdate.existingLeafDistributions` and `addedLeafDistributions`. Update the `.collect`/`.map` that build these maps in `RiskTreeDefinitionRequest.resolve` and `RiskTreeUpdateRequest.resolve` to key to the `(prob, shape)` pair. |
+| `http/requests/RiskTreeMaintenanceRequests.scala` | `DistributionUpdateRequest.validate()` currently returns `Distribution`. After: returns `(Probability, Distribution)`. Remove `probability` from `Distribution.create()` call; refine it separately; return the pair. |
+| `http/requests/RiskTreeRequests.scala` | `validateDistributionUpdate` (line 54) is a one-liner that delegates directly to `DistributionUpdateRequest.validate()` and declares its return type as `Distribution`. Change its return type to `(Probability, Distribution)` to match; update any call sites. |
 
 #### `server` module
 
 | File | Change |
 |------|--------|
-| `services/RiskTreeServiceLive.scala` | `buildNodes` parameter `leafDistributions: Map[SafeName.SafeName, Distribution]` → `Map[SafeName.SafeName, ResolvedLeafDistribution]`. Inside `buildNodes`, the map lookup produces `dist: ResolvedLeafDistribution` instead of `dist: Distribution`; the source expression `dist.probability` is syntactically unchanged — it now resolves to `ResolvedLeafDistribution.probability` rather than the removed `Distribution.probability`. The two `buildNodes` call sites in `create` and `update` pass the updated map type. |
+| `services/RiskTreeServiceLive.scala` | `buildNodes` parameter `leafDistributions: Map[SafeName.SafeName, Distribution]` → `Map[SafeName.SafeName, (Probability, Distribution)]`. Inside `buildNodes`, the lookup `val dist = leafDistributions(node.name)` becomes `val (prob, shape) = leafDistributions(node.name)`; pass `prob` and `shape`'s fields to `RiskLeaf.fromValidated` (currently `dist.probability` → `prob`, `dist.distributionType` → `shape.distributionType`, etc.). The two `buildNodes` call sites in `create` and `update` pass the updated map type. |
 
 No changes needed to `Simulator.scala` — it reads `leaf.probability` from `RiskLeaf`
-which is populated from `ResolvedLeafDistribution.probability` by `buildNodes`.
+which `buildNodes` populates from the tuple's `prob` element.
 
 #### `app` module
 
 | File | Change |
 |------|--------|
-| `state/TreeBuilderState.scala` | Delete `DistributionDraft`, `LeafDistributionDraft`. `LeafDraft.distribution: LeafDistributionDraft` → `LeafDraft.distribution: Distribution`. Add `LeafDraft.probability: Probability`. `addLeaf` signature: parameter changes from `dist: LeafDistributionDraft` to `shape: Distribution, probability: Probability`. `addLeaf` stores `LeafDraft(name, parent, shape, probability)` directly (no re-validation). `toLeafRequest` reads `draft.distribution.*` for shape fields and `draft.probability.value` for the wire `Double`. `validateDistribution` signature removes `probability: Double` parameter. `loadFromTree` constructs `Distribution` from `RiskLeaf` shape fields; reads `riskLeaf.probability` for `LeafDraft.probability`. `currentDraftVar: Var[Option[DistributionDraft]]` → `Var[Option[Distribution]]`. |
-| `state/RiskLeafFormState.scala` | Delete `toDistributionDraft`, `toShapeDraft`. `draftSignal: Signal[Option[Distribution]]` — derived by calling `Distribution.create()` inline, gated by whether the `Validation` result is a success. Combine all shape-field reactive inputs (`distributionTypeVar`, `percentilesVar`, `quantilesVar`, `minLossVar`, `maxLossVar`, `termsVar`, `expertParamsVar`, `lognormalParamsVar`) into a `draftSignal` combinator that calls `Distribution.create()` and maps to `Some(dist)` on success, `None` on failure. Add import for `Distribution`. |
+| `state/TreeBuilderState.scala` | Delete `DistributionDraft`, `LeafDistributionDraft`. `LeafDraft.distribution: LeafDistributionDraft` → `LeafDraft.distribution: Distribution`. Add `LeafDraft.probability: Probability`. `addLeaf` signature: parameter changes from `dist: LeafDistributionDraft` to `shape: Distribution, probability: Probability`. `addLeaf` stores `LeafDraft(name, parent, shape, probability)` directly (no re-validation). `toLeafRequest` reads `draft.distribution.*` for shape fields and `draft.probability` for probability — no `validateDistribution` re-call; `.value` only at the wire boundary. Delete the `validateDistribution` helper. `loadFromTree` becomes a structure-preserving projection: build `Distribution` directly from the `RiskLeaf`'s already-Iron-typed shape fields (`distributionType`, `minLoss`, `maxLoss`, `percentiles`, `quantiles`, `terms`) and copy `riskLeaf.probability` into `LeafDraft.probability` — **preserves the `NodeId`** (written into `LeafDraft.id` by the prerequisite), no downgrade to raw primitives, no `DistributionMode.fromString` round-trip. `currentDraftVar: Var[Option[DistributionDraft]]` → `Var[Option[Distribution]]`. |
+| `state/RiskLeafFormState.scala` | Delete `toDistributionDraft`, `toShapeDraft`. `draftSignal: Signal[Option[Distribution]]` — derived by calling `Distribution.create()` inline, gated by whether the `Validation` result is a success. Combine the shape-field reactive inputs (`distributionModeVar`, `percentilesVar`, `quantilesVar`, `minLossVar`, `maxLossVar`, `termsVar`) into a `draftSignal` combinator that calls `Distribution.create()` and maps to `Some(dist)` on success, `None` on failure. `distributionModeVar` (a `DistributionMode`) supplies the mode via `.toApiString` at the `create()` call. Add import for `Distribution`. |
 | `state/DistributionChartState.scala` | `draftSignal: StrictSignal[Option[DistributionDraft]]` → `StrictSignal[Option[Distribution]]`. |
-| `views/DistributionChartView.scala` | `toPreviewRequest(draft: Distribution)` — reads `draft.distributionType`, `draft.minLoss`, `draft.maxLoss`, `draft.percentiles`, `draft.quantiles`, `draft.terms` directly. Delete `DistributionDraft` import. |
-| `views/DistributionSpecBuilder.scala` | `draft: Option[DistributionDraft]` → `draft: Option[Distribution]`. `d.distributionType == DistributionMode.Expert` → `d.distributionType == DistributionType.Expert`. Delete `DistributionMode` import. |
-| `views/TreePreview.scala` | `TreeNode.Leaf` construction from `leavesVar`: reads `l.distribution: Distribution` for shape fields; `l.probability: Probability` for probability; all `.assume` calls removed (values are already Iron-typed). `distType = l.distribution.distributionType` (type `DistributionType`). |
+| `views/DistributionChartView.scala` | `toPreviewRequest(draft: Distribution)` — reads `draft.distributionType`, `draft.minLoss`, `draft.maxLoss`, `draft.percentiles`, `draft.quantiles`, `draft.terms` directly. `distributionType` is now a `DistributionType` (use `.toString` for the wire string, not `.toApiString`). Delete `DistributionDraft` import. |
+| `chart/DistributionSpecBuilder.scala` | `draft: Option[DistributionDraft]` → `draft: Option[Distribution]`. `d.distributionType == DistributionMode.Expert` → `d.distributionType == IronConstants.Expert`. Replace the `DistributionMode` import with `IronConstants`. |
+| `views/TreePreview.scala` | `TreeNode.Leaf` construction from `leavesVar`: reads `l.distribution: Distribution` for shape fields; `l.probability: Probability` for probability; all `.assume` calls removed (values are already Iron-typed). `distType` field type changes from `DistributionMode` to `DistributionType`, fed by `l.distribution.distributionType`. Replace the `DistributionMode` import with `DistributionType`. |
 | `views/RiskLeafFormView.scala` | Call site of `builderState.addLeaf` — no longer constructs `LeafDistributionDraft`; passes `shape: Distribution, probability: Probability` where `shape` comes from `leafFormState.draftSignal` and `probability` is refined from `probabilityVar`. |
-| `components/TreeNodeRow.scala` | `leafTooltip` `distType: DistributionMode` → `distType: DistributionType`. Delete `DistributionMode` import from `TreeNodeRow`. |
-| `views/TreeDetailView.scala` | Already passes `leaf.distributionType: DistributionType` — `DistributionMode.fromString` conversion removed. `DistributionMode` import removed. |
+| `components/TreeNodeRow.scala` | `leafTooltip` `distType: DistributionMode` → `distType: DistributionType`. Replace the `DistributionMode` import with `DistributionType`. |
+| `views/TreeDetailView.scala` | Pass `leaf.distributionType: DistributionType` directly to `TreeNodeRow.leafTooltip` — the `DistributionMode.fromString(...).getOrElse(...)` bridge and the `DistributionMode` import are removed. |
 
 ---
 
@@ -487,31 +664,33 @@ which is populated from `ResolvedLeafDistribution.probability` by `buildNodes`.
 Steps 1 and 2 are in `common` and compile independently. Steps 3 and 4 depend on
 Step 1. Step 5 (app module) depends on Steps 1 and 3.
 
-**Step 1 — `Distribution.scala` (common)**
-Remove `probability` field and parameter. Add `DistributionType` companion. Add
-`ResolvedLeafDistribution`. This step will break everything that depends on
-`Distribution.probability` — expected.
+**Step 1 — `OpaqueTypes.scala` + `Distribution.scala` (common)**
+Add `Expert` / `Lognormal` `DistributionType` constants to `IronConstants`. Remove
+`probability` field and parameter from `Distribution`. This step will break
+everything that depends on `Distribution.probability` — expected.
 
 **Step 2 — `RiskTreeRequests.scala` (common)**
-Update `refineLeafDefs` and `refineExistingLeaves` to return tuples carrying
-`ResolvedLeafDistribution`. Update all three resolved maps. Fix `Distribution.create()`
-call sites.
+Update `refineLeafDefs` and `refineExistingLeaves` to carry a refined `Probability`
+alongside the `Distribution` in their result tuples. Widen all three resolved maps to
+`Map[SafeName.SafeName, (Probability, Distribution)]`. Fix `Distribution.create()`
+call sites (drop `l.probability`; refine it separately).
 
 **Step 3 — `RiskTreeMaintenanceRequests.scala` (common)**
-Update `DistributionUpdateRequest.validate()` to return `ResolvedLeafDistribution`.
+Update `DistributionUpdateRequest.validate()` to return `(Probability, Distribution)`;
+update `validateDistributionUpdate`'s return type to match.
 
 **Step 4 — `RiskTreeServiceLive.scala` (server)**
 Update `buildNodes` parameter type. Update probability read site.
 
 **Step 5 — App module (all files in parallel where possible)**
-- `TreeBuilderState.scala` — structural changes to draft types
-- `RiskLeafFormState.scala` — new `draftSignal` derivation
+- `TreeBuilderState.scala` — delete `DistributionDraft`/`LeafDistributionDraft`; `LeafDraft` carries `Distribution` + `Probability`; `loadFromTree` becomes a structure-preserving projection (preserves the `NodeId` per the prerequisite)
+- `RiskLeafFormState.scala` — new `draftSignal` derivation emitting `Option[Distribution]`; `DistributionMode` toggle retained
 - `DistributionChartState.scala` — type annotation only
 - `DistributionChartView.scala` — `toPreviewRequest` parameter type
-- `DistributionSpecBuilder.scala` — `DistributionType.Expert` constant
-- `TreePreview.scala` — construction from typed fields, remove `.assume`
-- `TreeNodeRow.scala` — `distType` parameter type
-- `TreeDetailView.scala` — remove `DistributionMode` bridge
+- `DistributionSpecBuilder.scala` — `IronConstants.Expert` mode check
+- `TreePreview.scala` — construction from typed fields, remove `.assume`, `distType: DistributionType`
+- `TreeNodeRow.scala` — `distType` parameter `DistributionMode` → `DistributionType`
+- `TreeDetailView.scala` — remove `DistributionMode.fromString` bridge
 - `RiskLeafFormView.scala` — `addLeaf` call site
 
 ---

@@ -3,7 +3,7 @@ package com.risquanter.register.http.requests
 import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, Probability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
@@ -29,7 +29,7 @@ object RiskTreeRequests {
   final case class ResolvedCreate(
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],
-    leafDistributions: Map[SafeName.SafeName, Distribution],
+    leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, Distribution)],
     rootName: SafeName.SafeName
   )
 
@@ -39,8 +39,8 @@ object RiskTreeRequests {
     treeName: SafeName.SafeName,
     existing: Map[SafeName.SafeName, ResolvedNode],
     added: Map[SafeName.SafeName, ResolvedNode],
-    existingLeafDistributions: Map[SafeName.SafeName, Distribution],
-    addedLeafDistributions: Map[SafeName.SafeName, Distribution],
+    existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, Distribution)],
+    addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, Distribution)],
     rootName: SafeName.SafeName
   )
 
@@ -50,12 +50,6 @@ object RiskTreeRequests {
 
   def resolveUpdate(req: RiskTreeUpdateRequest, newId: IdGenerator): Validation[ValidationError, ResolvedUpdate] =
     RiskTreeUpdateRequest.resolve(req, newId)
-
-  def validateDistributionUpdate(req: DistributionUpdateRequest): Validation[ValidationError, Distribution] =
-    DistributionUpdateRequest.validate(req)
-
-  def validateRename(req: NodeRenameRequest): Validation[ValidationError, SafeName.SafeName] =
-    NodeRenameRequest.validate(req)
 
   private[requests] def refineParentName(raw: Option[String], field: String): Validation[ValidationError, Option[SafeName.SafeName]] = {
     raw.map(_.trim).filter(_.nonEmpty) match {
@@ -82,14 +76,15 @@ object RiskTreeRequests {
   private[requests] def refineLeafDefs(
     leaves: Seq[RiskLeafDefinitionRequest],
     baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], Distribution)]] =
+  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], Probability, Distribution)]] =
     collectAllWithIndex(leaves) { (l, idx) =>
       val base = s"$baseLabel[$idx]"
       Validation.validateWith(
         refineNameField(l.name, s"$base.name"),
         refineParentName(l.parentName, s"$base.parentName"),
-        Distribution.create(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base, terms = l.terms)
-      )((name, parent, dist) => (name, parent, dist))
+        toValidation(ValidationUtil.refineProbability(l.probability, s"$base.probability")),
+        Distribution.create(l.distributionType, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base, terms = l.terms)
+      )((name, parent, prob, dist) => (name, parent, prob, dist))
     }
 
   private[requests] def refineExistingPortfolios(
@@ -108,15 +103,16 @@ object RiskTreeRequests {
   private[requests] def refineExistingLeaves(
     leaves: Seq[RiskLeafUpdateRequest],
     baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName], Distribution)]] =
+  ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName], Probability, Distribution)]] =
     collectAllWithIndex(leaves) { (l, idx) =>
       val base = s"$baseLabel[$idx]"
       Validation.validateWith(
         toValidation(ValidationUtil.refineId(l.id, s"$base.id")),
         refineNameField(l.name, s"$base.name"),
         refineParentName(l.parentName, s"$base.parentName"),
-        Distribution.create(l.distributionType, l.probability, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base, terms = l.terms)
-      )((id, name, parent, dist) => (id, name, parent, dist))
+        toValidation(ValidationUtil.refineProbability(l.probability, s"$base.probability")),
+        Distribution.create(l.distributionType, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base, terms = l.terms)
+      )((id, name, parent, prob, dist) => (id, name, parent, prob, dist))
     }
 
   // Guard: ensure no node name collides with a reserved FOL query symbol (e.g. "leaf", "p95").

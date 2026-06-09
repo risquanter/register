@@ -6,6 +6,7 @@ import scala.scalajs.js
 
 import app.chart.DistributionSpecBuilder
 import app.core.ZJS.*
+import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.DistributionPreviewEndpoints
 import com.risquanter.register.http.requests.{DistributionPreviewRequest, DistributionPreviewResponse}
@@ -30,7 +31,7 @@ enum DistributionViewMode:
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   */
 final class DistributionChartState(
-  val draftSignal:    StrictSignal[Option[DistributionDraft]],
+  val draftSignal:    StrictSignal[Option[Distribution]],
   val keySignal:      StrictSignal[Option[WorkspaceKeySecret]],
   val userIdAccessor: () => Option[UserId] = () => None
 ) extends DistributionPreviewEndpoints:

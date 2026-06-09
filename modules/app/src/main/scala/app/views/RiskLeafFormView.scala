@@ -195,9 +195,9 @@ object RiskLeafFormView:
     submitError: Var[Option[String]]
   ): Unit =
     state.triggerValidation()
-    state.toDistributionDraft match
-      case Validation.Success(_, dist) =>
-        builderState.addLeaf(state.nameVar.now(), parentVar.now(), dist) match
+    (builderState.currentDraftVar.now(), state.refinedProbability) match
+      case (Some(shape), Some(prob)) =>
+        builderState.addLeaf(state.nameVar.now(), parentVar.now(), shape, prob) match
           case Validation.Success(_, _) =>
             submitError.set(None)
             // Intentional: parentVar is NOT reset — it is auto-synced by
@@ -215,5 +215,5 @@ object RiskLeafFormView:
               case "parent" => None  // leaf form has no parent text input to highlight
               case _        => None
             })
-      case Validation.Failure(_, errs) =>
-        submitError.set(Some(errs.head.message))
+      case _ =>
+        submitError.set(Some("Distribution or probability is invalid"))

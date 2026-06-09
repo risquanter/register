@@ -5,7 +5,8 @@ import com.raquo.laminar.api.L.{*, given}
 import scala.scalajs.js
 
 import app.facades.{vegaEmbed, EmbedResult}
-import app.state.{DistributionChartState, DistributionViewMode, LoadState, DistributionDraft}
+import app.state.{DistributionChartState, DistributionViewMode, LoadState}
+import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.http.requests.DistributionPreviewRequest
 
 /** Reactive distribution preview chart for the Design view.
@@ -149,17 +150,17 @@ object DistributionChartView:
 
   // ── Draft → request conversion ────────────────────────────────
 
-  /** Build a preview request from a valid draft.
+  /** Build a preview request from a valid distribution shape.
     *
-    * Percentiles in [[LeafDistributionDraft]] are stored as 0–1 (normalised from the
+    * Percentiles in [[Distribution]] are stored as 0–1 (normalised from the
     * form's 0–100 display values). The preview endpoint expects 0–100, so we re-scale.
     */
-  private def toPreviewRequest(draft: DistributionDraft): DistributionPreviewRequest =
+  private def toPreviewRequest(draft: Distribution): DistributionPreviewRequest =
     DistributionPreviewRequest(
-      distributionType = draft.distributionType.toApiString,
+      distributionType = draft.distributionType.toString,
       percentiles      = draft.percentiles.map(_.map(_ * 100.0)),
       quantiles        = draft.quantiles,
-      terms            = draft.terms,
-      minLoss          = draft.minLoss,
-      maxLoss          = draft.maxLoss
+      terms            = draft.terms.map(_.toInt),
+      minLoss          = draft.minLoss.map(identity),
+      maxLoss          = draft.maxLoss.map(identity)
     )

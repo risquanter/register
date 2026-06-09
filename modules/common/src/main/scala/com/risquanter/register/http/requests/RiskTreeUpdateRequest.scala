@@ -24,29 +24,29 @@ object RiskTreeUpdateRequest:
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, newPortfoliosV, newLeavesV) {
       (treeName, portfolios, leaves, newPortfolios, newLeaves) =>
-        validateTopologyUpdate(treeName, portfolios, leaves.map { case (_, name, parent, _) => (name, parent) }, newPortfolios, newLeaves.map { case (name, parent, _) => (name, parent) }).map { rootName =>
+        validateTopologyUpdate(treeName, portfolios, leaves.map { case (_, name, parent, _, _) => (name, parent) }, newPortfolios, newLeaves.map { case (name, parent, _, _) => (name, parent) }).map { rootName =>
           val existingPortfolioNodes = portfolios.map { case (id, name, parent) =>
             name -> ResolvedNode(id, name, parent, NodeKind.Portfolio)
           }
-          val existingLeafNodes = leaves.map { case (id, name, parent, _) =>
+          val existingLeafNodes = leaves.map { case (id, name, parent, _, _) =>
             name -> ResolvedNode(id, name, parent, NodeKind.Leaf)
           }
           val addedPortfolioNodes = newPortfolios.map { case (name, parent) =>
             name -> ResolvedNode(newId(), name, parent, NodeKind.Portfolio)
           }
-          val addedLeafNodes = newLeaves.map { case (name, parent, _) =>
+          val addedLeafNodes = newLeaves.map { case (name, parent, _, _) =>
             name -> ResolvedNode(newId(), name, parent, NodeKind.Leaf)
           }
 
-          val existingLeafDistributions = leaves.collect { case (_, name, _, dist) => name -> dist }.toMap
-          val addedLeafDistributions = newLeaves.map { case (name, _, dist) => name -> dist }.toMap
+          val existingLeafOccurrenceAndShape = leaves.collect { case (_, name, _, prob, dist) => name -> (prob, dist) }.toMap
+          val addedLeafOccurrenceAndShape = newLeaves.map { case (name, _, prob, dist) => name -> (prob, dist) }.toMap
 
           ResolvedUpdate(
             treeName = treeName,
             existing = (existingPortfolioNodes ++ existingLeafNodes).toMap,
             added = (addedPortfolioNodes ++ addedLeafNodes).toMap,
-            existingLeafDistributions = existingLeafDistributions,
-            addedLeafDistributions = addedLeafDistributions,
+            existingLeafOccurrenceAndShape = existingLeafOccurrenceAndShape,
+            addedLeafOccurrenceAndShape = addedLeafOccurrenceAndShape,
             rootName = rootName
           )
         }

@@ -2,8 +2,7 @@ package app.components
 
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom.MouseEvent
-import app.state.DistributionMode
-import com.risquanter.register.domain.data.iron.{SafeName, NodeId, Probability, NonNegativeLong}
+import com.risquanter.register.domain.data.iron.{SafeName, NodeId, Probability, NonNegativeLong, DistributionType}
 
 /** Unified tree-node row used by both TreePreview (draft state) and
   * TreeDetailView (persisted tree).
@@ -35,7 +34,7 @@ object TreeNodeRow:
     */
   def leafTooltip(
     name:        SafeName.SafeName,
-    distType:    DistributionMode,
+    distType:    DistributionType,
     probability: Probability,
     id:          Option[NodeId]          = None,
     percentiles: Option[Array[Double]]   = None,
@@ -44,7 +43,7 @@ object TreeNodeRow:
     maxLoss:     Option[NonNegativeLong] = None
   ): String =
     val idLine = id.fold("")(n => s"\nID:           ${n.toSafeId.value}")
-    val base   = s"${name.value}\n─────────────────────$idLine\nType:         ${distType.toApiString}\nProbability:  $probability"
+    val base   = s"${name.value}\n─────────────────────$idLine\nType:         ${distType}\nProbability:  $probability"
     val pLine  = percentiles.fold("")(arr => s"\nPercentiles:  [${arr.mkString(", ")}]")
     val qLine  = quantiles.fold("")(arr => s"\nQuantiles:    [${arr.mkString(", ")}]")
     val mnLine = minLoss.fold("")(v => s"\nMin Loss:     $v")

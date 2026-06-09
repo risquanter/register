@@ -1,9 +1,11 @@
 package app.state
 
 import zio.test.*
+import zio.prelude.Validation
 
-import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName}
+import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Distribution}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, Probability}
+import io.github.iltotore.iron.*
 import com.risquanter.register.domain.tree.TreeIndex
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
@@ -110,8 +112,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         assertTrue(state.leavesVar.now().length == 1) &&
         assertTrue(state.leavesVar.now().head.parent.isEmpty) &&
-        assertTrue(state.leavesVar.now().head.distribution.shape.terms == Some(3)) &&
-        assertTrue(state.leavesVar.now().head.distribution.shape.distributionType == "expert")
+        assertTrue(state.leavesVar.now().head.distribution.terms.contains(3)) &&
+        assertTrue(state.leavesVar.now().head.distribution.distributionType == IronConstants.Expert)
       },
 
       test("root portfolio + leaf under root: parent resolved correctly") {
@@ -163,6 +165,98 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val result = state.toUpdateRequest()
         assertTrue(result.isSuccess)
+      }
+
+    ),
+
+    suite("toUpdateRequest — node identity preservation")(
+
+      test("loaded nodes route to the existing buckets carrying their original ids; new buckets empty") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "Identity", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        state.toUpdateRequest() match
+          case Validation.Success(_, req) =>
+            assertTrue(
+              req.newPortfolios.isEmpty,
+              req.newLeaves.isEmpty,
+              req.portfolios.map(_.id).contains(rootUlid),
+              req.leaves.map(_.id).contains(leafUlid)
+            )
+          case Validation.Failure(_, errors) =>
+            assertTrue(false).label(errors.map(_.message).mkString("; "))
+      },
+
+      test("a node added after load routes to the new bucket while loaded nodes keep identity") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "Mixed", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+
+        val newShape = Distribution(
+          distributionType = IronConstants.Lognormal,
+          minLoss          = Some(2000L),
+          maxLoss          = Some(8000L),
+          percentiles      = None,
+          quantiles        = None,
+          terms            = None
+        )
+        val newProb: Probability = 0.15
+        val added = state.addLeaf("Fraud Risk", Some("Operational Risk"), newShape, newProb)
+
+        state.toUpdateRequest() match
+          case Validation.Success(_, req) =>
+            assertTrue(
+              added.isSuccess,
+              req.leaves.map(_.id).contains(leafUlid),       // loaded leaf keeps its NodeId
+              req.newLeaves.length == 1,                     // the session-added leaf is "new"
+              req.newLeaves.exists(_.name == "Fraud Risk")
+            )
+          case Validation.Failure(_, errors) =>
+            assertTrue(false).label(errors.map(_.message).mkString("; "))
+      },
+
+      test("NodeId survives the value/refine round-trip: emitted id strings are valid SafeIds") {
+        // Guards the precondition the server relies on: NodeId.value re-refines to the
+        // same SafeId, so the existing-bucket id is accepted, not rejected.
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "RoundTripId", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        state.toUpdateRequest() match
+          case Validation.Success(_, req) =>
+            val emittedIds = req.portfolios.map(_.id) ++ req.leaves.map(_.id)
+            assertTrue(
+              emittedIds.nonEmpty,
+              emittedIds.forall(s => NodeId.fromString(s).isRight)
+            )
+          case Validation.Failure(_, errors) =>
+            assertTrue(false).label(errors.map(_.message).mkString("; "))
       }
 
     )

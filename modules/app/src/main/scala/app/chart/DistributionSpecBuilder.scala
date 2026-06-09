@@ -2,7 +2,9 @@ package app.chart
 
 import scala.scalajs.js
 
-import app.state.{DistributionViewMode, DistributionDraft, DistributionMode}
+import app.state.DistributionViewMode
+import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.data.iron.IronConstants
 import com.risquanter.register.http.requests.{DistributionPreviewPoint, DistributionPreviewResponse}
 
 /** Client-side Vega-Lite v6 specification builder for distribution preview charts.
@@ -18,7 +20,7 @@ object DistributionSpecBuilder:
   def build(
     response: DistributionPreviewResponse,
     viewMode: DistributionViewMode,
-    draft:    Option[DistributionDraft] = None,
+    draft:    Option[Distribution] = None,
     width:    Int = 950,
     height:   Int = 300
   ): js.Dynamic =
@@ -31,7 +33,7 @@ object DistributionSpecBuilder:
 
   private def buildPdfSpec(
     response: DistributionPreviewResponse,
-    draft:    Option[DistributionDraft],
+    draft:    Option[Distribution],
     width:    Int,
     height:   Int
   ): js.Dynamic =
@@ -73,7 +75,7 @@ object DistributionSpecBuilder:
 
   private def buildCdfSpec(
     response: DistributionPreviewResponse,
-    draft:    Option[DistributionDraft],
+    draft:    Option[Distribution],
     width:    Int,
     height:   Int
   ): js.Dynamic =
@@ -150,12 +152,12 @@ object DistributionSpecBuilder:
   /** Build anchor overlay layers for both PDF and CDF views. */
   private def anchorAnnotations(
     response: DistributionPreviewResponse,
-    draft:    Option[DistributionDraft],
+    draft:    Option[Distribution],
     viewMode: DistributionViewMode
   ): js.Array[js.Any] =
     val layers = js.Array[js.Any]()
     draft.foreach { d =>
-      if d.distributionType == DistributionMode.Expert then
+      if d.distributionType == IronConstants.Expert then
         // Expert mode: vertical rules at each input quantile x-position
         val pcts   = d.percentiles.getOrElse(Array.empty[Double])
         val quants = d.quantiles.getOrElse(Array.empty[Double])

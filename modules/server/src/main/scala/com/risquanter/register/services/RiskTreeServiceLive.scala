@@ -239,7 +239,7 @@ class RiskTreeServiceLive private (
   /** Build domain nodes and rootId from a resolved V2 request. */
   private def buildNodes(
     nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
-    leafDistributions: Map[SafeName.SafeName, Distribution],
+    leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, Distribution)],
     rootName: SafeName.SafeName
   ): Task[(Seq[RiskNode], NodeId)] = ZIO.attempt {
     val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(n => NodeId(n.id)).toMap
@@ -252,18 +252,18 @@ class RiskTreeServiceLive private (
     val domainNodes: Seq[RiskNode] = nodesByName.values.toSeq.map { node =>
       node.kind match {
         case RiskTreeRequests.NodeKind.Leaf =>
-          val dist = leafDistributions(node.name)
+          val (prob, shape) = leafOccurrenceAndShape(node.name)
           RiskLeaf.fromValidated(
             id = node.id,
             name = node.name,
-            distributionType = dist.distributionType,
-            probability = dist.probability,
-            percentiles = dist.percentiles,
-            quantiles = dist.quantiles,
-            minLoss = dist.minLoss,
-            maxLoss = dist.maxLoss,
+            distributionType = shape.distributionType,
+            probability = prob,
+            percentiles = shape.percentiles,
+            quantiles = shape.quantiles,
+            minLoss = shape.minLoss,
+            maxLoss = shape.maxLoss,
             parentId = parentIdFor(node),
-            terms = dist.terms
+            terms = shape.terms
           )
 
         case RiskTreeRequests.NodeKind.Portfolio =>
@@ -288,7 +288,7 @@ class RiskTreeServiceLive private (
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
       resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(wsId, treeId, resolved.treeName)
-      (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafDistributions, resolved.rootName)
+      (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafOccurrenceAndShape, resolved.rootName)
       riskTree <- RiskTree.fromNodes(
         id = treeId,
         name = resolved.treeName,
@@ -311,8 +311,8 @@ class RiskTreeServiceLive private (
       resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
-      allLeafDistributions = resolved.existingLeafDistributions ++ resolved.addedLeafDistributions
-      (nodes, rootId) <- buildNodes(allNodes, allLeafDistributions, resolved.rootName)
+      allLeafOccurrenceAndShape = resolved.existingLeafOccurrenceAndShape ++ resolved.addedLeafOccurrenceAndShape
+      (nodes, rootId) <- buildNodes(allNodes, allLeafOccurrenceAndShape, resolved.rootName)
       riskTree <- RiskTree.fromNodes(
         id = id,
         name = resolved.treeName,

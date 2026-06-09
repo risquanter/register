@@ -67,6 +67,21 @@ Anything else is not a signal. Default action when unclear: stop and ask.
 
 ---
 
+## No "pre-existing failure" excuse
+
+A compile error or failing test in any module you build or run is yours to fix —
+the origin of the failure is irrelevant to your obligation to resolve it.
+
+- Never dismiss, defer, or narrate around a build/test failure because it is
+  "pre-existing", "unrelated", "already broken", or "not caused by my change".
+- Never spend a tool call proving a failure is pre-existing. Spend it fixing.
+- Never report work as done while any module you touched is red. Green is the only done.
+- The sole exception is a fix with a genuine tradeoff (weakening an assertion, changing
+  an API shape, a workaround) → raise ⚠️ Decision Required. "It's unrelated" is not a
+  tradeoff.
+
+---
+
 ## Correct-by-construction — always-active design constraint
 
 This applies to every new type, method, endpoint, DTO, and service in this codebase.

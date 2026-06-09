@@ -3,7 +3,6 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 
 import app.state.{TreeViewState, LoadState, ChartHoverBridge}
-import app.state.DistributionMode
 import app.components.{Icons, ColorSwatchPicker, TreeNodeRow}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
@@ -45,7 +44,7 @@ object TreeDetailView:
     case leaf: RiskLeaf =>
       TreeNodeRow.leafTooltip(
         name        = leaf.name,
-        distType    = DistributionMode.fromString(leaf.distributionType.toString).getOrElse(DistributionMode.Expert),
+        distType    = leaf.distributionType,
         probability = leaf.probability,
         id          = Some(leaf.id),
         percentiles = leaf.percentiles,

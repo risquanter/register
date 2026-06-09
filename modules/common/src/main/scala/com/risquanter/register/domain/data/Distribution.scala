@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
 import zio.prelude.Validation
-import com.risquanter.register.domain.data.iron.{DistributionType, Probability, NonNegativeLong, PositiveInt, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{DistributionType, NonNegativeLong, PositiveInt, ValidationUtil}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
@@ -12,7 +12,6 @@ import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCo
   */
 final case class Distribution(
   distributionType: DistributionType,
-  probability: Probability,
   minLoss: Option[NonNegativeLong],
   maxLoss: Option[NonNegativeLong],
   percentiles: Option[Array[Double]],
@@ -23,7 +22,6 @@ final case class Distribution(
 object Distribution {
   def create(
     distributionType: String,
-    probability: Double,
     minLoss: Option[Long],
     maxLoss: Option[Long],
     percentiles: Option[Array[Double]],
@@ -32,7 +30,6 @@ object Distribution {
     terms: Option[Int] = None
   ): Validation[ValidationError, Distribution] = {
     val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
-    val probV = toValidation(ValidationUtil.refineProbability(probability, s"$fieldPrefix.probability"))
     val minV = minLoss match {
       case Some(v) => toValidation(ValidationUtil.refineNonNegativeLong(v, s"$fieldPrefix.minLoss")).map(Some(_))
       case None    => Validation.succeed(None)
@@ -85,8 +82,8 @@ object Distribution {
       case other => Validation.fail(ValidationError(s"$fieldPrefix.distributionType", ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE, s"Unsupported distribution type: $other"))
     }
 
-    Validation.validateWith(distTypeV, probV, minV, maxV, termsV, crossV) { (dt, prob, min, max, t, _) =>
-      Distribution(dt, prob, min, max, percentiles, quantiles, t)
+    Validation.validateWith(distTypeV, minV, maxV, termsV, crossV) { (dt, min, max, t, _) =>
+      Distribution(dt, min, max, percentiles, quantiles, t)
     }
   }
 }

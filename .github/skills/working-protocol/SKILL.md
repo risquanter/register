@@ -112,6 +112,21 @@ When a compilation error, test failure, or unexpected constraint blocks progress
 4. **Present options.** At least two concrete alternatives.
 5. **Wait for decision.** Do not proceed without an accepted signal.
 
+### No "pre-existing" excuse (hard rule)
+
+A compile error or failing test in any module you build or run is **yours to fix**,
+full stop. The origin of the failure is irrelevant to your obligation to resolve it.
+
+- **Never** dismiss, defer, downgrade, or narrate around a build/test failure on the
+  grounds that it is "pre-existing", "unrelated", "already broken", or "not caused by
+  my change". Investigating blame is **never** a substitute for fixing.
+- **Never** report work as done while `sbt <module>/compile` or `sbt <module>/test`
+  for any module you touched is red. Green is the only done.
+- Do **not** spend a tool call proving a failure is pre-existing. Spend it fixing.
+- The only exception is a fix that carries a genuine tradeoff (weakening an assertion,
+  changing an API shape, a workaround) — then raise a `⚠️ Decision Required` and let the
+  user choose. "It would take effort" or "it is unrelated" is not a tradeoff.
+
 ---
 
 ## ADR compliance — mandatory review process
@@ -143,6 +158,7 @@ When a compilation error, test failure, or unexpected constraint blocks progress
 
 A phase is **not complete** without:
 - [ ] Compiled with zero warnings
+- [ ] Every module touched compiles **and** its tests run green — no failure excused as "pre-existing" or "unrelated" (see Blocked / Failing State Protocol)
 - [ ] All new behaviours covered by tests (happy path + all validation paths + error branches)
 - [ ] ADR compliance review passed
 - [ ] Functional composition checklist cleared

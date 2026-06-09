@@ -20,16 +20,16 @@ object RiskTreeDefinitionRequest:
     val leavesV = refineLeafDefs(req.leaves, "request.leaves")
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV) { (treeName, portfolios, leaves) =>
-      validateTopologyCreate(treeName, portfolios, leaves.map { case (name, parent, _) => (name, parent) }).map { rootName =>
+      validateTopologyCreate(treeName, portfolios, leaves.map { case (name, parent, _, _) => (name, parent) }).map { rootName =>
         val portfolioNodes = portfolios.map { case (name, parent) =>
           name -> ResolvedNode(newId(), name, parent, NodeKind.Portfolio)
         }
-        val leafNodes = leaves.map { case (name, parent, _) =>
+        val leafNodes = leaves.map { case (name, parent, _, _) =>
           name -> ResolvedNode(newId(), name, parent, NodeKind.Leaf)
         }
         val nodes = (portfolioNodes ++ leafNodes).toMap
-        val leafDistributions = leaves.map { case (name, _, dist) => name -> dist }.toMap
-        ResolvedCreate(treeName, nodes, leafDistributions, rootName)
+        val leafOccurrenceAndShape = leaves.map { case (name, _, prob, dist) => name -> (prob, dist) }.toMap
+        ResolvedCreate(treeName, nodes, leafOccurrenceAndShape, rootName)
       }
     }.flatMap(identity)
   }

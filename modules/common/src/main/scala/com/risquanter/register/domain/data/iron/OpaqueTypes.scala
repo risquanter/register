@@ -67,6 +67,10 @@ object IronConstants:
   val ZeroL: NonNegativeLong = 0L
   val OneL: NonNegativeLong = 1L
 
+  // DistributionType constants — compile-time safe (Iron validates literals against the Match constraint)
+  val Expert:    DistributionType = "expert"
+  val Lognormal: DistributionType = "lognormal"
+
 // Opaque type for Metalog/HDR PRNG counters (zero-cost abstraction)
 // Used for the 4-5 Long counter parameters in HDR.generate(counter, entityId, varId, seed3, seed4)
 // This signals that these Longs are semantically distinct from regular numeric values—

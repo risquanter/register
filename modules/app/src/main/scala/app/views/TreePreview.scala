@@ -1,10 +1,10 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import io.github.iltotore.iron.*
-import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, DistributionMode}
+import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft}
 import app.components.{Icons, TreeNodeRow}
-import com.risquanter.register.domain.data.iron.{SafeName, Probability, NonNegativeLong}
+import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.data.iron.{SafeName, Probability, NonNegativeLong, DistributionType}
 
 /**
  * Hierarchical tree preview rendered from TreeBuilderState signals.
@@ -23,7 +23,7 @@ object TreePreview:
     case Portfolio(n: SafeName.SafeName) extends TreeNode(n)
     case Leaf(
       n:           SafeName.SafeName,
-      distType:    DistributionMode,
+      distType:    DistributionType,
       probability: Probability,
       percentiles: Option[Array[Double]],
       quantiles:   Option[Array[Double]],
@@ -37,7 +37,7 @@ object TreePreview:
 
     def label: String = this match
       case Portfolio(n)  => n.value
-      case l: Leaf       => s"${l.n.value} (${l.distType.toApiString}, p=${f"${l.probability}%.2f"})"
+      case l: Leaf       => s"${l.n.value} (${l.distType}, p=${f"${l.probability}%.2f"})"
 
     /** Tooltip — delegates to shared TreeNodeRow utilities (D2(a): native title). */
     def tooltip: String = this match
@@ -87,16 +87,14 @@ object TreePreview:
     val allNodes: List[(TreeNode, Option[String])] =
       portfolios.map(p => (TreeNode.Portfolio(p.name), p.parent.map(_.value))) ++
       leaves.map { l =>
-        val s = l.distribution.shape
         val node = TreeNode.Leaf(
           n           = l.name,
-          distType    = s.distributionType,
-          // safe: leavesVar invariant — only nodes that passed validateDistribution are appended
-          probability = l.distribution.probability.assume,
-          percentiles = s.percentiles,
-          quantiles   = s.quantiles,
-          minLoss     = s.minLoss.map(_.assume), // safe: lossFilter guarantees >= 0
-          maxLoss     = s.maxLoss.map(_.assume)  // safe: lossFilter guarantees >= 0
+          distType    = l.distribution.distributionType,
+          probability = l.probability,
+          percentiles = l.distribution.percentiles,
+          quantiles   = l.distribution.quantiles,
+          minLoss     = l.distribution.minLoss,
+          maxLoss     = l.distribution.maxLoss
         )
         (node, l.parent.map(_.value))
       }

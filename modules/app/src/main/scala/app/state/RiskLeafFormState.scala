@@ -1,10 +1,9 @@
 package app.state
 
 import com.raquo.laminar.api.L.{*, given}
-import com.risquanter.register.domain.data.iron.{ValidationUtil, ValidationMessages}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.data.Distribution
+import com.risquanter.register.domain.data.iron.{ValidationUtil, ValidationMessages, Probability}
 import zio.prelude.Validation
-import app.state.{DistributionDraft, LeafDistributionDraft}
 
 /** Type-safe field identifiers for the risk leaf form. */
 enum RiskLeafField:
@@ -265,68 +264,66 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   /** Check if form is valid (for submit button) */
   val isValid: Signal[Boolean] = hasErrors.map(!_)
 
-  /** Build a shape-only draft (no probability) from the distribution fields.
+  /** Build the current shape-only Distribution from form fields.
     *
-    * Used by [[draftSignal]] to drive the preview chart without requiring a
-    * valid probability. Called from [[toDistributionDraft]] to avoid duplicating
-    * parse/normalize logic.
+    * Reads all distribution-related Vars via `.now()`. Returns `Some(dist)` when
+    * the current field values produce a valid [[Distribution]] (cross-field rules
+    * pass), `None` when incomplete or invalid.
+    *
+    * Percentiles from the form are in 0–100 scale; converted to 0–1 before
+    * passing to [[Distribution.create]].
     */
-  private def toShapeDraft: Validation[ValidationError, DistributionDraft] =
+  private def currentShapeDraft(): Option[Distribution] =
     val mode = distributionModeVar.now()
+    val minLossOpt = mode match
+      case DistributionMode.Lognormal => parseLong(minLossVar.now())
+      case _                          => None
+    val maxLossOpt = mode match
+      case DistributionMode.Lognormal => parseLong(maxLossVar.now())
+      case _                          => None
+    val pcts = mode match
+      // UI uses 0-100 scale; domain model requires 0-1 scale
+      case DistributionMode.Expert => toArrayOpt(parseDoubleList(percentilesVar.now()).map(_ / 100.0))
+      case _                       => None
+    val quants = mode match
+      case DistributionMode.Expert => toArrayOpt(parseDoubleList(quantilesVar.now()))
+      case _                       => None
+    val termsOpt = if termsVar.now().isBlank then None else termsVar.now().toIntOption
+    Distribution.create(
+      distributionType = mode.toApiString,
+      minLoss          = minLossOpt,
+      maxLoss          = maxLossOpt,
+      percentiles      = pcts,
+      quantiles        = quants,
+      fieldPrefix      = "leaf",
+      terms            = termsOpt
+    ) match
+      case Validation.Success(_, dist) => Some(dist)
+      case _                           => None
 
-    val minLossV = mode match
-      case DistributionMode.Lognormal => parseLongField(minLossVar.now(), "leaf.minLoss").map(Some(_))
-      case _                          => Validation.succeed(None)
-    val maxLossV = mode match
-      case DistributionMode.Lognormal => parseLongField(maxLossVar.now(), "leaf.maxLoss").map(Some(_))
-      case _                          => Validation.succeed(None)
-    val percentilesV = mode match
-      // UI uses 0-100 scale; domain model requires 0-1 scale (refineProbability expects exclusive (0,1))
-      case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(percentilesVar.now()).map(_ / 100.0)))
-      case _                       => Validation.succeed(None)
-    val quantilesV = mode match
-      case DistributionMode.Expert => Validation.succeed(toArrayOpt(parseDoubleList(quantilesVar.now())))
-      case _                       => Validation.succeed(None)
-
-    Validation.validateWith(minLossV, maxLossV, percentilesV, quantilesV) {
-      (minL, maxL, pcts, quants) =>
-        DistributionDraft(
-          distributionType = mode,
-          minLoss          = minL,
-          maxLoss          = maxL,
-          percentiles      = pcts,
-          quantiles        = quants,
-          terms            = if termsVar.now().isBlank then None else termsVar.now().toIntOption
-        )
-    }
-
-  /** Build a distribution draft from current fields (lightweight parsing; full validation happens in TreeBuilderState). */
-  def toDistributionDraft: Validation[ValidationError, LeafDistributionDraft] =
-    val probabilityV = parseDoubleField(probabilityVar.now(), "leaf.probability")
-    Validation.validateWith(probabilityV, toShapeDraft) { (prob, shape) =>
-      LeafDistributionDraft(shape = shape, probability = prob)
-    }
-
-  /** Reactive signal of the current distribution draft, derived from all distribution
-    * form fields.
+  /** Refined occurrence probability from the current form value, or None if invalid.
     *
-    * Emits `Some(draft)` when the current field values produce a valid draft,
-    * `None` when the form is incomplete or invalid.
-    *
-    * Used by [[app.state.DistributionChartState]] to trigger debounced preview fetches
-    * as the user types. [[toDistributionDraft]] reads all vars via `.now()` — because
-    * Laminar signal updates are synchronous, `.now()` calls inside `.map` reflect the
-    * value that triggered the update. This avoids duplicating parse/normalize logic.
+    * Called by [[app.views.RiskLeafFormView]] at submit time to pass a typed
+    * `Probability` to [[TreeBuilderState.addLeaf]] alongside the shape `Distribution`.
     */
-  val draftSignal: Signal[Option[DistributionDraft]] =
+  def refinedProbability: Option[Probability] =
+    probabilityVar.now().toDoubleOption.flatMap { p =>
+      ValidationUtil.refineProbability(p).toOption
+    }
+
+  /** Reactive signal of the current shape-only distribution draft.
+    *
+    * Emits `Some(dist)` when the distribution fields produce a valid [[Distribution]]
+    * (cross-field rules pass), `None` when incomplete or invalid.
+    * Does not include probability — that is a leaf-level field separate from shape.
+    *
+    * Used by [[app.state.DistributionChartState]] to trigger debounced preview fetches.
+    */
+  val draftSignal: Signal[Option[Distribution]] =
     distributionModeVar.signal
       .combineWith(percentilesVar.signal, quantilesVar.signal, minLossVar.signal)
       .combineWith(maxLossVar.signal, termsVar.signal)
-      .map { _ =>
-        toShapeDraft match
-          case Validation.Success(_, draft) => Some(draft)
-          case _                            => None
-      }
+      .map(_ => currentShapeDraft())
 
   /** Signal emitting an advisory warning when the implied P90/P10 loss ratio is
     * unusually high (> 100×), suggesting the expert estimates encode extreme tail
@@ -350,16 +347,6 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
         else None
       case _ => None
     }
-
-  private def parseDoubleField(raw: String, field: String): Validation[ValidationError, Double] =
-    this.parseDouble(raw) match
-      case Some(v) => Validation.succeed(v)
-      case None => Validation.fail(ValidationError(field, ValidationErrorCode.INVALID_FORMAT, s"$field must be a number"))
-
-  private def parseLongField(raw: String, field: String): Validation[ValidationError, Long] =
-    this.parseLong(raw) match
-      case Some(v) => Validation.succeed(v)
-      case None => Validation.fail(ValidationError(field, ValidationErrorCode.INVALID_FORMAT, s"$field must be a whole number"))
 
   private def toArrayOpt(values: List[Double]): Option[Array[Double]] =
     if values.isEmpty then None else Some(values.toArray)

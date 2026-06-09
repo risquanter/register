@@ -81,11 +81,11 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
       result match {
         case Validation.Success(_, resolved) =>
-          val dist: Distribution = resolved.leafDistributions.values.head
+          val (_, shape) = resolved.leafOccurrenceAndShape.values.head
           assertTrue(
             resolved.nodes.values.count(_.kind == NodeKind.Leaf) == 1,
-            dist.minLoss.exists(_ == 1000L),
-            dist.maxLoss.exists(_ == 5000L)
+            shape.minLoss.exists(_ == 1000L),
+            shape.maxLoss.exists(_ == 5000L)
           )
         case Validation.Failure(_, errors) =>
           assertTrue(false).label(s"resolveCreate should succeed but failed: ${errors.map(_.message).mkString(", ")}")
@@ -280,6 +280,34 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       val result = resolveUpdate(req, () => safeId("generated"))
 
       assertFailsWith(result)("reserved query symbol")
+    },
+
+    test("resolveUpdate preserves existing node ids verbatim (time-travel identity precondition)") {
+      // The whole point of the existing buckets: a loaded node's id must survive
+      // resolution unchanged so its Irmin path is rewritten in place, not churned.
+      val rootIdStr = "01H0R8Z3F5J2N4R8Z3F5J2N4R8"
+      val leafIdStr = "01H0R8Z3F5J2N4R8Z3F5J2N4R9"
+      val req = RiskTreeUpdateRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = rootIdStr, name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate(leafIdStr, "Leaf1", Some("Root"))),
+        newPortfolios = Seq.empty,
+        newLeaves = Seq.empty
+      )
+
+      // The id generator would mint a *different* id; existing nodes must not call it.
+      val result = resolveUpdate(req, () => safeId("REGENERATED-MUST-NOT-BE-USED"))
+
+      result match
+        case Validation.Success(_, resolved) =>
+          val rootNode = resolved.existing.values.find(_.name.value == "Root")
+          val leafNode = resolved.existing.values.find(_.name.value == "Leaf1")
+          assertTrue(
+            rootNode.exists(_.id.value.toString == rootIdStr),
+            leafNode.exists(_.id.value.toString == leafIdStr)
+          )
+        case Validation.Failure(_, errors) =>
+          assertTrue(false).label(errors.map(_.message).mkString("; "))
     }
   )
 }

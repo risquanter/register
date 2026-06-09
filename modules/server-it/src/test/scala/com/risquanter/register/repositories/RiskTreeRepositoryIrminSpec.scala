@@ -7,7 +7,8 @@ import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.infra.irmin.IrminClientLive
+import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
+import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.domain.data.RiskPortfolio
 import com.risquanter.register.domain.data.RiskLeaf
 import com.risquanter.register.testcontainers.IrminCompose
@@ -77,7 +78,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
     val leaf1   = original.index.nodes(leaf1Id)
     val newRoot = RiskPortfolio.create(
       id = root.id.value,
-      name = root.name,
+      name = root.name.value,
       childIds = Array(leaf1Id),
       parentId = None
     ).toEither.toOption.get
@@ -90,8 +91,35 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       index = newIndex
     )
 
-  private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository] =
-    ZLayer.make[RiskTreeRepository](
+  /** Identity-preserving edit: change leaf-1's `minLoss` while keeping every NodeId
+    * (and therefore every Irmin node path) unchanged. Models the frontend
+    * identity-preserving update path at the repository boundary. */
+  private def editLeaf1MinLoss(original: RiskTree, newMin: Long): RiskTree =
+    val rootId  = original.rootId
+    val leaf1Id = nodeId("leaf-1")
+    val leaf2Id = nodeId("leaf-2")
+    val root    = original.index.nodes(rootId).asInstanceOf[RiskPortfolio]
+    val leaf2   = original.index.nodes(leaf2Id)
+    val newLeaf1 = RiskLeaf.create(
+      id = leaf1Id.value,          // SAME id → same path nodes/{leaf-1}
+      name = "Leaf 1",
+      distributionType = "lognormal",
+      probability = 0.1,
+      minLoss = Some(newMin),
+      maxLoss = Some(2000L),
+      parentId = Some(rootId)
+    ).toEither.toOption.get
+    val newIndex = TreeIndex.fromNodesUnsafe(Map(rootId -> root, leaf1Id -> newLeaf1, leaf2Id -> leaf2))
+    RiskTree(
+      id = original.id,
+      name = original.name,
+      nodes = Seq(root, newLeaf1, leaf2),
+      rootId = rootId,
+      index = newIndex
+    )
+
+  private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient] =
+    ZLayer.make[RiskTreeRepository & IrminClient](
       IrminCompose.irminConfigLayer,
       IrminClientLive.layer,
       RiskTreeRepositoryIrmin.layer
@@ -136,5 +164,36 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           _    <- repo.delete(wsId, tree.id)
           res  <- repo.getById(wsId, tree.id)
         yield assertTrue(res.isEmpty)
+      },
+
+      // Git-semantics guarantee that later enables path-scoped time travel:
+      // an identity-preserving edit rewrites the node at the SAME path and records a
+      // NEW commit on top of the old one — it does not delete the node and recreate it
+      // under a fresh id (which would sever the path's commit lineage).
+      test("identity-preserving update rewrites a node in place at the same path and advances commit history") {
+        for
+          repo       <- ZIO.service[RiskTreeRepository]
+          irmin      <- ZIO.service[IrminClient]
+          tree        = sampleTree(treeId("tree-git"), "Git Tree")
+          leaf1Id     = nodeId("leaf-1")
+          leafPath    = IrminPath.unsafeFrom(
+                          s"workspaces/${wsId.value}/risk-trees/${tree.id.value}/nodes/${leaf1Id.value}"
+                        )
+          _          <- repo.create(wsId, tree)
+          before     <- irmin.get(leafPath)
+          headBefore <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
+          _          <- repo.update(wsId, tree.id, t => editLeaf1MinLoss(t, 1234L))
+          after      <- irmin.get(leafPath)
+          headAfter  <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
+          reloaded   <- repo.getById(wsId, tree.id)
+        yield assertTrue(
+          before.isDefined,                                 // node was stored at nodes/{id}
+          after.isDefined,                                  // STILL at the same path after edit
+          before != after,                                  // content changed (minLoss 1000 → 1234)
+          headBefore.isDefined,
+          headAfter.isDefined,
+          headBefore != headAfter,                          // a new commit → the path has lineage
+          reloaded.exists(_.index.nodes.contains(leaf1Id))  // NodeId preserved across the update
+        )
       }
     ).provideLayerShared(irminLayer) @@ TestAspect.sequential
