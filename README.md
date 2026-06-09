@@ -1,6 +1,6 @@
 # Risquanter Register
 
-[![GitHub last commit](https://github.com/risquanter/register/commits/main/badge.svg)](https://github.com/risquanter/register/commits/main)
+[![Last commit](https://img.shields.io/github/last-commit/risquanter/register)](https://github.com/risquanter/register/commits/main)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE.md)
 
 
