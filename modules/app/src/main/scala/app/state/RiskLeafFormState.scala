@@ -36,9 +36,14 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   // Common fields
   val nameVar: Var[String] = Var("")
   val probabilityVar: Var[String] = Var("")
+
+  /** Parent selection — None means root. Not reset by [[resetFields]]; auto-synced by
+    * [[app.components.FormInputs.parentSelect]] based on available options.
+    */
+  val parentVar: Var[Option[String]] = Var(None)
   
   // Expert mode fields
-  val percentilesVar: Var[String] = Var("10, 50, 90")  // Default expert percentiles
+  val percentilesVar: Var[String] = Var("")  // Placeholder text "e.g., 10, 50, 90" is on the input element
   val quantilesVar: Var[String] = Var("")              // User must provide quantiles
   
   // Lognormal mode fields
@@ -53,7 +58,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     nameVar.set("")
     probabilityVar.set("")
     distributionModeVar.set(DistributionMode.Expert)
-    percentilesVar.set("10, 50, 90")
+    percentilesVar.set("")
     quantilesVar.set("")
     minLossVar.set("")
     maxLossVar.set("")

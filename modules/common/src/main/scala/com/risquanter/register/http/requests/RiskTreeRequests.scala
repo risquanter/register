@@ -25,7 +25,8 @@ object RiskTreeRequests {
   )
 
   // Result of resolving a create request: all names refined, ids generated, topology validated, distributions validated.
-  // `nodes` is keyed by name for easy parent resolution in the service layer; `leafDistributions` carry domain-validated params.
+  // `nodes` is keyed by name for easy parent resolution in the service layer; `leafOccurrenceAndShape` carries the
+  // domain-validated occurrence probability paired with the distribution shape for each leaf.
   final case class ResolvedCreate(
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],

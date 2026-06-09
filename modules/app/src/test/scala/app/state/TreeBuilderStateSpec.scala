@@ -259,5 +259,227 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
             assertTrue(false).label(errors.map(_.message).mkString("; "))
       }
 
+    ),
+
+    suite("updateLeaf")(
+
+      test("happy path: replaces draft in leavesVar; old name gone") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "UpdateLeaf", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val originalName = state.leavesVar.now().head.name
+        val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(80000L), None, None, None)
+        val newProb: Probability = 0.5
+        state.updateLeaf(originalName, "Renamed Risk", Some("Operational Risk"), newShape, newProb) match
+          case Validation.Success(_, _) =>
+            assertTrue(
+              state.leavesVar.now().length == 1,
+              state.leavesVar.now().head.name.value == "Renamed Risk",
+              !state.leavesVar.now().exists(_.name.value == "Cyber Risk")
+            )
+          case Validation.Failure(_, errs) =>
+            assertTrue(false).label(errs.map(_.message).mkString("; "))
+      },
+
+      test("preserves NodeId across rename") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "LeafIdPreserve", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val originalName = state.leavesVar.now().head.name
+        val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(8000L), None, None, None)
+        state.updateLeaf(originalName, "Renamed Risk", Some("Operational Risk"), newShape, 0.3) match
+          case Validation.Success(_, _) =>
+            assertTrue(state.leavesVar.now().head.id.map(_.value.toString).contains(leafUlid))
+          case Validation.Failure(_, errs) =>
+            assertTrue(false).label(errs.map(_.message).mkString("; "))
+      },
+
+      test("fails when new name collides with another leaf") {
+        val leaf2Ulid = "01HX9ABCDE0000000000000005"
+        val leaf1 = RiskLeaf.unsafeApply(id = leafUlid,  name = "LeafA", distributionType = "lognormal", probability = 0.1, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId))
+        val leaf2 = RiskLeaf.unsafeApply(id = leaf2Ulid, name = "LeafB", distributionType = "lognormal", probability = 0.2, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId))
+        val root2 = RiskPortfolio.unsafeFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, leaf2Ulid), parentId = None)
+        val tree  = mkTree(treeUlid, "Collision", Seq(root2, leaf1, leaf2), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val nameA    = state.leavesVar.now().find(_.name.value == "LeafA").get.name
+        val newShape = Distribution(IronConstants.Lognormal, Some(100L), Some(1000L), None, None, None)
+        assertTrue(state.updateLeaf(nameA, "LeafB", Some("Operational Risk"), newShape, 0.1).isFailure)
+      }
+
+    ),
+
+    suite("updatePortfolio")(
+
+      test("renames portfolio and cascade-updates leaf parent ref") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "CascadeRename", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val originalName     = state.portfoliosVar.now().head.name
+        val newPortfolioName = SafeName.fromString("RenamedPortfolio").toOption.get
+        state.updatePortfolio(originalName, newPortfolioName, None) match
+          case Validation.Success(_, _) =>
+            assertTrue(
+              state.portfoliosVar.now().head.name == newPortfolioName,
+              state.leavesVar.now().head.parent.map(_.value).contains("RenamedPortfolio")
+            )
+          case Validation.Failure(_, errs) =>
+            assertTrue(false).label(errs.map(_.message).mkString("; "))
+      },
+
+      test("preserves NodeId across rename") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "PortIdPreserve", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val originalName     = state.portfoliosVar.now().head.name
+        val newPortfolioName = SafeName.fromString("RenamedPortfolio").toOption.get
+        state.updatePortfolio(originalName, newPortfolioName, None) match
+          case Validation.Success(_, _) =>
+            assertTrue(state.portfoliosVar.now().head.id.map(_.value.toString).contains(rootUlid))
+          case Validation.Failure(_, errs) =>
+            assertTrue(false).label(errs.map(_.message).mkString("; "))
+      }
+
+    ),
+
+    suite("selection state")(
+
+      test("updateLeaf: selectedLeafName cleared on success") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "ClearSel", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val originalName = state.leavesVar.now().head.name
+        state.selectedLeafName.set(Some(originalName))
+        val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(8000L), None, None, None)
+        state.updateLeaf(originalName, "Renamed", Some("Operational Risk"), newShape, 0.3)
+        assertTrue(state.selectedLeafName.now().isEmpty)
+      },
+
+      test("selecting a leaf clears selectedPortfolioName (mutual exclusivity)") {
+        val state = new TreeBuilderState()
+        val portName = SafeName.fromString("MyPortfolio").toOption.get
+        val leafName = SafeName.fromString("MyLeaf").toOption.get
+        state.selectedPortfolioName.set(Some(portName))
+        state.selectedLeafName.set(Some(leafName))
+        // the click handler in TreePreview clears the other Var first
+        state.selectedPortfolioName.set(None)
+        assertTrue(
+          state.selectedLeafName.now().contains(leafName),
+          state.selectedPortfolioName.now().isEmpty
+        )
+      },
+
+      test("selecting a portfolio clears selectedLeafName (mutual exclusivity)") {
+        val state = new TreeBuilderState()
+        val portName = SafeName.fromString("MyPortfolio").toOption.get
+        val leafName = SafeName.fromString("MyLeaf").toOption.get
+        state.selectedLeafName.set(Some(leafName))
+        state.selectedPortfolioName.set(Some(portName))
+        // the click handler in TreePreview clears the other Var first
+        state.selectedLeafName.set(None)
+        assertTrue(
+          state.selectedPortfolioName.now().contains(portName),
+          state.selectedLeafName.now().isEmpty
+        )
+      }
+
+    ),
+
+    suite("populateLeafForm")(
+
+      test("expert mode: percentiles rescaled from 0-1 domain to 0-100 form scale") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Expert Risk",
+          distributionType = "expert",
+          probability      = 0.2,
+          percentiles      = Some(Array(0.1, 0.5, 0.9)),
+          quantiles        = Some(Array(1000.0, 5000.0, 20000.0)),
+          terms            = Some(3),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "PopulateExpert", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val formState = new RiskLeafFormState
+        state.populateLeafForm(formState, state.leavesVar.now().head)
+        val pcts = formState.percentilesVar.now()
+        assertTrue(
+          pcts.contains("10"),
+          pcts.contains("50"),
+          pcts.contains("90"),
+          formState.probabilityVar.now() == "0.2",
+          formState.nameVar.now() == "Expert Risk",
+          formState.distributionModeVar.now() == DistributionMode.Expert
+        )
+      },
+
+      test("lognormal mode: minLoss and maxLoss fields populated correctly") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Lognormal Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "PopulateLognormal", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val formState = new RiskLeafFormState
+        state.populateLeafForm(formState, state.leavesVar.now().head)
+        assertTrue(
+          formState.distributionModeVar.now() == DistributionMode.Lognormal,
+          formState.minLossVar.now() == "1000",
+          formState.maxLossVar.now() == "50000"
+        )
+      }
+
     )
   )

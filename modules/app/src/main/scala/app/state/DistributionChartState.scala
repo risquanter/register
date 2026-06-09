@@ -36,6 +36,11 @@ final class DistributionChartState(
   val userIdAccessor: () => Option[UserId] = () => None
 ) extends DistributionPreviewEndpoints:
 
+  /** Whether the live preview is enabled. Defaults to false; auto-reset to false
+    * when the workspace key becomes None (wired in [[app.views.DesignView]]).
+    */
+  val previewEnabledVar: Var[Boolean] = Var(false)
+
   /** Current PDF/CDF view mode — toggled by the user via the chart toggle buttons. */
   val viewModeVar: Var[DistributionViewMode] = Var(DistributionViewMode.PDF)
 

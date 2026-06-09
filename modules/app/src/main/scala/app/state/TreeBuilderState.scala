@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.{Validation, ForEach}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.{Distribution, RiskTree, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, Probability}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, Probability, IronConstants}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.frontend.TreeBuilderLogic
@@ -57,6 +57,18 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
   val rootLabel = "(root)"
 
+  // ── Node selection (Design view in-place editing) ────────────
+
+  /** Name of the currently selected leaf node, or None when in add-leaf mode.
+    * Selecting a leaf clears `selectedPortfolioName` (mutual exclusivity).
+    */
+  val selectedLeafName: Var[Option[SafeName.SafeName]] = Var(None)
+
+  /** Name of the currently selected portfolio node, or None when in add-portfolio mode.
+    * Selecting a portfolio clears `selectedLeafName` (mutual exclusivity).
+    */
+  val selectedPortfolioName: Var[Option[SafeName.SafeName]] = Var(None)
+
   // ── Tree-name validation ──────────────────────────────────────
   private val treeNameErrorRaw: Signal[Option[String]] = treeNameVar.signal.map { v =>
     ValidationUtil.refineName(v, "tree.name") match
@@ -104,6 +116,100 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case _ => ()
     result
 
+  /** Populate a [[RiskLeafFormState]] from a loaded [[LeafDraft]].
+    *
+    * Sets all field vars from the draft, including `parentVar`. Percentiles are
+    * rescaled from the 0-1 domain representation to the 0-100 form display scale.
+    */
+  def populateLeafForm(state: RiskLeafFormState, leaf: LeafDraft): Unit =
+    val mode = leaf.distribution.distributionType match
+      case IronConstants.Expert    => DistributionMode.Expert
+      case IronConstants.Lognormal => DistributionMode.Lognormal
+      case other => throw new IllegalStateException(s"Unrecognised DistributionType: $other — update populateLeafForm")
+    state.distributionModeVar.set(mode)
+    state.nameVar.set(leaf.name.value)
+    state.probabilityVar.set(leaf.probability.toString)
+    state.parentVar.set(leaf.parent.map(_.value))
+    mode match
+      case DistributionMode.Expert =>
+        val pcts   = leaf.distribution.percentiles.fold("")(arr => arr.map(p => (p * 100.0).toString).mkString(", "))
+        val quants = leaf.distribution.quantiles.fold("")(arr => arr.map(_.toString).mkString(", "))
+        state.percentilesVar.set(pcts)
+        state.quantilesVar.set(quants)
+        state.termsVar.set(leaf.distribution.terms.fold("")(_.toString))
+      case DistributionMode.Lognormal =>
+        state.minLossVar.set(leaf.distribution.minLoss.fold("")(_.toString))
+        state.maxLossVar.set(leaf.distribution.maxLoss.fold("")(_.toString))
+
+  /** Populate a [[PortfolioFormState]] from a loaded [[PortfolioDraft]]. */
+  def populatePortfolioForm(state: PortfolioFormState, portfolio: PortfolioDraft): Unit =
+    state.nameVar.set(portfolio.name.value)
+    state.parentVar.set(portfolio.parent.map(_.value))
+
+  /** Update an existing leaf in-place. Preserves the node's server identity (`id`).
+    *
+    * Validates the new name/parent, then runs `preValidateTopology` on the post-substitution
+    * node set. On success, replaces the draft in `leavesVar` and clears `selectedLeafName`.
+    * Mirrors the `addLeaf` pattern: match on result, then update Var.
+    */
+  def updateLeaf(
+    originalName: SafeName.SafeName,
+    rawName:      String,
+    rawParent:    Option[String],
+    shape:        Distribution,
+    probability:  Probability
+  ): Validation[ValidationError, LeafDraft] =
+    val existing = leavesVar.now().find(_.name == originalName)
+    val result = for
+      name   <- validateName(rawName, "leaf.name")
+      parent <- validateParentName(rawParent, "leaf.parentName")
+      draft  = LeafDraft(name, parent, shape, probability, existing.flatMap(_.id))
+      _      <- TreeBuilderLogic.preValidateTopology(
+        portfoliosVar.now().map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
+        (leavesVar.now().filterNot(_.name == originalName) :+ draft).map(l => l.name.value.toString -> l.parent.map(_.value.toString))
+      )
+    yield draft
+    result match
+      case Validation.Success(_, draft) =>
+        leavesVar.update(_.map(l => if l.name == originalName then draft else l))
+        selectedLeafName.set(None)
+      case _ => ()
+    result
+
+  /** Update an existing portfolio in-place. Cascade-renames every child whose `parent`
+    * references `originalName`. Preserves the node's server identity (`id`).
+    *
+    * Both Vars are updated sequentially — effectively atomic in single-threaded JS;
+    * no observer can interleave within the same synchronous event handler.
+    */
+  def updatePortfolio(
+    originalName: SafeName.SafeName,
+    newName:      SafeName.SafeName,
+    newParent:    Option[SafeName.SafeName]
+  ): Validation[ValidationError, PortfolioDraft] =
+    val existing = portfoliosVar.now().find(_.name == originalName)
+    val draft = PortfolioDraft(newName, newParent, existing.flatMap(_.id))
+    val updatedPortfolios = portfoliosVar.now().map { p =>
+      if p.name == originalName then draft
+      else if p.parent == Some(originalName) then p.copy(parent = Some(newName))
+      else p
+    }
+    val updatedLeaves = leavesVar.now().map { l =>
+      if l.parent == Some(originalName) then l.copy(parent = Some(newName))
+      else l
+    }
+    val result = TreeBuilderLogic.preValidateTopology(
+      updatedPortfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)),
+      updatedLeaves.map(l => l.name.value.toString -> l.parent.map(_.value.toString))
+    ).map(_ => draft)
+    result match
+      case Validation.Success(_, _) =>
+        portfoliosVar.set(updatedPortfolios)
+        leavesVar.set(updatedLeaves)
+        selectedPortfolioName.set(None)
+      case _ => ()
+    result
+
   /** Remove node by name; cascades removal of portfolio descendants and their leaves. */
   def removeNode(name: String): Unit =
     val portfolios = portfoliosVar.now()
@@ -117,8 +223,8 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val portfolios = portfoliosVar.now()
     val leaves = leavesVar.now()
     val treeNameV = validateName(treeNameVar.now(), "tree.name")
-    val portfoliosV = Validation.validateAll(portfolios.map(toPortfolioRequest))
-    val leavesV = Validation.validateAll(leaves.map(toLeafRequest))
+    val portfoliosV = Validation.succeed(portfolios.map(toPortfolioRequest))
+    val leavesV = Validation.succeed(leaves.map(toLeafRequest))
     val topologyV = TreeBuilderLogic.fullValidateTopology(portfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)), leaves.map(l => l.name.value.toString -> l.parent.map(_.value.toString)))
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, topologyV) { (treeName, ports, leafs, _) =>
@@ -151,9 +257,9 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val headerV = Validation.validateWith(treeNameV, topologyV)((name, _) => name)
 
     val existingPortfoliosV = Validation.succeed(existingPortfolios.map(toPortfolioUpdateRequest))
-    val newPortfoliosV      = Validation.validateAll(newPortfolioDrafts.map(toPortfolioRequest))
-    val existingLeavesV     = Validation.validateAll(existingLeaves.map(toLeafUpdateRequest))
-    val newLeavesV          = Validation.validateAll(newLeafDrafts.map(toLeafRequest))
+    val newPortfoliosV      = Validation.succeed(newPortfolioDrafts.map(toPortfolioRequest))
+    val existingLeavesV     = Validation.succeed(existingLeaves.map(toLeafUpdateRequest))
+    val newLeavesV          = Validation.succeed(newLeafDrafts.map(toLeafRequest))
 
     Validation.validateWith(headerV, existingPortfoliosV, newPortfoliosV, existingLeavesV, newLeavesV) {
       (treeName, existPorts, newPorts, existLeaves, newLeaves) =>
@@ -222,11 +328,15 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case _ => Validation.succeed(None)
 
 
-  private def toPortfolioRequest(draft: PortfolioDraft): Validation[ValidationError, RiskPortfolioDefinitionRequest] =
-    Validation.succeed(RiskPortfolioDefinitionRequest(draft.name.value, draft.parent.map(_.value)))
+  // Total conversions: every field is already a refined domain type (`SafeName`,
+  // `Distribution`, `Probability`), so construction cannot fail. Returning the plain
+  // request type keeps totality visible; callers wrap the whole collection once with
+  // `Validation.succeed` where a `Validation` is needed for `validateWith`.
+  private def toPortfolioRequest(draft: PortfolioDraft): RiskPortfolioDefinitionRequest =
+    RiskPortfolioDefinitionRequest(draft.name.value, draft.parent.map(_.value))
 
-  private def toLeafRequest(draft: LeafDraft): Validation[ValidationError, RiskLeafDefinitionRequest] =
-    Validation.succeed(RiskLeafDefinitionRequest(
+  private def toLeafRequest(draft: LeafDraft): RiskLeafDefinitionRequest =
+    RiskLeafDefinitionRequest(
       name             = draft.name.value,
       parentName       = draft.parent.map(_.value),
       distributionType = draft.distribution.distributionType.toString,
@@ -236,18 +346,18 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       percentiles      = draft.distribution.percentiles,
       quantiles        = draft.distribution.quantiles,
       terms            = draft.distribution.terms.map(_.toInt)
-    ))
+    )
 
-  // Identity-preserving variant: emits an update DTO that carries the node's existing
-  // id, so the server keeps the same NodeId (and Irmin path) instead of minting a new one.
-  // Names/parents are already `SafeName`, so the portfolio variant cannot fail.
+  // Identity-preserving variants: emit an update DTO carrying the node's existing id,
+  // so the server keeps the same NodeId (and Irmin path) instead of minting a new one.
+  // Total for the same reason as the definition variants above.
   private def toPortfolioUpdateRequest(entry: (NodeId, PortfolioDraft)): RiskPortfolioUpdateRequest =
     val (id, draft) = entry
     RiskPortfolioUpdateRequest(id.value, draft.name.value, draft.parent.map(_.value))
 
-  private def toLeafUpdateRequest(entry: (NodeId, LeafDraft)): Validation[ValidationError, RiskLeafUpdateRequest] =
+  private def toLeafUpdateRequest(entry: (NodeId, LeafDraft)): RiskLeafUpdateRequest =
     val (id, draft) = entry
-    Validation.succeed(RiskLeafUpdateRequest(
+    RiskLeafUpdateRequest(
       id               = id.value,
       name             = draft.name.value,
       parentName       = draft.parent.map(_.value),
@@ -258,5 +368,5 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       percentiles      = draft.distribution.percentiles,
       quantiles        = draft.distribution.quantiles,
       terms            = draft.distribution.terms.map(_.toInt)
-    ))
+    )
 

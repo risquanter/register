@@ -38,6 +38,10 @@ object DesignView:
       cls := "design-view",
       // ── Load subscription: propagate selected tree → builder state ──
       // Bound to element lifetime (ADR-019: side effects in callbacks, not in .map).
+      // Auto-disable preview when workspace key goes away (e.g. capability URL cleared)
+      distributionChartState.keySignal.changes
+        .filter(_.isEmpty) --> { _ => distributionChartState.previewEnabledVar.set(false) },
+
       treeViewState.selectedTree.signal.changes.collect {
         case LoadState.Loaded(tree) => tree
       } --> { tree =>
@@ -55,7 +59,7 @@ object DesignView:
           builderState.loadFromTree(tree)
       },
       SplitPane.horizontal(
-        left = TreeBuilderView(builderState, treeViewState, wsState),
+        left = TreeBuilderView(builderState, treeViewState, wsState, distributionChartState),
         right = SplitPane.vertical(
           top = previewPanel,
           bottom = DistributionChartView(distributionChartState),

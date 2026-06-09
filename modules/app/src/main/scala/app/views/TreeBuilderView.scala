@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 import zio.*
 import zio.prelude.Validation
-import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState}
+import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState, DistributionChartState}
 import app.components.FormInputs
 import app.core.ZJS.*
 import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
@@ -19,7 +19,7 @@ import com.risquanter.register.http.responses.SimulationResponse
  */
 object TreeBuilderView extends WorkspaceLifecycleEndpoints
   with WorkspaceTreeEndpoints:
-  def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState): HtmlElement =
+  def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState, chartState: DistributionChartState): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
     def onSuccess(response: SimulationResponse): Unit =
@@ -74,7 +74,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
       div(
         cls := "forms-stack",
         PortfolioFormView(state),
-        RiskLeafFormView(state)
+        RiskLeafFormView(state, chartState)
       ),
       FormInputs.submitButton(
         state.isUpdateMode.map(if _ then "Update Risk Tree" else "Create Risk Tree"),

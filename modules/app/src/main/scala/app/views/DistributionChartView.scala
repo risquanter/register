@@ -9,6 +9,18 @@ import app.state.{DistributionChartState, DistributionViewMode, LoadState}
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.http.requests.DistributionPreviewRequest
 
+/** Reason the chart area shows idle text rather than a chart or loading state.
+  *
+  * Used by [[DistributionChartView.renderIdle]] to show context-appropriate copy.
+  */
+enum PreviewIdleReason:
+  /** No workspace key — distribution previews are not available. */
+  case NoWorkspace
+  /** Workspace exists but the user has not enabled the live preview toggle. */
+  case PreviewDisabled
+  /** Preview is enabled but form fields are incomplete or invalid. */
+  case ParametersIncomplete
+
 /** Reactive distribution preview chart for the Design view.
   *
   * Pure derived view — owns no state (ADR-019 Pattern 4).
@@ -58,14 +70,15 @@ object DistributionChartView:
 
       // Debounced fetch subscription — scoped to this element's mounted lifetime.
       onMountCallback { ctx =>
-        // Fetch on draft changes (debounced), sampling the current key.
+        // Fetch on draft changes (debounced), sampling key and preview-enabled flag.
+        // Only fires when the preview toggle is on; resetting always fires to clear stale state.
         chartState.draftSignal.changes
           .debounce(400)
-          .withCurrentValueOf(chartState.keySignal)
+          .withCurrentValueOf(chartState.keySignal, chartState.previewEnabledVar.signal)
           .foreach {
-            case (Some(draft), Some(key)) =>
+            case (Some(draft), Some(key), true) =>
               chartState.loadPreview(key, toPreviewRequest(draft))
-            case (None, _) =>
+            case (None, _, _) =>
               chartState.reset()
             case _ => ()
           }(ctx.owner)
@@ -77,18 +90,15 @@ object DistributionChartView:
       chartState.specSignal.changes --> { _ => renderError$.set(None) },
 
       // Spec → DOM: dispose previous chart then render next state.
-      child <-- chartState.specSignal.combineWith(renderError$.signal).map { (specState, renderErr) =>
-        disposeChart()
-        renderErr match
-          case Some(msg) => renderError(msg)
-          case None =>
-            specState match
-              case LoadState.Idle        => renderIdle
-              case LoadState.Loading     => renderLoading
-              case LoadState.Failed(msg) => renderError(msg)
-              case LoadState.Loaded(sp)  =>
-                renderChart(sp, result => currentResult = result, msg => renderError$.set(Some(msg)))
-      },
+      child <-- chartState.specSignal
+        .combineWith(renderError$.signal, chartState.keySignal.map(_.isDefined), chartState.previewEnabledVar.signal)
+        .map { (specState, renderErr, hasWorkspace, previewEnabled) =>
+          disposeChart()
+          resolveChartContent(specState, renderErr, hasWorkspace, previewEnabled,
+            onResult = result => currentResult = result,
+            onError  = msg => renderError$.set(Some(msg))
+          )
+        },
 
       // Coherence echo caption: Exact/Smoothed fit summary from the server response.
       child.maybe <-- chartState.coherenceCaptionSignal.map(_.map { caption =>
@@ -100,11 +110,42 @@ object DistributionChartView:
 
   // ── State renderers ───────────────────────────────────────────
 
-  private def renderIdle: HtmlElement =
+  /** Resolve the current chart panel content from the combined state signals.
+    *
+    * Extracted from the `child <-- ...map` combinator to stay within the 3-line
+    * lambda limit and make the routing logic independently readable.
+    */
+  private def resolveChartContent(
+    specState:      LoadState[js.Dynamic],
+    renderErr:      Option[String],
+    hasWorkspace:   Boolean,
+    previewEnabled: Boolean,
+    onResult:       EmbedResult => Unit,
+    onError:        String => Unit
+  ): HtmlElement =
+    renderErr match
+      case Some(msg) => renderError(msg)
+      case None =>
+        specState match
+          case LoadState.Loading     => renderLoading
+          case LoadState.Failed(msg) => renderError(msg)
+          case LoadState.Loaded(sp)  => renderChart(sp, onResult, onError)
+          case LoadState.Idle =>
+            val reason =
+              if      !hasWorkspace   then PreviewIdleReason.NoWorkspace
+              else if !previewEnabled then PreviewIdleReason.PreviewDisabled
+              else                         PreviewIdleReason.ParametersIncomplete
+            renderIdle(reason)
+
+  private def renderIdle(reason: PreviewIdleReason): HtmlElement =
+    val text = reason match
+      case PreviewIdleReason.NoWorkspace          => "Create a risk tree to enable distribution previews"
+      case PreviewIdleReason.PreviewDisabled       => "Enable preview to see a distribution chart"
+      case PreviewIdleReason.ParametersIncomplete  => "Enter distribution parameters to see a preview"
     div(
       cls := "distribution-chart-message",
       span(cls := "distribution-chart-icon", "📊"),
-      p("Enter distribution parameters to see a preview")
+      p(text)
     )
 
   private def renderLoading: HtmlElement =

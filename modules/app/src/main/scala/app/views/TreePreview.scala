@@ -1,6 +1,7 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
+import org.scalajs.dom.MouseEvent
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft}
 import app.components.{Icons, TreeNodeRow}
 import com.risquanter.register.domain.data.Distribution
@@ -128,12 +129,37 @@ object TreePreview:
         case _: TreeNode.Portfolio => TreeNodeRow.NodeKind.Portfolio
         case _: TreeNode.Leaf      => TreeNodeRow.NodeKind.Leaf
 
+      // Selection signal and click handler differ by node type for mutual exclusivity.
+      val (isSelected, onNodeClick) = node match
+        case _: TreeNode.Portfolio =>
+          val sel   = builderState.selectedPortfolioName.signal.map(_.contains(node.name))
+          val click = Some((_: MouseEvent) =>
+            if builderState.selectedPortfolioName.now().contains(node.name) then
+              builderState.selectedPortfolioName.set(None)       // toggle off
+            else
+              builderState.selectedLeafName.set(None)            // mutual exclusivity
+              builderState.selectedPortfolioName.set(Some(node.name))
+          )
+          (sel, click)
+        case _: TreeNode.Leaf =>
+          val sel   = builderState.selectedLeafName.signal.map(_.contains(node.name))
+          val click = Some((_: MouseEvent) =>
+            if builderState.selectedLeafName.now().contains(node.name) then
+              builderState.selectedLeafName.set(None)            // toggle off
+            else
+              builderState.selectedPortfolioName.set(None)       // mutual exclusivity
+              builderState.selectedLeafName.set(Some(node.name))
+          )
+          (sel, click)
+
       val nodeRow = TreeNodeRow(
-        label   = node.label,
-        kind    = nodeKind,
-        depth   = depth,
-        tooltip = Some(node.tooltip),
-        onRemove = Some(() => builderState.removeNode(node.name.value))
+        label       = node.label,
+        kind        = nodeKind,
+        depth       = depth,
+        tooltip     = Some(node.tooltip),
+        onRemove    = Some(() => builderState.removeNode(node.name.value)),
+        onNodeClick = onNodeClick,
+        isSelected  = isSelected
       )
 
       val grandchildren = childrenOf.getOrElse(Some(node.name.value), Nil)

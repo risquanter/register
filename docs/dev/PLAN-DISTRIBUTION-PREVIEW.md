@@ -1,7 +1,7 @@
 # Distribution Preview Panel — Planning Context
 
 **Date:** May 2026  
-**Status:** FULLY IMPLEMENTED — behavioral bug identified (see §13 below)  
+**Status:** FULLY IMPLEMENTED — §13 bug resolved by Option A (draftSignal emits `Option[Distribution]`, no probability coupling)  
 **Feature:** Replace `DistributionChartPlaceholder` with a live distribution visualisation
 panel in the Design view, giving non-statistical users graphical feedback on the shape
 of the distribution they are modelling as they type.
