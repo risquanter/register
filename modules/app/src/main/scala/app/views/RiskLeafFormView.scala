@@ -62,12 +62,12 @@ object RiskLeafFormView:
       state.parentVar.signal.changes --> { _ => submitError.set(None) },
 
       // Push reactive draft up to TreeBuilderState for DistributionChartState to observe.
-      // Gated on form validity — server is never called with an incomplete form (Issue 3).
+      // draftSignal already returns None when distribution fields are invalid (via
+      // Distribution.create) — no additional hasErrors gate needed here. Removing the
+      // gate allows the preview to render when distribution params are valid even if
+      // name/probability are still empty (submit validation is separate and unchanged).
       // Cleared on unmount so the chart returns to Idle when the leaf form is not active.
-      state.draftSignal
-        .withCurrentValueOf(state.hasErrors)
-        .map { case (draft, errors) => if errors then None else draft }
-        --> builderState.currentDraftVar.writer,
+      state.draftSignal --> builderState.currentDraftVar.writer,
       onUnmountCallback { _ =>
         builderState.currentDraftVar.set(None)
         builderState.selectedLeafName.set(None)
@@ -126,13 +126,12 @@ object RiskLeafFormView:
             submitError.set(None)
           }
         ),
-        // Preview toggle — disabled when no workspace key is present
+        // Preview toggle — always enabled; endpoint is public (no workspace key required)
         label(
           cls := "form-preview-toggle",
           input(
             typ := "checkbox",
             checked <-- chartState.previewEnabledVar.signal,
-            disabled <-- chartState.keySignal.map(_.isEmpty),
             onChange.mapToChecked --> chartState.previewEnabledVar.writer
           ),
           span("Show preview")

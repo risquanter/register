@@ -14,9 +14,7 @@ import com.risquanter.register.http.requests.DistributionShapeRequest
   * Used by [[DistributionChartView.renderIdle]] to show context-appropriate copy.
   */
 enum PreviewIdleReason:
-  /** No workspace key — distribution previews are not available. */
-  case NoWorkspace
-  /** Workspace exists but the user has not enabled the live preview toggle. */
+  /** User has not enabled the live preview toggle. */
   case PreviewDisabled
   /** Preview is enabled but form fields are incomplete or invalid. */
   case ParametersIncomplete
@@ -70,16 +68,16 @@ object DistributionChartView:
 
       // Debounced fetch subscription — scoped to this element's mounted lifetime.
       onMountCallback { ctx =>
-        // Stream 1: Fetch on draft changes (debounced), sampling key and preview-enabled flag.
+        // Stream 1: Fetch on draft changes (debounced), sampling preview-enabled flag.
         // Handles the common case: user editing form fields while preview is already enabled.
         // Resetting always fires (draft → None means form cleared/unmounted).
         chartState.draftSignal.changes
           .debounce(400)
-          .withCurrentValueOf(chartState.keySignal, chartState.previewEnabledVar.signal)
+          .withCurrentValueOf(chartState.previewEnabledVar.signal)
           .foreach {
-            case (Some(draft), Some(key), true) =>
-              chartState.loadPreview(key, toPreviewRequest(draft))
-            case (None, _, _) =>
+            case (Some(draft), true) =>
+              chartState.loadPreview(toPreviewRequest(draft))
+            case (None, _) =>
               chartState.reset()
             case _ => ()
           }(ctx.owner)
@@ -89,14 +87,21 @@ object DistributionChartView:
         // was off — draftSignal.changes would never fire in that state.
         // No debounce: the user clicked intentionally.
         chartState.previewEnabledVar.signal.changes
-          .withCurrentValueOf(chartState.draftSignal, chartState.keySignal)
+          .withCurrentValueOf(chartState.draftSignal)
           .foreach {
-            case (true, Some(draft), Some(key)) =>
-              chartState.loadPreview(key, toPreviewRequest(draft))
-            case (false, _, _) =>
+            case (true, Some(draft)) =>
+              chartState.loadPreview(toPreviewRequest(draft))
+            case (false, _) =>
               chartState.reset()
             case _ => ()
           }(ctx.owner)
+
+        // Eager load on mount: neither .changes stream fires for values already set
+        // before this element mounted. If preview is enabled and a valid draft exists
+        // right now, kick off the first fetch immediately.
+        (chartState.previewEnabledVar.now(), chartState.draftSignal.now()) match
+          case (true, Some(draft)) => chartState.loadPreview(toPreviewRequest(draft))
+          case _                   => ()
       },
 
       // Clear render error when a new spec arrives (new fetch attempt started).
@@ -106,10 +111,10 @@ object DistributionChartView:
 
       // Spec → DOM: dispose previous chart then render next state.
       child <-- chartState.specSignal
-        .combineWith(renderError$.signal, chartState.keySignal.map(_.isDefined), chartState.previewEnabledVar.signal)
-        .map { (specState, renderErr, hasWorkspace, previewEnabled) =>
+        .combineWith(renderError$.signal, chartState.previewEnabledVar.signal)
+        .map { (specState, renderErr, previewEnabled) =>
           disposeChart()
-          resolveChartContent(specState, renderErr, hasWorkspace, previewEnabled,
+          resolveChartContent(specState, renderErr, previewEnabled,
             onResult = result => currentResult = result,
             onError  = msg => renderError$.set(Some(msg))
           )
@@ -133,7 +138,6 @@ object DistributionChartView:
   private def resolveChartContent(
     specState:      LoadState[js.Dynamic],
     renderErr:      Option[String],
-    hasWorkspace:   Boolean,
     previewEnabled: Boolean,
     onResult:       EmbedResult => Unit,
     onError:        String => Unit
@@ -147,16 +151,14 @@ object DistributionChartView:
           case LoadState.Loaded(sp)  => renderChart(sp, onResult, onError)
           case LoadState.Idle =>
             val reason =
-              if      !hasWorkspace   then PreviewIdleReason.NoWorkspace
-              else if !previewEnabled then PreviewIdleReason.PreviewDisabled
-              else                         PreviewIdleReason.ParametersIncomplete
+              if !previewEnabled then PreviewIdleReason.PreviewDisabled
+              else                    PreviewIdleReason.ParametersIncomplete
             renderIdle(reason)
 
   private def renderIdle(reason: PreviewIdleReason): HtmlElement =
     val text = reason match
-      case PreviewIdleReason.NoWorkspace          => "Create a risk tree to enable distribution previews"
-      case PreviewIdleReason.PreviewDisabled       => "Enable preview to see a distribution chart"
-      case PreviewIdleReason.ParametersIncomplete  => "Enter distribution parameters to see a preview"
+      case PreviewIdleReason.PreviewDisabled      => "Enable preview to see a distribution chart"
+      case PreviewIdleReason.ParametersIncomplete => "Enter distribution parameters to see a preview"
     div(
       cls := "distribution-chart-message",
       span(cls := "distribution-chart-icon", "📊"),

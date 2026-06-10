@@ -1,5 +1,26 @@
 # Copilot Instructions — Register
 
+## ⛔ HARD GATE — read these files before any other action
+
+Do not respond to any user request involving code, planning, editing, building, or
+reviewing until all three skill files below have been read via `read_file`. This is
+not a soft guideline. It is a precondition. Skipping this step is a protocol violation
+regardless of outcome or perceived urgency.
+
+```
+/home/danago/projects/register/.github/skills/working-protocol/SKILL.md
+/home/danago/projects/register/.github/skills/adr-constraints/SKILL.md
+/home/danago/projects/register/.github/skills/code-quality-review/SKILL.md
+```
+
+Read all three. Then read the register-dev skill before any build or test command:
+
+```
+/home/danago/projects/register/.github/skills/register-dev/SKILL.md
+```
+
+---
+
 ## Build and test commands
 
 Before running any compilation, test, or Docker command — as a standalone task or as

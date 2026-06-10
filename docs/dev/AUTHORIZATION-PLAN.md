@@ -1000,7 +1000,7 @@ Complete route census as of the current codebase. Every route is assigned a `Per
 | 16 | POST | `/w/{key}/risk-trees/{treeId}/nodes/lec-multi` | Workspace | `ViewTree` | RiskTree | L0+ | Multi-node LEC batch |
 | 17 | POST | `/w/{key}/risk-trees/{treeId}/lec-chart` | Workspace | `ViewTree` | RiskTree | L0+ | Vega-Lite chart spec |
 | 18 | GET | `/w/{key}/events/tree/{treeId}` | SSE | `ViewTree` | RiskTree | L0+ | SSE stream — same gate as the REST read |
-| 23 | POST | `/w/{key}/distribution/preview` | DistributionPreview | `AnalyzeRun` | Workspace | L0+ | Stateless distribution fitting + sampling; no tree resource. `authzService.check` wired — NoOp backend until Phase K. See PLAN-DISTRIBUTION-PREVIEW.md §B.4 |
+| 23 | POST | `/distribution/preview` | DistributionPreview | — | Public | L0+ | Stateless distribution fitting + sampling; no tree resource, no workspace key. L0: open. L1+: JWT required (mesh + userCtx.extract). Rate limiting at nginx level. Workspace-scoped path removed 2026-06-10 (Option B decision). |
 | 19 | GET | `/risk-trees/{treeId}/cache/stats` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
 | 20 | GET | `/risk-trees/{treeId}/cache/nodes` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
 | 21 | DELETE | `/risk-trees/{treeId}/cache` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |

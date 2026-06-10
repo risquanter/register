@@ -39,7 +39,7 @@ final class DistributionChartState(
   /** Whether the live preview is enabled. Defaults to false; auto-reset to false
     * when the workspace key becomes None (wired in [[app.views.DesignView]]).
     */
-  val previewEnabledVar: Var[Boolean] = Var(false)
+  val previewEnabledVar: Var[Boolean] = Var(true)
 
   /** Current PDF/CDF view mode — toggled by the user via the chart toggle buttons. */
   val viewModeVar: Var[DistributionViewMode] = Var(DistributionViewMode.PDF)
@@ -57,14 +57,17 @@ final class DistributionChartState(
         loadState.map(resp => DistributionSpecBuilder.build(resp, viewMode, draft))
       }
 
-  /** Trigger a preview fetch for the given workspace key and request.
+  /** Trigger a preview fetch for the given request.
     *
-    * Sets `previewVar` through the `Loading → Loaded/Failed` lifecycle via
+    * Sets `previewVar` through the `Loading -> Loaded/Failed` lifecycle via
     * `loadInto`. Called from [[app.views.DistributionChartView]] on the
     * debounced `draftSignal.changes` stream.
+    *
+    * No workspace key required -- the endpoint is public at L0 and JWT-gated
+    * at L1+ via the mesh + userCtx.extract in the controller.
     */
-  def loadPreview(key: WorkspaceKeySecret, req: DistributionShapeRequest): Unit =
-    distributionPreviewEndpoint((userIdAccessor(), key, req)).loadInto(previewVar)
+  def loadPreview(req: DistributionShapeRequest): Unit =
+    distributionPreviewEndpoint((userIdAccessor(), req)).loadInto(previewVar)
 
   /** Reset the preview to Idle (e.g. when the form is unmounted). */
   def reset(): Unit = previewVar.set(LoadState.Idle)

@@ -220,6 +220,10 @@ http {
             set $backend "__BACKEND__";
             proxy_pass $backend;
         }
+        location /distribution {
+            set $backend "__BACKEND__";
+            proxy_pass $backend;
+        }
         location /health {
             set $backend "__BACKEND__";
             proxy_pass $backend;
