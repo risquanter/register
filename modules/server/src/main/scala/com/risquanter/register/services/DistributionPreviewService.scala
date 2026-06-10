@@ -2,9 +2,10 @@ package com.risquanter.register.services
 
 import zio.*
 
+import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode, ValidationFailed}
-import com.risquanter.register.http.requests.{DistributionPreviewRequest, DistributionPreviewResponse, DistributionPreviewPoint}
+import com.risquanter.register.http.requests.{DistributionPreviewResponse, DistributionPreviewPoint}
 import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
 
 /** Computes a sampled distribution preview curve from raw distribution parameters.
@@ -13,7 +14,7 @@ import com.risquanter.register.simulation.{LognormalHelper, MetalogDistribution}
   * function of its request input. The workspace key auth gate lives in the controller.
   */
 trait DistributionPreviewService:
-  def preview(req: DistributionPreviewRequest): IO[ValidationFailed, DistributionPreviewResponse]
+  def preview(dist: Distribution): IO[ValidationFailed, DistributionPreviewResponse]
 
 object DistributionPreviewService:
   val layer: ZLayer[Any, Nothing, DistributionPreviewService] =
@@ -35,30 +36,23 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
     val step = (hi - lo) / GridSize
     (1 to GridSize).map(i => lo + (i - 0.5) * step)
 
-  override def preview(req: DistributionPreviewRequest): IO[ValidationFailed, DistributionPreviewResponse] =
-    req.distributionType match
-      case "expert"    => previewExpert(req)
-      case "lognormal" => previewLognormal(req)
-      case other =>
-        ZIO.fail(ValidationFailed(List(ValidationError(
-          field   = "request.distributionType",
-          code    = ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE,
-          message = s"Unsupported distribution type: $other"
-        ))))
+  override def preview(dist: Distribution): IO[ValidationFailed, DistributionPreviewResponse] =
+    // distributionType is DistributionType = String :| Match["^(expert|lognormal)$"],
+    // so only these two values are reachable here.
+    (dist.distributionType: String) match
+      case "expert"    => previewExpert(dist)
+      case "lognormal" => previewLognormal(dist)
 
-  private def previewExpert(req: DistributionPreviewRequest): IO[ValidationFailed, DistributionPreviewResponse] =
-    val rawPercentiles = req.percentiles.getOrElse(Array.empty[Double])
-    val rawQuantiles   = req.quantiles.getOrElse(Array.empty[Double])
-
-    // Normalise 0–100 percentiles to (0, 1); fromPercentilesUnsafe validates the range
-    val normalisedPercentiles = rawPercentiles.map(_ / 100.0)
-    val resolvedTerms         = req.terms.getOrElse(math.min(rawPercentiles.length, 4))
+  private def previewExpert(dist: Distribution): IO[ValidationFailed, DistributionPreviewResponse] =
+    val percentiles   = dist.percentiles.getOrElse(Array.empty[Double])  // already 0-1
+    val quantiles     = dist.quantiles.getOrElse(Array.empty[Double])
+    val resolvedTerms = dist.terms.map(_.toInt).getOrElse(math.min(percentiles.length, 4))
 
     for
       metalog <- ZIO.fromEither(
         MetalogDistribution.fromPercentilesUnsafe(
-          percentiles = normalisedPercentiles,
-          quantiles   = rawQuantiles,
+          percentiles = percentiles,
+          quantiles   = quantiles,
           terms       = resolvedTerms,
           lower       = Some(0.0),
           upper       = None
@@ -72,13 +66,13 @@ private final class DistributionPreviewServiceLive() extends DistributionPreview
     yield DistributionPreviewResponse(
       distributionType = "expert",
       resolvedTerms    = Some(resolvedTerms),
-      anchorCount      = Some(rawPercentiles.length),
+      anchorCount      = Some(percentiles.length),
       points           = points
     )
 
-  private def previewLognormal(req: DistributionPreviewRequest): IO[ValidationFailed, DistributionPreviewResponse] =
-    val minLoss = req.minLoss.getOrElse(0L)
-    val maxLoss = req.maxLoss.getOrElse(0L)
+  private def previewLognormal(dist: Distribution): IO[ValidationFailed, DistributionPreviewResponse] =
+    val minLoss = dist.minLoss.getOrElse(0L)
+    val maxLoss = dist.maxLoss.getOrElse(0L)
 
     for
       lognormal <- ZIO.fromEither(LognormalHelper.fromLognormal90CI(minLoss, maxLoss))

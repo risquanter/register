@@ -36,7 +36,7 @@ services:
       dockerfile: containers/prod/Dockerfile.irmin-prod
     image: local/irmin-prod:3.11
     pull_policy: build
-    container_name: irmin-graphql
+    # container_name: irmin-graphql  # Removed to allow multiple instances (dev + integration tests)
     ports:
       - "9080:8080"  # Expose on 9080 to avoid conflict with register-server
     volumes:

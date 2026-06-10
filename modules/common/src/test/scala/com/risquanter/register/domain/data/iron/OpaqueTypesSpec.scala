@@ -90,7 +90,29 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
         assertTrue(prob == 0.75)
       }
     ),
-    
+
+    suite("OccurrenceProbability type alias")(
+      test("accepts 0.0 (event that never occurs)") {
+        val result: Either[String, OccurrenceProbability] = 0.0.refineEither
+        assertTrue(result.isRight)
+      },
+
+      test("accepts 1.0 (event that always occurs)") {
+        val result: Either[String, OccurrenceProbability] = 1.0.refineEither
+        assertTrue(result.isRight)
+      },
+
+      test("rejects value below 0.0") {
+        val result: Either[String, OccurrenceProbability] = (-0.001).refineEither
+        assertTrue(result.isLeft)
+      },
+
+      test("rejects value above 1.0") {
+        val result: Either[String, OccurrenceProbability] = 1.001.refineEither
+        assertTrue(result.isLeft)
+      }
+    ),
+
     suite("SafeName opaque type")(
       test("can be created from SafeShortStr") {
         val validStr: SafeShortStr = "John Doe".refineUnsafe

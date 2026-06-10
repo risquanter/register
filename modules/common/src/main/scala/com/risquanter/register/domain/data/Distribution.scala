@@ -20,6 +20,20 @@ final case class Distribution(
 )
 
 object Distribution {
+  /** Returns Failure when `arr` has two or more elements that are not strictly
+    * increasing. Matches the pattern of `RiskNode.validateExpertMode` and
+    * `TreeBuilderLogic.requireCond`: structural condition computed internally,
+    * result expressed as `Validation[ValidationError, Unit]`.
+    */
+  private def requireStrictlyIncreasing(
+    arr:     Array[Double],
+    field:   String,
+    message: String
+  ): Validation[ValidationError, Unit] =
+    if arr.length >= 2 && !ValidationUtil.isStrictlyIncreasing(arr.toSeq) then
+      Validation.fail(ValidationError(field, ValidationErrorCode.INVALID_COMBINATION, message))
+    else Validation.succeed(())
+
   def create(
     distributionType: String,
     minLoss: Option[Long],
@@ -59,12 +73,18 @@ object Distribution {
             val elementV: Validation[ValidationError, Unit] = toValidation(
               if allElementErrors.isEmpty then Right(()) else Left(allElementErrors)
             )
+            val monotonicPctCheck = requireStrictlyIncreasing(
+              pct, s"$fieldPrefix.percentiles", ValidationMessages.percentilesMustBeStrictlyIncreasing)
+            val monotonicQtCheck = requireStrictlyIncreasing(
+              q, s"$fieldPrefix.quantiles", ValidationMessages.quantilesMustBeStrictlyIncreasing)
             val termsCheck: Validation[ValidationError, Unit] = termsV match {
               case Validation.Success(_, Some(t)) if t.toInt > pct.length =>
                 Validation.fail(ValidationError(s"$fieldPrefix.terms", ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.termsOutOfRange))
+              case Validation.Success(_, Some(t)) if t.toInt < 2 =>
+                Validation.fail(ValidationError(s"$fieldPrefix.terms", ValidationErrorCode.INVALID_COMBINATION, ValidationMessages.termsOutOfRange))
               case _ => Validation.succeed(())
             }
-            Validation.validateWith(elementV, termsCheck)((_, _) => ())
+            Validation.validateWith(elementV, monotonicPctCheck, monotonicQtCheck, termsCheck)((_, _, _, _) => ())
           case (Some(_), Some(q)) if q.isEmpty => Validation.fail(ValidationError(s"$fieldPrefix.quantiles", ValidationErrorCode.REQUIRED_FIELD, "Expert mode requires quantiles"))
           case (Some(pct), Some(q)) if pct.length != q.length =>
             Validation.fail(ValidationError(s"$fieldPrefix.distributionType", ValidationErrorCode.INVALID_COMBINATION, s"percentiles and quantiles length mismatch (${pct.length} vs ${q.length})"))

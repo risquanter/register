@@ -166,9 +166,19 @@ object TreeDetailView:
         }
 
     def handleNodeClick(ev: org.scalajs.dom.MouseEvent): Unit =
+      // Approved gestures (ADR: Ctrl+Click = add to chart, Ctrl+Shift+Click = remove):
+      //   Ctrl/Cmd+Click          → add node to LEC chart selection (no-op if already selected)
+      //   Ctrl/Cmd+Shift+Click    → remove node from LEC chart selection (no-op if not selected)
+      //   plain Click             → navigate / show node detail
       if ev.ctrlKey || ev.metaKey then
         ev.preventDefault()
-        state.userSelectionToggle.onNext(nodeId)
+        val alreadySelected = state.userSelectedNodeIds.now().contains(nodeId)
+        if ev.shiftKey then
+          // Remove gesture — only emit if the node is currently selected
+          if alreadySelected then state.userSelectionToggle.onNext(nodeId)
+        else
+          // Add gesture — only emit if the node is not yet selected
+          if !alreadySelected then state.userSelectionToggle.onNext(nodeId)
       else
         state.selectNode(nodeId)
 

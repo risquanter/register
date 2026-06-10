@@ -5,6 +5,7 @@ import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState}
 import app.components.FormInputs
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.errors.ValidationError
 
 /**
  * Portfolio sub-form wired to TreeBuilderState.
@@ -83,7 +84,7 @@ object PortfolioFormView:
               case _        => None
             })
       case Validation.Failure(_, errs) =>
-        submitError.set(Some(errs.head.message))
+        routePortfolioDraftErrors(form, errs.toList, submitError)
 
   private def handleUpdate(
     form: PortfolioFormState,
@@ -105,4 +106,23 @@ object PortfolioFormView:
               case _        => None
             })
       case Validation.Failure(_, errs) =>
-        submitError.set(Some(errs.head.message))
+        routePortfolioDraftErrors(form, errs.toList, submitError)
+
+  /** Route toDraft validation errors to their per-field inline slots.
+    * Errors with no matching field fall back to the banner with their real message. */
+  private def routePortfolioDraftErrors(
+    form: PortfolioFormState,
+    errors: List[ValidationError],
+    submitError: Var[Option[String]]
+  ): Unit =
+    val unrouted = errors.filterNot { err =>
+      fieldForDraftError(err.field) match
+        case Some(field) => form.setSubmitFieldError(field, err.message); true
+        case None        => false
+    }
+    submitError.set(unrouted.headOption.map(_.message))
+
+  private def fieldForDraftError(field: String): Option[PortfolioField] =
+    if field.contains("name") then Some(PortfolioField.Name)
+    else if field.contains("parent") then Some(PortfolioField.Parent)
+    else None

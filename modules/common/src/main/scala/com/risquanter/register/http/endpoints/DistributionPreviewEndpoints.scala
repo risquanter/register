@@ -5,7 +5,7 @@ import sttp.tapir.json.zio.*
 
 import com.risquanter.register.domain.data.iron.WorkspaceKeySecret
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
-import com.risquanter.register.http.requests.{DistributionPreviewRequest, DistributionPreviewResponse}
+import com.risquanter.register.http.requests.{DistributionShapeRequest, DistributionPreviewResponse}
 
 /** Distribution preview endpoint.
   *
@@ -22,5 +22,5 @@ trait DistributionPreviewEndpoints extends BaseEndpoint:
       .description("Compute a sampled distribution preview curve from parameters (no tree required)")
       .in("w" / path[WorkspaceKeySecret]("key") / "distribution" / "preview")
       .post
-      .in(jsonBody[DistributionPreviewRequest])
+      .in(jsonBody[DistributionShapeRequest])
       .out(jsonBody[DistributionPreviewResponse])

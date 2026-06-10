@@ -3,7 +3,7 @@ package com.risquanter.register.services.helper
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution}
-import com.risquanter.register.domain.data.iron.Probability
+import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability}
 import com.risquanter.register.domain.data.{RiskLeaf, ExpertDistributionParams}
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
@@ -13,13 +13,17 @@ import io.github.iltotore.iron.autoRefine
 
 object SimulatorSpec extends ZIOSpecDefault {
   
-  // Helper to create Probability values
-  private def prob(value: Double): Probability =
+  // Helper to create OccurrenceProbability values (closed [0,1] interval)
+  private def prob(value: Double): OccurrenceProbability =
+    value.refineUnsafe
+
+  // Helper to create Metalog percentile values (open (0,1) interval)
+  private def pct(value: Double): Probability =
     value.refineUnsafe
   
   // Helper to create simple loss distribution
   private def createSimpleLossDistribution(): MetalogDistribution = {
-    val percentiles = Array(0.05, 0.5, 0.95).map(prob)
+    val percentiles = Array(0.05, 0.5, 0.95).map(pct)
     val quantiles = Array(1000.0, 5000.0, 25000.0)
     MetalogDistribution.fromPercentiles(percentiles, quantiles, terms = 3)
       .toOption.get

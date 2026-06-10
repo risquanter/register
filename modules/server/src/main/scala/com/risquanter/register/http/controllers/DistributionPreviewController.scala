@@ -7,7 +7,7 @@ import com.risquanter.register.auth.{ AuthorizationService, Permission, UserCont
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.http.endpoints.DistributionPreviewEndpoints
-import com.risquanter.register.http.requests.DistributionPreviewRequest
+import com.risquanter.register.http.requests.DistributionShapeRequest
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.workspace.WorkspaceStore
 
@@ -45,7 +45,7 @@ class DistributionPreviewController private (
           userId <- userCtx.extract(maybeUserId)
           ws     <- workspaceStore.resolve(key)
           _      <- authzService.check(userId, Permission.AnalyzeRun, ws.id.asResource)
-          result <- DistributionPreviewRequest.validate(req).toZIOValidation
+          result <- DistributionShapeRequest.validate(req).toZIOValidation
                       .flatMap(previewService.preview)
         yield result).either
     }

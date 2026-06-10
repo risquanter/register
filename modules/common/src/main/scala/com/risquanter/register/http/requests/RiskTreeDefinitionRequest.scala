@@ -42,15 +42,10 @@ object RiskPortfolioDefinitionRequest:
   given JsonCodec[RiskPortfolioDefinitionRequest] = DeriveJsonCodec.gen
 
 final case class RiskLeafDefinitionRequest(
-  name: String,
-  parentName: Option[String],
-  distributionType: String,
-  probability: Double,
-  minLoss: Option[Long],
-  maxLoss: Option[Long],
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]],
-  terms: Option[Int] = None
+  name:              String,
+  parentName:        Option[String],
+  probability:       Double,
+  distributionShape: DistributionShapeRequest
 )
 object RiskLeafDefinitionRequest:
   given JsonCodec[RiskLeafDefinitionRequest] = DeriveJsonCodec.gen

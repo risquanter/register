@@ -213,7 +213,48 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         assertTrue(result.isLeft)
       }
     ),
-    
+
+    suite("refineOccurrenceProbability")(
+      test("accepts value between 0 and 1 exclusive") {
+        val result = ValidationUtil.refineOccurrenceProbability(0.5)
+        assertTrue(result.isRight && result.contains(0.5))
+      },
+
+      test("accepts 0.0 (event that never occurs)") {
+        val result = ValidationUtil.refineOccurrenceProbability(0.0)
+        assertTrue(result.isRight && result.contains(0.0))
+      },
+
+      test("accepts 1.0 (event that always occurs)") {
+        val result = ValidationUtil.refineOccurrenceProbability(1.0)
+        assertTrue(result.isRight && result.contains(1.0))
+      },
+
+      test("rejects value below 0.0") {
+        val result = ValidationUtil.refineOccurrenceProbability(-0.001)
+        assertTrue(result.isLeft)
+      },
+
+      test("rejects value above 1.0") {
+        val result = ValidationUtil.refineOccurrenceProbability(1.001)
+        assertTrue(result.isLeft)
+      },
+
+      test("error message references inclusive range") {
+        val result = ValidationUtil.refineOccurrenceProbability(-0.1)
+        assertTrue(result.left.exists(errs =>
+          errs.exists(e => e.message.contains("inclusive"))
+        ))
+      },
+
+      test("custom fieldPath is preserved in error") {
+        val result = ValidationUtil.refineOccurrenceProbability(-0.1, "leaf.occurrenceProb")
+        assertTrue(result.left.exists(errs =>
+          errs.exists(e => e.field == "leaf.occurrenceProb")
+        ))
+      }
+    ),
+
     suite("refineShortOptText")(
       test("accepts None") {
         val result = ValidationUtil.refineShortOptText(None, "field")

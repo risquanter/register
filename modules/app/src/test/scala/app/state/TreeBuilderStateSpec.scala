@@ -4,7 +4,7 @@ import zio.test.*
 import zio.prelude.Validation
 
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Distribution}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, Probability}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, OccurrenceProbability}
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.tree.TreeIndex
 
@@ -218,7 +218,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           quantiles        = None,
           terms            = None
         )
-        val newProb: Probability = 0.15
+        val newProb: OccurrenceProbability = 0.15
         val added = state.addLeaf("Fraud Risk", Some("Operational Risk"), newShape, newProb)
 
         state.toUpdateRequest() match
@@ -278,7 +278,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val originalName = state.leavesVar.now().head.name
         val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(80000L), None, None, None)
-        val newProb: Probability = 0.5
+        val newProb: OccurrenceProbability = 0.5
         state.updateLeaf(originalName, "Renamed Risk", Some("Operational Risk"), newShape, newProb) match
           case Validation.Success(_, _) =>
             assertTrue(
@@ -400,6 +400,55 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         assertTrue(state.selectedLeafName.now().isEmpty)
       },
 
+      test("removeNode: clears selectedLeafName when the removed leaf was selected") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val tree  = mkTree(treeUlid, "RemoveClearsSel", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val leafName = state.leavesVar.now().head.name
+        state.selectedLeafName.set(Some(leafName))
+        state.removeNode(leafName.value.toString)
+        assertTrue(state.selectedLeafName.now().isEmpty)
+      },
+
+      test("removeNode: does not clear selectedLeafName when a different leaf is removed") {
+        val leaf1 = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId)
+        )
+        val leaf2 = RiskLeaf.unsafeApply(
+          id               = childUlid,
+          name             = "Market Risk",
+          distributionType = "lognormal",
+          probability      = 0.2,
+          minLoss          = Some(500L),
+          maxLoss          = Some(20000L),
+          parentId         = Some(rootId)
+        )
+        val rootWithTwo = RiskPortfolio.unsafeFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, childUlid), parentId = None)
+        val tree  = mkTree(treeUlid, "RemoveOther", Seq(rootWithTwo, leaf1, leaf2), rootId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val cyberName  = state.leavesVar.now().find(_.name.value == "Cyber Risk").get.name
+        val marketName = state.leavesVar.now().find(_.name.value == "Market Risk").get.name
+        state.selectedLeafName.set(Some(cyberName))
+        state.removeNode(marketName.value.toString)
+        assertTrue(state.selectedLeafName.now().contains(cyberName))
+      },
+
       test("selecting a leaf clears selectedPortfolioName (mutual exclusivity)") {
         val state = new TreeBuilderState()
         val portName = SafeName.fromString("MyPortfolio").toOption.get
@@ -448,12 +497,12 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val formState = new RiskLeafFormState
         state.populateLeafForm(formState, state.leavesVar.now().head)
-        val pcts = formState.percentilesVar.now()
+        // domainToDisplayPct(0.1, 0) → "10"; noise eliminated by BigDecimal rounding.
+        // Comma-separated integers, space after comma, matching mkString(", ") format.
         assertTrue(
-          pcts.contains("10"),
-          pcts.contains("50"),
-          pcts.contains("90"),
-          formState.probabilityVar.now() == "0.2",
+          formState.percentilesVar.now() == "10, 50, 90",
+          // domainToDisplayPct(0.2, 2) → "20" (trailing zeros stripped)
+          formState.probabilityVar.now() == "20",
           formState.nameVar.now() == "Expert Risk",
           formState.distributionModeVar.now() == DistributionMode.Expert
         )

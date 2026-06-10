@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -163,6 +163,11 @@ object IronTapirCodecs {
   /** Schema for Probability for JSON body derivation. */
   given Schema[Probability] = Schema.schemaForDouble.map[Probability](
     d => ValidationUtil.refineProbability(d).toOption
+  )(identity)
+
+  /** Schema for OccurrenceProbability for JSON body derivation. */
+  given Schema[OccurrenceProbability] = Schema.schemaForDouble.map[OccurrenceProbability](
+    d => ValidationUtil.refineOccurrenceProbability(d).toOption
   )(identity)
 
   /** Schema for NonNegativeLong for JSON body derivation. */

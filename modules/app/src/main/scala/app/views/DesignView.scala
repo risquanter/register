@@ -47,15 +47,18 @@ object DesignView:
       } --> { tree =>
         val previousId = builderState.editingTreeId.now()
         if previousId.contains(tree.id) then
-          // Same tree already in builder (e.g. after successful submit) — reload silently.
+          // Same tree reloaded after successful submit — do not clear currentDraftVar so
+          // that the preview checkbox works immediately after submission.
           builderState.loadFromTree(tree)
         else if builderState.isDirty then
           if dom.window.confirm("Loading a saved tree will clear your current draft. Continue?") then
+            builderState.currentDraftVar.set(None) // switching tree — clear stale draft
             builderState.loadFromTree(tree)
           else
             // Revert dropdown to previously loaded tree (or None for new-tree mode).
             treeViewState.selectedTreeId.set(previousId)
         else
+          builderState.currentDraftVar.set(None) // switching tree — clear stale draft
           builderState.loadFromTree(tree)
       },
       SplitPane.horizontal(

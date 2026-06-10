@@ -20,14 +20,17 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
 
   private def validLeafDef(name: String, parent: Option[String]) =
     RiskLeafDefinitionRequest(
-      name = name,
-      parentName = parent,
-      distributionType = "lognormal",
-      probability = 0.8,
-      minLoss = Some(1000L),
-      maxLoss = Some(5000L),
-      percentiles = None,
-      quantiles = None
+      name              = name,
+      parentName        = parent,
+      probability       = 0.8,
+      distributionShape = DistributionShapeRequest(
+        distributionType = "lognormal",
+        percentiles      = None,
+        quantiles        = None,
+        terms            = None,
+        minLoss          = Some(1000L),
+        maxLoss          = Some(5000L)
+      )
     )
 
   // Update request helpers use raw ULID string literals for `id` fields because
@@ -36,15 +39,18 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
   // Using TestHelpers.safeId here would bypass the validation path we're testing.
   private def validLeafUpdate(id: String, name: String, parent: Option[String]) =
     RiskLeafUpdateRequest(
-      id = id,
-      name = name,
-      parentName = parent,
-      distributionType = "lognormal",
-      probability = 0.8,
-      minLoss = Some(1000L),
-      maxLoss = Some(5000L),
-      percentiles = None,
-      quantiles = None
+      id                = id,
+      name              = name,
+      parentName        = parent,
+      probability       = 0.8,
+      distributionShape = DistributionShapeRequest(
+        distributionType = "lognormal",
+        percentiles      = None,
+        quantiles        = None,
+        terms            = None,
+        minLoss          = Some(1000L),
+        maxLoss          = Some(5000L)
+      )
     )
 
   def spec = suite("RiskTreeRequests")(
@@ -54,14 +60,17 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
         portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
         leaves = Seq(
           RiskLeafDefinitionRequest(
-            name = "Leaf",
-            parentName = Some("Root"),
-            distributionType = "lognormal",
-            probability = 0.8,
-            minLoss = None, // invalid for lognormal
-            maxLoss = None,
-            percentiles = None,
-            quantiles = None
+            name              = "Leaf",
+            parentName        = Some("Root"),
+            probability       = 0.8,
+            distributionShape = DistributionShapeRequest(
+              distributionType = "lognormal",
+              percentiles      = None,
+              quantiles        = None,
+              terms            = None,
+              minLoss          = None, // invalid for lognormal
+              maxLoss          = None
+            )
           )
         )
       )

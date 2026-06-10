@@ -9,7 +9,7 @@ import app.core.ZJS.*
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.DistributionPreviewEndpoints
-import com.risquanter.register.http.requests.{DistributionPreviewRequest, DistributionPreviewResponse}
+import com.risquanter.register.http.requests.{DistributionShapeRequest, DistributionPreviewResponse}
 
 /** PDF/CDF view toggle for the distribution preview chart. */
 enum DistributionViewMode:
@@ -63,7 +63,7 @@ final class DistributionChartState(
     * `loadInto`. Called from [[app.views.DistributionChartView]] on the
     * debounced `draftSignal.changes` stream.
     */
-  def loadPreview(key: WorkspaceKeySecret, req: DistributionPreviewRequest): Unit =
+  def loadPreview(key: WorkspaceKeySecret, req: DistributionShapeRequest): Unit =
     distributionPreviewEndpoint((userIdAccessor(), key, req)).loadInto(previewVar)
 
   /** Reset the preview to Idle (e.g. when the form is unmounted). */

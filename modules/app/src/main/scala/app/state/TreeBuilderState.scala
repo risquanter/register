@@ -4,9 +4,9 @@ import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.{Validation, ForEach}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.{Distribution, RiskTree, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, Probability, IronConstants}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability, IronConstants}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest}
 import com.risquanter.register.frontend.TreeBuilderLogic
 
 final case class PortfolioDraft(
@@ -18,7 +18,7 @@ final case class LeafDraft(
   name:         SafeName.SafeName,
   parent:       Option[SafeName.SafeName],
   distribution: Distribution,
-  probability:  Probability,
+  probability: OccurrenceProbability,
   id:           Option[NodeId] = None
 )
 
@@ -101,7 +101,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case _ => ()
     result
 
-  def addLeaf(rawName: String, rawParent: Option[String], shape: Distribution, probability: Probability): Validation[ValidationError, LeafDraft] =
+  def addLeaf(rawName: String, rawParent: Option[String], shape: Distribution, probability: OccurrenceProbability): Validation[ValidationError, LeafDraft] =
     val result = for
       name <- validateName(rawName, "leaf.name")
       parent <- validateParentName(rawParent, "leaf.parentName")
@@ -118,8 +118,9 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
   /** Populate a [[RiskLeafFormState]] from a loaded [[LeafDraft]].
     *
-    * Sets all field vars from the draft, including `parentVar`. Percentiles are
-    * rescaled from the 0-1 domain representation to the 0-100 form display scale.
+    * Sets all field vars from the draft, including `parentVar`. Probability and
+    * percentiles are rescaled from the 0-1 domain representation to the 0-100
+    * form display scale.
     */
   def populateLeafForm(state: RiskLeafFormState, leaf: LeafDraft): Unit =
     val mode = leaf.distribution.distributionType match
@@ -128,11 +129,12 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case other => throw new IllegalStateException(s"Unrecognised DistributionType: $other — update populateLeafForm")
     state.distributionModeVar.set(mode)
     state.nameVar.set(leaf.name.value)
-    state.probabilityVar.set(leaf.probability.toString)
+    // Form field is on the 0-100 (percent) scale; domain value is 0-1.
+    state.probabilityVar.set(RiskLeafFormState.domainToDisplayPct(leaf.probability, 2))
     state.parentVar.set(leaf.parent.map(_.value))
     mode match
       case DistributionMode.Expert =>
-        val pcts   = leaf.distribution.percentiles.fold("")(arr => arr.map(p => (p * 100.0).toString).mkString(", "))
+        val pcts   = leaf.distribution.percentiles.fold("")(arr => arr.map(RiskLeafFormState.domainToDisplayPct(_, 0)).mkString(", "))
         val quants = leaf.distribution.quantiles.fold("")(arr => arr.map(_.toString).mkString(", "))
         state.percentilesVar.set(pcts)
         state.quantilesVar.set(quants)
@@ -157,7 +159,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     rawName:      String,
     rawParent:    Option[String],
     shape:        Distribution,
-    probability:  Probability
+    probability:  OccurrenceProbability
   ): Validation[ValidationError, LeafDraft] =
     val existing = leavesVar.now().find(_.name == originalName)
     val result = for
@@ -217,6 +219,12 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val toRemove = TreeBuilderLogic.collectCascade(Set(name), portfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)))
     portfoliosVar.set(portfolios.filterNot(p => toRemove.contains(p.name.value.toString)))
     leavesVar.set(leaves.filterNot(l => toRemove.contains(l.name.value.toString) || l.parent.exists(n => toRemove.contains(n.value.toString))))
+    // Clear selection if the selected node was removed — otherwise the form
+    // stays in "Update" mode with a ghost selection pointing at a deleted leaf/portfolio.
+    if selectedLeafName.now().exists(n => toRemove.contains(n.value.toString)) then
+      selectedLeafName.set(None)
+    if selectedPortfolioName.now().exists(n => toRemove.contains(n.value.toString)) then
+      selectedPortfolioName.set(None)
 
   /** Build backend request with client-side validation. */
   def toRequest(): Validation[ValidationError, RiskTreeDefinitionRequest] =
@@ -308,7 +316,11 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       )
     }.toList
 
-    currentDraftVar.set(None)
+    // currentDraftVar is intentionally NOT cleared here. Ownership belongs to
+    // RiskLeafFormView's draftSignal subscription. When loading the same tree after
+    // a successful submit the form fields are still valid — clearing the draft would
+    // prevent the preview checkbox from working. When switching to a different tree,
+    // the caller (DesignView) clears currentDraftVar before calling loadFromTree.
     treeNameVar.set(tree.name.value)
     portfoliosVar.set(portfolios)
     leavesVar.set(leaves)
@@ -337,15 +349,17 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
 
   private def toLeafRequest(draft: LeafDraft): RiskLeafDefinitionRequest =
     RiskLeafDefinitionRequest(
-      name             = draft.name.value,
-      parentName       = draft.parent.map(_.value),
-      distributionType = draft.distribution.distributionType.toString,
-      probability      = draft.probability,
-      minLoss          = draft.distribution.minLoss.map(identity),
-      maxLoss          = draft.distribution.maxLoss.map(identity),
-      percentiles      = draft.distribution.percentiles,
-      quantiles        = draft.distribution.quantiles,
-      terms            = draft.distribution.terms.map(_.toInt)
+      name              = draft.name.value,
+      parentName        = draft.parent.map(_.value),
+      probability       = draft.probability,
+      distributionShape = DistributionShapeRequest(
+        distributionType = draft.distribution.distributionType.toString,
+        percentiles      = draft.distribution.percentiles,
+        quantiles        = draft.distribution.quantiles,
+        terms            = draft.distribution.terms.map(_.toInt),
+        minLoss          = draft.distribution.minLoss.map(identity),
+        maxLoss          = draft.distribution.maxLoss.map(identity)
+      )
     )
 
   // Identity-preserving variants: emit an update DTO carrying the node's existing id,
@@ -358,15 +372,17 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   private def toLeafUpdateRequest(entry: (NodeId, LeafDraft)): RiskLeafUpdateRequest =
     val (id, draft) = entry
     RiskLeafUpdateRequest(
-      id               = id.value,
-      name             = draft.name.value,
-      parentName       = draft.parent.map(_.value),
-      distributionType = draft.distribution.distributionType.toString,
-      probability      = draft.probability,
-      minLoss          = draft.distribution.minLoss.map(identity),
-      maxLoss          = draft.distribution.maxLoss.map(identity),
-      percentiles      = draft.distribution.percentiles,
-      quantiles        = draft.distribution.quantiles,
-      terms            = draft.distribution.terms.map(_.toInt)
+      id                = id.value,
+      name              = draft.name.value,
+      parentName        = draft.parent.map(_.value),
+      probability       = draft.probability,
+      distributionShape = DistributionShapeRequest(
+        distributionType = draft.distribution.distributionType.toString,
+        percentiles      = draft.distribution.percentiles,
+        quantiles        = draft.distribution.quantiles,
+        terms            = draft.distribution.terms.map(_.toInt),
+        minLoss          = draft.distribution.minLoss.map(identity),
+        maxLoss          = draft.distribution.maxLoss.map(identity)
+      )
     )
 

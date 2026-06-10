@@ -61,8 +61,18 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
       cls := "tree-builder",
       h1("Risk Tree Builder"),
 
-      // Clear stale submit feedback when the user edits the tree name
-      state.treeNameVar.signal.changes --> { _ => submitState.set(SubmitState.Idle) },
+      // Clear stale submit feedback when the user edits the tree name.
+      // Does NOT clear a Success notification — Success transitions to Idle only via
+      // the next explicit submit action. This prevents the programmatic-write trampoline
+      // where selectTree() writes treeNameVar immediately after onSuccess sets Success,
+      // causing the notification to disappear within milliseconds.
+      state.treeNameVar.signal.changes
+        .withCurrentValueOf(submitState.signal)
+        --> { case (_, current) =>
+          current match
+            case SubmitState.Success(_) => ()
+            case _                      => submitState.set(SubmitState.Idle)
+        },
 
       FormInputs.textInput(
         labelText = "Tree Name",

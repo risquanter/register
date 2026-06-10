@@ -3,7 +3,7 @@ package app.views
 import zio.test.*
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft}
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{SafeName, IronConstants, Probability}
+import com.risquanter.register.domain.data.iron.{SafeName, IronConstants, OccurrenceProbability}
 import io.github.iltotore.iron.*
 
 /** Structural tests for TreePreview rendering logic.
@@ -44,7 +44,7 @@ object TreePreviewSpec extends ZIOSpecDefault:
     terms            = None
   )
 
-  private val lognormalProb: Probability = 0.3
+  private val lognormalProb: OccurrenceProbability = 0.3
 
   /** Replication of renderTree's groupBy logic for structural assertion. */
   private def expectedGrouping(

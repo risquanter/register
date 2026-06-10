@@ -195,7 +195,7 @@ object Simulator {
       sampler = RiskSampler.fromDistribution(
         entitySeed = entitySeed,
         riskSeed = leaf.id,
-        occurrenceProb = leaf.probability, // Already Probability type from domain model
+        occurrenceProb = leaf.probability, // Already OccurrenceProbability type from domain model
         lossDistribution = distribution,
         seed3 = seed3,
         seed4 = seed4

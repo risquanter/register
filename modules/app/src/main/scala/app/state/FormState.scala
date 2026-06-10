@@ -70,6 +70,11 @@ trait FormState[F]:
     submitFieldErrors.set(Map.empty)
     showErrorsVar.set(true)
 
+  /** Expose the show-all-errors flag for subclasses that need to build
+    * custom visibility gates (e.g. cross-field errors with content-presence
+    * logic rather than per-field touch logic). */
+  protected def showErrorsSignal: Signal[Boolean] = showErrorsVar.signal
+
   /** Reset error display and touched state (e.g., after successful submit) */
   def resetTouched(): Unit =
     showErrorsVar.set(false)

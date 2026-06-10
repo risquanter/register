@@ -76,6 +76,13 @@ object ValidationUtil {
       )))
   }
 
+  /** True when every adjacent pair in `xs` satisfies a < b.  Single-element
+   *  and empty sequences are trivially increasing. Used by both Distribution.create
+   *  (server-side validation) and RiskLeafFormState (client-side form validation).
+   */
+  def isStrictlyIncreasing(xs: Seq[Double]): Boolean =
+    xs.sliding(2).forall { case Seq(a, b) => a < b; case _ => true }
+
   // Refinement for non-negative long values
   def refineNonNegativeLong(value: Long, fieldPath: String = "value"): Either[List[ValidationError], NonNegativeLong] = {
     value
@@ -97,6 +104,18 @@ object ValidationUtil {
         field = fieldPath,
         code = ValidationErrorCode.INVALID_RANGE,
         message = ValidationMessages.probabilityOutOfRange
+      )))
+  }
+
+  // Refinement for occurrence probability (must be between 0.0 and 1.0, inclusive)
+  def refineOccurrenceProbability(value: Double, fieldPath: String = "probability"): Either[List[ValidationError], OccurrenceProbability] = {
+    value
+      .refineEither[GreaterEqual[0.0] & LessEqual[1.0]]
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.occurrenceProbabilityOutOfRange
       )))
   }
 

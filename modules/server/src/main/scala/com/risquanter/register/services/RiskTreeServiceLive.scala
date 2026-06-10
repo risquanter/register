@@ -10,7 +10,7 @@ import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, Probability, DistributionType, TreeId, NodeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
@@ -239,7 +239,7 @@ class RiskTreeServiceLive private (
   /** Build domain nodes and rootId from a resolved V2 request. */
   private def buildNodes(
     nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
-    leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, Distribution)],
+    leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
     rootName: SafeName.SafeName
   ): Task[(Seq[RiskNode], NodeId)] = ZIO.attempt {
     val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(n => NodeId(n.id)).toMap

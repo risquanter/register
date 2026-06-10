@@ -2,7 +2,8 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{ValidationUtil, ValidationMessages, Probability}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, ValidationMessages, OccurrenceProbability}
+import com.risquanter.register.domain.errors.ValidationError
 import zio.prelude.Validation
 
 /** Type-safe field identifiers for the risk leaf form. */
@@ -72,21 +73,28 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   /** Filter for name field: any printable characters */
   val nameFilter: String => Boolean = _ => true
   
-  /** 
-   * Filter for probability field: digits and single decimal point.
-   * Prevents patterns like "0.2.5" or "1..2"
-   */
+  /** Filter for probability field: digits and single decimal point, max 2 dp.
+    * Enforced at the character level so the user cannot type a third decimal place. */
   val probabilityFilter: String => Boolean = { s =>
     val hasSingleDot = s.count(_ == '.') <= 1
     val allValidChars = s.forall(c => c.isDigit || c == '.')
-    hasSingleDot && allValidChars
+    val maxTwoDp = s.indexOf('.') match
+      case -1  => true
+      case idx => s.length - idx - 1 <= 2
+    hasSingleDot && allValidChars && maxTwoDp
   }
   
-  /** 
-   * Filter for percentiles/quantiles: digits, commas, spaces, decimal points.
-   * Prevents consecutive dots.
-   */
-  val arrayFilter: String => Boolean = { s =>
+  /** Filter for percentile field: digits, commas, and spaces only.
+    * Percentiles are entered as integers (0 dp); decimal points are rejected
+    * per decision-analysis convention (Cooke, SHELF, Keelin 2016). */
+  val percentilesFilter: String => Boolean =
+    _.forall(c => c.isDigit || c == ',' || c == ' ')
+
+  /** Filter for quantiles field: digits, commas, spaces, and decimal points.
+    * Prevents consecutive dots (guards against "1..2" typos). Max 2 dp is
+    * enforced at validation time, not at the filter level, because the filter
+    * operates on the whole comma-separated string. */
+  val quantilesFilter: String => Boolean = { s =>
     val validChars = s.forall(c => c.isDigit || c == ',' || c == ' ' || c == '.')
     val noConsecutiveDots = !s.contains("..")
     validChars && noConsecutiveDots
@@ -106,15 +114,18 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       case Left(errors) => Some(errors.head.message)
   }
   
-  /** Probability validation using Iron Probability type (open interval 0 < p < 1) */
+  /** Probability validation. The field is entered on the 0–100 (percent) scale
+    * without the `%` sign; it is divided by 100 before being refined against the
+    * Iron `OccurrenceProbability` type (closed interval 0 ≤ p ≤ 1). The error message is
+    * therefore expressed on the entered 0–100 scale, not the internal 0–1 scale. */
   private val probabilityErrorRaw: Signal[Option[String]] = probabilityVar.signal.map { v =>
     if v.isBlank then Some(ValidationMessages.probabilityRequired)
     else this.parseDouble(v) match
       case None => Some(ValidationMessages.probabilityNotANumber)
-      case Some(prob) => 
-        ValidationUtil.refineProbability(prob) match
+      case Some(pct) =>
+        ValidationUtil.refineOccurrenceProbability(RiskLeafFormState.pctToDomain(pct)) match
           case Right(_) => None
-          case Left(errs) => Some(errs.head.message)
+          case Left(_)  => Some("Probability must be between 0 and 100 (inclusive)")
   }
   
   /** Expert mode: percentiles validation (0-100, but Metalog needs 0 < p < 100) */
@@ -127,6 +138,8 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
           if values.isEmpty then Some(ValidationMessages.percentilesFormat)
           else if values.exists(p => p <= 0 || p >= 100) then 
             Some(ValidationMessages.percentilesOutOfRange)
+          else if !ValidationUtil.isStrictlyIncreasing(values) then
+            Some(ValidationMessages.percentilesMustBeStrictlyIncreasing)
           else None
       case _ => None
     }
@@ -140,6 +153,8 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
           val values = parseDoubleList(v)
           if values.isEmpty then Some(ValidationMessages.quantilesFormat)
           else if values.exists(_ < 0) then Some(ValidationMessages.quantilesMustBeNonNegative)
+          else if !ValidationUtil.isStrictlyIncreasing(values) then
+            Some(ValidationMessages.quantilesMustBeStrictlyIncreasing)
           else None
       case _ => None
     }
@@ -220,26 +235,103 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   val nameError: Signal[Option[String]] = withSubmitErrors(Name, nameErrorRaw)
   val probabilityError: Signal[Option[String]] = withSubmitErrors(Probability, probabilityErrorRaw)
 
-  // Cross-field errors merged into per-field signals (BCA-style):
-  // own-field error takes priority; cross-field error is the fallback.
-  // Both fields get a red border when the cross-field constraint is violated.
+  // Cross-field errors use a content-presence gate, NOT the per-field touch gate.
+  //
+  // Problem with merging the cross-field raw error into each field's withSubmitErrors:
+  //   withSubmitErrors(Percentiles, ownRaw.orElse(crossRaw))
+  // gates the WHOLE combined signal behind "Percentiles was touched". So when the user
+  // enters 3 percentiles (blurs, touched) then starts typing 1 quantile (not yet blurred),
+  // the cross-field "lengths must match" error only appears under Percentiles — the stable,
+  // completed field — while the user is still editing Quantiles. Reversal also possible.
+  //
+  // Correct model: the cross-field constraint is evaluable as soon as BOTH fields have
+  // non-empty content. Its visibility gate must be:
+  //   showAll (submit triggered) || (pField.nonEmpty && qField.nonEmpty)
+  //
+  // Own-field errors continue to use the per-field touch gate via withSubmitErrors.
+  // The final per-field signal is: own-error (touch-gated) orElse cross-error (content-gated).
 
-  /** Percentiles: own error ∪ expert cross-field (length mismatch) */
-  val percentilesError: Signal[Option[String]] = withSubmitErrors(Percentiles,
-    percentilesErrorRaw.combineWith(expertCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
-  )
-  /** Quantiles: own error ∪ expert cross-field (length mismatch) */
-  val quantilesError: Signal[Option[String]] = withSubmitErrors(Quantiles,
-    quantilesErrorRaw.combineWith(expertCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
-  )
-  /** Min loss: own error ∪ lognormal cross-field (min ≥ max) */
-  val minLossError: Signal[Option[String]] = withSubmitErrors(MinLoss,
-    minLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
-  )
-  /** Max loss: own error ∪ lognormal cross-field (min ≥ max) */
-  val maxLossError: Signal[Option[String]] = withSubmitErrors(MaxLoss,
-    maxLossErrorRaw.combineWith(lognormalCrossFieldErrorRaw).map { case (own, cross) => own.orElse(cross) }
-  )
+  // Track which field in each cross-field pair was most recently edited.
+  // Starts with an arbitrary default (true) which is irrelevant until both fields
+  // have content — the bothFilled gate suppresses the error until then.
+  private val lastExpertEdited: Signal[Boolean] =  // true = percentiles last, false = quantiles last
+    EventStream
+      .merge(
+        percentilesVar.signal.changes.mapTo(true),
+        quantilesVar.signal.changes.mapTo(false)
+      )
+      .toSignal(true)
+
+  private val lastLognormalEdited: Signal[Boolean] = // true = minLoss last, false = maxLoss last
+    EventStream
+      .merge(
+        minLossVar.signal.changes.mapTo(true),
+        maxLossVar.signal.changes.mapTo(false)
+      )
+      .toSignal(true)
+
+  /** Cross-field error gated to show only under the most-recently-edited field of the pair.
+    *
+    * `isThisFieldLast` is true when this field (not its partner) was the last edited.
+    * Gate: error is shown when both fields have content AND this was last edited,
+    * OR when form-wide validation has been triggered (submit).
+    */
+  private def crossFieldGated(
+    thisField:       RiskLeafField,
+    fieldA:          Var[String],
+    fieldB:          Var[String],
+    raw:             Signal[Option[String]],
+    isThisFieldLast: Signal[Boolean]
+  ): Signal[Option[String]] =
+    val bothFilled =
+      fieldA.signal.map(_.nonEmpty)
+        .combineWith(fieldB.signal.map(_.nonEmpty))
+        .map { (a, b) => a && b }
+    // Gate: show when form-wide errors are forced (submit), or when this specific
+    // field has been blurred AND was the last one edited AND both fields have content.
+    // isTouched prevents firing on every keystroke; isThisFieldLast pins the error
+    // to only one of the two fields at a time.
+    showErrorsSignal
+      .combineWith(isTouched(thisField), bothFilled, isThisFieldLast)
+      .map { (showAll, touched, filled, isLast) => showAll || (touched && isLast && filled) }
+      .combineWith(raw)
+      .map { (show, err) => if show then err else None }
+
+  private val expertCrossFieldGated_Pct: Signal[Option[String]] =
+    crossFieldGated(Percentiles, percentilesVar, quantilesVar, expertCrossFieldErrorRaw, lastExpertEdited)
+
+  private val expertCrossFieldGated_Qt: Signal[Option[String]] =
+    crossFieldGated(Quantiles, percentilesVar, quantilesVar, expertCrossFieldErrorRaw, lastExpertEdited.map(!_))
+
+  private val lognormalCrossFieldGated_Min: Signal[Option[String]] =
+    crossFieldGated(MinLoss, minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited)
+
+  private val lognormalCrossFieldGated_Max: Signal[Option[String]] =
+    crossFieldGated(MaxLoss, minLossVar, maxLossVar, lognormalCrossFieldErrorRaw, lastLognormalEdited.map(!_))
+
+  /** Percentiles: own error (touch-gated) ∪ expert cross-field (last-edited-gated) */
+  val percentilesError: Signal[Option[String]] =
+    withSubmitErrors(Percentiles, percentilesErrorRaw)
+      .combineWith(expertCrossFieldGated_Pct)
+      .map { (own, cross) => own.orElse(cross) }
+
+  /** Quantiles: own error (touch-gated) ∪ expert cross-field (last-edited-gated) */
+  val quantilesError: Signal[Option[String]] =
+    withSubmitErrors(Quantiles, quantilesErrorRaw)
+      .combineWith(expertCrossFieldGated_Qt)
+      .map { (own, cross) => own.orElse(cross) }
+
+  /** Min loss: own error (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
+  val minLossError: Signal[Option[String]] =
+    withSubmitErrors(MinLoss, minLossErrorRaw)
+      .combineWith(lognormalCrossFieldGated_Min)
+      .map { (own, cross) => own.orElse(cross) }
+
+  /** Max loss: own error (touch-gated) ∪ lognormal cross-field (last-edited-gated) */
+  val maxLossError: Signal[Option[String]] =
+    withSubmitErrors(MaxLoss, maxLossErrorRaw)
+      .combineWith(lognormalCrossFieldGated_Max)
+      .map { (own, cross) => own.orElse(cross) }
   val termsError: Signal[Option[String]] = withSubmitErrors(Terms, termsErrorRaw)
 
   // ============================================================
@@ -278,7 +370,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     * Percentiles from the form are in 0–100 scale; converted to 0–1 before
     * passing to [[Distribution.create]].
     */
-  private def currentShapeDraft(): Option[Distribution] =
+  def currentShapeValidation(): Validation[ValidationError, Distribution] =
     val mode = distributionModeVar.now()
     val minLossOpt = mode match
       case DistributionMode.Lognormal => parseLong(minLossVar.now())
@@ -288,7 +380,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       case _                          => None
     val pcts = mode match
       // UI uses 0-100 scale; domain model requires 0-1 scale
-      case DistributionMode.Expert => toArrayOpt(parseDoubleList(percentilesVar.now()).map(_ / 100.0))
+      case DistributionMode.Expert => toArrayOpt(parseDoubleList(percentilesVar.now()).map(RiskLeafFormState.pctToDomain))
       case _                       => None
     val quants = mode match
       case DistributionMode.Expert => toArrayOpt(parseDoubleList(quantilesVar.now()))
@@ -302,18 +394,22 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       quantiles        = quants,
       fieldPrefix      = "leaf",
       terms            = termsOpt
-    ) match
+    )
+
+  private def currentShapeDraft(): Option[Distribution] =
+    currentShapeValidation() match
       case Validation.Success(_, dist) => Some(dist)
       case _                           => None
 
   /** Refined occurrence probability from the current form value, or None if invalid.
     *
     * Called by [[app.views.RiskLeafFormView]] at submit time to pass a typed
-    * `Probability` to [[TreeBuilderState.addLeaf]] alongside the shape `Distribution`.
+    * `OccurrenceProbability` to [[TreeBuilderState.addLeaf]] alongside the shape `Distribution`.
     */
-  def refinedProbability: Option[Probability] =
-    probabilityVar.now().toDoubleOption.flatMap { p =>
-      ValidationUtil.refineProbability(p).toOption
+  def refinedProbability: Option[OccurrenceProbability] =
+    probabilityVar.now().toDoubleOption.flatMap { pct =>
+      // Field is entered on the 0–100 (percent) scale; convert to 0–1 before refining.
+      ValidationUtil.refineOccurrenceProbability(RiskLeafFormState.pctToDomain(pct)).toOption
     }
 
   /** Reactive signal of the current shape-only distribution draft.
@@ -357,3 +453,25 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
     if values.isEmpty then None else Some(values.toArray)
 
 
+object RiskLeafFormState:
+  /** Convert a 0–100 percent-scale value (as entered in the form) to the
+    * 0–1 domain scale used in [[Distribution]].
+    *
+    * Used for scalar probability (`pctToDomain(pct)`) and per-element
+    * percentile arrays (`arr.map(pctToDomain)`).
+    */
+  def pctToDomain(pct: Double): Double = pct / 100.0
+
+  /** Convert a 0–1 domain value to its 0–100 display string, rounded to
+    * `decimals` decimal places using half-up rounding.
+    *
+    * Uses [[BigDecimal]] to eliminate floating-point noise
+    * (e.g., `0.1 * 100 = 10.000000000000001`).
+    *
+    * - `decimals = 0` → percentiles (integers: "10", "50", "90")
+    * - `decimals = 2` → probability ("20.5" — trailing zeros stripped)
+    */
+  def domainToDisplayPct(p: Double, decimals: Int): String =
+    BigDecimal(p * 100.0)
+      .setScale(decimals, scala.math.BigDecimal.RoundingMode.HALF_UP)
+      .underlying.stripTrailingZeros.toPlainString

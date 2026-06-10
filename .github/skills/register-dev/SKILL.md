@@ -60,10 +60,18 @@ sbt "app/testOnly *TreeBuilderStateSpec"
 
 # With filtered output (pass/fail summary)
 sbt 'commonJVM/test; server/test' 2>&1 | \
-  grep -E 'tests passed|tests failed|FAILED|\[error\]|success|Executed in'
+  grep -E 'tests failed|FAILED|\[error\]|success'
 ```
 
-Expected counts (as of 2026-03-09): `commonJVM` 289, `server` 219.
+### Reporting test results
+
+Run tests. Report **pass or fail only**. Never report the count. Never comment on the count. Never act on the count. The count is a distraction and irrelevant to the user. The user only needs to know if the tests passed or failed. Failed test need to be investigated even if they are from earlier. A single failure is a blocker regardless of the count. The user needs to know about it and fix it before proceeding.
+
+```bash
+sbt commonJVM/test
+sbt server/test
+sbt app/test
+```
 
 ---
 

@@ -2,7 +2,7 @@ package app.components
 
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom.MouseEvent
-import com.risquanter.register.domain.data.iron.{SafeName, NodeId, Probability, NonNegativeLong, DistributionType}
+import com.risquanter.register.domain.data.iron.{SafeName, NodeId, OccurrenceProbability, NonNegativeLong, DistributionType}
 
 /** Unified tree-node row used by both TreePreview (draft state) and
   * TreeDetailView (persisted tree).
@@ -35,7 +35,7 @@ object TreeNodeRow:
   def leafTooltip(
     name:        SafeName.SafeName,
     distType:    DistributionType,
-    probability: Probability,
+    probability: OccurrenceProbability,
     id:          Option[NodeId]          = None,
     percentiles: Option[Array[Double]]   = None,
     quantiles:   Option[Array[Double]]   = None,

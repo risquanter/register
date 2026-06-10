@@ -51,6 +51,10 @@ object ValidationMessages:
   val probabilityNotANumber: String     = "Probability must be a number"
   val probabilityOutOfRange: String     = "Probability must be between 0 and 1 (exclusive)"
 
+  // Occurrence probability (closed interval 0 ≤ p ≤ 1)
+  // ══════════════════════════════════════════════════════════════════
+  val occurrenceProbabilityOutOfRange: String = "Occurrence probability must be between 0 and 1 (inclusive)"
+
   // ══════════════════════════════════════════════════════════════════
   // Distribution type
   // ══════════════════════════════════════════════════════════════════
@@ -92,6 +96,8 @@ object ValidationMessages:
   val percentilesRequired: String       = "Percentiles are required for expert mode"
   val percentilesFormat: String         = "Enter comma-separated percentile values"
   val percentilesOutOfRange: String     = "Percentiles must be between 0 and 100 (exclusive)"
+  val percentilesMustBeStrictlyIncreasing: String =
+    "Percentiles must be strictly increasing — values must be in ascending order"
 
   val quantilesRequired: String         = "Quantiles are required for expert mode"
   val quantilesFormat: String           = "Enter comma-separated quantile values (loss amounts)"
@@ -106,7 +112,7 @@ object ValidationMessages:
   // Expert mode — Metalog terms
   // ══════════════════════════════════════════════════════════════════
   val termsOutOfRange: String =
-    "Terms must be between 2 and the number of anchor points"
+    "Terms must be between 2 and the number of percentile-quantile pairs"
 
   // ══════════════════════════════════════════════════════════════════
   // Distribution fit failure

@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -61,12 +61,15 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       RiskLeafDefinitionRequest(
         name = "Test Risk",
         parentName = None,
-        distributionType = "lognormal",
         probability = 0.75,
-        minLoss = Some(1000L),
-        maxLoss = Some(50000L),
-        percentiles = None,
-        quantiles = None
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          percentiles = None,
+          quantiles = None,
+          terms = None,
+          minLoss = Some(1000L),
+          maxLoss = Some(50000L)
+        )
       )
     )
   )
@@ -93,22 +96,28 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             RiskLeafDefinitionRequest(
               name = "Cyber Attack",
               parentName = Some("Operational Risk"),
-              distributionType = "lognormal",
               probability = 0.25,
-              minLoss = Some(1000L),
-              maxLoss = Some(50000L),
-              percentiles = None,
-              quantiles = None
+              distributionShape = DistributionShapeRequest(
+                distributionType = "lognormal",
+                percentiles = None,
+                quantiles = None,
+                terms = None,
+                minLoss = Some(1000L),
+                maxLoss = Some(50000L)
+              )
             ),
             RiskLeafDefinitionRequest(
               name = "Fraud",
               parentName = Some("Operational Risk"),
-              distributionType = "lognormal",
               probability = 0.15,
-              minLoss = Some(500L),
-              maxLoss = Some(10000L),
-              percentiles = None,
-              quantiles = None
+              distributionShape = DistributionShapeRequest(
+                distributionType = "lognormal",
+                percentiles = None,
+                quantiles = None,
+                terms = None,
+                minLoss = Some(500L),
+                maxLoss = Some(10000L)
+              )
             )
           )
         )
@@ -232,22 +241,28 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             RiskLeafDefinitionRequest(
               name = "Leaf 1",
               parentName = Some("Multi Root"),
-              distributionType = "lognormal",
               probability = 0.3,
-              minLoss = Some(1000L),
-              maxLoss = Some(30000L),
-              percentiles = None,
-              quantiles = None
+              distributionShape = DistributionShapeRequest(
+                distributionType = "lognormal",
+                percentiles = None,
+                quantiles = None,
+                terms = None,
+                minLoss = Some(1000L),
+                maxLoss = Some(30000L)
+              )
             ),
             RiskLeafDefinitionRequest(
               name = "Leaf 2",
               parentName = Some("Multi Root"),
-              distributionType = "lognormal",
               probability = 0.2,
-              minLoss = Some(2000L),
-              maxLoss = Some(40000L),
-              percentiles = None,
-              quantiles = None
+              distributionShape = DistributionShapeRequest(
+                distributionType = "lognormal",
+                percentiles = None,
+                quantiles = None,
+                terms = None,
+                minLoss = Some(2000L),
+                maxLoss = Some(40000L)
+              )
             )
           )
         )
@@ -274,22 +289,28 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             RiskLeafDefinitionRequest(
               name = "Node A",
               parentName = Some("Shared Root"),
-              distributionType = "lognormal",
               probability = 0.3,
-              minLoss = Some(5000L),
-              maxLoss = Some(15000L),
-              percentiles = None,
-              quantiles = None
+              distributionShape = DistributionShapeRequest(
+                distributionType = "lognormal",
+                percentiles = None,
+                quantiles = None,
+                terms = None,
+                minLoss = Some(5000L),
+                maxLoss = Some(15000L)
+              )
             ),
             RiskLeafDefinitionRequest(
               name = "Node B",
               parentName = Some("Shared Root"),
-              distributionType = "lognormal",
               probability = 0.2,
-              minLoss = Some(10000L),
-              maxLoss = Some(50000L),
-              percentiles = None,
-              quantiles = None
+              distributionShape = DistributionShapeRequest(
+                distributionType = "lognormal",
+                percentiles = None,
+                quantiles = None,
+                terms = None,
+                minLoss = Some(10000L),
+                maxLoss = Some(50000L)
+              )
             )
           )
         )

@@ -2,7 +2,7 @@ package com.risquanter.register.simulation
 
 import zio.test.*
 import zio.test.Assertion.*
-import com.risquanter.register.domain.data.iron.Probability
+import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import io.github.iltotore.iron.*
@@ -10,11 +10,11 @@ import io.github.iltotore.iron.constraint.all.*
 
 object RiskSamplerSpec extends ZIOSpecDefault {
   
-  // Helper to create Probability from raw double
-  private def prob(value: Double): Probability =
+  // Helper to create OccurrenceProbability from raw double (closed [0,1] interval)
+  private def prob(value: Double): OccurrenceProbability =
     value.refineUnsafe
   
-  // Helper to create Probability arrays from raw doubles
+  // Helper to create Probability arrays from raw doubles (open (0,1) interval, for Metalog percentiles)
   private def probArray(values: Double*): Array[Probability] =
     values.toArray.map(_.refineUnsafe)
   
@@ -126,7 +126,7 @@ object RiskSamplerSpec extends ZIOSpecDefault {
       
       test("occurrence rate approximates probability over many trials") {
         val metalog = createSimpleLossDistribution()
-        val targetProb: Probability = 0.3.refineUnsafe
+        val targetProb: OccurrenceProbability = 0.3.refineUnsafe
         val sampler = RiskSampler.fromDistribution(
           entitySeed = 1L,
           riskSeed = nodeId("RISK-30PCT"),

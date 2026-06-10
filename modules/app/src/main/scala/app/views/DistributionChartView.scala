@@ -7,7 +7,7 @@ import scala.scalajs.js
 import app.facades.{vegaEmbed, EmbedResult}
 import app.state.{DistributionChartState, DistributionViewMode, LoadState}
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.http.requests.DistributionPreviewRequest
+import com.risquanter.register.http.requests.DistributionShapeRequest
 
 /** Reason the chart area shows idle text rather than a chart or loading state.
   *
@@ -70,8 +70,9 @@ object DistributionChartView:
 
       // Debounced fetch subscription — scoped to this element's mounted lifetime.
       onMountCallback { ctx =>
-        // Fetch on draft changes (debounced), sampling key and preview-enabled flag.
-        // Only fires when the preview toggle is on; resetting always fires to clear stale state.
+        // Stream 1: Fetch on draft changes (debounced), sampling key and preview-enabled flag.
+        // Handles the common case: user editing form fields while preview is already enabled.
+        // Resetting always fires (draft → None means form cleared/unmounted).
         chartState.draftSignal.changes
           .debounce(400)
           .withCurrentValueOf(chartState.keySignal, chartState.previewEnabledVar.signal)
@@ -79,6 +80,20 @@ object DistributionChartView:
             case (Some(draft), Some(key), true) =>
               chartState.loadPreview(key, toPreviewRequest(draft))
             case (None, _, _) =>
+              chartState.reset()
+            case _ => ()
+          }(ctx.owner)
+
+        // Stream 2: React immediately when the preview toggle itself is flipped.
+        // Handles the case where the draft is already valid and stable but preview
+        // was off — draftSignal.changes would never fire in that state.
+        // No debounce: the user clicked intentionally.
+        chartState.previewEnabledVar.signal.changes
+          .withCurrentValueOf(chartState.draftSignal, chartState.keySignal)
+          .foreach {
+            case (true, Some(draft), Some(key)) =>
+              chartState.loadPreview(key, toPreviewRequest(draft))
+            case (false, _, _) =>
               chartState.reset()
             case _ => ()
           }(ctx.owner)
@@ -193,13 +208,13 @@ object DistributionChartView:
 
   /** Build a preview request from a valid distribution shape.
     *
-    * Percentiles in [[Distribution]] are stored as 0–1 (normalised from the
-    * form's 0–100 display values). The preview endpoint expects 0–100, so we re-scale.
+    * Percentiles in [[Distribution]] are stored as 0–1 (domain scale) and the
+    * preview endpoint now expects 0–1, so no rescaling is needed.
     */
-  private def toPreviewRequest(draft: Distribution): DistributionPreviewRequest =
-    DistributionPreviewRequest(
+  private def toPreviewRequest(draft: Distribution): DistributionShapeRequest =
+    DistributionShapeRequest(
       distributionType = draft.distributionType.toString,
-      percentiles      = draft.percentiles.map(_.map(_ * 100.0)),
+      percentiles      = draft.percentiles,   // 0-1, no conversion
       quantiles        = draft.quantiles,
       terms            = draft.terms.map(_.toInt),
       minLoss          = draft.minLoss.map(identity),

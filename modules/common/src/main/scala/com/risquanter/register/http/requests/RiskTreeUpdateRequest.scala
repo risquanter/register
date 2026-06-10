@@ -62,16 +62,11 @@ object RiskPortfolioUpdateRequest:
   given JsonCodec[RiskPortfolioUpdateRequest] = DeriveJsonCodec.gen
 
 final case class RiskLeafUpdateRequest(
-  id: String,
-  name: String,
-  parentName: Option[String],
-  distributionType: String,
-  probability: Double,
-  minLoss: Option[Long],
-  maxLoss: Option[Long],
-  percentiles: Option[Array[Double]],
-  quantiles: Option[Array[Double]],
-  terms: Option[Int] = None
+  id:                String,
+  name:              String,
+  parentName:        Option[String],
+  probability:       Double,
+  distributionShape: DistributionShapeRequest
 )
 object RiskLeafUpdateRequest:
   given JsonCodec[RiskLeafUpdateRequest] = DeriveJsonCodec.gen

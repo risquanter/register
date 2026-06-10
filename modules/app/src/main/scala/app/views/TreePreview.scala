@@ -5,7 +5,7 @@ import org.scalajs.dom.MouseEvent
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft}
 import app.components.{Icons, TreeNodeRow}
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{SafeName, Probability, NonNegativeLong, DistributionType}
+import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, NonNegativeLong, DistributionType}
 
 /**
  * Hierarchical tree preview rendered from TreeBuilderState signals.
@@ -25,7 +25,7 @@ object TreePreview:
     case Leaf(
       n:           SafeName.SafeName,
       distType:    DistributionType,
-      probability: Probability,
+      probability: OccurrenceProbability,
       percentiles: Option[Array[Double]],
       quantiles:   Option[Array[Double]],
       minLoss:     Option[NonNegativeLong],

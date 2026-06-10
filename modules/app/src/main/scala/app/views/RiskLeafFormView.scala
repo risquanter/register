@@ -5,6 +5,7 @@ import zio.prelude.Validation
 import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState}
 import app.components.FormInputs.*
 import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.errors.ValidationError
 
 /**
  * Complete form for creating a RiskLeaf.
@@ -88,7 +89,7 @@ object RiskLeafFormView:
         errorSignal = state.probabilityError,
         filter = state.probabilityFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Probability),
-        placeholderText = "e.g., 0.25",
+        placeholderText = "e.g., 40 (= 40%)",
         inputModeAttr = "decimal"
       ),
       
@@ -114,17 +115,6 @@ object RiskLeafFormView:
       // Submit / Clear Buttons + preview toggle
       div(
         cls := "form-actions",
-        // Preview toggle — disabled when no workspace key is present
-        label(
-          cls := "form-preview-toggle",
-          input(
-            typ := "checkbox",
-            checked <-- chartState.previewEnabledVar.signal,
-            disabled <-- chartState.keySignal.map(_.isEmpty),
-            onChange.mapToChecked --> chartState.previewEnabledVar.writer
-          ),
-          span("Show preview")
-        ),
         button(
           typ := "button",
           cls := "form-clear",
@@ -135,6 +125,17 @@ object RiskLeafFormView:
             builderState.selectedLeafName.set(None)
             submitError.set(None)
           }
+        ),
+        // Preview toggle — disabled when no workspace key is present
+        label(
+          cls := "form-preview-toggle",
+          input(
+            typ := "checkbox",
+            checked <-- chartState.previewEnabledVar.signal,
+            disabled <-- chartState.keySignal.map(_.isEmpty),
+            onChange.mapToChecked --> chartState.previewEnabledVar.writer
+          ),
+          span("Show preview")
         ),
         submitButton(
           textSignal = isEditMode.map(if _ then "Update Leaf" else "Add Leaf"),
@@ -158,7 +159,7 @@ object RiskLeafFormView:
         labelText = "Percentiles",
         valueVar = state.percentilesVar,
         errorSignal = state.percentilesError,
-        filter = state.arrayFilter,
+        filter = state.percentilesFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Percentiles),
         placeholderText = "e.g., 10, 50, 90",
         inputModeAttr = "decimal"
@@ -168,7 +169,7 @@ object RiskLeafFormView:
         labelText = "Quantiles (loss in $M)",
         valueVar = state.quantilesVar,
         errorSignal = state.quantilesError,
-        filter = state.arrayFilter,
+        filter = state.quantilesFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Quantiles),
         placeholderText = "e.g., 50, 200, 1000 ($50M, $200M, $1B)",
         inputModeAttr = "decimal"
@@ -224,8 +225,8 @@ object RiskLeafFormView:
     submitError: Var[Option[String]]
   ): Unit =
     state.triggerValidation()
-    (builderState.currentDraftVar.now(), state.refinedProbability) match
-      case (Some(shape), Some(prob)) =>
+    (state.currentShapeValidation(), state.refinedProbability) match
+      case (Validation.Success(_, shape), Some(prob)) =>
         builderState.addLeaf(state.nameVar.now(), state.parentVar.now(), shape, prob) match
           case Validation.Success(_, _) =>
             submitError.set(None)
@@ -244,8 +245,10 @@ object RiskLeafFormView:
               case "parent" => None  // leaf form has no parent text input to highlight
               case _        => None
             })
-      case _ =>
-        submitError.set(Some("Distribution or probability is invalid"))
+      case (shapeV, _) =>
+        // Shape/probability invalid. Surface the SPECIFIC, field-routed reasons
+        // inline below each field (probability is already covered reactively).
+        routeLeafShapeErrors(state, shapeErrorsOf(shapeV), submitError)
 
   /** Handle update-leaf submission (edit mode). */
   private def handleUpdate(
@@ -255,8 +258,8 @@ object RiskLeafFormView:
     submitError: Var[Option[String]]
   ): Unit =
     state.triggerValidation()
-    (builderState.currentDraftVar.now(), state.refinedProbability) match
-      case (Some(shape), Some(prob)) =>
+    (state.currentShapeValidation(), state.refinedProbability) match
+      case (Validation.Success(_, shape), Some(prob)) =>
         builderState.updateLeaf(originalName, state.nameVar.now(), state.parentVar.now(), shape, prob) match
           case Validation.Success(_, _) =>
             submitError.set(None)
@@ -267,5 +270,37 @@ object RiskLeafFormView:
               case "parent" => None
               case _        => None
             })
-      case _ =>
-        submitError.set(Some("Distribution or probability is invalid"))
+      case (shapeV, _) =>
+        routeLeafShapeErrors(state, shapeErrorsOf(shapeV), submitError)
+
+  /** Extract the validation errors from a shape result (empty when it succeeded). */
+  private def shapeErrorsOf(shapeV: Validation[ValidationError, ?]): List[ValidationError] =
+    shapeV match
+      case Validation.Failure(_, errs) => errs.toList
+      case _                           => Nil
+
+  /** Route distribution-shape validation errors to their per-field inline slots
+    * (same visual channel as reactive errors, via `setSubmitFieldError`). Errors
+    * with no matching form field fall back to the submit-error banner carrying
+    * their real message — never a generic constant. */
+  private def routeLeafShapeErrors(
+    state: RiskLeafFormState,
+    errors: List[ValidationError],
+    submitError: Var[Option[String]]
+  ): Unit =
+    val unrouted = errors.filterNot { err =>
+      fieldForShapeError(err.field) match
+        case Some(field) => state.setSubmitFieldError(field, err.message); true
+        case None        => false
+    }
+    submitError.set(unrouted.headOption.map(_.message))
+
+  /** Map a `Distribution.create` field path (e.g. `leaf.percentiles[1]`) to the
+    * form field whose inline error slot should display it. */
+  private def fieldForShapeError(field: String): Option[RiskLeafField] =
+    if field.contains("percentiles") then Some(RiskLeafField.Percentiles)
+    else if field.contains("quantiles") then Some(RiskLeafField.Quantiles)
+    else if field.contains("minLoss") then Some(RiskLeafField.MinLoss)
+    else if field.contains("maxLoss") then Some(RiskLeafField.MaxLoss)
+    else if field.contains("terms") then Some(RiskLeafField.Terms)
+    else None

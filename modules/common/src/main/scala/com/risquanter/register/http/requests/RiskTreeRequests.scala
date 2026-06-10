@@ -3,7 +3,7 @@ package com.risquanter.register.http.requests
 import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, Probability}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
@@ -30,7 +30,7 @@ object RiskTreeRequests {
   final case class ResolvedCreate(
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],
-    leafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, Distribution)],
+    leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
     rootName: SafeName.SafeName
   )
 
@@ -40,8 +40,8 @@ object RiskTreeRequests {
     treeName: SafeName.SafeName,
     existing: Map[SafeName.SafeName, ResolvedNode],
     added: Map[SafeName.SafeName, ResolvedNode],
-    existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, Distribution)],
-    addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (Probability, Distribution)],
+    existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
+    addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
     rootName: SafeName.SafeName
   )
 
@@ -77,14 +77,14 @@ object RiskTreeRequests {
   private[requests] def refineLeafDefs(
     leaves: Seq[RiskLeafDefinitionRequest],
     baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], Probability, Distribution)]] =
+  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], OccurrenceProbability, Distribution)]] =
     collectAllWithIndex(leaves) { (l, idx) =>
       val base = s"$baseLabel[$idx]"
       Validation.validateWith(
         refineNameField(l.name, s"$base.name"),
         refineParentName(l.parentName, s"$base.parentName"),
-        toValidation(ValidationUtil.refineProbability(l.probability, s"$base.probability")),
-        Distribution.create(l.distributionType, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base, terms = l.terms)
+        toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, s"$base.probability")),
+        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, base, terms = l.distributionShape.terms)
       )((name, parent, prob, dist) => (name, parent, prob, dist))
     }
 
@@ -104,15 +104,15 @@ object RiskTreeRequests {
   private[requests] def refineExistingLeaves(
     leaves: Seq[RiskLeafUpdateRequest],
     baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName], Probability, Distribution)]] =
+  ): Validation[ValidationError, Seq[(SafeId.SafeId, SafeName.SafeName, Option[SafeName.SafeName], OccurrenceProbability, Distribution)]] =
     collectAllWithIndex(leaves) { (l, idx) =>
       val base = s"$baseLabel[$idx]"
       Validation.validateWith(
         toValidation(ValidationUtil.refineId(l.id, s"$base.id")),
         refineNameField(l.name, s"$base.name"),
         refineParentName(l.parentName, s"$base.parentName"),
-        toValidation(ValidationUtil.refineProbability(l.probability, s"$base.probability")),
-        Distribution.create(l.distributionType, l.minLoss, l.maxLoss, l.percentiles, l.quantiles, base, terms = l.terms)
+        toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, s"$base.probability")),
+        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, base, terms = l.distributionShape.terms)
       )((id, name, parent, prob, dist) => (id, name, parent, prob, dist))
     }
 

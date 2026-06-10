@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
 import sttp.tapir.Schema
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, NonNegativeLong, NodeId, PositiveInt}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, NonNegativeLong, NodeId, PositiveInt}
 import com.risquanter.register.domain.data.iron.ValidationMessages
 
 /** Recursive ADT representing a risk hierarchy tree.
@@ -77,7 +77,7 @@ final case class RiskLeaf private (
   @jsonField("name") safeName: SafeName.SafeName,
   parentId: Option[NodeId],
   distributionType: DistributionType,
-  probability: Probability,
+  probability: OccurrenceProbability,
   percentiles: Option[Array[Double]],
   quantiles: Option[Array[Double]],
   minLoss: Option[NonNegativeLong],
@@ -139,7 +139,7 @@ object RiskLeaf {
     id: SafeId.SafeId,
     name: SafeName.SafeName,
     distributionType: DistributionType,
-    probability: Probability,
+    probability: OccurrenceProbability,
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
     minLoss: Option[NonNegativeLong],
@@ -182,7 +182,7 @@ object RiskLeaf {
     // Step 1: Validate all individual fields in parallel
     val idV = toValidation(ValidationUtil.refineId(id, s"$fieldPrefix.id"))
     val nameV = toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
-    val probV = toValidation(ValidationUtil.refineProbability(probability, s"$fieldPrefix.probability"))
+    val probV = toValidation(ValidationUtil.refineOccurrenceProbability(probability, s"$fieldPrefix.probability"))
     val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
     val termsV: Validation[ValidationError, Option[PositiveInt]] = terms match {
       case Some(v) => toValidation(ValidationUtil.refinePositiveInt(v, s"$fieldPrefix.terms")).map(Some(_))

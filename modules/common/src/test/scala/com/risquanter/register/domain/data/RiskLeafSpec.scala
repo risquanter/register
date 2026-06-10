@@ -169,7 +169,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
       }
     ),
     suite("Invalid Probability Validation")(
-      test("rejects probability = 0.0") {
+      test("accepts probability = 0.0 (event that never occurs)") {
         val result = RiskLeaf.create(
           id = idStr("valid-id"),
           name = "Valid Name",
@@ -178,9 +178,9 @@ object RiskLeafSpec extends ZIOSpecDefault {
           minLoss = Some(100L),
           maxLoss = Some(1000L)
         )
-        assertTrue(result.isFailure)
+        assertTrue(result.isSuccess)
       },
-      test("rejects probability = 1.0") {
+      test("accepts probability = 1.0 (event that always occurs)") {
         val result = RiskLeaf.create(
           id = idStr("valid-id"),
           name = "Valid Name",
@@ -189,7 +189,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
           minLoss = Some(100L),
           maxLoss = Some(1000L)
         )
-        assertTrue(result.isFailure)
+        assertTrue(result.isSuccess)
       },
       test("rejects negative probability") {
         val result = RiskLeaf.create(

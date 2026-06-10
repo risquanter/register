@@ -91,9 +91,13 @@ object PRNGCounter:
 // Probability values (must be between 0.0 and 1.0, exclusive)
 // Exclusive bounds are required for numerical stability in simulation-util's
 // inverse CDF calculations where 0.0 and 1.0 would cause division by zero or infinity.
-// NOTE: Used for both occurrence probabilities AND Metalog percentiles, since QPFitter
-// requires exclusive (0,1) bounds: "p must be in (0,1)"
+// NOTE: Used for Metalog percentiles which require exclusive (0,1) bounds.
 type Probability = Double :| (Greater[0.0] & Less[1.0])
+
+// Occurrence probability for a risk leaf event (can be 0 = never, or 1 = always).
+// Semantically distinct from Probability: the closed [0,1] interval is correct here
+// because a risk event is allowed to never or always occur.
+type OccurrenceProbability = Double :| (GreaterEqual[0.0] & LessEqual[1.0])
 
 // Distribution type string (must be "expert" or "lognormal")
 type DistributionType = String :| Match["^(expert|lognormal)$"]

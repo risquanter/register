@@ -1,11 +1,13 @@
 package com.risquanter.register.services
 
 import zio.*
+import zio.prelude.Validation
 import zio.test.*
 import zio.test.Assertion.*
 
+import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.errors.{ValidationErrorCode, ValidationFailed}
-import com.risquanter.register.http.requests.{DistributionPreviewRequest, DistributionPreviewResponse}
+import com.risquanter.register.http.requests.{DistributionPreviewResponse}
 
 object DistributionPreviewServiceSpec extends ZIOSpecDefault:
 
@@ -13,35 +15,38 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
-  private def expertReq(
-    percentiles: Array[Double] = Array(5.0, 50.0, 95.0),
+  private def expertDist(
+    percentiles: Array[Double] = Array(0.05, 0.50, 0.95),
     quantiles:   Array[Double] = Array(1_000.0, 5_000.0, 25_000.0),
     terms:       Option[Int]   = None
-  ): DistributionPreviewRequest =
-    DistributionPreviewRequest(
+  ): Distribution =
+    Distribution.create(
       distributionType = "expert",
+      minLoss          = None,
+      maxLoss          = None,
       percentiles      = Some(percentiles),
       quantiles        = Some(quantiles),
-      terms            = terms,
-      minLoss          = None,
-      maxLoss          = None
-    )
+      terms            = terms
+    ) match
+      case Validation.Success(_, d) => d
+      case Validation.Failure(_, e) => throw new RuntimeException(s"Bad test fixture: ${e.toList}")
 
-  private def lognormalReq(
+  private def lognormalDist(
     minLoss: Long = 1_000L,
     maxLoss: Long = 50_000L
-  ): DistributionPreviewRequest =
-    DistributionPreviewRequest(
+  ): Distribution =
+    Distribution.create(
       distributionType = "lognormal",
-      percentiles      = None,
-      quantiles        = None,
-      terms            = None,
       minLoss          = Some(minLoss),
-      maxLoss          = Some(maxLoss)
-    )
+      maxLoss          = Some(maxLoss),
+      percentiles      = None,
+      quantiles        = None
+    ) match
+      case Validation.Success(_, d) => d
+      case Validation.Failure(_, e) => throw new RuntimeException(s"Bad test fixture: ${e.toList}")
 
-  private def preview(req: DistributionPreviewRequest) =
-    ZIO.serviceWithZIO[DistributionPreviewService](_.preview(req))
+  private def preview(dist: Distribution) =
+    ZIO.serviceWithZIO[DistributionPreviewService](_.preview(dist))
 
   // ── spec ───────────────────────────────────────────────────────────────────
 
@@ -52,12 +57,12 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
     suite("expert mode")(
 
       test("returns exactly 200 points") {
-        for resp <- preview(expertReq())
+        for resp <- preview(expertDist())
         yield assertTrue(resp.points.length == 200)
       },
 
       test("all pdf and cdf values are finite and non-negative") {
-        for resp <- preview(expertReq())
+        for resp <- preview(expertDist())
         yield assertTrue(
           resp.points.forall(p => p.pdf.isFinite && p.pdf >= 0.0) &&
           resp.points.forall(p => p.cdf.isFinite && p.cdf >= 0.0 && p.cdf <= 1.0)
@@ -65,7 +70,7 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       },
 
       test("cdf values are strictly increasing") {
-        for resp <- preview(expertReq())
+        for resp <- preview(expertDist())
         yield
           val cdfs = resp.points.map(_.cdf)
           val monotone = cdfs.sliding(2).forall { case Array(a, b) => a < b; case _ => true }
@@ -74,13 +79,13 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
 
       test("x values (quantiles) are non-negative with lower bound 0") {
         // The expert distribution is fitted with lower = Some(0.0)
-        for resp <- preview(expertReq())
+        for resp <- preview(expertDist())
         yield assertTrue(resp.points.forall(_.x >= 0.0))
       },
 
       test("response metadata reflects resolved terms and anchor count") {
         // 3 anchors, no explicit terms → resolvedTerms = min(3, 4) = 3
-        for resp <- preview(expertReq())
+        for resp <- preview(expertDist())
         yield assertTrue(
           resp.distributionType == "expert" &&
           resp.resolvedTerms    == Some(3) &&
@@ -89,16 +94,8 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       },
 
       test("respects explicit terms override") {
-        for resp <- preview(expertReq(terms = Some(2)))
+        for resp <- preview(expertDist(terms = Some(2)))
         yield assertTrue(resp.resolvedTerms == Some(2))
-      },
-
-      test("returns ValidationFailed for out-of-range percentiles (bad fit)") {
-        // Percentiles outside (0, 100) are normalised to outside (0, 1), which
-        // MetalogDistribution.fromPercentilesUnsafe rejects.
-        val badReq = expertReq(percentiles = Array(0.0, 50.0, 100.0)) // 0.0 and 100.0 are invalid
-        for result <- preview(badReq).either
-        yield assertTrue(result.isLeft)
       }
     ),
 
@@ -107,12 +104,12 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
     suite("lognormal mode")(
 
       test("returns exactly 200 points") {
-        for resp <- preview(lognormalReq())
+        for resp <- preview(lognormalDist())
         yield assertTrue(resp.points.length == 200)
       },
 
       test("all pdf and cdf values are finite and non-negative") {
-        for resp <- preview(lognormalReq())
+        for resp <- preview(lognormalDist())
         yield assertTrue(
           resp.points.forall(p => p.pdf.isFinite && p.pdf >= 0.0) &&
           resp.points.forall(p => p.cdf.isFinite && p.cdf >= 0.0 && p.cdf <= 1.0)
@@ -120,7 +117,7 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       },
 
       test("cdf values are strictly increasing") {
-        for resp <- preview(lognormalReq())
+        for resp <- preview(lognormalDist())
         yield
           val cdfs = resp.points.map(_.cdf)
           val monotone = cdfs.sliding(2).forall { case Array(a, b) => a < b; case _ => true }
@@ -128,7 +125,7 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       },
 
       test("response metadata has no resolvedTerms or anchorCount") {
-        for resp <- preview(lognormalReq())
+        for resp <- preview(lognormalDist())
         yield assertTrue(
           resp.distributionType == "lognormal" &&
           resp.resolvedTerms    == None         &&
@@ -137,20 +134,5 @@ object DistributionPreviewServiceSpec extends ZIOSpecDefault:
       }
     ),
 
-    // ── unknown distribution type ─────────────────────────────────────────────
-
-    suite("unknown distribution type")(
-
-      test("fails with UNSUPPORTED_DISTRIBUTION_TYPE") {
-        val req = DistributionPreviewRequest("beta", None, None, None, None, None)
-        for result <- preview(req).either
-        yield assertTrue(
-          result match
-            case Left(ValidationFailed(errs)) =>
-              errs.exists(_.code == ValidationErrorCode.UNSUPPORTED_DISTRIBUTION_TYPE)
-            case _ => false
-        )
-      }
-    )
 
   ).provideLayer(serviceLayer)

@@ -98,7 +98,14 @@ final class LECChartState(
     curveCache.signal
       .combineWith(visibleCurves, nodeColorMap)
       .map { (cacheState, visible, colorMap) =>
-        cacheState.map { allCurves =>
+        // Short-circuit to Idle when no curves are selected.
+        // Without this guard, deselecting the last node causes a transient
+        // Loaded(emptySpec) emission (curveCache still holds stale data)
+        // before AnalyzeView resets curveCache to Idle.  That transient causes
+        // LECChartView to mount a new Vega container which immediately gets
+        // replaced — leaving a stale EmbedResult that breaks the next select.
+        if visible.isEmpty then LoadState.Idle
+        else cacheState.map { allCurves =>
           LECSpecBuilder.build(
             ColorAssigner.pairWithColors(allCurves, visible, colorMap)
           )
