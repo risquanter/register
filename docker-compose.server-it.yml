@@ -1,0 +1,38 @@
+# Standalone compose file for serverIt integration tests.
+#
+# Used exclusively by IrminCompose (modules/server-it) to start an isolated
+# Irmin instance per test run. Each run gets a unique project name
+# (register_it_<uuid>) and a dynamically assigned host port, so multiple
+# specs can run concurrently without competing for a fixed port.
+#
+# Dev workflow uses docker-compose.yml (static port 9080) — this file has no
+# effect on it.
+#
+# IrminCompose discovers the assigned host port via `docker compose port irmin 8080`.
+
+name: register-it
+
+services:
+  irmin:
+    image: local/irmin-prod:3.11
+    pull_policy: never
+    ports:
+      - "8080"    # dynamic host port — Docker assigns a free port per instance
+    volumes:
+      - irmin-data:/data
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=10M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - --post-data='{\"query\":\"{ __typename }\"}' --header='Content-Type: application/json' http://127.0.0.1:8080/graphql | grep -q data"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    profiles:
+      - persistence
+
+volumes:
+  irmin-data:

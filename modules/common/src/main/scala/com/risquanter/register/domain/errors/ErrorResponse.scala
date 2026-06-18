@@ -126,6 +126,7 @@ object ErrorResponse {
     */
   def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
     case e: SimError          => encodeSimError(e)
+    case e: AuthError         => encodeAuthError(e)
     case e: IrminError        => encodeIrminError(e)
     case e: FolQueryFailure   => encodeFolQueryFailure(e)
     // Genuine unknown — already logged at service layer (ADR-002 Decision 5)
@@ -151,6 +152,14 @@ object ErrorResponse {
     case DataConflict(reason)                      => makeDataConflictResponse(reason)
     case VersionConflict(nodeId, expected, actual) => makeVersionConflictResponse(nodeId, expected, actual)
     case MergeConflict(branch, details)            => makeMergeConflictResponse(branch, details)
+  }
+
+  /** Exhaustive match on AuthError — both subtypes intentionally map to 403.
+    * AuthServiceUnavailable maps to 403, not 503, to avoid revealing infrastructure state.
+    */
+  private def encodeAuthError(error: AuthError): (StatusCode, ErrorResponse) = error match {
+    case _: AuthForbidden                        => makeAccessDeniedResponse("Access denied")
+    case AuthServiceUnavailable(reason, _)       => makeAccessDeniedResponse(reason)
   }
 
   /** Exhaustive match on IrminError — compiler-enforced coverage (ADR-008). */

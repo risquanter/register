@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
 import com.risquanter.register.http.support.{SttpClientFixture, DemoSpecSupport}
 import io.github.iltotore.iron.*
@@ -39,143 +39,206 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       // ── Technology & Cyber (4 leaves) ────────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Ransomware Attack", parentName = Some("Technology & Cyber"),
-        distributionType = "expert", probability = 0.15,
-        minLoss = None, maxLoss = None,
-        percentiles = Some(Array(0.25, 0.50, 0.75, 0.95)),
-        quantiles   = Some(Array(500000.0, 2000000.0, 8000000.0, 25000000.0))
+        probability = 0.15,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "expert",
+          percentiles = Some(Array(0.25, 0.50, 0.75, 0.95)),
+          quantiles   = Some(Array(500000.0, 2000000.0, 8000000.0, 25000000.0)),
+          minLoss = None, maxLoss = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Cloud Provider Outage", parentName = Some("Technology & Cyber"),
-        distributionType = "lognormal", probability = 0.30,
-        minLoss = Some(200000L), maxLoss = Some(4000000L),
-        percentiles = None, quantiles = None
+        probability = 0.30,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(200000L), maxLoss = Some(4000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Data Breach (PII)", parentName = Some("Technology & Cyber"),
-        distributionType = "lognormal", probability = 0.10,
-        minLoss = Some(1000000L), maxLoss = Some(15000000L),
-        percentiles = None, quantiles = None
+        probability = 0.10,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(1000000L), maxLoss = Some(15000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Insider Threat", parentName = Some("Technology & Cyber"),
-        distributionType = "lognormal", probability = 0.05,
-        minLoss = Some(2000000L), maxLoss = Some(20000000L),
-        percentiles = None, quantiles = None
+        probability = 0.05,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(2000000L), maxLoss = Some(20000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       // ── Process & People (3 leaves) ───────────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Key Person Departure", parentName = Some("Process & People"),
-        distributionType = "lognormal", probability = 0.20,
-        minLoss = Some(100000L), maxLoss = Some(800000L),
-        percentiles = None, quantiles = None
+        probability = 0.20,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(100000L), maxLoss = Some(800000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Internal Fraud", parentName = Some("Process & People"),
-        distributionType = "expert", probability = 0.08,
-        minLoss = None, maxLoss = None,
-        percentiles = Some(Array(0.25, 0.50, 0.75, 0.95)),
-        quantiles   = Some(Array(200000.0, 1000000.0, 4000000.0, 18000000.0))
+        probability = 0.08,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "expert",
+          percentiles = Some(Array(0.25, 0.50, 0.75, 0.95)),
+          quantiles   = Some(Array(200000.0, 1000000.0, 4000000.0, 18000000.0)),
+          minLoss = None, maxLoss = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Process Failure", parentName = Some("Process & People"),
-        distributionType = "lognormal", probability = 0.25,
-        minLoss = Some(50000L), maxLoss = Some(500000L),
-        percentiles = None, quantiles = None
+        probability = 0.25,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(50000L), maxLoss = Some(500000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       // ── Third-Party & Supply Chain (3 leaves) ─────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Critical Vendor Failure", parentName = Some("Third-Party & Supply Chain"),
-        distributionType = "lognormal", probability = 0.12,
-        minLoss = Some(500000L), maxLoss = Some(5000000L),
-        percentiles = None, quantiles = None
+        probability = 0.12,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(500000L), maxLoss = Some(5000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Outsourcing SLA Breach", parentName = Some("Third-Party & Supply Chain"),
-        distributionType = "lognormal", probability = 0.20,
-        minLoss = Some(100000L), maxLoss = Some(1500000L),
-        percentiles = None, quantiles = None
+        probability = 0.20,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(100000L), maxLoss = Some(1500000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Concentration Risk", parentName = Some("Third-Party & Supply Chain"),
-        distributionType = "expert", probability = 0.08,
-        minLoss = None, maxLoss = None,
-        percentiles = Some(Array(0.25, 0.50, 0.95)),
-        quantiles   = Some(Array(1000000.0, 4000000.0, 18000000.0))
+        probability = 0.08,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "expert",
+          percentiles = Some(Array(0.25, 0.50, 0.95)),
+          quantiles   = Some(Array(1000000.0, 4000000.0, 18000000.0)),
+          minLoss = None, maxLoss = None, terms = None
+        )
       ),
       // ── Market Risk (2 leaves) ────────────────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Equity Portfolio Drawdown", parentName = Some("Market Risk"),
-        distributionType = "expert", probability = 0.35,
-        minLoss = None, maxLoss = None,
-        percentiles = Some(Array(0.25, 0.50, 0.75, 0.95)),
-        quantiles   = Some(Array(1000000.0, 4000000.0, 12000000.0, 28000000.0))
+        probability = 0.35,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "expert",
+          percentiles = Some(Array(0.25, 0.50, 0.75, 0.95)),
+          quantiles   = Some(Array(1000000.0, 4000000.0, 12000000.0, 28000000.0)),
+          minLoss = None, maxLoss = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "FX Adverse Move", parentName = Some("Market Risk"),
-        distributionType = "lognormal", probability = 0.40,
-        minLoss = Some(500000L), maxLoss = Some(8000000L),
-        percentiles = None, quantiles = None
+        probability = 0.40,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(500000L), maxLoss = Some(8000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       // ── Credit Risk (2 leaves) ────────────────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Counterparty Default", parentName = Some("Credit Risk"),
-        distributionType = "lognormal", probability = 0.05,
-        minLoss = Some(3000000L), maxLoss = Some(30000000L),
-        percentiles = None, quantiles = None
+        probability = 0.05,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(3000000L), maxLoss = Some(30000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Credit Downgrade Wave", parentName = Some("Credit Risk"),
-        distributionType = "expert", probability = 0.15,
-        minLoss = None, maxLoss = None,
-        percentiles = Some(Array(0.25, 0.50, 0.95)),
-        quantiles   = Some(Array(800000.0, 3000000.0, 20000000.0))
+        probability = 0.15,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "expert",
+          percentiles = Some(Array(0.25, 0.50, 0.95)),
+          quantiles   = Some(Array(800000.0, 3000000.0, 20000000.0)),
+          minLoss = None, maxLoss = None, terms = None
+        )
       ),
       // ── Liquidity Risk (1 leaf) ────────────────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Funding Squeeze", parentName = Some("Liquidity Risk"),
-        distributionType = "lognormal", probability = 0.08,
-        minLoss = Some(2000000L), maxLoss = Some(25000000L),
-        percentiles = None, quantiles = None
+        probability = 0.08,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(2000000L), maxLoss = Some(25000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       // ── Compliance & Legal Risk (3 leaves) ────────────────────────────────
       RiskLeafDefinitionRequest(
         name = "Regulatory Action", parentName = Some("Compliance & Legal Risk"),
-        distributionType = "lognormal", probability = 0.12,
-        minLoss = Some(2000000L), maxLoss = Some(50000000L),
-        percentiles = None, quantiles = None
+        probability = 0.12,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(2000000L), maxLoss = Some(50000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Litigation", parentName = Some("Compliance & Legal Risk"),
-        distributionType = "expert", probability = 0.08,
-        minLoss = None, maxLoss = None,
-        percentiles = Some(Array(0.25, 0.50, 0.75, 0.95)),
-        quantiles   = Some(Array(300000.0, 2000000.0, 8000000.0, 40000000.0))
+        probability = 0.08,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "expert",
+          percentiles = Some(Array(0.25, 0.50, 0.75, 0.95)),
+          quantiles   = Some(Array(300000.0, 2000000.0, 8000000.0, 40000000.0)),
+          minLoss = None, maxLoss = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "GDPR / Data Protection Fine", parentName = Some("Compliance & Legal Risk"),
-        distributionType = "lognormal", probability = 0.15,
-        minLoss = Some(500000L), maxLoss = Some(10000000L),
-        percentiles = None, quantiles = None
+        probability = 0.15,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(500000L), maxLoss = Some(10000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       // ── Strategic & Reputational Risk (3 leaves) ──────────────────────────
       RiskLeafDefinitionRequest(
         name = "ESG Controversy", parentName = Some("Strategic & Reputational Risk"),
-        distributionType = "lognormal", probability = 0.10,
-        minLoss = Some(1000000L), maxLoss = Some(12000000L),
-        percentiles = None, quantiles = None
+        probability = 0.10,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(1000000L), maxLoss = Some(12000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "M&A Integration Failure", parentName = Some("Strategic & Reputational Risk"),
-        distributionType = "lognormal", probability = 0.05,
-        minLoss = Some(5000000L), maxLoss = Some(40000000L),
-        percentiles = None, quantiles = None
+        probability = 0.05,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(5000000L), maxLoss = Some(40000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name = "Product Recall / Liability", parentName = Some("Strategic & Reputational Risk"),
-        distributionType = "expert", probability = 0.06,
-        minLoss = None, maxLoss = None,
-        percentiles = Some(Array(0.25, 0.50, 0.95)),
-        quantiles   = Some(Array(1000000.0, 5000000.0, 35000000.0))
+        probability = 0.06,
+        distributionShape = DistributionShapeRequest(
+          distributionType = "expert",
+          percentiles = Some(Array(0.25, 0.50, 0.95)),
+          quantiles   = Some(Array(1000000.0, 5000000.0, 35000000.0)),
+          minLoss = None, maxLoss = None, terms = None
+        )
       )
     )
   )

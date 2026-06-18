@@ -461,6 +461,16 @@ Decide between (a) / (b) / (c) when this TODO is picked up.
 
 ---
 
+## 8. ~~Integration test port conflict~~ — RESOLVED 2026-06-18
+
+**Resolution:** Created `docker-compose.server-it.yml` — a standalone compose file
+used exclusively by `IrminCompose` that exposes irmin with a dynamic host port
+(`"8080"` — no static binding). `IrminCompose` now looks for this file first;
+dev compose file (`docker-compose.yml`) retains the static `9080:8080` mapping
+unchanged. Multiple specs can now run concurrently. `sbt 'serverIt/test'` is green.
+
+---
+
 ## 8. fol-engine typed vs. untyped pipeline mismatch — equality predicate not reachable
 
 **Observed (2026-05-01).** A motivating query for the post-fix demo

@@ -90,12 +90,19 @@ export REGISTER_WORKSPACE_STORE_BACKEND=postgres
 ## Running tests
 
 ```bash
-# Unit and integration tests (JVM)
-sbt test
+# All tests — unit + integration (requires Docker, local/irmin-prod:3.11 image)
+sbt 'commonJVM/test; server/test; app/test; serverIt/test'
 
-# Server integration tests
+# Unit tests only (no Docker required)
+sbt 'commonJVM/test; server/test; app/test'
+
+# Integration tests only
 sbt serverIt/test
 ```
+
+Integration tests (`serverIt`) spin up isolated Irmin containers using
+`docker-compose.server-it.yml` with dynamic host ports — multiple specs run
+concurrently without port conflicts with the dev stack.
 
 ---
 

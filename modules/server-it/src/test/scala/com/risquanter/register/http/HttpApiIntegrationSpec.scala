@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.http.support.SttpClientFixture
@@ -42,22 +42,22 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
         RiskLeafDefinitionRequest(
           name = "Leaf 1",
           parentName = Some("Root"),
-          distributionType = "lognormal",
           probability = 0.1,
-          minLoss = Some(1000L),
-          maxLoss = Some(2000L),
-          percentiles = None,
-          quantiles = None
+          distributionShape = DistributionShapeRequest(
+            distributionType = "lognormal",
+            minLoss = Some(1000L), maxLoss = Some(2000L),
+            percentiles = None, quantiles = None, terms = None
+          )
         ),
         RiskLeafDefinitionRequest(
           name = "Leaf 2",
           parentName = Some("Root"),
-          distributionType = "lognormal",
           probability = 0.2,
-          minLoss = Some(1500L),
-          maxLoss = Some(3000L),
-          percentiles = None,
-          quantiles = None
+          distributionShape = DistributionShapeRequest(
+            distributionType = "lognormal",
+            minLoss = Some(1500L), maxLoss = Some(3000L),
+            percentiles = None, quantiles = None, terms = None
+          )
         )
       )
     )

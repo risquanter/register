@@ -261,6 +261,29 @@ object LossDistributionSpec extends ZIOSpecDefault {
         val r2 = withCfg(200) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
 
         assertTrue(!Equal[RiskResult].equal(r1, r2))
+      },
+      test("equal outcomes with differing provenances are equal (provenance is audit metadata, not identity)") {
+        import com.risquanter.register.domain.data.{NodeProvenance, LognormalDistributionParams}
+        import java.time.Instant
+        import io.github.iltotore.iron.refineUnsafe
+        val params = LognormalDistributionParams(1000L.refineUnsafe, 5000L.refineUnsafe, 0.9)
+        val prov1 = NodeProvenance(
+          riskId = nodeId("risk-001"),
+          entityId = 1L,
+          occurrenceVarId = 1001L,
+          lossVarId = 2001L,
+          globalSeed3 = 0L,
+          globalSeed4 = 0L,
+          distributionType = "lognormal",
+          distributionParams = params,
+          timestamp = Instant.parse("2026-01-01T00:00:00Z"),
+          simulationUtilVersion = "1.0.0"
+        )
+        val prov2 = prov1.copy(timestamp = Instant.parse("2026-06-18T12:00:00Z"), simulationUtilVersion = "1.1.0")
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), List(prov1)) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), List(prov2)) }
+
+        assertTrue(Equal[RiskResult].equal(r1, r2))
       }
     ),
     suite("edge cases")(

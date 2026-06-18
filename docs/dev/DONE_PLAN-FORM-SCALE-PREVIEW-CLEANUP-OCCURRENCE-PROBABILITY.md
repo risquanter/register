@@ -1,7 +1,8 @@
 # Plan: Form Scale Conventions, Preview Cleanup, and OccurrenceProbability
 
-**Status:** Phase 1–3 approved. Phase 4 approved.  
+**Status:** ✅ COMPLETE — All phases implemented and tested  
 **Date:** 2026-06-10  
+**Completed:** 2026-06-18  
 **Tags:** frontend, laminar, preview-endpoint, domain-types, iron, scala-js
 
 ---
@@ -811,7 +812,7 @@ No cross-field rule exists in two places simultaneously after all phases are com
 
 ## Approval Checkpoint
 
-- [ ] User approves Phase 1 (Conversion Methods + Filter Split)
-- [ ] User approves Phase 2 (strictly-increasing check in `Distribution.create`) — Trigger #5
-- [ ] User approves Phase 3 (Preview Shadow Stack) — Triggers #1, #4, #5
-- [ ] User approves Phase 4 (OccurrenceProbability) — Triggers #4, #5
+- [x] User approves Phase 1 (Conversion Methods + Filter Split) — ✅ COMPLETE
+- [x] User approves Phase 2 (strictly-increasing check in `Distribution.create`) — Trigger #5 — ✅ COMPLETE
+- [x] User approves Phase 3 (Preview Shadow Stack) — Triggers #1, #4, #5 — ✅ COMPLETE
+- [x] User approves Phase 4 (OccurrenceProbability) — Triggers #4, #5 — ✅ COMPLETE

@@ -62,8 +62,8 @@ sleep 2
 All commands filter output to show pass/fail counts, individual failures, and compilation errors.
 
 ```bash
-# All tests (common + server + integration — requires Docker)
-sbt clean test 2>&1 | grep -E 'tests passed|tests failed|FAILED|FAIL|error.*Tests|\[error\]|success|Executed in'
+# All tests (common + server + app + integration — requires Docker)
+sbt 'commonJVM/test; server/test; app/test; serverIt/test' 2>&1 | grep -E 'tests passed|tests failed|FAILED|FAIL|error.*Tests|\[error\]|success|Executed in'
 
 # Unit tests only (common + server, no integration)
 sbt 'commonJVM/test; server/test' 2>&1 | grep -E 'tests passed|tests failed|FAILED|FAIL|error.*Tests|\[error\]|success|Executed in'
@@ -71,16 +71,25 @@ sbt 'commonJVM/test; server/test' 2>&1 | grep -E 'tests passed|tests failed|FAIL
 # Server tests only
 sbt server/test 2>&1 | grep -E 'tests passed|tests failed|FAILED|FAIL|error.*Tests|\[error\]|success|Executed in'
 
-#Integration tests only
+# Integration tests only
 sbt 'serverIt/test' 2>&1 | grep -E 'tests passed|tests failed|FAILED|Failed|PASS|\+.*test|\-.*test|error.*Tests|\[error\]|success|Executed in' | head -40
 ```
 
+### Integration test infrastructure
+
+`IrminCompose` uses `docker-compose.server-it.yml` (not the main `docker-compose.yml`)
+to start each Irmin container with a **dynamic host port**. This means:
+- Multiple specs run concurrently without port 9080 conflicts.
+- Dev stack (`docker compose --profile persistence up`) is unaffected — it still uses port 9080.
+- `IrminCompose` discovers the assigned port via `docker compose port irmin 8080` after startup.
+
 ### Docker Cleanup
 
-When integration tests leave stale containers or the Docker namespace fills up:
+When integration tests leave stale containers after a crash or Ctrl+C:
 
 ```bash
-docker compose down --remove-orphans --volumes && docker network prune -f
+docker ps -a --filter name=register_it_ --format '{{.ID}}' | xargs -r docker rm -f
+docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docker network rm
 ```
 
 ### Expected Counts (as of 2026-03-09)

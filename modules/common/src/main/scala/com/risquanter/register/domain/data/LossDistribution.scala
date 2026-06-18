@@ -138,9 +138,15 @@ object RiskResult {
     )
   }
   
-  /** Value equality for RiskResult */
+  /** Value equality for RiskResult.
+    *
+    * Identity is defined over the simulation outcome (outcomes, nTrials, nodeId).
+    * Provenance is an audit trail about how the result was produced and is
+    * intentionally excluded: two results with byte-identical losses but different
+    * run timestamps or library versions represent the same value.
+    */
   given Equal[RiskResult] = Equal.make { (a, b) =>
-    a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.nodeId == b.nodeId && a.provenances == b.provenances
+    a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.nodeId == b.nodeId
   }
 
   /** Associative combine for RiskResult (trial-aligned summation) */

@@ -78,10 +78,12 @@ sbt app/test
 ## Integration Tests (serverIt)
 
 Requires `local/irmin-prod:3.11` Docker image (built once — see Image Builds).
-`IrminCompose` starts/stops a scoped Irmin container automatically per run.
+`IrminCompose` starts/stops a scoped Irmin container automatically per run using
+`docker-compose.server-it.yml` (dynamic host port — multiple specs run concurrently
+without port conflicts).
 
 ```bash
-# All integration tests
+# All integration tests (runs all specs concurrently — safe)
 sbt "serverIt/test"
 
 # Single suite

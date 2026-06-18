@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, QueryRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, QueryResponse}
 import com.risquanter.register.domain.errors.{JsonHttpError, ValidationErrorCode, ErrorResponse}
 import com.risquanter.register.http.support.SttpClientFixture
@@ -42,42 +42,42 @@ object QueryEndpointSpec extends ZIOSpecDefault:
       RiskLeafDefinitionRequest(
         name             = "Cyber Breach",
         parentName       = Some("IT Risk"),
-        distributionType = "lognormal",
         probability      = 0.20,
-        minLoss          = Some(500000L),
-        maxLoss          = Some(8000000L),
-        percentiles      = None,
-        quantiles        = None
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(500000L), maxLoss = Some(8000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name             = "Ransomware",
         parentName       = Some("IT Risk"),
-        distributionType = "lognormal",
         probability      = 0.10,
-        minLoss          = Some(200000L),
-        maxLoss          = Some(4000000L),
-        percentiles      = None,
-        quantiles        = None
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(200000L), maxLoss = Some(4000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name             = "Supply Chain Disruption",
         parentName       = Some("Third Party Risk"),
-        distributionType = "lognormal",
         probability      = 0.15,
-        minLoss          = Some(300000L),
-        maxLoss          = Some(3000000L),
-        percentiles      = None,
-        quantiles        = None
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(300000L), maxLoss = Some(3000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       ),
       RiskLeafDefinitionRequest(
         name             = "Regulatory Fine",
         parentName       = Some("Third Party Risk"),
-        distributionType = "lognormal",
         probability      = 0.08,
-        minLoss          = Some(100000L),
-        maxLoss          = Some(2000000L),
-        percentiles      = None,
-        quantiles        = None
+        distributionShape = DistributionShapeRequest(
+          distributionType = "lognormal",
+          minLoss = Some(100000L), maxLoss = Some(2000000L),
+          percentiles = None, quantiles = None, terms = None
+        )
       )
     )
   )

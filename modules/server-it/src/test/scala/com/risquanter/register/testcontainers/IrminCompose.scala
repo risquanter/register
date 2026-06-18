@@ -38,12 +38,20 @@ object IrminCompose:
   private final case class Started(irminUrl: String, projectName: String, composeFile: File)
 
   private def findComposeFile(): File =
+    // Prefer the dedicated IT compose file (dynamic port, no dev-stack conflicts).
+    // Fall back to the main docker-compose.yml if the IT file is absent.
     List(
-      "docker-compose.yml",
-      "../docker-compose.yml",
-      "../../docker-compose.yml"
+      "docker-compose.server-it.yml",
+      "../docker-compose.server-it.yml",
+      "../../docker-compose.server-it.yml"
     ).map(path => new File(path)).find(_.exists()).getOrElse {
-      throw new IllegalStateException("docker-compose.yml not found (looked in ., .., ../..)")
+      List(
+        "docker-compose.yml",
+        "../docker-compose.yml",
+        "../../docker-compose.yml"
+      ).map(path => new File(path)).find(_.exists()).getOrElse {
+        throw new IllegalStateException("docker-compose.server-it.yml not found (looked in ., .., ../..)")
+      }
     }
 
   private def start: Task[Started] =
