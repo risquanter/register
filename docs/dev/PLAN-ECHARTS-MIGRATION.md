@@ -40,13 +40,15 @@ ECharts is chosen over Vega or D3 because:
 | `app/chart/DistributionSpecBuilder.scala` | Builds Vega-Lite spec for PDF/CDF preview | Deleted in Phase E3 |
 | `app/chart/ColorAssigner.scala` | `NodeId → HexColor` mapping | **Unchanged** |
 | `app/chart/PaletteData.scala` | Palette definitions | **Unchanged** |
-| `app/state/ChartHoverBridge.scala` | Bidirectional Vega↔Laminar hover state | Deleted in Phase E2 |
-| `app/state/LECChartState.scala` | LEC curve data cache, `specSignal` derivation | Modified in Phase E2 |
+| `app/state/ChartHoverBridge.scala` | Bidirectional Vega↔Laminar hover state | Preserved until Phase E3.5; deleted in E3.5-4 |
+| `app/state/LECChartState.scala` | LEC curve data cache, `specSignal` derivation | Modified in Phase E2; extended in Phase E5 |
 | `app/state/DistributionChartState.scala` | Distribution preview cache, `specSignal` | Modified in Phase E3 |
-| `app/views/LECChartView.scala` | Renders LEC chart via `vegaEmbed` | Rewritten in Phase E2 |
-| `app/views/DistributionChartView.scala` | Renders distribution preview via `vegaEmbed` | Rewritten in Phase E3 |
-| `app/views/AnalyzeView.scala` | Creates `ChartHoverBridge`; wires hover | Modified in Phase E2 |
-| `app/views/TreeDetailView.scala` | Reads `hoveredCurveId` from bridge | Lightly modified in Phase E2 |
+| `app/views/LECChartView.scala` | Renders LEC chart via `vegaEmbed` | Renamed to `VegaLECChartView` (E2-4a); replaced with new ECharts implementation (E2-4b) |
+| `app/views/VegaLECChartView.scala` | Preserved Vega LEC chart (renamed from `LECChartView`) | Created E2-4a; used in comparison (E3.5-1); deleted E3.5-4 |
+| `app/views/DistributionChartView.scala` | Renders distribution preview via `vegaEmbed` | Renamed to `VegaDistributionChartView` (E3-3a); replaced with new ECharts implementation (E3-3b) |
+| `app/views/VegaDistributionChartView.scala` | Preserved Vega distribution chart (renamed from `DistributionChartView`) | Created E3-3a; used in comparison (E3.5-1); deleted E3.5-4 |
+| `app/views/AnalyzeView.scala` | Creates `ChartHoverBridge`; wires hover | Modified in Phase E2; comparison layout added+removed in E3.5; extended in Phase E5 |
+| `app/views/TreeDetailView.scala` | Reads `hoveredCurveId` from bridge | Modified in Phase E2 (bridge type); gains `onFocusPortfolio` callback in Phase E5 |
 | `modules/app/package.json` | Has `vega`, `vega-embed`, `vega-lite` | Modified in E1, cleaned in E4 |
 
 ---
@@ -58,7 +60,7 @@ ECharts is chosen over Vega or D3 because:
 | ADR-001 | Iron types at boundaries; validation at domain edges | ✅ `LECNodeCurve` and `DistributionPreviewResponse` arrive from the server already validated. Option builders are pure transforms of validated data. No new domain boundary. |
 | ADR-011 | Top-level import conventions | ✅ All new code will follow. |
 | ADR-018 | Nominal wrappers (`NodeId`, `TreeId`) | ✅ `NodeId` used throughout chart state and hover bridge; no change to wrapping convention. |
-| ADR-019 | Signals down / callbacks up; state above pure views; no mutations in rendering | ✅ ECharts event callbacks write to Laminar `Var`s (same pattern as current bridge). Option builders are pure functions. State objects created above views. |
+| ADR-019 | Signals down / callbacks up; state above pure views; no mutations in rendering | ✅ ECharts event callbacks write to Laminar `Var`s (same pattern as current bridge). Option builders are pure functions. State objects created above views. `focusPortfolioId` is written via `onFocusPortfolio: Option[NodeId] => Unit` callback on `TreeDetailView.apply` — `TreeDetailView` never accesses `focusPortfolioId` directly. |
 | ADR-025 | SPA routing | ✅ Not affected. |
 | ADR-028 | Query pane | ✅ Not affected; `AnalyzeQueryState` unchanged. |
 
@@ -180,10 +182,13 @@ package. Integration-level verification happens in Phase E2's manual checklist.
 
 **Prerequisite:** Phase E1 approved and complete.
 
-**Goal:** Replace `LECSpecBuilder` + `ChartHoverBridge` + `LECChartView` with ECharts
-equivalents. `ColorAssigner`, `PaletteData`, `LECChartState.curveCache`, and
-`LECChartState.specSignal` type (`Signal[LoadState[js.Dynamic]]`) remain unchanged —
-the option builder is a drop-in replacement for the spec builder at the call site.
+**Goal:** Replace `LECSpecBuilder` and `LECChartView` with ECharts equivalents; replace
+`ChartHoverBridge` with `EChartsHoverBridge`. Before overwriting, `LECChartView` is renamed
+to `VegaLECChartView` (zero logic changes) to preserve the Vega implementation for the
+Phase E3.5 visual comparison gate. `ChartHoverBridge` is not deleted in this phase —
+it is kept alive for `VegaLECChartView` until E3.5-4. `ColorAssigner`, `PaletteData`,
+`LECChartState.curveCache`, and `LECChartState.specSignal` type (`Signal[LoadState[js.Dynamic]]`)
+remain unchanged — the option builder is a drop-in replacement for the spec builder at the call site.
 
 ---
 
@@ -193,6 +198,27 @@ the option builder is a drop-in replacement for the spec builder at the call sit
 spline). No toggle. `EChartsLECOptionBuilder.build` has no interpolation parameter.
 No `interpolationModeVar` in `LECChartState`. The Vega-Lite `<select>` that existed
 inside the chart canvas is removed with no frontend replacement.
+
+---
+
+### Functional Equivalence Specification
+
+For each migrated component, the new implementation must preserve the following
+behavioural contracts. Tests in E2-3 and E3-2 are the automated verification of
+these contracts.
+
+| Current | New | Must-preserve semantics |
+|---|---|---|
+| `LECSpecBuilder.build(curves, ...)` | `EChartsLECOptionBuilder.build(curves, ...)` | Empty input → empty chart (no series); for each `(curve, color)` pair exactly one rendered series; series color matches paired `HexColor`; P50/P95 annotations present at same loss values when quantiles non-empty; B/M axis label format preserved |
+| `ChartHoverBridge.parseHoverSignal(v)` | `EChartsHoverBridge.parseMouseoverEvent(p)` | Valid node ID string → `Some(NodeId)`; invalid, missing, or null/undefined input → `None`; no side effects |
+| `ChartHoverBridge.buildSelectionStore(id)` | `EChartsHoverBridge.buildHighlightAction(id, n)` | `Some(nodeId)` → a highlight action; `None` → a downplay action; the field the option builder writes as series name round-trips through the parse function |
+| `DistributionSpecBuilder.build(...)` | `EChartsDistributionOptionBuilder.build(...)` | PDF mode: filled area series; CDF mode: y-axis domain `[0,1]`; anchor points (percentiles for expert, min/max for lognormal) present as `markLine` entries; dark theme colours preserved |
+
+### Build gate policy
+
+**Every step ends with a required gate before the next step begins:**
+`sbt test` (for `modules/app`) must be green. A failing test is the implementer's
+responsibility regardless of cause — do not proceed while red.
 
 ---
 
@@ -265,9 +291,52 @@ object EChartsHoverBridge:
   def buildHighlightAction(nodeId: Option[NodeId], seriesCount: Int): js.Dynamic
 ```
 
-### Step E2-3 — Rewrite `LECChartView`
+### Step E2-3 — Tests
 
-**File:** `modules/app/src/main/scala/app/views/LECChartView.scala`
+> **Write and run these specs before any view rewrite or deletion (E2-4, E2-5, E2-6).**
+> Both new specs AND the existing `ChartHoverBridgeSpec` must be green before proceeding.
+> Gate: `sbt test`.
+
+**New files:**
+- `modules/app/src/test/scala/app/chart/EChartsLECOptionBuilderSpec.scala`
+- `modules/app/src/test/scala/app/state/EChartsHoverBridgeSpec.scala`
+
+ZIO Test (Scala.js), same pattern as `ChartHoverBridgeSpec`.
+
+`EChartsLECOptionBuilderSpec` test cases:
+1. Empty curves → `emptyOption` (no series, no legend entries)
+2. Single curve → one series entry; `itemStyle.color` matches input `HexColor`
+3. Multi-curve → series array length matches input; colours correctly paired
+4. Quantile marks → P50/P95 `markLine` entries present when quantiles non-empty
+5. Adaptive y-ceiling → does not exceed 1.0
+
+`EChartsHoverBridgeSpec` test cases (pure functions only — no `EChartsInstance`):
+1. `parseMouseoverEvent`: valid `params.seriesName` (ULID) → `Some(NodeId)`
+2. `parseMouseoverEvent`: params itself is `null`/`undefined` → `None`  ← covers `ChartHoverBridgeSpec` case 4
+3. `parseMouseoverEvent`: params present but `seriesName` field missing/null → `None`
+4. `parseMouseoverEvent`: params with invalid string (not a ULID) → `None`
+5. `buildHighlightAction`: `Some(nodeId)` → action with `type: 'highlight'`
+6. `buildHighlightAction`: `None` → action with `type: 'downplay'`
+7. Round-trip / option-builder contract: construct mock params with `seriesName = nodeId.value`
+   (the value the option builder writes per its series naming convention) →
+   `parseMouseoverEvent` returns `Some(nodeId)`. This verifies the semantic contract
+   between the option builder and the parser — the same invariant that
+   `ChartHoverBridgeSpec`'s round-trip tested for Vega.
+
+### Step E2-4 — Preserve + Rewrite `LECChartView`
+
+**Sub-step E2-4a — Rename old implementation (zero logic changes)**
+
+Rename `LECChartView.scala` → `VegaLECChartView.scala` and rename the object
+`LECChartView` → `VegaLECChartView` inside the file. No other changes — the
+`vegaEmbed` lifecycle, `ChartHoverBridge` parameter, and all helper functions remain
+exactly as they are. This preserves the Vega implementation for use in the Phase E3.5
+visual comparison gate. E2-4a and E2-4b are one atomic work unit; the build gate is
+after E2-4b, not between them.
+
+**Sub-step E2-4b — Write new `LECChartView`**
+
+**File:** `modules/app/src/main/scala/app/views/LECChartView.scala` (new file)
 
 Replace the `vegaEmbed` Promise lifecycle with ECharts synchronous init:
 
@@ -295,43 +364,33 @@ overhead for incremental updates.
 The `renderIdle` / `renderLoading` / `renderError` helper functions are unchanged in
 structure (same CSS classes, same message text).
 
-### Step E2-4 — Wire `AnalyzeView`
+Gate: `sbt test` green before proceeding.
+
+### Step E2-5 — Wire `AnalyzeView`
 
 **File:** `modules/app/src/main/scala/app/views/AnalyzeView.scala`
 
-Replace `val hoverBridge = new ChartHoverBridge()` with `val hoverBridge = new EChartsHoverBridge()`.  
-No other change — the downstream call sites (`LECChartView(...)`, `TreeDetailView(...)`)
-accept `EChartsHoverBridge` in place of `ChartHoverBridge` as a structural replacement.
+Replace `val hoverBridge = new ChartHoverBridge()` with `val hoverBridge = new EChartsHoverBridge()`.
 
-*(If Scala's type system requires an explicit type change, the parameter types of
-`LECChartView.apply` and `TreeDetailView.apply` are updated accordingly.)*
+`EChartsHoverBridge` is an unrelated class — not a subtype of `ChartHoverBridge`. The
+parameter types of `LECChartView.apply` and `TreeDetailView.apply` must be updated from
+`ChartHoverBridge` to `EChartsHoverBridge`. Update the parameter types at both call sites
+and their respective `apply` signatures before this step will compile.
 
-### Step E2-5 — Delete `LECSpecBuilder` and `ChartHoverBridge`
+Gate: `sbt test` green before proceeding.
+
+### Step E2-6 — Delete `LECSpecBuilder` and `ChartHoverBridgeSpec`
+
+> **`ChartHoverBridge.scala` is NOT deleted here. It is still needed by `VegaLECChartView`
+> during the Phase E3.5 visual comparison gate. It will be deleted in E3.5-4.**
+
+> **All new specs must be green before this step. Deleting `ChartHoverBridgeSpec` is only
+> safe once `EChartsHoverBridgeSpec` covers the same behavioural surface (verified in E2-3).**
 
 - Delete `modules/app/src/main/scala/app/chart/LECSpecBuilder.scala`
-- Delete `modules/app/src/main/scala/app/state/ChartHoverBridge.scala`
+- Delete `modules/app/src/test/scala/app/state/ChartHoverBridgeSpec.scala`
 
-### Step E2-6 — Tests
-
-**New files:**
-- `modules/app/src/test/scala/app/chart/EChartsLECOptionBuilderSpec.scala`
-- `modules/app/src/test/scala/app/state/EChartsHoverBridgeSpec.scala`
-
-ZIO Test (Scala.js), same pattern as `ChartHoverBridgeSpec`.
-
-`EChartsLECOptionBuilderSpec` test cases:
-1. Empty curves → `emptyOption` (no series, no legend entries)
-2. Single curve → one series entry; `itemStyle.color` matches input `HexColor`
-3. Multi-curve → series array length matches input; colours correctly paired
-4. Quantile marks → P50/P95 `markLine` entries present when quantiles non-empty
-5. Adaptive y-ceiling → does not exceed 1.0
-
-`EChartsHoverBridgeSpec` test cases (pure functions only — no `EChartsInstance`):
-1. `parseMouseoverEvent`: valid `params.seriesName` (ULID) → `Some(NodeId)`
-2. `parseMouseoverEvent`: missing/null `seriesName` → `None`
-3. `parseMouseoverEvent`: invalid string (not a ULID) → `None`
-4. `buildHighlightAction`: `Some(nodeId)` → action with `type: 'highlight'`
-5. `buildHighlightAction`: `None` → action with `type: 'downplay'`
+Gate: `sbt test` green after deletion (only new tests remain; all must pass).
 
 ### Phase E2 — Integration verification (manual)
 
@@ -348,15 +407,16 @@ ZIO Test (Scala.js), same pattern as `ChartHoverBridgeSpec`.
 
 | File | Change |
 |------|--------|
-| `app/chart/EChartsLECOptionBuilder.scala` | New |
-| `app/state/EChartsHoverBridge.scala` | New |
-| `app/views/LECChartView.scala` | Rewritten |
-| `app/views/AnalyzeView.scala` | `ChartHoverBridge` → `EChartsHoverBridge` |
-| `app/chart/LECSpecBuilder.scala` | Deleted |
-| `app/state/ChartHoverBridge.scala` | Deleted |
-| `app/test/…/EChartsLECOptionBuilderSpec.scala` | New |
-| `app/test/…/EChartsHoverBridgeSpec.scala` | New |
-| `app/test/…/ChartHoverBridgeSpec.scala` | Deleted |
+| `app/chart/EChartsLECOptionBuilder.scala` | New (E2-1) |
+| `app/state/EChartsHoverBridge.scala` | New (E2-2) |
+| `app/test/…/EChartsLECOptionBuilderSpec.scala` | New (E2-3) |
+| `app/test/…/EChartsHoverBridgeSpec.scala` | New (E2-3) |
+| `app/views/VegaLECChartView.scala` | Renamed from `LECChartView.scala` (E2-4a); deleted in Phase E3.5 |
+| `app/views/LECChartView.scala` | New ECharts implementation (E2-4b) |
+| `app/views/AnalyzeView.scala` | `ChartHoverBridge` → `EChartsHoverBridge`; `LECChartView.apply` and `TreeDetailView.apply` parameter types updated (E2-5) |
+| `app/chart/LECSpecBuilder.scala` | Deleted (E2-6) |
+| `app/state/ChartHoverBridge.scala` | **Not deleted here** — deleted in Phase E3.5 |
+| `app/test/…/ChartHoverBridgeSpec.scala` | Deleted (E2-6, after E2-3 spec passes) |
 
 ---
 
@@ -396,22 +456,10 @@ Vega config.
 `anchorAnnotations(response, draft, viewMode): js.Array[js.Any]` extracted as a named
 pure function (ADR FL1 compliance).
 
-### Step E3-2 — Rewrite `DistributionChartView`
+### Step E3-2 — Tests
 
-**File:** `modules/app/src/main/scala/app/views/DistributionChartView.scala`
-
-Same synchronous ECharts init/dispose pattern from Phase E2. No hover bridge.
-`instance.setOption(opts, notMerge = true)` on signal update (no re-init).
-The `toggleEl` (PDF/CDF toggle buttons) and `coherenceCaptionSignal` caption are
-unchanged — they are Laminar elements with no chart dependency.
-
-The debounced fetch subscription in `onMountCallback` is unchanged.
-
-### Step E3-3 — Delete `DistributionSpecBuilder`
-
-Delete `modules/app/src/main/scala/app/chart/DistributionSpecBuilder.scala`.
-
-### Step E3-4 — Tests
+> **Write and run this spec before the view rewrite or deletion (E3-3, E3-4).**
+> Gate: `sbt test`.
 
 **New file:** `modules/app/src/test/scala/app/chart/EChartsDistributionOptionBuilderSpec.scala`
 
@@ -424,6 +472,34 @@ Test cases:
 4. Expert mode with percentile anchors → `markLine.data` contains anchor points
 5. Lognormal with min/max → `markLine.data` contains bound markers
 
+### Step E3-3 — Preserve + Rewrite `DistributionChartView`
+
+**Sub-step E3-3a — Rename old implementation (zero logic changes)**
+
+Rename `DistributionChartView.scala` → `VegaDistributionChartView.scala` and rename
+the object `DistributionChartView` → `VegaDistributionChartView` inside the file.
+No other changes. This preserves the Vega implementation for the Phase E3.5 visual
+comparison gate. E3-3a and E3-3b are one atomic work unit; build gate is after E3-3b.
+
+**Sub-step E3-3b — Write new `DistributionChartView`**
+
+**File:** `modules/app/src/main/scala/app/views/DistributionChartView.scala` (new file)
+
+Same synchronous ECharts init/dispose pattern from Phase E2. No hover bridge.
+`instance.setOption(opts, notMerge = true)` on signal update (no re-init).
+The `toggleEl` (PDF/CDF toggle buttons) and `coherenceCaptionSignal` caption are
+unchanged — they are Laminar elements with no chart dependency.
+
+The debounced fetch subscription in `onMountCallback` is unchanged.
+
+Gate: `sbt test` green before proceeding.
+
+### Step E3-4 — Delete `DistributionSpecBuilder`
+
+Delete `modules/app/src/main/scala/app/chart/DistributionSpecBuilder.scala`.
+
+Gate: `sbt test` green after deletion.
+
 ### Phase E3 — Integration verification (manual)
 
 - [ ] Distribution preview renders for a lognormal leaf (PDF + CDF toggle).
@@ -435,16 +511,107 @@ Test cases:
 
 | File | Change |
 |------|--------|
-| `app/chart/EChartsDistributionOptionBuilder.scala` | New |
-| `app/views/DistributionChartView.scala` | Rewritten |
-| `app/chart/DistributionSpecBuilder.scala` | Deleted |
-| `app/test/…/EChartsDistributionOptionBuilderSpec.scala` | New |
+| `app/chart/EChartsDistributionOptionBuilder.scala` | New (E3-1) |
+| `app/test/…/EChartsDistributionOptionBuilderSpec.scala` | New (E3-2) |
+| `app/views/VegaDistributionChartView.scala` | Renamed from `DistributionChartView.scala` (E3-3a); deleted in Phase E3.5 |
+| `app/views/DistributionChartView.scala` | New ECharts implementation (E3-3b) |
+| `app/chart/DistributionSpecBuilder.scala` | Deleted (E3-4, after E3-2 spec passes) |
+
+---
+
+## Phase E3.5 — Visual Comparison Gate
+
+**Prerequisite:** Phases E2 and E3 approved and complete.
+
+**Goal:** Render the new ECharts chart and the original Vega chart side-by-side for
+visual sign-off before any Vega code is deleted. The new chart occupies the exact
+original DOM position with all layout and resize behavior intact. The old chart is
+rendered below it, unchanged, in an identical container. No changes are made to the
+preserved Vega view files.
+
+---
+
+### Step E3.5-1 — Add comparison layout to `AnalyzeView`
+
+**File:** `modules/app/src/main/scala/app/views/AnalyzeView.scala`
+
+For each chart surface, render the new (ECharts) chart in its normal container — same
+CSS classes, same enclosing div structure, same resize observers as today — then
+render the old (Vega) chart immediately below in an identical container, with a
+temporary comparison label. The old views receive the same data signals as the new ones.
+
+```
+// LEC surface
+[new LECChartView — in the original container, no layout changes]
+div(cls := "vega-comparison-panel")
+  p("Vega original — visual comparison only (temporary)")
+  VegaLECChartView(specSignal, new ChartHoverBridge())   // new bridge, not wired to tree
+
+// Distribution surface  
+[new DistributionChartView — in the original container, no layout changes]
+div(cls := "vega-comparison-panel")
+  p("Vega original — visual comparison only (temporary)")
+  VegaDistributionChartView(response, viewMode, draft)   // unchanged implementation
+```
+
+**Constraints:**
+- `VegaLECChartView` and `VegaDistributionChartView` are passed the same data signals
+  as the new charts so both render the same data simultaneously.
+- `VegaLECChartView` receives a fresh `new ChartHoverBridge()` not wired to
+  `TreeDetailView` or `AnalyzeView`. The comparison is visual only; hover interaction
+  in the Vega panel is not required.
+- The `vega-comparison-panel` container must use the same CSS structure as the original
+  chart container so both charts render at the same width and height.
+- Zero changes to `VegaLECChartView.scala`, `VegaDistributionChartView.scala`,
+  `ChartHoverBridge.scala`, or `DistributionChartState.scala`.
+
+Gate: `sbt test` green. Both charts visible in browser.
+
+### Step E3.5-2 — Visual sign-off checklist
+
+- [ ] New LEC chart (ECharts): all curves render with correct colours
+- [ ] Old LEC chart (Vega): renders identically to before the migration
+- [ ] Curve colours, line shapes, and quantile annotations match visually between the two
+- [ ] New distribution chart (ECharts): PDF and CDF mode render correctly
+- [ ] Old distribution chart (Vega): renders identically to before the migration
+- [ ] Anchor points (percentiles / min–max) match visually between the two
+- [ ] Both charts update simultaneously when the same data changes
+- [ ] New chart resize/responsive behaviour matches the original chart behaviour
+
+Proceed to E3.5-3 only after all items are checked off.
+
+### Step E3.5-3 — Remove comparison layout from `AnalyzeView`
+
+**File:** `modules/app/src/main/scala/app/views/AnalyzeView.scala`
+
+Remove the two `vega-comparison-panel` divs and their labels. The new ECharts charts
+remain in their positions. `VegaLECChartView` and `VegaDistributionChartView` are no
+longer instantiated anywhere.
+
+Gate: `sbt test` green.
+
+### Step E3.5-4 — Delete preserved Vega view files and `ChartHoverBridge`
+
+- Delete `modules/app/src/main/scala/app/views/VegaLECChartView.scala`
+- Delete `modules/app/src/main/scala/app/views/VegaDistributionChartView.scala`
+- Delete `modules/app/src/main/scala/app/state/ChartHoverBridge.scala`
+
+Gate: `sbt test` green.
+
+### Phase E3.5 — Files touched
+
+| File | Change |
+|------|--------|
+| `app/views/AnalyzeView.scala` | Add comparison layout (E3.5-1), remove it (E3.5-3) |
+| `app/views/VegaLECChartView.scala` | Deleted (E3.5-4) |
+| `app/views/VegaDistributionChartView.scala` | Deleted (E3.5-4) |
+| `app/state/ChartHoverBridge.scala` | Deleted (E3.5-4) |
 
 ---
 
 ## Phase E4 — Vega Removal
 
-**Prerequisite:** Phases E2 and E3 approved and complete (both charts migrated).
+**Prerequisite:** Phases E2, E3, and E3.5 approved and complete (both charts migrated and visually signed off).
 
 **Goal:** Remove all Vega/Vega-Lite code and packages. After this phase, no Vega
 code exists in the project.
@@ -591,8 +758,16 @@ val focusPortfolioId: Var[Option[NodeId]] = Var(None)
 ```
 
 `axisPointerXVar` is written by `LECChartView` via a callback.
-`focusPortfolioId` is written by `TreeDetailView` (portfolio-row focus click target)
-via `treeViewState.chartState.focusPortfolioId.set(...)`. Cleared in `reset()`.
+`focusPortfolioId` is written via a callback supplied by `AnalyzeView`. Per ADR-019,
+`TreeDetailView` must not call `.set(...)` on a `Var` it does not own. The correct
+pattern: `TreeDetailView.apply` gains a new callback parameter:
+```scala
+onFocusPortfolio: Option[NodeId] => Unit = _ => ()
+```
+The portfolio-row focus click target in `TreeDetailView` calls `onFocusPortfolio(Some(nodeId))`
+or `onFocusPortfolio(None)` — never touches `focusPortfolioId` directly.
+`AnalyzeView` supplies the callback: `onFocusPortfolio = treeViewState.chartState.focusPortfolioId.set`.
+Cleared in `reset()`.
 
 `TreeViewState` passes `expandedNodes.signal` into the `LECChartState` constructor:
 ```scala
@@ -729,6 +904,10 @@ the pie series exists before the first partial update.
   ```scala
   onAxisPointerX = x => treeViewState.chartState.axisPointerXVar.set(x)
   ```
+- Supply the `onFocusPortfolio` callback to `TreeDetailView` (ADR-019 fix from E5-1):
+  ```scala
+  onFocusPortfolio = treeViewState.chartState.focusPortfolioId.set
+  ```
 - No new DOM element or split-pane change is needed — the pie floats inside the existing
   LEC chart canvas.
 
@@ -767,7 +946,7 @@ Test cases:
 | `app/chart/EChartsLECOptionBuilder.scala` | Add empty pie series to initial option (for partial-update seeding) |
 | `app/views/LECChartView.scala` | Add `pieDataSignal` + `onAxisPointerX` params; register `updateAxisPointer` event; subscribe to `pieDataSignal` for partial setOption |
 | `app/views/AnalyzeView.scala` | Pass `pieDataSignal` + `onAxisPointerX` callback into `LECChartView` |
-| `app/views/TreeDetailView.scala` | Add "focus" click target on portfolio rows → sets `treeViewState.chartState.focusPortfolioId` |
+| `app/views/TreeDetailView.scala` | Add `onFocusPortfolio: Option[NodeId] => Unit` callback parameter; add focus click target on portfolio rows → calls `onFocusPortfolio` (never touches `focusPortfolioId` directly) |
 | `app/test/…/ThresholdPieCalculatorSpec.scala` | New |
 
 ---
@@ -821,8 +1000,9 @@ work begins.
 | Phase | New files | Modified files | Deleted files |
 |-------|-----------|----------------|---------------|
 | E1 | `ECharts.scala` | `package.json` | — |
-| E2 | `EChartsLECOptionBuilder.scala`, `EChartsHoverBridge.scala`, 2 test specs | `LECChartView.scala`, `AnalyzeView.scala`, `LECChartState.scala` | `LECSpecBuilder.scala`, `ChartHoverBridge.scala`, `ChartHoverBridgeSpec.scala` |
-| E3 | `EChartsDistributionOptionBuilder.scala`, 1 test spec | `DistributionChartView.scala`, `DistributionChartState.scala` | `DistributionSpecBuilder.scala` |
+| E2 | `VegaLECChartView.scala` (renamed), `EChartsLECOptionBuilder.scala`, `EChartsHoverBridge.scala`, new `LECChartView.scala`, 2 test specs | `AnalyzeView.scala`, `LECChartState.scala` | `LECSpecBuilder.scala`, `ChartHoverBridgeSpec.scala` |
+| E3 | `VegaDistributionChartView.scala` (renamed), `EChartsDistributionOptionBuilder.scala`, new `DistributionChartView.scala`, 1 test spec | `DistributionChartState.scala` | `DistributionSpecBuilder.scala` |
+| E3.5 | — | `AnalyzeView.scala` (comparison added then removed) | `VegaLECChartView.scala`, `VegaDistributionChartView.scala`, `ChartHoverBridge.scala` |
 | E4 | — | `package.json`, `package-lock.json` | `VegaEmbed.scala` |
 | E5 | `ThresholdPieCalculator.scala`, 1 test spec | `LECChartState.scala`, `TreeViewState.scala`, `EChartsLECOptionBuilder.scala`, `LECChartView.scala`, `AnalyzeView.scala`, `TreeDetailView.scala` | — |
 | E6 | TBD | TBD | — |

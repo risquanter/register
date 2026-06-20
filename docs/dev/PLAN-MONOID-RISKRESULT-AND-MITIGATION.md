@@ -1,6 +1,6 @@
-# PLAN — `Monoid[RiskResult]` Aggregation & Mitigation Design Exploration
+# PLAN — `TrialOutcomes` Monoid, Aggregation & Mitigation Design
 
-Status: **Draft / not approved for implementation**
+Status: **Draft / not approved for implementation — code audit completed 2026-06-18**
 Scope: Internal implementation only (no API change intended). API implications flagged where relevant.
 Related: ADR-003 (provenance), ADR-014/ADR-015 (RiskResult as cache/runtime state, cache-aside),
 `docs/scratch/milestone-2b-cache-and-decisions.md` (Leaf-as-aggregate semantic smell).
@@ -15,26 +15,151 @@ proposed a category-theory-inspired risk engine. Most of it does **not** fit our
 of our incremental, cached, provenance-carrying engine).
 
 Exactly **one** idea is portable and genuinely useful: modeling **child aggregation as a lawful
-`Monoid`**. This document captures that insight at implementation-pickup level, and separately
+monoid**. This document captures that insight at implementation-pickup level, and separately
 explores **mitigation** design (an acknowledged open topic with no current good design).
 
 ---
 
-## PART A — `Monoid[RiskResult]` aggregation
+## Code audit — 2026-06-18
 
-### A.1 The core insight
+Audit of `modules/common/src/main/scala/.../domain/data/` and
+`modules/server/src/main/scala/.../services/cache/` against this plan.
 
-Aggregating independent child risks into a portfolio is **associative** and has an **identity**
-(a zero-loss / empty result). That is precisely the algebraic signature of a `Monoid`:
+### Confirmed decisions (2026-06-18 design review)
 
-- `empty` = the zero-loss result (empty outcomes + empty provenance).
-- `combine(a, b)` = index-aligned outcome combination + provenance merge.
+- **`RiskResult → LossDistribution` widening is confirmed safe.** Every caller of `ensureCached` /
+  `ensureCachedAll` uses only `LossDistribution` members (`probOfExceedance`, `outcomeCount`,
+  `nTrials`, `minLoss`, `maxLoss`). `LECGenerator`, `RiskTreeKnowledgeBase`, and the service
+  layer all touch only these. The type substitution is mechanical with zero logic change. The
+  one exception — `provenances` access in `ProvenanceSpec` — requires a pattern match after
+  widening; for `RiskResultGroup` provenance lives in `children.flatMap(_.provenances)`.
 
-Provenance composition is **itself** a monoid (empty provenance + associative merge), so the
-overall `RiskResult` monoid is the product of two monoids (outcomes × provenance).
+- **`LossDistributionType` enum can be deleted.** The enum (`Leaf`/`Composite`) is referenced only
+  in `LossDistribution.scala` itself as hardcoded constructor arguments. No code outside that
+  file reads `.distributionType`. The class hierarchy (`RiskResult`/`RiskResultGroup`) is the
+  correct discriminator — pattern match on the subtype.
+
+- **`Associative[RiskResult]`, `Commutative[RiskResult]`, `RiskResult.combine`,
+  `RiskResultIdentityInstances`, and `RiskResult.withNodeId` are semantically wrong and should
+  be deleted.** See A.1 update below.
+
+### What already exists
+
+| Item | Location | Notes |
+|---|---|---|
+| `Associative[RiskResult]` + `Commutative[RiskResult]` | `LossDistribution.scala` | **To be deleted** — semantically wrong (see A.1) |
+| `Identity[RiskResult]` (context-dependent) | `RiskResultIdentityInstances.scala` | **To be deleted** — test-only, supports the wrong monoid |
+| `LossDistribution.merge` | `LossDistribution.scala` | The genuine combine for `Map[TrialId, Loss]`; correct and kept |
+| `RiskResultGroup` (Composite type) | `LossDistribution.scala` | Correct composite subtype; holds `children: List[RiskResult]` (to be widened to `List[LossDistribution]` — gap 2) and combined `outcomes` — the correct fix for the Leaf-as-aggregate smell |
+| `RiskTransform` (B3 result-stage endomorphism) | `RiskTransform.scala` | `case class RiskTransform(run: RiskResult => RiskResult)`; lawful `Identity[RiskTransform]`; operations: `applyDeductible`, `capLosses`, `scaleLosses`, `insurancePolicy`, `filterBelowThreshold`; property-tested |
+
+### What is NOT wired into production
+
+- **`RiskResultGroup`** is used in tests only (`LossDistributionSpec`, `PreludeOrdUsageSpec`).
+  `RiskResultResolverLive` still does `childResults.reduce(RiskResult.combine).withNodeId(portfolio.id)`,
+  producing a `LossDistributionType.Leaf` result for portfolio nodes — the smell is still live.
+- **`RiskTransform`** is used in tests only (`RiskTransformSpec`). No production call path
+  invokes it. The transforms do **not** append to `RiskResult.provenances`.
+
+### Open gaps after audit
+
+1. **Resolver `reduce(RiskResult.combine)` is wrong** — must be replaced with `RiskResultGroup(portfolio.id, childResults*)`. Not just a wiring change; the false monoid instances must be deleted too.
+2. **`RiskResultGroup.children: List[RiskResult]`** — must widen to `List[LossDistribution]` to support nested portfolios. `apply` must accept `LossDistribution*`.
+3. **Cache and resolver return type** — `RiskResult` → `LossDistribution` throughout (mechanical substitution, zero logic change).
+4. **`LossDistributionType` enum + `distributionType` field** — dead code; can be deleted.
+5. **`RiskTransform` + widened cache type** — `RiskTransform` operates on `RiskResult` (not
+   `LossDistribution`). After widening the cache to `LossDistribution`, any future call site that
+   reads from cache and applies a transform must pattern-match: `case rr: RiskResult =>`.
+   Portfolio results (`RiskResultGroup`) cannot be directly transformed by `RiskTransform`.
+   This is acceptable now (transforms are unwired in production), but must be resolved before
+   `RiskTransform` is wired into any production path.
+6. **`RiskTransform` not on any call path** — no service, controller, or API accepts or applies one.
+
+---
+
+## Functional Equivalence Specification
+
+This refactoring changes internal structure only. The following simulation output
+properties **must be bit-for-bit identical** before and after any resolver or cache change.
+These are the ground truth properties that regression tests must explicitly verify.
+
+| Property | Where computed | Must preserve |
+|---|---|---|
+| `probOfExceedance(threshold)` on portfolio result | `LossDistribution` (shared impl) | Identical values — same `outcomes` map, same `nTrials` |
+| Portfolio `outcomes` map | `LossDistribution.merge` | Each trial's value = pointwise sum of all child trial values (outer join, missing = 0) |
+| `nTrials` on portfolio result | `RiskResultGroup.apply` | Must equal `cfg.defaultNTrials` (same as leaf results) |
+| `provenances` reachable from portfolio | `children.flatMap(_.provenances)` | Same set as current `combinedResult.provenances`; same insertion order if children are in the same sequence |
+| Leaf node outcomes | Unchanged — leaf simulation path not modified | Identical |
+
+**The key invariant to verify before any resolver change:**
+
+> For a portfolio with children C1 and C2, after the resolver runs:
+> `portfolioResult.outcomes.get(trialId) == c1.outcomes.get(trialId).getOrElse(0) + c2.outcomes.get(trialId).getOrElse(0)`
+> for every `trialId` that appears in either child.
+
+This invariant is currently tested only vacuously (`rootResult.outcomes.size >= 0` is always
+true). **Before making any resolver change, this test must be strengthened.** See A.6.
+
+---
+
+## PART A — Aggregation design
+
+### A.1 The core insight (revised 2026-06-18)
+
+> The original framing placed the monoid on `RiskResult`. This was wrong. The correct
+> algebraic structure is described below.
+
+`LossDistribution` is a **product type**: `NodeId × TrialOutcomes`, where `NodeId` is a label
+(not algebraic) and `TrialOutcomes = (nTrials: Int, outcomes: Map[TrialId, Loss])` is the
+genuine monoid.
+
+```
+LossDistribution = NodeId × TrialOutcomes
+                   (label)   (the monoid)
+```
+
+**`TrialOutcomes` is the honest monoid:**
+- `empty` = `(nTrials = N, outcomes = Map.empty)` — zero losses across N trials.
+- `combine(a, b)` = outer-join sum of outcome maps, same-N enforced.
+- Associative ✅ Commutative ✅ Identity ✅
+
+**`NodeId` does not participate in the algebra.** This is why `combine(a: LossDistribution,
+b: LossDistribution)` cannot be a semantically correct monoid on `LossDistribution`:
+the `nodeId` of the combined result has no principled derivation from the inputs — it must
+always come from external context (the tree structure, the resolver). Any instance that steals
+`a.nodeId` is producing a semantic lie.
+
+**`LossDistribution.merge`** is the implementation of `TrialOutcomes.combine`. It already
+exists, is correct, and is the right primitive. The separate name (`merge` not `combine`)
+accidentally signals the right thing: it operates on the mathematical content and returns
+`Map[TrialId, Loss]` rather than a full `LossDistribution`, because constructing the named
+result is the caller's responsibility (not the algebra's).
+
+**Portfolio construction is a named constructor, not a monoid operation.** The form is:
+```scala
+RiskResultGroup(parentNodeId, children*)  // children: List[LossDistribution]
+```
+The resolver supplies `parentNodeId` from the tree. `RiskResultGroup.apply` calls `merge`
+internally. No binary `combine` is involved.
+
+**The canonical structure is:**
+```scala
+// Option 1 — explicit TrialOutcomes type (makes algebra visible, property-testable)
+case class TrialOutcomes(nTrials: Int, outcomes: Map[TrialId, Loss])
+given Associative[TrialOutcomes]  // outer-join sum
+given Commutative[TrialOutcomes]  // order-independent
+given identity(using cfg: SimulationConfig): Identity[TrialOutcomes]  // empty
+
+// Option 2 — implicit (minimum fix: delete false monoid, use RiskResultGroup directly)
+// No new type. Resolver calls RiskResultGroup(id, children*); merge is the internal detail.
+```
+
+Option 1 makes the algebra explicit and standalone-testable. Option 2 is the minimum viable
+fix. Both are correct; Option 1 is better long-term. The choice between them is a decision
+gate (new type on a shared domain module → trigger #4/#5).
 
 > The categorical framing in the source conversation (Profunctor / Kleisli / Comonad / CBRNG
-> generator fusion) is **not** adopted. Only the monoid lens is.
+> generator fusion) is **not** adopted. Only the monoid lens is — and it now lives in the right place.
 
 ### A.2 What problem this actually solves for us
 
@@ -48,8 +173,10 @@ overall `RiskResult` monoid is the product of two monoids (outcomes × provenanc
    reordering / parallel reduction.** Making the combine lawful means the parallelism we want
    becomes *correct by construction*, not asserted.
 
-3. **Cleaner provenance accumulation** — provenance merge becomes the monoid of the provenance
-   component, aligning with ADR-003 instead of being threaded manually.
+3. **Cleaner provenance access** — under the corrected design, leaf provenances stay in
+   `RiskResult.provenances`; portfolio provenances are accessed as `children.flatMap(_.provenances)`
+   on `RiskResultGroup`. This is structurally honest: provenance belongs to the node that was
+   simulated, not to the aggregate. No manual provenance threading at aggregation time.
 
 ### A.3 What this is NOT
 
@@ -68,59 +195,146 @@ not lawful and this plan must stop and escalate** (instruction trigger #6 / #9 a
 
 Open questions that determine whether the laws genuinely hold for *our* `RiskResult`:
 
-| Question | Why it matters | Resolution needed before impl |
+| Question | Why it matters | Status |
 |---|---|---|
-| Are child outcome vectors **index-aligned** (same iteration count, same RNG coordinate)? | Pointwise combine is only meaningful if index `i` of child A corresponds to index `i` of child B. If counts differ, associativity/identity break. | **Decision required** — confirm invariant or define alignment rule. |
-| Is provenance merge **associative and commutative** as currently structured (ADR-003)? | Parallel reduction may reorder merges. | Verify against ADR-003 provenance model. |
-| Does `empty` (zero outcomes) interact correctly with a fixed-N simulation? | An empty result has no samples; combining with an N-sample result must not produce a length mismatch. | **Decision required** — define empty semantics (zero-vector of length N vs. true neutral). |
+| Are child outcome vectors **index-aligned** (same iteration count, same RNG coordinate)? | Pointwise combine is only meaningful if index `i` of child A corresponds to index `i` of child B. | ✅ **Resolved** — `LossDistribution.merge` uses outer-join (missing trial = 0 loss); `RiskResultGroup.apply` inherits this. Same-N invariant enforced by the alignment check in `TrialOutcomes.combine` (Option 1) or by `RiskResultGroup.apply` directly (Option 2). |
+| Is provenance associative under the new design? | Parallel reduction may reorder child merges. | ✅ **Resolved** — provenance stays in individual `RiskResult.provenances` and is accessed at read time via `children.flatMap(_.provenances)`. No merge step; no ordering sensitivity. |
+| Does `empty` interact correctly with a fixed-N simulation? | An empty result has no samples; combining with an N-sample result must not produce a length mismatch. | ✅ **Resolved** — `TrialOutcomes.empty` carries `nTrials = cfg.defaultNTrials` (Option 1); `RiskResultGroup.apply` handles empty child list explicitly (Option 2). Alignment is always enforced. |
 
-> ⚠️ The third row is the subtle one: a *true* monoidal `empty` is length-agnostic, but our
-> outcomes are fixed-length sample vectors. We likely need either (a) `empty` = zero-vector of
-> the ambient N, or (b) a representation where length is carried/validated. This is a genuine
-> design fork, not a detail.
+### A.5 Implementation sketch (revised 2026-06-18)
 
-### A.5 Implementation sketch (for pickup — NOT final)
+**Delete (false monoid):**
+- `RiskResult.combine`
+- `given Associative[RiskResult]`, `given Commutative[RiskResult]`
+- `RiskResultIdentityInstances` (both copies in `common` and `server`)
+- `RiskResult.withNodeId`
+- `LossDistributionType` enum + `distributionType` field on `LossDistribution`
 
-Conceptual shape only. Real types must use existing domain types and smart constructors
-(correct-by-construction; no `new`/raw primitives).
-
+**Add alignment guard to `RiskResultGroup.apply`:**
+`RiskResult.combine` currently enforces `require(a.nTrials == b.nTrials, ...)`. Deleting
+it removes the only alignment check. `RiskResultGroup.apply` must gain this guard
+explicitly before the resolver is changed:
+```scala
+require(
+  results.isEmpty || results.map(_.nTrials).distinct.size == 1,
+  s"Cannot aggregate distributions with different trial counts: ${results.map(_.nTrials).mkString(", ")}"
+)
 ```
-// CONCEPTUAL — not the final signature.
-// RiskResult monoid = product of (outcomes monoid) × (provenance monoid)
+This must be in place before any call site switches to `RiskResultGroup`.
 
-empty:    RiskResult with zero/neutral outcomes + empty provenance
-combine:  index-aligned outcome combine  +  provenance merge
+**Widen (mechanical type substitution):**
+- `RiskResultGroup.children: List[LossDistribution]` (from `List[RiskResult]`)
+- `RiskResultGroup.apply(results: LossDistribution*)` (from `RiskResult*`)
+- `RiskResultCache.get/put` signature: `LossDistribution` (from `RiskResult`)
+- `RiskResultResolver.ensureCached/ensureCachedAll` return type: `LossDistribution`
+- `LECGenerator` method signatures: `LossDistribution` (from `RiskResult`)
+- `RiskTreeKnowledgeBase` constructor and field: `Map[NodeId, LossDistribution]`
+
+**Fix resolver portfolio branch:**
+```scala
+// DELETE this:
+childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b))
+  .withNodeId(portfolio.id)
+
+// REPLACE with:
+RiskResultGroup(portfolio.id, childResults*)
+// where childResults: List[LossDistribution]
 ```
 
-- Live in the **domain/services layer**, behind the resolver. No leakage to HTTP DTOs.
-- Resolver aggregation rewritten as a single lawful reduction over children.
-- Parallelism (replacing sequential `ZIO.foreach`) added **only after** laws are proven by
-  property tests — associativity first, identity second.
+**Optional — introduce `TrialOutcomes`:**
+If Option 1 (explicit type) is chosen, add `case class TrialOutcomes` with `Associative`,
+`Commutative`, `Identity` instances and restructure `RiskResult`/`RiskResultGroup` to embed it.
+This makes the monoid property-testable in isolation. Decision gate: new type in shared domain
+module → trigger #4.
 
-### A.6 Test strategy (mandatory before behaviour change)
+### A.6 Test strategy — sequencing is mandatory
 
-- **Property tests** for monoid laws (identity, associativity) on `RiskResult` — likely with a
-  generator that respects the index-alignment invariant.
-- **Provenance-merge** property tests (associativity; commutativity if relied upon for parallel
-  reduction).
-- **Regression**: existing `RiskResultResolverSpec` / `RiskResultCacheSpec` must remain green and
-  must demonstrate that aggregated results are *unchanged* vs. current Leaf-based aggregation
-  (i.e., the refactor is behaviour-preserving for outputs, only changing internal structure).
+> **The test sequence below is not optional.** Changing the order risks adapting tests
+> to wrong behaviour to fix a refactoring-induced mistake. Each step is a gate.
+
+**Step 1 — Strengthen existing resolver test BEFORE making any change (gate)**
+
+`RiskResultResolverSpec` currently has:
+```scala
+// THIS IS VACUOUS — always true, verifies nothing:
+rootResult.outcomes.size >= 0
+```
+Before touching the resolver, this must be replaced with an explicit numerical assertion:
+```scala
+// After resolving the root portfolio:
+risk1Result <- resolver.ensureCached(testTree, risk1Id)
+risk2Result <- resolver.ensureCached(testTree, risk2Id)
+rootResult  <- resolver.ensureCached(testTree, rootId)
+allTrialIds = risk1Result.outcomes.keySet ++ risk2Result.outcomes.keySet
+then:
+  allTrialIds.forall { t =>
+    rootResult.outcomes.getOrElse(t, 0L) ==
+      risk1Result.outcomes.getOrElse(t, 0L) +
+      risk2Result.outcomes.getOrElse(t, 0L)
+  }
+```
+This test must be green on the CURRENT (pre-change) resolver before any edit.
+If it is not green on the current code, stop — the current implementation is broken.
+
+**Step 2 — Add alignment guard to `RiskResultGroup.apply` (gate)**
+
+Add the `require` described in A.5. Run `sbt test` — must be green.
+
+**Step 3 — Write new property / unit tests for the replacement (gate)**
+
+- **For Option 1 (`TrialOutcomes`)**: property tests for `Associative[TrialOutcomes]`
+  (associativity, commutativity) and `Identity[TrialOutcomes]` (left/right identity).
+- **For Option 2 (minimum fix)**: unit tests for `RiskResultGroup.apply` — verify that
+  outcomes equal the pointwise sum of children's outcomes for every trial ID.
+
+Run `sbt test` — must be green (new tests and all existing tests).
+
+**Step 4 — Make the resolver change (gate)**
+
+Replace `childResults.reduce(RiskResult.combine).withNodeId` with `RiskResultGroup(id, children*)`.
+Widen resolver and cache return types to `LossDistribution`.
+
+Run `sbt test` — all tests including the strengthened Step 1 assertion must be green.
+If the strengthened assertion fails, the resolver change broke numerical equivalence.
+Fix the resolver; do not weaken the assertion.
+
+**Step 5 — Delete false monoid instances (gate)**
+
+Delete `RiskResult.combine`, `Associative/Commutative[RiskResult]`, `RiskResultIdentityInstances`,
+`RiskResult.withNodeId`, `LossDistributionType` enum.
+
+Run `sbt test` — must still be green.
+
+> `scala-test.instructions.md` rule: **never weaken an assertion to fix a failing test.
+> If a test fails, the implementation is wrong. Fix the implementation.**
 
 ### A.7 Decision gates before any implementation
 
-1. Index-alignment invariant (A.4, row 1).
-2. `empty` semantics under fixed-N (A.4, row 3).
-3. Provenance-merge law confirmation against ADR-003 (A.4, row 2).
+1. ~~Index-alignment invariant (A.4, row 1).~~ ✅ **Resolved** — the alignment check moves from
+   `RiskResult.combine` (being deleted) to `RiskResultGroup.apply` (explicit `require` per A.5).
+   The guard must be added to `apply` before the resolver is changed (Step 2 in A.6).
+2. ~~`empty` semantics under fixed-N (A.4, row 3).~~ ✅ **Resolved** — `TrialOutcomes` (Option 1) or `RiskResultGroup.apply` empty-list path (Option 2).
+3. ~~Provenance-merge law confirmation against ADR-003 (A.4, row 2).~~ ✅ **Resolved** — provenance stays in leaves; portfolio access is `children.flatMap(_.provenances)` at read time.
 4. Whether to introduce a distinct aggregate type (resolving the Leaf-as-aggregate smell) or keep
    `RiskResult` and only formalize combine. **This touches `RiskResult` shape → trigger #4/#5.**
+   > **Audit update**: `RiskResultGroup` already exists as the correct composite type in
+   > `LossDistribution.scala`. The design decision is already made in code — the question is
+   > whether to wire the resolver to use it. This is a **behaviour change** → trigger #5.
 
 ---
 
-## PART B — Mitigation design exploration (OPEN TOPIC)
+## PART B — Mitigation
 
-> No good design currently exists. This section proposes options with merits/cons. **Nothing here
-> is approved.** Some options imply new API surface and are flagged accordingly.
+> **Audit update (2026-06-18)**: B3 (result-stage endomorphism) is **fully implemented** as
+> `RiskTransform` in `modules/common/.../domain/data/RiskTransform.scala`. It has `applyDeductible`,
+> `capLosses`, `scaleLosses`, `insurancePolicy`, `filterBelowThreshold`, and a lawful
+> `Identity[RiskTransform]` with property tests. **It is not wired into any production call path
+> and does not record provenance.** B1 (parameter-stage) does not exist. B2 is subsumed by B3
+> (transforms operate on `Map[TrialId, Loss]` inside `RiskResult`). The section below is
+> preserved for historical context; options B1–B4 are no longer open questions — B3 is the answer.
+
+> Original note: No good design currently existed. This section proposed options with merits/cons.
+> Some options imply new API surface and are flagged accordingly.
 
 ### B.0 Overview of the design space
 
@@ -200,27 +414,29 @@ From the conversation: a post-loss transform (deductible, insurance cap) mapped 
 
 ---
 
-### Option B3 — Result-stage mitigation (`RiskResult => RiskResult`)
+### Option B3 — Result-stage mitigation (`RiskResult => RiskResult`) ✅ IMPLEMENTED
 
-A mitigation as an endomorphism on the whole `RiskResult` (transforms outcomes **and** appends
-provenance in one place).
+A mitigation as an endomorphism on the whole `RiskResult`. **This is implemented as `RiskTransform`.**
 
-**Merits**
-- **Single, honest home for provenance**: the mitigation *is* the provenance event. Best alignment
-  with ADR-003.
-- Composes as endomorphism; can be ordered.
-- Operates at the same granularity as the cache (`RiskResult` per node), so caching story is
-  explicit and controllable.
-- **Composes naturally with Part A**: if `RiskResult` has a monoid for aggregation, mitigations are
-  endomorphisms on the same object — a clean, unified algebra (monoid for combine, endomorphisms
-  for mitigation).
+`RiskTransform` is `case class RiskTransform(run: RiskResult => RiskResult)` with:
+- `Identity[RiskTransform]` (lawful; `combine` = ordered composition `l then r`)
+- `applyDeductible(d: Loss)`, `capLosses(c: Loss)`, `scaleLosses(f: Double)`,
+  `insurancePolicy(d: Loss, c: Loss)`, `filterBelowThreshold(t: Loss)`
+- Property tests for all identity laws in `RiskTransformSpec`
 
-**Cons**
-- Most invasive to `RiskResult` semantics (now both a sampling output *and* a transformation
-  target) — trigger #4/#5.
-- Requires deciding caching of pre/post-mitigation results.
+**What it does**: maps `RiskResult.outcomes` via per-trial `Long => Long` transforms. Works on
+the sparse `Map[TrialId, Loss]` inside `RiskResult` — which is B2 (outcome-level) expressed
+through the B3 (result-level) interface. Both concerns are unified.
 
-**API impact**: none if internal; new surface if exposed.
+**Remaining gaps before B3 is complete**:
+1. **Provenance not recorded**: no transform appends a mitigation event to `RiskResult.provenances`.
+   To satisfy ADR-003, each named transform must record what it did and at what parameter.
+2. **Not wired**: no service, controller, or API invokes `RiskTransform`. It is pure domain
+   infrastructure waiting to be connected.
+3. **Caching decision open**: cache pre-mitigation result only (raw), apply transforms at read
+   time? Or cache mitigated variants separately? This is **trigger #5** (behaviour change).
+
+**API impact**: none currently (internal only); new surface required if clients submit transforms.
 
 ---
 
@@ -255,8 +471,8 @@ children).
 ### B.6 Tentative recommendation (for discussion, not approved)
 
 - **Most promising single direction: B3 (result-stage endomorphism)**, *because* it unifies with
-  Part A (monoid for aggregation + endomorphisms for mitigation = one coherent algebra on
-  `RiskResult`) and gives provenance a single honest home (ADR-003).
+  Part A (monoid for aggregation on `TrialOutcomes` + endomorphisms for mitigation on
+  `LossDistribution` = one coherent algebra) and gives provenance a single honest home (ADR-003).
 - **B1** remains attractive as a *complementary* mechanism for mitigations that are genuinely
   parameter changes (lower frequency), since it requires essentially zero new machinery and is the
   best cache fit.
@@ -267,14 +483,13 @@ children).
   unlawful and is exactly the kind of "mathematically pretty but wrong" trap the source
   conversation falls into elsewhere.
 
-### B.7 Open decisions for mitigation (all blocking)
+### B.7 Open decisions for mitigation
 
-1. Which stage(s) to support — single (B3?) or a small combination (B1 + B3)?
-2. Composition algebra: ordered endomorphisms vs. monoid (recommendation: ordered).
-3. Caching of pre- vs. post-mitigation results.
-4. **Whether mitigation becomes a client-facing concept** → if yes, this is a deliberate **API-shape
-   decision** (trigger #1) requiring its own ADR, not a refactor.
-5. Provenance representation of a mitigation event (ADR-003).
+1. ~~Which stage(s) to support — single (B3?) or a small combination (B1 + B3)?~~ ✅ **Resolved** — B3 (`RiskTransform`) is implemented. B1 has no implementation and no use case identified yet.
+2. ~~Composition algebra: ordered endomorphisms vs. monoid (recommendation: ordered).~~ ✅ **Resolved** — `Identity[RiskTransform]` uses ordered composition (`l then r`); `andThen`/`compose` methods explicit.
+3. **Caching of pre- vs. post-mitigation results.** Still open. Current cache stores raw results; `RiskTransform` is applied outside the cache. Decision needed before any production wiring. → **trigger #5**
+4. **Whether mitigation becomes a client-facing concept** → if yes, this is a deliberate **API-shape decision** (trigger #1) requiring its own ADR, not a refactor.
+5. **Provenance representation of a mitigation event** — `RiskTransform` currently does not append to `RiskResult.provenances`. What `NodeProvenance` or new type should record a transform application is unresolved.
 
 ---
 
@@ -288,10 +503,24 @@ gap. **Do not parallelize it independently** — its correctness depends on the 
 law. Treat C.1 as the *payoff* of Part A, not a separate task. (Cross-ref:
 `docs/scratch/milestone-2b-cache-and-decisions.md`.)
 
-### C.2 Aggregate type vs. `RiskResult` reuse
-Resolve the documented Leaf-as-aggregate smell *as part of* Part A decision A.7.4. Either introduce
-a distinct aggregate representation or formally bless `RiskResult` as the aggregate via the monoid.
-Pick one deliberately — drifting is the current problem.
+### C.2 Aggregate type vs. `RiskResult` reuse — Leaf-as-aggregate smell
+
+> **Audit update**: `RiskResultGroup` exists in `LossDistribution.scala` as the correct
+> composite subtype of `LossDistribution`. It carries `children: List[RiskResult]` alongside
+> the combined `outcomes: Map[TrialId, Loss]`. The design decision (introduce a distinct
+> aggregate type) is **already made in code**.
+
+**The smell, precisely**: `RiskResultResolverLive.simulateNode` aggregates portfolio children via
+`childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b)).withNodeId(portfolio.id)`.
+This produces a `RiskResult` whose type is `Leaf` (the subtype), despite carrying a portfolio's
+`nodeId`. Children are discarded. Downstream code cannot distinguish a simulated leaf from an
+aggregated portfolio.
+
+**The fix**: replace the `reduce` + `withNodeId` with `RiskResultGroup(portfolio.id, childResults*)`,
+which stores the children list and carries the correct `Composite` type tag. The resolver's
+return type for portfolio paths must change from `Task[RiskResult]` to `Task[LossDistribution]`
+(the common supertype) — or the cache must be widened. **This is a behaviour change → trigger #5.**
+See A.7 gate 4.
 
 ### C.3 `includeProvenance` flag honesty
 `RiskResultResolver` exposes `includeProvenance`, but the live implementation always captures
@@ -309,10 +538,37 @@ purely to close the door.
 
 ---
 
-## Pickup checklist (next session)
+## Pickup checklist (updated after 2026-06-18 design review)
 
-1. Resolve A.7 decision gates (esp. index-alignment + `empty` semantics + Leaf-vs-aggregate).
-2. Load `adr-constraints` (new/changed types touch ADR-003/014/015).
-3. Write monoid-law property tests **first**; prove laws before any resolver behaviour change.
-4. Resolve B.7 decisions; if mitigation goes client-facing, open a separate ADR (API decision).
-5. Only then implement, ending with the mandatory `code-quality-review`.
+**Resolved — no action needed:**
+- A.4 rows 1–3 (alignment, provenance, empty semantics) — resolved (see audit).
+- `RiskResult → LossDistribution` widening — confirmed mechanical, zero logic change.
+- `LossDistributionType` enum — confirmed dead code, safe to delete.
+- B3 design choice — implemented as `RiskTransform`.
+- B.7 decisions 1–2 (stage selection, composition algebra) — resolved in code.
+
+**Remaining open items (each requires a Decision before work starts):**
+
+1. **Option 1 vs Option 2 for A.1** — Introduce explicit `TrialOutcomes` type (Option 1) or
+   proceed with minimum viable fix only (Option 2, delete false monoid + use `RiskResultGroup`)?
+   Option 1 is richer; Option 2 is smaller scope. New type in shared module → **trigger #4**.
+
+2. **Delete false monoid + fix resolver** — once Option 1/2 decided, execute in the order
+   specified by A.6 (Steps 1–5). Key work items within that sequence:
+   - Add `require` alignment guard to `RiskResultGroup.apply` (A.5, A.6 Step 2).
+   - Delete `RiskResult.combine`, `Associative/Commutative[RiskResult]`, `RiskResultIdentityInstances`,
+     `RiskResult.withNodeId`, `LossDistributionType` enum.
+   - Widen `RiskResultGroup.children` to `List[LossDistribution]`.
+   - Replace resolver `reduce(combine)` with `RiskResultGroup(portfolio.id, childResults*)`.
+   - Widen cache and all downstream signatures to `LossDistribution`.
+   - Behaviour change in resolver → **trigger #5**.
+
+3. **Tests — follow A.6 sequencing (Steps 1–5 are mandatory gates)**. Step 1 must be
+   completed on the current code before any implementation begins.
+
+4. **B.7 decision 3**: Caching policy for pre- vs. post-mitigation results before wiring
+   `RiskTransform` into any production call path. → **trigger #5**.
+5. **B.7 decision 5**: Provenance representation for a `RiskTransform` application (ADR-003).
+6. **B.7 decision 4**: If mitigation becomes client-facing, open a separate ADR (trigger #1).
+7. Load `adr-constraints` before any implementation phase.
+8. End with mandatory `code-quality-review`.
