@@ -19,7 +19,7 @@ out javascript:, data:, file: vectors; path `[^\s]*` is broad but necessary). No
 type SafeNameConstraint = Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9 /\\-]+$"]
 ```
 Allowed: letters, digits, space, `/`, `-`  
-Excluded by decision: `(`, `)`, `&` — not present in any existing fixtures or demos; no special injection risk but excluded per "no character not already used" rule.
+Excluded by decision: `(`, `)`, `&` — present in the enterprise demo fixtures but not required; excluded per "no character not strictly needed" rule. All existing uses will be replaced in Step 4 (see replacements listed there).
 
 ### ValidEmail
 ```
@@ -68,8 +68,12 @@ Replacements must preserve meaning:
 - `Third-Party & Supply Chain` → `Third-Party and Supply Chain`
 - `Compliance & Legal Risk` → `Compliance and Legal Risk`
 
-Replacements that would change a name used as a foreign key reference (e.g. `parentName`)
-**must be updated at every reference site in the same file** atomically.
+Replacements that would change a name must be applied at **every reference site** atomically:
+- `parentName` fields in the same fixture that reference the old name
+- FOL query string literals in the same file that embed the old name as a quoted constant
+  (e.g. `descendant_of(x, "Technology & Cyber")` → `descendant_of(x, "Technology and Cyber")`)
+  Note: `&` is not special in the FOL lexer inside quoted strings — the update is purely
+  a data-consistency requirement, not a syntax fix.
 
 ### Step 2 — Update Iron types
 

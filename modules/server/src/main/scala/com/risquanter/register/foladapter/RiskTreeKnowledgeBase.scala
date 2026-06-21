@@ -6,7 +6,9 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.common.FolSymbols
 
-import fol.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, RuntimeDispatcher, Value}
+import fol.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, Value}
+import fol.typed.extract
+import fol.typed.MapDispatcher
 
 /** Bridges the register domain (RiskTree + simulation results) to the vql-engine
   * typed evaluation pipeline.
@@ -204,113 +206,72 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
       node.name.value.toString -> descNames
     }
 
-  val dispatcher: RuntimeDispatcher = new RuntimeDispatcher:
+  private def lookupResult(assetName: String, ctx: String): Either[String, RiskResult] =
+    nameToResult.get(assetName).toRight(s"$ctx: no simulation result for asset '$assetName'")
 
-    override def functionSymbols: Set[SymbolName] =
-      Set(SymbolName("p95"), SymbolName("p99"), SymbolName("lec"))
-
-    override def predicateSymbols: Set[SymbolName] =
-      Set(
-        SymbolName("leaf"), SymbolName("portfolio"),
-        SymbolName("child_of"), SymbolName("descendant_of"),
-        SymbolName("leaf_descendant_of"),
-        SymbolName("gt_loss"), SymbolName("gt_prob")
-      )
-
-    override def evalFunction(name: SymbolName, args: List[Value]): Either[String, Any] =
-      name.value match
-        case "p95" =>
-          for
-            assetName <- extractString(args, 0, "p95")
-            result    <- lookupResult(assetName, "p95")
-          yield percentile(result, 0.95)
-
-        case "p99" =>
-          for
-            assetName <- extractString(args, 0, "p99")
-            result    <- lookupResult(assetName, "p99")
-          yield percentile(result, 0.99)
-
-        case "lec" =>
-          for
-            assetName <- extractString(args, 0, "lec")
-            threshold <- extractLong(args, 1, "lec")
-            result    <- lookupResult(assetName, "lec")
-          yield result.probOfExceedance(threshold)
-
-        case other =>
-          Left(s"Unknown function: $other")
-
-    override def evalPredicate(name: SymbolName, args: List[Value]): Either[String, Boolean] =
-      name.value match
-        case "leaf" =>
-          extractString(args, 0, "leaf").map(leafNames.contains)
-
-        case "portfolio" =>
-          extractString(args, 0, "portfolio").map(portfolioNames.contains)
-
-        case "child_of" =>
-          for
-            child  <- extractString(args, 0, "child_of")
-            parent <- extractString(args, 1, "child_of")
-          yield childrenByName.getOrElse(parent, Set.empty).contains(child)
-
-        case "descendant_of" =>
-          for
-            desc     <- extractString(args, 0, "descendant_of")
-            ancestor <- extractString(args, 1, "descendant_of")
-          yield descendantsByName.getOrElse(ancestor, Set.empty).contains(desc)
-
-        case "leaf_descendant_of" =>
-          for
-            desc     <- extractString(args, 0, "leaf_descendant_of")
-            ancestor <- extractString(args, 1, "leaf_descendant_of")
-          yield
-            val descs = descendantsByName.getOrElse(ancestor, Set.empty)
-            descs.contains(desc) && leafNames.contains(desc)
-
-        case "gt_loss" =>
-          for
-            a <- extractLong(args, 0, "gt_loss")
-            b <- extractLong(args, 1, "gt_loss")
-          yield a > b
-
-        case "gt_prob" =>
-          for
-            a <- extractDouble(args, 0, "gt_prob")
-            b <- extractDouble(args, 1, "gt_prob")
-          yield a > b
-
-        case other =>
-          Left(s"Unknown predicate: $other")
-
-    // ── Value extraction helpers ─────────────────────────────────────
-
-    private def extractString(args: List[Value], idx: Int, ctx: String): Either[String, String] =
-      args.lift(idx).toRight(s"$ctx: missing argument at index $idx").flatMap { v =>
-        v.raw match
-          case s: String => Right(s)
-          case other     => Left(s"$ctx: expected String at index $idx, got ${other.getClass.getSimpleName}")
+  val dispatcher: MapDispatcher = MapDispatcher(
+    functions = Map(
+      SymbolName("p95") -> { args =>
+        for
+          assetName <- args(0).extract[String]
+          result    <- lookupResult(assetName, "p95")
+        yield percentile(result, 0.95)
+      },
+      SymbolName("p99") -> { args =>
+        for
+          assetName <- args(0).extract[String]
+          result    <- lookupResult(assetName, "p99")
+        yield percentile(result, 0.99)
+      },
+      SymbolName("lec") -> { args =>
+        for
+          assetName <- args(0).extract[String]
+          threshold <- args(1).extract[Long]
+          result    <- lookupResult(assetName, "lec")
+        yield result.probOfExceedance(threshold)
       }
-
-    private def extractLong(args: List[Value], idx: Int, ctx: String): Either[String, Long] =
-      args.lift(idx).toRight(s"$ctx: missing argument at index $idx").flatMap { v =>
-        v.raw match
-          case l: Long => Right(l)
-          case other   => Left(s"$ctx: expected Long at index $idx, got ${other.getClass.getSimpleName}")
+    ),
+    predicates = Map(
+      SymbolName("leaf") -> { args =>
+        args(0).extract[String].map(leafNames.contains)
+      },
+      SymbolName("portfolio") -> { args =>
+        args(0).extract[String].map(portfolioNames.contains)
+      },
+      SymbolName("child_of") -> { args =>
+        for
+          child  <- args(0).extract[String]
+          parent <- args(1).extract[String]
+        yield childrenByName.getOrElse(parent, Set.empty).contains(child)
+      },
+      SymbolName("descendant_of") -> { args =>
+        for
+          desc     <- args(0).extract[String]
+          ancestor <- args(1).extract[String]
+        yield descendantsByName.getOrElse(ancestor, Set.empty).contains(desc)
+      },
+      SymbolName("leaf_descendant_of") -> { args =>
+        for
+          desc     <- args(0).extract[String]
+          ancestor <- args(1).extract[String]
+        yield
+          val descs = descendantsByName.getOrElse(ancestor, Set.empty)
+          descs.contains(desc) && leafNames.contains(desc)
+      },
+      SymbolName("gt_loss") -> { args =>
+        for
+          a <- args(0).extract[Long]
+          b <- args(1).extract[Long]
+        yield a > b
+      },
+      SymbolName("gt_prob") -> { args =>
+        for
+          a <- args(0).extract[Double]
+          b <- args(1).extract[Double]
+        yield a > b
       }
-
-    private def extractDouble(args: List[Value], idx: Int, ctx: String): Either[String, Double] =
-      args.lift(idx).toRight(s"$ctx: missing argument at index $idx").flatMap { v =>
-        v.raw match
-          case d: Double => Right(d)
-          case other     => Left(s"$ctx: expected Double at index $idx, got ${other.getClass.getSimpleName}")
-      }
-
-    private def lookupResult(assetName: String, ctx: String): Either[String, RiskResult] =
-      nameToResult.get(assetName).toRight(s"$ctx: no simulation result for asset '$assetName'")
-
-  end dispatcher
+    )
+  )
 
   // ── RuntimeModel ───────────────────────────────────────────────────
 

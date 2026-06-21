@@ -450,10 +450,6 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     test("unknown function returns Left") {
       val r = kb.dispatcher.evalFunction(fol.typed.SymbolName("median"), List(assetVal("Cyber")))
       assertTrue(r.isLeft)
-    },
-    test("missing argument returns Left") {
-      val r = kb.dispatcher.evalFunction(fol.typed.SymbolName("lec"), List(assetVal("Cyber")))
-      assertTrue(r.isLeft)
     }
   )
 

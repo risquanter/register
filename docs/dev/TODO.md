@@ -214,31 +214,70 @@ from a Maven registry (GitHub Packages or Maven Central):
 
 ---
 
-## 5a. [LOW PRIO / EXTERNAL] `vague-quantifier-logic` — characterise non-feasible metalog behaviour
+## 5a. [LOW PRIO / EXTERNAL] `vague-quantifier-logic` — add monotonicity validation to metalog constructor
 
-**Context (external project):** `MetalogDistribution.fromPercentilesUnsafe` in
-`vague-quantifier-logic` accepts quantile arrays that are non-monotone (decreasing
-or flat). It fits a distribution to the supplied data regardless of whether the
-resulting quantile function is itself monotone. This is mathematically correct for
-a general fitting library — the name "unsafe" signals that no domain-level
-semantic validation is performed.
+**Context assessment:**
+`MetalogDistribution.fromPercentilesUnsafe` accepts non-monotone quantile arrays
+and silently returns `Right(_)`. The metalog is not a general curve-fitter;
+its mathematical foundation is that the quantile function $Q(p)$ **is** the
+distribution. You supply $\{(p_i, q_i)\}$ pairs, solve the linear system
+$\mathbf{q} = \mathbf{M}\mathbf{a}$ for coefficients $\mathbf{a}$, and the result
+is a valid probability distribution if and only if $Q'(p) > 0$ for all
+$p \in (0, 1)$. Non-monotone input quantile values (e.g. $q_{0.25} > q_{0.50}$)
+violate the precondition of the function — the linear system can still be solved,
+but the result has a negative PDF on some interval and is not a probability
+distribution. Accepting such input and returning `Right(_)` is a contract error,
+not a design feature.
 
-**What's missing:** There are no tests in `vague-quantifier-logic` that *document*
-this behaviour. A future maintainer could mistakenly add an early-rejection guard
-on quantile ordering, which would silently break callers that rely on the library
-fitting degenerate inputs (e.g. stress-testing or boundary exploration use cases).
+**Correct action in `vague-quantifier-logic`:**
+Add a `fromPercentiles` constructor that validates strict monotonicity of the
+supplied quantile values before fitting and returns
+`Either[MonotoneViolation, MetalogDistribution]`. The existing
+`fromPercentilesUnsafe` can delegate to it (strip the `Right` branch) or be
+documented to explicitly require monotone input as a precondition — whichever
+is more consistent with the library's internal conventions.
 
-**Suggested addition to `vague-quantifier-logic`:**
-A characterisation test that verifies:
-1. `fromPercentilesUnsafe` with strictly decreasing quantiles returns `Right(_)` (fits without error).
-2. The resulting distribution's quantile function is non-monotone (i.e. the CDF
-   is not well-formed), serving as an explicit documentation of the library's
-   contract boundary.
+The validation is a simple linear scan: for each adjacent pair
+$(q_i, q_{i+1})$, assert $q_i < q_{i+1}$. The error value should carry the
+violating pair and its indices so the caller can surface a meaningful message.
 
-**Relation to this repo:** `DistributionPreviewRequest.validate()` (register)
-enforces strict quantile monotonicity at the request layer precisely *because* the
-library does not. The two invariants are complementary and intentionally at
-different layers.
+**Consequence for this repo (`register`):**
+`DistributionPreviewRequest.validate()` currently enforces strict quantile
+monotonicity at the request layer *because* the library does not. Once the
+library validates its own preconditions, register's check becomes
+redundant-but-harmless defence-in-depth. It should be kept as-is (it provides
+a user-facing error message before any IO) but annotated with a comment
+explaining the layering:
+
+```scala
+// Validates monotonicity before dispatching to the library.
+// vague-quantifier-logic's fromPercentiles also validates — this check
+// surfaces a structured request-layer error earlier.
+```
+
+**Follow-up steps:**
+
+1. **`simulation-util` / `vague-quantifier-logic`**
+   - Add `MonotoneViolation` error type (or reuse an existing validation error
+     type if one exists) carrying the violating indices and values.
+   - Implement `fromPercentiles(...): Either[MonotoneViolation, MetalogDistribution]`
+     with the linear scan guard before the fitting call.
+   - Add a unit test: `fromPercentiles` with non-monotone input returns `Left(_)`;
+     `fromPercentiles` with strictly increasing input returns `Right(_)` and
+     agrees with `fromPercentilesUnsafe` on a known fixture.
+   - Update `fromPercentilesUnsafe` scaladoc to state the monotonicity precondition
+     explicitly.
+
+2. **`register`**
+   - Update the call site in `DistributionPreviewService` (or wherever
+     `fromPercentilesUnsafe` is called) to use `fromPercentiles` instead,
+     removing the `Unsafe` call entirely.
+   - Add the layering comment to `DistributionPreviewRequest.validate()` as above.
+   - No behaviour change; the monotonicity error is already surfaced before this
+     call site is reached.
+
+**Status:** root cause confirmed, fix not yet started. Blocked on
+`simulation-util` work.
 
 ---
 

@@ -33,6 +33,9 @@ sed -n 's/ThisBuild \/ version := "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
 
 For local development, `.env` is optional — compose falls back to the `dev` tag when absent.
 The file is needed when version tags must match a `build.sbt` bump, and in CI.
+If you add or update `.env` after images were already built without it, run
+`docker compose build` again before `docker compose up` — otherwise compose will look for the
+versioned tag (e.g. `:0.1.1`) while only the `:dev` image exists locally.
 
 ---
 
