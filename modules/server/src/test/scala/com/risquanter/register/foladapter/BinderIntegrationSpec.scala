@@ -5,6 +5,7 @@ import zio.test.*
 import com.risquanter.register.domain.data.{RiskResult, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -135,47 +136,50 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
         )
       },
 
-      test("B3: injection-shaped node name — binder echoes only the query token, never the embedded payload") {
-        // Tree fixture: a single node whose name carries a grammar-meaningful payload.
-        // SafeName allows arbitrary non-blank ≤50-char strings, so this construction is
-        // a legal in-memory state reachable through any non-DTO write path.
-        val rootIdStr = idStr("root-inj")
-        val payloadIdStr = idStr("payload")
+      test("B3: injection-shaped node name is rejected at SafeName construction with a clear error") {
+        // SafeName now enforces ^[A-Za-z0-9 /\\-]+$ — the characters `"` and `)`
+        // used in the canonical injection payload `foo")` are forbidden.
+        // This test documents that:
+        //   1. The injection-shaped name is rejected (not silently accepted)
+        //   2. The rejection produces a structured ValidationError with a user-readable message
+        //   3. The error code is INVALID_PATTERN so clients can distinguish it from
+        //      REQUIRED_FIELD or INVALID_LENGTH
+        //
+        // The threat model tested by the original B3 (a node with `foo")` bypassing
+        // DTO validators via a direct write path) is now CLOSED at the type level:
+        // SafeName.fromString enforces the whitelist on every construction path.
         val payloadName = """foo")"""
-        val rootP = RiskPortfolio.unsafeApply(
-          id = rootIdStr, name = "RootInj",
-          childIds = Array(NodeId(safeId("payload"))), parentId = None
-        )
-        val payload = RiskLeaf.unsafeApply(
-          id = payloadIdStr, name = payloadName,
-          distributionType = "lognormal", probability = 0.1,
-          minLoss = Some(1L), maxLoss = Some(2L),
-          parentId = Some(NodeId(safeId("root-inj")))
-        )
-        val injTree = bypassTree(Seq(rootP, payload))
-        val injKb   = RiskTreeKnowledgeBase(injTree, Map.empty)
+        val result = SafeName.fromString(payloadName)
 
-        // KB constructed without exception; the payload-shaped name is registered as a constant.
-        val kbBuilt = injKb.catalog.constants.contains(payloadName)
+        import com.risquanter.register.domain.errors.ValidationErrorCode
+        import com.risquanter.register.domain.data.iron.ValidationMessages
 
-        // Query references the bare token "foo" (lexer's "-terminator stops at the first ")".
-        val text   = """Q[>=]^{1/2} x (leaf_descendant_of(x, "foo"), leaf(x))"""
-        val parsed = VagueQueryParser.parse(text).toOption.get
-        val bound  = QueryBinder.bind(parsed, injKb.catalog)
-
-        // Binder rejects with the offending token "foo" — never re-feeds the embedded
-        // payload `foo")` into any error path. Locks PLAN §10's Map.get verdict in code:
-        // if anyone swaps Map.get for string interpolation, this assertion catches it.
-        val errors = bound.left.toOption.getOrElse(Nil)
-        val unknownTokens = errors.collect {
-          case TypeCheckError.UnknownConstantOrLiteral(name) => name
-        }
         assertTrue(
-          kbBuilt,
-          bound.isLeft,
-          unknownTokens.contains("foo"),
-          !unknownTokens.exists(_.contains(payloadName))
+          result.isLeft,
+          result.left.exists(_.exists(_.code == ValidationErrorCode.INVALID_PATTERN)),
+          result.left.exists(_.exists(_.message == ValidationMessages.nameInvalidChars))
         )
+      },
+
+      test("B4: injection-shaped query string is rejected at parse or bind level — not evaluated") {
+        // Documents the structural guarantee: if a node name were ever interpolated
+        // into a query string (it is not — names are looked up via Map.get only),
+        // the resulting malformed query would be caught before any dispatcher lambda
+        // is invoked.
+        //
+        // Attack shape: "IT Risk" is a valid constant; the closing " terminates the
+        // literal, and the characters that follow (`, gt_loss(p95(x), 0)`) would be
+        // injection candidates. The trailing `""` (empty string literal) in argument
+        // position produces either a parse error or an arity mismatch at bind time.
+        //
+        // If this test fails (assertTrue on a false value), the parser returned a
+        // successful evaluation result for injection-shaped input. Stop immediately
+        // and consult the user — do not attempt to work around the failure.
+        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 0"))"""
+        val rejected = VagueQueryParser.parse(text) match
+          case Left(_)       => true
+          case Right(parsed) => QueryBinder.bind(parsed, kb.catalog).isLeft
+        assertTrue(rejected)
       }
     )
 

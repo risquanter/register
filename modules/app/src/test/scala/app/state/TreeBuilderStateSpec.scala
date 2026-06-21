@@ -126,7 +126,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId)
         )
-        val tree  = mkTree(treeUlid, "Root+Leaf", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val tree  = mkTree(treeUlid, "Root and Leaf", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         assertTrue(state.portfoliosVar.now().length == 1) &&

@@ -16,8 +16,8 @@ type SafeShortStr = String :| (Not[Blank] & MaxLength[50])
 // Extra short strings (e.g., for tags, codes)
 type SafeExtraShortStr = String :| (Not[Blank] & MaxLength[20])
 
-// Email with format validation (single @, max 50 chars)
-type ValidEmail = String :| (Not[Blank] & MaxLength[50] & Match["[^@]+@[^@]+"])
+// Email with format validation (whitelist regex: local-part, @, domain with TLD)
+type ValidEmail = String :| (Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$"])
 
 // URL constraints for service/internal calls (http/https with hostname, IPv4, or IPv6, optional port/path)
 type UrlConstraint = Not[Blank] & MaxLength[200] & Match["^(?i)https?://(?:\\[[0-9a-fA-F:]+\\]|[^/:#?\\s]+)(?::\\d+)?(?:/[^\\s]*)?$"]
@@ -102,17 +102,23 @@ type OccurrenceProbability = Double :| (GreaterEqual[0.0] & LessEqual[1.0])
 // Distribution type string (must be "expert" or "lognormal")
 type DistributionType = String :| Match["^(expert|lognormal)$"]
 
+// SafeName character whitelist: letters, digits, space, hyphen, forward-slash.
+// Excludes HTML/script/FOL-grammar chars. Deliberately narrow — add only when
+// a concrete use case requires the character and no injection risk exists.
+type SafeNameConstraint = Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9 /\\-]+$"]
+type SafeNameStr = String :| SafeNameConstraint
+
 // Opaque type for names - prevents mixing with other string types
 object SafeName:
-  opaque type SafeName = SafeShortStr
+  opaque type SafeName = SafeNameStr
   
   object SafeName:
-    def apply(s: SafeShortStr): SafeName = s
+    def apply(s: SafeNameStr): SafeName = s
     // Extractor for pattern matching:
-    def unapply(sn: SafeName): Option[SafeShortStr] = Some(sn)
+    def unapply(sn: SafeName): Option[SafeNameStr] = Some(sn)
     
   extension (sn: SafeName) 
-    def value: SafeShortStr = sn
+    def value: SafeNameStr = sn
   
   // Convenience constructor from plain String
   def fromString(s: String): Either[List[ValidationError], SafeName] = 

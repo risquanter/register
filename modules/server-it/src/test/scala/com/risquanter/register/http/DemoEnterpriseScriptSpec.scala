@@ -25,20 +25,20 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
     portfolios = Seq(
       RiskPortfolioDefinitionRequest(name = "Enterprise Risk",               parentName = None),
       RiskPortfolioDefinitionRequest(name = "Operational Risk",              parentName = Some("Enterprise Risk")),
-      RiskPortfolioDefinitionRequest(name = "Technology & Cyber",            parentName = Some("Operational Risk")),
-      RiskPortfolioDefinitionRequest(name = "Process & People",              parentName = Some("Operational Risk")),
-      RiskPortfolioDefinitionRequest(name = "Third-Party & Supply Chain",    parentName = Some("Operational Risk")),
+      RiskPortfolioDefinitionRequest(name = "Technology and Cyber",            parentName = Some("Operational Risk")),
+      RiskPortfolioDefinitionRequest(name = "Process and People",              parentName = Some("Operational Risk")),
+      RiskPortfolioDefinitionRequest(name = "Third-Party and Supply Chain",    parentName = Some("Operational Risk")),
       RiskPortfolioDefinitionRequest(name = "Financial Risk",                parentName = Some("Enterprise Risk")),
       RiskPortfolioDefinitionRequest(name = "Market Risk",                   parentName = Some("Financial Risk")),
       RiskPortfolioDefinitionRequest(name = "Credit Risk",                   parentName = Some("Financial Risk")),
       RiskPortfolioDefinitionRequest(name = "Liquidity Risk",                parentName = Some("Financial Risk")),
-      RiskPortfolioDefinitionRequest(name = "Compliance & Legal Risk",       parentName = Some("Enterprise Risk")),
-      RiskPortfolioDefinitionRequest(name = "Strategic & Reputational Risk", parentName = Some("Enterprise Risk"))
+      RiskPortfolioDefinitionRequest(name = "Compliance and Legal Risk",       parentName = Some("Enterprise Risk")),
+      RiskPortfolioDefinitionRequest(name = "Strategic and Reputational Risk", parentName = Some("Enterprise Risk"))
     ),
     leaves = Seq(
-      // ── Technology & Cyber (4 leaves) ────────────────────────────────────
+      // ── Technology and Cyber (4 leaves) ────────────────────────────────────
       RiskLeafDefinitionRequest(
-        name = "Ransomware Attack", parentName = Some("Technology & Cyber"),
+        name = "Ransomware Attack", parentName = Some("Technology and Cyber"),
         probability = 0.15,
         distributionShape = DistributionShapeRequest(
           distributionType = "expert",
@@ -48,7 +48,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Cloud Provider Outage", parentName = Some("Technology & Cyber"),
+        name = "Cloud Provider Outage", parentName = Some("Technology and Cyber"),
         probability = 0.30,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -57,7 +57,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Data Breach (PII)", parentName = Some("Technology & Cyber"),
+        name = "Data Breach - PII", parentName = Some("Technology and Cyber"),
         probability = 0.10,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -66,7 +66,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Insider Threat", parentName = Some("Technology & Cyber"),
+        name = "Insider Threat", parentName = Some("Technology and Cyber"),
         probability = 0.05,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -74,9 +74,9 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           percentiles = None, quantiles = None, terms = None
         )
       ),
-      // ── Process & People (3 leaves) ───────────────────────────────────────
+      // ── Process and People (3 leaves) ───────────────────────────────────────
       RiskLeafDefinitionRequest(
-        name = "Key Person Departure", parentName = Some("Process & People"),
+        name = "Key Person Departure", parentName = Some("Process and People"),
         probability = 0.20,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -85,7 +85,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Internal Fraud", parentName = Some("Process & People"),
+        name = "Internal Fraud", parentName = Some("Process and People"),
         probability = 0.08,
         distributionShape = DistributionShapeRequest(
           distributionType = "expert",
@@ -95,7 +95,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Process Failure", parentName = Some("Process & People"),
+        name = "Process Failure", parentName = Some("Process and People"),
         probability = 0.25,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -103,9 +103,9 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           percentiles = None, quantiles = None, terms = None
         )
       ),
-      // ── Third-Party & Supply Chain (3 leaves) ─────────────────────────────
+      // ── Third-Party and Supply Chain (3 leaves) ─────────────────────────────
       RiskLeafDefinitionRequest(
-        name = "Critical Vendor Failure", parentName = Some("Third-Party & Supply Chain"),
+        name = "Critical Vendor Failure", parentName = Some("Third-Party and Supply Chain"),
         probability = 0.12,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -114,7 +114,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Outsourcing SLA Breach", parentName = Some("Third-Party & Supply Chain"),
+        name = "Outsourcing SLA Breach", parentName = Some("Third-Party and Supply Chain"),
         probability = 0.20,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -123,7 +123,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Concentration Risk", parentName = Some("Third-Party & Supply Chain"),
+        name = "Concentration Risk", parentName = Some("Third-Party and Supply Chain"),
         probability = 0.08,
         distributionShape = DistributionShapeRequest(
           distributionType = "expert",
@@ -182,9 +182,9 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           percentiles = None, quantiles = None, terms = None
         )
       ),
-      // ── Compliance & Legal Risk (3 leaves) ────────────────────────────────
+      // ── Compliance and Legal Risk (3 leaves) ────────────────────────────────
       RiskLeafDefinitionRequest(
-        name = "Regulatory Action", parentName = Some("Compliance & Legal Risk"),
+        name = "Regulatory Action", parentName = Some("Compliance and Legal Risk"),
         probability = 0.12,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -193,7 +193,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Litigation", parentName = Some("Compliance & Legal Risk"),
+        name = "Litigation", parentName = Some("Compliance and Legal Risk"),
         probability = 0.08,
         distributionShape = DistributionShapeRequest(
           distributionType = "expert",
@@ -203,7 +203,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "GDPR / Data Protection Fine", parentName = Some("Compliance & Legal Risk"),
+        name = "GDPR / Data Protection Fine", parentName = Some("Compliance and Legal Risk"),
         probability = 0.15,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -211,9 +211,9 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           percentiles = None, quantiles = None, terms = None
         )
       ),
-      // ── Strategic & Reputational Risk (3 leaves) ──────────────────────────
+      // ── Strategic and Reputational Risk (3 leaves) ──────────────────────────
       RiskLeafDefinitionRequest(
-        name = "ESG Controversy", parentName = Some("Strategic & Reputational Risk"),
+        name = "ESG Controversy", parentName = Some("Strategic and Reputational Risk"),
         probability = 0.10,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -222,7 +222,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "M&A Integration Failure", parentName = Some("Strategic & Reputational Risk"),
+        name = "M and A Integration Failure", parentName = Some("Strategic and Reputational Risk"),
         probability = 0.05,
         distributionShape = DistributionShapeRequest(
           distributionType = "lognormal",
@@ -231,7 +231,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
         )
       ),
       RiskLeafDefinitionRequest(
-        name = "Product Recall / Liability", parentName = Some("Strategic & Reputational Risk"),
+        name = "Product Recall / Liability", parentName = Some("Strategic and Reputational Risk"),
         probability = 0.06,
         distributionShape = DistributionShapeRequest(
           distributionType = "expert",
@@ -281,10 +281,10 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           // Q8: 10/11 portfolios have ALL direct children with P99 > $1M — satisfies >=1/2
           q8   <- query(client, key, treeId)("""Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y), 1000000)))""")
 
-          // Q-A: no Technology & Cyber leaf has unconditional P95 > $5M (0/4) — fails >=2/3
-          qa   <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology & Cyber"), gt_loss(p95(x), 5000000))""")
+          // Q-A: no Technology and Cyber leaf has unconditional P95 > $5M (0/4) — fails >=2/3
+          qa   <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x), 5000000))""")
           // Q-Ab: P99 > $1M — all 4 Cyber leaves clear it (Insider Threat P99 is 80th conditional ≫ $1M; 5%-prob P95 edge gone)
-          qab  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology & Cyber"), gt_loss(p99(x), 1000000))""")
+          qab  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p99(x), 1000000))""")
           // Q-B: 1/3 Operational Risk children clear the LEC bar — fails >=1/2
           qb   <- query(client, key, treeId)("""Q[>=]^{1/2} x (child_of(x, "Operational Risk"), gt_prob(lec(x, 10000000), 0.05))""")
           // Q-Bb: scope swap — 4/4 Enterprise Risk children (top-level aggregates) clear the LEC bar
@@ -296,12 +296,12 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           // Q-C2: 1/10 Operational Risk leaves have P99 > $20M — fails >=2/3 (contrast with Q-C1)
           qc2  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x), 20000000))""")
           // Q-C2b: scope swap to Compliance + threshold lowered to $5M — 3/3 leaves clear it
-          qc2b <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance & Legal Risk"), gt_loss(p99(x), 5000000))""")
+          qc2b <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x), 5000000))""")
           // Q-D: ~9-11/21 non-Cyber leaves have P95 > $1M (~43-52%) — proportion can land inside About(1/3,0.1) upper bound
           //       when count=9 (9/21=42.86% < 43.33%); verdict disabled pending TODO §12 seed reproducibility fix
-          qd   <- query(client, key, treeId)("""Q[~]^{1/3} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))""")
+          qd   <- query(client, key, treeId)("""Q[~]^{1/3} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))""")
           // Q-Db: same proportion IS "about 1/2" — Q[~]^{1/2} showcases around tolerance vs strict Q[<=]
-          qdb  <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))""")
+          qdb  <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))""")
 
           // Diagnostic: log actual proportions for calibration (single call to avoid deep for-comprehension)
         yield assertTrue(q1.rangeSize == 21, q1.satisfied) &&   // ~12/21≈57% sat Q[>=]^{1/4}(25%); margin≈0.32 ✓

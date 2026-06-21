@@ -31,28 +31,27 @@ object ValidationUtil {
         }
     }
 
-  // Refinement for name; using a maximum length of 50
+  // Refinement for name; whitelist: letters, digits, space, hyphen, forward-slash
   def refineName(value: String, fieldPath: String = "name"): Either[List[ValidationError], SafeName.SafeName] = {
     val sanitized = nonEmpty(value)
     sanitized
-      .refineEither[Not[Blank] & MaxLength[50]]
+      .refineEither[SafeNameConstraint]
       .map(SafeName.SafeName(_))
       .left
       .map { err =>
-        val isBlank = sanitized.isEmpty || err.toLowerCase.contains("blank")
-        List(ValidationError(
-          field = fieldPath,
-          code = if isBlank then ValidationErrorCode.REQUIRED_FIELD else ValidationErrorCode.INVALID_LENGTH,
-          message = if isBlank then ValidationMessages.nameRequired else ValidationMessages.nameTooLong
-        ))
+        val (code, message) = (sanitized.isEmpty || err.toLowerCase.contains("blank"), sanitized.length > 50) match
+          case (true, _) => (ValidationErrorCode.REQUIRED_FIELD,  ValidationMessages.nameRequired)
+          case (_, true) => (ValidationErrorCode.INVALID_LENGTH,  ValidationMessages.nameTooLong)
+          case _         => (ValidationErrorCode.INVALID_PATTERN, ValidationMessages.nameInvalidChars)
+        List(ValidationError(field = fieldPath, code = code, message = message))
       }
   }
 
-  // Refinement for email; using a maximum length of 50 and requiring single @ symbol
+  // Refinement for email; whitelist regex: local-part, @, domain with TLD
   def refineEmail(value: String, fieldPath: String = "email"): Either[List[ValidationError], Email.Email] = {
     val sanitized = nonEmpty(value)
     sanitized
-      .refineEither[Not[Blank] & MaxLength[50] & Match["[^@]+@[^@]+"]]
+      .refineEither[Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$"]]
       .map(Email.Email(_))
       .left
       .map(_ => List(ValidationError(

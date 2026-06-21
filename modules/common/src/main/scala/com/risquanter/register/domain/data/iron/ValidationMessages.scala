@@ -18,10 +18,11 @@ import com.risquanter.register.common.Constants
 object ValidationMessages:
 
   // ══════════════════════════════════════════════════════════════════
-  // Name (SafeName: Not[Blank] & MaxLength[50])
+  // Name (SafeName: Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9 /\\-]+$"])
   // ══════════════════════════════════════════════════════════════════
   val nameRequired: String      = "Name must not be blank"
   val nameTooLong: String       = s"Name must be at most ${Constants.MaxNameLength} characters"
+  val nameInvalidChars: String  = "Name must use only letters, digits, spaces, hyphens, and forward slashes"
 
   // ══════════════════════════════════════════════════════════════════
   // Reserved FOL symbol names

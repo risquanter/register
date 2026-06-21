@@ -104,15 +104,49 @@ Update the error message to: `"Name must be 1–50 characters using only letters
 Apply all replacements identified in Step 1. For each `.sh` or `.http` file, verify
 `parentName` references are updated to match wherever the name is used as a key.
 
-### Step 5 — Compile and test
+### Step 5 — Regression test: injection-shaped quoted literal is rejected at parse/bind level
+
+Add a test to `BinderIntegrationSpec` (alongside B1/B2/B3) that verifies a query
+string where a quoted constant terminates early and is followed by embedded FOL
+operators is rejected before any evaluation.
+
+The canonical attack form: a query whose quoted literal contains `"` to close the
+string early, with additional FOL content appended — simulating what would happen
+if node names were ever interpolated into query strings (they are not, but this
+documents the structural guarantee):
 
 ```
-sbt commonJVM/compile commonJS/compile server/compile server/test app/compile app/test
+// B4 — injection-shaped quoted literal
+// The closing " after "IT Risk terminates the string; the characters that follow
+// are injected FOL content.  The parser must reject this as malformed.
+// Concrete form (adjust delimiters to whatever the FOL grammar accepts):
+//   leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 0)")
+// or any query string where a " appears mid-literal and the remainder parses as
+// a second FOL expression.
+```
+
+The test must:
+1. Call `VagueSemantics.evaluateTyped` (or the equivalent bind step) with the
+   injection-shaped query string.
+2. Assert the result is `Left(...)` — rejected, not evaluated.
+3. Assert the satisfied/result output does NOT contain any value derivable from
+   the injected expression (e.g. `gt_loss(p95(x), 0)` never fires).
+
+**If the assertion at step 2 or 3 fails** — i.e. the injection-shaped query
+returns `Right(...)` or produces an evaluation result — **stop immediately and
+consult the user**. Do not attempt to work around or explain the deviation.
+This indicates an unexpected parser behaviour that must be understood before
+proceeding.
+
+### Step 6 — Compile and test
+
+```
+sbt commonJVM/compile commonJS/compile server/compile server/test serverIt/test app/compile app/test
 ```
 
 All modules must be green before marking done.
 
-### Step 6 — Code quality review
+### Step 7 — Code quality review
 
 Load `code-quality-review` skill and run the full checklist against all changed files.
 
@@ -125,8 +159,9 @@ Load `code-quality-review` skill and run the full checklist against all changed 
 - [ ] `ValidEmail` regex tightened to whitelist
 - [ ] `refineName` error message names the allowed character set
 - [ ] All fixture names containing `(`, `)`, `&` replaced consistently
-- [ ] `parentName` cross-references updated atomically with name replacements
-- [ ] `commonJVM/compile`, `commonJS/compile`, `server/test`, `app/test` green
+- [ ] `parentName` cross-references and FOL query string literals updated atomically with name replacements
+- [ ] B4 regression test added to `BinderIntegrationSpec`; asserts injection-shaped query string is rejected
+- [ ] `commonJVM/compile`, `commonJS/compile`, `server/test`, `serverIt/test`, `app/test` green
 - [ ] No test assertions weakened
 - [ ] Code quality review passed
 

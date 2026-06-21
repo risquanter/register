@@ -114,8 +114,8 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
     ),
 
     suite("SafeName opaque type")(
-      test("can be created from SafeShortStr") {
-        val validStr: SafeShortStr = "John Doe".refineUnsafe
+      test("can be created from SafeNameStr") {
+        val validStr: SafeNameStr = "John Doe".refineUnsafe
         val name: SafeName.SafeName = SafeName.SafeName(validStr)
         assertTrue(name.value == "John Doe")
       },
@@ -159,6 +159,18 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
       test("fromString rejects invalid name") {
         val result = SafeName.fromString("")
         assertTrue(result.isLeft)
+      },
+
+      test("fromString rejects name with forbidden characters") {
+        // Characters outside ^[A-Za-z0-9 /\\-]+$ are rejected (e.g. &, (, ), quotes)
+        val ampersand = SafeName.fromString("Technology & Cyber")
+        val parens    = SafeName.fromString("Data Breach (PII)")
+        val quote     = SafeName.fromString("foo\"bar")
+        assertTrue(
+          ampersand.isLeft,
+          parens.isLeft,
+          quote.isLeft
+        )
       }
     ),
     

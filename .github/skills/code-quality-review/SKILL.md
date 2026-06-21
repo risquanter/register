@@ -69,6 +69,34 @@ invent ad-hoc logic that a Monoid / Functor / Validation would have eliminated?
 - Does the new type have the algebraic instances its usage implies? A type that is
   folded over a collection but has no `Identity` instance is incomplete. **SHOULD-FIX.**
 
+### `if/else` checklist — run on every `if` or `if/else` encountered
+
+Every `if/else` in new or changed code must pass all of the following before being
+accepted as clean:
+
+1. **Single value produced?** If the branches compute *multiple* related values
+   (e.g. `code` and `message` both depend on the same condition), the values are
+   semantically coupled and must travel together. Replace parallel `if/else` chains
+   or parallel `val` bindings with a single `match` on a tuple or sealed ADT that
+   produces all derived values in one expression. **SHOULD-FIX.**
+
+2. **Condition repeated?** If the same boolean predicate appears in more than one
+   `if/else` arm (including hidden repetition via `!flag && otherFlag`-style
+   guards), the classification is being done twice. Extract the classification into
+   one `match` with exhaustive cases. **SHOULD-FIX.**
+
+3. **Exhaustive?** If branches don't cover all inputs the type system permits,
+   the `if/else` is partial. Prefer `match` with a wildcard arm that makes the
+   default explicit. **SHOULD-FIX** — silent defaults are correctness risks.
+
+4. **Can a `map`/`fold`/`Option` replace it?** `if (x.isEmpty) None else Some(f(x))`
+   → `x.map(f)`. `if (cond) Left(e) else Right(v)` → `Either.cond(cond, v, e)`.
+   Every such substitution removes a branch and makes intent clearer. **SHOULD-FIX.**
+
+5. **Is it a guard on a domain value?** `if (name.length > 50)` in service/handler
+   code means a constraint that should have been enforced at the Iron type boundary
+   has leaked inward. **MUST-FIX** — route through the smart constructor instead.
+
 ---
 
 ## 1. ADR Compliance
@@ -130,6 +158,33 @@ invent ad-hoc logic that a Monoid / Functor / Validation would have eliminated?
 - Input validation at the boundary (codec / smart constructor), not in service?
 - No `catch` blocks that silently swallow exceptions?
 - New credential types satisfy R1–R8 from ADR-022?
+
+### XSS defence-in-depth — two layers, both required
+
+When Iron type constraints exclude HTML-meaningful characters (`<`, `>`, `&`, `"`):
+
+- **That is defence-in-depth, not the primary XSS guard.**
+  The primary guard for Laminar-rendered output is Laminar’s typed DOM API, which
+  writes via `textContent` / typed setters, never `innerHTML`. Structural prevention
+  cannot be bypassed regardless of string content.
+
+- **Iron whitelisting is the backup layer.** Its value is: if the structural layer
+  is ever bypassed (e.g. a future contributor calls `.innerHTML` or renders into a
+  non-Laminar context), the input domain is already restricted.
+
+- **New output paths require explicit output encoding.**
+  If a value typed as `SafeName` (or any Iron-refined user-input type) is used in:
+  - Email template bodies
+  - PDF export content
+  - Server-rendered HTML (Twirl, Scalatags, etc.)
+  - Log lines rendered as HTML in a dashboard
+  - URL path or query parameters
+  - CSS selectors or `style` attribute values
+
+  ...then context-aware encoding must be applied at the rendering site. The Iron
+  whitelist is insufficient in those contexts because allowed characters (`/`, `-`,
+  letters) can form payloads depending on the output language. Flag any new output
+  path that consumes a user-input type without visible encoding. **MUST-FIX.**
 
 ---
 

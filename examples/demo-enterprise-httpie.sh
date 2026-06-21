@@ -16,16 +16,16 @@
 # Tree structure:
 #   Enterprise Risk  (root)
 #   ├── Operational Risk
-#   │   ├── Technology & Cyber
+#   │   ├── Technology and Cyber
 #   │   │   ├── Ransomware Attack             expert  15%  P25=$500K P50=$2M P75=$8M P95=$25M
 #   │   │   ├── Cloud Provider Outage         lognorm 30%  $200K–$4M
-#   │   │   ├── Data Breach (PII)             lognorm 10%  $1M–$15M
+#   │   │   ├── Data Breach - PII             lognorm 10%  $1M–$15M
 #   │   │   └── Insider Threat                lognorm  5%  $2M–$20M
-#   │   ├── Process & People
+#   │   ├── Process and People
 #   │   │   ├── Key Person Departure          lognorm 20%  $100K–$800K
 #   │   │   ├── Internal Fraud                expert   8%  P25=$200K P50=$1M P75=$4M P95=$18M
 #   │   │   └── Process Failure               lognorm 25%  $50K–$500K
-#   │   └── Third-Party & Supply Chain
+#   │   └── Third-Party and Supply Chain
 #   │       ├── Critical Vendor Failure       lognorm 12%  $500K–$5M
 #   │       ├── Outsourcing SLA Breach        lognorm 20%  $100K–$1.5M
 #   │       └── Concentration Risk            expert   8%  P25=$1M P50=$4M P95=$18M
@@ -38,13 +38,13 @@
 #   │   │   └── Credit Downgrade Wave         expert  15%  P25=$800K P50=$3M P95=$20M
 #   │   └── Liquidity Risk
 #   │       └── Funding Squeeze               lognorm  8%  $2M–$25M
-#   ├── Compliance & Legal Risk
+#   ├── Compliance and Legal Risk
 #   │   ├── Regulatory Action                 lognorm 12%  $2M–$50M
 #   │   ├── Litigation                        expert   8%  P25=$300K P50=$2M P75=$8M P95=$40M
 #   │   └── GDPR / Data Protection Fine       lognorm 15%  $500K–$10M
-#   └── Strategic & Reputational Risk
+#   └── Strategic and Reputational Risk
 #       ├── ESG Controversy                   lognorm 10%  $1M–$12M
-#       ├── M&A Integration Failure           lognorm  5%  $5M–$40M
+#       ├── M and A Integration Failure       lognorm  5%  $5M–$40M
 #       └── Product Recall / Liability        expert   6%  P25=$1M P50=$5M P95=$35M
 # =============================================================================
 set -euo pipefail
@@ -75,20 +75,20 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
   portfolios:='[
     {"name": "Enterprise Risk",                  "parentName": null},
     {"name": "Operational Risk",                 "parentName": "Enterprise Risk"},
-    {"name": "Technology & Cyber",               "parentName": "Operational Risk"},
-    {"name": "Process & People",                 "parentName": "Operational Risk"},
-    {"name": "Third-Party & Supply Chain",       "parentName": "Operational Risk"},
+    {"name": "Technology and Cyber",               "parentName": "Operational Risk"},
+    {"name": "Process and People",                 "parentName": "Operational Risk"},
+    {"name": "Third-Party and Supply Chain",       "parentName": "Operational Risk"},
     {"name": "Financial Risk",                   "parentName": "Enterprise Risk"},
     {"name": "Market Risk",                      "parentName": "Financial Risk"},
     {"name": "Credit Risk",                      "parentName": "Financial Risk"},
     {"name": "Liquidity Risk",                   "parentName": "Financial Risk"},
-    {"name": "Compliance & Legal Risk",          "parentName": "Enterprise Risk"},
-    {"name": "Strategic & Reputational Risk",    "parentName": "Enterprise Risk"}
+    {"name": "Compliance and Legal Risk",          "parentName": "Enterprise Risk"},
+    {"name": "Strategic and Reputational Risk",    "parentName": "Enterprise Risk"}
   ]' \
   leaves:='[
     {
       "name": "Ransomware Attack",
-      "parentName": "Technology & Cyber",
+      "parentName": "Technology and Cyber",
       "distributionType": "expert",
       "probability": 0.15,
       "minLoss": null, "maxLoss": null,
@@ -97,15 +97,15 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Cloud Provider Outage",
-      "parentName": "Technology & Cyber",
+      "parentName": "Technology and Cyber",
       "distributionType": "lognormal",
       "probability": 0.30,
       "minLoss": 200000, "maxLoss": 4000000,
       "percentiles": null, "quantiles": null
     },
     {
-      "name": "Data Breach (PII)",
-      "parentName": "Technology & Cyber",
+      "name": "Data Breach - PII",
+      "parentName": "Technology and Cyber",
       "distributionType": "lognormal",
       "probability": 0.10,
       "minLoss": 1000000, "maxLoss": 15000000,
@@ -113,7 +113,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Insider Threat",
-      "parentName": "Technology & Cyber",
+      "parentName": "Technology and Cyber",
       "distributionType": "lognormal",
       "probability": 0.05,
       "minLoss": 2000000, "maxLoss": 20000000,
@@ -121,7 +121,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Key Person Departure",
-      "parentName": "Process & People",
+      "parentName": "Process and People",
       "distributionType": "lognormal",
       "probability": 0.20,
       "minLoss": 100000, "maxLoss": 800000,
@@ -129,7 +129,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Internal Fraud",
-      "parentName": "Process & People",
+      "parentName": "Process and People",
       "distributionType": "expert",
       "probability": 0.08,
       "minLoss": null, "maxLoss": null,
@@ -138,7 +138,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Process Failure",
-      "parentName": "Process & People",
+      "parentName": "Process and People",
       "distributionType": "lognormal",
       "probability": 0.25,
       "minLoss": 50000, "maxLoss": 500000,
@@ -146,7 +146,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Critical Vendor Failure",
-      "parentName": "Third-Party & Supply Chain",
+      "parentName": "Third-Party and Supply Chain",
       "distributionType": "lognormal",
       "probability": 0.12,
       "minLoss": 500000, "maxLoss": 5000000,
@@ -154,7 +154,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Outsourcing SLA Breach",
-      "parentName": "Third-Party & Supply Chain",
+      "parentName": "Third-Party and Supply Chain",
       "distributionType": "lognormal",
       "probability": 0.20,
       "minLoss": 100000, "maxLoss": 1500000,
@@ -162,7 +162,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Concentration Risk",
-      "parentName": "Third-Party & Supply Chain",
+      "parentName": "Third-Party and Supply Chain",
       "distributionType": "expert",
       "probability": 0.08,
       "minLoss": null, "maxLoss": null,
@@ -213,7 +213,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Regulatory Action",
-      "parentName": "Compliance & Legal Risk",
+      "parentName": "Compliance and Legal Risk",
       "distributionType": "lognormal",
       "probability": 0.12,
       "minLoss": 2000000, "maxLoss": 50000000,
@@ -221,7 +221,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Litigation",
-      "parentName": "Compliance & Legal Risk",
+      "parentName": "Compliance and Legal Risk",
       "distributionType": "expert",
       "probability": 0.08,
       "minLoss": null, "maxLoss": null,
@@ -230,7 +230,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "GDPR / Data Protection Fine",
-      "parentName": "Compliance & Legal Risk",
+      "parentName": "Compliance and Legal Risk",
       "distributionType": "lognormal",
       "probability": 0.15,
       "minLoss": 500000, "maxLoss": 10000000,
@@ -238,15 +238,15 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "ESG Controversy",
-      "parentName": "Strategic & Reputational Risk",
+      "parentName": "Strategic and Reputational Risk",
       "distributionType": "lognormal",
       "probability": 0.10,
       "minLoss": 1000000, "maxLoss": 12000000,
       "percentiles": null, "quantiles": null
     },
     {
-      "name": "M&A Integration Failure",
-      "parentName": "Strategic & Reputational Risk",
+      "name": "M and A Integration Failure",
+      "parentName": "Strategic and Reputational Risk",
       "distributionType": "lognormal",
       "probability": 0.05,
       "minLoss": 5000000, "maxLoss": 40000000,
@@ -254,7 +254,7 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     },
     {
       "name": "Product Recall / Liability",
-      "parentName": "Strategic & Reputational Risk",
+      "parentName": "Strategic and Reputational Risk",
       "distributionType": "expert",
       "probability": 0.06,
       "minLoss": null, "maxLoss": null,
@@ -373,16 +373,16 @@ run_query \
 # Q-A — descendant scoping + P95: tail severity within the Cyber sub-portfolio
 # NOT SATISFIED: no Cyber leaf has unconditional P95 > $5M (prob ≤ 30% means most are zero at P95)
 run_query \
-  "Q-A: Do at least 2/3 of Technology & Cyber leaf risks have P95 above \$5M?" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology & Cyber"), gt_loss(p95(x), 5000000))'
+  "Q-A: Do at least 2/3 of Technology and Cyber leaf risks have P95 above \$5M?" \
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x), 5000000))'
 
 # Q-Ab — same scope, P99 > $1M: all 4 Cyber leaves clear it (Insider Threat P99 well above $1M even at 5% prob)
 run_query \
-  "Q-Ab: Do at least 2/3 of Technology & Cyber leaf risks have P99 above \$1M? (p99 contrast)" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology & Cyber"), gt_loss(p99(x), 1000000))'
+  "Q-Ab: Do at least 2/3 of Technology and Cyber leaf risks have P99 above \$1M? (p99 contrast)" \
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p99(x), 1000000))'
 
 # Q-B — direct-child scoping + LEC + Probability: Operational Risk immediate sub-units
-# NOT SATISFIED: only 1 of 3 direct children (Technology & Cyber) has high enough aggregate tail
+# NOT SATISFIED: only 1 of 3 direct children (Technology and Cyber) has high enough aggregate tail
 run_query \
   "Q-B: Do at least half of direct children of Operational Risk have >5% chance of exceeding \$10M?" \
   'Q[>=]^{1/2} x (child_of(x, "Operational Risk"), gt_prob(lec(x, 10000000), 0.05))'
@@ -408,21 +408,21 @@ run_query \
   "Q-C2: Do at least 2/3 of Operational Risk leaf descendants have P99 above \$20M?" \
   'Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x), 20000000))'
 
-# Q-C2b — scope swap to Compliance & Legal Risk + lower threshold: all 3 leaves clear $5M P99
+# Q-C2b — scope swap to Compliance and Legal Risk + lower threshold: all 3 leaves clear $5M P99
 run_query \
-  "Q-C2b: Do at least 2/3 of Compliance & Legal Risk leaf descendants have P99 above \$5M? (scope+threshold swap contrast)" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance & Legal Risk"), gt_loss(p99(x), 5000000))'
+  "Q-C2b: Do at least 2/3 of Compliance and Legal Risk leaf descendants have P99 above \$5M? (scope+threshold swap contrast)" \
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x), 5000000))'
 
 # Q-D — exclusion via negation: leaves outside the Cyber cluster
 # NOT SATISFIED: ~9-11/21 non-Cyber leaves have P95 > $1M (~43-52%) — far from "about 1/3"
 run_query \
   "Q-D: Do about 1/3 of non-Cyber leaves have P95 above \$1M?" \
-  'Q[~]^{1/3} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))'
+  'Q[~]^{1/3} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))'
 
 # Q-Db — same proportion IS "about 1/2"; Q[~]^{1/2} showcases around tolerance vs strict Q[<=]
 run_query \
   "Q-Db: Do about half of non-Cyber leaves have P95 above \$1M? (around-quantifier contrast)" \
-  'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))'
+  'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))'
 
 header "Done"
 info "Re-run anytime — the workspace key above remains valid until expiry."
