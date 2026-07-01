@@ -575,50 +575,11 @@ reliable `DemoEnterpriseScriptSpec` assertions in combined test runs.
 
 ---
 
-## 13. [POST USER-DOCS] Document threshold-pie normalisation behaviour in user documentation
-
-**Context:** The threshold-linked pie chart (ECharts migration Phase E5) shows each
-direct child of the focus portfolio as a slice sized by its individual exceedance
-probability `P(loss > X)` at the current crosshair position. ECharts normalises all
-slices to 100% regardless of their absolute values.
-
-**Consequence:** When the user drills into a child portfolio C2 (expanding C2 into C2a
-and C2b), the visual proportions of the remaining siblings (C1, C3) will shift. This is
-expected — the displayed percentage is each node's share of the total of all displayed
-exceedance values, not a probability partition. Critically, `P(C2 > X) ≠ P(C2a > X) +
-P(C2b > X)` in general (the children are independent random variables, not a mutually
-exclusive decomposition), so the total changes when a portfolio is expanded.
-
-**User documentation should clarify:**
-- The pie is a proportional comparison of individual exceedance probabilities, not a
-  true probabilistic decomposition.
-- Proportions change when expanding a portfolio because the total of displayed values
-  changes.
-- Tooltip raw-probability values (planned: shown alongside percentages) are the
-  authoritative figures; the pie angles are for visual comparison only.
-
-**Prerequisite:** User documentation section for the Analyze view must exist first.
-Placeholder until then.
+## 13. 
 
 ---
 
-## 14. [POST E1–E5] Evaluate ECharts modular tree-shaking (Option B bundle strategy)
-
-**Context:** The ECharts migration (Phase E1, PLAN-ECHARTS-MIGRATION.md) chose Option A
-(full bundle, `import * as echarts from 'echarts'`, ~500 KB gzip) for simplicity. Option
-B (modular imports via `echarts/core` + explicit `LineChart`, `PieChart`,
-`CanvasRenderer` registrations + `echarts.use([...])`) was estimated to produce a
-~200–300 KB gzip bundle.
-
-**Follow-up required once Phases E1–E5 are stable:**
-1. Profile the actual bundle size with Option A via `vite build --report`.
-2. Determine how many chart types are actually used (line + pie in E1–E5; any others?).
-3. If the size delta is material (> ~150 KB gzip), assess the complexity cost of
-   switching the Scala.js facade to modular imports and weigh against the saving.
-4. Note: switching from Option A to Option B is a facade-only change — no option-builder
-   or view code needs to change.
-
-**No action required until E1–E5 are complete and deployed.**
+## 14. DELETED ITEM, placeholder kept for consistent numbering only 
 
 ---
 
@@ -715,17 +676,26 @@ validating whether ZIO's environment model makes this straightforward or impract
 
 ### 16b. Anonymous sentinel `UserId` may bypass the type-level guarantee
 
+**Status: Design decision taken — Wave 0B pending implementation (AUTHORIZATION-IMPLEMENTATION-PLAN.md §B)**
+
 `UserContextExtractor.noOp` returns the sentinel `UserId("00000000-...")`. If the mode
 selection logic in `AppLayer` has a bug and NoOp is wired in a production environment,
 this value could reach a SpiceDB `check()` call. SpiceDB would deny it (no relationships),
 but it would appear in audit logs as a real-looking UUID, and no compiler error would
 surface the mistake.
 
-**Recommendation to investigate:** model `UserId` as a sum type with `Anonymous` and
-`Authenticated(raw: UuidStr)` variants; narrow `AuthorizationService.check()` to accept
-only `Authenticated`. Passing an anonymous user to `check()` would then be a type error.
-Trade-off to evaluate: this changes the `UserId` type surface across all callers and may
-add pattern-match overhead in places that currently treat it uniformly.
+**Wave 0B (pending):** `UserId` becomes a sum type with `Anonymous` and `Authenticated(raw: UuidStr)`
+variants. `AuthorizationService.check()` accepts only `Authenticated`. Passing the sentinel
+to `check()` is then a compile error. The `UserContextExtractor.scala` code comment has been
+updated with the two-layer mitigation model. Full migration scope listed in
+`AUTHORIZATION-IMPLEMENTATION-PLAN.md §B` — 14 files across `common`, auth, HTTP controllers,
+Tapir codec, and tests.
+
+**Wave 3 (still required after Wave 0B):** The SpiceDB CEL caveat / schema-level subject
+constraint that rejects `user:00000000-...` remains necessary as an independent infrastructure
+layer — it guards against bypasses that skip the application layer (direct SpiceDB API calls,
+misconfigured service accounts, operator error). Must be in place before `fine-grained` mode
+is activated in any non-development namespace.
 
 ---
 

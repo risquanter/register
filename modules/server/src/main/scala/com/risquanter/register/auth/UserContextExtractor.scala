@@ -33,15 +33,22 @@ object UserContextExtractor:
     *   - Easily excluded by SpiceDB provisioning CI checks
     *   - Unlikely to collide with any Keycloak-issued UUID
     *
-    * Current mitigation: point-in-time `zed permission check` in AuthzProvisioning CI.
-    * That check only catches pollution present at migration time — not grants written
-    * afterwards by ops tooling or manual `zed` commands.
+    * Two independent mitigations are required:
     *
-    * TODO [ADR-012 §7 T4 / Wave 3]: Replace point-in-time CI check with a continuous
-    * invariant enforced at the SpiceDB schema layer using a CEL caveat or a
-    * schema-level subject constraint that rejects `user:00000000-...` as a valid
-    * subject. This MUST be in place before `fine-grained` mode is activated in
-    * any non-development namespace.
+    * [Layer 1 — Scala type system / Wave 0B — pending implementation]:
+    *   `UserId` becomes a sum type (`Anonymous | Authenticated`). `AuthorizationService.check()`
+    *   accepts only `UserId.Authenticated`. Passing this sentinel to `check()` becomes a compile
+    *   error, not a runtime behaviour gap. Eliminates the code-path risk entirely.
+    *   See AUTHORIZATION-IMPLEMENTATION-PLAN.md §B for the full migration scope.
+    *
+    * [Layer 2 — SpiceDB schema / Wave 3 — still required after Wave 0B]:
+    *   A CEL caveat or schema-level subject constraint that rejects `user:00000000-...` as a
+    *   valid SpiceDB subject. This independent infrastructure layer remains necessary even after
+    *   Wave 0B: it guards against bypasses that skip the application layer (direct SpiceDB API
+    *   calls, misconfigured service accounts, operator error). MUST be in place before
+    *   `fine-grained` mode is activated in any non-development namespace.
+    *
+    * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md — Wave 0B (UserId sum type)
     * @see docs/ADR-012.md §7 — Trust Assumption T4
     */
   val AnonymousSentinelUuid: String = "00000000-0000-0000-0000-000000000000"

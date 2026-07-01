@@ -3,6 +3,7 @@
 **Date:** February 19, 2026
 **Status:** In progress (Phase K preparation + Layer 1 Wave 1 plumbing landed; infra rollout pending)
 **Related:** [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) (Tier 1.5 = Layer 0)
+**Implementation amendments:** [AUTHORIZATION-IMPLEMENTATION-PLAN.md](./AUTHORIZATION-IMPLEMENTATION-PLAN.md) — type corrections, `Checked[P]` proof token, `BootstrapProvisioner`, K8s CI hardening
 **ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs), [ADR-023](./ADR-023-local-dev-tls-and-trust-material-policy.md) (Local Dev TLS & Trust Policy), [ADR-024](./ADR-024-externalized-authorization-pep-pattern.md) (Externalized Authorization / PEP Pattern)
 
 ---
@@ -450,7 +451,9 @@ SpiceDB is the selected Layer 2 backend. This phase establishes the implementati
 
 - Deploy SpiceDB on k3s (Helm) with persistent storage — see [ADR-INFRA-010](../register-infra/docs/adr/ADR-INFRA-010.md)
 - Apply initial `.zed` schema (`workspace`, `risk_tree`, inherited permissions)
-- Implement `AuthorizationServiceSpiceDB` with `check` and `listAccessible` only — app is a pure PEP, never writes tuples (see ADR-024)
+- Implement `AuthorizationServiceSpiceDB` with `check` and `listAccessible` only — pure PEP, no tuple writes
+- Implement `BootstrapProvisionerSpiceDB` for workspace ownership lifecycle writes — see AUTHORIZATION-IMPLEMENTATION-PLAN.md §D
+- `AuthorizationService` contains zero write operations; `BootstrapProvisioner` is scoped to bootstrap handler only (see ADR-024)
 - Implement `AuthzProvisioning` job in CI/CD (idempotent reconcile, drift detection, audit logs) — delivery via in-cluster CI runner, see [ADR-INFRA-011](../register-infra/docs/adr/ADR-INFRA-011.md)
 - Ensure app runtime never writes authorization data — no `grant`/`revoke`/tuple writes in application code (see ADR-024)
 - Verify latency budget for `check` on representative workspace/tree paths
@@ -681,18 +684,19 @@ case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = Non
 ```scala
 trait AuthorizationService:
 
-  def check(
-    user:       UserId,
-    permission: Permission,
+  def check[P <: Permission](
+    user:       UserId.Authenticated,
+    permission: P,
     resource:   ResourceRef
-  ): IO[AuthError, Unit]
-  // Fails the ZIO effect — callers use flatMap, never fold/map (fail-closed, [ADR-024: Fail-Closed by Default](./ADR-024-externalized-authorization-pep-pattern.md#5-fail-closed-by-default)).
+  ): IO[AuthError, Checked[P]]
+  // Returns a proof token Checked[P] on success — callers bind it via `given` in for-comprehensions.
+  // Protected service methods require Checked[P] via `using` parameter; missing proof is a compile error.
   // PERMISSIONSHIP_NO_PERMISSION  → AuthForbidden
   // Connectivity failure          → AuthServiceUnavailable (mapped to 403 at HTTP layer)
   // No grant() / revoke() — pure PEP; tuple writes are ops-path only ([ADR-024: App is PEP Only](./ADR-024-externalized-authorization-pep-pattern.md#1-app-is-pep-only)).
 
   def listAccessible(
-    user:         UserId,
+    user:         UserId.Authenticated,
     resourceType: ResourceType,
     permission:   Permission
   ): IO[AuthError, List[ResourceId]]
@@ -769,7 +773,7 @@ Start with `minimize_latency`. Add `fully_consistent` as a config option for env
 | SpiceDB: HTTP 4xx (config/auth) | 403 Forbidden | Fail-closed; don't reveal infra |
 | SpiceDB: HTTP 5xx / timeout | 403 Forbidden | Fail-closed; 503 would reveal SpiceDB is down |
 | SpiceDB: network error | 403 Forbidden | Fail-closed |
-| Caller uses `.fold(_ => (), ...)` on `check()` | Compile succeeds; auth bypassed | Code smell — [ADR-024: Fail-Closed by Default](./ADR-024-externalized-authorization-pep-pattern.md#5-fail-closed-by-default); catch in PR review |
+| Missing `Checked[P]` at a protected call site | Does not compile | Proof token pattern enforces check() was called — see AUTHORIZATION-IMPLEMENTATION-PLAN.md Wave 1 |
 
 #### Observability
 
@@ -799,10 +803,10 @@ authz.check user=8f14e45f-... permission=design_write resource=risk_tree:01HXY r
 
 ```scala
 final case class SpiceDbConfig(
-  url:            SafeUrl,                  // SpiceDB HTTP endpoint (e.g., "https://spicedb.infra:50051")
+  url:            SpiceDbUrl,               // HTTPS-only endpoint — see AUTHORIZATION-IMPLEMENTATION-PLAN.md §C
   token:          SpiceDbToken,             // API bearer token — redacted in toString (WorkspaceKeySecret pattern)
   consistency:    SpiceDbConsistency = SpiceDbConsistency.MinimizeLatency,
-  timeoutSeconds: Int = 10
+  timeoutSeconds: PositiveInt = 10          // PositiveInt — 0 or negative is a config error
 )
 
 enum SpiceDbConsistency:
@@ -848,20 +852,20 @@ object AuthorizationServiceSpiceDB:
 // Wired when register.auth.mode = "capability-only" or "identity" — no SpiceDB needed.
 // All checks pass; listAccessible returns Nil (no fine-grained filtering in those modes).
 object AuthorizationServiceNoOp extends AuthorizationService:
-  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit] =
-    ZIO.unit
-  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]] =
+  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]] =
+    ZIO.succeed(Checked[P]())   // always grants; proof produced unconditionally
+  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]] =
     ZIO.succeed(Nil)
 
 // For unit tests — allow/deny by explicit (user, permission, resource) set.
 // No live SpiceDB required; injected via ZLayer in test scope.
 class AuthorizationServiceStub(
-  allowed: Set[(UserId, Permission, ResourceRef)]
+  allowed: Set[(UserId.Authenticated, Permission, ResourceRef)]
 ) extends AuthorizationService:
-  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit] =
-    if allowed.contains((user, permission, resource)) then ZIO.unit
+  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]] =
+    if allowed.contains((user, permission, resource)) then ZIO.succeed(Checked[P]())
     else ZIO.fail(AuthForbidden(user.value, permission.zedName, resource.resourceType.zedType, resource.resourceId.value))
-  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]] =
+  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]] =
     ZIO.succeed(allowed.collect {
       case (u, p, ResourceRef(rt, id)) if u == user && p == permission && rt == resourceType => id
     }.toList)
@@ -1109,36 +1113,25 @@ val getTreeById: ServerEndpoint[Any, Task] = getWorkspaceTreeByIdEndpoint.server
 
 ```scala
 trait UserContextExtractor:
-  /** Extract UserId from the mesh-injected `x-user-id` claim header.
+  /** Extract user identity from the mesh-injected `x-user-id` claim header.
     *
-    * The parameter type is Option[UserId] — Tapir codec has already validated the UUID format:
-    * - None:         `x-user-id` header absent → NoOp passes through; `requirePresent` fails closed
+    * The parameter type is Option[UserId.Authenticated] — Tapir codec has already validated the UUID format.
+    * - None:         `x-user-id` header absent → NoOp passes through (Anonymous); `requireAuthenticated` fails closed
     * - Some(userId): header present, UUID-validated at Tapir boundary — value is trusted
     *
-    * The mesh guarantees that if `x-user-id` is present, it is the `sub` claim from a Keycloak-validated
-    * JWT. The app contains zero JWT code — no base64 decode, no claim extraction, no JWT library.
-    * See [ADR-012: Claim Header Injection](./ADR-012.md#6-claim-header-injection) for the required external header stripping configuration.
-    *
-    * capability-only: returns UserId.anonymous — header not required, check() is NoOp
-    * identity:        header required; fail with AuthForbidden if absent
-    * fine-grained:    same as identity; check() then uses real SpiceDB
+    * `UserId` is a sum type (`Anonymous | Authenticated`). `AuthorizationService.check()` accepts only
+    * `Authenticated`; the compiler prevents anonymous identities from reaching SpiceDB call sites.
+    * See AUTHORIZATION-IMPLEMENTATION-PLAN.md §B for the sum type design.
     */
-  def extract(maybeUserId: Option[UserId]): IO[AppError, UserId]
+  def extract(maybeUserId: Option[UserId.Authenticated]): IO[AppError, UserId]
+  def requireAuthenticated(maybeUserId: Option[UserId.Authenticated]): IO[AppError, UserId.Authenticated]
 
 object UserContextExtractor:
-  val anonymous: UserId = UserId.fromString("00000000-0000-0000-0000-000000000000")
-    // sentinel value used only in NoOp/capability-only mode; never reaches SpiceDB
+  // capability-only — x-user-id header value is ignored entirely; returns Anonymous
+  val noOp: UserContextExtractor = ...
 
-  // capability-only — x-user-id header value is ignored entirely
-  val noOp: UserContextExtractor = _ => ZIO.succeed(anonymous)
-
-  // identity / fine-grained — header must be present.
-  // If absent: request did not pass through an authenticated waypoint, or user is unauthenticated.
-  // Both cases fail closed. No JWT parsing needed; the mesh has already done all validation.
-  val requirePresent: UserContextExtractor = {
-    case None         => ZIO.fail(AuthForbidden("Missing x-user-id header — unauthenticated request or mesh bypass"))
-    case Some(userId) => ZIO.succeed(userId)
-  }
+  // identity / fine-grained — header must be present; returns Authenticated or fails closed
+  val requirePresent: UserContextExtractor = ...
 ```
 
 `UserContextExtractor` is provided as a ZLayer. The layer selection follows the same `register.auth.mode` switch as `AuthorizationService`.
@@ -1164,8 +1157,9 @@ _Deliverables:_
 - `AuthorizationServiceNoOp` (always allow — all modes initially)
 - `AuthorizationServiceStub` (Set-backed — for tests)
 - `UserContextExtractor` trait + `noOp` implementation
-- `AuthConfig` case class: `mode: String` (validated: `capability-only | identity | fine-grained`)
-- ZLayer wiring: `AuthorizationServiceNoOp` bound by default in all modes
+- `AuthConfig` with `AuthMode` sealed enum (validated: `CapabilityOnly | Identity | FineGrained`); service fails on unknown mode string
+- `BootstrapProvisioner` trait + `BootstrapProvisionerNoOp` (resource lifecycle write, separate from `AuthorizationService`)
+- `ZLayer` wiring: `AuthorizationServiceNoOp` + `BootstrapProvisionerNoOp` bound by default in all modes
 
 _Regression gate:_ All existing `RouteSecurityRegressionSpec` and unit tests pass unchanged. No endpoint definitions modified yet.
 
@@ -1272,37 +1266,46 @@ _New tests:_
 
 ---
 
-**Wave 6 — Bootstrap seeding: post-create ownership write (fine-grained mode)**
+**Wave 6 — Bootstrap ownership registration: resource lifecycle write (fine-grained mode)**
 
-`POST /workspaces/bootstrap` has no resource to check before the workspace is created (no prior `WorkspaceId` to look up). This is the only route that writes to SpiceDB instead of reading. It is also the only justified exception to ADR-024's "no grant/revoke in app" principle — this is initial provisioning, not an admin delegation action.
+`POST /workspaces/bootstrap` creates a new workspace — no prior resource exists to check permissions against.
+After creation, the creator's ownership is recorded in SpiceDB as a resource lifecycle write (not a PAP action
+— see ADR-024 updated clarification and AUTHORIZATION-IMPLEMENTATION-PLAN.md §Pre-Wave).
 
 _Flow in `fine-grained` mode:_
 
 ```scala
 val bootstrapWorkspace: ServerEndpoint[Any, Task] = bootstrapWorkspaceEndpoint.serverLogic {
-  case (maybeForwardedFor, maybeUserId, req) =>          // maybeUserId: Option[UserId] — mesh-injected
+  case (maybeForwardedFor, maybeUserId, req) =>          // maybeUserId: Option[UserId.Authenticated]
     (for
-      userId  <- userCtx.extract(maybeUserId)            // Layer 1: identity required in fine-grained
+      userId  <- userCtx.requireAuthenticated(maybeUserId)   // Layer 1: identity required
       tree    <- riskTreeService.create(req)
       ws      <- workspaceStore.bootstrap(tree.id, ...)
-      _       <- authz.seed(userId, ws.id)             // writes SpiceDB tuple: workspace:ID#owner_user@user:UID
+      _       <- bootstrapProvisioner.recordOwnership(userId, ws.id)
+      // ↑ resource lifecycle write via BootstrapProvisioner, NOT AuthorizationService
+      // ↑ BootstrapProvisioner is in scope only for this handler
     yield WorkspaceBootstrapResponse(ws.key, tree)).either
 }
 ```
 
-`AuthorizationService.seed(userId, workspaceId)` is a new method, **separate from `check()`**, which writes a single SpiceDB relationship tuple:
+`BootstrapProvisioner.recordOwnership()` writes one SpiceDB tuple:
 ```
 workspace:{workspaceId}#owner_user@user:{userId}
 ```
 
-In `capability-only` and `identity` modes, `seed()` is a no-op (the NoOp implementation does nothing).
+In `capability-only` and `identity` modes, `BootstrapProvisionerNoOp` is wired — a no-op.
 
-_Decision record (inline, no new ADR):_ This is the minimal exception to ADR-024. The app writes exactly one tuple, at exactly one point in time, scoped to workspace creation. No tuple writes occur anywhere else in the app. If the `seed()` call fails, workspace creation is rolled back (the ZIO for-comprehension ensures atomicity at the service level). The alternative — an async provisioning sidecar — is a valid future migration target but adds infrastructure complexity disproportionate to a single tuple write.
+_Design rationale:_ Resource lifecycle writes (recording creator ownership at creation time) are
+categorically different from policy administration. The Zanzibar paper models this pattern explicitly.
+`AuthorizationService` retains zero write operations. The service account’s write permission is scoped
+to `owner_user`/`owner_team` on `workspace` definitions only. See AUTHORIZATION-IMPLEMENTATION-PLAN.md
+§Wave 6 and ADR-024 updated §1 for full justification.
 
 _New tests:_
-  - `bootstrapWorkspace` in fine-grained mode: stub records one `seed()` call with correct `(userId, workspaceId)`
-  - `seed()` failure → workspace creation returns error (no orphaned workspace)
-  - `bootstrapWorkspace` in capability-only mode: stub records zero `seed()` calls
+  - `bootstrapWorkspace` in fine-grained mode: `BootstrapProvisionerStub` records one `recordOwnership(userId, workspaceId)` call
+  - `recordOwnership()` failure → workspace creation rolled back (no orphaned workspace)
+  - `bootstrapWorkspace` in capability-only mode: `BootstrapProvisionerNoOp` records zero calls
+  - No other handler has `BootstrapProvisioner` in its ZIO environment — compile-time scope enforcement
 
 ---
 
@@ -1326,7 +1329,7 @@ val authModeLayer: TaskLayer[AuthorizationService & UserContextExtractor] =
           ZLayer.succeed(AuthorizationServiceNoOp) ++
           UserContextExtractor.jwtLayer
         )
-      case _ => // capability-only
+      case AuthConfig("capability-only", _) =>  // exhaustive — unknown mode fails at startup
         ZIO.succeed(
           ZLayer.succeed(AuthorizationServiceNoOp) ++
           ZLayer.succeed(UserContextExtractor.noOp)
@@ -1352,9 +1355,11 @@ test("all workspace-scoped routes are 403 when stub has no grants") { ... }
 // Verifies that the correct Permission enum value is used at each call site
 test("stub with correct grant passes all workspace-scoped routes") { ... }
 
-// Invariant 3: No workspace-scoped route short-circuits past check() — AuthorizationServiceStub
-// records every check() call; test verifies call count == 1 per request
-test("authz.check() is called exactly once per protected request") { ... }
+// Invariant 3: check() was called before any protected service operation — enforced at compile time
+// by the Checked[P] proof token (strong form). Missing proof is a compile error, not a runtime gap.
+// Runtime test: AuthorizationServiceStub records check() calls; call count == 1 per request verifies
+// the correct permission was checked (not bypassed via a different NoOp path).
+test("authz.check() proof token is required and correctly scoped per protected request") { ... }
 
 // Invariant 4: Cache endpoints are NOT tested for SpiceDB permission — they are mesh-only
 // Document this explicitly so future contributors don't add spurious check() calls
@@ -1366,13 +1371,13 @@ test("authz.check() is called exactly once per protected request") { ... }
 
 | Wave | Changed files | Behavior change? | Test additions |
 |------|--------------|-----------------|----------------|
-| 0 | New files: AuthTypes, AuthorizationService, UserContextExtractor | None | Unit tests for new types |
+| 0 | New files: AuthTypes, AuthorizationService, BootstrapProvisioner, UserContextExtractor | None | Unit tests for new types |
 | 1 | WorkspaceEndpoints, SSEEndpoints, WorkspaceController, SSEController | None (NoOp) | Compilation + regression |
 | 2 | AppLayer (ZLayer wiring) + UserContextExtractor.requirePresent | Identity mode: x-user-id header required | Header presence tests |
 | 3 | AppLayer (SpiceDB wiring) | Fine-grained: read routes enforced | Stub-based 200/403 read tests |
 | 4 | WorkspaceController (write routes) | Fine-grained: write routes enforced | Stub-based 200/403 write tests |
 | 5 | WorkspaceController (admin routes) | Fine-grained: admin routes enforced | Stub-based 200/403 admin tests |
-| 6 | WorkspaceController (bootstrap) + AuthorizationService (seed) | Fine-grained: bootstrap writes ownership tuple | seed() call count tests |
+| 6 | WorkspaceController (bootstrap) + BootstrapProvisioner | Fine-grained: bootstrap records ownership | recordOwnership() call count tests |
 
 ### Estimated Effort: ~2–4 weeks
 
