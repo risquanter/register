@@ -3,6 +3,7 @@
 **Date:** 2026-07-01
 **Status:** Approved — ready for implementation
 **Companion document:** [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md) — strategic design, wave structure, route matrix
+**Testing plan:** [AUTH-TESTING-PLAN.md](./AUTH-TESTING-PLAN.md) — BATS end-to-end tests (infra) + Scala `server-it` test cases cross-reference
 **Applies to:** All waves in AUTHORIZATION-PLAN.md Task L2.6
 
 This document specifies concrete amendments to the wave rollout defined in AUTHORIZATION-PLAN.md,
@@ -590,7 +591,7 @@ Run this test:
 2. In the K.6 CI pipeline as a post-deploy smoke check on every deploy to any environment
 
 Add to AUTHORIZATION-PLAN.md K.5 exit criteria:
-> - **Header spoofing test passes** — see AUTHORIZATION-IMPLEMENTATION-PLAN.md K.5 amendment
+> - **Header spoofing test passes** — see AUTH-TESTING-PLAN.md §K5 (B-K5-1 through B-K5-3)
 
 ---
 
@@ -625,7 +626,84 @@ full desired state and reconciles against reality in both directions.
 
 ---
 
-## [LOW PRIORITY / POST-COMPLETION] Resource-Scoped Proof Token — `Checked[P, R]`
+## SpiceDB Adapter Integration Tests (`server-it`)
+
+These tests verify `AuthorizationServiceSpiceDB` against a real SpiceDB instance using the
+existing `server-it` Docker Compose infrastructure. They are owned by the `register` project.
+
+**Setup:**
+- Add SpiceDB to `docker-compose.server-it.yml` (use the official `authzed/spicedb:latest` dev image)
+- Apply `infra/spicedb/schema.zed` at container startup
+- Seed test relationships before each test suite via the SpiceDB HTTP API (or `zed` CLI)
+- Test class: `modules/server-it/src/test/scala/.../auth/AuthorizationServiceSpiceDBSpec.scala`
+
+The test data model uses three users (`alice`, `bob`, `carol`) and two workspaces (`ws1`, `ws2`)
+with a single tree (`tree1` in `ws1`). `alice` is `owner_user` of `ws1`; `bob` has no grants;
+`carol` has a `viewer` grant on `ws1`.
+
+---
+
+### T-S1 — Allowed check returns `Checked[P]`
+**Precondition:** `workspace:ws1#owner_user@user:alice` seeded
+**Action:** `check(alice.Authenticated, Permission.ViewWorkspace, ws1.asResource)`
+**Assert:** `Right(Checked[Permission.ViewWorkspace.type])` — no exception, effect succeeds
+
+### T-S2 — Denied check returns `AuthForbidden`
+**Precondition:** No relationship seeded for `bob`
+**Action:** `check(bob.Authenticated, Permission.ViewWorkspace, ws1.asResource)`
+**Assert:** `Left(AuthForbidden)` — `userId`, `permission`, `resourceType`, `resourceId` fields
+populated with the checked values (not redacted)
+
+### T-S3 — Insufficient permission returns `AuthForbidden`
+**Precondition:** `workspace:ws1#viewer@user:carol` seeded (viewer, not editor)
+**Action:** `check(carol.Authenticated, Permission.DesignWrite, ws1.asResource)`
+**Assert:** `Left(AuthForbidden)` — viewer cannot design_write
+
+### T-S4 — Schema inheritance: workspace `owner_user` grants tree `view_tree`
+**Precondition:** `workspace:ws1#owner_user@user:alice` seeded; `risk_tree:tree1#workspace@workspace:ws1` seeded; no direct tree relationship for alice
+**Action:** `check(alice.Authenticated, Permission.ViewTree, tree1.asResource)`
+**Assert:** `Right(Checked[...])` — inherited via `workspace->view_workspace->view_tree`
+
+### T-S5 — SpiceDB unavailable returns `AuthServiceUnavailable`, fails closed
+**Precondition:** SpiceDB container stopped or network blocked
+**Action:** `check(alice.Authenticated, Permission.ViewWorkspace, ws1.asResource)`
+**Assert:** `Left(AuthServiceUnavailable)` — NOT `AuthForbidden`; confirms different error path.
+The HTTP layer must map both to 403 — caller cannot distinguish unavailable from denied.
+
+### T-S6 — Invalid token returns `AuthServiceUnavailable`, fails closed
+**Precondition:** `AuthorizationServiceSpiceDB` configured with a wrong bearer token
+**Action:** `check(alice.Authenticated, Permission.ViewWorkspace, ws1.asResource)`
+**Assert:** `Left(AuthServiceUnavailable)` — 4xx from SpiceDB maps to unavailable, not forbidden
+
+### T-S7 — `listAccessible` returns workspace IDs where user has permission
+**Precondition:** `workspace:ws1#owner_user@user:alice`, `workspace:ws2#viewer@user:alice` seeded
+**Action:** `listAccessible(alice.Authenticated, ResourceType.Workspace, Permission.ViewWorkspace)`
+**Assert:** Result contains both `ws1.id` and `ws2.id` (order-insensitive)
+
+### T-S8 — `listAccessible` returns `Nil` for user with no relationships
+**Precondition:** No relationships seeded for `bob`
+**Action:** `listAccessible(bob.Authenticated, ResourceType.Workspace, Permission.ViewWorkspace)`
+**Assert:** `Right(Nil)`
+
+### T-S9 — Anonymous sentinel UUID (`00000000-...`) has no permissions (T4 guard)
+**Precondition:** No relationship seeded for `00000000-0000-0000-0000-000000000000`; sentinel is
+explicitly NOT present in any SpiceDB tuple (CI invariant from ADR-012 §7 T4)
+**Action:** `check(sentinelUuid.Authenticated, Permission.ViewWorkspace, ws1.asResource)`
+**Assert:** `Left(AuthForbidden)` — sentinel must never be granted access
+**Note:** This test verifies the CI invariant at the Scala layer. The BATS-level counterpart
+(B-FC-3 in AUTH-TESTING-PLAN.md) verifies the same at the deployed HTTP level.
+
+### T-S10 — `BootstrapProvisionerSpiceDB.recordOwnership` writes a checkable tuple
+**Precondition:** No relationship seeded for `alice` on `ws3`
+**Action:**
+1. `bootstrapProvisioner.recordOwnership(alice.Authenticated, ws3)`
+2. `check(alice.Authenticated, Permission.ViewWorkspace, ws3.asResource)`
+**Assert:** Step 1 succeeds; step 2 returns `Right(Checked[...])` — the written tuple is immediately
+readable. Use `consistency = FullyConsistent` for this test to avoid NewEnemy window.
+
+---
+
+
 
 > **Status:** Initially proposed — not validated. Do not implement until all items above are
 > complete and the `Checked[P]` strong form has been in use long enough to assess whether
@@ -717,8 +795,12 @@ All items below must be satisfied before the authorization rollout is considered
 - [ ] K.6 provisioning job performs full bidirectional reconcile
 - [ ] App service account verified: write permission scoped to `owner_user`/`owner_team` on `workspace` only
 
-**Tests:**
+**Tests (unit + stub-based):**
 - [ ] Compile-time proof: missing `Checked[P]` at a protected call site does not compile
 - [ ] `AuthorizationServiceStub` returns `Checked[P]` on success
 - [ ] `BootstrapProvisionerStub` records `recordOwnership()` calls (not on `AuthorizationService`)
 - [ ] All waves from AUTHORIZATION-PLAN.md pass their regression gates unchanged
+
+**Tests (`server-it` — SpiceDB adapter, see §SpiceDB Adapter Integration Tests):**
+- [ ] SpiceDB added to `docker-compose.server-it.yml`; schema applied at startup
+- [ ] T-S1 through T-S10 pass against live SpiceDB instance
