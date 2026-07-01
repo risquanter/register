@@ -281,48 +281,6 @@ explaining the layering:
 
 
 
-## 7. ~~`SafeName` character class is permissive~~ — RESOLVED 2026-06-22
-
-**Resolution:** `SafeName` now enforces `^[A-Za-z0-9 /\\-]+$` via `SafeNameConstraint`
-(letters, digits, space, hyphen, forward-slash). `ValidEmail` tightened to a proper
-whitelist regex. Both changes landed in `PLAN-INPUT-TYPE-HARDENING.md`.
-
-- `BinderIntegrationSpec` B3 updated: proves injection-shaped names are rejected with
-  `INVALID_PATTERN` + user-readable message at construction time.
-- `BinderIntegrationSpec` B4 added: proves malformed/injection-shaped query strings are
-  rejected at parse or bind level, never evaluated.
-- All enterprise demo fixture names containing `&`, `(`, `)` renamed consistently across
-  `DemoEnterpriseScriptSpec`, `examples/demo-enterprise-*.sh`.
-
-**Open sub-items (tracked separately):**
-
-### Extension: broader `String`-backed type audit
-
-`SafeName` and `ValidEmail` are hardened. The same analysis applies to
-`SafeShortStr`, `SafeLongStr`, query strings, and free-text fields. For each:
-enumerate purpose (identifier / display name / free-text / opaque token), decide
-a per-type character-class policy, and tighten the Iron refinement. The audit
-table and principle are documented in the now-resolved §7 body above.
-
-### Related gap: ~~"no-re-parse" discipline is NOT documented as an ADR~~ — RESOLVED 2026-06-22
-
-**Resolution:** ADR-029 "Input Injection Defence — Parse, Don't Re-Parse" authored.
-Documents the threat model (OWASP A03, CWE-89/79/94/77), the no-re-parse mandate,
-the current parser boundary inventory, the Iron + Laminar two-layer defence model,
-and the code smell patterns. Compile-time enforcement proposals (Scalafix rules,
-`Tainted[String]`) deliberately omitted — over-engineered for this codebase's scale;
-the `code-quality-review` skill §6 XSS section is the enforcement mechanism.
-
----
-
-## 8. ~~Integration test port conflict~~ — RESOLVED 2026-06-18
-
-**Resolution:** Created `docker-compose.server-it.yml` — a standalone compose file
-used exclusively by `IrminCompose` that exposes irmin with a dynamic host port
-(`"8080"` — no static binding). `IrminCompose` now looks for this file first;
-dev compose file (`docker-compose.yml`) retains the static `9080:8080` mapping
-unchanged. Multiple specs can now run concurrently. `sbt 'serverIt/test'` is green.
-
 ---
 
 ## 8. fol-engine typed vs. untyped pipeline mismatch — equality predicate not reachable
@@ -661,3 +619,205 @@ B (modular imports via `echarts/core` + explicit `LineChart`, `PieChart`,
    or view code needs to change.
 
 **No action required until E1–E5 are complete and deployed.**
+
+---
+
+## 15. Authorization domain: compiler-enforced `check()` proof tokens
+
+**Context:** The current `AuthorizationService` is structurally correct (fail-closed
+`IO[AuthError, Unit]`, no `grant()`/`revoke()`, ADR-024 compliant). However, the
+primary authorization failure mode — forgetting to call `check()` before a handler
+executes — is invisible to the type system. A controller can call the business logic
+directly without calling `authorizationService.check()`, and the compiler will not
+object.
+
+**Analysis:** The same "validate once at the boundary, carry the proof" principle that
+Iron applies to input types (ADR-001) can be applied to authorization. The pattern:
+
+```scala
+// Opaque — only AuthorizationService can produce this; no external constructor
+opaque type Checked[+P <: Permission] = Unit
+
+trait AuthorizationService:
+  def check[P <: Permission](
+    user:       UserId,
+    permission: P,
+    resource:   ResourceRef
+  ): IO[AuthError, Checked[P]]   // returns the proof, not Unit
+
+// Handler MUST receive the proof; cannot be called without it
+def createTree(req: CreateTreeRequest, auth: Checked[Permission.DesignWrite.type]): IO[AppError, Response]
+```
+
+`AuthorizationServiceNoOp` would still produce `Checked[P]` (all modes still compile);
+the difference is that skipping `check()` is now a compile error rather than a runtime
+gap. Every call site where auth was accidentally omitted becomes visible immediately.
+
+**Two compiler invariants that would be added:**
+
+1. **`Checked[P]` proof token** — proves `check()` was called and succeeded with the
+   specific `Permission` before the handler body runs. Analogous to Iron's
+   `String :| SafeNameConstraint` — the type carries the proof, cannot be forged.
+
+2. **`Authorized[R <: ResourceType]` phantom on fetched resources** — proves the
+   resource was fetched *after* authorization, not before. Guards against the
+   TOCTOU pattern where a resource is loaded first and then the auth check happens
+   against stale data.
+
+**Relationship to the authorization plan:**
+This is an implementation refinement to Wave 1 of AUTHORIZATION-PLAN.md's rollout,
+not a new architectural concern. The `AuthorizationService` trait signature changes
+from `IO[AuthError, Unit]` to `IO[AuthError, Checked[P]]`; all call sites gain a
+`Checked[P]` parameter. `AuthorizationServiceNoOp` and `AuthorizationServiceStub`
+return `ZIO.succeed(())` cast to `Checked[P]` — intentional bypass, explicitly
+documented in type, not accidental omission.
+
+**Why not implement immediately:** The rollout waves in the authorization plan have
+not yet landed (Wave 0 infrastructure is the current baseline). The `Checked[P]`
+pattern is cleanest to introduce alongside Wave 1 when all `serverLogic` signatures
+are being updated anyway. Retrofitting after all waves are wired would require
+touching every controller twice.
+
+**Action:** Revisit at Wave 1 implementation time. Evaluate whether introducing
+`Checked[P]` from the start is worth the signature surface change, or whether the
+`RouteSecurityRegressionSpec` invariants (Wave 6, Invariant 3: "authz.check() called
+exactly once per protected request") provide sufficient runtime coverage.
+
+**Status:** design identified, not yet prioritised. Depends on authorization plan Wave 0+.
+
+---
+
+## 16. Authorization plan — compiler and infrastructure security recommendations
+
+**Context:** Analysis of `AUTHORIZATION-PLAN.md` against the "types as proofs" principle
+(Iron, ADR-001, ADR-029) and infrastructure hardening identified eight areas where the
+current design may benefit from tighter enforcement. These are candidate improvements
+worth investigating before or during rollout — not pre-approved tasks.
+
+---
+
+### 16a. `seed()` on `AuthorizationService` may violate ADR-024 at the interface level
+
+Wave 6 proposes adding `seed(userId, workspaceId)` to `AuthorizationService` to write
+the bootstrap ownership tuple to SpiceDB. The plan describes this as "the only justified
+exception" to the PEP-only constraint. However, placing a write operation on the shared
+service trait means all implementations must carry it, and nothing in the type system
+prevents it from being called outside the bootstrap handler.
+
+**Recommendation to investigate:** separate `seed()` onto a distinct `BootstrapProvisioner`
+service whose ZIO environment type is available only to the bootstrap handler. If the
+compiler can express "only this one handler has this service in scope," calling `seed()`
+from any other site becomes a compile error rather than a convention. `AuthorizationService`
+would remain a pure read interface, fully honouring ADR-024 at the type level. Worth
+validating whether ZIO's environment model makes this straightforward or impractical.
+
+---
+
+### 16b. Anonymous sentinel `UserId` may bypass the type-level guarantee
+
+`UserContextExtractor.noOp` returns the sentinel `UserId("00000000-...")`. If the mode
+selection logic in `AppLayer` has a bug and NoOp is wired in a production environment,
+this value could reach a SpiceDB `check()` call. SpiceDB would deny it (no relationships),
+but it would appear in audit logs as a real-looking UUID, and no compiler error would
+surface the mistake.
+
+**Recommendation to investigate:** model `UserId` as a sum type with `Anonymous` and
+`Authenticated(raw: UuidStr)` variants; narrow `AuthorizationService.check()` to accept
+only `Authenticated`. Passing an anonymous user to `check()` would then be a type error.
+Trade-off to evaluate: this changes the `UserId` type surface across all callers and may
+add pattern-match overhead in places that currently treat it uniformly.
+
+---
+
+### 16c. `AuthConfig.mode` string matching fails open on misconfiguration
+
+The AppLayer ZLayer selection uses:
+```scala
+case AuthConfig("fine-grained", spicedb) => ...
+case AuthConfig("identity", _)           => ...
+case _ =>                                    // falls through to capability-only
+```
+
+A typo (e.g. `"fine_grained"` with underscore) silently activates `capability-only`
+mode — the least restrictive option. This is a misconfiguration that fails open rather
+than failing hard.
+
+**Recommendation to investigate:** make `auth.mode` a validated sealed enum or an
+Iron-constrained string (`Match["^(capability-only|identity|fine-grained)$"]`) whose
+parsing fails the service at startup on an unknown value. The `case _ =>` fallback
+should arguably be an error, not a default. Worth checking how the ZIO Config library
+handles enum-typed config values to see if this is straightforward.
+
+---
+
+### 16d. `timeoutSeconds: Int` in `SpiceDbConfig` is unvalidated
+
+A raw `Int` allows 0 or negative values, which would produce undefined HTTP client
+behaviour. The Iron constraint precedent (`PositiveInt`, `NonNegativeInt`) already
+exists in the codebase.
+
+**Recommendation to investigate:** change `timeoutSeconds: Int` to `PositiveInt`. This
+is a small, low-risk change that follows established patterns. The only question is
+whether the ZIO Config integration handles refined types cleanly for this field.
+
+---
+
+### 16e. `SafeUrl` for SpiceDB endpoint permits `http://`
+
+The existing `UrlConstraint` allows `http://` or `https://`. SpiceDB in production
+requires TLS. An `http://` SpiceDB URL would silently downgrade security.
+
+**Recommendation to investigate:** define a stricter `SpiceDbUrlConstraint` (HTTPS-only
+scheme) for `SpiceDbConfig.url`. The trade-off is that local dev / integration tests
+that talk to a plaintext SpiceDB would need to use the looser constraint or a dev-mode
+override path. Worth checking whether the additional constraint causes friction in test
+harnesses.
+
+---
+
+### 16f. `Checked[P]` proof token — see TODO §15
+
+Already captured in §15. Restated here for completeness as a companion to the auth
+plan rollout.
+
+---
+
+### 16g. Header spoofing test is absent from Phase K.5 exit criteria
+
+The entire Layer 1/2 identity model depends on the Istio waypoint stripping external
+`x-user-*` headers before injecting claim headers derived from the validated JWT. If a
+request bypassing the waypoint carries a spoofed `x-user-id` header, it presents as an
+arbitrary authenticated identity with no JWT required.
+
+The plan references ADR-012 for this requirement but does not include a test that
+verifies the behaviour in a deployed cluster.
+
+**Recommendation to investigate:** add a mandatory smoke test to the K.5 exit criteria
+that sends a request carrying a forged `x-user-id` header directly to the backend and
+verifies it is rejected (403) or that the header is overwritten by mesh injection. The
+test must be run against a real Istio deployment — an in-process test cannot exercise
+this. Consider whether this test should be part of the K.6 CI pipeline as a post-deploy
+check on every deploy.
+
+---
+
+### 16h. SpiceDB provisioning job drift detection scope may be incomplete
+
+The plan says the K.6 CI job should "fail pipeline on drift/validation errors." As written,
+this likely catches write errors but may not catch relationships that exist in SpiceDB
+but are absent from the config source (orphaned tuples from manual `zed` CLI operations
+or earlier CI runs).
+
+**Recommendation to investigate:** scope "drift detection" explicitly to mean a full
+reconcile: the CI job should compare the *intended state* (config file) against the
+*live SpiceDB relationship graph* and fail if they diverge in either direction —
+missing tuples OR extra tuples not in config. Extra tuples represent privilege creep.
+Worth reviewing whether the SpiceDB API surface (LookupResources, ReadRelationships)
+makes this full-reconcile pattern feasible at reasonable cost.
+
+---
+
+**Status:** analysis only, no decisions made. All eight items are candidates for
+investigation; none are committed work. Items 16a–16e concern the Scala implementation
+and should be revisited at or before Wave 0. Items 16g–16h concern the K3s rollout
+and should be reviewed at Phase K.5 / K.6 planning.
