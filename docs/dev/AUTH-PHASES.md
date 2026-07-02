@@ -15,11 +15,11 @@ All items in this phase have no inter-dependencies and can proceed simultaneousl
 **`register` project:**
 | Task | Ref | Notes |
 |------|-----|-------|
-| Wave 0B: `UserId` sum type (`Anonymous \| Authenticated`) | IMPL-PLAN §B | Largest change; start first — blocks Wave 1 and everything downstream |
+| Wave 0B: `UserId` sum type (`Anonymous \| Authenticated`) ✅| IMPL-PLAN §B | Largest change; start first — blocks Wave 1 and everything downstream |
 | Wave 0C: `SpiceDbConfig.scala` (HTTPS-only URL, `PositiveInt` timeout) | IMPL-PLAN §C | Small independent file |
-| Wave 0D: `BootstrapProvisioner` trait + NoOp + SpiceDB files | IMPL-PLAN §D | Independent of sum type |
+| Wave 0D: `BootstrapProvisioner` trait + NoOp + SpiceDB files ✅| IMPL-PLAN §D | Independent of sum type |
 | Wave 2 completion: wire `requirePresent` into `Identity`/`FineGrained` branches | AUTH-PLAN Wave 2 | Structure already in `Application.scala` — small change |
-| ADR-024: add lifecycle write clarification + service account scope | IMPL-PLAN Pre-Wave | Documentation edit only |
+| ADR-024: add lifecycle write clarification + service account scope ✅| IMPL-PLAN Pre-Wave | Documentation edit only |
 | `infra/spicedb/schema.zed` | AUTH-PLAN §L2.1 | Owned by `register`; exact schema is in the plan verbatim |
 
 **`register-infra` project:**

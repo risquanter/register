@@ -8,7 +8,7 @@ import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirC
 import io.getquill.SnakeCase
 
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
-import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, UserContextExtractor}
+import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, BootstrapProvisioner, BootstrapProvisionerNoOp, UserContextExtractor}
 import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
@@ -121,6 +121,15 @@ object Application extends ZIOAppDefault {
       }
     }
 
+  private val chooseBootstrapProvisioner: ZLayer[AuthConfig, Nothing, BootstrapProvisioner] =
+    ZLayer.fromZIO {
+      ZIO.service[AuthConfig].map {
+        case AuthConfig(AuthMode.CapabilityOnly) => BootstrapProvisionerNoOp
+        case AuthConfig(AuthMode.Identity)       => BootstrapProvisionerNoOp
+        case AuthConfig(AuthMode.FineGrained)    => BootstrapProvisionerNoOp
+      }
+    }
+
   private val chooseUserContextExtractor: ZLayer[AuthConfig, Nothing, UserContextExtractor] =
     ZLayer.fromZIO {
       ZIO.service[AuthConfig].map {
@@ -177,6 +186,7 @@ object Application extends ZIOAppDefault {
       RateLimiterLive.layer,
       WorkspaceReaper.layer,
       chooseAuthorizationService,
+      chooseBootstrapProvisioner,
       chooseUserContextExtractor,
       ZLayer.fromZIO(SystemController.makeZIO),
       ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),

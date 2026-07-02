@@ -20,8 +20,8 @@ not duplicate the strategic content; read AUTHORIZATION-PLAN.md first.
 | `AuthMode` sealed enum | Wave 0 ✅ | Scala config | **Already implemented** — `AuthConfig.scala` has sealed `enum AuthMode` with fail-fast `DeriveConfig` (verified 2026-07-01) |
 | `WorkspaceId` + `asResource` | Pre-Wave ✅ | Scala type | **Already exists** — `case class WorkspaceId` in `OpaqueTypes.scala`, `WorkspaceRecord.id: WorkspaceId`, both `asResource` extensions in `AuthorizationService.scala` (verified 2026-07-01) |
 | `UserId` sum type | Wave 0 ✅| Scala type | `Anonymous \| Authenticated` — prevents sentinel reaching SpiceDB |
-| `SpiceDbConfig` Iron constraints | Wave 0 | Scala config | `PositiveInt` timeout, HTTPS-only URL constraint |
-| `BootstrapProvisioner` trait | Wave 0 | Scala type | Separate resource lifecycle writes from `AuthorizationService` |
+| `SpiceDbConfig` Iron constraints | Wave 0 ✅| Scala config | `PositiveInt` timeout, HTTPS-only URL constraint |
+| `BootstrapProvisioner` trait | Wave 0 ✅| Scala type | Separate resource lifecycle writes from `AuthorizationService` |
 | `Checked[P]` proof token (strong form) | Wave 1 | Scala type | `check()` returns proof; protected operations require it via `using` |
 | `BootstrapProvisioner.recordOwnership()` | Wave 6 | Scala impl | Replaces `authz.seed()` — correct naming and service boundary |
 | SpiceDB service account scope | Wave 6 | Ops | Narrow write permission to `owner_user`/`owner_team` on `workspace` only |

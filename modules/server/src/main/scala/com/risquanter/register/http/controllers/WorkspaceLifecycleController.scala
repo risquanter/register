@@ -3,7 +3,7 @@ package com.risquanter.register.http.controllers
 import zio.*
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.auth.{ AuthorizationService, Permission, UserContextExtractor }
+import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Permission, UserContextExtractor }
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
@@ -31,11 +31,12 @@ import com.risquanter.register.services.workspace.{RateLimiter, WorkspaceStore}
   * @see ADR-024 — Application as Pure PEP
   */
 class WorkspaceLifecycleController private (
-  riskTreeService: RiskTreeService,
-  workspaceStore:  WorkspaceStore,
-  rateLimiter:     RateLimiter,
-  userCtx:         UserContextExtractor,
-  authzService:    AuthorizationService
+  riskTreeService:      RiskTreeService,
+  workspaceStore:       WorkspaceStore,
+  rateLimiter:          RateLimiter,
+  userCtx:              UserContextExtractor,
+  authzService:         AuthorizationService,
+  bootstrapProvisioner: BootstrapProvisioner
 ) extends BaseController
     with WorkspaceLifecycleEndpoints:
 
@@ -117,11 +118,12 @@ class WorkspaceLifecycleController private (
     )
 
 object WorkspaceLifecycleController:
-  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & RateLimiter & UserContextExtractor & AuthorizationService, Nothing, WorkspaceLifecycleController] =
+  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & RateLimiter & UserContextExtractor & AuthorizationService & BootstrapProvisioner, Nothing, WorkspaceLifecycleController] =
     for
-      riskTreeService <- ZIO.service[RiskTreeService]
-      workspaceStore  <- ZIO.service[WorkspaceStore]
-      rateLimiter     <- ZIO.service[RateLimiter]
-      userCtx         <- ZIO.service[UserContextExtractor]
-      authzService    <- ZIO.service[AuthorizationService]
-    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, rateLimiter, userCtx, authzService)
+      riskTreeService      <- ZIO.service[RiskTreeService]
+      workspaceStore       <- ZIO.service[WorkspaceStore]
+      rateLimiter          <- ZIO.service[RateLimiter]
+      userCtx              <- ZIO.service[UserContextExtractor]
+      authzService         <- ZIO.service[AuthorizationService]
+      bootstrapProvisioner <- ZIO.service[BootstrapProvisioner]
+    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, rateLimiter, userCtx, authzService, bootstrapProvisioner)

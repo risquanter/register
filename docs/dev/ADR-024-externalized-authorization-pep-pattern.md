@@ -20,7 +20,7 @@
 
 ### 1. App is PEP Only
 
-The application calls SpiceDB to **read** authorization state. It never writes authorization data.
+The application calls SpiceDB to **read** authorization state. It never writes arbitrary authorization data.
 
 ```scala
 // The complete AuthorizationService interface — no grant(), no revoke()
@@ -32,6 +32,11 @@ trait AuthorizationService:
   def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
   // For listing resources a user can access (e.g. "show my workspaces").
 ```
+
+**Service account write scope** (enforced at K.6 provisioning):
+- Permitted: `owner_user` and `owner_team` on `workspace` only
+- Prohibited: `editor`, `analyst`, `viewer`, all other relations
+- See §7 — these two writes are lifecycle management, not PAP
 
 ### 2. PAP is Ops Tooling, Not the App
 
@@ -86,6 +91,22 @@ authorizationService.check(user.userId, Permission.DesignWrite, resource)
 
 No HTTP route in the application exposes tuple write operations. Any future self-service access management capability is a separate administrative service (a dedicated PAP), distinct from this application's codebase and deployment.
 
+### 7. Resource Lifecycle Writes — Not PAP
+
+Recording creator ownership at resource creation is system-initiated, not user-initiated — categorically distinct from PAP (Zanzibar, 2019). Gate: does a _user request_ drive the SpiceDB write?
+- **Yes** (user delegates access) → PAP. Ops tooling only.
+- **No** (system records creator at creation time) → lifecycle write. App is correct.
+
+```scala
+// BootstrapProvisioner — separate trait, injected only into the bootstrap handler
+for
+  ws <- workspaceStore.create(req)
+  _  <- bootstrapProvisioner.recordOwnership(userId, ws.id)
+  //    writes: workspace:{id}#owner_user@user:{sub}
+  //    AuthorizationService is NOT used here — PEP stays read-only
+yield ws
+```
+
 ---
 
 ## Code Smells
@@ -135,6 +156,22 @@ authService.check(user, permission, resource)
 // GOOD: Any failure is a deny — check() itself fails the effect
 authService.check(user, permission, resource)
   .flatMap(_ => proceed())  // unreachable on deny or error
+```
+
+### ❌ Lifecycle Write on AuthorizationService
+
+```scala
+// BAD: Resource lifecycle write added to PEP — blurs PAP boundary
+trait AuthorizationService:
+  def check(...)
+  def recordOwnership(userId: UserId, wsId: WorkspaceId): IO[AuthError, Unit]  // ← PAP leak
+```
+
+```scala
+// GOOD: Separate trait scoped to the one handler that needs it
+trait BootstrapProvisioner:
+  def recordOwnership(userId: UserId.Authenticated, wsId: WorkspaceId): IO[AuthError, Unit]
+// AuthorizationService unchanged — zero write methods
 ```
 
 ---
