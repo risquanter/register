@@ -22,6 +22,27 @@ type ValidEmail = String :| (Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9._%+
 // URL constraints for service/internal calls (http/https with hostname, IPv4, or IPv6, optional port/path)
 type UrlConstraint = Not[Blank] & MaxLength[200] & Match["^(?i)https?://(?:\\[[0-9a-fA-F:]+\\]|[^/:#?\\s]+)(?::\\d+)?(?:/[^\\s]*)?$"]
 
+// HTTPS-only URL constraint — narrows UrlConstraint to TLS-only endpoints.
+// Prevents silent plaintext downgrade for external services that receive credentials in headers.
+// Use for any config-loaded service URL where a credential is transmitted (SpiceDB, Keycloak, etc.).
+// See ADR-001 §8.
+type SecureUrlConstraint = Not[Blank] & MaxLength[200] &
+  Match["^https://(?:\\[[0-9a-fA-F:]+\\]|[^/:#?\\s]+)(?::\\d+)?(?:/[^\\s]*)?$"]
+
+// Printable ASCII constraint — safe for outbound HTTP header values and config-loaded credentials.
+// Blocks CRLF injection (\r\n), null bytes (\x00), and all ASCII control characters (\x01-\x1F, \x7F).
+// Range: 0x21 (!) through 0x7E (~) — visible US-ASCII only; no space, no non-ASCII bytes.
+// Use: any string sent verbatim as an HTTP header field value or as an external service credential.
+// See ADR-001 §8 for the full application rule.
+type PrintableAscii = Match["^[\\x21-\\x7E]+$"]
+
+// External service token string — config-loaded opaque credential sent verbatim as an HTTP header.
+// PrintableAscii eliminates CRLF injection and non-ASCII byte injection at the type level.
+// MaxLength[2048] accommodates JWTs (base64url header.payload.signature) and pre-shared keys.
+// Compose with a final class credential wrapper (ADR-022 R1–R8) for full credential hygiene.
+// Named ExternalTokenStr (not service-specific) so it can be reused for any external API credential.
+type ExternalTokenStr = String :| (Not[Blank] & MaxLength[2048] & PrintableAscii)
+
 type BranchRefConstraint =
   Not[Blank] & MaxLength[160] & Match["^(main|scenarios/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63})$"]
 
@@ -29,6 +50,9 @@ type BranchRefStr = String :| BranchRefConstraint
 
 // Validated URL string — base alias underlying object Url
 type ValidUrl = String :| UrlConstraint
+
+// HTTPS-validated URL string — base alias underlying object SecureUrl
+type SecureUrlStr = String :| SecureUrlConstraint
 
 // Non-negative long values (IDs, counts, amounts)
 type NonNegativeLong = Long :| GreaterEqual[0L]
@@ -157,6 +181,26 @@ object Url:
   // Convenience constructor from plain String
   def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], Url] =
     ValidationUtil.refineUrl(s, fieldPath)
+
+// SecureUrl: HTTPS-only service endpoint URL (TLS enforced at the type level).
+// Use for any config-loaded external service URL where credentials are transmitted.
+// Companion to object Url — identical API, narrower constraint.
+object SecureUrl:
+  opaque type SecureUrl = SecureUrlStr
+
+  object SecureUrl:
+    def apply(s: SecureUrlStr): SecureUrl = s
+    def unapply(u: SecureUrl): Option[SecureUrlStr] = Some(u)
+
+  extension (u: SecureUrl)
+    def value: SecureUrlStr = u
+
+  given JsonEncoder[SecureUrl] = JsonEncoder[String].contramap(_.value.toString)
+  given JsonDecoder[SecureUrl] = JsonDecoder[String].mapOrFail(s =>
+    fromString(s).left.map(_.map(_.message).mkString(", ")))
+
+  def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], SecureUrl] =
+    ValidationUtil.refineSecureUrl(s, fieldPath)
 
 case class BranchRef(toBranchRef: BranchRefStr)
 

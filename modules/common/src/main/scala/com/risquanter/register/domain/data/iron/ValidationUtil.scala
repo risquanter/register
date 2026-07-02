@@ -4,7 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.{Match, ValidURL}
-import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SafeId, TreeId, NodeId, WorkspaceKeySecret, WorkspaceKeyHash, UserId}
+import com.risquanter.register.domain.data.iron.{SafeName, Email, Url, SecureUrl, SafeId, TreeId, NodeId, WorkspaceKeySecret, WorkspaceKeyHash, UserId, ExternalTokenStr, PrintableAscii}
 import com.bilalfazlani.zioUlid.ULID
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.prelude.Validation
@@ -72,6 +72,37 @@ object ValidationUtil {
         field = fieldPath,
         code = ValidationErrorCode.INVALID_FORMAT,
         message = ValidationMessages.urlInvalid
+      )))
+  }
+
+  // Refinement for HTTPS-only URLs (SecureUrlConstraint).
+  // Rejects http:// — use for any external service endpoint that will receive a credential in headers.
+  // See ADR-001 §8.
+  def refineSecureUrl(value: String, fieldPath: String = "url"): Either[List[ValidationError], SecureUrl.SecureUrl] = {
+    val sanitized = nonEmpty(value)
+    sanitized
+      .refineEither[SecureUrlConstraint]
+      .map(SecureUrl.SecureUrl(_))
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_FORMAT,
+        message = s"URL must be a valid HTTPS endpoint (http:// is not permitted for external service credentials)"
+      )))
+  }
+
+  // Refinement for external service tokens (ExternalTokenStr).
+  // Validates PrintableAscii + MaxLength[2048] — blocks CRLF injection and non-ASCII bytes.
+  // Returns ExternalTokenStr; wrap in a credential final class (ADR-022 R1–R8) at the call site.
+  // See ADR-001 §8.
+  def refineExternalToken(value: String, fieldPath: String = "token"): Either[List[ValidationError], ExternalTokenStr] = {
+    value
+      .refineEither[Not[Blank] & MaxLength[2048] & PrintableAscii]
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_FORMAT,
+        message = "Token must be non-empty, at most 2048 characters, and contain only printable ASCII (0x21\u20130x7E)"
       )))
   }
 
