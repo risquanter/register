@@ -69,7 +69,7 @@ trait AuthorizationService:
     * @see ADR-024: Fail-Closed by Default
     */
   def check(
-    user:       UserId,
+    user:       UserId.Authenticated,
     permission: Permission,
     resource:   ResourceRef
   ): IO[AuthError, Unit]
@@ -80,7 +80,7 @@ trait AuthorizationService:
     * Used for "show my workspaces" queries — no local DB join required.
     */
   def listAccessible(
-    user:         UserId,
+    user:         UserId.Authenticated,
     resourceType: ResourceType,
     permission:   Permission
   ): IO[AuthError, List[ResourceId]]

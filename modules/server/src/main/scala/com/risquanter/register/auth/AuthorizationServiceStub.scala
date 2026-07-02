@@ -7,14 +7,14 @@ import com.risquanter.register.domain.errors.{AuthError, AuthForbidden}
 /** Set-backed stub for unit tests. Allow/deny by explicit (user, permission, resource) set.
   * No live SpiceDB required; inject via ZLayer in test scope.
   *
-  * @see AUTHORIZATION-PLAN.md — Wave 0: AuthorizationServiceStub for tests.
+  * @see ADR-024 — Application as Pure PEP (stub used in test scope only).
   */
 final class AuthorizationServiceStub(
-  allowed: Set[(UserId, Permission, ResourceRef)]
+  allowed: Set[(UserId.Authenticated, Permission, ResourceRef)]
 ) extends AuthorizationService:
 
   def check(
-    user:       UserId,
+    user:       UserId.Authenticated,
     permission: Permission,
     resource:   ResourceRef
   ): IO[AuthError, Unit] =
@@ -27,7 +27,7 @@ final class AuthorizationServiceStub(
     ))
 
   def listAccessible(
-    user:         UserId,
+    user:         UserId.Authenticated,
     resourceType: ResourceType,
     permission:   Permission
   ): IO[AuthError, List[ResourceId]] =
@@ -43,7 +43,7 @@ object AuthorizationServiceStub:
   val denyAll: AuthorizationServiceStub = new AuthorizationServiceStub(Set.empty)
 
   /** ZLayer factory for test scope injection. */
-  def layer(allowed: Set[(UserId, Permission, ResourceRef)]): ZLayer[Any, Nothing, AuthorizationService] =
+  def layer(allowed: Set[(UserId.Authenticated, Permission, ResourceRef)]): ZLayer[Any, Nothing, AuthorizationService] =
     ZLayer.succeed(new AuthorizationServiceStub(allowed))
 
   /** ZLayer factory for deny-all in test scope. */

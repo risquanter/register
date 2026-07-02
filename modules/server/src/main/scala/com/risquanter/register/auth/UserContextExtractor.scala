@@ -1,61 +1,32 @@
 package com.risquanter.register.auth
 
 import zio.{IO, UIO, ZIO}
-import com.risquanter.register.domain.data.iron.UserId
+import io.github.iltotore.iron.autoRefine
+import com.risquanter.register.configs.AuthMode
+import com.risquanter.register.domain.data.iron.{UserId, UuidStr}
 import com.risquanter.register.domain.errors.{AppError, AuthServiceUnavailable}
 
-/** Extracts UserId from the mesh-injected x-user-id claim header.
+/** Extracts a validated UserId from the mesh-injected x-user-id claim header.
   *
-  * The input is Option[UserId] — Tapir has already validated the UUID format at the
-  * codec boundary: None = header absent, Some(userId) = present and UUID-valid.
+  * Tapir validates UUID format at the codec boundary before this is called.
+  * None = header absent; Some(userId) = present and UUID-valid.
   *
-  * Implementations:
-  *   - noOp:           capability-only mode — header value ignored, returns anonymous sentinel
+  *   - noOp:           capability-only mode — ignores header, returns UserId.Anonymous
   *   - requirePresent: identity/fine-grained mode — header required; fails closed if absent
   *
-  * @see ADR-012: Minimal Service Code for Auth — §7 Mesh Trust Assumptions
-  * @see AUTHORIZATION-PLAN.md — UserContextExtractor Design
+  * @see ADR-012 §7 — Mesh Trust Assumptions
   */
 trait UserContextExtractor:
-  def extract(maybeUserId: Option[UserId]): IO[AppError, UserId]
+  def extract(maybeUserId: Option[UserId.Authenticated]): IO[AppError, UserId]
+  def requireAuthenticated(maybeUserId: Option[UserId.Authenticated]): IO[AppError, UserId.Authenticated]
 
 object UserContextExtractor:
 
-  /** The anonymous sentinel UUID.
-    *
-    * Used in capability-only mode (noOp) where no identity is asserted.
-    * MUST NOT be granted any permission in SpiceDB — if it is, capability-only
-    * mode silently carries real authorization power into fine-grained mode
-    * (ADR-012 §7 — Trust Assumption T4).
-    *
-    * The value is all-zeros by convention:
-    *   - Recognisable in logs ("this is a sentinel, not a real user")
-    *   - Easily excluded by SpiceDB provisioning CI checks
-    *   - Unlikely to collide with any Keycloak-issued UUID
-    *
-    * Two independent mitigations are required:
-    *
-    * [Layer 1 — Scala type system / Wave 0B — pending implementation]:
-    *   `UserId` becomes a sum type (`Anonymous | Authenticated`). `AuthorizationService.check()`
-    *   accepts only `UserId.Authenticated`. Passing this sentinel to `check()` becomes a compile
-    *   error, not a runtime behaviour gap. Eliminates the code-path risk entirely.
-    *   See AUTHORIZATION-IMPLEMENTATION-PLAN.md §B for the full migration scope.
-    *
-    * [Layer 2 — SpiceDB schema / Wave 3 — still required after Wave 0B]:
-    *   A CEL caveat or schema-level subject constraint that rejects `user:00000000-...` as a
-    *   valid SpiceDB subject. This independent infrastructure layer remains necessary even after
-    *   Wave 0B: it guards against bypasses that skip the application layer (direct SpiceDB API
-    *   calls, misconfigured service accounts, operator error). MUST be in place before
-    *   `fine-grained` mode is activated in any non-development namespace.
-    *
-    * @see AUTHORIZATION-IMPLEMENTATION-PLAN.md — Wave 0B (UserId sum type)
-    * @see docs/ADR-012.md §7 — Trust Assumption T4
+  /** All-zeros UUID reserved for SpiceDB CI checks (ADR-012 §7 T4).
+    * Must never be granted any SpiceDB permission — enforced at the schema level
+    * before fine-grained mode is activated in any non-development namespace.
     */
-  val AnonymousSentinelUuid: String = "00000000-0000-0000-0000-000000000000"
-
-  val anonymous: UserId =
-    UserId.fromString(AnonymousSentinelUuid)
-      .getOrElse(throw RuntimeException("BUG: anonymous sentinel UserId failed UUID validation"))
+  val AnonymousSentinelUuid: UuidStr = "00000000-0000-0000-0000-000000000000"
 
   /** Emit a structured log entry describing which auth mode is active.
     *
@@ -70,7 +41,11 @@ object UserContextExtractor:
     *   - auth.mode=capability-only in a production (non-free-tier) namespace
     *   - auth.extractor=noOp when auth.mode=identity or auth.mode=fine-grained
     */
-  def logStartupMode(mode: String, extractor: UserContextExtractor): UIO[Unit] =
+  def logStartupMode(mode: AuthMode, extractor: UserContextExtractor): UIO[Unit] =
+    val modeName = mode match
+      case AuthMode.CapabilityOnly => "capability-only"
+      case AuthMode.Identity       => "identity"
+      case AuthMode.FineGrained    => "fine-grained"
     val extractorName = extractor match
       case e if e eq noOp           => "noOp"
       case e if e eq requirePresent => "requirePresent"
@@ -84,13 +59,23 @@ object UserContextExtractor:
         "Do NOT run in this mode in production with real user data."
       else ""
     ZIO.logInfo(
-      s"auth.mode=$mode auth.extractor=$extractorName auth.sentinel.active=$sentinelActive$warning"
+      s"auth.mode=$modeName auth.extractor=$extractorName auth.sentinel.active=$sentinelActive$warning"
     )
 
-  /** capability-only mode — x-user-id header value is ignored entirely.
-    * All checks hit AuthorizationServiceNoOp which always succeeds.
+  // Used by noOp.requireAuthenticated — NoOp.check() ignores the user and always succeeds,
+  // so any Authenticated value satisfies the type. Only reachable in capability-only mode.
+  // AnonymousSentinelUuid is UuidStr — fromString is guaranteed to succeed.
+  private val sentinelAuthenticated: UserId.Authenticated =
+    UserId.fromString(AnonymousSentinelUuid).toOption.get
+
+  /** capability-only mode — ignores the header; returns UserId.Anonymous.
+    * UserId.Anonymous cannot be passed to authz.check() — compile-time enforced (ADR-012 §7 T4).
     */
-  val noOp: UserContextExtractor = _ => ZIO.succeed(anonymous)
+  val noOp: UserContextExtractor = new UserContextExtractor:
+    def extract(m: Option[UserId.Authenticated]): IO[AppError, UserId] =
+      ZIO.succeed(UserId.Anonymous)
+    def requireAuthenticated(m: Option[UserId.Authenticated]): IO[AppError, UserId.Authenticated] =
+      ZIO.succeed(m.getOrElse(sentinelAuthenticated))
 
   /** identity / fine-grained mode — header must be present.
     *
@@ -100,10 +85,13 @@ object UserContextExtractor:
     *
     * @see ADR-012: Claim Header Injection (required external header stripping config)
     */
-  val requirePresent: UserContextExtractor = maybeUserId =>
-    maybeUserId match
-      case Some(userId) => ZIO.succeed(userId)
-      case None =>
-        ZIO.fail(AuthServiceUnavailable(
-          "Missing x-user-id header — unauthenticated request or mesh bypass detected"
-        ))
+  val requirePresent: UserContextExtractor = new UserContextExtractor:
+    def extract(m: Option[UserId.Authenticated]): IO[AppError, UserId] =
+      requireAuthenticated(m)
+    def requireAuthenticated(m: Option[UserId.Authenticated]): IO[AppError, UserId.Authenticated] =
+      m match
+        case Some(userId) => ZIO.succeed(userId)
+        case None =>
+          ZIO.fail(AuthServiceUnavailable(
+            "Missing x-user-id header — unauthenticated request or mesh bypass detected"
+          ))

@@ -37,7 +37,7 @@ class WorkspaceAnalysisController private (
   val probOfExceedance: ServerEndpoint[Any, Task] = getWorkspaceProbOfExceedanceEndpoint.serverLogic {
     case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.probOfExceedance(ws.id, treeId, nodeId, threshold, includeProvenance)
@@ -47,7 +47,7 @@ class WorkspaceAnalysisController private (
   val getLECCurvesMulti: ServerEndpoint[Any, Task] = getWorkspaceLECCurvesMultiEndpoint.serverLogic {
     case (maybeUserId, key, treeId, includeProvenance, nodeIds) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, includeProvenance)

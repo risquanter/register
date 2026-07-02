@@ -13,13 +13,13 @@ import com.risquanter.register.domain.errors.AuthError
 object AuthorizationServiceNoOp extends AuthorizationService:
 
   def check(
-    user:       UserId,
+    user:       UserId.Authenticated,
     permission: Permission,
     resource:   ResourceRef
   ): IO[AuthError, Unit] = ZIO.unit
 
   def listAccessible(
-    user:         UserId,
+    user:         UserId.Authenticated,
     resourceType: ResourceType,
     permission:   Permission
   ): IO[AuthError, List[ResourceId]] = ZIO.succeed(Nil)

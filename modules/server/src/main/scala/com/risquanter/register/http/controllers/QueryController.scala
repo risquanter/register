@@ -42,7 +42,7 @@ class QueryController private (
   val queryTree: ServerEndpoint[Any, Task] = queryWorkspaceTreeEndpoint.serverLogic {
     case (maybeUserId, key, treeId, req) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         parsed <- ZIO.fromEither(QueryRequest.resolve(req))

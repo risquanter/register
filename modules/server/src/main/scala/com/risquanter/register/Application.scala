@@ -198,13 +198,7 @@ object Application extends ZIOAppDefault {
     _          <- ZIO.logInfo(s"CORS allowed origins: ${corsConfig.normalised.mkString(", ")}")
     // Auth mode startup log — operators should alert on capability-only in production namespaces.
     // @see ADR-012 §7 — Trust Assumption T3/Attack 3: silent mode mismatch detection
-    _          <- UserContextExtractor.logStartupMode(
-                    authConfig.mode match
-                      case AuthMode.CapabilityOnly => "capability-only"
-                      case AuthMode.Identity       => "identity"
-                      case AuthMode.FineGrained    => "fine-grained",
-                    userCtx
-                  )
+    _          <- UserContextExtractor.logStartupMode(authConfig.mode, userCtx)
     endpoints  <- HttpApi.endpointsZIO
     _          <- ZIO.logInfo(s"Registered ${endpoints.length} HTTP endpoints")
 

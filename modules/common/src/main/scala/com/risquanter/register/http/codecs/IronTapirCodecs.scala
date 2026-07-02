@@ -140,15 +140,15 @@ object IronTapirCodecs {
     * @see ADR-012: Claim Header Injection
     * @see ADR-022: PII handling (toString redacted in UserId)
     */
-  given Codec[String, UserId, CodecFormat.TextPlain] =
-    Codec.string.mapDecode[UserId](raw =>
+  given Codec[String, UserId.Authenticated, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[UserId.Authenticated](raw =>
       UserId.fromString(raw).fold(
         errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
         DecodeResult.Value(_)
       )
     )(_.value)
 
-  given Schema[UserId] = Schema.string
+  given Schema[UserId.Authenticated] = Schema.string
 
   /** Schema for SafeName.SafeName for JSON body derivation. */
   given Schema[SafeName.SafeName] = Schema.string.map[SafeName.SafeName](

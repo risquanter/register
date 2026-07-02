@@ -61,7 +61,7 @@ class WorkspaceLifecycleController private (
   val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.serverLogic {
     case (maybeUserId, key) =>
       (for
-        userId   <- userCtx.extract(maybeUserId)
+        userId   <- userCtx.requireAuthenticated(maybeUserId)
         ws       <- workspaceStore.resolve(key)
         _        <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         ids      <- workspaceStore.listTrees(key)
@@ -73,7 +73,7 @@ class WorkspaceLifecycleController private (
   val createWorkspaceTree: ServerEndpoint[Any, Task] = createWorkspaceTreeEndpoint.serverLogic {
     case (maybeUserId, key, req) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         ws     <- workspaceStore.resolve(key)
         _      <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
         tree   <- riskTreeService.create(ws.id, req)
@@ -83,7 +83,7 @@ class WorkspaceLifecycleController private (
 
   val rotateWorkspace: ServerEndpoint[Any, Task] = rotateWorkspaceKeySecretEndpoint.serverLogic { case (maybeUserId, key) =>
     (for
-      userId <- userCtx.extract(maybeUserId)
+      userId <- userCtx.requireAuthenticated(maybeUserId)
       ws     <- workspaceStore.resolve(key)
       _      <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       newKey <- workspaceStore.rotate(key)
@@ -93,7 +93,7 @@ class WorkspaceLifecycleController private (
 
   val deleteWorkspace: ServerEndpoint[Any, Task] = deleteWorkspaceEndpoint.serverLogic { case (maybeUserId, key) =>
     (for
-      userId <- userCtx.extract(maybeUserId)
+      userId <- userCtx.requireAuthenticated(maybeUserId)
       ws     <- workspaceStore.resolve(key)
       _      <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       ids    <- workspaceStore.listTrees(key)

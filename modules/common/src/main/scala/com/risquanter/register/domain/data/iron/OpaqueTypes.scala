@@ -329,7 +329,7 @@ type UuidStr = String :| UuidConstraint
 //
 // @see ADR-012: Claim Header Injection — mesh-injected; app contains zero JWT code.
 // @see AUTHORIZATION-PLAN.md — UserId design rationale and PII classification.
-final class UserId private (private val raw: UuidStr):
+/* final class UserId private (private val raw: UuidStr):
   /** Extract the raw UUID string. Use only in SpiceDB calls, audit logs, and serialisation. */
   def value: String = raw
   override def toString: String = "UserId(***)"
@@ -347,6 +347,30 @@ object UserId:
   given JsonEncoder[UserId] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[UserId] = JsonDecoder[String].mapOrFail(s =>
     UserId.fromString(s).left.map(_.mkString(", ")))
+*/
+
+sealed trait UserId:
+  override def toString: String = "UserId(***)"
+
+object UserId:
+  // makes "val forged = Authenticated("not-validated".refineUnsafe[UuidConstraint])" impossible
+  final class Authenticated private[UserId] (private val raw: UuidStr) extends UserId:
+    def value: String = raw
+    override def hashCode: Int = raw.hashCode
+    override def equals(that: Any): Boolean = that match
+      case u: Authenticated => raw == u.raw
+      case _                => false
+
+  case object Anonymous extends UserId:
+    override def toString: String = "UserId.Anonymous"
+
+  def fromString(s: String): Either[List[ValidationError], Authenticated] =
+    ValidationUtil.refineUserId(s).map(new Authenticated(_))
+
+  // JSON codecs — Authenticated only; Anonymous is never serialised to JSON.
+  given JsonEncoder[Authenticated] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[Authenticated] = JsonDecoder[String].mapOrFail(s =>
+    fromString(s).left.map(_.mkString(", ")))
 
 // WorkspaceId: Nominal case class wrapper over SafeId (ULID) for workspace identity.
 // Compiler-distinct from TreeId, NodeId, and raw SafeId.

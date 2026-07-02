@@ -41,7 +41,7 @@ class WorkspaceTreeController private (
   val getTreeById: ServerEndpoint[Any, Task] = getWorkspaceTreeByIdEndpoint.serverLogic {
     case (maybeUserId, key, treeId) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         _      <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.getById(ws.id, treeId).map(_.map(SimulationResponse.fromRiskTree))
@@ -51,7 +51,7 @@ class WorkspaceTreeController private (
   val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
     case (maybeUserId, key, treeId) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         _      <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.getById(ws.id, treeId)
@@ -61,7 +61,7 @@ class WorkspaceTreeController private (
   val updateTree: ServerEndpoint[Any, Task] = updateWorkspaceTreeEndpoint.serverLogic {
     case (maybeUserId, key, treeId, req) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.update(ws.id, treeId, req).map(SimulationResponse.fromRiskTree)
@@ -71,7 +71,7 @@ class WorkspaceTreeController private (
   val deleteTree: ServerEndpoint[Any, Task] = deleteWorkspaceTreeEndpoint.serverLogic {
     case (maybeUserId, key, treeId) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.delete(ws.id, treeId)
@@ -83,7 +83,7 @@ class WorkspaceTreeController private (
   val invalidateCache: ServerEndpoint[Any, Task] = invalidateWorkspaceCacheEndpoint.serverLogic {
     case (maybeUserId, key, treeId, nodeId) =>
       (for
-        userId <- userCtx.extract(maybeUserId)
+        userId <- userCtx.requireAuthenticated(maybeUserId)
         _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         tree   <- riskTreeService.getById(ws.id, treeId).someOrFail(TreeNotInWorkspace(key, treeId))

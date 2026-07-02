@@ -30,5 +30,5 @@ trait BaseEndpoint {
     *
     * @see ADR-012: Claim Header Injection
     */
-  val authedBaseEndpoint = baseEndpoint.in(header[Option[UserId]]("x-user-id"))
+  val authedBaseEndpoint = baseEndpoint.in(header[Option[UserId.Authenticated]]("x-user-id"))
 }

@@ -122,12 +122,12 @@ object AuthTypesSpec extends ZIOSpecDefault:
         },
         test("round-trips through JSON") {
           val userId   = UserId.fromString(validUuid).toOption.get
-          val decoded  = userId.toJson.fromJson[UserId]
+          val decoded  = userId.toJson.fromJson[UserId.Authenticated]
           assertTrue(decoded == Right(userId))
         },
         test("rejects invalid UUID in JSON decode") {
           val json = "\"not-a-uuid\""
-          assertTrue(json.fromJson[UserId].isLeft)
+          assertTrue(json.fromJson[UserId.Authenticated].isLeft)
         }
       )
     ),

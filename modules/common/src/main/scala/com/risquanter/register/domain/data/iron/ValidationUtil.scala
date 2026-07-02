@@ -200,11 +200,10 @@ object ValidationUtil {
 
   // Refinement for user IDs (UUID v4 format — as issued by Keycloak JWT sub claim via Istio x-user-id header injection).
   // Validates verbatim: Keycloak sub claims are lowercase UUID v4, 8-4-4-4-12 hex format.
-  def refineUserId(value: String, fieldPath: String = "userId"): Either[List[ValidationError], UserId] = {
+  def refineUserId(value: String, fieldPath: String = "userId"): Either[List[ValidationError], UuidStr] = {
     val sanitized = nonEmpty(value)
     sanitized
       .refineEither[UuidConstraint]
-      .map(UserId(_))
       .left
       .map(_ => List(ValidationError(
         field = fieldPath,

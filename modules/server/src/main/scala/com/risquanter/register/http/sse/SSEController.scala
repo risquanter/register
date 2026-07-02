@@ -51,7 +51,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
   val treeEvents: ServerEndpoint[ZioStreams, Task] =
     treeEventsEndpoint.serverLogic { case (maybeUserId, key, treeId) =>
       (for
-        userId      <- userCtx.extract(maybeUserId)
+        userId      <- userCtx.requireAuthenticated(maybeUserId)
         _           <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         _           <- workspaceStore.resolveTree(key, treeId)
         eventStream <- sseHub.subscribe(treeId)

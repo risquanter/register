@@ -3,6 +3,7 @@ package com.risquanter.register.auth
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
+import com.risquanter.register.configs.AuthMode
 import com.risquanter.register.domain.data.iron.UserId
 import com.risquanter.register.domain.errors.AuthServiceUnavailable
 
@@ -12,54 +13,38 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
   private val validUserId = UserId.fromString(validUuid).toOption.get
 
   def spec = suite("UserContextExtractor")(
-    suite("anonymous sentinel")(
-      test("anonymous is a valid UserId with all-zero UUID") {
-        assertTrue(
-          UserContextExtractor.anonymous.value == "00000000-0000-0000-0000-000000000000"
-        )
+    suite("UserId.Anonymous — capability-only identity")(
+      test("Anonymous has redacted toString distinct from Authenticated") {
+        assertTrue(UserId.Anonymous.toString == "UserId.Anonymous")
       },
       // ADR-012 §7 T4 — sentinel pollution guard.
-      // If this test fails it means AnonymousSentinelUuid was changed, which must be
-      // a deliberate decision with accompanying SpiceDB exclusion CI update.
-      test("AnonymousSentinelUuid constant matches anonymous.value (sentinel stability)") {
-        assertTrue(
-          UserContextExtractor.AnonymousSentinelUuid == UserContextExtractor.anonymous.value
-        )
+      // AnonymousSentinelUuid is a valid UUID format kept for SpiceDB CI checks;
+      // it must never be granted any SpiceDB permission.
+      test("AnonymousSentinelUuid is a valid UUID parseable to Authenticated") {
+        val parsed = UserId.fromString(UserContextExtractor.AnonymousSentinelUuid)
+        assertTrue(parsed.isRight)
       },
-      // Ensures the sentinel UUID cannot be used as a real user identity at the Tapir
-      // decode boundary — UserId.fromString must succeed (it's a valid UUID format),
-      // but the value must equal the sentinel so callers can detect and reject it.
-      test("anonymous sentinel is parseable and equals itself (round-trip)") {
-        val reparsed = UserId.fromString(UserContextExtractor.AnonymousSentinelUuid)
-        assertTrue(
-          reparsed.isRight,
-          reparsed.toOption.get == UserContextExtractor.anonymous
-        )
-      },
-      test("a real user UUID is never equal to the anonymous sentinel") {
-        assertTrue(validUserId != UserContextExtractor.anonymous)
+      test("Authenticated from a real UUID is never equal to UserId.Anonymous") {
+        assertTrue(validUserId != UserId.Anonymous)
       }
     ),
     suite("noOp — capability-only mode")(
-      test("returns anonymous when header is absent") {
+      test("returns UserId.Anonymous when header is absent") {
         for
           result <- UserContextExtractor.noOp.extract(None)
-        yield assertTrue(result == UserContextExtractor.anonymous)
+        yield assertTrue(result == UserId.Anonymous)
       },
-      test("ignores the provided userId and returns anonymous") {
+      test("ignores the provided userId and returns UserId.Anonymous") {
         for
           result <- UserContextExtractor.noOp.extract(Some(validUserId))
-        yield assertTrue(result == UserContextExtractor.anonymous)
+        yield assertTrue(result == UserId.Anonymous)
       },
-      // ADR-012 §7 T4 — noOp must always produce the sentinel, never a real userId.
-      // This is what prevents noOp mode from accidentally granting identity-scoped access.
-      test("noOp always returns anonymous even when a valid userId is supplied") {
+      // ADR-012 §7 T4 — noOp must always produce Anonymous, never a real Authenticated.
+      test("noOp always returns Anonymous regardless of header value") {
         for
-          result <- UserContextExtractor.noOp.extract(Some(validUserId))
-        yield assertTrue(
-          result == UserContextExtractor.anonymous,
-          result.value == UserContextExtractor.AnonymousSentinelUuid
-        )
+          result1 <- UserContextExtractor.noOp.extract(None)
+          result2 <- UserContextExtractor.noOp.extract(Some(validUserId))
+        yield assertTrue(result1 == UserId.Anonymous, result2 == UserId.Anonymous)
       }
     ),
     suite("requirePresent — identity/fine-grained mode")(
@@ -68,46 +53,72 @@ object UserContextExtractorSpec extends ZIOSpecDefault:
           result <- UserContextExtractor.requirePresent.extract(Some(validUserId))
         yield assertTrue(result == validUserId)
       },
-      test("fails with AuthServiceUnavailable when header is absent") {
+      test("fails with AuthServiceUnavailable mentioning mesh bypass when header is absent") {
         for
           result <- UserContextExtractor.requirePresent.extract(None).either
         yield result match
           case Left(err: AuthServiceUnavailable) =>
-            assertTrue(err.getMessage.contains("Missing x-user-id header"))
+            assertTrue(
+              err.getMessage.contains("Missing x-user-id header"),
+              err.getMessage.contains("mesh bypass")
+            )
           case other =>
             assertTrue(false)
       },
-      test("failure message mentions mesh bypass") {
-        for
-          result <- UserContextExtractor.requirePresent.extract(None).either
-        yield result match
-          case Left(err) => assertTrue(err.getMessage.contains("mesh bypass"))
-          case Right(_)  => assertTrue(false)
-      },
-      // ADR-012 §7 T4 — requirePresent must NEVER return the anonymous sentinel.
-      // If a real UUID is present in the header, it is returned verbatim (not replaced).
-      test("requirePresent never returns the anonymous sentinel for a real userId") {
+      // ADR-012 §7 T4 — requirePresent must NEVER return UserId.Anonymous.
+      test("requirePresent never returns UserId.Anonymous for a real userId") {
         for
           result <- UserContextExtractor.requirePresent.extract(Some(validUserId))
-        yield assertTrue(result != UserContextExtractor.anonymous)
+        yield assertTrue(result != UserId.Anonymous)
       },
-      // Edge case: what if someone explicitly sends the sentinel UUID as their user id?
-      // requirePresent returns it as-is (it's a valid UUID). The SpiceDB layer
-      // will find no permissions for it (T4 CI check ensures this).
-      // This test documents the contract: extractor doesn't filter by value, only by presence.
+      // Edge case: if someone explicitly sends the sentinel UUID as their user id,
+      // requirePresent returns it as Authenticated (valid UUID format).
+      // The SpiceDB layer finds no permissions for it — T4 CI check enforces this.
       test("requirePresent passes through sentinel UUID if explicitly provided (SpiceDB has no grants for it)") {
+        val sentinelAuthenticated = UserId.fromString(UserContextExtractor.AnonymousSentinelUuid).toOption.get
         for
-          result <- UserContextExtractor.requirePresent.extract(Some(UserContextExtractor.anonymous))
-        yield assertTrue(result == UserContextExtractor.anonymous)
+          result <- UserContextExtractor.requirePresent.extract(Some(sentinelAuthenticated))
+        yield assertTrue(result == sentinelAuthenticated)
+      }
+    ),
+    suite("noOp.requireAuthenticated — capability-only mode")(
+      test("returns sentinel Authenticated when header is absent") {
+        for
+          result <- UserContextExtractor.noOp.requireAuthenticated(None)
+        yield assertTrue(result.value == UserContextExtractor.AnonymousSentinelUuid)
+      },
+      test("returns header userId when header is present") {
+        for
+          result <- UserContextExtractor.noOp.requireAuthenticated(Some(validUserId))
+        yield assertTrue(result == validUserId)
+      }
+    ),
+    suite("requirePresent.requireAuthenticated — identity/fine-grained mode")(
+      test("returns userId when header is present") {
+        for
+          result <- UserContextExtractor.requirePresent.requireAuthenticated(Some(validUserId))
+        yield assertTrue(result == validUserId)
+      },
+      test("fails with AuthServiceUnavailable when header is absent") {
+        for
+          result <- UserContextExtractor.requirePresent.requireAuthenticated(None).either
+        yield result match
+          case Left(err: AuthServiceUnavailable) =>
+            assertTrue(
+              err.getMessage.contains("Missing x-user-id header"),
+              err.getMessage.contains("mesh bypass")
+            )
+          case other =>
+            assertTrue(false)
       }
     ),
     suite("logStartupMode")(
       test("noOp mode log completes without error") {
-        UserContextExtractor.logStartupMode("capability-only", UserContextExtractor.noOp)
+        UserContextExtractor.logStartupMode(AuthMode.CapabilityOnly, UserContextExtractor.noOp)
           .as(assertTrue(true))
       },
       test("requirePresent mode log completes without error") {
-        UserContextExtractor.logStartupMode("fine-grained", UserContextExtractor.requirePresent)
+        UserContextExtractor.logStartupMode(AuthMode.FineGrained, UserContextExtractor.requirePresent)
           .as(assertTrue(true))
       }
     )
