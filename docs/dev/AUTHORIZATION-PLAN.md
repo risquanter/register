@@ -244,12 +244,18 @@ enum Role:
   case Analyst    // may run analysis, create scenario branches; cannot mutate canonical design
   case Editor     // ⊇ Analyst: may also mutate canonical design
   case TeamAdmin  // may manage team structure
+  case Viewer     // read-only; access enforced by SpiceDB check(), not this enum
+                  // Note: viewer is in OPA recognized_roles but currently absent from
+                  // UserContext.scala Role.fromClaim — UserContext.roles is empty for
+                  // pure-viewer users. No functional impact (SpiceDB uses userId, not roles).
+                  // UserContext.scala should be updated to map "viewer" → Some(Viewer).
 
 object Role:
   def fromClaim(s: String): Option[Role] = s match
     case "analyst"    => Some(Analyst)
     case "editor"     => Some(Editor)
     case "team_admin" => Some(TeamAdmin)
+    case "viewer"     => Some(Viewer)  // TODO: add to UserContext.scala
     case _            => None
 ```
 
@@ -398,23 +404,52 @@ spec:
     # forwardOriginalToken is NOT set — the app never receives the raw JWT
 ```
 
-**AuthorizationPolicy (protect non-public routes):**
+**AuthorizationPolicy — two focused policies (waypoint-scoped via `targetRef`):**
+
 ```yaml
+# Policy 1: require JWT for all authenticated routes
 apiVersion: security.istio.io/v1
 kind: AuthorizationPolicy
 metadata:
   name: require-jwt
   namespace: register
 spec:
+  # targetRef scopes to the waypoint, not pods directly. Required in Ambient
+  # mode: ztunnel cannot evaluate HTTP attributes (requestPrincipals, paths),
+  # so a pod-selector policy with only HTTP rules silently has zero effective
+  # rules, leaving pods in default-deny at L4.
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: waypoint
   action: ALLOW
   rules:
   - from:
     - source:
         requestPrincipals: ["*"]  # any valid JWT
+---
+# Policy 2: public routes — no JWT required
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-capability-urls
+  namespace: register
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: waypoint
+  action: ALLOW
+  rules:
   - to:
     - operation:
-        paths: ["/w/*", "/workspaces", "/health"]  # public routes
+        paths: ["/w/*", "/workspaces/*", "/health"]  # public routes
 ```
+
+With two separate `ALLOW` policies on the waypoint, Istio allows a request
+when **any** policy matches. Authenticated routes match `require-jwt`; public
+routes match `allow-capability-urls`. A request matching neither is denied by
+default.
 
 ### Task L1.6: Tests
 

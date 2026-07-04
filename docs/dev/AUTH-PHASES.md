@@ -25,9 +25,9 @@ All items in this phase have no inter-dependencies and can proceed simultaneousl
 **`register-infra` project:**
 | Task | Ref |
 |------|-----|
-| K.1: k3s cluster bootstrap | AUTH-PLAN §K.1 |
-| K.2: Container registry + image pipeline | AUTH-PLAN §K.2 |
-| K.3: PostgreSQL on k3s | AUTH-PLAN §K.3 |
+| K.1: k3s cluster bootstrap ✅ | AUTH-PLAN §K.1 |
+| K.2: Container registry + image pipeline ✅ | AUTH-PLAN §K.2 |
+| K.3: PostgreSQL on k3s ✅ | AUTH-PLAN §K.3 |
 
 ---
 
@@ -37,8 +37,8 @@ All items in this phase have no inter-dependencies and can proceed simultaneousl
 → Blocked by: Wave 0B (`UserId.Authenticated` required in signatures)
 → Ref: IMPL-PLAN §Wave 1
 
-**`register-infra`:** K.4 — Keycloak on k3s (realm, clients, roles, mappers, OIDC flow).
-→ Blocked by: K.3
+**`register-infra`:** K.4 ✅ — Keycloak on k3s (realm, clients, roles, mappers, OIDC flow).
+→ Blocked by: K.3 ✅
 → Ref: AUTH-PLAN §K.4
 
 ---
@@ -54,8 +54,8 @@ All items can run in parallel within this phase.
 | Waves 4–5: workspace-level `check()` on all lifecycle routes ✅ | Wave 1 | AUTH-PLAN Waves 4–5. All 12 routes structurally wired with `given Checked[Permission] <- authzService.check(...)`. Enforcement active in fine-grained mode once Wave 3 is deployed. |
 | Wave 6: `BootstrapProvisioner.recordOwnership()` wiring | Wave 0D + Wave 0B + Wave 1 | IMPL-PLAN §Wave 6. `bootstrapWorkspace` still anonymous (no `requireAuthenticated`, no `recordOwnership`). |
 
-**`register-infra`:** K.5 — Istio ambient mode, `RequestAuthentication`, `AuthorizationPolicy`, JWT claim header injection, waypoint header-stripping verification.
-→ Blocked by: K.4
+**`register-infra`:** K.5 ✅ — Istio ambient mode, `RequestAuthentication`, `AuthorizationPolicy`, JWT claim header injection, waypoint header-stripping verification.
+→ Blocked by: K.4 ✅
 → Ref: AUTH-PLAN §K.5
 
 ---
