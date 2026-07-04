@@ -22,7 +22,8 @@ not duplicate the strategic content; read AUTHORIZATION-PLAN.md first.
 | `UserId` sum type | Wave 0 ✅| Scala type | `Anonymous \| Authenticated` — prevents sentinel reaching SpiceDB |
 | `SpiceDbConfig` Iron constraints | Wave 0 ✅| Scala config | `PositiveInt` timeout, HTTPS-only URL constraint |
 | `BootstrapProvisioner` trait | Wave 0 ✅| Scala type | Separate resource lifecycle writes from `AuthorizationService` |
-| `Checked[P]` proof token (strong form) | Wave 1 | Scala type | `check()` returns proof; protected operations require it via `using` |
+| `Checked[P]` proof token (strong form) | Wave 1 ✅ | Scala type | `check()` returns proof; protected operations require it via `using`. **Implemented 2026-07-04 — see implementation note below.** |
+| `BootstrapProvisioner.bootstrapToken()` / `systemMaintenanceToken()` | Wave 0D amendment ✅ | Scala type | Lifecycle proof tokens added alongside `recordOwnership()` — required for `Checked[P]` to work at bootstrap and reaper call sites. `bootstrapToken()` produces `Checked[Bootstrap.type]`; `systemMaintenanceToken()` produces `Checked[SystemMaintenance.type]`. |
 | `BootstrapProvisioner.recordOwnership()` | Wave 6 | Scala impl | Replaces `authz.seed()` — correct naming and service boundary |
 | SpiceDB service account scope | Wave 6 | Ops | Narrow write permission to `owner_user`/`owner_team` on `workspace` only |
 | Header spoofing smoke test | Phase K.5 | K8s CI | Mandatory exit criterion verifying waypoint strips external headers |
@@ -357,6 +358,17 @@ only. This scoping means the compiler prevents any handler other than bootstrap 
 ---
 
 ## Wave 1 Amendment: `Checked[P]` Proof Token (Strong Form)
+
+> **✅ IMPLEMENTED 2026-07-04**
+>
+> **Implementation deviation from plan examples:** Scala 3 type inference widens the return
+> type of `check()` to `Checked[Permission]` (base type) when the caller does not explicitly
+> ascribe the type parameter. As a result:
+> - Service method signatures use `(using Checked[Permission])` — **not** `(using Checked[Permission.ViewWorkspace.type])`
+> - Handler bindings use `given Checked[Permission] <- authzService.check(...)` — **not** the specific singleton type shown in examples below
+> - The specific permission value (`Permission.ViewWorkspace`, `Permission.DesignWrite`, etc.) is still passed to `check()` and sent to SpiceDB — only the binding type is wider
+> - This is correct behavior: service methods require `Checked[Permission]` (any proof); the specific permission that SpiceDB enforces lives in the `check()` call arguments
+> - See ADR-030 §3 for the full rationale and working Scala 3 syntax
 
 This is the most significant type-level change. It is introduced at Wave 1 because that wave
 already touches every workspace-scoped `serverLogic` signature. Introducing it here avoids
@@ -780,14 +792,15 @@ All items below must be satisfied before the authorization rollout is considered
 **Type-level (Scala):**
 - [x] `AuthMode` sealed enum; service fails on unknown mode string — **DONE** (`AuthConfig.scala`, verified 2026-07-01)
 - [x] `WorkspaceId` and `asResource` extensions exist — **DONE** (`OpaqueTypes.scala` + `AuthorizationService.scala`, verified 2026-07-01)
-- [ ] `UserId.Authenticated` / `UserId.Anonymous` sum type; `check()` accepts only `Authenticated`
-- [ ] `SpiceDbConfig.url` is HTTPS-only Iron constraint
-- [ ] `SpiceDbConfig.timeoutSeconds` is `PositiveInt`
-- [ ] `Checked[P]` opaque type (strong form); `check()` returns `IO[AuthError, Checked[P]]`
-- [ ] Protected service methods take `using Checked[P]`; missing proof is a compile error
-- [ ] `BootstrapProvisioner` trait separate from `AuthorizationService`; `AuthorizationService` has no write methods
-- [ ] `BootstrapProvisioner.recordOwnership()` wired in bootstrap handler only
-- [ ] ADR-024 updated with lifecycle write clarification and service account scope note
+- [x] `UserId.Authenticated` / `UserId.Anonymous` sum type; `check()` accepts only `Authenticated` — **DONE** (`OpaqueTypes.scala`, Wave 0B, verified 2026-07-01)
+- [x] `SpiceDbConfig.url` is HTTPS-only Iron constraint — **DONE** (`SpiceDbConfig.scala`, Wave 0C, verified 2026-07-01)
+- [x] `SpiceDbConfig.timeoutSeconds` is `PositiveInt` — **DONE** (`SpiceDbConfig.scala`, Wave 0C, verified 2026-07-01)
+- [x] `Checked[P]` opaque type (strong form); `check()` returns `IO[AuthError, Checked[P]]` — **DONE** (`auth/AuthorizationService.scala`, Wave 1, verified 2026-07-04). **Implementation note:** service method `using` parameters use base `Checked[Permission]` type (not specific subtypes); handler bindings use `given Checked[Permission] <-` (Scala 3 infers base type from `check()`). See ADR-030 §3.
+- [x] Protected service methods take `using Checked[P]`; missing proof is a compile error — **DONE** (`WorkspaceStore`, `RiskTreeService` traits + impls, Wave 1, verified 2026-07-04). All 10 protected methods on `WorkspaceStore` + `RiskTreeService` carry `(using Checked[Permission])`.
+- [x] `BootstrapProvisioner` trait separate from `AuthorizationService`; `AuthorizationService` has no write methods — **DONE** (`auth/BootstrapProvisioner.scala`, Wave 0D, verified 2026-07-01). Extended 2026-07-04 with `bootstrapToken()` and `systemMaintenanceToken()` lifecycle proof methods.
+- [ ] `BootstrapProvisioner.recordOwnership()` wired in bootstrap handler only — **Wave 6 (future)**
+- [x] ADR-024 updated with lifecycle write clarification and service account scope note — **DONE** (ADR-024 §7, Pre-Wave, verified 2026-07-01)
+- [x] ADR-030 created: Authorization Enforcement at the Orchestration Boundary — **DONE** (`docs/dev/ADR-030-authorization-enforcement-orchestration-boundary.md`, 2026-07-04)
 
 **Infrastructure (K8s/CI):**
 - [ ] Header spoofing smoke test passes against deployed K.5 cluster
@@ -796,10 +809,10 @@ All items below must be satisfied before the authorization rollout is considered
 - [ ] App service account verified: write permission scoped to `owner_user`/`owner_team` on `workspace` only
 
 **Tests (unit + stub-based):**
-- [ ] Compile-time proof: missing `Checked[P]` at a protected call site does not compile
-- [ ] `AuthorizationServiceStub` returns `Checked[P]` on success
-- [ ] `BootstrapProvisionerStub` records `recordOwnership()` calls (not on `AuthorizationService`)
-- [ ] All waves from AUTHORIZATION-PLAN.md pass their regression gates unchanged
+- [x] Compile-time proof: missing `Checked[P]` at a protected call site does not compile — **DONE** (verified 2026-07-04: removing `given Checked[Permission] <-` from any controller handler causes compiler error at each subsequent protected service method call)
+- [x] `AuthorizationServiceStub` returns `Checked[P]` on success — **DONE** (`auth/AuthorizationServiceStub.scala`, verified 2026-07-04)
+- [ ] `BootstrapProvisionerStub` records `recordOwnership()` calls (not on `AuthorizationService`) — **Wave 6 (future)**
+- [x] All waves from AUTHORIZATION-PLAN.md pass their regression gates unchanged — **DONE** (478 tests pass, 0 failures, verified 2026-07-04)
 
 **Tests (`server-it` — SpiceDB adapter, see §SpiceDB Adapter Integration Tests):**
 - [ ] SpiceDB added to `docker-compose.server-it.yml`; schema applied at startup

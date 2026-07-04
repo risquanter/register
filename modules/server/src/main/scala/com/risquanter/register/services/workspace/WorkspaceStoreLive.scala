@@ -89,7 +89,7 @@ final class WorkspaceStoreLive private (
     * means the updatedWith finds None and the no-op map produces no change.
     * Making this atomic via Ref.modify would add complexity for no practical gain.
     */
-  override def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
+  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       _       <- resolveInternal(key)
       keyHash  = WorkspaceKeyHash.fromSecret(key)
@@ -101,7 +101,7 @@ final class WorkspaceStoreLive private (
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op.
     * Same non-atomic resolve + update pattern as addTree (see justification above).
     */
-  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
+  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       _       <- resolveInternal(key)
       keyHash  = WorkspaceKeyHash.fromSecret(key)
@@ -111,7 +111,7 @@ final class WorkspaceStoreLive private (
     yield ()
 
   /** List all tree IDs in a workspace. */
-  override def listTrees(key: WorkspaceKeySecret): IO[AppError, List[TreeId]] =
+  override def listTrees(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
   /** Resolve a workspace with dual timeout check (A11) and access tracking (A10).
@@ -179,7 +179,7 @@ final class WorkspaceStoreLive private (
     * delete is idempotent — a concurrent delete between resolve and update simply
     * removes a key that is already gone, which is a no-op on Map.
     */
-  override def delete(key: WorkspaceKeySecret): IO[AppError, Unit] =
+  override def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       ws      <- resolveInternal(key)
       keyHash  = WorkspaceKeyHash.fromSecret(key)
@@ -195,7 +195,7 @@ final class WorkspaceStoreLive private (
   /** Atomic rotation via single Ref.modify — no window where neither key works.
     * Reuses validateWorkspace for DRY validation. (A29: logs rotation)
     */
-  override def rotate(key: WorkspaceKeySecret): IO[AppError, WorkspaceKeySecret] =
+  override def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret] =
     for
       newKey <- WorkspaceKeySecret.generate
       now    <- Clock.instant

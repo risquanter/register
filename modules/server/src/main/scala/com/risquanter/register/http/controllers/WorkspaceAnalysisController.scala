@@ -3,7 +3,7 @@ package com.risquanter.register.http.controllers
 import zio.*
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.auth.{AuthorizationService, Permission, ResourceRef, ResourceType, UserContextExtractor}
+import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
 import com.risquanter.register.services.RiskTreeService
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -38,7 +38,7 @@ class WorkspaceAnalysisController private (
     case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.probOfExceedance(ws.id, treeId, nodeId, threshold, includeProvenance)
       yield result).either
@@ -48,7 +48,7 @@ class WorkspaceAnalysisController private (
     case (maybeUserId, key, treeId, includeProvenance, nodeIds) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, includeProvenance)
       yield result).either

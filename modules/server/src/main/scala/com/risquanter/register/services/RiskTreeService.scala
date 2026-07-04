@@ -30,7 +30,7 @@ trait RiskTreeService {
     * @param req Request containing tree definition
     * @return Persisted risk tree metadata (no LEC data)
     */
-  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest): Task[RiskTree]
+  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
   
   /** Update risk tree definition - modifies tree structure only
     * @param wsId Workspace that owns the tree
@@ -38,21 +38,21 @@ trait RiskTreeService {
     * @param req Updated tree definition
     * @return Updated risk tree metadata
     */
-  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]
+  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
   
   /** Delete risk tree configuration
     * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
     * @return Deleted risk tree metadata
     */
-  def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree]
+  def delete(wsId: WorkspaceId, id: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
   
   /** Retrieve single risk tree configuration by ID (no LEC data)
     * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
     * @return Optional risk tree metadata
     */
-  def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]]
+  def getById(wsId: WorkspaceId, id: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]]
   
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)
@@ -91,5 +91,5 @@ object RiskTreeService:
     * for the cascade-delete semantic.
     */
   extension (self: RiskTreeService)
-    def cascadeDeleteTrees(wsId: WorkspaceId, ids: Iterable[TreeId]): UIO[Unit] =
+    def cascadeDeleteTrees(wsId: WorkspaceId, ids: Iterable[TreeId])(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): UIO[Unit] =
       ZIO.foreachDiscard(ids)(id => self.delete(wsId, id).ignore)

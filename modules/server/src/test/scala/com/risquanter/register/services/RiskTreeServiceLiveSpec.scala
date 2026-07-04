@@ -13,9 +13,13 @@ import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.*
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
 import com.risquanter.register.util.IdGenerators
+import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
 
 object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
+  // Service-level test: operates below the authorization layer.
+  // TestChecked provides the Checked[Permission] proof required by protected service methods.
+  private given Checked[Permission] = TestChecked.value
 
   // Concise service accessor pattern
   private def service[A](f: RiskTreeService => ZIO[Any, Throwable, A]): ZIO[RiskTreeService, Throwable, A] =

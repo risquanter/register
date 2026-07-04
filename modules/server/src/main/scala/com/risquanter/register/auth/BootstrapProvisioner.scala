@@ -1,6 +1,6 @@
 package com.risquanter.register.auth
 
-import zio.{IO, ZIO}
+import zio.{IO, UIO, ZIO}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
 import com.risquanter.register.domain.errors.AuthError
 
@@ -37,5 +37,30 @@ trait BootstrapProvisioner:
     workspaceId: WorkspaceId
   ): IO[AuthError, Unit]
 
+  /** Produce a compile-time proof for resource-creation operations.
+    *
+    * Called at the start of bootstrapWorkspace, before riskTreeService.create()
+    * and workspaceStore.addTree(). No SpiceDB call is made — Bootstrap is a
+    * lifecycle marker only.
+    *
+    * @see ADR-030 §5 — Bootstrap Lifecycle Token
+    */
+  def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]]
+
+  /** Produce a compile-time proof for background system maintenance operations.
+    *
+    * Called by WorkspaceReaper before cascadeDeleteTrees and delete.
+    * No SpiceDB call is made — SystemMaintenance is a lifecycle marker only.
+    *
+    * @see ADR-030 §1 — Orchestration Boundary (background orchestrators)
+    */
+  def systemMaintenanceToken(): UIO[Checked[Permission.SystemMaintenance.type]]
+
 object BootstrapProvisioner:
-  val noOp: BootstrapProvisioner = (_, _) => ZIO.unit
+  val noOp: BootstrapProvisioner = new BootstrapProvisioner:
+    def recordOwnership(userId: UserId.Authenticated, workspaceId: WorkspaceId): IO[AuthError, Unit] =
+      ZIO.unit
+    def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]] =
+      ZIO.succeed(Checked[Permission.Bootstrap.type]())
+    def systemMaintenanceToken(): UIO[Checked[Permission.SystemMaintenance.type]] =
+      ZIO.succeed(Checked[Permission.SystemMaintenance.type]())

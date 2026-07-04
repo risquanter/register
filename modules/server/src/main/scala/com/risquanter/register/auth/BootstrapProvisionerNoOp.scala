@@ -1,6 +1,6 @@
 package com.risquanter.register.auth
 
-import zio.{IO, ZIO, ZLayer}
+import zio.{IO, UIO, ZIO, ZLayer}
 import com.risquanter.register.domain.data.iron.{UserId, WorkspaceId}
 import com.risquanter.register.domain.errors.AuthError
 
@@ -17,6 +17,12 @@ object BootstrapProvisionerNoOp extends BootstrapProvisioner:
     userId:      UserId.Authenticated,
     workspaceId: WorkspaceId
   ): IO[AuthError, Unit] = ZIO.unit
+
+  def bootstrapToken(): UIO[Checked[Permission.Bootstrap.type]] =
+    ZIO.succeed(Checked[Permission.Bootstrap.type]())
+
+  def systemMaintenanceToken(): UIO[Checked[Permission.SystemMaintenance.type]] =
+    ZIO.succeed(Checked[Permission.SystemMaintenance.type]())
 
   val layer: ZLayer[Any, Nothing, BootstrapProvisioner] =
     ZLayer.succeed(BootstrapProvisionerNoOp)

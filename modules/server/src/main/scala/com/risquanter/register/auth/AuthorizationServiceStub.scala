@@ -13,12 +13,12 @@ final class AuthorizationServiceStub(
   allowed: Set[(UserId.Authenticated, Permission, ResourceRef)]
 ) extends AuthorizationService:
 
-  def check(
+  def check[P <: Permission](
     user:       UserId.Authenticated,
-    permission: Permission,
+    permission: P,
     resource:   ResourceRef
-  ): IO[AuthError, Unit] =
-    if allowed.contains((user, permission, resource)) then ZIO.unit
+  ): IO[AuthError, Checked[P]] =
+    if allowed.contains((user, permission, resource)) then ZIO.succeed(Checked[P]())
     else ZIO.fail(AuthForbidden(
       userId       = user.value,
       permission   = permission.zedName,

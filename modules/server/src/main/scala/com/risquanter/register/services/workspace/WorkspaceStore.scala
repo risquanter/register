@@ -25,13 +25,13 @@ trait WorkspaceStore:
   def create(): UIO[WorkspaceKeySecret]
 
   /** Associate a tree with a workspace. Fails if workspace expired or not found. */
-  def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit]
+  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
 
   /** Disassociate a tree from a workspace. Idempotent — removing a non-member is a no-op. */
-  def removeTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit]
+  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
 
   /** List all tree IDs in a workspace. Fails if expired or not found. */
-  def listTrees(key: WorkspaceKeySecret): IO[AppError, List[TreeId]]
+  def listTrees(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, List[TreeId]]
 
   /** Resolve a workspace. Fails with WorkspaceExpired or WorkspaceNotFound.
     * Implements dual timeout: absolute (createdAt + ttl) AND idle (lastAccessedAt + idleTimeout).
@@ -81,7 +81,7 @@ trait WorkspaceStore:
     * Tree cascade-deletion is orchestrated by the controller (Option B).
     * Security: logs deletion event (A29).
     */
-  def delete(key: WorkspaceKeySecret): IO[AppError, Unit]
+  def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
 
   /** Atomic rotation. Generates new key, transfers all tree associations,
     * instantly invalidates old key. No grace period — old key is immediately
@@ -89,7 +89,7 @@ trait WorkspaceStore:
     * Returns new key.
     * Security: logs rotation event (A29).
     */
-  def rotate(key: WorkspaceKeySecret): IO[AppError, WorkspaceKeySecret]
+  def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret]
 
 object WorkspaceStore:
   // Accessor methods for ZIO service pattern
@@ -105,13 +105,13 @@ object WorkspaceStore:
   def resolveTreeWorkspace(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolveTreeWorkspace(key, treeId))
 
-  def addTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
+  def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.addTree(key, treeId))
 
-  def removeTree(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Unit] =
+  def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.removeTree(key, treeId))
 
-  def listTrees(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, List[TreeId]] =
+  def listTrees(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, List[TreeId]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.listTrees(key))
 
   def belongsTo(key: WorkspaceKeySecret, treeId: TreeId): ZIO[WorkspaceStore, AppError, Boolean] =
@@ -123,8 +123,8 @@ object WorkspaceStore:
   def evictExpired: ZIO[WorkspaceStore, Nothing, List[WorkspaceRecord]] =
     ZIO.serviceWithZIO[WorkspaceStore](_.evictExpired)
 
-  def delete(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, Unit] =
+  def delete(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, Unit] =
     ZIO.serviceWithZIO[WorkspaceStore](_.delete(key))
 
-  def rotate(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
+  def rotate(key: WorkspaceKeySecret)(using p: com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
     ZIO.serviceWithZIO[WorkspaceStore](_.rotate(key))

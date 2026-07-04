@@ -1085,8 +1085,8 @@ val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.s
   case (maybeUserId, key) =>    // maybeUserId: Option[UserId] — mesh-injected, UUID-validated at Tapir boundary
     (for
       ws     <- workspaceStore.resolve(key)                                     // Layer 0: capability
-      userId <- userCtx.extract(maybeUserId)                                    // Layer 1: identity (NoOp or require-present)
-      _      <- authz.check(userId, Permission.ViewWorkspace, ws.id.asResource) // Layer 2: SpiceDB (NoOp or live)
+      userId <- userCtx.requireAuthenticated(maybeUserId)                       // Layer 1: identity (NoOp or require-present)
+      given Checked[Permission] <- authz.check(userId, Permission.ViewWorkspace, ws.id.asResource) // Layer 2: SpiceDB (NoOp or live)
       trees  <- workspaceStore.listTrees(key).map(_.map(SimulationResponse.fromRiskTree))
     yield trees).either
 }
@@ -1098,8 +1098,8 @@ val getTreeById: ServerEndpoint[Any, Task] = getWorkspaceTreeByIdEndpoint.server
     (for
       ws     <- workspaceStore.resolve(key)
       _      <- resolveTree(key, treeId)                                    // Layer 0: workspace capability + tree ownership
-      userId <- userCtx.extract(maybeUserId)                                // Layer 1: identity (NoOp or require-present)
-      _      <- authz.check(userId, Permission.ViewTree, treeId.asResource) // Layer 2: SpiceDB on tree
+      userId <- userCtx.requireAuthenticated(maybeUserId)                   // Layer 1: identity
+      given Checked[Permission] <- authz.check(userId, Permission.ViewTree, treeId.asResource) // Layer 2: SpiceDB on tree
       result <- riskTreeService.getById(treeId).map(_.map(SimulationResponse.fromRiskTree))
     yield result).either
 }

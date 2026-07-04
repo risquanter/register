@@ -134,8 +134,8 @@ object Application extends ZIOAppDefault {
     ZLayer.fromZIO {
       ZIO.service[AuthConfig].map {
         case AuthConfig(AuthMode.CapabilityOnly) => UserContextExtractor.noOp
-        case AuthConfig(AuthMode.Identity)       => UserContextExtractor.noOp
-        case AuthConfig(AuthMode.FineGrained)    => UserContextExtractor.noOp
+        case AuthConfig(AuthMode.Identity)       => UserContextExtractor.requirePresent
+        case AuthConfig(AuthMode.FineGrained)    => UserContextExtractor.requirePresent
       }
     }
 

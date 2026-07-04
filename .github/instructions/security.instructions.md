@@ -31,10 +31,12 @@ The application is a **pure PEP (Policy Enforcement Point)**. It reads authoriza
 state. It never writes authorization data.
 
 ```scala
-// ✅ The complete interface — check only
+// ✅ The complete interface — check only, returns Checked[P] proof token
 trait AuthorizationService:
-  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]
-  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
+  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
+  // Checked[P] is bound via `given` in controller for-comprehensions.
+  // Protected service methods require `using Checked[Permission]` — missing proof is a compile error.
+  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
 
 // ❌ NEVER — app never writes tuples to SpiceDB
 def grant(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]

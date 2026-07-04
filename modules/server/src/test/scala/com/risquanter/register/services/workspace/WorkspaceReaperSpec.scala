@@ -13,8 +13,12 @@ import com.risquanter.register.domain.data.{RiskTree, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.util.IdGenerators
+import com.risquanter.register.auth.{BootstrapProvisionerNoOp, Checked, Permission, TestChecked}
 
 object WorkspaceReaperSpec extends ZIOSpecDefault:
+  // Service-level test: WorkspaceReaper calls protected service methods as a background orchestrator.
+  // TestChecked provides the Checked[Permission] proof for direct stub invocations.
+  private given Checked[Permission] = TestChecked.value
 
   // ── Test helpers ────────────────────────────────────────────────────
 
@@ -22,10 +26,10 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     * All other methods die immediately to catch unintended calls.
     */
   private def makeStub(onDelete: (WorkspaceId, TreeId) => Task[RiskTree]): RiskTreeService = new RiskTreeService:
-    def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest): Task[RiskTree]                                          = ZIO.die(new UnsupportedOperationException)
-    def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree]                                  = ZIO.die(new UnsupportedOperationException)
-    def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree]                                                              = onDelete(wsId, id)
-    def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]]                                                     = ZIO.die(new UnsupportedOperationException)
+    def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest)(using Checked[Permission]): Task[RiskTree]                                          = ZIO.die(new UnsupportedOperationException)
+    def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest)(using Checked[Permission]): Task[RiskTree]                                  = ZIO.die(new UnsupportedOperationException)
+    def delete(wsId: WorkspaceId, id: TreeId)(using Checked[Permission]): Task[RiskTree]                                                              = onDelete(wsId, id)
+    def getById(wsId: WorkspaceId, id: TreeId)(using Checked[Permission]): Task[Option[RiskTree]]                                                     = ZIO.die(new UnsupportedOperationException)
     def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[Double] = ZIO.die(new UnsupportedOperationException)
     def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
 
@@ -97,7 +101,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
             ZLayer.succeed(config),
             WorkspaceStoreLive.layer,
             noOpTreeServiceLayer,
-            ZLayer.succeed(Scope.global)
+            ZLayer.succeed(BootstrapProvisionerNoOp),
+                        ZLayer.succeed(Scope.global)
           )
       ).as(assertTrue(true))
     },
@@ -114,7 +119,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
             ZLayer.succeed(config),
             WorkspaceStoreLive.layer,
             noOpTreeServiceLayer,
-            ZLayer.succeed(Scope.global)
+            ZLayer.succeed(BootstrapProvisionerNoOp),
+                        ZLayer.succeed(Scope.global)
           )
       ).as(assertTrue(true))
     },
@@ -132,7 +138,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                        ZLayer.succeed(reaperTestConfig),
                        ZLayer.succeed(store: WorkspaceStore),
                        noOpTreeServiceLayer,
-                       ZLayer.succeed(Scope.global)
+                       ZLayer.succeed(BootstrapProvisionerNoOp),
+                        ZLayer.succeed(Scope.global)
                      )
           key   <- store.create()
           // yield so the reaper fiber can run until it blocks on ZIO.sleep
@@ -165,7 +172,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                                  ZLayer.succeed(reaperTestConfig),
                                  ZLayer.succeed(store: WorkspaceStore),
                                  ZLayer.succeed(svc: RiskTreeService),
-                                 ZLayer.succeed(Scope.global)
+                                 ZLayer.succeed(BootstrapProvisionerNoOp),
+                        ZLayer.succeed(Scope.global)
                                )
           // yield so the reaper fiber reaches ZIO.sleep, then advance
           _                <- ZIO.yieldNow
@@ -201,7 +209,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                                  ZLayer.succeed(reaperTestConfig),
                                  ZLayer.succeed(store: WorkspaceStore),
                                  ZLayer.succeed(svc: RiskTreeService),
-                                 ZLayer.succeed(Scope.global)
+                                 ZLayer.succeed(BootstrapProvisionerNoOp),
+                        ZLayer.succeed(Scope.global)
                                )
           _                <- ZIO.yieldNow
           _                <- TestClock.adjust(4.minutes)
@@ -229,6 +238,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                         ZLayer.succeed(reaperTestConfig),
                         ZLayer.succeed(store: WorkspaceStore),
                         noOpTreeServiceLayer,  // delete always fails
+                        ZLayer.succeed(BootstrapProvisionerNoOp),
                         ZLayer.succeed(Scope.global)
                       )
           _      <- ZIO.yieldNow

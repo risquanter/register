@@ -11,14 +11,24 @@ import com.risquanter.register.domain.errors.AuthError
   * @see AUTHORIZATION-PLAN.md — Task L2.2: Authorization Service
   */
 enum Permission(val zedName: String):
-  case DesignWrite      extends Permission("design_write")
-  case AnalyzeRun       extends Permission("analyze_run")
-  case ViewWorkspace    extends Permission("view_workspace")
-  case AdminWorkspace   extends Permission("admin_workspace")
-  case ViewTree         extends Permission("view_tree")
-  case ViewOrg          extends Permission("view_org")
-  case ViewTeam         extends Permission("view_team")
-  case ManageTeam       extends Permission("manage_team")
+  case DesignWrite         extends Permission("design_write")
+  case AnalyzeRun          extends Permission("analyze_run")
+  case ViewWorkspace       extends Permission("view_workspace")
+  case AdminWorkspace      extends Permission("admin_workspace")
+  case ViewTree            extends Permission("view_tree")
+  case ViewOrg             extends Permission("view_org")
+  case ViewTeam            extends Permission("view_team")
+  case ManageTeam          extends Permission("manage_team")
+  /** Lifecycle marker for resource creation. Never sent to SpiceDB.
+    * Produced only by BootstrapProvisioner.bootstrapToken().
+    * @see ADR-030 §5
+    */
+  case Bootstrap           extends Permission("__bootstrap__")
+  /** Lifecycle marker for background system maintenance. Never sent to SpiceDB.
+    * Produced only by BootstrapProvisioner.systemMaintenanceToken().
+    * @see ADR-030 §1
+    */
+  case SystemMaintenance   extends Permission("__system__")
 
 /** Resource type identifiers — values match SpiceDB Zed schema `definition` names exactly.
   *
@@ -49,6 +59,25 @@ object ResourceRef:
   */
 type ResourceId = SafeId.SafeId
 
+/** Compile-time proof that AuthorizationService.check() was called and succeeded.
+  *
+  * Opaque — no public constructor. Only constructible inside the auth package via
+  * AuthorizationService.check() or BootstrapProvisioner.bootstrapToken() /
+  * systemMaintenanceToken(). Erased to Unit at runtime; carries no runtime value.
+  *
+  * Uses the base Permission type in service method `using` parameters — not a
+  * specific subtype — to avoid duplicating SpiceDB policy in Scala types (ADR-024).
+  * Any Checked[P] where P <: Permission satisfies using Checked[Permission] via
+  * covariance.
+  *
+  * @see ADR-030 — Authorization Enforcement at the Orchestration Boundary
+  */
+opaque type Checked[+P <: Permission] = Unit
+
+object Checked:
+  /** Package-private — only auth-package code may produce proofs. */
+  private[auth] def apply[P <: Permission](): Checked[P] = ()
+
 /** Authorization service — pure Policy Enforcement Point (PEP).
   *
   * Callers call check() and listAccessible() only. This service never writes
@@ -68,11 +97,11 @@ trait AuthorizationService:
     *
     * @see ADR-024: Fail-Closed by Default
     */
-  def check(
+  def check[P <: Permission](
     user:       UserId.Authenticated,
-    permission: Permission,
+    permission: P,
     resource:   ResourceRef
-  ): IO[AuthError, Unit]
+  ): IO[AuthError, Checked[P]]
 
   /** List all resource IDs of `resourceType` where `user` has `permission`.
     *

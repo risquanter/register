@@ -282,7 +282,7 @@ class RiskTreeServiceLive private (
   }
   
   // Config CRUD - only persist, no execution
-  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest): Task[RiskTree] = {
+  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
     val operation = for {
       treeId <- IdGenerators.nextTreeId
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
@@ -304,7 +304,7 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest): Task[RiskTree] = {
+  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
     val operation = for {
       oldTree <- getTreeOrFail(wsId, id)
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
@@ -329,7 +329,7 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] =
     repo.delete(wsId, id)
       .tap(tree => invalidationHandler.handleTreeDeletion(tree))
       .tapBoth(
@@ -337,7 +337,7 @@ class RiskTreeServiceLive private (
       _ => recordOperation("delete", success = true)
     )
   
-  override def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]] =
+  override def getById(wsId: WorkspaceId, id: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]] =
     repo.getById(wsId, id).tapBoth(
       error => logIfUnexpected("getById")(error) *> recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)

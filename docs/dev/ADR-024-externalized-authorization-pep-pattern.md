@@ -25,11 +25,12 @@ The application calls SpiceDB to **read** authorization state. It never writes a
 ```scala
 // The complete AuthorizationService interface — no grant(), no revoke()
 trait AuthorizationService:
-  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]
+  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
+  // Returns Checked[P] proof token on success. Callers bind via `given` in for-comprehensions.
   // Fails with AuthError.Forbidden if SpiceDB returns false — fail-closed by design.
   // No grant() / revoke(): app is a pure PEP; tuple writes are ops-path only.
 
-  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
+  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
   // For listing resources a user can access (e.g. "show my workspaces").
 ```
 
@@ -123,8 +124,8 @@ trait AuthorizationService:
 ```scala
 // GOOD: App reads authorization state only
 trait AuthorizationService:
-  def check(user: UserId, permission: Permission, resource: ResourceRef): IO[AuthError, Unit]
-  def listAccessible(user: UserId, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
+  def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
+  def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
 ```
 
 ### ❌ Startup Seeding

@@ -1,6 +1,7 @@
 package com.risquanter.register.services.workspace
 
 import zio.*
+import com.risquanter.register.auth.{BootstrapProvisioner, Checked, Permission}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.services.RiskTreeService
 
@@ -37,13 +38,14 @@ trait WorkspaceReaper
 
 object WorkspaceReaper:
 
-  val layer: ZLayer[WorkspaceStore & WorkspaceConfig & RiskTreeService, Nothing, WorkspaceReaper] =
+  val layer: ZLayer[WorkspaceStore & WorkspaceConfig & RiskTreeService & BootstrapProvisioner, Nothing, WorkspaceReaper] =
     ZLayer.scoped {
       for
         config      <- ZIO.service[WorkspaceConfig]
         store       <- ZIO.service[WorkspaceStore]
         treeService <- ZIO.service[RiskTreeService]
-        _           <- reapLoop(store, treeService, config.reaperInterval)
+        provisioner <- ZIO.service[BootstrapProvisioner]
+        _           <- reapLoop(store, treeService, provisioner, config.reaperInterval)
                          .forkScoped
                          .when(!isNoOp(config))
         _           <- ZIO.logInfo(
@@ -71,11 +73,14 @@ object WorkspaceReaper:
   private def reapLoop(
     store: WorkspaceStore,
     treeService: RiskTreeService,
+    provisioner: BootstrapProvisioner,
     interval: java.time.Duration
   ): UIO[Nothing] =
     val cycle =
       for
         evicted <- store.evictExpired
+        // exempt: system maintenance — no user context; WorkspaceReaper is a background orchestrator
+        given Checked[Permission.SystemMaintenance.type] <- provisioner.systemMaintenanceToken()
         _       <- ZIO.foreachDiscard(evicted)(ws =>
                      treeService.cascadeDeleteTrees(ws.id, ws.trees))
       yield ()

@@ -11,8 +11,12 @@ import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash}
 import com.risquanter.register.domain.errors.{TreeNotInWorkspace, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.util.IdGenerators
+import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
 object WorkspaceStoreSpec extends ZIOSpecDefault:
+  // Service-level test: operates below the authorization layer.
+  // TestChecked provides the Checked[Permission] proof required by protected store methods.
+  private given Checked[Permission] = TestChecked.value
 
   private val testConfig = TestConfigs.workspace.copy(
     ttl = Duration.ofHours(24),

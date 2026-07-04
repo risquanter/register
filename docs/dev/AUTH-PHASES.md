@@ -16,9 +16,9 @@ All items in this phase have no inter-dependencies and can proceed simultaneousl
 | Task | Ref | Notes |
 |------|-----|-------|
 | Wave 0B: `UserId` sum type (`Anonymous \| Authenticated`) ✅| IMPL-PLAN §B | Largest change; start first — blocks Wave 1 and everything downstream |
-| Wave 0C: `SpiceDbConfig.scala` (HTTPS-only URL, `PositiveInt` timeout) | IMPL-PLAN §C | Small independent file |
+| Wave 0C: `SpiceDbConfig.scala` (HTTPS-only URL, `PositiveInt` timeout) ✅ | IMPL-PLAN §C | HTTPS-only URL constraint + PositiveInt timeout — done in Wave 0C |
 | Wave 0D: `BootstrapProvisioner` trait + NoOp + SpiceDB files ✅| IMPL-PLAN §D | Independent of sum type |
-| Wave 2 completion: wire `requirePresent` into `Identity`/`FineGrained` branches | AUTH-PLAN Wave 2 | Structure already in `Application.scala` — small change |
+| Wave 2 completion: wire `requirePresent` into `Identity`/`FineGrained` branches ✅ | AUTH-PLAN Wave 2 | Wired in `Application.scala` `chooseUserContextExtractor`; Identity + FineGrained → `UserContextExtractor.requirePresent`. Verified 2026-07-04. |
 | ADR-024: add lifecycle write clarification + service account scope ✅| IMPL-PLAN Pre-Wave | Documentation edit only |
 | `infra/spicedb/schema.zed` | AUTH-PLAN §L2.1 | Owned by `register`; exact schema is in the plan verbatim |
 
@@ -33,7 +33,7 @@ All items in this phase have no inter-dependencies and can proceed simultaneousl
 
 ## Phase 1 — After Phase 0
 
-**`register`:** Wave 1 — `Checked[P]` proof token; `check()` return type `Unit` → `Checked[P]`; `requireAuthenticated()` helper; protected service method `using` parameters.
+**`register`:** Wave 1 ✅ — `Checked[P]` proof token implemented; `check()` return type `Unit` → `Checked[P]`; protected service method `using Checked[Permission]` parameters; `bootstrapToken()` + `systemMaintenanceToken()` lifecycle proof tokens; `WorkspaceReaper` updated with `BootstrapProvisioner` dependency; 478 tests pass (verified 2026-07-04). **Implementation note:** service methods use base `Checked[Permission]` type (not specific subtypes) — see ADR-030 §3.
 → Blocked by: Wave 0B (`UserId.Authenticated` required in signatures)
 → Ref: IMPL-PLAN §Wave 1
 
@@ -52,7 +52,7 @@ All items can run in parallel within this phase.
 |------|------------|-----|
 | Wave 3: `AuthorizationServiceSpiceDB` | Wave 0C + Wave 1 | AUTH-PLAN §L2.2, IMPL-PLAN §C |
 | Waves 4–5: workspace-level `check()` on all lifecycle routes | Wave 1 | AUTH-PLAN Waves 4–5 |
-| Wave 6: `BootstrapProvisioner.recordOwnership()` wiring | Wave 0D + Wave 0B | IMPL-PLAN §Wave 6 |
+| Wave 6: `BootstrapProvisioner.recordOwnership()` wiring | Wave 0D + Wave 0B + Wave 1 | IMPL-PLAN §Wave 6 |
 
 **`register-infra`:** K.5 — Istio ambient mode, `RequestAuthentication`, `AuthorizationPolicy`, JWT claim header injection, waypoint header-stripping verification.
 → Blocked by: K.4

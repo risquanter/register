@@ -62,7 +62,7 @@ final class WorkspaceStorePostgres private (
              ).unit
     yield key).orDie
 
-  override def addTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
+  override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       ws  <- resolveInternal(key)
       now <- Clock.instant
@@ -70,7 +70,7 @@ final class WorkspaceStorePostgres private (
       _   <- db(run(query[WorkspaceTreeRow].insertValue(lift(row)).onConflictIgnore)).unit
     yield ()
 
-  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId): IO[AppError, Unit] =
+  override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(
@@ -82,7 +82,7 @@ final class WorkspaceStorePostgres private (
             ).unit
     yield ()
 
-  override def listTrees(key: WorkspaceKeySecret): IO[AppError, List[TreeId]] =
+  override def listTrees(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, List[TreeId]] =
     resolveInternal(key).map(_.trees.toList)
 
   override def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
@@ -130,13 +130,13 @@ final class WorkspaceStorePostgres private (
                  )
     yield doomed).orDie
 
-  override def delete(key: WorkspaceKeySecret): IO[AppError, Unit] =
+  override def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       ws <- resolveInternal(key)
       _  <- db(run(query[WorkspaceRow].filter(_.id == lift(ws.id)).delete)).unit
     yield ()
 
-  override def rotate(key: WorkspaceKeySecret): IO[AppError, WorkspaceKeySecret] =
+  override def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret] =
     for
       ws     <- resolveInternal(key)
       newKey <- WorkspaceKeySecret.generate

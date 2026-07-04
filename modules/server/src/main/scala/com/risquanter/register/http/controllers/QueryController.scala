@@ -3,7 +3,7 @@ package com.risquanter.register.http.controllers
 import zio.*
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.auth.{AuthorizationService, Permission, ResourceRef, ResourceType, UserContextExtractor}
+import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
@@ -43,7 +43,7 @@ class QueryController private (
     case (maybeUserId, key, treeId, req) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        _      <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         parsed <- ZIO.fromEither(QueryRequest.resolve(req))
                     .mapError(e => FolQueryFailure.fromQueryError(e))

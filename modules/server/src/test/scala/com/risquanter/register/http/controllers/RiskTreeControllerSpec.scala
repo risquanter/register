@@ -15,8 +15,10 @@ import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorC
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.testutil.TestHelpers.{safeId}
 import io.github.iltotore.iron.constraint.numeric.*
+import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
 object RiskTreeControllerSpec extends ZIOSpecDefault {
+  private given Checked[Permission] = TestChecked.value
 
   // Service accessor pattern
   private def service[A](f: RiskTreeService => ZIO[Any, Throwable, A]): ZIO[RiskTreeService, Throwable, A] =

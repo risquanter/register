@@ -11,8 +11,10 @@ import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceK
 import com.risquanter.register.domain.errors.{WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
+import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
 object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
+  private given Checked[Permission] = TestChecked.value
 
   private val storeConfig: WorkspaceConfig = TestConfigs.workspace.copy(
     ttl = Duration.ofHours(24),

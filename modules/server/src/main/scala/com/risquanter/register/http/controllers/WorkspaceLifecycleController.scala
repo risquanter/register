@@ -3,7 +3,7 @@ package com.risquanter.register.http.controllers
 import zio.*
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Permission, UserContextExtractor }
+import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Checked, Permission, UserContextExtractor }
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
@@ -48,8 +48,10 @@ class WorkspaceLifecycleController private (
       val ip = normaliseIp(xff)
       (for
         _    <- rateLimiter.checkCreate(ip)
+        given Checked[Permission.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
+        // exempt: pre-resource-creation — no resource exists yet to check
         key  <- workspaceStore.create()
-        ws   <- workspaceStore.resolve(key)
+        ws   <- workspaceStore.resolve(key)  // exempt: Layer 0 capability gate
         tree <- riskTreeService.create(ws.id, req)
         _    <- workspaceStore.addTree(key, tree.id)
       yield WorkspaceBootstrapResponse(
@@ -64,7 +66,7 @@ class WorkspaceLifecycleController private (
       (for
         userId   <- userCtx.requireAuthenticated(maybeUserId)
         ws       <- workspaceStore.resolve(key)
-        _        <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
+        given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         ids      <- workspaceStore.listTrees(key)
         trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id))
         existing  = trees.collect { case Some(t) => SimulationResponse.fromRiskTree(t) }
@@ -76,7 +78,7 @@ class WorkspaceLifecycleController private (
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         ws     <- workspaceStore.resolve(key)
-        _      <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
+        given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
         tree   <- riskTreeService.create(ws.id, req)
         _      <- workspaceStore.addTree(key, tree.id)
       yield SimulationResponse.fromRiskTree(tree)).either
@@ -86,7 +88,7 @@ class WorkspaceLifecycleController private (
     (for
       userId <- userCtx.requireAuthenticated(maybeUserId)
       ws     <- workspaceStore.resolve(key)
-      _      <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
+      given Checked[Permission] <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       newKey <- workspaceStore.rotate(key)
       newWs  <- workspaceStore.resolve(newKey)
     yield WorkspaceRotateResponse(newKey, newWs.expiresAt)).either
@@ -96,7 +98,7 @@ class WorkspaceLifecycleController private (
     (for
       userId <- userCtx.requireAuthenticated(maybeUserId)
       ws     <- workspaceStore.resolve(key)
-      _      <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
+      given Checked[Permission] <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       ids    <- workspaceStore.listTrees(key)
       _      <- riskTreeService.cascadeDeleteTrees(ws.id, ids)
       _      <- workspaceStore.delete(key)

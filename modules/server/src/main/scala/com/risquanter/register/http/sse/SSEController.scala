@@ -6,7 +6,7 @@ import sttp.tapir.server.ServerEndpoint
 import sttp.capabilities.zio.ZioStreams
 import zio.json.*
 
-import com.risquanter.register.auth.{AuthorizationService, Permission, ResourceRef, ResourceType, UserContextExtractor}
+import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.controllers.BaseController
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -52,7 +52,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
     treeEventsEndpoint.serverLogic { case (maybeUserId, key, treeId) =>
       (for
         userId      <- userCtx.requireAuthenticated(maybeUserId)
-        _           <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         _           <- workspaceStore.resolveTree(key, treeId)
         eventStream <- sseHub.subscribe(treeId)
         sseStream    = eventStream.map(formatAsSSE)

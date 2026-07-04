@@ -3,7 +3,7 @@ package com.risquanter.register.http.controllers
 import zio.*
 import sttp.tapir.server.ServerEndpoint
 
-import com.risquanter.register.auth.{AuthorizationService, Permission, ResourceRef, ResourceType, UserContextExtractor}
+import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.{InvalidationResponse, WorkspaceTreeEndpoints}
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.services.RiskTreeService
@@ -42,7 +42,7 @@ class WorkspaceTreeController private (
     case (maybeUserId, key, treeId) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        _      <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.getById(ws.id, treeId).map(_.map(SimulationResponse.fromRiskTree))
       yield result).either
@@ -52,7 +52,7 @@ class WorkspaceTreeController private (
     case (maybeUserId, key, treeId) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        _      <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.getById(ws.id, treeId)
       yield result).either
@@ -62,7 +62,7 @@ class WorkspaceTreeController private (
     case (maybeUserId, key, treeId, req) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.update(ws.id, treeId, req).map(SimulationResponse.fromRiskTree)
       yield result).either
@@ -72,7 +72,7 @@ class WorkspaceTreeController private (
     case (maybeUserId, key, treeId) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         result <- riskTreeService.delete(ws.id, treeId)
                       .tap(_ => workspaceStore.removeTree(key, treeId))
@@ -84,7 +84,7 @@ class WorkspaceTreeController private (
     case (maybeUserId, key, treeId, nodeId) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
-        _      <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         tree   <- riskTreeService.getById(ws.id, treeId).someOrFail(TreeNotInWorkspace(key, treeId))
         r      <- invalidationHandler.handleNodeChange(nodeId, tree)
