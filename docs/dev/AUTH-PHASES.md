@@ -16,7 +16,7 @@ All items in this phase have no inter-dependencies and can proceed simultaneousl
 | Task | Ref | Notes |
 |------|-----|-------|
 | Wave 0B: `UserId` sum type (`Anonymous \| Authenticated`) ✅| IMPL-PLAN §B | Largest change; start first — blocks Wave 1 and everything downstream |
-| Wave 0C: `SpiceDbConfig.scala` (HTTPS-only URL, `PositiveInt` timeout) ✅ | IMPL-PLAN §C | HTTPS-only URL constraint + PositiveInt timeout — done in Wave 0C |
+| Wave 0C: `SpiceDbConfig.scala` (`MeshServiceUrl`, `PositiveInt` timeout) ✅ | IMPL-PLAN §C | `MeshServiceUrl` (http/https, mesh mTLS) + PositiveInt timeout — done in Wave 0C |
 | Wave 0D: `BootstrapProvisioner` trait + NoOp + SpiceDB files ✅| IMPL-PLAN §D | Independent of sum type |
 | Wave 2 completion: wire `requirePresent` into `Identity`/`FineGrained` branches ✅ | AUTH-PLAN Wave 2 | Wired in `Application.scala` `chooseUserContextExtractor`; Identity + FineGrained → `UserContextExtractor.requirePresent`. Verified 2026-07-04. |
 | ADR-024: add lifecycle write clarification + service account scope ✅| IMPL-PLAN Pre-Wave | Documentation edit only |

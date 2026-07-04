@@ -732,16 +732,12 @@ whether the ZIO Config integration handles refined types cleanly for this field.
 
 ---
 
-### 16e. `SafeUrl` for SpiceDB endpoint permits `http://`
+### 16e. ~~`SafeUrl` for SpiceDB endpoint permits `http://`~~ — **Resolved 2026-07-04**
 
-The existing `UrlConstraint` allows `http://` or `https://`. SpiceDB in production
-requires TLS. An `http://` SpiceDB URL would silently downgrade security.
-
-**Recommendation to investigate:** define a stricter `SpiceDbUrlConstraint` (HTTPS-only
-scheme) for `SpiceDbConfig.url`. The trade-off is that local dev / integration tests
-that talk to a plaintext SpiceDB would need to use the looser constraint or a dev-mode
-override path. Worth checking whether the additional constraint causes friction in test
-harnesses.
+Resolved by introducing `MeshServiceUrl` opaque type in `OpaqueTypes.scala` and using it
+for `SpiceDbConfig.url`. Transport security is the mesh's responsibility (Istio mTLS);
+application-layer TLS would be redundant and would complicate cert rotation.
+See `SpiceDbConfig.scala` and `OpaqueTypes.scala` `MeshServiceUrl` block.
 
 ---
 

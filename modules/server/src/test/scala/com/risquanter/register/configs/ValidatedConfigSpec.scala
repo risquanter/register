@@ -21,6 +21,9 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
   private val irminConfig =
     deriveConfig[IrminConfig].nested("register", "irmin")
 
+  private val spiceDbConfig =
+    deriveConfig[SpiceDbConfig].nested("register", "spicedb")
+
   def spec = suite("ValidatedConfig")(
     test("loads TelemetryConfig with validated Url endpoint") {
       withConfig(
@@ -64,6 +67,42 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
         "register.irmin.healthCheckRetries" -> "0"
       ) {
         ZIO.config(irminConfig).exit.map(exit => assert(exit)(fails(anything)))
+      }
+    },
+    test("loads SpiceDbConfig with http URL (mesh mTLS)") {
+      withConfig(
+        "register.spicedb.url"   -> "http://spicedb.svc.cluster.local:8080",
+        "register.spicedb.token" -> "some-pre-shared-key"
+      ) {
+        ZIO.config(spiceDbConfig).map(config =>
+          assertTrue(config.url.value.toString == "http://spicedb.svc.cluster.local:8080")
+        )
+      }
+    },
+    test("loads SpiceDbConfig with https URL") {
+      withConfig(
+        "register.spicedb.url"   -> "https://spicedb.example.com:443",
+        "register.spicedb.token" -> "some-pre-shared-key"
+      ) {
+        ZIO.config(spiceDbConfig).map(config =>
+          assertTrue(config.url.value.toString == "https://spicedb.example.com:443")
+        )
+      }
+    },
+    test("rejects invalid SpiceDb URL") {
+      withConfig(
+        "register.spicedb.url"   -> "not-a-url",
+        "register.spicedb.token" -> "some-pre-shared-key"
+      ) {
+        ZIO.config(spiceDbConfig).exit.map(exit => assert(exit)(fails(anything)))
+      }
+    },
+    test("rejects blank SpiceDb token") {
+      withConfig(
+        "register.spicedb.url"   -> "http://spicedb.svc.cluster.local:8080",
+        "register.spicedb.token" -> "   "
+      ) {
+        ZIO.config(spiceDbConfig).exit.map(exit => assert(exit)(fails(anything)))
       }
     }
   )

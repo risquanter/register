@@ -3,8 +3,8 @@ package com.risquanter.register.configs
 import zio.Config
 import zio.config.magnolia.{DeriveConfig, deriveConfig}
 import io.github.iltotore.iron.*
-import com.risquanter.register.domain.data.iron.{ExternalTokenStr, PositiveInt, IronConstants, SecureUrl}
-import com.risquanter.register.domain.data.iron.SecureUrl.*
+import com.risquanter.register.domain.data.iron.{ExternalTokenStr, PositiveInt, IronConstants, MeshServiceUrl}
+import com.risquanter.register.domain.data.iron.MeshServiceUrl.*
 import com.risquanter.register.domain.errors.ValidationError
 import com.risquanter.register.domain.data.iron.ValidationUtil
 
@@ -68,7 +68,7 @@ object SpiceDbConsistency:
   *
   * Loaded from application.conf under `register.spicedb`.
   *
-  * @param url            HTTPS endpoint for the SpiceDB gRPC-gateway REST API
+  * @param url            SpiceDB gRPC-gateway REST API endpoint (http or https); transport security provided by service mesh mTLS
   * @param token          Pre-shared key or token sent as HTTP Authorization Bearer header
   * @param consistency    ZedToken cache freshness policy (default: minimize-latency)
   * @param timeoutSeconds Per-request timeout in seconds (default: 10)
@@ -77,7 +77,7 @@ object SpiceDbConsistency:
   * @see ADR-022: SpiceDbToken credential class design (R1–R8)
   */
 final case class SpiceDbConfig(
-  url:            SecureUrl.SecureUrl,
+  url:            MeshServiceUrl.MeshServiceUrl,
   token:          SpiceDbToken,
   consistency:    SpiceDbConsistency = SpiceDbConsistency.MinimizeLatency,
   timeoutSeconds: PositiveInt = IronConstants.Ten
@@ -87,15 +87,15 @@ object SpiceDbConfig:
   // All DeriveConfig instances are local to this companion object.
   // IMPORTANT: exposing these as bare `given Config[T]` would leak via the
   // deriveConfigFromConfig bridge in zio-config-magnolia, causing Magnolia to
-  // resolve SecureUrl's validator for ALL string fields in the case class.
+  // resolve MeshServiceUrl's validator for ALL string fields in the case class.
   // Following the IrminConfig / SimulationConfig pattern exactly.
 
   private def errorsToConfigError(errs: List[ValidationError]): Config.Error =
     Config.Error.InvalidData(message = errs.map(_.message).mkString("; "))
 
-  private val secureUrlConfig: Config[SecureUrl.SecureUrl] =
+  private val meshServiceUrlConfig: Config[MeshServiceUrl.MeshServiceUrl] =
     Config.string.mapOrFail { s =>
-      SecureUrl
+      MeshServiceUrl
         .fromString(s, "url")
         .left
         .map(errorsToConfigError)
@@ -114,7 +114,7 @@ object SpiceDbConfig:
       ValidationUtil.refinePositiveInt(value).left.map(errorsToConfigError)
     }
 
-  given DeriveConfig[SecureUrl.SecureUrl]   = DeriveConfig(secureUrlConfig)
+  given DeriveConfig[MeshServiceUrl.MeshServiceUrl] = DeriveConfig(meshServiceUrlConfig)
   given DeriveConfig[SpiceDbToken]          = DeriveConfig(tokenConfig)
   // DeriveConfig[SpiceDbConsistency] is defined in SpiceDbConsistency companion — found via implicit scope
   given DeriveConfig[PositiveInt]           = DeriveConfig(positiveIntConfig)

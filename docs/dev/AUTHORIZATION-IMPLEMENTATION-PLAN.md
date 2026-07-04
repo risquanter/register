@@ -20,7 +20,7 @@ not duplicate the strategic content; read AUTHORIZATION-PLAN.md first.
 | `AuthMode` sealed enum | Wave 0 ✅ | Scala config | **Already implemented** — `AuthConfig.scala` has sealed `enum AuthMode` with fail-fast `DeriveConfig` (verified 2026-07-01) |
 | `WorkspaceId` + `asResource` | Pre-Wave ✅ | Scala type | **Already exists** — `case class WorkspaceId` in `OpaqueTypes.scala`, `WorkspaceRecord.id: WorkspaceId`, both `asResource` extensions in `AuthorizationService.scala` (verified 2026-07-01) |
 | `UserId` sum type | Wave 0 ✅| Scala type | `Anonymous \| Authenticated` — prevents sentinel reaching SpiceDB |
-| `SpiceDbConfig` Iron constraints | Wave 0 ✅| Scala config | `PositiveInt` timeout, HTTPS-only URL constraint |
+| `SpiceDbConfig` Iron constraints | Wave 0 ✅| Scala config | `PositiveInt` timeout, `MeshServiceUrl` constraint (http/https, mesh mTLS) |
 | `BootstrapProvisioner` trait | Wave 0 ✅| Scala type | Separate resource lifecycle writes from `AuthorizationService` |
 | `Checked[P]` proof token (strong form) | Wave 1 ✅ | Scala type | `check()` returns proof; protected operations require it via `using`. **Implemented 2026-07-04 — see implementation note below.** |
 | `BootstrapProvisioner.bootstrapToken()` / `systemMaintenanceToken()` | Wave 0D amendment ✅ | Scala type | Lifecycle proof tokens added alongside `recordOwnership()` — required for `Checked[P]` to work at bootstrap and reaper call sites. `bootstrapToken()` produces `Checked[Bootstrap.type]`; `systemMaintenanceToken()` produces `Checked[SystemMaintenance.type]`. |
@@ -280,21 +280,17 @@ See also `docs/dev/TODO.md §16b` — anonymous sentinel sum type recommendation
 Two constraint tightenings that follow existing Iron patterns in the codebase:
 
 ```scala
-// HTTPS-only URL for SpiceDB — http:// would silently downgrade to plaintext
-type SpiceDbUrlConstraint = Not[Blank] & MaxLength[200] &
-  Match["^https://(?:\\[[0-9a-fA-F:]+\\]|[^/:#?\\s]+)(?::\\d+)?(?:/[^\\s]*)?$"]
-type SpiceDbUrl = String :| SpiceDbUrlConstraint
-
-// PositiveInt timeout — 0 or negative produces undefined HTTP client behaviour
+// MeshServiceUrl: mesh-internal service endpoint — mTLS provided by Istio, not the application.
+// Accepts both http:// and https:// — use SecureUrl for internet-facing endpoints.
 final case class SpiceDbConfig(
-  url:            SpiceDbUrl,          // was SafeUrl — narrowed to HTTPS-only
+  url:            MeshServiceUrl,      // was SafeUrl (pre-impl name) → SecureUrl → MeshServiceUrl
   token:          SpiceDbToken,
   consistency:    SpiceDbConsistency = SpiceDbConsistency.MinimizeLatency,
   timeoutSeconds: PositiveInt = 10     // was Int
 )
 ```
 
-Service fails to start if SpiceDB URL is `http://` or timeout is ≤ 0. Both are config errors
+Service fails to start if SpiceDB URL is invalid or timeout is ≤ 0. Both are config errors
 that would be invisible at runtime otherwise.
 
 ---
@@ -793,7 +789,7 @@ All items below must be satisfied before the authorization rollout is considered
 - [x] `AuthMode` sealed enum; service fails on unknown mode string — **DONE** (`AuthConfig.scala`, verified 2026-07-01)
 - [x] `WorkspaceId` and `asResource` extensions exist — **DONE** (`OpaqueTypes.scala` + `AuthorizationService.scala`, verified 2026-07-01)
 - [x] `UserId.Authenticated` / `UserId.Anonymous` sum type; `check()` accepts only `Authenticated` — **DONE** (`OpaqueTypes.scala`, Wave 0B, verified 2026-07-01)
-- [x] `SpiceDbConfig.url` is HTTPS-only Iron constraint — **DONE** (`SpiceDbConfig.scala`, Wave 0C, verified 2026-07-01)
+- [x] `SpiceDbConfig.url` uses `MeshServiceUrl` constraint (http/https, mesh mTLS) — **DONE** (`SpiceDbConfig.scala`, Wave 0C, updated 2026-07-04)
 - [x] `SpiceDbConfig.timeoutSeconds` is `PositiveInt` — **DONE** (`SpiceDbConfig.scala`, Wave 0C, verified 2026-07-01)
 - [x] `Checked[P]` opaque type (strong form); `check()` returns `IO[AuthError, Checked[P]]` — **DONE** (`auth/AuthorizationService.scala`, Wave 1, verified 2026-07-04). **Implementation note:** service method `using` parameters use base `Checked[Permission]` type (not specific subtypes); handler bindings use `given Checked[Permission] <-` (Scala 3 infers base type from `check()`). See ADR-030 §3.
 - [x] Protected service methods take `using Checked[P]`; missing proof is a compile error — **DONE** (`WorkspaceStore`, `RiskTreeService` traits + impls, Wave 1, verified 2026-07-04). All 10 protected methods on `WorkspaceStore` + `RiskTreeService` carry `(using Checked[Permission])`.

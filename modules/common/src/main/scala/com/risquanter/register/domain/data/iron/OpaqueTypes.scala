@@ -202,6 +202,36 @@ object SecureUrl:
   def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], SecureUrl] =
     ValidationUtil.refineSecureUrl(s, fieldPath)
 
+// MeshServiceUrl: URL for service-to-service calls within a service mesh (Istio ambient mode or sidecar mTLS).
+//
+// Accepts both http:// and https:// — transport security is the mesh's responsibility.
+// The Istio control plane provides mutual TLS between all mesh-enrolled pods transparently;
+// adding application-layer TLS on top would be redundant and would complicate cert rotation
+// (Istio rotates workload certs approximately every 24 hours by default).
+//
+// Use this type for any internal service URL where:
+//   (1) the target service is deployed inside the same mesh (Istio ambient mode / sidecar)
+//   (2) Istio PeerAuthentication STRICT is active on the target port
+//
+// Do NOT use for:
+//   - Public or internet-facing endpoints (use SecureUrl)
+//   - Services outside the mesh that transmit credentials over the wire
+//
+// Companion to object SecureUrl — identical API surface, accepts http://.
+// See ADR-012 (service mesh), ADR-022 (credential hygiene).
+object MeshServiceUrl:
+  opaque type MeshServiceUrl = ValidUrl
+
+  object MeshServiceUrl:
+    def apply(s: ValidUrl): MeshServiceUrl = s
+    def unapply(u: MeshServiceUrl): Option[ValidUrl] = Some(u)
+
+  extension (u: MeshServiceUrl)
+    def value: ValidUrl = u
+
+  def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], MeshServiceUrl] =
+    Url.fromString(s, fieldPath).map(_.value)
+
 case class BranchRef(toBranchRef: BranchRefStr)
 
 object BranchRef:

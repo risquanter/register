@@ -840,7 +840,7 @@ authz.check user=8f14e45f-... permission=design_write resource=risk_tree:01HXY r
 
 ```scala
 final case class SpiceDbConfig(
-  url:            SpiceDbUrl,               // HTTPS-only endpoint — see AUTHORIZATION-IMPLEMENTATION-PLAN.md §C
+  url:            MeshServiceUrl,               // mesh-mTLS endpoint (http/https) — see AUTHORIZATION-IMPLEMENTATION-PLAN.md §C
   token:          SpiceDbToken,             // API bearer token — redacted in toString (WorkspaceKeySecret pattern)
   consistency:    SpiceDbConsistency = SpiceDbConsistency.MinimizeLatency,
   timeoutSeconds: PositiveInt = 10          // PositiveInt — 0 or negative is a config error
