@@ -521,6 +521,8 @@ definition workspace {
   relation analyst:      user
   relation viewer:       user
 
+  // admin_workspace added during implementation: required by Wave 5 rotate/delete check() calls.
+  permission admin_workspace = owner_user + owner_team->manage_team
   permission design_write   = editor + owner_user + owner_team->design_write
   permission analyze_run    = analyst + editor + owner_user + owner_team->analyze_run
   permission view_workspace = viewer + analyst + editor + owner_user + owner_team->view_team

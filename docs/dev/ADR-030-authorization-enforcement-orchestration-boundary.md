@@ -165,6 +165,37 @@ tree <- riskTreeService.create(ws.id, req)    // Checked[Bootstrap.type] <: Chec
 _    <- workspaceStore.addTree(key, tree.id)  // same given in scope ✓
 ```
 
+### 6. Schema Authority — Single Source of Truth
+
+> **Cardinal design decision.** `infra/spicedb/schema.zed` in the `register` repository is
+> the **only authoritative source** for the SpiceDB Zed schema. `register-infra` reads this
+> file from the `register` checkout when applying the schema — it does not maintain its own
+> copy.
+
+The constraint that makes this non-negotiable: `Permission.zedName` values in the Scala
+`Permission` enum must exactly match `permission` names in the schema. A rename in one place
+without the other produces silent authorization failures at runtime
+(`PERMISSIONSHIP_NO_PERMISSION` on every check — no compile error, no log warning).
+
+By keeping the schema co-located with the Scala code that references its permission names:
+- A schema rename that doesn't update the Scala enum fails CI immediately (atomic PR)
+- Commit signing (ADR-020) covers schema changes automatically
+- The `register-infra` CI job applies schema via `zed schema write` from the `register`
+  checkout — no separate schema maintenance, no drift
+
+**For `register-infra`:** The provisioning job MUST read `infra/spicedb/schema.zed` from
+the `register` repo checkout (git submodule, CI artifact, or shared pipeline step).
+Maintaining a separate copy of the schema in `register-infra` is a prohibited pattern —
+it creates two sources of truth with no enforcement that they stay in sync.
+
+**Enterprise override** (for deployers with a dedicated policy team):
+```hocon
+register.authz.provisioning {
+  schema-source = "classpath:/spicedb/schema.zed"  # default: in-repo
+  # schema-source = "https://policy.internal/schemas/register/v2.zed"  # enterprise override
+}
+```
+
 ---
 
 ## Code Smells

@@ -20,7 +20,7 @@ All items in this phase have no inter-dependencies and can proceed simultaneousl
 | Wave 0D: `BootstrapProvisioner` trait + NoOp + SpiceDB files ✅| IMPL-PLAN §D | Independent of sum type |
 | Wave 2 completion: wire `requirePresent` into `Identity`/`FineGrained` branches ✅ | AUTH-PLAN Wave 2 | Wired in `Application.scala` `chooseUserContextExtractor`; Identity + FineGrained → `UserContextExtractor.requirePresent`. Verified 2026-07-04. |
 | ADR-024: add lifecycle write clarification + service account scope ✅| IMPL-PLAN Pre-Wave | Documentation edit only |
-| `infra/spicedb/schema.zed` | AUTH-PLAN §L2.1 | Owned by `register`; exact schema is in the plan verbatim |
+| `infra/spicedb/schema.zed` ✅ | AUTH-PLAN §L2.1 | Created at `infra/spicedb/schema.zed`. Schema is verbatim from AUTH-PLAN §L2.1 with one addition: `permission admin_workspace = owner_user + owner_team->manage_team` on `workspace` — required by Wave 5 rotate/delete calls; absent from plan original. Verified 2026-07-04. |
 
 **`register-infra` project:**
 | Task | Ref |
@@ -50,9 +50,9 @@ All items can run in parallel within this phase.
 **`register`:**
 | Task | Blocked by | Ref |
 |------|------------|-----|
-| Wave 3: `AuthorizationServiceSpiceDB` | Wave 0C + Wave 1 | AUTH-PLAN §L2.2, IMPL-PLAN §C |
-| Waves 4–5: workspace-level `check()` on all lifecycle routes | Wave 1 | AUTH-PLAN Waves 4–5 |
-| Wave 6: `BootstrapProvisioner.recordOwnership()` wiring | Wave 0D + Wave 0B + Wave 1 | IMPL-PLAN §Wave 6 |
+| Wave 3: `AuthorizationServiceSpiceDB` | Wave 0C + Wave 1 | AUTH-PLAN §L2.2, IMPL-PLAN §C. **Exit criteria:** (1) T-U1–T-U5 mock HTTP adapter unit tests pass (see AUTH-TESTING-PLAN §W3). (2) OTel counter `authz.check.total` and histogram `authz.check.latency_ms` increment on every `check()` call — follow `RiskTreeServiceLive` pattern. (3) Structured log per check() call using `user.value` for PII opt-in. |
+| Waves 4–5: workspace-level `check()` on all lifecycle routes ✅ | Wave 1 | AUTH-PLAN Waves 4–5. All 12 routes structurally wired with `given Checked[Permission] <- authzService.check(...)`. Enforcement active in fine-grained mode once Wave 3 is deployed. |
+| Wave 6: `BootstrapProvisioner.recordOwnership()` wiring | Wave 0D + Wave 0B + Wave 1 | IMPL-PLAN §Wave 6. `bootstrapWorkspace` still anonymous (no `requireAuthenticated`, no `recordOwnership`). |
 
 **`register-infra`:** K.5 — Istio ambient mode, `RequestAuthentication`, `AuthorizationPolicy`, JWT claim header injection, waypoint header-stripping verification.
 → Blocked by: K.4
@@ -63,7 +63,7 @@ All items can run in parallel within this phase.
 ## Phase 3 — After Phase 2
 
 **`register`:** `server-it` SpiceDB adapter tests (T-S1–T-S10) — add SpiceDB to `docker-compose.server-it.yml`, write `AuthorizationServiceSpiceDBSpec`.
-→ Blocked by: Wave 3 + `infra/spicedb/schema.zed`
+→ Blocked by: Wave 3 (not yet implemented) + `infra/spicedb/schema.zed` ✅
 → Ref: IMPL-PLAN §SpiceDB Adapter Integration Tests
 
 **`register-infra`:**
@@ -109,7 +109,7 @@ Everything else is off the critical path and parallelizable.
 
 | `register` delivers | `register-infra` can then proceed |
 |---------------------|-----------------------------------|
-| `infra/spicedb/schema.zed` committed | Deploy SpiceDB + apply schema |
+| `infra/spicedb/schema.zed` committed | Deploy SpiceDB + apply schema. **`register-infra` MUST read this file from the `register` checkout — do not maintain a separate copy. See ADR-030 §6.** |
 | Wave 2 deployed image | BATS §L1 (also needs K.5 live) |
 | Wave 3 deployed image | BATS §L2, §FC (also needs K.5 live) |
 | Wave 6 deployed image | BATS §BOOT-1 full ownership lifecycle |

@@ -1,0 +1,64 @@
+/**
+ * SpiceDB Authorization Schema — Register
+ *
+ * Permission names here must match Permission.zedName values in
+ * modules/server/src/main/scala/com/risquanter/register/auth/AuthorizationService.scala.
+ * A rename in either place without updating the other fails CI immediately.
+ *
+ * Note: Permission.Bootstrap ("__bootstrap__") and Permission.SystemMaintenance ("__system__")
+ * are compile-time lifecycle markers only — they are never passed to authz.check() and
+ * therefore do not appear in this schema. See ADR-030 §5.
+ *
+ * Relationship tuples (who has access to what) are managed exclusively by the
+ * register-infra CI provisioning job — never by application runtime code. See ADR-024.
+ */
+
+definition user {}
+
+definition organization {
+  relation org_member: user
+  // No org_admin in Zed — M3: org-wide emergency ops use Keycloak account disable
+  // + audited zed CLI bulk-delete per ops runbook. No schema escape hatch.
+
+  permission view_org = org_member
+}
+
+definition team {
+  relation organization: organization
+  relation team_admin:   user
+  relation editor:       user  // editor ⊇ analyst: may mutate canonical design
+  relation analyst:      user  // may create scenario branches; cannot mutate canonical design
+  relation viewer:       user
+
+  permission manage_team  = team_admin
+  permission design_write = editor + team_admin
+  permission analyze_run  = analyst + editor + team_admin
+  permission view_team    = viewer + analyst + editor + team_admin
+}
+
+definition workspace {
+  relation organization: organization
+  relation owner_team:   team
+  relation owner_user:   user  // direct ownership for team-less workspaces
+  relation editor:       user
+  relation analyst:      user
+  relation viewer:       user
+
+  // admin_workspace: restricted to the direct owner or a team admin.
+  // Used by rotate and delete operations (Wave 5). Added to plan original; see AUTH-PHASES.md §L2.1 note.
+  permission admin_workspace = owner_user + owner_team->manage_team
+  permission design_write    = editor + owner_user + owner_team->design_write
+  permission analyze_run     = analyst + editor + owner_user + owner_team->analyze_run
+  permission view_workspace  = viewer + analyst + editor + owner_user + owner_team->view_team
+}
+
+definition risk_tree {
+  relation workspace: workspace
+  relation editor:    user
+  relation analyst:   user
+  relation viewer:    user
+
+  permission design_write = editor + workspace->design_write
+  permission analyze_run  = analyst + editor + workspace->analyze_run
+  permission view_tree    = viewer + analyst + editor + workspace->view_workspace
+}

@@ -408,6 +408,51 @@ zed permission check \
 
 ---
 
+## Section W3 — SpiceDB Adapter Unit Tests (Scala, Wave 3 prerequisite)
+
+> **Audience:** `register` project — these are Scala unit tests in the `server` module,
+> not BATS tests. They are listed here to complete the test coverage picture.
+> They must pass before Wave 3 is considered done and before any BATS §L2/§FC tests are run.
+>
+> **No live SpiceDB required.** Uses sttp's mock/stub backend to simulate SpiceDB HTTP
+> responses. Tests the `AuthorizationServiceSpiceDB` HTTP adapter's response mapping in
+> isolation.
+
+### T-U1 — `PERMISSIONSHIP_HAS_PERMISSION` maps to `ZIO.succeed(Checked[P]())`
+
+Mock HTTP response: `200 {"permissionship": "PERMISSIONSHIP_HAS_PERMISSION"}`  
+Assert: `check(alice, ViewWorkspace, ws1)` completes successfully with a `Checked[Permission]` proof.
+
+### T-U2 — `PERMISSIONSHIP_NO_PERMISSION` maps to `AuthForbidden`
+
+Mock HTTP response: `200 {"permissionship": "PERMISSIONSHIP_NO_PERMISSION"}`  
+Assert: `check(bob, ViewWorkspace, ws1)` fails with `AuthForbidden` — `userId`, `permission`, `resourceType`, `resourceId` fields populated.
+
+### T-U3 — `PERMISSIONSHIP_UNSPECIFIED` treated as deny (fail-closed)
+
+Mock HTTP response: `200 {"permissionship": "PERMISSIONSHIP_UNSPECIFIED"}`  
+Assert: fails with `AuthForbidden` — unspecified is treated as denial, not as pass.
+
+### T-U4 — HTTP 4xx (bad token) maps to `AuthServiceUnavailable`
+
+Mock HTTP response: `401 {"code": "UNAUTHENTICATED"}`  
+Assert: fails with `AuthServiceUnavailable` — config error, not a forbidden. HTTP layer must map to 403.
+
+### T-U5 — HTTP 5xx / timeout maps to `AuthServiceUnavailable` (fail-closed)
+
+Mock HTTP response: `503` or simulated timeout  
+Assert: fails with `AuthServiceUnavailable`, NOT `AuthForbidden` — confirms separate error path. HTTP layer maps both to 403.
+
+### T-U6 — OTel counter `authz.check.total` increments on every call
+
+Assert: after 3 `check()` calls (2 allowed, 1 denied), counter has value 3 with appropriate `result` labels (`allowed`, `denied`).
+
+### T-U7 — Audit log uses `user.value` not `user.toString`
+
+Assert: structured log output for a `check()` call contains the raw UUID string (from `user.value`), not the redacted `UserId(***)` from `user.toString`.
+
+---
+
 ## Defense-in-Depth Overlap with Scala `server-it` Tests
 
 The following test pairs cover the same behaviour at two different levels. Both must pass:
@@ -428,6 +473,7 @@ The following test pairs cover the same behaviour at two different levels. Both 
 
 All items below must pass before any environment beyond `local-dev` is declared authorization-complete:
 
+- [ ] T-U1 through T-U7: SpiceDB adapter unit tests pass with mock HTTP backend (**Wave 3 exit criterion**)
 - [ ] B-L0-1 through B-L0-3: capability-only mode verified
 - [ ] B-L1-1 through B-L1-4: identity mode verified (requires Keycloak + Istio)
 - [ ] B-L2-1 through B-L2-5: fine-grained read verified
