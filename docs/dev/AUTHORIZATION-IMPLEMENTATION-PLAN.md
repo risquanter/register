@@ -794,7 +794,7 @@ All items below must be satisfied before the authorization rollout is considered
 - [x] `Checked[P]` opaque type (strong form); `check()` returns `IO[AuthError, Checked[P]]` — **DONE** (`auth/AuthorizationService.scala`, Wave 1, verified 2026-07-04). **Implementation note:** service method `using` parameters use base `Checked[Permission]` type (not specific subtypes); handler bindings use `given Checked[Permission] <-` (Scala 3 infers base type from `check()`). See ADR-030 §3.
 - [x] Protected service methods take `using Checked[P]`; missing proof is a compile error — **DONE** (`WorkspaceStore`, `RiskTreeService` traits + impls, Wave 1, verified 2026-07-04). All 10 protected methods on `WorkspaceStore` + `RiskTreeService` carry `(using Checked[Permission])`.
 - [x] `BootstrapProvisioner` trait separate from `AuthorizationService`; `AuthorizationService` has no write methods — **DONE** (`auth/BootstrapProvisioner.scala`, Wave 0D, verified 2026-07-01). Extended 2026-07-04 with `bootstrapToken()` and `systemMaintenanceToken()` lifecycle proof methods.
-- [ ] `BootstrapProvisioner.recordOwnership()` wired in bootstrap handler only — **Wave 6 (future)**
+- [x] `BootstrapProvisioner.recordOwnership()` wired in bootstrap handler only — **DONE** (`WorkspaceLifecycleController.bootstrapWorkspace`, Wave 6, verified 2026-07-05)
 - [x] ADR-024 updated with lifecycle write clarification and service account scope note — **DONE** (ADR-024 §7, Pre-Wave, verified 2026-07-01)
 - [x] ADR-030 created: Authorization Enforcement at the Orchestration Boundary — **DONE** (`docs/dev/ADR-030-authorization-enforcement-orchestration-boundary.md`, 2026-07-04)
 
@@ -807,7 +807,7 @@ All items below must be satisfied before the authorization rollout is considered
 **Tests (unit + stub-based):**
 - [x] Compile-time proof: missing `Checked[P]` at a protected call site does not compile — **DONE** (verified 2026-07-04: removing `given Checked[Permission] <-` from any controller handler causes compiler error at each subsequent protected service method call)
 - [x] `AuthorizationServiceStub` returns `Checked[P]` on success — **DONE** (`auth/AuthorizationServiceStub.scala`, verified 2026-07-04)
-- [ ] `BootstrapProvisionerStub` records `recordOwnership()` calls (not on `AuthorizationService`) — **Wave 6 (future)**
+- [x] `BootstrapProvisionerStub` records `recordOwnership()` calls (not on `AuthorizationService`) — **DONE** (`auth/BootstrapProvisionerStub.scala`, Wave 6, verified 2026-07-05)
 - [x] All waves from AUTHORIZATION-PLAN.md pass their regression gates unchanged — **DONE** (478 tests pass, 0 failures, verified 2026-07-04)
 
 **Tests (`server-it` — SpiceDB adapter, see §SpiceDB Adapter Integration Tests):**

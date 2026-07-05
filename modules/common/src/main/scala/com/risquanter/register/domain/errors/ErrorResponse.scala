@@ -156,10 +156,13 @@ object ErrorResponse {
 
   /** Exhaustive match on AuthError — both subtypes intentionally map to 403.
     * AuthServiceUnavailable maps to 403, not 503, to avoid revealing infrastructure state.
+    * Its `reason` (transport/parse detail) stays server-side only — the audit log
+    * records it; the response body must not, or clients could fingerprint the
+    * authorization backend and distinguish outage from denial.
     */
   private def encodeAuthError(error: AuthError): (StatusCode, ErrorResponse) = error match {
     case _: AuthForbidden                        => makeAccessDeniedResponse("Access denied")
-    case AuthServiceUnavailable(reason, _)       => makeAccessDeniedResponse(reason)
+    case _: AuthServiceUnavailable               => makeAccessDeniedResponse("Access denied")
   }
 
   /** Exhaustive match on IrminError — compiler-enforced coverage (ADR-008). */

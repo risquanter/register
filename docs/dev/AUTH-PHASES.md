@@ -52,7 +52,7 @@ All items can run in parallel within this phase.
 |------|------------|-----|
 | Wave 3: `AuthorizationServiceSpiceDB` | Wave 0C + Wave 1 | AUTH-PLAN §L2.2, IMPL-PLAN §C. **Exit criteria:** (1) T-U1–T-U5 mock HTTP adapter unit tests pass (see AUTH-TESTING-PLAN §W3). (2) OTel counter `authz.check.total` and histogram `authz.check.latency_ms` increment on every `check()` call — follow `RiskTreeServiceLive` pattern. (3) Structured log per check() call using `user.value` for PII opt-in. |
 | Waves 4–5: workspace-level `check()` on all lifecycle routes ✅ | Wave 1 | AUTH-PLAN Waves 4–5. All 12 routes structurally wired with `given Checked[Permission] <- authzService.check(...)`. Enforcement active in fine-grained mode once Wave 3 is deployed. |
-| Wave 6: `BootstrapProvisioner.recordOwnership()` wiring | Wave 0D + Wave 0B + Wave 1 | IMPL-PLAN §Wave 6. `bootstrapWorkspace` still anonymous (no `requireAuthenticated`, no `recordOwnership`). |
+| Wave 6: `BootstrapProvisioner.recordOwnership()` wiring ✅ | Wave 0D + Wave 0B + Wave 1 | IMPL-PLAN §Wave 6. `bootstrapWorkspace` now authenticated (`requireAuthenticated`) and records ownership on bootstrap. `bootstrapWorkspaceEndpoint` extended with `x-user-id` header. Frontend call site updated. `BootstrapProvisionerStub` created. 4 new controller tests pass. Verified 2026-07-05. |
 
 **`register-infra`:** K.5 ✅ — Istio ambient mode, `RequestAuthentication`, `AuthorizationPolicy`, JWT claim header injection, waypoint header-stripping verification.
 → Blocked by: K.4 ✅

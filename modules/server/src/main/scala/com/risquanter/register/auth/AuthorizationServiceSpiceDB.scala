@@ -159,6 +159,11 @@ final class AuthorizationServiceSpiceDB private (
 
   // ─── listAccessible() ─────────────────────────────────────────────────────
 
+  // Intentionally uninstrumented: AUTHORIZATION-PLAN §L2.2 Observability scopes
+  // telemetry (span, authz.check.* metrics, audit log) to check() only — the
+  // per-request allow/deny enforcement decision. listAccessible is a listing
+  // convenience whose result is shown to the user; failures surface as
+  // AuthServiceUnavailable and are visible in ordinary request logs/traces.
   override def listAccessible(
     user:         UserId.Authenticated,
     resourceType: ResourceType,

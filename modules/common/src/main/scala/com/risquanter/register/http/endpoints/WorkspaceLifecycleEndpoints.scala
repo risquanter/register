@@ -7,7 +7,7 @@ import sttp.model.StatusCode
 
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, WorkspaceRotateResponse, SimulationResponse}
-import com.risquanter.register.domain.data.iron.WorkspaceKeySecret
+import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Workspace lifecycle API endpoints.
@@ -25,6 +25,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .in("workspaces")
       .post
       .in(header[Option[String]]("X-Forwarded-For"))
+      .in(header[Option[UserId.Authenticated]]("x-user-id"))
       .in(jsonBody[RiskTreeDefinitionRequest])
       .out(jsonBody[WorkspaceBootstrapResponse])
 

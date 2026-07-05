@@ -37,9 +37,24 @@ Trade-off: [the value judgement only the user can weigh]
 Decision needed: [single specific closed question]
 ```
 
+### What is NOT a decision (noise filter — apply before raising anything)
+
+A "decision" is only real if there are **two or more viable options with genuine trade-offs** that only the user can weigh.
+
+**Do not raise a ⚠️ Decision Required if:**
+
+- Only one option is technically viable and the other is labelled "not viable" or "cannot be implemented" — that is asking for permission to proceed, not a decision. Just ask: "Proceed with X?" or proceed if it follows directly from an approved plan.
+- A plan already explicitly specifies the change (e.g. the implementation plan names the new header, the new parameter, the new file). A plan passage quoting the signature is the decision. Do not re-decide what the plan already decided.
+- The "decision" amounts to "do the work" vs "don't do the work" with no real trade-off between approaches.
+- A trigger fires but the change is fully covered and scoped by the approved plan being executed. The Decision Trigger list gates *unplanned* changes, not plan execution.
+
+Pseudo-decisions are noise. Noise erodes trust in the protocol. Raise only real decisions.
+
+---
+
 ### Decision Triggers (mandatory halt)
 
-Stop immediately on any of these:
+Stop immediately on any of these **that are NOT already covered by the approved plan**:
 
 1. Any change to an API shape, Tapir endpoint signature, or OpenAPI output
 2. Any workaround: `asInstanceOf`, `Schema.any`, unsafe cast, escape hatch
