@@ -8,7 +8,7 @@ import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirC
 import io.getquill.SnakeCase
 
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
-import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, UserContextExtractor}
+import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, BootstrapProvisionerSpiceDB, UserContextExtractor}
 import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
@@ -144,13 +144,26 @@ object Application extends ZIOAppDefault {
       yield result
     }
 
-  private val chooseBootstrapProvisioner: ZLayer[AuthConfig, Nothing, BootstrapProvisioner] =
-    ZLayer.fromZIO {
-      ZIO.service[AuthConfig].map {
-        case AuthConfig(AuthMode.CapabilityOnly) => BootstrapProvisionerNoOp
-        case AuthConfig(AuthMode.Identity)       => BootstrapProvisionerNoOp
-        case AuthConfig(AuthMode.FineGrained)    => BootstrapProvisionerNoOp
-      }
+  private val chooseBootstrapProvisioner: ZLayer[AuthConfig, Throwable, BootstrapProvisioner] =
+    ZLayer.scoped {
+      for
+        authConfig <- ZIO.service[AuthConfig]
+        result     <- authConfig.mode match
+          case AuthMode.CapabilityOnly =>
+            ZIO.logInfo("auth.mode=capability-only; BootstrapProvisioner NoOp (ownership via owner_id column only)").as(
+              BootstrapProvisionerNoOp: BootstrapProvisioner
+            )
+          case AuthMode.Identity =>
+            ZIO.logInfo("auth.mode=identity; BootstrapProvisioner NoOp (ownership via owner_id column only)").as(
+              BootstrapProvisionerNoOp: BootstrapProvisioner
+            )
+          case AuthMode.FineGrained =>
+            ZIO.logInfo("auth.mode=fine-grained; activating BootstrapProvisionerSpiceDB") *>
+              ZLayer.make[BootstrapProvisioner](
+                BootstrapProvisionerSpiceDB.liveLayer,
+                Configs.makeLayer[SpiceDbConfig]("register.spicedb")
+              ).build.map(_.get[BootstrapProvisioner])
+      yield result
     }
 
   private val chooseUserContextExtractor: ZLayer[AuthConfig, Nothing, UserContextExtractor] =

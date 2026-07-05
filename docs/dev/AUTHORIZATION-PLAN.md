@@ -791,16 +791,16 @@ The app is a pure PEP — it never writes tuples. The CI provisioning job is ext
 
 | Mode | Config value | Behaviour | Latency |
 |------|-------------|-----------|---------|
-| Default | `minimize_latency` | SpiceDB uses cache (NewEnemy) | ~1ms overhead |
-| High-compliance | `fully_consistent` | Always reads PostgreSQL snapshot | ~5ms overhead |
+| Default | `minimize-latency` | SpiceDB uses cache (NewEnemy) | ~1ms overhead |
+| High-compliance | `fully-consistent` | Always reads PostgreSQL snapshot | ~5ms overhead |
 
 ```hocon
-register.authz.spicedb {
-  consistency = "minimize_latency"  # default; set "fully_consistent" for high-compliance environments
+register.spicedb {
+  consistency = "minimize-latency"  # default; set "fully-consistent" for high-compliance environments
 }
 ```
 
-Start with `minimize_latency`. Add `fully_consistent` as a config option for environments with strict audit requirements.
+Start with `minimize-latency`. Add `fully-consistent` as a config option for environments with strict audit requirements.
 
 #### Failure Modes
 
@@ -914,7 +914,7 @@ The trait hides transport entirely. When gRPC is needed:
 
 1. Add `scalapb` + SpiceDB gRPC stubs as dependencies
 2. Create `AuthorizationServiceSpiceDbGrpc extends AuthorizationService`
-3. Wire via config: `register.authz.spicedb.transport = http | grpc`
+3. Wire via config: `register.spicedb.transport = http | grpc`
 4. Zero changes to any `check()` call site — the trait is the stable interface
 
 HTTP first; gRPC only if latency profiling shows the HTTP overhead exceeds budget under load.

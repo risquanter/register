@@ -16,8 +16,10 @@ import com.risquanter.register.configs.{SpiceDbConfig, SpiceDbConsistency}
 import com.risquanter.register.domain.data.iron.{UserId, SafeId}
 import com.risquanter.register.domain.errors.{AuthError, AuthForbidden, AuthServiceUnavailable}
 
-// ─── SpiceDB REST API request/response types (file-private) ─────────────────
-// Private to this file — not part of any public or package-level API surface.
+// ─── SpiceDB REST API request/response types (package-private) ───────────────
+// Top-level `private` = visible within the `auth` package only — not part of any
+// public API surface. SpiceDbObjectRef / SpiceDbSubjectRef and their encoders are
+// shared with BootstrapProvisionerSpiceDB.scala (WriteRelationships request body).
 // Named with SpiceDb prefix to avoid shadowing same-named types from other namespaces.
 
 private case class SpiceDbObjectRef(objectType: String, objectId: String)

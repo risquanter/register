@@ -50,9 +50,9 @@ All items can run in parallel within this phase.
 **`register`:**
 | Task | Blocked by | Ref |
 |------|------------|-----|
-| Wave 3: `AuthorizationServiceSpiceDB` | Wave 0C + Wave 1 | AUTH-PLAN §L2.2, IMPL-PLAN §C. **Exit criteria:** (1) T-U1–T-U5 mock HTTP adapter unit tests pass (see AUTH-TESTING-PLAN §W3). (2) OTel counter `authz.check.total` and histogram `authz.check.latency_ms` increment on every `check()` call — follow `RiskTreeServiceLive` pattern. (3) Structured log per check() call using `user.value` for PII opt-in. |
+| Wave 3: `AuthorizationServiceSpiceDB` ✅ | Wave 0C + Wave 1 | AUTH-PLAN §L2.2, IMPL-PLAN §C. **Exit criteria met (code-verified 2026-07-05):** (1) mock HTTP adapter unit tests pass — `AuthorizationServiceSpiceDBSpec` covers T-U1–T-U14, exceeding the planned T-U1–T-U5 (see AUTH-TESTING-PLAN §W3). (2) OTel counter `authz.check.total` and histogram `authz.check.latency_ms` increment on every `check()` call. (3) Structured log per check() call using `user.value` for PII opt-in. Wired in fine-grained mode in `Application.chooseAuthorizationService`; `register.spicedb` config block added to `application.conf` with `SPICEDB_URL`/`SPICEDB_TOKEN`/`SPICEDB_CONSISTENCY`/`SPICEDB_TIMEOUT_SECONDS` env hooks (2026-07-05). |
 | Waves 4–5: workspace-level `check()` on all lifecycle routes ✅ | Wave 1 | AUTH-PLAN Waves 4–5. All 12 routes structurally wired with `given Checked[Permission] <- authzService.check(...)`. Enforcement active in fine-grained mode once Wave 3 is deployed. |
-| Wave 6: `BootstrapProvisioner.recordOwnership()` wiring ✅ | Wave 0D + Wave 0B + Wave 1 | IMPL-PLAN §Wave 6. `bootstrapWorkspace` now authenticated (`requireAuthenticated`) and records ownership on bootstrap. `bootstrapWorkspaceEndpoint` extended with `x-user-id` header. Frontend call site updated. `BootstrapProvisionerStub` created. 4 new controller tests pass. Verified 2026-07-05. |
+| Wave 6: `BootstrapProvisioner.recordOwnership()` wiring ✅ | Wave 0D + Wave 0B + Wave 1 | IMPL-PLAN §Wave 6. `bootstrapWorkspace` now authenticated (`requireAuthenticated`) and records ownership on bootstrap. `bootstrapWorkspaceEndpoint` extended with `x-user-id` header. Frontend call site updated. `BootstrapProvisionerStub` created. 4 new controller tests pass. Verified 2026-07-05. **`BootstrapProvisionerSpiceDB` implemented and wired in fine-grained mode (2026-07-05)** — ownership tuples written via WriteRelationships (`OPERATION_TOUCH`); unblocks BATS §BOOT once deployed. |
 
 **`register-infra`:** K.5 ✅ — Istio ambient mode, `RequestAuthentication`, `AuthorizationPolicy`, JWT claim header injection, waypoint header-stripping verification.
 → Blocked by: K.4 ✅
@@ -62,8 +62,8 @@ All items can run in parallel within this phase.
 
 ## Phase 3 — After Phase 2
 
-**`register`:** `server-it` SpiceDB adapter tests (T-S1–T-S10) — add SpiceDB to `docker-compose.server-it.yml`, write `AuthorizationServiceSpiceDBSpec`.
-→ Blocked by: Wave 3 (not yet implemented) + `infra/spicedb/schema.zed` ✅
+**`register`:** `server-it` SpiceDB adapter tests (T-S1–T-S10) — add SpiceDB to `docker-compose.server-it.yml`, write the `server-it` integration spec (the unit-level `AuthorizationServiceSpiceDBSpec` already exists in `server`).
+→ Blocked by: Wave 3 ✅ + `infra/spicedb/schema.zed` ✅ — unblocked
 → Ref: IMPL-PLAN §SpiceDB Adapter Integration Tests
 
 **`register-infra`:**
@@ -110,6 +110,7 @@ Everything else is off the critical path and parallelizable.
 | `register` delivers | `register-infra` can then proceed |
 |---------------------|-----------------------------------|
 | `infra/spicedb/schema.zed` committed | Deploy SpiceDB + apply schema. **`register-infra` MUST read this file from the `register` checkout — do not maintain a separate copy. See ADR-030 §6.** |
+| `register.spicedb` env contract in `application.conf` ✅ 2026-07-05 — `SPICEDB_URL`, `SPICEDB_TOKEN` (required in fine-grained mode), `SPICEDB_CONSISTENCY` (`minimize-latency` \| `fully-consistent`, optional), `SPICEDB_TIMEOUT_SECONDS` (optional) | Wire env values in the register Helm chart (register-infra TODO Step 2 §register-helm-values) |
 | Wave 2 deployed image | BATS §L1 (also needs K.5 live) |
 | Wave 3 deployed image | BATS §L2, §FC (also needs K.5 live) |
 | Wave 6 deployed image | BATS §BOOT-1 full ownership lifecycle |
