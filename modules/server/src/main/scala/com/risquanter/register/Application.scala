@@ -7,8 +7,8 @@ import sttp.tapir.server.ziohttp.{ZioHttpInterpreter, ZioHttpServerOptions}
 import sttp.tapir.server.interceptor.cors.{CORSInterceptor, CORSConfig as TapirCORSConfig}
 import io.getquill.SnakeCase
 
-import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
-import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, BootstrapProvisioner, BootstrapProvisionerNoOp, UserContextExtractor}
+import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
+import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, UserContextExtractor}
 import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
@@ -23,6 +23,8 @@ import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive, WorkspaceStorePostgres, RateLimiterLive, WorkspaceReaper}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
+import zio.telemetry.opentelemetry.tracing.Tracing
+import zio.telemetry.opentelemetry.metrics.Meter
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 
 /** Main application entry point
@@ -112,13 +114,34 @@ object Application extends ZIOAppDefault {
       } yield flyway
     }
 
-  private val chooseAuthorizationService: ZLayer[AuthConfig, Throwable, AuthorizationService] =
-    ZLayer.fromZIO {
-      ZIO.service[AuthConfig].map {
-        case AuthConfig(AuthMode.CapabilityOnly) => AuthorizationServiceNoOp
-        case AuthConfig(AuthMode.Identity)       => AuthorizationServiceNoOp
-        case AuthConfig(AuthMode.FineGrained)    => AuthorizationServiceNoOp
-      }
+  // Requires Tracing & Meter because FineGrained mode creates AuthorizationServiceSpiceDB
+  // with OTel instruments. Both are already provided in appLayer (TracingLive/MetricsLive).
+  private val chooseAuthorizationService: ZLayer[AuthConfig & Tracing & Meter, Throwable, AuthorizationService] =
+    ZLayer.scoped {
+      for
+        authConfig <- ZIO.service[AuthConfig]
+        result     <- authConfig.mode match
+          case AuthMode.CapabilityOnly =>
+            ZIO.logInfo("auth.mode=capability-only; authorization NoOp (all checks pass)").as(
+              AuthorizationServiceNoOp: AuthorizationService
+            )
+          case AuthMode.Identity =>
+            ZIO.logInfo("auth.mode=identity; authorization NoOp (all SpiceDB checks pass)").as(
+              AuthorizationServiceNoOp: AuthorizationService
+            )
+          case AuthMode.FineGrained =>
+            ZIO.logInfo("auth.mode=fine-grained; activating AuthorizationServiceSpiceDB") *>
+              (for
+                tracing <- ZIO.service[Tracing]
+                meter   <- ZIO.service[Meter]
+                svc     <- ZLayer.make[AuthorizationService](
+                  AuthorizationServiceSpiceDB.liveLayer,
+                  Configs.makeLayer[SpiceDbConfig]("register.spicedb"),
+                  ZLayer.succeed(tracing),
+                  ZLayer.succeed(meter)
+                ).build.map(_.get[AuthorizationService])
+              yield svc)
+      yield result
     }
 
   private val chooseBootstrapProvisioner: ZLayer[AuthConfig, Nothing, BootstrapProvisioner] =
