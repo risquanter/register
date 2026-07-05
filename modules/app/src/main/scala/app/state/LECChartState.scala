@@ -39,7 +39,7 @@ final class LECChartState(
   selectedTreeId: StrictSignal[Option[TreeId]],
   selectedTree: StrictSignal[LoadState[RiskTree]],
   globalError: Var[Option[GlobalError]],
-  userIdAccessor: () => Option[UserId] = () => None
+  userIdAccessor: () => Option[UserId.Authenticated] = () => None
 ) extends WorkspaceAnalysisEndpoints:
 
   // ── User selection state ──────────────────────────────────────

@@ -33,7 +33,7 @@ enum DistributionViewMode:
 final class DistributionChartState(
   val draftSignal:    StrictSignal[Option[Distribution]],
   val keySignal:      StrictSignal[Option[WorkspaceKeySecret]],
-  val userIdAccessor: () => Option[UserId] = () => None
+  val userIdAccessor: () => Option[UserId.Authenticated] = () => None
 ) extends DistributionPreviewEndpoints:
 
   /** Whether the live preview is enabled. Defaults to false; auto-reset to false

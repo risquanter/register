@@ -50,7 +50,7 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
     * Layer 1+ (Task L1.3): replace with AuthState.currentUserId signal.
     * @see AUTHORIZATION-PLAN.md Wave 1
     */
-  def currentUserId: Option[UserId] = None
+  def currentUserId: Option[UserId.Authenticated] = None
 
   /** Extract workspace key from the current browser URL path.
     * Uses fromString for Iron-validated construction (ADR-022 R5, R7).

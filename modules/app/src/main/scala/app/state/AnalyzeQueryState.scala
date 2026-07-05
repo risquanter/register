@@ -28,7 +28,7 @@ import fol.parser.VagueQueryParser
 final class AnalyzeQueryState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
-  userIdAccessor: () => Option[UserId] = () => None
+  userIdAccessor: () => Option[UserId.Authenticated] = () => None
 ) extends WorkspaceQueryEndpoints:
 
   // ── Query input ───────────────────────────────────────────────
