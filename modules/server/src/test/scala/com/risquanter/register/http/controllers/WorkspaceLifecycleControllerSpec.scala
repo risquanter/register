@@ -44,8 +44,10 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
   private given MonadError[Task] = new RIOMonadError[Any]
 
   // ── Stub repository ───────────────────────────────────────────────────────────
+  // `def` (not `val`) so each buildBackend call gets a fresh, isolated map.
+  // A shared mutable.Map across ZIO Test's parallel test execution is a data race.
 
-  private val stubRepo: RiskTreeRepository = new RiskTreeRepository:
+  private def stubRepo: RiskTreeRepository = new RiskTreeRepository:
     private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
     override def create(wsId: WorkspaceId, t: RiskTree): Task[RiskTree] =
       com.risquanter.register.util.IdGenerators.nextTreeId.map { id =>

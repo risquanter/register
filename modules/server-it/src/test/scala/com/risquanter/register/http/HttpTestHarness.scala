@@ -25,7 +25,7 @@ import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
-import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
+import com.risquanter.register.auth.{AuthorizationServiceNoOp, BootstrapProvisionerNoOp, UserContextExtractor}
 
 /** Test-only harness to start the HTTP server on a random port with selectable repo wiring. */
 object HttpTestHarness:
@@ -138,6 +138,7 @@ object HttpTestHarness:
       WorkspaceStoreLive.layer,
       RateLimiterLive.layer,
       AuthorizationServiceNoOp.layer,
+      BootstrapProvisionerNoOp.layer,
       ZLayer.succeed(UserContextExtractor.noOp),
       ZLayer.fromZIO(SystemController.makeZIO),
       ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
