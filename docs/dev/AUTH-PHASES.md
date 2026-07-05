@@ -62,7 +62,7 @@ All items can run in parallel within this phase.
 
 ## Phase 3 — After Phase 2
 
-**`register`:** `server-it` SpiceDB adapter tests (T-S1–T-S10) — add SpiceDB to `docker-compose.server-it.yml`, write the `server-it` integration spec (the unit-level `AuthorizationServiceSpiceDBSpec` already exists in `server`).
+**`register`:** `server-it` SpiceDB adapter tests (T-S1–T-S10) ✅ — `spicedb` service added to `docker-compose.server-it.yml` (authz profile, `serve --datastore-engine=memory --grpc-preshared-key`); `SpiceDbCompose` helper seeds schema + standard test relationships; `AuthorizationServiceSpiceDBItSpec` implements T-S1–T-S10 (verified compile-clean 2026-07-06). `stubRepo` race fixed in `WorkspaceLifecycleControllerSpec`; `BootstrapProvisionerNoOp` gap fixed in `StubHttpTestHarness`. 505 unit tests pass.
 → Blocked by: Wave 3 ✅ + `infra/spicedb/schema.zed` ✅ — unblocked
 → Ref: IMPL-PLAN §SpiceDB Adapter Integration Tests
 
@@ -97,7 +97,7 @@ All items can run in parallel within this phase.
 Wave 0B (UserId sum type)
   → Wave 1 (Checked[P] proof token)
     → Wave 3 (AuthorizationServiceSpiceDB)
-      → server-it T-S1–T-S10
+      → server-it T-S1–T-S10 ✅ 2026-07-06
       → BATS §L2 / §BOOT / §FC
 ```
 

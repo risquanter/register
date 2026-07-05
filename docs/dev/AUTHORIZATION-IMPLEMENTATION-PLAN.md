@@ -634,16 +634,16 @@ full desired state and reconciles against reality in both directions.
 
 ---
 
-## SpiceDB Adapter Integration Tests (`server-it`)
+## SpiceDB Adapter Integration Tests (`server-it`) ✅ 2026-07-06
 
 These tests verify `AuthorizationServiceSpiceDB` against a real SpiceDB instance using the
 existing `server-it` Docker Compose infrastructure. They are owned by the `register` project.
 
-**Setup:**
-- Add SpiceDB to `docker-compose.server-it.yml` (use the official `authzed/spicedb:latest` dev image)
-- Apply `infra/spicedb/schema.zed` at container startup
-- Seed test relationships before each test suite via the SpiceDB HTTP API (or `zed` CLI)
-- Test class: `modules/server-it/src/test/scala/.../auth/AuthorizationServiceSpiceDBSpec.scala`
+**Setup (implemented):**
+- SpiceDB added to `docker-compose.server-it.yml` (`authz` profile, `authzed/spicedb:latest`, `serve --datastore-engine=memory --grpc-preshared-key=test-spicedb-token`, dynamic port 8080, `grpc_health_probe` healthcheck)
+- Schema applied via `SpiceDbCompose` helper: reads `infra/spicedb/schema.zed`, POSTs to `/v1/schema/write` at startup
+- Test relationships seeded via SpiceDB REST API in `SpiceDbCompose.layer` acquisition
+- Test class: `modules/server-it/src/test/scala/.../auth/AuthorizationServiceSpiceDBItSpec.scala` (named `ItSpec` to avoid collision with the unit-test `AuthorizationServiceSpiceDBSpec` in `server`)
 
 The test data model uses three users (`alice`, `bob`, `carol`) and two workspaces (`ws1`, `ws2`)
 with a single tree (`tree1` in `ws1`). `alice` is `owner_user` of `ws1`; `bob` has no grants;
@@ -811,5 +811,5 @@ All items below must be satisfied before the authorization rollout is considered
 - [x] All waves from AUTHORIZATION-PLAN.md pass their regression gates unchanged — **DONE** (478 tests pass, 0 failures, verified 2026-07-04)
 
 **Tests (`server-it` — SpiceDB adapter, see §SpiceDB Adapter Integration Tests):**
-- [ ] SpiceDB added to `docker-compose.server-it.yml`; schema applied at startup
-- [ ] T-S1 through T-S10 pass against live SpiceDB instance
+- [x] SpiceDB added to `docker-compose.server-it.yml`; schema applied at startup — **DONE** (`authz` profile, `serve --datastore-engine=memory --grpc-preshared-key=test-spicedb-token`; `SpiceDbCompose` helper writes schema + seeds test relationships via REST API, verified 2026-07-06)
+- [x] T-S1 through T-S10 pass against live SpiceDB instance — **DONE** (`AuthorizationServiceSpiceDBItSpec`, serverIt/test:compile clean, verified 2026-07-06)
