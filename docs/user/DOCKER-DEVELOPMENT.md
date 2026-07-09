@@ -251,9 +251,9 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `REGISTER_REPOSITORY_TYPE` | `in-memory` | Set to `irmin` to enable Irmin backend |
 | `IRMIN_URL` | `http://localhost:9080` | Irmin GraphQL URL (use `http://irmin:8080` inside compose) |
 | `IRMIN_BRANCH` | `main` | Irmin default branch |
-| `IRMIN_TIMEOUT_SECONDS` | `30` | Irmin request timeout |
-| `IRMIN_HEALTHCHECK_TIMEOUT_MILLIS` | `5000` | Irmin startup health-check timeout |
-| `IRMIN_HEALTHCHECK_RETRIES` | `0` | Irmin health-check retries (0 = fail-fast) |
+| `IRMIN_TIMEOUT` | `30s` | Irmin request timeout (HOCON duration, e.g. `30s`, `2m`) |
+| `IRMIN_HEALTHCHECK_ATTEMPT_TIMEOUT` | `5s` | Startup readiness: per-attempt probe timeout (ADR-031) |
+| `IRMIN_HEALTHCHECK_BUDGET` | `45s` | Startup readiness: total bounded wait before failing closed (ADR-031) |
 | `BACKEND_URL` | `http://register-server:8090` | **Frontend (nginx) only** — register-server URL for proxy_pass |
 
 ---

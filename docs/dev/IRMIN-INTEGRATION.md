@@ -247,19 +247,17 @@ Configuration for connecting to Irmin. Loaded from `application.conf` under `reg
 
 ```scala
 final case class IrminConfig(
-  url: SafeUrl,                 // e.g., "http://localhost:9080"
-  branch: String = "main",     // default branch
-  timeoutSeconds: Int = 30,     // request timeout
-  healthCheckTimeoutMillis: Int = 5000,
-  healthCheckRetries: Int = 0
+  url: Url.Url,                                              // e.g., "http://localhost:9080"
+  branch: BranchRef = BranchRef.Main,                        // default branch
+  timeout: Duration = Duration.ofSeconds(30),                // request timeout
+  healthCheckAttemptTimeout: Duration = Duration.ofSeconds(5), // per-attempt probe bound (ADR-031)
+  healthCheckBudget: Duration = Duration.ofSeconds(45)       // total bounded startup wait (ADR-031)
 ) {
-  def graphqlUrl: String = s"$url/graphql"
-  def timeout: Duration = timeoutSeconds.seconds
-  def healthCheckTimeout: Duration = healthCheckTimeoutMillis.millis
+  def graphqlUrl: String = s"${url.value}/graphql"
 }
 ```
 
-**Irmin context:** `url` is validated via `SafeUrl` and is used to build the `/graphql` endpoint. Health check bounds (timeout/retries) are applied during startup wiring.
+**Irmin context:** `url` is validated via the Iron `Url` constraint and builds the `/graphql` endpoint. The health-check bounds drive the startup readiness gate (`StartupReadiness.awaitReady`, ADR-031): each probe attempt is bounded by `healthCheckAttemptTimeout`, and the process fails closed once `healthCheckBudget` elapses.
 
 **Usage:**
 ```scala
@@ -356,7 +354,7 @@ trait IrminClient:
   def remove(path: IrminPath, message: String): IO[IrminError, IrminCommit]
   def branches: IO[IrminError, List[String]]
   def mainBranch: IO[IrminError, Option[IrminBranch]]
-  def healthCheck: IO[IrminError, Boolean]
+  def healthCheck: IO[IrminError, Unit]
 ```
 
 **Irmin context:**

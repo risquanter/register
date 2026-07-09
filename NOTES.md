@@ -22,6 +22,29 @@
 
 ---
 
+### Startup Irmin health check should retry, not fail-fast
+
+**Status**: Open — filed from register-infra (2026-07-08).
+
+**Problem**: `Application.irminHealthCheck` (`Application.scala:42`) fails the whole
+startup with `Irmin health check returned false` and the process self-terminates →
+Kubernetes `CrashLoopBackOff`. On the k8s bootstrap this fires whenever register
+starts before its network path to irmin is ready — i.e. before the mesh
+(Istio ambient) NetworkPolicy/HBONE rules for `register → irmin:8080` have been
+applied by ArgoCD. It self-heals on the next restart once the policies land, but the
+crash-loop is noisy and delays every fresh cluster bring-up.
+
+**Ask**: make the startup irmin check **resilient to a transient/not-yet-ready
+dependency** — a bounded retry-with-backoff (e.g. ~30–60s total) before giving up,
+rather than failing on the first `false`. This is the app-side fix the infra team
+chose over an infra workaround (an initContainer wait-for-irmin); tracked in
+register-infra `TODO.md` (Phase 3, "register↔irmin startup-ordering resilience").
+
+**Related**: `modules/server/.../Application.scala` (`irminHealthCheck`, ~L42), the
+irmin repository/health client it calls.
+
+---
+
 ## Completed Work (Historical Reference)
 
 ### ✅ Error Handling & Typed Error Codes (2026-01-06/07)

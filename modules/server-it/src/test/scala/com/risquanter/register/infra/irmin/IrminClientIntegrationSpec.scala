@@ -28,10 +28,10 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
 
   override def spec = suite("IrminClientIntegrationSpec")(
     
-    test("healthCheck returns true when Irmin is running") {
+    test("healthCheck succeeds when Irmin is running") {
       for
-        healthy <- IrminClient.healthCheck
-      yield assertTrue(healthy)
+        _ <- IrminClient.healthCheck
+      yield assertCompletes
     },
 
     test("branches returns main branch after first commit") {

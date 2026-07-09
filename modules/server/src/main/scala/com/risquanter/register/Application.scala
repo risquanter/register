@@ -13,6 +13,7 @@ import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeaders
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.cache.CacheController
+import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.persistence.{FlywayService, FlywayServiceLive, Repository}
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.QueryServiceLive
@@ -32,21 +33,22 @@ import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
   */
 object Application extends ZIOAppDefault {
 
-  // Repo selection helper (config-driven) with Irmin fail-fast health check
+  // Startup readiness gate for the Irmin dependency (ADR-031): bounded, fail-closed
+  // wait for irmin to become reachable. Request-path resilience remains the mesh's
+  // responsibility (ADR-012 §4); this gate covers only the bootstrap window, which
+  // the mesh cannot cover during its own policy reconciliation.
   private val irminHealthCheck: ZLayer[IrminClient & IrminConfig, Throwable, IrminClient] =
     ZLayer.fromZIO {
       for {
         cfg    <- ZIO.service[IrminConfig]
         client <- ZIO.service[IrminClient]
-        // Health check retries are bounded and default to zero per ADR-012 fail-fast guidance
-        retry   = Schedule.recurs(math.max(0, cfg.healthCheckRetries))
-        _ <- client.healthCheck
-               .flatMap(ok => if ok then ZIO.unit else ZIO.fail(new RuntimeException("Irmin health check returned false")))
-               .mapError(err => new RuntimeException(s"Irmin health check failed: $err"))
-               .retry(retry)
-               .timeoutFail(new RuntimeException(s"Irmin health check timed out after ${cfg.healthCheckTimeout.toMillis} ms"))(cfg.healthCheckTimeout)
-               .tapError(e => ZIO.logError(s"Irmin health check failed: ${e.getMessage}"))
-               .tap(_ => ZIO.logInfo(s"Irmin repository selected at ${cfg.url}"))
+        _      <- StartupReadiness.awaitReady(
+                    name           = s"irmin (${cfg.url})",
+                    probe          = client.healthCheck,
+                    attemptTimeout = cfg.healthCheckAttemptTimeout,
+                    budget         = cfg.healthCheckBudget
+                  )
+        _      <- ZIO.logInfo(s"Irmin repository selected at ${cfg.url}")
       } yield client
     }
 

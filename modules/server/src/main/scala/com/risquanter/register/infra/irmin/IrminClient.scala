@@ -60,13 +60,13 @@ trait IrminClient:
   def mainBranch: IO[IrminError, Option[IrminBranch]]
 
   /**
-    * Check if the Irmin service is reachable.
+    * Startup readiness probe: succeeds iff the Irmin service is reachable and
+    * responding; fails with the underlying IrminError (carrying the real cause)
+    * otherwise.
     *
-    * Useful for health checks.
-    *
-    * @return true if service responds, false otherwise
+    * @see ADR-031 — startup dependency readiness gate
     */
-  def healthCheck: IO[IrminError, Boolean]
+  def healthCheck: IO[IrminError, Unit]
 
   /**
     * List immediate child paths under the given prefix.
@@ -94,7 +94,7 @@ object IrminClient:
   def mainBranch: ZIO[IrminClient, IrminError, Option[IrminBranch]] =
     ZIO.serviceWithZIO[IrminClient](_.mainBranch)
 
-  def healthCheck: ZIO[IrminClient, IrminError, Boolean] =
+  def healthCheck: ZIO[IrminClient, IrminError, Unit] =
     ZIO.serviceWithZIO[IrminClient](_.healthCheck)
 
   def list(prefix: IrminPath): ZIO[IrminClient, IrminError, List[IrminPath]] =

@@ -39,9 +39,10 @@ services:
     # serve + memory datastore: full token enforcement (required for T-S6 invalid-token test).
     # --grpc-preshared-key matches SpiceDbCompose.TestToken; any request with a different
     # bearer token gets HTTP 401 → AuthServiceUnavailable in the Scala adapter.
+    # No TLS flags: SpiceDB serves plaintext gRPC/HTTP when no cert paths are given
+    # (the old --grpc-no-tls flag was removed upstream; unknown flags crash the container).
     command: >
       serve
-      --grpc-no-tls
       --http-enabled
       --http-addr 0.0.0.0:8080
       --datastore-engine=memory
@@ -50,8 +51,9 @@ services:
     ports:
       - "8080"    # dynamic host port — Docker assigns a free port per instance
     healthcheck:
-      # grpc_health_probe is bundled in the authzed/spicedb image at /grpc_health_probe
-      test: ["CMD", "/grpc_health_probe", "-addr=localhost:50051"]
+      # grpc_health_probe is bundled in the authzed/spicedb image on PATH (the image is
+      # distroless: no shell, and the binary is not at /grpc_health_probe in current tags)
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
       interval: 5s
       timeout: 5s
       retries: 12

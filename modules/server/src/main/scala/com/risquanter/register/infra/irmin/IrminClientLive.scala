@@ -87,10 +87,10 @@ final class IrminClientLive private (
                   )
     yield branch
 
-  override def healthCheck: IO[IrminError, Boolean] =
-    executeQuery[BranchesResponse](IrminQueries.listBranches)
-      .as(true)
-      .catchAll(_ => ZIO.succeed(false))
+  override def healthCheck: IO[IrminError, Unit] =
+    // Typed error carries the real cause (connection refused, HTTP status, parse
+    // failure) through the readiness gate's retries to the final failure (ADR-031).
+    executeQuery[BranchesResponse](IrminQueries.listBranches).unit
 
   override def list(prefix: IrminPath): IO[IrminError, List[IrminPath]] =
     for

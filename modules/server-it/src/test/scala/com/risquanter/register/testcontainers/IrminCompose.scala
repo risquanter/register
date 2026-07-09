@@ -1,6 +1,7 @@
 package com.risquanter.register.testcontainers
 
 import java.io.File
+import java.time.Duration
 import java.util.UUID
 import scala.sys.process.*
 
@@ -27,7 +28,9 @@ object IrminCompose:
     layer >>> ZLayer.fromZIO(
       ZIO.serviceWithZIO[Resource] { res =>
         ZIO.fromEither(Url.fromString(res.irminUrl).left.map(errs => new RuntimeException(errs.map(_.message).mkString("; "))))
-          .map(url => IrminConfig(url = url))
+          // Short budget: the container was started by this harness moments ago, so a
+          // broken irmin should fail the suite fast, not after the 45s production default.
+          .map(url => IrminConfig(url = url, healthCheckBudget = Duration.ofSeconds(10)))
       }
     )
 

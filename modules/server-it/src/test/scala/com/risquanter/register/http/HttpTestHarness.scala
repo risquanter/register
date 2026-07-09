@@ -15,6 +15,7 @@ import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.support.TestSafeUrls
+import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeServiceLive, SimulationSemaphore}
@@ -180,20 +181,23 @@ object HttpTestHarness:
       RiskTreeRepositoryIrmin.layer
     )
 
+  // Same startup readiness gate as Application (ADR-031) — no duplicated retry
+  // logic. Runs on the live clock: the harness executes under zio-test, where
+  // the default TestClock would never advance the gate's backoff sleeps.
   private val irminHealthCheck: ZLayer[IrminClient & IrminConfig, Throwable, IrminClient] =
     ZLayer.fromZIO {
       for
         cfg    <- ZIO.service[IrminConfig]
         client <- ZIO.service[IrminClient]
-        retry   = Schedule.recurs(math.max(0, cfg.healthCheckRetries))
-           _ <- client.healthCheck
-             .flatMap(ok => if ok then ZIO.unit else ZIO.fail(new RuntimeException("Irmin health check returned false")))
-             .mapError(err => new RuntimeException(s"Irmin health check failed: $err"))
-             .retry(retry)
-             .timeoutFail(new RuntimeException(s"Irmin health check timed out after ${cfg.healthCheckTimeout.toMillis} ms"))(cfg.healthCheckTimeout)
-                 .provideSomeLayer[IrminClient & IrminConfig](ZLayer.succeed(Clock.ClockLive))
-             .tapError(e => ZIO.logError(s"Irmin health check failed: ${e.getMessage}"))
-             .tap(_ => ZIO.logInfo(s"Irmin repository selected at ${cfg.url}"))
+        _      <- ZIO.withClock(Clock.ClockLive) {
+                    StartupReadiness.awaitReady(
+                      name           = s"irmin (${cfg.url})",
+                      probe          = client.healthCheck,
+                      attemptTimeout = cfg.healthCheckAttemptTimeout,
+                      budget         = cfg.healthCheckBudget
+                    )
+                  }
+        _      <- ZIO.logInfo(s"Irmin repository selected at ${cfg.url}")
       yield client
     }
 

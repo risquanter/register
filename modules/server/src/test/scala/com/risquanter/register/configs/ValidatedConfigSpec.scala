@@ -47,24 +47,53 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
         ZIO.config(telemetryConfig).exit.map(exit => assert(exit)(fails(anything)))
       }
     },
-    test("loads IrminConfig with BranchRef main") {
+    test("loads IrminConfig with BranchRef main and duration bounds") {
       withConfig(
         "register.irmin.url" -> "http://localhost:9080",
         "register.irmin.branch" -> "main",
-        "register.irmin.timeoutSeconds" -> "30",
-        "register.irmin.healthCheckTimeoutMillis" -> "5000",
-        "register.irmin.healthCheckRetries" -> "0"
+        "register.irmin.timeout" -> "30s",
+        "register.irmin.healthCheckAttemptTimeout" -> "5s",
+        "register.irmin.healthCheckBudget" -> "45s"
       ) {
-        ZIO.config(irminConfig).map(config => assertTrue(config.branch == BranchRef.Main))
+        ZIO.config(irminConfig).map(config =>
+          assertTrue(
+            config.branch == BranchRef.Main,
+            config.timeout == java.time.Duration.ofSeconds(30),
+            config.healthCheckAttemptTimeout == java.time.Duration.ofSeconds(5),
+            config.healthCheckBudget == java.time.Duration.ofSeconds(45)
+          )
+        )
       }
     },
     test("rejects invalid Irmin branch") {
       withConfig(
         "register.irmin.url" -> "http://localhost:9080",
         "register.irmin.branch" -> "feature/x",
-        "register.irmin.timeoutSeconds" -> "30",
-        "register.irmin.healthCheckTimeoutMillis" -> "5000",
-        "register.irmin.healthCheckRetries" -> "0"
+        "register.irmin.timeout" -> "30s",
+        "register.irmin.healthCheckAttemptTimeout" -> "5s",
+        "register.irmin.healthCheckBudget" -> "45s"
+      ) {
+        ZIO.config(irminConfig).exit.map(exit => assert(exit)(fails(anything)))
+      }
+    },
+    test("rejects non-positive Irmin readiness budget (ADR-031)") {
+      withConfig(
+        "register.irmin.url" -> "http://localhost:9080",
+        "register.irmin.branch" -> "main",
+        "register.irmin.timeout" -> "30s",
+        "register.irmin.healthCheckAttemptTimeout" -> "5s",
+        "register.irmin.healthCheckBudget" -> "0s"
+      ) {
+        ZIO.config(irminConfig).exit.map(exit => assert(exit)(fails(anything)))
+      }
+    },
+    test("rejects negative Irmin timeout") {
+      withConfig(
+        "register.irmin.url" -> "http://localhost:9080",
+        "register.irmin.branch" -> "main",
+        "register.irmin.timeout" -> "-5s",
+        "register.irmin.healthCheckAttemptTimeout" -> "5s",
+        "register.irmin.healthCheckBudget" -> "45s"
       ) {
         ZIO.config(irminConfig).exit.map(exit => assert(exit)(fails(anything)))
       }
