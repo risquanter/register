@@ -1,7 +1,7 @@
 # Authorization Implementation Plan — Security Hardening & Type Corrections
 
 **Date:** 2026-07-01
-**Status:** Approved — ready for implementation
+**Status:** Complete — all register app items implemented (2026-07-09); Phase K infra and BATS tests remain in register-infra
 **Companion document:** [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md) — strategic design, wave structure, route matrix
 **Testing plan:** [AUTH-TESTING-PLAN.md](./AUTH-TESTING-PLAN.md) — BATS end-to-end tests (infra) + Scala `server-it` test cases cross-reference
 **Applies to:** All waves in AUTHORIZATION-PLAN.md Task L2.6
@@ -16,7 +16,7 @@ not duplicate the strategic content; read AUTHORIZATION-PLAN.md first.
 
 | Item | Wave | Layer | Description |
 |------|------|-------|-------------|
-| ADR-024 clarification | Pre-Wave | Docs | Document resource lifecycle writes vs policy administration |
+| ADR-024 clarification | Pre-Wave ✅ | Docs | Document resource lifecycle writes vs policy administration — §7 added to ADR-024 |
 | `AuthMode` sealed enum | Wave 0 ✅ | Scala config | **Already implemented** — `AuthConfig.scala` has sealed `enum AuthMode` with fail-fast `DeriveConfig` (verified 2026-07-01) |
 | `WorkspaceId` + `asResource` | Pre-Wave ✅ | Scala type | **Already exists** — `case class WorkspaceId` in `OpaqueTypes.scala`, `WorkspaceRecord.id: WorkspaceId`, both `asResource` extensions in `AuthorizationService.scala` (verified 2026-07-01) |
 | `UserId` sum type | Wave 0 ✅| Scala type | `Anonymous \| Authenticated` — prevents sentinel reaching SpiceDB |
@@ -24,7 +24,7 @@ not duplicate the strategic content; read AUTHORIZATION-PLAN.md first.
 | `BootstrapProvisioner` trait | Wave 0 ✅| Scala type | Separate resource lifecycle writes from `AuthorizationService` |
 | `Checked[P]` proof token (strong form) | Wave 1 ✅ | Scala type | `check()` returns proof; protected operations require it via `using`. **Implemented 2026-07-04 — see implementation note below.** |
 | `BootstrapProvisioner.bootstrapToken()` / `systemMaintenanceToken()` | Wave 0D amendment ✅ | Scala type | Lifecycle proof tokens added alongside `recordOwnership()` — required for `Checked[P]` to work at bootstrap and reaper call sites. `bootstrapToken()` produces `Checked[Bootstrap.type]`; `systemMaintenanceToken()` produces `Checked[SystemMaintenance.type]`. |
-| `BootstrapProvisioner.recordOwnership()` | Wave 6 | Scala impl | Replaces `authz.seed()` — correct naming and service boundary |
+| `BootstrapProvisioner.recordOwnership()` | Wave 6 ✅ | Scala impl | Implemented in `BootstrapProvisionerSpiceDB`; wired into `bootstrapWorkspace` handler (2026-07-09) |
 | SpiceDB service account scope | Wave 6 | Ops | Narrow write permission to `owner_user`/`owner_team` on `workspace` only |
 | Header spoofing smoke test | Phase K.5 | K8s CI | Mandatory exit criterion verifying waypoint strips external headers |
 | Full reconcile drift detection | Phase K.6 | K8s CI | Provisioning job compares both directions, not only write errors |

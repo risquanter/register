@@ -22,26 +22,31 @@
 
 ---
 
-### Startup Irmin health check should retry, not fail-fast
+### Startup Irmin health check should retry, not fail-fast ✅
 
-**Status**: Open — filed from register-infra (2026-07-08).
+**Status**: Complete — bounded, fail-closed readiness gate implemented (2026-07-09).
 
-**Problem**: `Application.irminHealthCheck` (`Application.scala:42`) fails the whole
-startup with `Irmin health check returned false` and the process self-terminates →
-Kubernetes `CrashLoopBackOff`. On the k8s bootstrap this fires whenever register
-starts before its network path to irmin is ready — i.e. before the mesh
-(Istio ambient) NetworkPolicy/HBONE rules for `register → irmin:8080` have been
-applied by ArgoCD. It self-heals on the next restart once the policies land, but the
-crash-loop is noisy and delays every fresh cluster bring-up.
+**Problem**: `Application.irminHealthCheck` failed the whole startup on the first
+`false` health check and the process self-terminated → Kubernetes `CrashLoopBackOff`.
+On the k8s bootstrap this fired whenever register started before its network path to
+irmin was ready — i.e. before the mesh (Istio ambient) NetworkPolicy/HBONE rules for
+`register → irmin:8080` had been applied by ArgoCD.
 
-**Ask**: make the startup irmin check **resilient to a transient/not-yet-ready
-dependency** — a bounded retry-with-backoff (e.g. ~30–60s total) before giving up,
-rather than failing on the first `false`. This is the app-side fix the infra team
-chose over an infra workaround (an initContainer wait-for-irmin); tracked in
-register-infra `TODO.md` (Phase 3, "register↔irmin startup-ordering resilience").
+**Resolution**: New `StartupReadiness.awaitReady` gate — jittered exponential backoff
+capped at 5s, bounded by a total elapsed-time budget (`IrminConfig.healthCheckBudget`,
+default 45s), fail-closed after the budget. `IrminClient.healthCheck` now returns a
+typed error (not `Boolean`), so the final failure carries the real cause instead of a
+generic "returned false". Governed by new
+[ADR-031](docs/dev/ADR-031-startup-readiness-vs-request-path-resilience.md), which
+draws the boundary between this (app-owned startup lifecycle gating) and request-path
+resilience (mesh-owned, ADR-012 §4). Verified: bounded fail-closed exit when irmin is
+absent for the whole budget, and clean recovery (server boots) when irmin becomes
+reachable mid-window.
 
-**Related**: `modules/server/.../Application.scala` (`irminHealthCheck`, ~L42), the
-irmin repository/health client it calls.
+**Related**: `modules/server/.../infra/StartupReadiness.scala`,
+`modules/server/.../Application.scala` (`irminHealthCheck`),
+`modules/server/.../configs/IrminConfig.scala`,
+`docs/dev/ADR-031-startup-readiness-vs-request-path-resilience.md`.
 
 ---
 

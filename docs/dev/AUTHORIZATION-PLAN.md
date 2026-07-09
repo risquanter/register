@@ -1,7 +1,7 @@
 # Authorization Plan — Layers 1 & 2
 
 **Date:** February 19, 2026
-**Status:** In progress (Phase K preparation + Layer 1 Wave 1 plumbing landed; infra rollout pending)
+**Status:** Register app implementation complete through Wave 6 (2026-07-09). Phase K infra (k3s, Keycloak, Istio) and BATS smoke tests remain in register-infra. Open app-side gap: `evictExpired` missing `AdminSystem` check (Wave 5 partial). L1.3/L1.4 frontend login flow blocked on Keycloak infra.
 **Related:** [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) (Tier 1.5 = Layer 0)
 **Implementation amendments:** [AUTHORIZATION-IMPLEMENTATION-PLAN.md](./AUTHORIZATION-IMPLEMENTATION-PLAN.md) — type corrections, `Checked[P]` proof token, `BootstrapProvisioner`, K8s CI hardening
 **ADR References:** [ADR-012](./ADR-012.md) (Service Mesh), [ADR-021](./ADR-021-capability-urls.md) (Capability URLs), [ADR-023](./ADR-023-local-dev-tls-and-trust-material-policy.md) (Local Dev TLS & Trust Policy), [ADR-024](./ADR-024-externalized-authorization-pep-pattern.md) (Externalized Authorization / PEP Pattern)
@@ -1181,7 +1181,7 @@ Each wave is a single PR. The PR passes all existing tests before merge. No wave
 
 ---
 
-**Wave 0 — Infrastructure (no user-visible change)**
+**Wave 0 — Infrastructure (no user-visible change) ✅**
 
 _Deliverables:_
 - `WorkspaceId` added to domain model (prerequisite — see above)
@@ -1202,7 +1202,7 @@ _Regression gate:_ All existing `RouteSecurityRegressionSpec` and unit tests pas
 
 ---
 
-**Wave 1 — Auth header declared on workspace-scoped endpoints**
+**Wave 1 — Auth header declared on workspace-scoped endpoints ✅**
 
 _Deliverables:_
 - `authedBaseEndpoint` added to `BaseEndpoint` (or new `AuthedEndpoint` mixin)
@@ -1222,7 +1222,7 @@ _Diff scope:_ `WorkspaceEndpoints.scala`, `SSEEndpoints.scala`, `WorkspaceContro
 
 ---
 
-**Wave 2 — Identity mode: claim header required**
+**Wave 2 — Identity mode: claim header required ✅**
 
 _Deliverables:_
 - `UserContextExtractor.requirePresent` implemented (header presence check — no JWT parsing)
@@ -1246,7 +1246,7 @@ _New tests:_
 
 ---
 
-**Wave 3 — Fine-grained mode: read route protection**
+**Wave 3 — Fine-grained mode: read route protection ✅**
 
 _Deliverables:_
 - `AuthorizationServiceSpiceDB` implemented (see Task L2.2)
@@ -1265,7 +1265,7 @@ _New tests (using `AuthorizationServiceStub`):_
 
 ---
 
-**Wave 4 — Fine-grained mode: write route protection**
+**Wave 4 — Fine-grained mode: write route protection ✅**
 
 _Deliverables:_
 - `check()` calls added to write routes:
@@ -1282,7 +1282,7 @@ _New tests:_
 
 ---
 
-**Wave 5 — Fine-grained mode: admin route protection**
+**Wave 5 — Fine-grained mode: admin route protection ⚠️ (partial — rotate/delete ✅; evictExpired missing AdminSystem check)**
 
 _Deliverables:_
 - `check()` calls added to admin routes:
@@ -1303,7 +1303,7 @@ _New tests:_
 
 ---
 
-**Wave 6 — Bootstrap ownership registration: resource lifecycle write (fine-grained mode)**
+**Wave 6 — Bootstrap ownership registration: resource lifecycle write (fine-grained mode) ✅**
 
 `POST /workspaces/bootstrap` creates a new workspace — no prior resource exists to check permissions against.
 After creation, the creator's ownership is recorded in SpiceDB as a resource lifecycle write (not a PAP action

@@ -31,9 +31,11 @@ enum GlobalError:
 
   /** Network-level failure (connection refused, DNS, timeout) or
     * unclassified non-HTTP error.
-    * `retryable` indicates whether a retry is meaningful.
+    *
+    * Request-path retries are owned by Istio (ADR-012 §4 + ADR-031).
+    * The SPA fails fast; the mesh retries server→dependency traffic.
     */
-  case NetworkError(message: String, retryable: Boolean)
+  case NetworkError(message: String)
 
   /** Data or version conflict (HTTP 409).
     * The banner rendering site decides which refresh action to offer
@@ -45,7 +47,9 @@ enum GlobalError:
   case ServerError(message: String)
 
   /** Infrastructure dependency failure (Irmin unavailable, GraphQL error, timeout).
-    * Transient — retry may succeed.
+    * Transient at the infrastructure level — the mesh (ADR-012 §4 + ADR-031)
+    * has already exhausted its retries on the register→Irmin path before
+    * this variant reaches the browser.
     */
   case DependencyError(message: String)
 
@@ -69,14 +73,6 @@ object GlobalError:
     * falls through to JVM exception type matching.
     */
   def fromThrowable(e: Throwable): GlobalError = e match
-    // ── Transport layer errors — check FIRST, before domain types ──
-    // Fetch API failures must be caught before domain pattern-matching
-    // because sttp passes raw JS exceptions through (not SttpClientException).
-    case _ if isFetchNetworkError(e) =>
-      NetworkError(msg(e), retryable = true)
-
-    case _: java.io.IOException => NetworkError(msg(e), retryable = true)
-
     // ── Shared domain errors (reconstructed by ErrorResponse.decode) ──
     case vf: com.risquanter.register.domain.errors.ValidationFailed =>
       ValidationFailed(vf.errors)
@@ -98,25 +94,9 @@ object GlobalError:
 
     case _: FolQueryFailure => ServerError(msg(e))
 
-    // ── Catch-all ──
-    case _ => NetworkError(msg(e), retryable = false)
-
-  /** Detect browser Fetch API network failures.
-    *
-    * The Fetch API signals connection-refused / DNS / timeout as a
-    * `TypeError` with varying messages across browsers:
-    *   - Firefox: "NetworkError when attempting to fetch resource."
-    *   - Chrome:  "Failed to fetch"
-    *   - Safari:  "Load failed"
-    *
-    * sttp's FetchZioBackend does NOT wrap these in `SttpClientException`
-    * on Scala.js — the raw `JavaScriptException` passes through unchanged.
-    */
-  private def isFetchNetworkError(e: Throwable): Boolean =
-    val message = Option(e.getMessage).getOrElse("")
-    message.contains("NetworkError when attempting to fetch") ||
-    message.contains("Failed to fetch") ||
-    message.contains("Load failed")
+    // ── Catch-all: browser Fetch failures (TypeError), IOExceptions, and anything else ──
+    // Request-path retries are owned by Istio (ADR-012 §4 + ADR-031); the SPA fails fast.
+    case _ => NetworkError(msg(e))
 
   /** Extract a user-friendly message from a Throwable.
     *

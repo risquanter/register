@@ -34,7 +34,7 @@ object ErrorBanner:
       case GlobalError.ValidationFailed(errors) =>
         ("⚠", errors.map(_.message).mkString("; "))
 
-      case GlobalError.NetworkError(msg, _) =>
+      case GlobalError.NetworkError(msg) =>
         ("⚡", safe(msg))
 
       case GlobalError.Conflict(msg) =>

@@ -6,23 +6,19 @@ not prescribed solutions.
 
 ---
 
-## 1. "Will retry" banner text has no backing implementation
+## ✅ 1. "Will retry" banner text has no backing implementation — RESOLVED 2026-07-09
 
-**Observed:** When a network error occurs (e.g. `TypeError: NetworkError when
+**Resolution:** `retryable: Boolean` removed from `GlobalError.NetworkError`
+(ADR-012 §4 + ADR-031 — request-path retries are owned by Istio, not the SPA).
+`ErrorBanner` pattern updated. Dead `isFetchNetworkError` guard, `IOException`
+arm, and private method removed — without `retryable` they were functionally
+identical to the catch-all. `DependencyError` doc updated to name the mesh as
+the retry owner. Catch-all comment names browser Fetch errors as the primary
+non-domain case.
+
+~~**Observed:** When a network error occurs (e.g. `TypeError: NetworkError when
 attempting to fetch resource.`), the global error banner appends " — will retry"
-to the message. No retry ever happens — the message is misleading.
-
-**Current understanding:** `GlobalError.NetworkError` carries a `retryable: Boolean`
-field. `GlobalError.fromThrowable` classifies Fetch API failures and
-`java.io.IOException` as `retryable = true`. `ErrorBanner` renders the
-" — will retry" hint when that flag is true. However, no code in `modules/app/`
-acts on the flag — there is no `Schedule`, no exponential backoff, no automatic
-re-dispatch. A search of the entire app source tree for `retry`, `Schedule.recurs`,
-`Schedule.exponential`, and `retryN` found nothing relevant. The `TreeListView`
-has a manual "Retry" button for its own `LoadState.Failed`, but that is a
-separate, unrelated mechanism.
-
-The `retryable` flag is currently a classification-only hint with no consumer.
+to the message. No retry ever happens — the message is misleading.~~
 
 ---
 
