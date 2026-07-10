@@ -3,18 +3,18 @@ package com.risquanter.register.simulation
 import com.risquanter.hdr.HDR
 
 /**
- * Thin Scala wrapper around simulation-util's HDR (Hash-Derived Random) PRNG.
- * 
+ * Thin Scala wrapper around the hdr-rng library's HDR (Hash-Derived Random) PRNG.
+ *
  * HDR provides a counter-based deterministic pseudo-random number generator
  * using the Splitmix64 algorithm. The same inputs always produce the same outputs,
  * enabling reproducible Monte Carlo simulations.
- * 
+ *
  * Key properties:
  * - Deterministic: generate(trial, entityId, varId, seed3, seed4) always returns same value
  * - Uniform: outputs are uniformly distributed in [0, 1)
  * - Independent: different seeds/varIds produce independent streams
- * 
- * @see com.risquanter.simulation.util.rng.HDR Java implementation in simulation-util
+ *
+ * @see com.risquanter.hdr.HDR pure Scala implementation in the hdr-rng library
  */
 object HDRWrapper {
   
@@ -50,7 +50,7 @@ object HDRWrapper {
   /**
    * Direct access to HDR generation for backward compatibility.
    * 
-   * Delegates to simulation-util's HDR.generate without currying.
+   * Delegates to hdr-rng's HDR.generate without currying.
    * Use createGenerator for more ergonomic repeated sampling.
    * 
    * @param counter Trial or iteration counter
