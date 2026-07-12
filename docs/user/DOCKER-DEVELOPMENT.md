@@ -106,17 +106,18 @@ Access: **http://localhost:18080**
 docker compose --profile frontend down
 ```
 
-### Use case C: Full stack — register + Irmin persistence + nginx frontend
+### Use case C: Full stack — register + Irmin + Postgres persistence + nginx frontend
 
-Register-server defaults to in-memory storage. The `REGISTER_REPOSITORY_TYPE` and
-`IRMIN_URL` overrides are required to use Irmin.
+Register-server defaults to in-memory storage for both risk trees and workspace
+metadata. The `.env.irmin` overrides switch it onto the persistent backends.
+A Compose profile only decides which containers start — it cannot change the
+server's environment — so `--profile persistence` alone leaves the server on its
+in-memory defaults; the `--env-file` is what actually enables persistence.
 
 ```bash
-# Create once:
-cat > .env.irmin <<'EOF'
-REGISTER_REPOSITORY_TYPE=irmin
-IRMIN_URL=http://irmin:8080
-EOF
+# Create once from the tracked template (Irmin trees + Postgres workspaces +
+# extended workspace expiry):
+cp .env.irmin.example .env.irmin
 
 docker compose \
   --profile persistence \

@@ -401,48 +401,60 @@ capability intact.
 
 ---
 
-## 10. `--profile persistence` is a no-op for the server — fix via compose override file
+## 10. ✅ `--profile persistence` was a no-op for the server — RESOLVED 2026-07-12 (env-file)
 
-**Observed:** Running `docker compose --profile persistence --profile frontend up -d`
-starts the postgres and irmin containers but the `register-server` service connects
-to neither — both `REGISTER_REPOSITORY_TYPE` and `REGISTER_WORKSPACE_STORE_BACKEND`
-default to `in-memory` in the base compose file, and `REGISTER_WORKSPACE_TTL` /
-`REGISTER_WORKSPACE_IDLE_TIMEOUT` are absent from the compose env block entirely.
-Workspaces disappear after ~1 h (the in-code `idleTimeout` default) regardless of
-whether persistence containers are running.
+**Was:** `docker compose --profile persistence --profile frontend up -d` started
+the postgres and irmin containers but `register-server` connected to neither —
+`REGISTER_REPOSITORY_TYPE` and `REGISTER_WORKSPACE_STORE_BACKEND` defaulted to
+`in-memory`, and `REGISTER_WORKSPACE_TTL` / `REGISTER_WORKSPACE_IDLE_TIMEOUT`
+were absent from the compose env block. A Compose profile only decides which
+containers *start* — it cannot change another service's environment — so the
+profile flag could never switch the server's backends.
 
-**Decision:** Option A — companion override file (`docker-compose.persistence.yml`).
-The base `docker-compose.yml` stays in-memory/safe for plain `docker compose up`
-(dev/CI use). A separate override file resets the four env vars to their
-persistence-backend values and wires the TTL overrides, so that:
+**Resolution:** completed the existing `--env-file .env.irmin` mechanism rather
+than adding a second one. An earlier note proposed a `docker-compose.persistence.yml`
+override file; that was dropped because `.env.irmin` (already documented in
+`PERSISTENT-SETUP.md`) achieves the same result with no new invocation pattern,
+and the override file's only unique capability — compose-level `depends_on`
+ordering — is already covered by the app's Irmin readiness gate (ADR-031) and,
+for Postgres, by Flyway retrying at boot.
+
+Changes made:
+- `docker-compose.yml` — added `REGISTER_WORKSPACE_TTL` and
+  `REGISTER_WORKSPACE_IDLE_TIMEOUT` to the `register-server` `environment:` block
+  with `${VAR:-72h}` / `${VAR:-1h}` defaults (matching `application.conf`, so the
+  base in-memory stack is unchanged). Without this an `--env-file` cannot reach
+  them: `--env-file` only feeds `${VAR}` interpolation, which requires the var to
+  appear in the `environment:` block. `REGISTER_REPOSITORY_TYPE`,
+  `REGISTER_WORKSPACE_STORE_BACKEND` and `REGISTER_DB_*` were already plumbed.
+- `.env.irmin.example` — extended from 2 vars to the full persistent tier:
+  `REGISTER_REPOSITORY_TYPE=irmin` + `IRMIN_URL`,
+  `REGISTER_WORKSPACE_STORE_BACKEND=postgres`, and `REGISTER_WORKSPACE_TTL` /
+  `REGISTER_WORKSPACE_IDLE_TIMEOUT=120h`. Postgres credentials/Flyway use the
+  `REGISTER_DB_*` compose defaults, which already point at the `postgres` service.
+- Docs reconciled: `PERSISTENT-SETUP.md`, `DOCKER-DEVELOPMENT.md` (use case C),
+  `DEVELOPMENT-SETUP.md` — all now use `cp .env.irmin.example .env.irmin` +
+  `--env-file .env.irmin --profile persistence`, and explain why the profile
+  alone is insufficient. Removed the stale manual `export
+  REGISTER_WORKSPACE_STORE_BACKEND=postgres` step.
+
+One-stop command for a fully persistent stack:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.persistence.yml \
-  --profile persistence --profile frontend up -d
+docker compose --profile persistence --profile frontend --env-file .env.irmin up -d
 ```
 
-is the single one-stop command for a fully persistent stack. The postgres and
-irmin `profiles: [persistence]` stay on those services so they are not started
-without the flag.
+**Verified:** `docker compose --env-file .env.irmin.example config` resolves all
+four vars into the container (`irmin` / `postgres` / `120h` / `120h`); the base
+`docker compose config` still resolves `in-memory` / `in-memory` / `72h` / `1h`.
+Not run: a live restart-persistence smoke test (would require bringing the
+running stack down); the app-side `WorkspaceStorePostgres` is separately covered
+by its own tests.
 
-**Env vars that need setting in the override file:**
-
-| Var | Value |
-|---|---|
-| `REGISTER_REPOSITORY_TYPE` | `irmin` |
-| `REGISTER_WORKSPACE_STORE_BACKEND` | `postgres` |
-| `REGISTER_WORKSPACE_TTL` | `120h` (5-day) |
-| `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `120h` (5-day) |
-
-**Outcome wanted:**
-1. `docker-compose.persistence.yml` created with the above overrides.
-2. `docs/DOCKER-DEVELOPMENT.md` updated to document the two-file invocation,
-   explain the base vs. override split, and call out that `--profile persistence`
-   alone is not sufficient without the override file.
-3. `README.md` quick-start section reviewed and updated so that any persistence
-   instructions reflect the corrected invocation.
-4. A brief pass over any other docs that reference `docker compose … up` to
-   confirm no stale single-file examples remain.
+**Note (Kubernetes):** this fix is docker-compose only. The K3D/ArgoCD deployment
+has the same workspace-store gap — the Helm chart wires Irmin but leaves the
+workspace store in-memory. Tracked in `register-infra/docs/TODO.md` ("Deferred —
+Blocked on App-Side Changes" → register-db / workspace-store-postgres wiring).
 
 ## 11. `WorkspaceReaperSpec` — cascade-deletion across multiple expired workspaces flakes under `TestClock`
 
@@ -783,3 +795,154 @@ makes this full-reconcile pattern feasible at reasonable cost.
 investigation; none are committed work. Items 16a–16e concern the Scala implementation
 and should be revisited at or before Wave 0. Items 16g–16h concern the K3s rollout
 and should be reviewed at Phase K.5 / K.6 planning.
+
+---
+
+## 17. Stale simulation served after tree update (PUT) without explicit invalidation
+
+**Observed (2026-07-11, `APP_VERSION` 0.3.0):** full docker-compose stack
+(`localhost:18080`, default in-memory repository). After
+`PUT /w/{key}/risk-trees/{treeId}` (full-replacement update reusing existing
+node ids) that changes a leaf's `probability` and `distributionShape`, an
+immediate `POST …/nodes/lec-multi` returns curves that do not reflect the
+update.
+
+**Evidence from the session:**
+- Baseline tree (4 leaves, Cyber Breach p=0.20, CI 500k–8M) vs "mitigated"
+  variant (Cyber Breach p=0.08, CI 300k–3M, all else identical): the
+  *mitigated* fetch returned p90 = 1 745 730 vs baseline p90 = 1 479 526
+  (mitigated strictly worse — impossible), and **byte-identical
+  p99 = 8 389 797.0 in both responses**, suggesting reuse of a previous
+  simulation.
+- In the same run, the first lec-multi after morphing a 1-leaf seed tree into
+  the 4-leaf baseline matched a hybrid state: the leaf's **new** distribution
+  shape but its **old** occurrence probability (root exceedance ≈ 0.37 ≈
+  1−(0.9·0.9·0.85·0.92), i.e. Cyber Breach still at the previous leaf's
+  p=0.10 instead of 0.20).
+
+**Workaround (confirmed):** `POST /w/{key}/risk-trees/{treeId}/invalidate/{rootId}`
+after the PUT — subsequent lec-multi results are correct (root exceedance
+0.4433 ≈ analytic 1−∏(1−pᵢ) = 0.437).
+
+**ROOT CAUSE (confirmed by live repro, 2026-07-12):**
+`InvalidationHandlerLive.computeAffectedNodes` handles "reparented" and
+"parameter-changed" as mutually exclusive branches (`if oldParent != newParent
+then … else if nodeData changed then Set(nid)`). A node that is **both
+reparented and content-changed in the same PUT** takes the reparent branch:
+its old and new parents' ancestor paths are invalidated, but the node's own
+cache entry is **not**. Because `RiskResultResolverLive.simulateNode` composes
+portfolio results from cached child entries (`cache.get(childId)`), the stale
+leaf result is folded into every "fresh" ancestor re-simulation — and **no
+amount of ancestor/root invalidation can fix it**; only invalidating the leaf
+itself flushes it.
+
+Live verification (fresh stack, in-memory repo, 4-leaf tree under root "Ops"):
+
+| Mutation via PUT | Root exceedance observed | Analytic | Verdict |
+|---|---|---|---|
+| leaf param change only (p 0.20→0.08, CI shrunk) | 0.3575 | 0.352 | correct — diff fired, log shows leaf in invalidation set |
+| leaf reparented under new portfolio **and** p 0.08→0.30, CI grown | 0.3575 (byte-identical quantiles to previous state) | 0.507 | **stale** — log shows only `[root]` + `[root → IT Systems]` invalidated, leaf absent |
+| … then explicit `invalidate/{rootId}` | 0.3575 | 0.507 | **still stale** (root recomposed from stale cached leaf) |
+| … then explicit `invalidate/{leafId}` | 0.5118 | 0.507 | correct |
+
+So the TODO's original title understates it: the documented root-invalidate
+workaround only *appeared* to work in the original session because subsequent
+non-reparenting PUTs re-triggered leaf invalidation. The reliable workaround
+is invalidating the **changed leaf**, not the root. Also verified NOT broken:
+structural equality on `RiskLeaf` (param-only changes are detected),
+`TreeIndex.ancestorPath` (includes the node itself, runs to the root,
+root-first order in logs).
+
+**Test gap:** `MutationInvalidationSpec` covers "parameter change" and "move
+node (reparent)" as separate suites but has no combined
+reparent-plus-param-change case — exactly the hole.
+
+**Fix candidates (decision needed):**
+1. Make the checks additive in `computeAffectedNodes`: compute reparent
+   contribution and content-change contribution independently and union them.
+   Note a reparented node's `parentId` is part of its node data, so checking
+   content-change first (or always) naturally includes the node itself;
+   invalidating a *purely* reparented leaf is semantically unnecessary (its
+   result doesn't depend on the parent) but harmless — decide whether to keep
+   that optimisation.
+2. Longer-term (milestone-2b Phase A, designed but unimplemented): move to the
+   content-addressed cache per `docs/scratch/milestone-2b-cache-and-decisions.md`,
+   which makes this whole bug class structurally impossible — see that doc's
+   Review Addendum (2026-07-12) for the audited status, a recommended
+   leaf-only-caching lean-down, and why it is the required substrate for
+   scenario branching. `ARCHITECTURE.md` correctly documents the current
+   NodeId keying; top-level claims of a "Merkle-tree cache" (CLAUDE.md/README)
+   describe the *planned* state.
+
+**Outcome wanted:** failing test in `MutationInvalidationSpec`
+(reparent + param change in one mutation → node itself must be invalidated),
+then the fix, then re-verify with the API repro above.
+
+---
+
+## 18. Update `examples/demo-*.sh` to the current bootstrap wire format
+
+**Observed (2026-07-11, `APP_VERSION` 0.3.0):** all four scripts
+(`demo-simple-curl.sh`, `demo-simple-httpie.sh`, `demo-enterprise-curl.sh`,
+`demo-enterprise-httpie.sh`) still send the old flat leaf format and fail with
+400 `missing at 'leaves[0].distributionShape'`.
+
+**Current format** (see `RiskTreeDefinitionRequest.scala`): leaf fields
+`distributionType`, `minLoss`, `maxLoss`, `percentiles`, `quantiles` moved
+into a nested `distributionShape` object (which also gained `terms`):
+
+```json
+{"name": "...", "parentName": "...", "probability": 0.2,
+ "distributionShape": {"distributionType": "lognormal",
+   "minLoss": 500000, "maxLoss": 8000000,
+   "percentiles": null, "quantiles": null, "terms": null}}
+```
+
+**Scope note:** also grep `tests/` (BATS) for the old flat payload shape
+before assuming only `examples/` is affected. Constraints relevant to the
+rewrite: node names allow only letters/digits/spaces/hyphens/slashes;
+`POST /workspaces` is rate-limited (`REGISTER_WORKSPACE_MAX_CREATES_PER_IP`,
+default 5/h, counted per attempt including 400s); beware item 17 if the
+scripts PUT then immediately fetch LECs.
+
+---
+
+## 19. Verify persistence end-to-end with a live restart test (follow-up to item 10)
+
+Item 10 (`--profile persistence` no-op) was fixed on 2026-07-12 by completing
+the `.env.irmin` env-file path. The fix was verified **statically only** —
+`docker compose --env-file .env.irmin.example config` resolves all four vars
+into the container (`irmin` / `postgres` / `120h` / `120h`) and the base
+config still resolves the in-memory defaults. A **live restart-persistence
+test was not run** (it would have required bringing the running dev stack
+down), and `WorkspaceStorePostgres` correctness is only covered by its own
+unit/integration tests, not by an end-to-end compose check.
+
+**What to verify (needs a disposable/fresh stack, not the working dev one):**
+
+1. Bring up the full persistent stack:
+   ```bash
+   cp .env.irmin.example .env.irmin
+   docker compose --profile persistence --profile frontend --env-file .env.irmin up -d
+   ```
+2. Confirm the server actually selected the persistent backends — check startup
+   logs for the Irmin repository + Postgres workspace store being wired and
+   Flyway running its migration (not the in-memory fallbacks).
+3. Create a workspace + a risk tree via the API (or the SPA at
+   `http://localhost:18080`); note the workspace key / capability URL.
+4. Restart **only the server**: `docker compose restart register-server`
+   (leave postgres + irmin running). Confirm the workspace and its tree still
+   resolve after restart — this is the exact failure item 10 was about
+   (in-memory workspace store loses everything on restart even when trees
+   persist to Irmin).
+5. Optionally also confirm risk-tree data survives a full
+   `docker compose --profile persistence --profile frontend down` (without
+   `-v`) followed by `up` — Irmin/Postgres volumes should retain state.
+6. Tear down with `down` (add `-v` only to discard the persistent volumes).
+
+**Consider promoting to a test:** if this passes, a BATS case under `tests/`
+that boots the persistent profile, restarts the server, and asserts workspace
+survival would guard against a regression in the compose wiring or the
+`WorkspaceStorePostgres` boot path. See also the K8s twin in
+`register-infra/docs/TODO.md` ("Deferred — Blocked on App-Side Changes"),
+which has an analogous pod-restart survival check as its step 5.

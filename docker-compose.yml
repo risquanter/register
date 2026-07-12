@@ -106,7 +106,13 @@ services:
       REGISTER_DB_USER: "${REGISTER_DB_USER:-register_app}"
       REGISTER_DB_PASSWORD: "${REGISTER_DB_PASSWORD:-dev-only-password}"
       REGISTER_FLYWAY_URL: "${REGISTER_FLYWAY_URL:-jdbc:postgresql://postgres:5432/register}"
-      
+
+      # Workspace expiry — defaults match application.conf (72h absolute / 1h idle).
+      # Plumbed here so an --env-file (e.g. .env.irmin) can extend them for a
+      # persistent stack; the reaper deletes expired workspaces on any backend.
+      REGISTER_WORKSPACE_TTL: "${REGISTER_WORKSPACE_TTL:-72h}"
+      REGISTER_WORKSPACE_IDLE_TIMEOUT: "${REGISTER_WORKSPACE_IDLE_TIMEOUT:-1h}"
+
       # Telemetry configuration
       # NOTE: TracingLive.console & MetricsLive.console are configured but produce
       # no visible output (likely log at DEBUG level filtered by default log config).

@@ -30,7 +30,7 @@ cp .env.irmin.example .env.irmin
 
 Template files:
 - `.env.inmemory.example` → sets `REGISTER_REPOSITORY_TYPE=in-memory`
-- `.env.irmin.example` → sets `REGISTER_REPOSITORY_TYPE=irmin` and `IRMIN_URL=http://irmin:8080`
+- `.env.irmin.example` → full persistence tier: `REGISTER_REPOSITORY_TYPE=irmin` + `IRMIN_URL` (risk trees), `REGISTER_WORKSPACE_STORE_BACKEND=postgres` (workspace metadata), and extended `REGISTER_WORKSPACE_TTL` / `REGISTER_WORKSPACE_IDLE_TIMEOUT`
 
 Run Compose with the selected env file:
 
@@ -73,17 +73,13 @@ REGISTER_CORS_ORIGINS=http://<your-machine>:5173 docker compose up -d register-s
 
 ## With Irmin persistence
 
-To use the persistent Irmin backend during development, first build the Irmin images (see [PERSISTENT-SETUP.md](PERSISTENT-SETUP.md)), then:
+To use the persistent backends during development, first build the Irmin images (see [PERSISTENT-SETUP.md](PERSISTENT-SETUP.md)), then start with the `.env.irmin` file — it enables both the Irmin risk-tree store and the PostgreSQL workspace store together:
 
 ```bash
-docker compose --profile persistence up -d register-server irmin postgres
+docker compose --env-file .env.irmin --profile persistence up -d register-server irmin postgres
 ```
 
-To enable the PostgreSQL-backed workspace store as well, export:
-
-```bash
-export REGISTER_WORKSPACE_STORE_BACKEND=postgres
-```
+`--profile persistence` alone starts the `irmin` and `postgres` containers but does **not** switch the server onto them (a profile cannot change another service's environment). The `--env-file` supplies the four overrides that do. To enable only the Irmin tree store without Postgres, remove `REGISTER_WORKSPACE_STORE_BACKEND=postgres` from your `.env.irmin`.
 
 ---
 

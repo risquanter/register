@@ -63,7 +63,7 @@ The storage layer is [Irmin](https://irmin.org/) — a Git-like content-addresse
 
 Risquanter is a source-only project — there are no published binary releases or pre-built container images. Everything is built locally from source. This will change after the first stable release, but for now the quickest way to get up and running is to follow the instructions below to build the container images yourself. The resulting stack is production-equivalent — the same application binary as would run in a cloud deployment, just with a different configuration and without the orchestration layer.
 
-Register runs in two modes: in-memory storage for quick local trials, and a persistent mode backed by Irmin. The instructions below cover in-memory; for Irmin persistence see [docs/user/PERSISTENT-SETUP.md](docs/user/PERSISTENT-SETUP.md).
+Register runs in two modes: in-memory storage for quick local trials, and a persistent mode backed by Irmin (risk trees) and PostgreSQL (workspace metadata). The instructions below cover in-memory; for persistence see [docs/user/PERSISTENT-SETUP.md](docs/user/PERSISTENT-SETUP.md).
 
 ### Prerequisites
 
@@ -256,7 +256,7 @@ chmod +x examples/*.sh
 |---|---|
 | [docs/user/API-TUTORIAL.md](docs/user/API-TUTORIAL.md) | Step-by-step HTTP API guide, leaf parameterisation reference, enterprise example |
 | [docs/user/VQL-QUERY-EXAMPLES.md](docs/user/VQL-QUERY-EXAMPLES.md) | Full VQL query reference with annotated PASS/FAIL examples |
-| [docs/user/PERSISTENT-SETUP.md](docs/user/PERSISTENT-SETUP.md) | Enabling Irmin-backed persistence |
+| [docs/user/PERSISTENT-SETUP.md](docs/user/PERSISTENT-SETUP.md) | Enabling Irmin + PostgreSQL persistence |
 | [docs/user/DEVELOPMENT-SETUP.md](docs/user/DEVELOPMENT-SETUP.md) | Local development workflow (Scala.js, Vite HMR, tests) |
 | [docs/user/DOCKER-DEVELOPMENT.md](docs/user/DOCKER-DEVELOPMENT.md) | Container configuration, observability stack, and Kubernetes deployment |
 | [docs/dev/AUTHORIZATION-PLAN.md](docs/dev/AUTHORIZATION-PLAN.md) | Layer 1 / Layer 2 authorisation infrastructure |

@@ -1,6 +1,24 @@
 # Milestone 2b: Cache & Branching Design
 
 > Empirical validation: `dev/test-irmin-hashes.sh` (9/9 tests passed).
+>
+> **Status (audited 2026-07-12): designed and validated, NOT implemented.**
+> None of the Phase A–E deliverables exist in code (`ContentHash`,
+> `ContentCache`, `ContentHashIndex`, `CacheScope`, eviction strategies,
+> branch-parameterized `IrminClient` operations, `Scenario*`/`History*`
+> services). `TreeCacheManager` is still the live NodeId-keyed cache. The
+> only Phase A item present is `BranchRef`, used solely as an Irmin config
+> value; `IrminQueries.getValueFromBranch` exists but has no caller.
+>
+> **This design is the required substrate for scenario branching.** The
+> Phase B–E features (scenarios, comparison, merge, time travel) cannot be
+> built on the current NodeId-keyed cache — see Problem Statement: branch
+> switching would silently return wrong results. See the
+> [Review Addendum (2026-07-12)](#review-addendum-2026-07-12) for audit
+> insights, a recommended Phase A lean-down, implementation aid, and launch
+> prerequisites. Related: `docs/dev/TODO.md` item 17 (the cache-staleness
+> bug class this design eliminates) and item 12 (seed derivation — coupled
+> to the hashed bytes, see addendum).
 
 ---
 
@@ -206,6 +224,15 @@ shows neither option has drift or wrong-result risk. The performance
 analysis shows no meaningful difference. The implementation analysis shows
 Option B requires less code, fewer new types, no new Irmin API surface, and
 is fully unit-testable without Irmin.
+
+**Decisive additional argument (2026-07-12 review):** the application also
+ships an in-memory repository backend (`RiskTreeRepositoryInMemory` — the
+default in `docker-compose.yml` and the backend most unit tests run
+against). Option A cannot produce leaf hashes there at all: there is no
+Irmin to ask. Option B works identically on both backends, so the
+content-addressed cache and its staleness guarantees cover the default
+dev/demo configuration too. This effectively closes DD-14 in favour of
+Option B.
 
 Migration from A to B (or B to A) is mechanical — replace one line in
 `ContentHashIndex.build`. The cache structure, pipeline, and worked examples
@@ -951,12 +978,12 @@ Phase A: Foundation
 
 Phase B: Scenario CRUD + Minimal UI
   - ScenarioService (create/list/delete/switch)           [Scala]
-  - BranchBar UI component                                [JS/Lit]
+  - BranchBar UI component                                [Scala.js/Laminar]
   - End-to-end: create scenario, switch, edit, switch back
 
 Phase C: Comparison
   - ScenarioDiff service (hash-based diff, UC5)           [Scala]
-  - Comparison view in Analyze section                     [JS/Lit]
+  - Comparison view in Analyze section                     [Scala.js/Laminar]
   - Cross-branch cache reuse (UC6, implicit)
 
 Phase D: Merge
@@ -966,7 +993,7 @@ Phase D: Merge
 
 Phase E: History / Time Travel
   - HistoryService (commit log, point-in-time, revert)    [Scala→Irmin]
-  - CommitHistoryPanel UI                                  [JS/Lit]
+  - CommitHistoryPanel UI                                  [Scala.js/Laminar]
 ```
 
 ### Follow-up improvements (post-launch)
@@ -1109,3 +1136,139 @@ Every entry is `RiskResult` with `type=Leaf`. The outcomes and provenances are
 correct. The `distributionType` field is misleading for portfolios but has no
 impact on cache correctness. If drill-down is added later, the resolver can
 switch to `RiskResultGroup` for portfolio nodes.
+
+---
+
+## Review Addendum (2026-07-12)
+
+Full audit of this design against the codebase, combined with the live
+root-cause investigation of the cache-staleness bug (`docs/dev/TODO.md`
+item 17). Records insights, corrections, a recommended lean-down, and what
+"scenario branching is live" actually requires.
+
+### A1. First principle — state it explicitly
+
+**The cache key must cover every input that determines the cached result.**
+Everything else in this design is a consequence. Current coverage:
+
+| Result input | Covered by the key? | Note |
+|---|---|---|
+| Leaf params (probability, distribution) | Yes — in the leaf JSON bytes | The point of the design |
+| Leaf `id` (ULID) | Yes — in the leaf JSON bytes | **Load-bearing**: `entitySeed` is derived from the ULID (`Simulator.createSamplerFromLeaf`, TODO item 12). Do NOT drop `id` from the hashed bytes while seeds derive from ULIDs. |
+| `SimulationConfig` (nTrials, seeds) | No | Tolerable **only** while the cache is in-memory (restart clears). If the cache is ever persisted or config becomes per-branch, extend the key (DD-9b). |
+| Portfolio's own content | No — key is `sha256(sort(childHashes))` | Safe only while confirmed assumption 4 holds. See trap A4. |
+
+### A2. Dedupe claim precision + coupling to TODO item 12
+
+"Content-identical nodes share one cache entry" is imprecise: the leaf JSON
+includes `id`, so two *different* leaves with identical parameters hash
+differently and never share. All seven UCs still work — every UC concerns
+the *same node* across branches/history, where ids match.
+
+This imprecision is currently **correct behavior**: with ULID-derived seeds,
+same-param/different-id leaves legitimately produce different Monte Carlo
+results, so they must not share an entry. If TODO item 12 moves seed
+derivation to content (name/param hash), `id` can be dropped from the hashed
+bytes and true cross-node dedupe becomes sound. **Decide items 12 and this
+design together** — changing one silently changes the correctness terms of
+the other.
+
+### A3. The strongest motivation, previously unstated: scenario comparability
+
+Copy-based scenarios ("scenario = clone of the tree") are structurally broken
+today: cloned nodes get new ULIDs → new seeds → different simulation results
+for identical parameters → the scenario-vs-main diff shows phantom
+differences the user did not cause. Branch-based scenarios keep node ids
+stable across branches → same seeds → **differences reflect only the user's
+edits**. This is the headline argument for Irmin branches over tree copies,
+and it holds independent of any caching benefit.
+
+### A4. Recommended Phase A lean-down: cache leaf results only
+
+Portfolio *result* caching is the least valuable, most trap-laden element:
+
+- Confirmed assumption 1 already says aggregation is cheap (sparse map
+  merge, no sampling); re-aggregating a 100-node tree costs milliseconds.
+- **Trap 1:** the portfolio key omits the portfolio's own content. If
+  portfolios ever gain aggregation-relevant attributes — mitigation
+  transforms (`RiskTransform`, `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md`)
+  are heading exactly there — a stale-by-construction key reintroduces the
+  silent wrong-result class this design exists to eliminate. The key would
+  need to become `sha256(portfolioOwnContent | sort(childHashes))`.
+- **Trap 2:** `sorted` child hashes hard-code commutative aggregation.
+  Any future weighted/ordered combination breaks the key silently.
+
+**Lean variant:** `ContentCache` stores **leaf** results only; portfolios
+always re-aggregate on read. `ContentHashIndex` stays exactly as designed —
+it is a pure function computed per request and still serves the UC5 diff
+(which needs the hash index, not the result cache). Effect on the worked
+examples: Step 5 (time travel) changes from "0 sims, 0 aggs" to "0 sims,
+2 aggs" — same user-visible latency class. Portfolio caching can be added
+later behind `CacheScope` if profiling ever demands it. Bonus: only genuine
+leaves get cached, which dissolves the "always Leaf" `distributionType`
+mismatch for cache entries (see previous section).
+
+### A5. Scope honesty on UC4/UC6
+
+The cache is an in-memory `Ref`. "Time travel: 0 simulations" and free
+branch-switch warming hold **within one server session**; a restart clears
+everything, and multiple replicas would each hold cold private caches.
+These are UX-latency features, not capacity features. (This is also what
+makes excluding `SimulationConfig` from the key tolerable — A1.)
+
+### A6. Relationship to the invalidation bug (TODO item 17)
+
+Confirmed root cause (live repro 2026-07-12): a node that is reparented
+**and** param-changed in one PUT is never self-invalidated
+(`computeAffectedNodes` treats the two as exclusive branches), and no
+ancestor/root invalidation can recover, because the resolver recomposes
+portfolios from cached child entries. Content addressing removes the entire
+hand-written diff class — a changed leaf *is* a different key — and
+`InvalidationHandler` survives only for SSE notifications, as the component
+table already says. **The tactical item-17 fix must land regardless**: it
+protects the current PUT path now and does not conflict with this design.
+
+### A7. Implementation aid (corrections against the current codebase)
+
+- **UI stack:** the SPA is Scala.js + Laminar (ADR-019), not JS/Lit — the
+  phase outline has been corrected. BranchBar/comparison/history panels are
+  Laminar components in `modules/app`.
+- **Endpoints:** define scenario/history endpoints once in `modules/common`
+  as Tapir endpoints (JVM server routes + SPA sttp clients derive from the
+  same definition, per the existing pattern).
+- **Error types:** `BranchNotFound`, `MergeConflictError`, `CommitNotFound`
+  (DD-10) join the sealed `AppError` hierarchy; inexhaustive matches are
+  compile **errors**, so every existing match site must be updated — budget
+  for that sweep.
+- **Auth:** this design predates ADR-024/ADR-030. Scenario and history
+  endpoints need the same `Checked`-permission wiring as existing tree
+  endpoints, and DD-11 (workspace ↔ scenario ownership) is now partly an
+  authorization-model question, not just a naming convention.
+- **New types** follow ADR-001/ADR-018: Iron refinements + nominal wrappers
+  (`ContentHash`, `CommitHash`, `ScenarioId` as listed under New Types).
+- **Workspace reaper:** cascade deletion currently covers trees; scenario
+  branches of a reaped workspace are new state that must be cleaned too.
+
+### A8. What "fully implemented" means for feature liveness
+
+Phase B alone ships a usable end-to-end slice (create scenario, switch,
+edit, switch back); C–E complete the feature (comparison, merge, history).
+But "live" has preconditions **outside** the phase outline:
+
+1. **Open decisions:** DD-5, DD-7, DD-8, DD-9, DD-11 must be closed (DD-14
+   is effectively closed → Option B, see Recommendation). DD-8 (branch
+   state: header vs session, the two-tab problem) is the hardest UX call.
+2. **Deployment backend:** branching requires the Irmin repository. The
+   default compose stack runs in-memory, and `--profile persistence` is
+   currently a no-op for the server (TODO item 10) — the compose override
+   fix is a deployment prerequisite for this feature.
+3. **In-memory story:** decide explicitly what the in-memory backend does —
+   feature-flagged off (scenario endpoints return 404/NOT_SUPPORTED) or
+   branch semantics emulated in memory. The plan currently has no answer;
+   silent partial behavior is not an option.
+4. **Frontend phases included:** "fully implemented" per the outline already
+   includes the Laminar UI (BranchBar, comparison view, history panel), so
+   no separate frontend project remains.
+
+With 1–3 resolved: yes — scenario branching is live for Irmin-backed
+deployments at Phase B (minimal) / Phase E (complete).
