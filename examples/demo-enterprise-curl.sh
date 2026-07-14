@@ -75,193 +75,388 @@ BOOTSTRAP=$(curl -s -X POST "$BASE/workspaces" \
   -d '{
     "name": "Financial Services Enterprise Risk",
     "portfolios": [
-      {"name": "Enterprise Risk",               "parentName": null},
-      {"name": "Operational Risk",              "parentName": "Enterprise Risk"},
-      {"name": "Technology and Cyber",            "parentName": "Operational Risk"},
-      {"name": "Process and People",              "parentName": "Operational Risk"},
-      {"name": "Third-Party and Supply Chain",    "parentName": "Operational Risk"},
-      {"name": "Financial Risk",                "parentName": "Enterprise Risk"},
-      {"name": "Market Risk",                   "parentName": "Financial Risk"},
-      {"name": "Credit Risk",                   "parentName": "Financial Risk"},
-      {"name": "Liquidity Risk",                "parentName": "Financial Risk"},
-      {"name": "Compliance and Legal Risk",       "parentName": "Enterprise Risk"},
-      {"name": "Strategic and Reputational Risk", "parentName": "Enterprise Risk"}
+      {
+        "name": "Enterprise Risk",
+        "parentName": null
+      },
+      {
+        "name": "Operational Risk",
+        "parentName": "Enterprise Risk"
+      },
+      {
+        "name": "Technology and Cyber",
+        "parentName": "Operational Risk"
+      },
+      {
+        "name": "Process and People",
+        "parentName": "Operational Risk"
+      },
+      {
+        "name": "Third-Party and Supply Chain",
+        "parentName": "Operational Risk"
+      },
+      {
+        "name": "Financial Risk",
+        "parentName": "Enterprise Risk"
+      },
+      {
+        "name": "Market Risk",
+        "parentName": "Financial Risk"
+      },
+      {
+        "name": "Credit Risk",
+        "parentName": "Financial Risk"
+      },
+      {
+        "name": "Liquidity Risk",
+        "parentName": "Financial Risk"
+      },
+      {
+        "name": "Compliance and Legal Risk",
+        "parentName": "Enterprise Risk"
+      },
+      {
+        "name": "Strategic and Reputational Risk",
+        "parentName": "Enterprise Risk"
+      }
     ],
     "leaves": [
       {
         "name": "Ransomware Attack",
         "parentName": "Technology and Cyber",
-        "distributionType": "expert",
         "probability": 0.15,
-        "minLoss": null, "maxLoss": null,
-        "percentiles": [0.25, 0.50, 0.75, 0.95],
-        "quantiles":   [500000, 2000000, 8000000, 25000000]
+        "distributionShape": {
+          "distributionType": "expert",
+          "minLoss": null,
+          "maxLoss": null,
+          "percentiles": [
+            0.25,
+            0.5,
+            0.75,
+            0.95
+          ],
+          "quantiles": [
+            500000,
+            2000000,
+            8000000,
+            25000000
+          ],
+          "terms": null
+        }
       },
       {
         "name": "Cloud Provider Outage",
         "parentName": "Technology and Cyber",
-        "distributionType": "lognormal",
-        "probability": 0.30,
-        "minLoss": 200000, "maxLoss": 4000000,
-        "percentiles": null, "quantiles": null
+        "probability": 0.3,
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 200000,
+          "maxLoss": 4000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Data Breach - PII",
         "parentName": "Technology and Cyber",
-        "distributionType": "lognormal",
-        "probability": 0.10,
-        "minLoss": 1000000, "maxLoss": 15000000,
-        "percentiles": null, "quantiles": null
+        "probability": 0.1,
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 1000000,
+          "maxLoss": 15000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Insider Threat",
         "parentName": "Technology and Cyber",
-        "distributionType": "lognormal",
         "probability": 0.05,
-        "minLoss": 2000000, "maxLoss": 20000000,
-        "percentiles": null, "quantiles": null
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 2000000,
+          "maxLoss": 20000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Key Person Departure",
         "parentName": "Process and People",
-        "distributionType": "lognormal",
-        "probability": 0.20,
-        "minLoss": 100000, "maxLoss": 800000,
-        "percentiles": null, "quantiles": null
+        "probability": 0.2,
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 100000,
+          "maxLoss": 800000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Internal Fraud",
         "parentName": "Process and People",
-        "distributionType": "expert",
         "probability": 0.08,
-        "minLoss": null, "maxLoss": null,
-        "percentiles": [0.25, 0.50, 0.75, 0.95],
-        "quantiles":   [200000, 1000000, 4000000, 18000000]
+        "distributionShape": {
+          "distributionType": "expert",
+          "minLoss": null,
+          "maxLoss": null,
+          "percentiles": [
+            0.25,
+            0.5,
+            0.75,
+            0.95
+          ],
+          "quantiles": [
+            200000,
+            1000000,
+            4000000,
+            18000000
+          ],
+          "terms": null
+        }
       },
       {
         "name": "Process Failure",
         "parentName": "Process and People",
-        "distributionType": "lognormal",
         "probability": 0.25,
-        "minLoss": 50000, "maxLoss": 500000,
-        "percentiles": null, "quantiles": null
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 50000,
+          "maxLoss": 500000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Critical Vendor Failure",
         "parentName": "Third-Party and Supply Chain",
-        "distributionType": "lognormal",
         "probability": 0.12,
-        "minLoss": 500000, "maxLoss": 5000000,
-        "percentiles": null, "quantiles": null
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 500000,
+          "maxLoss": 5000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Outsourcing SLA Breach",
         "parentName": "Third-Party and Supply Chain",
-        "distributionType": "lognormal",
-        "probability": 0.20,
-        "minLoss": 100000, "maxLoss": 1500000,
-        "percentiles": null, "quantiles": null
+        "probability": 0.2,
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 100000,
+          "maxLoss": 1500000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Concentration Risk",
         "parentName": "Third-Party and Supply Chain",
-        "distributionType": "expert",
         "probability": 0.08,
-        "minLoss": null, "maxLoss": null,
-        "percentiles": [0.25, 0.50, 0.95],
-        "quantiles":   [1000000, 4000000, 18000000]
+        "distributionShape": {
+          "distributionType": "expert",
+          "minLoss": null,
+          "maxLoss": null,
+          "percentiles": [
+            0.25,
+            0.5,
+            0.95
+          ],
+          "quantiles": [
+            1000000,
+            4000000,
+            18000000
+          ],
+          "terms": null
+        }
       },
       {
         "name": "Equity Portfolio Drawdown",
         "parentName": "Market Risk",
-        "distributionType": "expert",
         "probability": 0.35,
-        "minLoss": null, "maxLoss": null,
-        "percentiles": [0.25, 0.50, 0.75, 0.95],
-        "quantiles":   [1000000, 4000000, 12000000, 28000000]
+        "distributionShape": {
+          "distributionType": "expert",
+          "minLoss": null,
+          "maxLoss": null,
+          "percentiles": [
+            0.25,
+            0.5,
+            0.75,
+            0.95
+          ],
+          "quantiles": [
+            1000000,
+            4000000,
+            12000000,
+            28000000
+          ],
+          "terms": null
+        }
       },
       {
         "name": "FX Adverse Move",
         "parentName": "Market Risk",
-        "distributionType": "lognormal",
-        "probability": 0.40,
-        "minLoss": 500000, "maxLoss": 8000000,
-        "percentiles": null, "quantiles": null
+        "probability": 0.4,
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 500000,
+          "maxLoss": 8000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Counterparty Default",
         "parentName": "Credit Risk",
-        "distributionType": "lognormal",
         "probability": 0.05,
-        "minLoss": 3000000, "maxLoss": 30000000,
-        "percentiles": null, "quantiles": null
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 3000000,
+          "maxLoss": 30000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Credit Downgrade Wave",
         "parentName": "Credit Risk",
-        "distributionType": "expert",
         "probability": 0.15,
-        "minLoss": null, "maxLoss": null,
-        "percentiles": [0.25, 0.50, 0.95],
-        "quantiles":   [800000, 3000000, 20000000]
+        "distributionShape": {
+          "distributionType": "expert",
+          "minLoss": null,
+          "maxLoss": null,
+          "percentiles": [
+            0.25,
+            0.5,
+            0.95
+          ],
+          "quantiles": [
+            800000,
+            3000000,
+            20000000
+          ],
+          "terms": null
+        }
       },
       {
         "name": "Funding Squeeze",
         "parentName": "Liquidity Risk",
-        "distributionType": "lognormal",
         "probability": 0.08,
-        "minLoss": 2000000, "maxLoss": 25000000,
-        "percentiles": null, "quantiles": null
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 2000000,
+          "maxLoss": 25000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Regulatory Action",
         "parentName": "Compliance and Legal Risk",
-        "distributionType": "lognormal",
         "probability": 0.12,
-        "minLoss": 2000000, "maxLoss": 50000000,
-        "percentiles": null, "quantiles": null
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 2000000,
+          "maxLoss": 50000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Litigation",
         "parentName": "Compliance and Legal Risk",
-        "distributionType": "expert",
         "probability": 0.08,
-        "minLoss": null, "maxLoss": null,
-        "percentiles": [0.25, 0.50, 0.75, 0.95],
-        "quantiles":   [300000, 2000000, 8000000, 40000000]
+        "distributionShape": {
+          "distributionType": "expert",
+          "minLoss": null,
+          "maxLoss": null,
+          "percentiles": [
+            0.25,
+            0.5,
+            0.75,
+            0.95
+          ],
+          "quantiles": [
+            300000,
+            2000000,
+            8000000,
+            40000000
+          ],
+          "terms": null
+        }
       },
       {
         "name": "GDPR / Data Protection Fine",
         "parentName": "Compliance and Legal Risk",
-        "distributionType": "lognormal",
         "probability": 0.15,
-        "minLoss": 500000, "maxLoss": 10000000,
-        "percentiles": null, "quantiles": null
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 500000,
+          "maxLoss": 10000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "ESG Controversy",
         "parentName": "Strategic and Reputational Risk",
-        "distributionType": "lognormal",
-        "probability": 0.10,
-        "minLoss": 1000000, "maxLoss": 12000000,
-        "percentiles": null, "quantiles": null
+        "probability": 0.1,
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 1000000,
+          "maxLoss": 12000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "M and A Integration Failure",
         "parentName": "Strategic and Reputational Risk",
-        "distributionType": "lognormal",
         "probability": 0.05,
-        "minLoss": 5000000, "maxLoss": 40000000,
-        "percentiles": null, "quantiles": null
+        "distributionShape": {
+          "distributionType": "lognormal",
+          "minLoss": 5000000,
+          "maxLoss": 40000000,
+          "percentiles": null,
+          "quantiles": null,
+          "terms": null
+        }
       },
       {
         "name": "Product Recall / Liability",
         "parentName": "Strategic and Reputational Risk",
-        "distributionType": "expert",
         "probability": 0.06,
-        "minLoss": null, "maxLoss": null,
-        "percentiles": [0.25, 0.50, 0.95],
-        "quantiles":   [1000000, 5000000, 35000000]
+        "distributionShape": {
+          "distributionType": "expert",
+          "minLoss": null,
+          "maxLoss": null,
+          "percentiles": [
+            0.25,
+            0.5,
+            0.95
+          ],
+          "quantiles": [
+            1000000,
+            5000000,
+            35000000
+          ],
+          "terms": null
+        }
       }
     ]
   }')

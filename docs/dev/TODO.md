@@ -880,7 +880,20 @@ then the fix, then re-verify with the API repro above.
 
 ---
 
-## 18. Update `examples/demo-*.sh` to the current bootstrap wire format
+## 18. Update `examples/demo-*.sh` to the current bootstrap wire format — DONE (2026-07-14)
+
+**Resolved 2026-07-14:** all four scripts rewritten to nest `distributionShape`
+(with `terms`); `demo-simple-curl.sh` and `demo-enterprise-curl.sh` verified
+end-to-end against the live server (bootstrap + all queries green). Also
+updated the four `docs/test/*.json` fixtures and `docs/user/API-TUTORIAL.md`
+(the tutorial's enterprise payloads additionally had `&`/`()` names that
+violate the `SafeName` pattern — normalised to the demo-script spellings, e.g.
+`Technology and Cyber`, `Data Breach - PII`, `M and A Integration Failure`).
+No BATS/`tests/` payloads were affected — the Scala test suites and frontend
+already use the nested shape. ADRs describe the *domain* model (`RiskLeaf`
+still stores flat fields) so they remain accurate and were left unchanged.
+Not touched: `docs/test/TESTING.md` uses the entire pre-workspace `/api/risk-trees`
+surface (broader rot — needs a separate reconciliation pass, see below).
 
 **Observed (2026-07-11, `APP_VERSION` 0.3.0):** all four scripts
 (`demo-simple-curl.sh`, `demo-simple-httpie.sh`, `demo-enterprise-curl.sh`,
@@ -946,3 +959,19 @@ survival would guard against a regression in the compose wiring or the
 `WorkspaceStorePostgres` boot path. See also the K8s twin in
 `register-infra/docs/TODO.md` ("Deferred — Blocked on App-Side Changes"),
 which has an analogous pod-restart survival check as its step 5.
+
+---
+
+## 20. `docs/test/TESTING.md` targets the retired `/api/risk-trees` surface
+
+**Observed (2026-07-14, while fixing item 18):** `TESTING.md` drives the whole
+pre-workspace unscoped API — `POST/GET/PUT /api/risk-trees`,
+`PATCH /api/risk-trees/{id}/nodes/{ulid}/distribution`, `.../nodes/{ulid}`
+(rename), `DELETE .../nodes/{ulid}`. The live surface is workspace-scoped
+(`POST /workspaces`, then `/w/{key}/risk-trees/...`); no `/api/` route and no
+node-level PATCH-distribution / rename / delete endpoint exist in
+`modules/common/.../http/endpoints/`. The doc's bodies are also flat-leaf
+(pre-`distributionShape`). This is a broader reconciliation than item 18:
+decide per section whether the endpoint still exists under the scoped surface,
+map it, or drop it — do **not** just nest `distributionShape` and leave the
+`/api/` paths, which would be half-fixed. Left untouched pending that decision.

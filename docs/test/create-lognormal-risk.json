@@ -1,16 +1,24 @@
 {
   "name": "Simple Lognormal Test",
   "portfolios": [
-    { "name": "Root", "parentName": null }
+    {
+      "name": "Root",
+      "parentName": null
+    }
   ],
   "leaves": [
     {
       "name": "Lognormal Risk",
       "parentName": "Root",
-      "distributionType": "lognormal",
       "probability": 0.5,
-      "minLoss": 10000,
-      "maxLoss": 100000
+      "distributionShape": {
+        "distributionType": "lognormal",
+        "minLoss": 10000,
+        "maxLoss": 100000,
+        "percentiles": null,
+        "quantiles": null,
+        "terms": null
+      }
     }
   ]
 }

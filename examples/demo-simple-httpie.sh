@@ -53,42 +53,64 @@ BOOTSTRAP=$(http --ignore-stdin POST "$BASE/workspaces" \
     {
       "name": "Cyber Breach",
       "parentName": "IT Risk",
-      "distributionType": "lognormal",
-      "probability": 0.20,
-      "minLoss": 500000,
-      "maxLoss": 8000000,
-      "percentiles": null,
-      "quantiles": null
+      "probability": 0.2,
+      "distributionShape": {
+        "distributionType": "lognormal",
+        "minLoss": 500000,
+        "maxLoss": 8000000,
+        "percentiles": null,
+        "quantiles": null,
+        "terms": null
+      }
     },
     {
       "name": "Ransomware",
       "parentName": "IT Risk",
-      "distributionType": "expert",
-      "probability": 0.10,
-      "minLoss": null,
-      "maxLoss": null,
-      "percentiles": [0.25, 0.50, 0.75, 0.95],
-      "quantiles":   [200000, 1000000, 4000000, 15000000]
+      "probability": 0.1,
+      "distributionShape": {
+        "distributionType": "expert",
+        "minLoss": null,
+        "maxLoss": null,
+        "percentiles": [
+          0.25,
+          0.5,
+          0.75,
+          0.95
+        ],
+        "quantiles": [
+          200000,
+          1000000,
+          4000000,
+          15000000
+        ],
+        "terms": null
+      }
     },
     {
       "name": "Supply Chain Disruption",
       "parentName": "Third Party Risk",
-      "distributionType": "lognormal",
       "probability": 0.15,
-      "minLoss": 300000,
-      "maxLoss": 3000000,
-      "percentiles": null,
-      "quantiles": null
+      "distributionShape": {
+        "distributionType": "lognormal",
+        "minLoss": 300000,
+        "maxLoss": 3000000,
+        "percentiles": null,
+        "quantiles": null,
+        "terms": null
+      }
     },
     {
       "name": "Regulatory Fine",
       "parentName": "Third Party Risk",
-      "distributionType": "lognormal",
       "probability": 0.08,
-      "minLoss": 100000,
-      "maxLoss": 2000000,
-      "percentiles": null,
-      "quantiles": null
+      "distributionShape": {
+        "distributionType": "lognormal",
+        "minLoss": 100000,
+        "maxLoss": 2000000,
+        "percentiles": null,
+        "quantiles": null,
+        "terms": null
+      }
     }
   ]')
 

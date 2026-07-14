@@ -1,16 +1,32 @@
 {
   "name": "Data Breach Scenario",
   "portfolios": [
-    { "name": "Root", "parentName": null }
+    {
+      "name": "Root",
+      "parentName": null
+    }
   ],
   "leaves": [
     {
       "name": "Data Breach",
       "parentName": "Root",
-      "distributionType": "expert",
       "probability": 0.05,
-      "percentiles": [0.05, 0.5, 0.95],
-      "quantiles": [100000, 500000, 2000000]
+      "distributionShape": {
+        "distributionType": "expert",
+        "minLoss": null,
+        "maxLoss": null,
+        "percentiles": [
+          0.05,
+          0.5,
+          0.95
+        ],
+        "quantiles": [
+          100000,
+          500000,
+          2000000
+        ],
+        "terms": null
+      }
     }
   ]
 }
