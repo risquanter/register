@@ -45,7 +45,16 @@ The cache must support seven workflows:
 
 ## Cache Strategy
 
-### Core idea (shared by all options below)
+> **DD-14 is closed (2026-07-14) → Option B, full JVM `sha256`.** This whole
+> section retains the Option A vs Option B comparison as the *rationale* for
+> that decision — the drift analysis, performance comparison, and
+> implementation-simplicity sections below are a record of why, not a live
+> choice. The conclusion is in
+> [Decision](#decision-option-b-full-jvm--closed-2026-07-14); everything
+> downstream of this section (pipeline, worked examples, types, phases)
+> is written in Option B terms only.
+
+### Core idea
 
 Replace `Map[(TreeId, NodeId), RiskResult]` with
 `Map[ContentHash, RiskResult]`. Two nodes with identical content share one
@@ -55,13 +64,17 @@ A per-branch cache (`Map[(BranchRef, NodeId), RiskResult]`) cannot serve
 cross-branch comparison or cache warming — it has no concept of content
 equality across branches.
 
-### The open question: who computes the leaf hash?
+### Leaf hash source (DD-14 — closed: Option B)
+
+> **Closed 2026-07-14 → Option B (full JVM `sha256`).** The analysis below is
+> retained as the rationale, not as an open exploration. Option A is recorded
+> for the record; it is not a live alternative.
 
 Portfolios need a JVM Merkle hash — that's settled (flat storage layout,
 Irmin `Tree.hash` would require hierarchical paths → reparenting cost). The
-question is: **where does the leaf cache key come from?**
+question was: **where does the leaf cache key come from?**
 
-**Option A — Hybrid: Irmin hash for leaves, JVM Merkle for portfolios**
+**Option A — Hybrid: Irmin hash for leaves, JVM Merkle for portfolios** *(rejected)*
 
 | Node type | Cache key | Computed by |
 |-----------|-----------|-------------|
@@ -72,7 +85,7 @@ Two different hash systems: Irmin SHA-1 for leaf keys, JVM SHA-256 for
 portfolio keys. The portfolio computation takes Irmin's leaf hashes as
 opaque string inputs.
 
-**Option B — Full JVM: JVM hash for everything**
+**Option B — Full JVM: JVM hash for everything** *(chosen)*
 
 | Node type | Cache key | Computed by |
 |-----------|-----------|-------------|
@@ -217,26 +230,88 @@ Option A's "hash comes for free" advantage applies to CPU cost (~1μs per
 leaf), not to code cost — the Irmin query, response type, and threading
 still need to be written and maintained.
 
-### Recommendation
+### Decision: Option B (full JVM) — closed 2026-07-14
 
-**Option B (full JVM)** is the stronger choice. The consistency analysis
-shows neither option has drift or wrong-result risk. The performance
-analysis shows no meaningful difference. The implementation analysis shows
-Option B requires less code, fewer new types, no new Irmin API surface, and
-is fully unit-testable without Irmin.
+**Option B (full JVM `sha256`) is chosen.** The consistency analysis shows
+neither option has drift or wrong-result risk. The performance analysis shows
+no meaningful difference. The implementation analysis shows Option B requires
+less code, fewer new types, no new Irmin API surface, and is fully
+unit-testable without Irmin.
 
-**Decisive additional argument (2026-07-12 review):** the application also
-ships an in-memory repository backend (`RiskTreeRepositoryInMemory` — the
-default in `docker-compose.yml` and the backend most unit tests run
-against). Option A cannot produce leaf hashes there at all: there is no
-Irmin to ask. Option B works identically on both backends, so the
-content-addressed cache and its staleness guarantees cover the default
-dev/demo configuration too. This effectively closes DD-14 in favour of
-Option B.
+**Decisive argument 1 — the in-memory backend (2026-07-12 review).** The
+application also ships an in-memory repository backend
+(`RiskTreeRepositoryInMemory` — the default in `docker-compose.yml` and the
+backend most unit tests run against). Option A cannot produce leaf hashes
+there at all: there is no Irmin to ask. Option B works identically on both
+backends, so the content-addressed cache and its staleness guarantees cover
+the default dev/demo configuration too. (This also shapes the in-memory
+question in [A8](#a8-what-fully-implemented-means-for-feature-liveness) item
+3: under Option B the *cache* is backend-agnostic, so only branch semantics —
+not cache correctness — remain in question there.)
 
-Migration from A to B (or B to A) is mechanical — replace one line in
-`ContentHashIndex.build`. The cache structure, pipeline, and worked examples
-are identical for both options.
+**Decisive argument 2 — the cache key must be free to diverge from stored
+bytes (2026-07-14 review).** Irmin's hash is a function of *bytes stored*. A
+cache key must be a function of *content that determines the simulation
+result*. These coincide today, but this design already documents two ways
+they must diverge — and Option A forecloses both, because you cannot subtract
+a field from someone else's hash:
+
+- **[A2](#a2-dedupe-claim-precision--coupling-to-todo-item-12) / TODO item
+  12:** if seed derivation moves off ULIDs to content, `id` should be dropped
+  from the hashed bytes so true cross-node dedupe becomes sound. Under Option
+  A, `id` is in the stored JSON and therefore permanently in the key.
+- **[A4](#a4-recommended-phase-a-lean-down-cache-leaf-results-only) trap 1:**
+  if portfolios gain aggregation-relevant attributes (mitigation transforms —
+  `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md`), the portfolio key must become
+  `sha256(portfolioOwnContent | sort(childHashes))`. The key is a design
+  artifact, not a storage fact.
+
+`dev/test-irmin-hashes.sh` demonstrates the limitation directly: the `ts1`/`ts2`
+case (identical `prob`, different `updatedAt`) asserts the **hashes differ** —
+i.e. under Option A any non-simulation metadata in node JSON silently destroys
+cache hits. The script's `sep/n1/params` vs `sep/n1/meta` case is the Option A
+workaround: **restructure Irmin storage** into params/meta paths to keep
+metadata out of the key. Option B needs no storage change — hash the fields
+that determine the result.
+
+**Decisive argument 3 — `ContentHash` type integrity.** Under Option A one
+`ContentHash` carries both 40-char SHA-1 (leaves) and 64-char SHA-256
+(portfolios), so the Iron refinement cannot pin a length — it degrades to
+`Match["^([a-f0-9]{40}|[a-f0-9]{64})$"]` or a bare hex constraint. A length
+implied by a protocol but not expressed in the type is a **Pass 0a MUST-FIX**
+(`code-quality-review`). Option B pins `Match["^[a-f0-9]{64}$"]` exactly. See
+[New Types](#new-types).
+
+**Supporting — no SHA-1 on user-influenced bytes.** Leaf JSON derives from
+user input (name, probability, distribution params). A SHA-1 collision would
+mean two distinct leaves sharing one cache entry — a wrong-result class.
+Realistic exploitability is very low (Iron whitelists heavily constrain the
+byte space per ADR-029; chosen-prefix collisions are expensive; the payoff is
+corrupting your own simulation). It is not a credible attack — but it is a
+finding any security review raises, and Option B costs nothing to avoid it.
+
+**What Option B actually requires of Irmin — read determinism, not byte
+fidelity.** The requirement is *not* "the bytes Irmin returns equal the bytes
+we stored." It is only that the round-trip is a **deterministic function**:
+same stored content → same returned bytes, every time. If Irmin re-encoded
+values consistently, `sha256(returned)` would still be a sound key. This holds
+structurally — Irmin stores opaque blobs and does not know the string is JSON
+— and it is not a differentiator: Irmin's own `Contents.hash` is computed over
+the value, so a value-transforming Irmin would break Option A identically.
+
+**Drift is self-cleaning; storage is never polluted.** Cache keys never reach
+Irmin (ADR-015: persisting results to Irmin is a code smell; `ContentCache` is
+a JVM-side `Ref`). A hash change therefore cannot corrupt stored data — the
+worst case is orphaned in-memory entries. And every drift trigger (Irmin
+upgrade, zio-json bump, JVM change) *requires a process restart*, which clears
+the in-memory cache before any new hash is computed. The mass-cache-miss row in
+the drift table costs one cold cache after a deploy. Routine orphans — every
+parameter edit strands the old hash's entry — are the `EvictionStrategy`'s
+problem and are identical under both options.
+
+**Implementation rule (binding).** Hash **the bytes Irmin returns**, never a
+re-serialisation of the decoded object. Re-serialising would make cache keys
+hostage to zio-json's output stability for no benefit.
 
 | Aspect | Option A (hybrid) | Option B (full JVM) |
 |--------|-------------------|---------------------|
@@ -253,9 +328,11 @@ are identical for both options.
 | Pre-compute key without write | `contents_hash` query (1 round-trip) | Local `sha256` (0 round-trips) |
 | Migration A↔B | Replace 1 line in `ContentHashIndex.build` | — |
 
-All worked examples below use Option A notation (leaf keys from Irmin). If
-Option B is chosen, replace every "Irmin hash passthrough" with
-"`sha256(json)` [Scala]" — the cache hit/miss outcomes are identical.
+All worked examples below use **Option B**: every leaf key is
+`sha256(jsonBytes)` [Scala], computed at tree-load time from the value
+`IrminClient.get` returns. Short placeholders like `"abc111"` and `"merk-O"`
+stand in for 64-hex SHA-256 digests throughout — they are illustrative labels,
+not literal values.
 
 ---
 
@@ -294,16 +371,12 @@ risk-trees/tree-1/
 
 ### Hash structure (after first load on `main`)
 
-Three data structures participate in cache resolution. The diagram uses
-**Option A (hybrid)** notation. For Option B (full JVM), replace layer 1
-with `sha256(jsonBytes)` [Scala] per node, and replace "passthrough" in
-layer 2 with `sha256(leaf.toJson)`.
+Three data structures participate in cache resolution (Option B — DD-14).
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ 1. Leaf hash source                                                      │
-│    Option A: Irmin Contents.hash  [Irmin — returned by getContents]     │
-│    Option B: sha256(jsonBytes)    [Scala — computed at tree-load time]  │
+│    sha256(jsonBytes)  [Scala — computed at tree-load time from get()]   │
 │                                                                          │
 │    Node │ Hash          │ Covers                                         │
 │    ─────┼───────────────┼──────────────────────────────────────────────  │
@@ -357,19 +430,16 @@ layer 2 with `sha256(leaf.toJson)`.
 
 ### Cache resolution pipeline
 
-For every node in a loaded tree (shown with Option A / Option B variants):
+For every node in a loaded tree:
 
 ```
 1. Read node from Irmin:
-   Option A: IrminClient.getContents(path, branch)   [Scala → Irmin GraphQL]
-             → returns (value: String, hash: ContentHash)
-   Option B: IrminClient.get(path, branch)            [Scala → Irmin GraphQL]
-             → returns value: String  (no hash)
+   IrminClient.get(path, branch)                       [Scala → Irmin GraphQL]
+   → returns value: String
 
-2. ContentHashIndex.build(tree, leafHashes)            [Scala, pure computation]
-   → leaf:      Option A: cacheKey = irminHash (passthrough)
-                Option B: cacheKey = sha256(value.getBytes)
-   → portfolio: cacheKey = sha256(sort(children's cacheKeys))   [both options]
+2. ContentHashIndex.build(tree, nodeJson)              [Scala, pure computation]
+   → leaf:      cacheKey = sha256(value.getBytes)   ← the bytes get() returned
+   → portfolio: cacheKey = sha256(sort(children's cacheKeys))
 
 3. ContentCache.get(cacheKey)                          [Scala, Ref lookup]
    → hit:  return cached RiskResult
@@ -380,10 +450,18 @@ For every node in a loaded tree (shown with Option A / Option B variants):
 
 ### Serialization determinism
 
-Both options depend on the same JSON bytes producing the same hash. For
-Option A, Irmin hashes the bytes we store. For Option B, the JVM hashes the
-bytes Irmin returns. Either way: same logical values → identical string →
-identical hash.
+The cache key is `sha256` over the bytes `IrminClient.get` returns, so key
+stability reduces to two properties:
+
+1. **Write determinism (ours):** same logical values → identical JSON string.
+   Guaranteed by the codecs below — this is the property that needs guarding.
+2. **Read determinism (Irmin's):** same stored content → same returned bytes,
+   every time. Note this is *weaker* than byte fidelity: we do not require
+   `get` to return exactly what `set` stored, only that the round-trip be a
+   deterministic function. Irmin stores opaque blobs and cannot re-encode a
+   string it does not know is JSON; and its own `Contents.hash` is computed
+   over the value, so a value-transforming Irmin would break its own hashing
+   first. Empirically validated by `dev/test-irmin-hashes.sh` (9/9).
 
 The current codecs guarantee this:
 
@@ -412,7 +490,7 @@ test("RiskLeaf JSON serialization is byte-stable") {
     probability = 0.3, percentiles = None, quantiles = None,
     minLoss = Some(1000L), maxLoss = Some(50000L)).toOption.get
   val json = leaf.toJson              // [Scala, zio-json]
-  // If this breaks, leaf cache keys (Option A or B) have changed.
+  // If this breaks, every leaf cache key has changed → mass cache miss.
   assertTrue(json ==
     """{"id":"test-1","name":"cyber","parentId":"ops","distributionType":"Lognormal","probability":0.3,"minLoss":1000,"maxLoss":50000}""")
 }
@@ -432,8 +510,9 @@ leaf simulation.
 ### Algorithm
 
 `ContentHashIndex.build` [Scala, pure] runs once at tree-load time, after
-reading all nodes from Irmin. The `leafHashes` parameter comes from either
-Irmin `getContents` (Option A) or `sha256(jsonBytes)` (Option B):
+reading all nodes from Irmin. Per DD-14 (Option B) it takes the **raw JSON
+bytes `IrminClient.get` returned** per node and hashes them itself — one code
+path, no Irmin coupling, unit-testable without a running Irmin:
 
 ```scala
 import java.security.MessageDigest
@@ -442,8 +521,8 @@ object ContentHashIndex:                                     // [Scala]
 
   def build(
     tree: RiskTree,
-    leafHashes: Map[NodeId, ContentHash]    // Option A: from getContents
-  ): Map[NodeId, ContentHash] =             // Option B: from sha256(json)
+    nodeJson: Map[NodeId, String]     // DD-14: the exact bytes get() returned —
+  ): Map[NodeId, ContentHash] =       // never a re-serialisation of the decoded node
 
     val index = scala.collection.mutable.Map.empty[NodeId, ContentHash]
 
@@ -451,7 +530,7 @@ object ContentHashIndex:                                     // [Scala]
       index.getOrElseUpdate(nodeId,
         tree.index.nodes(nodeId) match
           case _: RiskLeaf =>
-            leafHashes(nodeId)                               // passthrough
+            ContentHash(sha256(nodeJson(nodeId)))            // leaf: hash the bytes
 
           case p: RiskPortfolio =>
             val childHashes = p.childIds
@@ -508,18 +587,17 @@ other as a **sequential narrative**. Each step shows:
 - what `ContentHashIndex.build` [Scala] produces
 - what `ContentCache` [Scala] hits or misses
 
-> **Hash option notation:** Examples use Option A (hybrid) — leaf hashes
-> come from `IrminClient.getContents` [Scala→Irmin]. For Option B (full
-> JVM), Step 1's `getContents` calls become `get` + `sha256(jsonBytes)`;
-> leaf hash values like "abc111" would differ but all cache hit/miss logic
-> is identical.
+> **Hash notation (Option B — DD-14):** leaf hashes are
+> `sha256(jsonBytes)` [Scala], computed at tree-load time from what
+> `IrminClient.get` [Scala→Irmin] returns. Labels like `"abc111"` and
+> `"merk-O"` are illustrative stand-ins for 64-hex SHA-256 digests.
 
 ### Step 1: First load on `main` (UC1 / UC2)
 
 Tree loaded for the first time. `ContentCache` is empty.
 
 ```
-IrminClient.getContents [Scala→Irmin] per node on branch "main":
+IrminClient.get [Scala→Irmin] per node on branch "main":
   ┌───────────────────────────────────────────────────────────┐
   │   C  → { value: "{prob:0.3,…}",    hash: "abc111" }      │
   │   H  → { value: "{prob:0.1,…}",    hash: "abc222" }      │
@@ -555,7 +633,7 @@ User edits cyber's probability. `IrminClient.set` [Scala→Irmin] writes new
 JSON for C. Tree is reloaded.
 
 ```
-IrminClient.getContents [Scala→Irmin] on branch "main":
+IrminClient.get [Scala→Irmin] on branch "main":
   ┌───────────────────────────────────────────────────────────┐
   │   C  → hash: "xyz999"   ← CHANGED (prob now 0.6)         │
   │   H  → hash: "abc222"   ← same                           │
@@ -592,7 +670,7 @@ User creates branch `scenario-high` (forked from current `main` where
 cyber.prob=0.6). On `scenario-high`, edits market.prob from 0.5 to 0.8.
 
 ```
-IrminClient.getContents [Scala→Irmin] on branch "scenario-high":
+IrminClient.get [Scala→Irmin] on branch "scenario-high":
   ┌───────────────────────────────────────────────────────────┐
   │   C  → hash: "xyz999"   ← same as main (forked state)    │
   │   H  → hash: "abc222"   ← same                           │
@@ -625,7 +703,7 @@ Branch switch: 1 simulation + 1 aggregation. C, H, O all reused from main.
 **Switching back to `main`:**
 
 ```
-IrminClient.getContents [Scala→Irmin] on branch "main":
+IrminClient.get [Scala→Irmin] on branch "main":
   (same hashes as Step 2 — nothing changed on main)
 
 ContentHashIndex.build [Scala]:
@@ -662,7 +740,7 @@ Two Irmin writes: `IrminClient.set` [Scala→Irmin] for F (new node) and O
 (updated `childIds`).
 
 ```
-IrminClient.getContents [Scala→Irmin] on branch "scenario-high":
+IrminClient.get [Scala→Irmin] on branch "scenario-high":
   ┌───────────────────────────────────────────────────────────┐
   │   C  → hash: "xyz999"   ← unchanged                      │
   │   H  → hash: "abc222"   ← unchanged                      │
@@ -723,7 +801,7 @@ identical to c2's:
 After revert, the tree is reloaded:
 
 ```
-IrminClient.getContents [Scala→Irmin] on "scenario-high" at c4:
+IrminClient.get [Scala→Irmin] on "scenario-high" at c4:
   ┌───────────────────────────────────────────────────────────┐
   │   C  → hash: "xyz999"   ← same as c2                     │
   │   H  → hash: "abc222"   ← same as c2                     │
@@ -829,11 +907,12 @@ key to `(ContentHash, configHash)`.
 | DD | Topic | Decision | Rationale |
 |----|-------|----------|-----------|
 | DD-1 | `IrminClient` branch parameterization | Optional `branch` param on existing methods | Branch-aware reads required for scenarios. Default `None` = backward compatible. |
-| DD-2 | New `IrminClient` operations | Add 7 ops: `getContents`, `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca` | `getContents` required if Option A (hybrid) chosen (DD-14), otherwise only needed for commit info. Others are mechanical GraphQL wrappers. |
+| DD-2 | New `IrminClient` operations | Add 6 ops: `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca` | Mechanical GraphQL wrappers. **`getContents` dropped**: DD-14 closed on Option B, so leaf hashes come from `sha256(json)` [Scala] and the existing `get` suffices. Add `getContents` only if a concrete commit-info caller appears — an op with no call site is a code-quality MUST-FIX (§4, unused API is a liability). |
 | DD-3 | Cache strategy | Content-addressed: `Map[ContentHash, RiskResult]` | Content-identical nodes share one cache entry regardless of branch. |
 | DD-4 | Repository branch threading | Optional `branch` param on trait methods | Comparison workflow needs explicit branch args (read both in one effect). |
-| DD-10 | Error types | Flat hierarchy extending `AppError` | `BranchNotFound`, `MergeConflictError`, `CommitNotFound`, etc. Follows existing pattern. |
+| DD-10 | Error types | Flat hierarchy extending `AppError` | `BranchNotFound`, `MergeConflictError`, `CommitNotFound`, etc. Follows existing pattern. **Naming not settled** — `MergeConflict` already exists in the hierarchy; see [A7](#a7-implementation-aid-corrections-against-the-current-codebase). |
 | DD-12 | Test backward compat | Default args are source- and binary-compatible | ~60 new tests estimated across new capabilities. |
+| DD-14 | Leaf hash source | **Option B — full JVM `sha256(jsonBytes)`** (closed 2026-07-14) | One hash system (SHA-256, uniform 64-hex → tight Iron refinement); no `getContents` in Phase A; no SHA-1; works on the in-memory backend, which Option A cannot. See [Leaf hash source](#leaf-hash-source-dd-14--closed-option-b). |
 
 ### Influenced by cache strategy
 
@@ -846,7 +925,6 @@ key to `(ContentHash, configHash)`.
 
 | DD | Topic | Core question |
 |----|-------|---------------|
-| DD-14 | Leaf hash source | Option A (hybrid): Irmin `Contents.hash`. Option B (full JVM): `sha256(jsonBytes)` [Scala]. See [Cache Strategy](#cache-strategy) analysis. Migration A→B is 1-line change. |
 | DD-5 | Scenario domain model | Branch naming convention and scenario metadata storage location. |
 | DD-7 | HistoryService API | History granularity (raw Irmin commits vs transaction-grouped). Revert UX semantics. |
 | DD-8 | HTTP endpoint design | Branch state: client-side header (`X-Active-Branch`) vs server session. Two-tab problem. |
@@ -863,13 +941,37 @@ key to `(ContentHash, configHash)`.
 
 ## New Types
 
+Per ADR-001 + ADR-018 these are nominal wrappers over Iron-refined types with
+`fromString` delegating to the base smart constructor — **not** raw `String`
+wrappers. A `case class X(value: String)` for any of these is a Pass 0a
+MUST-FIX (`code-quality-review`). Co-locate with the existing wrappers in
+`OpaqueTypes.scala` (§11 Co-location).
+
 ```scala
-case class BranchRef(value: String)                          // Irmin branch name
-case class ContentHash(value: String)                        // Content hash (Irmin SHA-1 or JVM SHA-256, see DD-14)
-case class CommitHash(value: String)                         // Irmin commit hash
-case class IrminContents(value: String, hash: ContentHash)   // Value + hash pair
-case class ScenarioId(toSafeId: SafeId.SafeId)               // ULID, same pattern as TreeId
+// ALREADY EXISTS — OpaqueTypes.scala:235. Do not redefine; it is Iron-refined
+// today and used as an IrminConfig value (no other consumer yet).
+case class BranchRef(toBranchRef: BranchRefStr)              // Irmin branch name
+
+// NEW. DD-14 → Option B ⇒ SHA-256 only ⇒ uniform 64 hex chars, so the
+// refinement pins the length exactly. (Under the rejected Option A this type
+// would have had to straddle 40-char SHA-1 and 64-char SHA-256 — the Pass 0a
+// violation that helped close DD-14.)
+type ContentHashConstraint = Match["^[a-f0-9]{64}$"]
+type ContentHashStr        = String :| ContentHashConstraint
+case class ContentHash(toContentHash: ContentHashStr)        // SHA-256 hex digest
+
+// NEW. Irmin commit hash — refine to Irmin's actual commit-hash charset/length
+// before implementing; do not ship as a bare String.
+case class CommitHash(toCommitHash: CommitHashStr)
+
+// NEW. ULID, same pattern as TreeId (ADR-018).
+case class ScenarioId(toSafeId: SafeId.SafeId)
 ```
+
+**`IrminContents(value, hash)` is dropped.** It existed solely as the
+`getContents` return type under Option A; with DD-14 closed on Option B the
+read path returns `String` from the existing `get` and nothing needs the pair.
+Reintroduce only alongside a `getContents` caller, if one ever appears (DD-2).
 
 ---
 
@@ -877,11 +979,11 @@ case class ScenarioId(toSafeId: SafeId.SafeId)               // ULID, same patte
 
 | Component | Layer | Change |
 |-----------|-------|--------|
-| `IrminClient` | Scala→Irmin | Add optional `branch` param to `get`/`set`/`remove`/`list`. Add `getContents`, `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca`. |
-| `IrminQueries` | Scala | New GraphQL query strings for `get_contents`, `branch`, `merge_with_branch`, `revert`, `commit`, `last_modified`, `lcas`. |
-| `RiskTreeRepositoryIrmin` | Scala→Irmin | Thread `branch` param. Option A: use `getContents` to return hash alongside value. Option B: use `get`, compute hash in `ContentHashIndex`. |
+| `IrminClient` | Scala→Irmin | Add optional `branch` param to `get`/`set`/`remove`/`list`. Add `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca`. (`getContents` dropped — DD-14 → Option B.) |
+| `IrminQueries` | Scala | New GraphQL query strings for `branch`, `merge_with_branch`, `revert`, `commit`, `last_modified`, `lcas`. (`get_contents` dropped — DD-14 → Option B.) Note `getValueFromBranch` already exists here with no caller — the branch-parameterised `get` should subsume it rather than sit alongside it. |
+| `RiskTreeRepositoryIrmin` | Scala→Irmin | Thread `branch` param. Use the existing `get`; pass the returned JSON to `ContentHashIndex.build`, which hashes it (DD-14 → Option B). No read-path type change. |
 | `ContentCache` (new) | Scala | `Ref[Map[ContentHash, RiskResult]]` with `EvictionStrategy`. Replaces `RiskResultCache`. |
-| `ContentHashIndex` (new) | Scala | At tree load: leaf hashes from passthrough (Option A: Irmin, Option B: `sha256(json)`), portfolio Merkle hashes computed bottom-up. Returns `Map[NodeId, ContentHash]`. |
+| `ContentHashIndex` (new) | Scala | At tree load: leaf hashes = `sha256(json bytes returned by get)`, portfolio Merkle hashes computed bottom-up (DD-14 → Option B). Pure function, unit-testable without Irmin. Returns `Map[NodeId, ContentHash]`. |
 | `CacheScope` (new) | Scala | Abstraction over cache resolution. `RiskResultResolver` calls `CacheScope` instead of `TreeCacheManager`. |
 | `TreeCacheManager` | Scala | **Retired.** Replaced by `CacheScope` + `ContentCache`. |
 | `InvalidationHandler` | Scala | Simplified — cache misses driven by hash changes, not explicit `ancestorPath` invalidation. Structural mutation logic still needed for SSE notifications. |
@@ -952,12 +1054,23 @@ branch. Content-addressed caching captures this correctly — the JSON includes
 
 > Impact: None. Seed determinism aligns with content-addressed caching.
 
-**6. Name change triggers re-simulation.** Renaming a node changes its
-`Contents.hash` [Irmin] (the JSON includes `name`) → cache miss →
-re-simulation, even though `name` does not affect simulation results.
-Avoiding this would require hashing only simulation-relevant fields on the
-JVM — the exact canonicalisation complexity that Irmin delegation avoids.
-Acceptable trade-off: renames are rare, re-simulation of one node is fast.
+**6. Name change triggers re-simulation.** Renaming a node changes its JSON
+bytes (the JSON includes `name`) → new `sha256` → cache miss → re-simulation,
+even though `name` does not affect simulation results.
+
+> Impact: accepted. Renames are rare and re-simulating one node is fast
+> (~1–5ms at 10K trials).
+>
+> **Revised under DD-14 → Option B (2026-07-14).** This finding previously
+> argued that narrowing the hash preimage was infeasible because it was "the
+> canonicalisation complexity that Irmin delegation avoids." That reasoning
+> died with Option A: we now hash bytes we choose, so hashing only
+> simulation-relevant fields is *available* — it is simply not worth it yet.
+> Do **not** narrow the preimage in isolation: `id` must stay in the hashed
+> bytes while seeds derive from ULIDs
+> ([A1](#a1-first-principle--state-it-explicitly),
+> [A2](#a2-dedupe-claim-precision--coupling-to-todo-item-12)), so preimage
+> narrowing is coupled to TODO item 12 and must be decided with it.
 
 > Impact: Unnecessary work on rename. Accepted.
 
@@ -967,8 +1080,8 @@ Acceptable trade-off: renames are rare, re-simulation of one node is fast.
 
 ```
 Phase A: Foundation
-  - BranchRef, ContentHash, CommitHash types              [Scala]
-  - IrminClient branch parameterization + getContents     [Scala→Irmin]
+  - ContentHash, CommitHash types (BranchRef exists)      [Scala]
+  - IrminClient branch parameterization                   [Scala→Irmin]
   - IrminClient branch operations (create/merge/revert)   [Scala→Irmin]
   - Repository branch threading                           [Scala]
   - ContentCache + NoOpEvictionStrategy                   [Scala]
@@ -1240,6 +1353,25 @@ protects the current PUT path now and does not conflict with this design.
   (DD-10) join the sealed `AppError` hierarchy; inexhaustive matches are
   compile **errors**, so every existing match site must be updated — budget
   for that sweep.
+- **Error-type collision — settle before Phase A, not during it.** DD-10 names
+  `MergeConflictError`, but `MergeConflict(branch: String, details: String)`
+  **already exists** as a `SimError` subtype in `AppError.scala`, with a 409
+  `ErrorResponse` mapping (`makeMergeConflictResponse`, domain `"scenarios"`)
+  and round-trip codec tests. Adding `MergeConflictError` alongside it would
+  give two types for one condition. Two ways out:
+  - **(a) Reuse `MergeConflict`,** drop `MergeConflictError` from DD-10. No new
+    type, no match-site churn for this case, and the 409 mapping already works.
+    Cost: the branch field stays a raw `String` rather than `BranchRef`,
+    against ADR-018 — and the decoder already notes the branch name is lost
+    through HTTP (`case "branch" => MergeConflict("unknown", message)`).
+  - **(b) Introduce `MergeConflictError`** carrying `BranchRef` and retire
+    `MergeConflict`. ADR-018-clean and fixes the lossy decode. Cost: touches
+    every existing match site (inexhaustive matches are compile errors), plus
+    the `ErrorResponse` codec and its tests.
+
+  Either way this renames or replaces an existing public type and reshapes an
+  error response — Decision Triggers 4 and 8. It is a user decision, and taking
+  it before Phase A avoids discovering it mid-sweep.
 - **Auth:** this design predates ADR-024/ADR-030. Scenario and history
   endpoints need the same `Checked`-permission wiring as existing tree
   endpoints, and DD-11 (workspace ↔ scenario ownership) is now partly an
@@ -1255,13 +1387,19 @@ Phase B alone ships a usable end-to-end slice (create scenario, switch,
 edit, switch back); C–E complete the feature (comparison, merge, history).
 But "live" has preconditions **outside** the phase outline:
 
-1. **Open decisions:** DD-5, DD-7, DD-8, DD-9, DD-11 must be closed (DD-14
-   is effectively closed → Option B, see Recommendation). DD-8 (branch
+1. **Open decisions:** DD-5, DD-7, DD-8, DD-9, DD-11 must be closed. (DD-14
+   was closed 2026-07-14 → Option B; see
+   [Decision](#decision-option-b-full-jvm--closed-2026-07-14).) DD-8 (branch
    state: header vs session, the two-tab problem) is the hardest UX call.
-2. **Deployment backend:** branching requires the Irmin repository. The
-   default compose stack runs in-memory, and `--profile persistence` is
-   currently a no-op for the server (TODO item 10) — the compose override
-   fix is a deployment prerequisite for this feature.
+2. **Deployment backend:** branching requires the Irmin repository, and the
+   default compose stack still runs in-memory. TODO item 10 (`--profile
+   persistence` was a no-op for the server) was **resolved 2026-07-12** by
+   completing the `--env-file .env.irmin` path — no longer a blocker; the
+   sentence above predated the fix by hours. The residual is TODO item 19:
+   that fix was verified **statically only** (`docker compose --env-file
+   .env.irmin.example config` resolves the backends), with no live
+   restart-persistence test yet. Scenario branching should not be the first
+   feature to exercise the persistent tier end-to-end.
 3. **In-memory story:** decide explicitly what the in-memory backend does —
    feature-flagged off (scenario endpoints return 404/NOT_SUPPORTED) or
    branch semantics emulated in memory. The plan currently has no answer;
