@@ -373,6 +373,17 @@ risk-trees/tree-1/
 
 Three data structures participate in cache resolution (Option B — DD-14).
 
+> **DD-15 is open and touches layers 2 and 3 below.** The portfolio cache key
+> (`merk-O`, `merk-P`) and the existence of portfolio entries in `ContentCache`
+> are **not settled**. This section documents the design as originally written
+> — DD-15 Option A — which the review found to be *dominated*: it is either
+> replaced by `sha256(ownJsonHash ++ childKeys)` (Option C) or portfolios are
+> not cached at all (Option B). Note in particular that layer 1's portfolio
+> hashes, labelled "can NOT be used as cache keys" below, are exactly the
+> ingredient Option C uses. Read
+> [A4 review](#a4-review-2026-07-14--dd-15-still-open) before implementing
+> anything here. Leaf keys (layer 1) are unaffected either way.
+
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │ 1. Leaf hash source                                                      │
@@ -930,6 +941,7 @@ key to `(ContentHash, configHash)`.
 | DD-8 | HTTP endpoint design | Branch state: client-side header (`X-Active-Branch`) vs server session. Two-tab problem. |
 | DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. |
 | DD-11 | Workspace ↔ scenario ownership | Convention-based prefix matching vs explicit ownership records. |
+| DD-15 | Portfolio result caching scope | Cache portfolio results at all in Phase A, and if so under which key? **B** (leaf results only — the A4 lean-down) vs **C** (`sha256(ownJsonHash ++ childKeys)`). Option A (design as written) is dominated by C. Full analysis, including three review objections that collapsed, in [A4 review](#a4-review-2026-07-14--dd-15-still-open). |
 
 ### Deferred
 
@@ -1071,8 +1083,27 @@ even though `name` does not affect simulation results.
 > ([A1](#a1-first-principle--state-it-explicitly),
 > [A2](#a2-dedupe-claim-precision--coupling-to-todo-item-12)), so preimage
 > narrowing is coupled to TODO item 12 and must be decided with it.
+>
+> **Conditional on item 12's fix direction (2026-07-14).** This finding's
+> premise — "`name` does not affect simulation results" — is true *today*
+> only because seeds derive from `leaf.id`. Item 12's candidate 1 (name hash)
+> would make `name` a **simulation input**, and this finding inverts: a rename
+> would no longer be "same answer recomputed" but a **different answer**. A
+> typo fix would move P99. The "impact: accepted" verdict below depends on the
+> answer being unchanged and does not survive that fix direction. Re-evaluate
+> this finding when item 12 is decided.
+>
+> **Resolved 2026-07-15 — premise resurrected.** Item 12's final decision
+> (boundary-assigned seed IDs stored on the node — see
+> `docs/dev/PLAN-SEED-IDENTITY.md`) rejected the name-hash direction. The
+> name influences **no** figure: result = f(seedVarId, params, children)
+> under the workspace's seedEntityId. This finding's premise is true again,
+> and stronger: with name and ULID both excluded from the content hash, a
+> rename preserves the cache too — the "unnecessary work on rename" impact
+> below disappears entirely.
 
-> Impact: Unnecessary work on rename. Accepted.
+> Impact: Unnecessary work on rename. Accepted — **subject to the item-12
+> caveat above**.
 
 ---
 
@@ -1250,6 +1281,30 @@ correct. The `distributionType` field is misleading for portfolios but has no
 impact on cache correctness. If drill-down is added later, the resolver can
 switch to `RiskResultGroup` for portfolio nodes.
 
+**Superseded 2026-07-14 — the enum is dead code, already slated for deletion.**
+This section overstates the problem, and DD-15 must not be argued from it.
+[PLAN-MONOID-RISKRESULT-AND-MITIGATION.md](../dev/PLAN-MONOID-RISKRESULT-AND-MITIGATION.md)
+recorded the assessment on 2026-06-18 under "Confirmed decisions":
+
+> **`LossDistributionType` enum can be deleted.** … No code outside that file
+> reads `.distributionType`. The class hierarchy (`RiskResult`/`RiskResultGroup`)
+> is the correct discriminator — pattern match on the subtype.
+
+Verified against the codebase 2026-07-14: the enum has exactly **four
+references and zero reads** — the declaration, the abstract member, and the two
+subclass constructor args, all inside `LossDistribution.scala`. Nothing reads
+the field, so it misleads no caller. (Beware the name collision when
+grepping: `RiskLeaf.distributionType` is an unrelated `String` field holding
+`"lognormal"`/`"expert"`.) Its pickup checklist files it under "Resolved — no
+action needed: confirmed dead code, safe to delete." It has **not** been
+deleted — deletion is gated behind the same plan's open Option 1 vs Option 2
+decision.
+
+Consequence for this design: **this is not a cache concern at all.** It is
+neither an argument for nor against caching portfolio results, and the "bonus"
+[A4](#a4-recommended-phase-a-lean-down-cache-leaf-results-only) claims from
+dissolving it is void.
+
 ---
 
 ## Review Addendum (2026-07-12)
@@ -1286,6 +1341,32 @@ bytes and true cross-node dedupe becomes sound. **Decide items 12 and this
 design together** — changing one silently changes the correctness terms of
 the other.
 
+**Added 2026-07-14 — dedupe and spurious correlation are the same event.**
+This section reads as if content-based seeds are pure upside for the cache.
+They are not, and the cost lands in the *domain*, not here. Content-derived
+seeds mean two leaves with the same seed inputs produce byte-identical trial
+streams. Aggregating them yields exactly 2× one risk rather than the
+convolution of two independents — **tail risk overstated, silently**. A cache
+hit across two distinct nodes and a pair of perfectly correlated risks are
+the *same event seen from two sides*: dedupe firing is the symptom that the
+model has made two risks identical. The cache stays correct; the model may
+not. ULIDs cannot produce this — uniqueness is structural. Any content-based
+seed can, unless uniqueness is enforced as a domain invariant on whatever
+field the seed derives from. Item 12's candidate 2 (parameter hash) is the
+worst case (every identical-spec leaf correlates); candidate 1 (name) is
+safer only because names *tend* to differ, which is not a guarantee.
+See TODO item 12 for the seed-path analysis.
+
+**Superseded 2026-07-15 — item 12 decided against derived seeds entirely.**
+Seeds are now boundary-assigned IDs stored on the node
+(`docs/dev/PLAN-SEED-IDENTITY.md`): per-tree uniqueness is *enforced at the
+boundary*, so within-tree accidental correlation is unrepresentable. The
+warning above survives only in its deliberate forms, which are features:
+scenario branches share seed IDs (common random numbers across scenarios),
+and caller-provided IDs may intentionally resurrect a deleted stream. Dedupe
+firing across such nodes is correct, expected behaviour — same event seen
+from two sides, now always by intent, never by accident.
+
 ### A3. The strongest motivation, previously unstated: scenario comparability
 
 Copy-based scenarios ("scenario = clone of the tree") are structurally broken
@@ -1320,6 +1401,115 @@ examples: Step 5 (time travel) changes from "0 sims, 0 aggs" to "0 sims,
 later behind `CacheScope` if profiling ever demands it. Bonus: only genuine
 leaves get cached, which dissolves the "always Leaf" `distributionType`
 mismatch for cache entries (see previous section).
+
+---
+
+#### A4 review (2026-07-14) — DD-15, still OPEN
+
+A4's proposal was reviewed against the code. **Three of the four objections
+raised in review collapsed; one survived.** The net effect is that A4's own
+central claim held, its Trap 1 did not, and a fourth option emerged that A4
+did not consider. Recorded here because the collapses are as load-bearing as
+the survivals — do not re-raise them without re-reading this.
+
+**A4's "aggregation is cheap" is correct. A reviewer claim of quadratic cost
+was wrong.** `reduce(RiskResult.combine)` over *k* children performs *k−1*
+pairwise merges, each rebuilding the trial-ID union map. With *U* = union
+size that is ~`2U(k−1)` lookups plus *k−1* throwaway maps, against `U·k` for
+the variadic `LossDistribution.merge(d*)`. **Both are O(U·k)** — the pairwise
+form costs a ~2× constant and allocation churn, not a complexity class. Full
+re-aggregation of an *n*-node tree ≈ `U·(n−1)`: sub-ms on the 5-node
+reference tree (A4 is simply right), order tens of ms at n=100, U=10K —
+linear, predictable, and **still unmeasured**. Note the plan's switch to
+`RiskResultGroup(id, children*)` picks up the variadic merge incidentally;
+[PLAN-MONOID-RISKRESULT-AND-MITIGATION.md](../dev/PLAN-MONOID-RISKRESULT-AND-MITIGATION.md)
+never cites performance as a reason and must not be quoted as if it does.
+
+**Trap 1 is much weaker than A4 states — largely withdrawn.** `RiskTransform`
+is typed `RiskResult => RiskResult`, and `RiskResultGroup` is a *sibling* of
+`RiskResult` under `LossDistribution`, not a subtype. The monoid plan's gap 5
+states it outright: *"Portfolio results (`RiskResultGroup`) cannot be directly
+transformed by `RiskTransform`."* **A portfolio structurally cannot carry a
+transform under B3**, the chosen mitigation stage. Portfolio-level mitigation
+is B4, scored *"Poor cache fit, must sit outside the monoid, High API risk"*
+and unchosen. A4's "mitigation transforms are heading exactly there" does not
+hold on the documented roadmap.
+
+Two further facts constrain any future attempt to hash a transform into a key:
+`RiskTransform` wraps an opaque `RiskResult => RiskResult` **function, not
+data** — it cannot be hashed without first reifying it into a spec type (new
+shared-module type → trigger #4). It works only because a transform's
+*parameters* would live in the node's stored JSON and the function is built
+*from* that JSON — so hashing the node's own record covers it. Leaf keys
+already do; portfolio keys do not. That asymmetry, not mitigation, is the
+durable point.
+
+**Trap 2 is speculative.** `LossDistribution.merge` is an outer join plus sum
+— genuinely commutative. `sort` only misleads under a weighted/ordered
+aggregation that nothing plans.
+
+**The surviving objection: the portfolio key is identity-free.** `merk-O =
+sha256(sort(childKeys))` contains nothing about O — not its `id`, not its
+`name`. It is safe **today only by accident**: leaf JSON includes `id`, node
+ids are ULIDs, so identity leaks upward transitively and no two portfolios
+share a child-key set. If TODO item 12 is fixed and `id` is dropped from the
+hashed bytes ([A2](#a2-dedupe-claim-precision--coupling-to-todo-item-12)),
+that protection vanishes:
+
+```
+tree-1:  O1 {name:"ops-risk"}    children: cyber(p=0.3), hw(p=0.1)
+tree-2:  O2 {name:"operations"}  children: cyber(p=0.3), hw(p=0.1)
+
+leaf keys identical (id gone, params equal):  abc111, abc222
+merk-O1 = sha256(sort([abc111,abc222])) == merk-O2      ← collide
+```
+
+The cached entry carries `nodeId = O1`; reading O2 returns it. The name
+difference is **invisible to the key**, because the key never looks at O's own
+record. The resolver only stamps the correct id on the *miss* path, and this
+survives the monoid refactor unchanged (`RiskResultGroup` takes `nodeId` at
+construction).
+
+**The `distributionType` bonus A4 claims is void.** The enum is confirmed dead
+code with deletion already sanctioned — see the ["always Leaf"
+section](#the-always-leaf-mismatch). Nothing reads it, so it misleads nobody.
+It is not a reason to prefer any option here.
+
+##### Option set
+
+| Option | Portfolio key | Verdict |
+|---|---|---|
+| **A** — design as written | `sha256(sort(childKeys))` | **Dominated by C.** C closes the identity gap for one extra hash input. No scenario favours A. |
+| **B** — A4 lean-down | *(portfolios not cached)* | Live. Dissolves the identity gap by not having portfolio entries; shrinks the cross-tenant shared-key surface to full-content hashes only; decouples Phase A from the resolver refactor. Pays the (modest, linear, unmeasured) re-aggregation cost on every read. Reduces caching below current `TreeCacheManager` behaviour → **trigger #5**. |
+| **C** — content-complete key | `sha256(ownJsonHash ++ childKeys in childIds order)` | Live. `ownJsonHash` is **already computed at layer 1 and discarded** (the `def444`/`ghi555` entries in [Hash structure](#hash-structure-after-first-load-on-main)) — so this is one extra input to a hash already being taken, with no canonicalisation and no re-serialisation (DD-14's binding rule holds). Covers own attributes, `childIds` order, `id` and `name`. **Preserves every number in the worked-examples table**: a branch where O's own record is unchanged still matches. |
+| **D** — B now, C later behind `CacheScope` | *(staged)* | Live but weakened: C's cost is low enough that staging buys little. |
+
+**Where the reviewer landed: C, weakly.** Its justification is now narrow —
+it rests on the identity gap plus near-zero cost, **not** on the mitigation
+story it was originally pitched on. "Include your own content in your own key"
+is correct regardless of how the monoid plan's B.7 decision 3 or item 12 land,
+so it is the conservative choice rather than a bet on the future. B remains
+fully coherent and is the smaller Phase A.
+
+**Not decided. The live choice is B vs C.**
+
+**Update 2026-07-15 — item 12's final decision constrains the key
+composition, whichever of B/C wins.** Seed identity is now boundary-assigned
+and stored on the node (`docs/dev/PLAN-SEED-IDENTITY.md`): `seedVarId` is
+part of the leaf's JSON, `seedEntityId` is workspace-level. Consequences for
+this decision:
+
+- The layer-1 "own JSON hash" now **contains the seed identity** — a node's
+  content hash fully determines its simulation result again (the identity
+  gap this review flagged is closed *from the domain side*). The hash must
+  **exclude** name and ULID (both are reference identity; neither affects
+  results — renames invalidate nothing).
+- `seedEntityId` enters as **cache scope** (the existing `CacheScope`
+  concept), not per-node content. Cross-workspace dedupe is impossible by
+  design (different entity → genuinely different figures); within-workspace
+  cross-tree hits (scenario branches, provided IDs) are correct dedupe.
+- B vs C itself remains open, but C's "include your own content in your own
+  key" now has the domain guarantee it previously lacked.
 
 ### A5. Scope honesty on UC4/UC6
 

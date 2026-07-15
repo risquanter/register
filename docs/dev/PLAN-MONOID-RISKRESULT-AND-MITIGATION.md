@@ -74,6 +74,14 @@ Audit of `modules/common/src/main/scala/.../domain/data/` and
    This is acceptable now (transforms are unwired in production), but must be resolved before
    `RiskTransform` is wired into any production path.
 6. **`RiskTransform` not on any call path** — no service, controller, or API accepts or applies one.
+7. **`RiskTransform` correctness defects (found 2026-07-14) — MUST FIX before rollout.** Four
+   defects on a type that is public API in a shared module. All are cheap **now**, while gap 6
+   holds and nothing calls it; each becomes a breaking change the moment it has a caller. Detail
+   and rationale in [B.8](#b8-risktransform-defects--must-fix-before-any-production-wiring).
+   - `scaleLosses`, `insurancePolicy` (×2) throw `IllegalArgumentException` via `require` —
+     violates correct-by-construction (ADR-001); raw primitives, no Iron refinement (Pass 0a).
+   - `given Equal[RiskTransform] = Equal.default` is reference equality on a lambda — an
+     unlawful instance sitting in `common`, waiting for a caller.
 
 ---
 
@@ -493,6 +501,61 @@ children).
 
 ---
 
+### B.8 `RiskTransform` defects — MUST FIX before any production wiring
+
+Code review 2026-07-14 against `RiskTransform.scala`. **Gap 6 is the opportunity, not an
+excuse**: `RiskTransform` is public API in a shared module (`commonJVM`/`commonJS`) with zero
+production callers. Every item below is a local edit today and a breaking signature change once
+a call path exists. Fix them **before** wiring, not as part of it — otherwise B.7 decision 3
+lands on top of a type that is already wrong.
+
+**1–3. `require` throws where the codebase uses typed errors.**
+
+| Site | Guard |
+|---|---|
+| `RiskTransform.scala:154` | `require(factor >= 0.0, "Scale factor must be non-negative")` |
+| `RiskTransform.scala:172` | `require(deductible >= 0, "Deductible must be non-negative")` |
+| `RiskTransform.scala:173` | `require(cap > deductible, "Cap must be greater than deductible")` |
+
+`require` throws `IllegalArgumentException` — an untyped, unrecoverable failure in a ZIO
+codebase whose stated rule is *validate once, at the boundary*, with smart constructors
+returning `Validation[ValidationError, T]` (ADR-001). Compounding it, `factor: Double` and
+`deductible`/`cap: Loss` arrive as **raw primitives with no Iron refinement** — a Pass 0a
+finding on its own (`code-quality-review`). A non-negative scale factor and a
+`cap > deductible` cross-field rule are exactly what the Iron + `Validation.validateWith`
+pattern exists to express.
+
+Note `RiskResult.combine:131` carries the same `require` smell, but it is already in the
+deletion set (A.5) — **do not fix it, delete it**. These three are not; they survive the
+refactor untouched unless fixed deliberately.
+
+**4. `given Equal[RiskTransform] = Equal.default` is unlawful.**
+
+`Equal.default` delegates to `==`. `RiskTransform` is a `case class` whose only field is a
+`RiskResult => RiskResult`, and case-class `equals` compares that field **by reference**.
+So `capLosses(1000) === capLosses(1000)` is `false` — two structurally identical transforms
+compare unequal, and `Equal`'s reflexivity-beyond-identity expectation is broken for every
+value the smart constructors produce.
+
+Not currently live: nothing consumes the instance, and the Identity law tests sidestep it by
+running both transforms and comparing `.outcomes` (`RiskTransformSpec:73`) rather than using
+`Equal`. That is why it survived — **the law suite does not exercise the instance it would
+most naturally use.** Either delete the instance, or reify transforms into a comparable spec
+(see below) and derive `Equal` from that.
+
+**Root cause shared by 4 and the caching question.** `RiskTransform` wraps an opaque function,
+so it is **not data**: it cannot be compared, serialised, hashed, or logged. This is precisely
+why B.7 decision 3 (pre- vs. post-mitigation caching) is hard — a content-addressed cache key
+cannot cover a transform that has no representation. It works only if a transform's
+*parameters* live in the node's stored JSON and the function is constructed *from* that JSON,
+making the JSON the reified spec. If B.7 decision 3 lands on caching post-mitigation results,
+a `sealed trait TransformSpec` (data) with an interpreter to `RiskTransform` (function) is the
+likely shape — new type in a shared module → **trigger #4**, and it subsumes defect 4.
+See `docs/scratch/milestone-2b-cache-and-decisions.md` §A4 review (DD-15) for the cache-side
+analysis, including why portfolios cannot carry a `RiskTransform` at all under B3 (gap 5).
+
+---
+
 ## PART C — Other improvement suggestions (beyond Monoid & Mitigation)
 
 Surfaced from the review; each is **informational**, none approved.
@@ -572,3 +635,20 @@ purely to close the door.
 6. **B.7 decision 4**: If mitigation becomes client-facing, open a separate ADR (trigger #1).
 7. Load `adr-constraints` before any implementation phase.
 8. End with mandatory `code-quality-review`.
+
+**MUST FIX before rollout — `RiskTransform` defects (gap 7, detail in [B.8](#b8-risktransform-defects--must-fix-before-any-production-wiring)):**
+
+These are **not** gated behind the Option 1 / Option 2 decision and do not touch the monoid
+work — they can land independently and should land first. `RiskTransform` is public API in a
+shared module with zero callers (gap 6); that window is what makes them free.
+
+- [ ] Replace the three `require` guards (`RiskTransform.scala:154, 172, 173`) with
+      Iron-refined parameters + smart constructors returning `Validation` (ADR-001).
+      Cross-field rule `cap > deductible` via `Validation.validateWith`, not `.flatMap`.
+      Public signature change → **trigger #4** if the refined types are new.
+- [ ] Delete or replace `given Equal[RiskTransform] = Equal.default` (`RiskTransform.scala:88`)
+      — currently reference equality on a lambda.
+- [ ] Add a law-suite case that exercises `Equal[RiskTransform]` directly if the instance is
+      kept. The current suite compares `.outcomes` and would not have caught this.
+- [ ] **Blocking gate:** none of the above may be deferred past `RiskTransform`'s first
+      production call path. After that they are breaking changes.

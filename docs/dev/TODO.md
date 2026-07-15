@@ -503,7 +503,7 @@ to any code touched by that plan (only `RiskTreeKnowledgeBase`,
 
 ---
 
-## 12. Simulation outcomes are not reproducible across re-creations of the same tree
+## 12. Simulation outcomes are not reproducible across re-creations of the same tree — DECIDED 2026-07-15
 
 **Observed (2026-05-03).**
 `DemoEnterpriseScriptSpec` produces different P95/P99 figures — and
@@ -557,29 +557,76 @@ provisionality was known.
   provenance is preserved — but this requires callers to explicitly
   replay from provenance rather than re-simulating from parameters.
 
-**Direction (not yet decided):**
-The correct fix is to derive `entitySeed` from stable content rather
-than from the ULID allocation timestamp. Natural candidates:
+**DECIDED (2026-07-15, final after two same-day revisions):
+boundary-assigned seed identities, stored on the node.**
 
-- **Leaf name hash** — `leaf.name.value.hashCode.toLong`. Two leaves
-  with the same name always get the same seed; rename = seed change
-  (arguably correct: renamed leaf is a conceptually different entity).
-- **Distribution-parameter hash** — hash of
-  `(name, distributionType, probability, minLoss, maxLoss, percentiles, quantiles)`.
-  Two leaves with identical spec always get identical outcomes.
-- **Explicit caller-supplied seed** — add an optional `seed` field to
-  `RiskLeafDefinitionRequest`; server uses it if present, falls back to
-  a content hash otherwise. This is the most flexible option and
-  cleanly separates "I want reproducibility" from "I want a fresh run".
+Every leaf carries a **`seedVarId`** (server-assigned at the creation
+boundary in sorted-name order, or optionally caller-provided; immutable
+once assigned; unique **per tree**; never auto-reused after deletion via
+a persisted high-water mark). Every workspace carries a
+**`seedEntityId`** (global counter, or optionally provided; workspace =
+organizational boundary = the HDR paper's Entity axis). Streams:
+`occurrence = 2·seedVarId`, `loss = 2·seedVarId+1`, entity = the
+workspace's, derived in exactly one place and shared with provenance.
+Portfolios carry **no** seed ID (no stochastic behaviour — retracted).
+**No hashing anywhere.** App identity (ULID) and stochastic identity are
+deliberately separate types with separate lifecycles.
 
-Whichever approach is chosen, it must be reflected in `NodeProvenance`
-(the `entityId` field already captures the seed used; the _derivation
-rule_ should be documented there too) and the `README.md` "Counter-based
-PRNG" bullet should be updated to state exactly what the seed is derived
-from.
+Implementation plan (full rationale, HDR paper findings, verified
+arithmetic, decision log): [PLAN-SEED-IDENTITY.md](./PLAN-SEED-IDENTITY.md).
+**Implementation not started — explicit user gate.**
 
-**Status:** root cause confirmed, fix direction not yet decided. Blocks
-reliable `DemoEnterpriseScriptSpec` assertions in combined test runs.
+**Decision history (do not re-litigate):**
+1. *Name-only + 64-bit truncated SHA-256* (locked earlier 2026-07-15) —
+   killed by the HDR paper's magnitude budget: IDs are 8 **decimal**
+   digits (< 10⁸); 64-bit values are ~3.5×10¹⁰ over the dividend limit
+   and silently wrap `Long`, voiding the Dieharder validation.
+2. *8-digit name hash + boundary collision rejection* — killed by
+   unrecoverable UX ("rename until it stops colliding" is not
+   validation) and birthday risk (2% @ 1,000 leaves).
+3. *Assigned IDs* (this decision) — the paper's own "chart of accounts"
+   model; collision-free by construction; content-determined because the
+   ID is stored **in** the node content.
+
+**Findings that stand regardless (details in the plan):**
+- **The current code violates HDR's magnitude budget today** —
+  `String.hashCode` values are 21× the 10⁸ ID budget; lane dividends 8×
+  over the 10¹⁵ limit; HDR's statistical guarantees do not currently
+  apply. Fixed as a side effect.
+- **Provenance var-IDs are wrong for ~half of all leaves**
+  (`Simulator.scala:209-210` records `entitySeed.hashCode + 1000/2000`;
+  [RiskSampler.scala:93](../../modules/server/src/main/scala/com/risquanter/register/simulation/RiskSampler.scala#L93)
+  uses `riskHash + 1000/2000`; `Long.hashCode ≠` the value outside Int
+  range). Provenance-based replay — this item's stated escape hatch —
+  is broken today. No test covers it; the plan adds one. Fixed by
+  construction (single derivation site).
+- The seed derivation was duplicated at two sites
+  (`Simulator.scala:194`, `RiskSampler.scala:93`); fixing only the one
+  this item originally named would have left results flaky.
+
+**Semantics locked with the decision:**
+- Name uniqueness (`RiskTreeRequests.requireUniqueNames`, both write
+  paths) remains enforced but now serves **reference semantics only** —
+  the name influences no figure. Renames preserve figures *and* cache.
+- Reproducibility scope **narrowed by user decision**: within-workspace
+  recreation is reproducible; same spec in two workspaces differs **by
+  design** (org isolation); cross-workspace/deployment reproduction goes
+  via explicit seed-ID provision (export/import round-trip).
+- `seedVarId` uniqueness is per-tree, **not** workspace-wide: scenario
+  branches must share seed IDs so unedited nodes produce identical draws
+  (common random numbers across scenarios — milestone 2b's premise).
+- Content addressing (DD-15): seed IDs **in** the node content hash;
+  name and ULID **out**; `seedEntityId` as cache scope.
+- **API change acknowledged (trigger #1):** optional `seedVarId` /
+  `seedEntityId` on requests; both included in responses and exports.
+
+**Status:** PLAN LOCKED 2026-07-15 — approved in full, no open decisions.
+Migration resolved as moot (no data survives; wipe and recreate demo
+data). Version bump: MAJOR (user-decided, executed at completion).
+Even/odd stream split re-confirmed after collision arithmetic was
+verified for both candidate layouts. Remaining plan-§12 items are
+Signature-Echo-time details only. Implementation awaits an explicit go
+signal.
 
 ---
 
