@@ -4,9 +4,9 @@ import zio.*
 import zio.test.*
 import io.github.iltotore.iron.*
 
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -55,6 +55,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   }
   
   private val stubWsId: WorkspaceId = WorkspaceId(safeId("test-workspace-live"))
+  private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
   private val stubRepoLayer = ZLayer.fromFunction(() => makeStubRepo)
 
   // Valid request with single leaf node
@@ -77,6 +78,51 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       )
     )
   )
+
+  // ── Seed-identity test helpers ──────────────────────────────────────
+
+  private def leafDef(name: String, parent: String): RiskLeafDefinitionRequest =
+    RiskLeafDefinitionRequest(
+      name = name,
+      parentName = Some(parent),
+      probability = 0.25,
+      distributionShape = DistributionShapeRequest(
+        distributionType = "lognormal",
+        percentiles = None, quantiles = None, terms = None,
+        minLoss = Some(1000L), maxLoss = Some(50000L)
+      )
+    )
+
+  /** Two-leaf tree under "Seed Root": "Cyber Attack" and "Fraud". */
+  private def seedTreeRequest(treeName: String): RiskTreeDefinitionRequest =
+    RiskTreeDefinitionRequest(
+      name = treeName,
+      portfolios = Seq(RiskPortfolioDefinitionRequest("Seed Root", None)),
+      leaves = Seq(leafDef("Cyber Attack", "Seed Root"), leafDef("Fraud", "Seed Root"))
+    )
+
+  private def seedsByName(tree: RiskTree): Map[String, Long] =
+    tree.nodes.collect { case l: RiskLeaf => l.name.value -> l.seedVarId.value }.toMap
+
+  private def leafIdByName(tree: RiskTree, name: String): String =
+    tree.nodes.collectFirst { case l: RiskLeaf if l.name.value == name => l.id.value }.get
+
+  private def portfolioUpd(tree: RiskTree, name: String): RiskPortfolioUpdateRequest =
+    val id = tree.nodes.collectFirst { case p: RiskPortfolio if p.name.value == name => p.id.value }.get
+    RiskPortfolioUpdateRequest(id = id, name = name, parentName = None)
+
+  private def leafUpd(id: String, name: String, parent: String): RiskLeafUpdateRequest =
+    RiskLeafUpdateRequest(
+      id = id,
+      name = name,
+      parentName = Some(parent),
+      probability = 0.25,
+      distributionShape = DistributionShapeRequest(
+        distributionType = "lognormal",
+        percentiles = None, quantiles = None, terms = None,
+        minLoss = Some(1000L), maxLoss = Some(50000L)
+      )
+    )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
     suite("RiskTreeServiceLive")(
@@ -203,9 +249,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           rootId = tree.rootId
           
           // Test at multiple thresholds
-          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 1000L))   // Low threshold
-          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 25000L))  // Mid threshold
-          prob3 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 50000L))  // High threshold
+          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 1000L, testEntity))   // Low threshold
+          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 25000L, testEntity))  // Mid threshold
+          prob3 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 50000L, testEntity))  // High threshold
         } yield (prob1, prob2, prob3)
 
         program.assert { case (prob1, prob2, prob3) =>
@@ -224,8 +270,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           rootId = tree.rootId
           
           // Call twice with same threshold
-          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L))
-          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L))
+          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity))
+          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity))
         } yield (prob1, prob2)
 
         program.assert { case (prob1, prob2) =>
@@ -276,7 +322,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           idsByName = tree.index.nodes.map((nid, n) => n.name.value.toString -> nid).toMap
           leaf1Id = idsByName("Leaf 1")
           leaf2Id = idsByName("Leaf 2")
-          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(leaf1Id, leaf2Id)))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(leaf1Id, leaf2Id), testEntity))
         } yield curves
 
         program.assert { curves =>
@@ -325,7 +371,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           nodeAId = idsByName("Node A")
           nodeBId = idsByName("Node B")
           
-          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(nodeAId, nodeBId)))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(nodeAId, nodeBId), testEntity))
         } yield (curves, nodeAId, nodeBId)
 
         program.assert { case (curves, nodeAId, nodeBId) =>
@@ -342,10 +388,152 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("getLECCurvesMulti rejects empty set") {
         for {
           tree <- service(_.create(stubWsId, validRequest))
-          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set.empty)).exit
+          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set.empty, testEntity)).exit
         } yield assertTrue(
           exit.isFailure
         )
+      },
+
+      // ========================================
+      // Seed identity assignment (PLAN-SEED-IDENTITY §5)
+      // ========================================
+
+      test("create assigns seedVarIds 1..n in sorted-name order and sets the watermark") {
+        val request = RiskTreeDefinitionRequest(
+          name = "Seed Order Tree",
+          portfolios = Seq(RiskPortfolioDefinitionRequest("Seed Root", None)),
+          leaves = Seq(
+            leafDef("Zeta Risk", "Seed Root"),
+            leafDef("Alpha Risk", "Seed Root"),
+            leafDef("Mid Risk", "Seed Root")
+          )
+        )
+        val program = service(_.create(stubWsId, request))
+        program.assert { tree =>
+          val seeds = seedsByName(tree)
+          seeds == Map("Alpha Risk" -> 1L, "Mid Risk" -> 2L, "Zeta Risk" -> 3L) &&
+            tree.seedVarHighWater.value == 3L
+        }
+      },
+
+      test("recreating the same tree yields the same seedVarIds (item 12 core property)") {
+        val request = seedTreeRequest("Recreate A")
+        val program = for {
+          first  <- service(_.create(stubWsId, request))
+          second <- service(_.create(stubWsId, seedTreeRequest("Recreate B")))
+        } yield (first, second)
+        program.assert { case (first, second) =>
+          seedsByName(first) == seedsByName(second)
+        }
+      },
+
+      test("update preserves surviving leaves' seedVarIds, including across a rename") {
+        val program = for {
+          created <- service(_.create(stubWsId, seedTreeRequest("Rename Tree")))
+          leafId   = leafIdByName(created, "Cyber Attack")
+          updated <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
+            name = "Rename Tree",
+            portfolios = Seq(portfolioUpd(created, "Seed Root")),
+            leaves = Seq(
+              leafUpd(leafId, "Cyber Attack Renamed", "Seed Root"),
+              leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")
+            ),
+            newPortfolios = Seq.empty,
+            newLeaves = Seq.empty
+          )))
+        } yield (created, updated)
+        program.assert { case (created, updated) =>
+          val before = seedsByName(created)
+          val after  = seedsByName(updated)
+          after("Cyber Attack Renamed") == before("Cyber Attack") &&
+            after("Fraud") == before("Fraud") &&
+            updated.seedVarHighWater == created.seedVarHighWater
+        }
+      },
+
+      test("create with provided seedVarIds: fixed IDs kept, auto-assignment continues above them") {
+        val request = RiskTreeDefinitionRequest(
+          name = "Provided Seed Tree",
+          portfolios = Seq(RiskPortfolioDefinitionRequest("Seed Root", None)),
+          leaves = Seq(
+            leafDef("Pinned Risk", "Seed Root").copy(seedVarId = Some(5L)),
+            leafDef("Auto Beta", "Seed Root"),
+            leafDef("Auto Alpha", "Seed Root")
+          )
+        )
+        val program = service(_.create(stubWsId, request))
+        program.assert { tree =>
+          seedsByName(tree) == Map("Pinned Risk" -> 5L, "Auto Alpha" -> 6L, "Auto Beta" -> 7L) &&
+            tree.seedVarHighWater.value == 7L
+        }
+      },
+
+      test("update: a provided seedVarId clashing with a surviving leaf's ID is rejected (§5.1)") {
+        val program = for {
+          created <- service(_.create(stubWsId, seedTreeRequest("Clash Tree")))
+          clashId  = seedsByName(created)("Cyber Attack")
+          exit <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
+            name = "Clash Tree",
+            portfolios = Seq(portfolioUpd(created, "Seed Root")),
+            leaves = Seq(
+              leafUpd(leafIdByName(created, "Cyber Attack"), "Cyber Attack", "Seed Root"),
+              leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")
+            ),
+            newPortfolios = Seq.empty,
+            newLeaves = Seq(leafDef("Usurper", "Seed Root").copy(seedVarId = Some(clashId)))
+          ))).exit
+        } yield exit
+        program.assert {
+          case Exit.Failure(cause) =>
+            cause.failureOption.exists {
+              case ValidationFailed(errors) =>
+                errors.exists(e =>
+                  e.code == ValidationErrorCode.DUPLICATE_VALUE &&
+                  e.message.contains("used by multiple nodes"))
+              case _ => false
+            }
+          case Exit.Success(_) => false
+        }
+      },
+
+      test("update: a provided seedVarId may deliberately resurrect a freed ID (§5.1)") {
+        val program = for {
+          created <- service(_.create(stubWsId, seedTreeRequest("Resurrect Tree")))
+          freedId  = seedsByName(created)("Cyber Attack")
+          // Delete "Cyber Attack", then re-add a leaf explicitly claiming its freed ID.
+          after <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
+            name = "Resurrect Tree",
+            portfolios = Seq(portfolioUpd(created, "Seed Root")),
+            leaves = Seq(leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")),
+            newPortfolios = Seq.empty,
+            newLeaves = Seq(leafDef("Cyber Attack Reborn", "Seed Root").copy(seedVarId = Some(freedId)))
+          )))
+        } yield (freedId, created, after)
+        program.assert { case (freedId, created, after) =>
+          seedsByName(after)("Cyber Attack Reborn") == freedId &&
+            after.seedVarHighWater == created.seedVarHighWater
+        }
+      },
+
+      test("update: a new leaf gets highWater+1; a deleted leaf's ID is never reused") {
+        val program = for {
+          created <- service(_.create(stubWsId, seedTreeRequest("HighWater Tree")))
+          // Delete "Cyber Attack" (drop it), add "New Risk"
+          afterDelete <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
+            name = "HighWater Tree",
+            portfolios = Seq(portfolioUpd(created, "Seed Root")),
+            leaves = Seq(leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")),
+            newPortfolios = Seq.empty,
+            newLeaves = Seq(leafDef("New Risk", "Seed Root"))
+          )))
+        } yield (created, afterDelete)
+        program.assert { case (created, after) =>
+          val freedId = seedsByName(created)("Cyber Attack")
+          val newId   = seedsByName(after)("New Risk")
+          newId == created.seedVarHighWater.value + 1 &&
+            newId != freedId &&
+            after.seedVarHighWater.value == newId
+        }
       }
     ).provide(
       RiskTreeServiceLive.layer,

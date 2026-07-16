@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
 import java.time.{Duration, Instant}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, SeedEntityId}
 
 /** Workspace durable record — association/hash index.
   *
@@ -12,6 +12,11 @@ import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceK
   * Security-relevant fields (OWASP cross-reference):
   * - `lastAccessedAt` (A10): tracks idle timeout
   * - `idleTimeout` + `ttl` (A11): dual timeout — absolute AND idle
+  *
+  * `seedEntityId` is the workspace's stochastic identity: the HDR generator's
+  * Entity axis, shared by every simulation in this workspace. Assigned from the
+  * store's monotonic counter (or provided at creation), globally unique per
+  * deployment, immutable (PLAN-SEED-IDENTITY §5.2). Never derived from the ULID.
   */
 final case class WorkspaceRecord(
   id: WorkspaceId,
@@ -20,7 +25,8 @@ final case class WorkspaceRecord(
   createdAt: Instant,
   lastAccessedAt: Instant,
   ttl: Duration,
-  idleTimeout: Duration
+  idleTimeout: Duration,
+  seedEntityId: SeedEntityId.SeedEntityId
 ):
   /** Check if this workspace has expired via EITHER timeout mechanism (A11).
     *

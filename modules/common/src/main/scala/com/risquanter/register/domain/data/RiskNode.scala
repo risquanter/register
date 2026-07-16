@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
 import sttp.tapir.Schema
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, NonNegativeLong, NodeId, PositiveInt}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, NonNegativeLong, NodeId, PositiveInt, SeedVarId}
 import com.risquanter.register.domain.data.iron.ValidationMessages
 
 /** Recursive ADT representing a risk hierarchy tree.
@@ -71,6 +71,10 @@ object RiskNode {
   * @param quantiles Expert opinion: loss values in millions (expert mode only)
   * @param minLoss Lognormal: 80% CI lower bound in millions (lognormal mode only)
   * @param maxLoss Lognormal: 80% CI upper bound in millions (lognormal mode only)
+  * @param seedVarId Stochastic identity: selects the leaf's HDR random streams
+  *                  (occurrence = 2k, loss = 2k+1). Assigned at the creation
+  *                  boundary, immutable, unique per tree. Independent of the
+  *                  app identity (SafeId) — see PLAN-SEED-IDENTITY.md.
   */
 final case class RiskLeaf private (
   @jsonField("id") safeId: SafeId.SafeId,
@@ -82,7 +86,8 @@ final case class RiskLeaf private (
   quantiles: Option[Array[Double]],
   minLoss: Option[NonNegativeLong],
   maxLoss: Option[NonNegativeLong],
-  terms: Option[PositiveInt]
+  terms: Option[PositiveInt],
+  seedVarId: SeedVarId.SeedVarId
 ) extends RiskNode {
   // Defense in depth: invariant check as safety net
   // Should never trigger if custom decoder works correctly
@@ -121,10 +126,11 @@ object RiskLeaf {
     minLoss: Option[Long] = None,
     maxLoss: Option[Long] = None,
     parentId: Option[NodeId] = None,
-    terms: Option[Int] = None
+    terms: Option[Int] = None,
+    seedVarId: Long
   ): RiskLeaf = {
     // Unsafe: Assumes valid input (for backward compatibility only)
-    create(id, name, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, parentId = parentId, terms = terms)
+    create(id, name, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, parentId = parentId, terms = terms, seedVarId = seedVarId)
       .toEither
       .fold(
         errors => throw new IllegalArgumentException(s"Invalid RiskLeaf: $errors"),
@@ -145,9 +151,10 @@ object RiskLeaf {
     minLoss: Option[NonNegativeLong],
     maxLoss: Option[NonNegativeLong],
     parentId: Option[NodeId],
-    terms: Option[PositiveInt]
+    terms: Option[PositiveInt],
+    seedVarId: SeedVarId.SeedVarId
   ): RiskLeaf =
-    new RiskLeaf(id, name, parentId, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, terms)
+    new RiskLeaf(id, name, parentId, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, terms, seedVarId)
   
   /**
    * Smart constructor - validates all fields and constructs RiskLeaf with Iron types.
@@ -160,6 +167,7 @@ object RiskLeaf {
    * @param quantiles Optional array of loss quantiles (expert mode)
    * @param minLoss Optional min loss (lognormal mode, will be refined to NonNegativeLong)
    * @param maxLoss Optional max loss (lognormal mode, will be refined to NonNegativeLong)
+   * @param seedVarId Stochastic identity (will be refined to SeedVarId)
    * @return Validation with all errors accumulated, or valid RiskLeaf
    */
   def create(
@@ -173,7 +181,8 @@ object RiskLeaf {
     maxLoss: Option[Long] = None,
     parentId: Option[NodeId] = None,
     fieldPrefix: String = "root",
-    terms: Option[Int] = None
+    terms: Option[Int] = None,
+    seedVarId: Long
   ): Validation[com.risquanter.register.domain.errors.ValidationError, RiskLeaf] = {
     
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
@@ -184,6 +193,7 @@ object RiskLeaf {
     val nameV = toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
     val probV = toValidation(ValidationUtil.refineOccurrenceProbability(probability, s"$fieldPrefix.probability"))
     val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
+    val seedVarIdV = toValidation(ValidationUtil.refineSeedVarId(seedVarId, s"$fieldPrefix.seedVarId"))
     val termsV: Validation[ValidationError, Option[PositiveInt]] = terms match {
       case Some(v) => toValidation(ValidationUtil.refinePositiveInt(v, s"$fieldPrefix.terms")).map(Some(_))
       case None    => Validation.succeed(None)
@@ -211,8 +221,8 @@ object RiskLeaf {
     }
     
     // Step 3: Combine all validations (parallel accumulation where possible)
-    Validation.validateWith(idV, nameV, probV, distTypeV, termsV, crossFieldV) {
-      case (validId, validName, validProb, validDistType, validTerms, (validMinLoss, validMaxLoss)) =>
+    Validation.validateWith(idV, nameV, probV, distTypeV, seedVarIdV, termsV, crossFieldV) {
+      case (validId, validName, validProb, validDistType, validSeedVarId, validTerms, (validMinLoss, validMaxLoss)) =>
         new RiskLeaf(
           safeId = validId,
           safeName = validName,
@@ -223,7 +233,8 @@ object RiskLeaf {
           quantiles = quantiles,
           minLoss = validMinLoss,
           maxLoss = validMaxLoss,
-          terms = validTerms
+          terms = validTerms,
+          seedVarId = validSeedVarId
         )
     }
   }
@@ -360,7 +371,8 @@ object RiskLeaf {
     quantiles: Option[Array[Double]],
     minLoss: Option[Long],
     maxLoss: Option[Long],
-    terms: Option[Int]
+    terms: Option[Int],
+    seedVarId: Long
   )
   private object RiskLeafRaw {
     given rawCodec: JsonCodec[RiskLeafRaw] = DeriveJsonCodec.gen[RiskLeafRaw]
@@ -379,7 +391,8 @@ object RiskLeaf {
         raw.percentiles, raw.quantiles, raw.minLoss, raw.maxLoss,
         parentId = validParentId,
         fieldPrefix = s"riskLeaf[id=${raw.id}]",
-        terms = raw.terms
+        terms = raw.terms,
+        seedVarId = raw.seedVarId
       ).toEither.left.map(errors => errors.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; "))
     }
   }
@@ -396,7 +409,8 @@ object RiskLeaf {
       quantiles = leaf.quantiles,
       minLoss = leaf.minLoss.map(identity),
       maxLoss = leaf.maxLoss.map(identity),
-      terms = leaf.terms.map(_.toInt)
+      terms = leaf.terms.map(_.toInt),
+      seedVarId = leaf.seedVarId.value
     )
   }
   

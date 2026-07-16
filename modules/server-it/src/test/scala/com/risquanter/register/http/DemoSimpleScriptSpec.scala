@@ -17,8 +17,10 @@ object DemoSimpleScriptSpec extends ZIOSpecDefault:
 
   private val harnessLayer = DemoSpecSupport.harnessLayer
 
-  /** Reproduces the tree from Step 1 of demo-simple-{httpie,curl}.sh */
-  private val demoTreeRequest = RiskTreeDefinitionRequest(
+  /** Reproduces the tree from Step 1 of demo-simple-{httpie,curl}.sh.
+    * Shared with SeedReproducibilityItSpec (order-independence, PLAN-SEED-IDENTITY §11).
+    */
+  private[http] val demoTreeRequest = RiskTreeDefinitionRequest(
     name = "Operational Risk Model",
     portfolios = Seq(
       RiskPortfolioDefinitionRequest(name = "Operations",       parentName = None),

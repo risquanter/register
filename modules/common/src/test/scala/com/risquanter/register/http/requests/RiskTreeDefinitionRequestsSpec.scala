@@ -291,6 +291,114 @@ object RiskTreeRequestsSpec extends ZIOSpecDefault {
       assertFailsWith(result)("reserved query symbol")
     },
 
+    // ── Seed identity boundary rules (PLAN-SEED-IDENTITY §5.1/§5.3/§7, Layer 3) ──
+
+    test("resolveCreate carries provided seedVarIds keyed by refined leaf name") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
+        leaves = Seq(
+          validLeafDef("L1", Some("Root")).copy(seedVarId = Some(7L)),
+          validLeafDef("L2", Some("Root")) // no ID — server assigns
+        )
+      )
+
+      val result = resolveCreate(req, () => safeId("generated"))
+
+      result match
+        case Validation.Success(_, resolved) =>
+          assertTrue(
+            resolved.providedSeedVarIds.map { case (n, s) => n.value -> s.value } == Map("L1" -> 7L)
+          )
+        case Validation.Failure(_, errors) =>
+          assertTrue(false).label(errors.map(_.message).mkString("; "))
+    },
+
+    test("resolveCreate rejects an out-of-range provided seedVarId") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
+        leaves = Seq(validLeafDef("L1", Some("Root")).copy(seedVarId = Some(50000000L)))
+      )
+
+      assertFailsWith(resolveCreate(req, () => safeId("generated")))("seedVarId must be between 1 and 49999999")
+    },
+
+    test("resolveCreate rejects duplicate provided seedVarIds within the tree") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
+        leaves = Seq(
+          validLeafDef("L1", Some("Root")).copy(seedVarId = Some(5L)),
+          validLeafDef("L2", Some("Root")).copy(seedVarId = Some(5L))
+        )
+      )
+
+      assertFailsWith(resolveCreate(req, () => safeId("generated")))("seedVarId 5 is used by multiple nodes", "L1", "L2")
+    },
+
+    test("resolveCreate accumulates seed range errors with independent field errors") {
+      val req = RiskTreeDefinitionRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioDefinitionRequest(name = "Root", parentName = None)),
+        leaves = Seq(
+          validLeafDef("L1", Some("Root")).copy(seedVarId = Some(0L), probability = 1.5)
+        )
+      )
+
+      assertFailsWith(resolveCreate(req, () => safeId("generated")))(
+        "seedVarId must be between 1 and 49999999",
+        "probability"
+      )
+    },
+
+    test("resolveUpdate rejects seedVarId on an existing leaf (immutability §5.3)") {
+      val req = RiskTreeUpdateRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate("01H0R8Z3F5J2N4R8Z3F5J2N4R9", "Leaf1", Some("Root")).copy(seedVarId = Some(3L))),
+        newPortfolios = Seq.empty,
+        newLeaves = Seq.empty
+      )
+
+      assertFailsWith(resolveUpdate(req, () => safeId("generated")))("seedVarId is immutable once assigned")
+    },
+
+    test("resolveUpdate carries provided seedVarIds for new leaves only") {
+      val req = RiskTreeUpdateRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
+        leaves = Seq(validLeafUpdate("01H0R8Z3F5J2N4R8Z3F5J2N4R9", "Leaf1", Some("Root"))),
+        newPortfolios = Seq.empty,
+        newLeaves = Seq(validLeafDef("Leaf2", Some("Root")).copy(seedVarId = Some(9L)))
+      )
+
+      val result = resolveUpdate(req, () => safeId("generated"))
+
+      result match
+        case Validation.Success(_, resolved) =>
+          assertTrue(
+            resolved.providedSeedVarIds.map { case (n, s) => n.value -> s.value } == Map("Leaf2" -> 9L)
+          )
+        case Validation.Failure(_, errors) =>
+          assertTrue(false).label(errors.map(_.message).mkString("; "))
+    },
+
+    test("resolveUpdate rejects duplicate provided seedVarIds among new leaves") {
+      val req = RiskTreeUpdateRequest(
+        name = "Tree",
+        portfolios = Seq(RiskPortfolioUpdateRequest(id = "01H0R8Z3F5J2N4R8Z3F5J2N4R8", name = "Root", parentName = None)),
+        leaves = Seq.empty,
+        newPortfolios = Seq.empty,
+        newLeaves = Seq(
+          validLeafDef("N1", Some("Root")).copy(seedVarId = Some(4L)),
+          validLeafDef("N2", Some("Root")).copy(seedVarId = Some(4L))
+        )
+      )
+
+      assertFailsWith(resolveUpdate(req, () => safeId("generated")))("seedVarId 4 is used by multiple nodes", "N1", "N2")
+    },
+
     test("resolveUpdate preserves existing node ids verbatim (time-travel identity precondition)") {
       // The whole point of the existing buckets: a loaded node's id must survive
       // resolution unchanged so its Irmin path is rewritten in place, not churned.

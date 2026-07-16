@@ -112,6 +112,98 @@ object PRNGCounter:
     /** Extract underlying Long value */
     def value: Long = counter
 
+// ============================================================================
+// Seed Identity Types (TODO item 12 / PLAN-SEED-IDENTITY.md)
+// ============================================================================
+// Stochastic identity, deliberately separate from app identity (ULID):
+// assigned at the creation boundary, stored on the owning aggregate, immutable
+// once assigned. Ranges enforce the HDR paper's 8-decimal-digit ID budget
+// (Hubbard WSC 2019) — values at or above 10^8 break the generator's
+// modulus-precision guarantees. Deliberately no arithmetic operations:
+// stream derivation lives in exactly one place (server-side).
+
+// SeedEntityId: workspace-level HDR Entity axis.
+// 0 is the paper's reserved shared default and is excluded from assignment.
+type SeedEntityIdLong = Long :| (GreaterEqual[1L] & Less[100000000L])
+
+object SeedEntityId:
+  opaque type SeedEntityId = SeedEntityIdLong
+
+  object SeedEntityId:
+    def apply(v: SeedEntityIdLong): SeedEntityId = v
+    def unapply(id: SeedEntityId): Option[SeedEntityIdLong] = Some(id)
+
+  extension (id: SeedEntityId)
+    def value: Long = id
+
+  /** Convenience constructor from plain Long (range-validated). */
+  def fromLong(v: Long): Either[List[ValidationError], SeedEntityId] =
+    ValidationUtil.refineSeedEntityId(v)
+
+  // JSON codecs (companion object placement ensures implicit scope).
+  // Wire format is a JSON number (ADR-001: primitives on the wire).
+  given JsonEncoder[SeedEntityId] = JsonEncoder[Long].contramap(_.value)
+  given JsonDecoder[SeedEntityId] = JsonDecoder[Long].mapOrFail(v =>
+    fromLong(v).left.map(_.mkString(", ")))
+
+// SeedVarId: leaf-level HDR Var axis. Streams derive by even/odd doubling
+// (occurrence = 2k, loss = 2k+1), so the ID must stay below 5*10^7 to keep
+// 2k+1 inside the 10^8 budget.
+type SeedVarIdLong = Long :| (GreaterEqual[1L] & Less[50000000L])
+
+object SeedVarId:
+  opaque type SeedVarId = SeedVarIdLong
+
+  object SeedVarId:
+    def apply(v: SeedVarIdLong): SeedVarId = v
+    def unapply(id: SeedVarId): Option[SeedVarIdLong] = Some(id)
+
+  extension (id: SeedVarId)
+    def value: Long = id
+
+  /** Convenience constructor from plain Long (range-validated). */
+  def fromLong(v: Long): Either[List[ValidationError], SeedVarId] =
+    ValidationUtil.refineSeedVarId(v)
+
+  /** The per-tree distinctness rule (PLAN-SEED-IDENTITY §5.1), defined once.
+    *
+    * Both enforcement layers delegate here — the request boundary
+    * (RiskTreeRequests, field "request.seedVarIds", pre-assignment 400) and the
+    * RiskTree smart constructor (field "nodes.seedVarId", safety net for
+    * programmatic and store-loaded trees). One error per duplicated ID, naming
+    * every holder, sorted on both axes for deterministic messages.
+    */
+  def requireDistinct(
+    holders: Seq[(String, SeedVarId)],
+    field: String
+  ): zio.prelude.Validation[ValidationError, Unit] = {
+    import zio.prelude.Validation
+    val duplicates = holders
+      .groupBy { case (_, id) => id.value }
+      .filter { case (_, group) => group.size > 1 }
+      .toList
+      .sortBy { case (idValue, _) => idValue }
+    duplicates match {
+      case Nil => Validation.succeed(())
+      case head :: tail =>
+        def toError(idValue: Long, group: Seq[(String, SeedVarId)]) =
+          ValidationError(
+            field = field,
+            code = ValidationErrorCode.DUPLICATE_VALUE,
+            message = ValidationMessages.seedVarIdInUse(idValue, group.map(_._1).sorted)
+          )
+        Validation.failNonEmptyChunk(
+          zio.NonEmptyChunk.fromIterable(toError.tupled(head), tail.map(toError.tupled))
+        )
+    }
+  }
+
+  // JSON codecs (companion object placement ensures implicit scope).
+  // Wire format is a JSON number (ADR-001: primitives on the wire).
+  given JsonEncoder[SeedVarId] = JsonEncoder[Long].contramap(_.value)
+  given JsonDecoder[SeedVarId] = JsonDecoder[Long].mapOrFail(v =>
+    fromLong(v).left.map(_.mkString(", ")))
+
 // Probability values (must be between 0.0 and 1.0, exclusive)
 // Exclusive bounds are required for numerical stability in simulation-util's
 // inverse CDF calculations where 0.0 and 1.0 would cause division by zero or infinity.

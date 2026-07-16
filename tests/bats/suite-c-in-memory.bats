@@ -68,10 +68,13 @@ setup() {
     [[ "$count" -ge 1 ]]
 }
 
-@test "C04: GET /risk-trees (list-all) returns 403 when gate disabled (default)" {
+# The unauthenticated list-all route is not mounted at all (ADR-021 §3: every
+# tree operation is workspace-scoped under /w/{key}/...), so the closed gate
+# manifests as 404 — the security property is "no public tree listing exists".
+@test "C04: GET /risk-trees (list-all) is not exposed (workspace-scoped API only)" {
     local status
     status=$(curl -s -o /dev/null -w '%{http_code}' "${REGISTER_URL}/risk-trees")
-    [[ "$status" == "403" ]]
+    [[ "$status" == "404" ]]
 }
 
 # ============================================================================

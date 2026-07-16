@@ -39,7 +39,8 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         minLoss = Some(1000L),
         maxLoss = Some(50000L),
         percentiles = None,
-        quantiles = None
+        quantiles = None,
+        seedVarId = 1L
       )
       val riskTree = RiskTree.singleNodeUnsafe(
         id = treeId("sim-1"),
@@ -66,7 +67,8 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         minLoss = Some(100L),
         maxLoss = Some(5000L),
         percentiles = None,
-        quantiles = None
+        quantiles = None,
+        seedVarId = 2L
       )
       val riskTree = RiskTree.singleNodeUnsafe(
         id = treeId("sim-3"),
@@ -107,7 +109,8 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         minLoss = Some(1000L),
         maxLoss = Some(15000L),
         percentiles = None,
-        quantiles = None
+        quantiles = None,
+        seedVarId = 3L
       )
       val riskTree = RiskTree.singleNodeUnsafe(
         id = treeId("sim-5"),

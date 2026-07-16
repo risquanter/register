@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, LECPoint, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, SeedEntityId}
 
 /** Service layer for RiskTree business logic.
   * 
@@ -63,10 +63,11 @@ trait RiskTreeService {
     * @param wsId Workspace that owns the tree
     * @param nodeId Node identifier
     * @param threshold Loss threshold to compute P(Loss >= threshold)
+    * @param seedEntityId Owning workspace's stochastic identity (from the controller's resolved workspace)
     * @param includeProvenance Whether to include provenance metadata (currently unused for this endpoint)
     * @return Probability as Double (empirical frequency ratio: exceedingCount / nTrials)
     */
-  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[Double]
+  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Double]
   
   /** Get LEC curves for multiple nodes with shared tick domain.
     * 
@@ -79,7 +80,7 @@ trait RiskTreeService {
     * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
-  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]]
+  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]]
 }
 
 object RiskTreeService:

@@ -503,7 +503,7 @@ to any code touched by that plan (only `RiskTreeKnowledgeBase`,
 
 ---
 
-## 12. Simulation outcomes are not reproducible across re-creations of the same tree — DECIDED 2026-07-15
+## 12. Simulation outcomes are not reproducible across re-creations of the same tree — DONE (2026-07-16)
 
 **Observed (2026-05-03).**
 `DemoEnterpriseScriptSpec` produces different P95/P99 figures — and
@@ -574,7 +574,7 @@ deliberately separate types with separate lifecycles.
 
 Implementation plan (full rationale, HDR paper findings, verified
 arithmetic, decision log): [PLAN-SEED-IDENTITY.md](./PLAN-SEED-IDENTITY.md).
-**Implementation not started — explicit user gate.**
+**Implemented in full — see the completion record below.**
 
 **Decision history (do not re-litigate):**
 1. *Name-only + 64-bit truncated SHA-256* (locked earlier 2026-07-15) —
@@ -620,13 +620,35 @@ arithmetic, decision log): [PLAN-SEED-IDENTITY.md](./PLAN-SEED-IDENTITY.md).
 - **API change acknowledged (trigger #1):** optional `seedVarId` /
   `seedEntityId` on requests; both included in responses and exports.
 
-**Status:** PLAN LOCKED 2026-07-15 — approved in full, no open decisions.
-Migration resolved as moot (no data survives; wipe and recreate demo
-data). Version bump: MAJOR (user-decided, executed at completion).
-Even/odd stream split re-confirmed after collision arithmetic was
-verified for both candidate layouts. Remaining plan-§12 items are
-Signature-Echo-time details only. Implementation awaits an explicit go
-signal.
+**Status: DONE (2026-07-16).** Plan locked 2026-07-15 (approved in full,
+no open decisions); all twelve §10 work-breakdown steps implemented
+2026-07-15, plan-§11 test pyramid completed 2026-07-16. Migration
+resolved as moot (no data survives; wipe and recreate demo data).
+Version bump: MINOR — `0.4.0` (user-decided, executed).
+
+**Completion record (2026-07-16):**
+- Domain types, single derivation site (`SeedDerivation.streams`),
+  boundary assignment (`SeedVarIdAssigner`), per-tree uniqueness,
+  high-water mark, workspace `seedEntityId` (query param on bootstrap),
+  optional provided IDs on create / new-leaf update, §5.3 immutability
+  rejection with actionable message — all live.
+- Test plan §11 delivered at every layer: Layer 0–3 (Iron ranges, exact
+  derivation + HDR magnitude budget in `SeedDerivationSpec`, assignment
+  properties in `SeedVarIdAssignerSpec`, boundary/API rejections in the
+  request specs), **Layer 4 `SeedStabilitySpec`** (recreate → byte-identical
+  figures; CRN edit locality; rename changes nothing; entity isolation;
+  export → import round trip), **Layer 5 `SeedStatisticalSanitySpec`**
+  (Pearson adjacency on dense consecutive IDs, occurrence frequency,
+  KS uniformity smoke — deterministic constants), and system level
+  **`SeedReproducibilityItSpec`** (Irmin persist → fresh-stack reload →
+  identical figures; export → import across servers with pinned entity;
+  demo-simple/demo-enterprise **order-independence** — the original
+  symptom, asserted directly).
+- Demo suite re-baselined with explicit margin assertions; the Q-D
+  knife-edge was resolved by moving the quantifier to `AtMost(1/4,0.1)`
+  (spec + both demo scripts). BATS suites C and A green; demo data
+  recreated; cross-environment reproduction verified live (native
+  binary figures == JVM spec figures).
 
 ---
 

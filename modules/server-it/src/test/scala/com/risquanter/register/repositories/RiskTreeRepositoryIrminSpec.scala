@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId, SeedVarId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
@@ -46,7 +46,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       probability = 0.1,
       minLoss = Some(1000L),
       maxLoss = Some(2000L),
-      parentId = Some(rootId)
+      parentId = Some(rootId),
+      seedVarId = 1L
     ).toEither.toOption.get
 
     val leaf2 = RiskLeaf.create(
@@ -56,7 +57,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       probability = 0.2,
       minLoss = Some(1500L),
       maxLoss = Some(3000L),
-      parentId = Some(rootId)
+      parentId = Some(rootId),
+      seedVarId = 2L
     ).toEither.toOption.get
 
     val index = TreeIndex.fromNodesUnsafe(
@@ -68,7 +70,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       name = SafeName.fromString(treeName).toOption.get,
       nodes = Seq(portfolio, leaf1, leaf2),
       rootId = rootId,
-      index = index
+      index = index,
+      seedVarHighWater = SeedVarId.fromLong(2L).toOption.get
     )
 
   private def updatedTree(original: RiskTree): RiskTree =
@@ -88,7 +91,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       name = original.name,
       nodes = Seq(newRoot, leaf1),
       rootId = rootId,
-      index = newIndex
+      index = newIndex,
+      seedVarHighWater = original.seedVarHighWater
     )
 
   /** Identity-preserving edit: change leaf-1's `minLoss` while keeping every NodeId
@@ -107,7 +111,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       probability = 0.1,
       minLoss = Some(newMin),
       maxLoss = Some(2000L),
-      parentId = Some(rootId)
+      parentId = Some(rootId),
+      seedVarId = 1L               // identity-preserving: same leaf keeps its stream
     ).toEither.toOption.get
     val newIndex = TreeIndex.fromNodesUnsafe(Map(rootId -> root, leaf1Id -> newLeaf1, leaf2Id -> leaf2))
     RiskTree(
@@ -115,7 +120,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       name = original.name,
       nodes = Seq(root, newLeaf1, leaf2),
       rootId = rootId,
-      index = newIndex
+      index = newIndex,
+      seedVarHighWater = original.seedVarHighWater
     )
 
   private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient] =

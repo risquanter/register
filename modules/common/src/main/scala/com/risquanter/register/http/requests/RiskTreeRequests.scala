@@ -3,7 +3,7 @@ package com.risquanter.register.http.requests
 import zio.prelude.Validation
 import com.risquanter.register.common.FolSymbols
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, SafeName, SafeId, SeedVarId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
@@ -31,6 +31,7 @@ object RiskTreeRequests {
     treeName: SafeName.SafeName,
     nodes: Map[SafeName.SafeName, ResolvedNode],
     leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
+    providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
     rootName: SafeName.SafeName
   )
 
@@ -42,6 +43,7 @@ object RiskTreeRequests {
     added: Map[SafeName.SafeName, ResolvedNode],
     existingLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
     addedLeafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
+    providedSeedVarIds: Map[SafeName.SafeName, SeedVarId.SeedVarId],
     rootName: SafeName.SafeName
   )
 
@@ -77,15 +79,32 @@ object RiskTreeRequests {
   private[requests] def refineLeafDefs(
     leaves: Seq[RiskLeafDefinitionRequest],
     baseLabel: String
-  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], OccurrenceProbability, Distribution)]] =
+  ): Validation[ValidationError, Seq[(SafeName.SafeName, Option[SafeName.SafeName], OccurrenceProbability, Distribution, Option[SeedVarId.SeedVarId])]] =
     collectAllWithIndex(leaves) { (l, idx) =>
       val base = s"$baseLabel[$idx]"
       Validation.validateWith(
         refineNameField(l.name, s"$base.name"),
         refineParentName(l.parentName, s"$base.parentName"),
         toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, s"$base.probability")),
-        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, base, terms = l.distributionShape.terms)
-      )((name, parent, prob, dist) => (name, parent, prob, dist))
+        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, base, terms = l.distributionShape.terms),
+        refineSeedVarIdOpt(l.seedVarId, s"$base.seedVarId")
+      )((name, parent, prob, dist, seed) => (name, parent, prob, dist, seed))
+    }
+
+  // Optional caller-provided seedVarId on a leaf definition (create; new leaves in update).
+  // Absent means "server assigns" (PLAN-SEED-IDENTITY §5.1); present values are range-refined here.
+  private[requests] def refineSeedVarIdOpt(raw: Option[Long], field: String): Validation[ValidationError, Option[SeedVarId.SeedVarId]] =
+    raw match {
+      case Some(value) => toValidation(ValidationUtil.refineSeedVarId(value, field)).map(Some(_))
+      case None => Validation.succeed(None)
+    }
+
+  // §5.3 immutability: an existing node's seedVarId is never accepted on update —
+  // a mutable seed ID would let an edit silently re-roll the leaf's stochastic stream.
+  private[requests] def requireAbsentSeedVarId(raw: Option[Long], field: String): Validation[ValidationError, Unit] =
+    raw match {
+      case Some(_) => Validation.fail(ValidationError(field, ValidationErrorCode.CONSTRAINT_VIOLATION, ValidationMessages.seedVarIdImmutable))
+      case None => Validation.succeed(())
     }
 
   private[requests] def refineExistingPortfolios(
@@ -112,8 +131,9 @@ object RiskTreeRequests {
         refineNameField(l.name, s"$base.name"),
         refineParentName(l.parentName, s"$base.parentName"),
         toValidation(ValidationUtil.refineOccurrenceProbability(l.probability, s"$base.probability")),
-        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, base, terms = l.distributionShape.terms)
-      )((id, name, parent, prob, dist) => (id, name, parent, prob, dist))
+        Distribution.create(l.distributionShape.distributionType, l.distributionShape.minLoss, l.distributionShape.maxLoss, l.distributionShape.percentiles, l.distributionShape.quantiles, base, terms = l.distributionShape.terms),
+        requireAbsentSeedVarId(l.seedVarId, s"$base.seedVarId")
+      )((id, name, parent, prob, dist, _) => (id, name, parent, prob, dist))
     }
 
   // Guard: ensure no node name collides with a reserved FOL query symbol (e.g. "leaf", "p95").
@@ -132,6 +152,19 @@ object RiskTreeRequests {
       Validation.fail(ValidationError("request.names", ValidationErrorCode.AMBIGUOUS_REFERENCE, s"Duplicate names: ${duplicates.map(_.value).mkString(", ")}"))
     else Validation.succeed(allNames.toSet)
   }
+
+  // Guard: provided seedVarIds must be unique across all nodes of one tree
+  // (PLAN-SEED-IDENTITY.md §5.1 — scope is per-tree, deliberately not workspace-wide:
+  // scenario branches share seed IDs for common random numbers).
+  // The rule itself is defined once on the SeedVarId companion; this boundary
+  // layer contributes only the request-scoped field path.
+  private[requests] def requireUniqueSeedVarIds(
+    provided: Seq[(SafeName.SafeName, SeedVarId.SeedVarId)]
+  ): Validation[ValidationError, Unit] =
+    SeedVarId.requireDistinct(
+      provided.map { case (name, id) => name.value -> id },
+      field = "request.seedVarIds"
+    )
 
   // Guard: pick exactly one root (prefer a portfolio root when any portfolios exist; otherwise allow lone leaf tree).
   private[requests] def requireSingleRoot(

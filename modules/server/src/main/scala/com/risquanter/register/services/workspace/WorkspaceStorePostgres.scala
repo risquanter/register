@@ -7,8 +7,8 @@ import io.getquill.jdbczio.Quill
 
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.domain.data.WorkspaceRecord
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId, ValidationMessages}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.infra.persistence.QuillMappings.given
 import com.risquanter.register.util.IdGenerators
 
@@ -26,7 +26,8 @@ final class WorkspaceStorePostgres private (
       _.keyHash -> "key_hash",
       _.createdAt -> "created_at",
       _.lastAccess -> "last_access",
-      _.idleTimeout -> "idle_timeout"
+      _.idleTimeout -> "idle_timeout",
+      _.seedEntityId -> "seed_entity_id"
     )
 
   private inline given workspaceTreeSchema: SchemaMeta[WorkspaceTreeRow] =
@@ -37,30 +38,66 @@ final class WorkspaceStorePostgres private (
       _.addedAt -> "added_at"
     )
 
-  override def create(): UIO[WorkspaceKeySecret] =
-    (for
+  /** seedEntityId: None lets the workspace_seed_entity_id_seq DEFAULT assign;
+    * Some(v) inserts explicitly — the UNIQUE constraint rejects duplicates
+    * race-free (mapped to ValidationFailed), and the sequence is bumped past v
+    * so later assignments cannot collide (PLAN-SEED-IDENTITY §5.2).
+    */
+  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret] =
+    for
       key <- WorkspaceKeySecret.generate
-      sid <- IdGenerators.nextId
+      sid <- IdGenerators.nextId.orDie
       now <- Clock.instant
-      row  = WorkspaceRow(
-               id = WorkspaceId(sid),
-               keyHash = WorkspaceKeyHash.fromSecret(key),
-               createdAt = toOffsetDateTime(now),
-               lastAccess = toOffsetDateTime(now),
-               ttl = toIntervalString(config.ttl),
-               idleTimeout = toIntervalString(config.idleTimeout)
-             )
-      _   <- db(
-               run(
-                 quote {
-                   infix"""
-                     INSERT INTO workspaces (id, key_hash, created_at, last_access, ttl, idle_timeout)
-                     VALUES (${lift(row.id)}, ${lift(row.keyHash)}, ${lift(row.createdAt)}, ${lift(row.lastAccess)}, ${lift(row.ttl)}::interval, ${lift(row.idleTimeout)}::interval)
-                   """.as[Action[Long]]
-                 }
-               )
-             ).unit
-    yield key).orDie
+      id       = WorkspaceId(sid)
+      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      created  = toOffsetDateTime(now)
+      ttlS     = toIntervalString(config.ttl)
+      idleS    = toIntervalString(config.idleTimeout)
+      _ <- seedEntityId match
+             case None =>
+               db(
+                 run(
+                   quote {
+                     infix"""
+                       INSERT INTO workspaces (id, key_hash, created_at, last_access, ttl, idle_timeout)
+                       VALUES (${lift(id)}, ${lift(keyHash)}, ${lift(created)}, ${lift(created)}, ${lift(ttlS)}::interval, ${lift(idleS)}::interval)
+                     """.as[Action[Long]]
+                   }
+                 )
+               ).unit.orDie
+             case Some(entityId) =>
+               db(
+                 run(
+                   quote {
+                     infix"""
+                       INSERT INTO workspaces (id, key_hash, created_at, last_access, ttl, idle_timeout, seed_entity_id)
+                       VALUES (${lift(id)}, ${lift(keyHash)}, ${lift(created)}, ${lift(created)}, ${lift(ttlS)}::interval, ${lift(idleS)}::interval, ${lift(entityId.value)})
+                     """.as[Action[Long]]
+                   }
+                 )
+               ).unit.catchAll {
+                 case RepositoryFailure(reason) if reason.contains("seed_entity_id") =>
+                   ZIO.fail(ValidationFailed(List(ValidationError(
+                     field = "workspace.seedEntityId",
+                     code = ValidationErrorCode.DUPLICATE_VALUE,
+                     message = ValidationMessages.seedEntityIdInUse(entityId.value)
+                   ))))
+                 case other => ZIO.die(other)
+               } *> bumpSeedEntitySequence(entityId.value).orDie
+    yield key
+
+  /** Advance the assignment sequence past a provided value (never backwards). */
+  private def bumpSeedEntitySequence(value: Long): IO[AppError, Unit] =
+    db(
+      run(
+        quote {
+          infix"""
+            SELECT setval('workspace_seed_entity_id_seq',
+                          GREATEST((SELECT last_value FROM workspace_seed_entity_id_seq), ${lift(value)}))
+          """.as[Query[Long]]
+        }
+      )
+    ).unit
 
   override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
@@ -189,6 +226,9 @@ final class WorkspaceStorePostgres private (
       trees       <- loadTrees(row.id)
       ttl         <- parseInterval(row.ttl)
       idleTimeout <- parseInterval(row.idleTimeout)
+      entityId    <- ZIO.fromEither(SeedEntityId.fromLong(row.seedEntityId)).mapError(errs =>
+                       RepositoryFailure(s"Corrupt seed_entity_id ${row.seedEntityId}: ${errs.map(_.message).mkString("; ")}")
+                     )
     yield WorkspaceRecord(
       id = row.id,
       keyHash = row.keyHash,
@@ -196,7 +236,8 @@ final class WorkspaceStorePostgres private (
       createdAt = row.createdAt.toInstant,
       lastAccessedAt = row.lastAccess.toInstant,
       ttl = ttl,
-      idleTimeout = idleTimeout
+      idleTimeout = idleTimeout,
+      seedEntityId = entityId
     )
 
   private def db[A](effect: Task[A]): IO[AppError, A] =
@@ -220,7 +261,8 @@ object WorkspaceStorePostgres:
     createdAt: OffsetDateTime,
     lastAccess: OffsetDateTime,
     ttl: String,
-    idleTimeout: String
+    idleTimeout: String,
+    seedEntityId: Long
   )
 
   private final case class WorkspaceTreeRow(

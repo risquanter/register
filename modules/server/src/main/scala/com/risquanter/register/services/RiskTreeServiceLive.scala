@@ -10,7 +10,7 @@ import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
@@ -18,6 +18,7 @@ import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.services.cache.RiskResultResolver
+import com.risquanter.register.services.helper.SeedVarIdAssigner
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
 /**
@@ -236,11 +237,31 @@ class RiskTreeServiceLive private (
     () => if iter.hasNext then iter.next() else throw new IllegalStateException("ID pool exhausted while resolving request")
   }
 
+  /** Names of all leaves in a resolved request, for seedVarId assignment. */
+  private def leafNamesOf(nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode]): Seq[SafeName.SafeName] =
+    nodesByName.values.collect { case n if n.kind == RiskTreeRequests.NodeKind.Leaf => n.name }.toSeq
+
+  /** seedVarIds of the old tree's leaves that survive the update, keyed by their
+    * (possibly renamed) name in the request — matched by stable node id, so
+    * renames preserve stochastic identity (PLAN-SEED-IDENTITY §5.3 immutability).
+    */
+  private def carriedOverSeedVarIds(
+    oldTree: RiskTree,
+    existing: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode]
+  ): Map[SafeName.SafeName, SeedVarId.SeedVarId] =
+    existing.values.flatMap { node =>
+      oldTree.index.nodes.get(NodeId(node.id)) match {
+        case Some(leaf: RiskLeaf) => Some(node.name -> leaf.seedVarId)
+        case _                    => None
+      }
+    }.toMap
+
   /** Build domain nodes and rootId from a resolved V2 request. */
   private def buildNodes(
     nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
     leafOccurrenceAndShape: Map[SafeName.SafeName, (OccurrenceProbability, Distribution)],
-    rootName: SafeName.SafeName
+    rootName: SafeName.SafeName,
+    seedVarIdByLeafName: Map[SafeName.SafeName, SeedVarId.SeedVarId]
   ): Task[(Seq[RiskNode], NodeId)] = ZIO.attempt {
     val nameToId: Map[SafeName.SafeName, NodeId] = nodesByName.view.mapValues(n => NodeId(n.id)).toMap
     val childrenByParent: Map[Option[SafeName.SafeName], List[SafeName.SafeName]] =
@@ -263,7 +284,8 @@ class RiskTreeServiceLive private (
             minLoss = shape.minLoss,
             maxLoss = shape.maxLoss,
             parentId = parentIdFor(node),
-            terms = shape.terms
+            terms = shape.terms,
+            seedVarId = seedVarIdByLeafName(node.name)
           )
 
         case RiskTreeRequests.NodeKind.Portfolio =>
@@ -288,12 +310,16 @@ class RiskTreeServiceLive private (
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
       resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(wsId, treeId, resolved.treeName)
-      (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafOccurrenceAndShape, resolved.rootName)
+      (seedVarIds, seedVarHighWater) <- ZIO
+        .fromEither(SeedVarIdAssigner.assign(leafNamesOf(resolved.nodes), resolved.providedSeedVarIds, highWater = 0L))
+        .mapError(e => ValidationFailed(List(e)))
+      (nodes, rootId) <- buildNodes(resolved.nodes, resolved.leafOccurrenceAndShape, resolved.rootName, seedVarIds)
       riskTree <- RiskTree.fromNodes(
         id = treeId,
         name = resolved.treeName,
         nodes = nodes,
-        rootId = rootId
+        rootId = rootId,
+        seedVarHighWater = Some(seedVarHighWater)
       ).toZIOValidation
       persisted <- repo.create(wsId, riskTree)
     } yield persisted
@@ -312,12 +338,24 @@ class RiskTreeServiceLive private (
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
       allLeafOccurrenceAndShape = resolved.existingLeafOccurrenceAndShape ++ resolved.addedLeafOccurrenceAndShape
-      (nodes, rootId) <- buildNodes(allNodes, allLeafOccurrenceAndShape, resolved.rootName)
+      // Carried-over IDs (existing leaves, matched by node id) + caller-provided IDs
+      // (new leaves). A provided ID clashing with a carried one survives the merge as
+      // two names → one value and is rejected by RiskTree.fromNodes' distinctness
+      // check with the §5.1 "already used by" message.
+      (seedVarIds, seedVarHighWater) <- ZIO
+        .fromEither(SeedVarIdAssigner.assign(
+          leafNamesOf(allNodes),
+          carriedOverSeedVarIds(oldTree, resolved.existing) ++ resolved.providedSeedVarIds,
+          highWater = oldTree.seedVarHighWater.value
+        ))
+        .mapError(e => ValidationFailed(List(e)))
+      (nodes, rootId) <- buildNodes(allNodes, allLeafOccurrenceAndShape, resolved.rootName, seedVarIds)
       riskTree <- RiskTree.fromNodes(
         id = id,
         name = resolved.treeName,
         nodes = nodes,
-        rootId = rootId
+        rootId = rootId,
+        seedVarHighWater = Some(seedVarHighWater)
       ).toZIOValidation
       updated <- repo.update(wsId, id, _ => riskTree)
       _ <- invalidationHandler.handleMutation(oldTree, updated)
@@ -347,7 +385,7 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean = false): Task[Double] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Double] =
     traced("probOfExceedance") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -359,7 +397,7 @@ class RiskTreeServiceLive private (
         (tree, _) <- lookupNodeInTree(wsId, treeId, nodeId)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
-        result <- resolver.ensureCached(tree, nodeId, includeProvenance)
+        result <- resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
         _ <- tracing.setAttribute("cache_resolved", true)
         
         // Compute exceedance probability from cached result
@@ -368,7 +406,7 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]] =
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]] =
     traced("getLECCurvesMulti") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -389,7 +427,7 @@ class RiskTreeServiceLive private (
         (tree, nodesMap) = treeWithNodes
         
         // Batch cache-aside: ensure all results are cached
-        results <- resolver.ensureCachedAll(tree, nodeIds, includeProvenance)
+        results <- resolver.ensureCachedAll(tree, nodeIds, seedEntityId, includeProvenance)
         _ <- tracing.setAttribute("results_resolved", results.size.toLong)
         
         // Generate curves with shared tick domain (ADR-014 render-time strategy)

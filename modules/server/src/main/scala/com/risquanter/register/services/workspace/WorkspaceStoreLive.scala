@@ -3,8 +3,8 @@ package com.risquanter.register.services.workspace
 import zio.*
 import java.time.Instant
 import com.risquanter.register.domain.data.WorkspaceRecord
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, WorkspaceKeySecret, SeedEntityId, ValidationMessages}
+import com.risquanter.register.domain.errors.{AppError, RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.configs.WorkspaceConfig
 import com.risquanter.register.util.IdGenerators
 
@@ -57,30 +57,66 @@ final class WorkspaceStoreLive private (
 
   // ── Public API ────────────────────────────────────────────────────────
 
-  /** Create a new workspace with configured TTL and idle timeout. (A29: logs creation) */
-  override def create(): UIO[WorkspaceKeySecret] =
+  /** Create a new workspace with configured TTL and idle timeout. (A29: logs creation)
+    *
+    * seedEntityId: None assigns from the fixed-base counter (deterministic per
+    * fresh store, PLAN-SEED-IDENTITY §5.5); Some(v) provides it — rejected when
+    * a live workspace holds v, and the counter is bumped past v (§5.2).
+    * Assignment and uniqueness check are atomic in a single Ref.modify.
+    */
+  override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret] =
     for
       key <- WorkspaceKeySecret.generate
       sid <- IdGenerators.nextId.orDie
       now <- Clock.instant
       keyHash = WorkspaceKeyHash.fromSecret(key)
-      workspace = WorkspaceRecord(
-        id = WorkspaceId(sid),
-        keyHash = keyHash,
-        trees = Set.empty,
-        createdAt = now,
-        lastAccessedAt = now,
-        ttl = config.ttl,
-        idleTimeout = config.idleTimeout
-      )
-      _ <- ref.update { state =>
-             state.copy(
-               byHash = state.byHash + (keyHash -> workspace),
-               byId = state.byId + (workspace.id -> keyHash)
-             )
-           }
+      result <- ref.modify { state =>
+        resolveSeedEntityId(state, seedEntityId) match
+          case Left(err) => (Left(err), state)
+          case Right((entityId, nextCounter)) =>
+            val workspace = WorkspaceRecord(
+              id = WorkspaceId(sid),
+              keyHash = keyHash,
+              trees = Set.empty,
+              createdAt = now,
+              lastAccessedAt = now,
+              ttl = config.ttl,
+              idleTimeout = config.idleTimeout,
+              seedEntityId = entityId
+            )
+            (Right(workspace), state.copy(
+              byHash = state.byHash + (keyHash -> workspace),
+              byId = state.byId + (workspace.id -> keyHash),
+              nextSeedEntityId = nextCounter
+            ))
+      }
+      workspace <- ZIO.fromEither(result)
       _ <- logSecurity("workspace.created", "workspace_id" -> workspace.id.value)("Workspace created")
     yield key
+
+  /** Pure: resolve the new workspace's seedEntityId against current state.
+    * Returns (entityId, counter value after this creation).
+    */
+  private def resolveSeedEntityId(
+    state: WorkspaceStoreLive.State,
+    provided: Option[SeedEntityId.SeedEntityId]
+  ): Either[AppError, (SeedEntityId.SeedEntityId, Long)] =
+    provided match
+      case Some(id) =>
+        if state.byHash.values.exists(_.seedEntityId.value == id.value) then
+          Left(ValidationFailed(List(ValidationError(
+            field = "workspace.seedEntityId",
+            code = ValidationErrorCode.DUPLICATE_VALUE,
+            message = ValidationMessages.seedEntityIdInUse(id.value)
+          ))))
+        else
+          Right((id, math.max(state.nextSeedEntityId, id.value + 1)))
+      case None =>
+        SeedEntityId.fromLong(state.nextSeedEntityId) match
+          case Right(id) => Right((id, state.nextSeedEntityId + 1))
+          case Left(_) => Left(RepositoryFailure(
+            s"seedEntityId assignment space exhausted at ${state.nextSeedEntityId}"
+          ))
 
   /** Associate a tree with a workspace.
     *
@@ -240,19 +276,27 @@ final class WorkspaceStoreLive private (
     yield ws
 
 object WorkspaceStoreLive:
+  /** Fixed counter base: fresh stores assign seedEntityIds 1, 2, 3… in creation
+    * order — the determinism the demo suites rely on (PLAN-SEED-IDENTITY §5.5).
+    */
+  private val SeedEntityIdBase: Long = 1L
+
   private final case class State(
     byHash: Map[WorkspaceKeyHash, WorkspaceRecord],
-    byId: Map[WorkspaceId, WorkspaceKeyHash]
+    byId: Map[WorkspaceId, WorkspaceKeyHash],
+    nextSeedEntityId: Long
   )
+
+  private def emptyState: State = State(Map.empty, Map.empty, SeedEntityIdBase)
 
   val layer: ZLayer[WorkspaceConfig, Nothing, WorkspaceStore] =
     ZLayer.fromZIO {
       for
         config <- ZIO.service[WorkspaceConfig]
-        ref    <- Ref.make(State(Map.empty, Map.empty))
+        ref    <- Ref.make(emptyState)
       yield WorkspaceStoreLive(ref, config)
     }
 
   /** Create a store with explicit config (for tests). */
   def make(config: WorkspaceConfig): UIO[WorkspaceStore] =
-    Ref.make(State(Map.empty, Map.empty)).map(ref => WorkspaceStoreLive(ref, config))
+    Ref.make(emptyState).map(ref => WorkspaceStoreLive(ref, config))

@@ -8,7 +8,7 @@ import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, TreeId, NodeId, SeedEntityId}
 import com.risquanter.register.testutil.TestHelpers.*
 
 /**
@@ -20,6 +20,8 @@ import com.risquanter.register.testutil.TestHelpers.*
  * RiskTree parameter to access tree-scoped cache via TreeCacheManager.
  */
 object RiskResultResolverSpec extends ZIOSpecDefault {
+
+  private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
   // Test fixture: Simple risk tree for testing (flat node format)
   private val rootIdStr  = safeId("root").value.toString
@@ -33,7 +35,8 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
     probability = 0.1,
     minLoss = Some(10000L),
     maxLoss = Some(50000L),
-    parentId = Some(nodeId("root"))
+    parentId = Some(nodeId("root")),
+    seedVarId = 1L
   )
 
   val risk2Leaf = RiskLeaf.unsafeApply(
@@ -43,7 +46,8 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
     probability = 0.2,
     minLoss = Some(5000L),
     maxLoss = Some(20000L),
-    parentId = Some(nodeId("root"))
+    parentId = Some(nodeId("root")),
+    seedVarId = 2L
   )
 
   val rootNode: RiskNode = RiskPortfolio.unsafeFromStrings(
@@ -96,7 +100,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           _ <- ZIO.succeed(assertTrue(initialCached.isEmpty))
           
           // Call ensureCached - should simulate
-          result <- resolver.ensureCached(testTree, risk1Id)
+          result <- resolver.ensureCached(testTree, risk1Id, testEntity)
           
           // Verify result is valid
           _ <- ZIO.succeed(assertTrue(result.nodeId == risk1Id))
@@ -116,14 +120,14 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           cache <- cacheManager.cacheFor(testTreeId)
           
           // First call: simulate and cache
-          firstResult <- resolver.ensureCached(testTree, risk1Id)
+          firstResult <- resolver.ensureCached(testTree, risk1Id, testEntity)
           
           // Manually verify what's in cache before second call
           cachedBefore <- cache.get(risk1Id)
           _ <- ZIO.succeed(assertTrue(cachedBefore.isDefined))
           
           // Second call: should hit cache (same RiskResult instance)
-          secondResult <- resolver.ensureCached(testTree, risk1Id)
+          secondResult <- resolver.ensureCached(testTree, risk1Id, testEntity)
           
           // Verify both results are identical
         } yield assertTrue(
@@ -137,7 +141,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           
           // Simulate root portfolio
-          rootResult <- resolver.ensureCached(testTree, rootId)
+          rootResult <- resolver.ensureCached(testTree, rootId, testEntity)
           
         } yield assertTrue(
           // Verify root aggregates child risks
@@ -157,7 +161,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           cache <- cacheManager.cacheFor(testTreeId)
           
           // Call with multiple node IDs
-          results <- resolver.ensureCachedAll(testTree, Set(risk1Id, risk2Id))
+          results <- resolver.ensureCachedAll(testTree, Set(risk1Id, risk2Id), testEntity)
           
           // Verify all are now cached
           cached1 <- cache.get(risk1Id)
@@ -175,7 +179,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
       test("handles empty set") {
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          results <- resolver.ensureCachedAll(testTree, Set.empty)
+          results <- resolver.ensureCachedAll(testTree, Set.empty, testEntity)
         } yield assertTrue(results.isEmpty)
       },
       
@@ -184,10 +188,10 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           
           // Pre-cache risk1
-          _ <- resolver.ensureCached(testTree, risk1Id)
+          _ <- resolver.ensureCached(testTree, risk1Id, testEntity)
           
           // Call with both cached and uncached
-          results <- resolver.ensureCachedAll(testTree, Set(risk1Id, risk2Id))
+          results <- resolver.ensureCachedAll(testTree, Set(risk1Id, risk2Id), testEntity)
           
         } yield assertTrue(
           // Verify both returned
@@ -205,7 +209,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
         
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          result <- resolver.ensureCached(testTree, invalidId).exit
+          result <- resolver.ensureCached(testTree, invalidId, testEntity).exit
           
         } yield assertTrue(
           // Should fail with some error
@@ -223,7 +227,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           
           // This should trigger simulation and record metrics
-          _ <- resolver.ensureCached(testTree, risk1Id)
+          _ <- resolver.ensureCached(testTree, risk1Id, testEntity)
           
           // Telemetry is recorded via TracingLive.console
           // In a full implementation, we would assert on captured spans/metrics
@@ -235,10 +239,10 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           
           // First call: cache_hit = false
-          _ <- resolver.ensureCached(testTree, risk1Id)
+          _ <- resolver.ensureCached(testTree, risk1Id, testEntity)
           
           // Second call: cache_hit = true
-          _ <- resolver.ensureCached(testTree, risk1Id)
+          _ <- resolver.ensureCached(testTree, risk1Id, testEntity)
           
           // Telemetry assertions would go here if we had test instrumentation
         } yield assertCompletes
@@ -256,9 +260,9 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           _ <- cacheManager.onTreeStructureChanged(testTreeId)
           
           // Simulate twice (with cache clearing)
-          result1 <- resolver.ensureCached(testTree, risk1Id)
+          result1 <- resolver.ensureCached(testTree, risk1Id, testEntity)
           _ <- cacheManager.onTreeStructureChanged(testTreeId)
-          result2 <- resolver.ensureCached(testTree, risk1Id)
+          result2 <- resolver.ensureCached(testTree, risk1Id, testEntity)
           
         } yield assertTrue(
           // Should be identical due to fixed seeds

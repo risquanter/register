@@ -47,7 +47,7 @@ class QueryController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         parsed <- ZIO.fromEither(QueryRequest.resolve(req))
                     .mapError(e => FolQueryFailure.fromQueryError(e))
-        result <- queryService.evaluate(ws.id, treeId, parsed)
+        result <- queryService.evaluate(ws.id, treeId, parsed, ws.seedEntityId)
       yield result).either
   }
 

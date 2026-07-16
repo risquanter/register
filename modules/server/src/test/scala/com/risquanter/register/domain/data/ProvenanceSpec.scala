@@ -1,11 +1,12 @@
 package com.risquanter.register.domain.data
 
 import com.risquanter.register.BuildInfo
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, SeedEntityId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, TreeCacheManager}
+import com.risquanter.register.simulation.SeedDerivation
 import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId}
 import zio.*
 import zio.test.*
@@ -23,6 +24,8 @@ import io.github.iltotore.iron.*
  * - Reproduction from provenance metadata
  */
 object ProvenanceSpec extends ZIOSpecDefault {
+
+  private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
   // Test layer with all dependencies for provenance tests
   val testLayer: ZLayer[Any, Throwable, RiskResultResolver & TreeCacheManager] = 
@@ -146,7 +149,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(1000L),
-          maxLoss = Some(10000L)
+          maxLoss = Some(10000L),
+          seedVarId = 1L
         )
         
         val testTree = RiskTree.singleNodeUnsafe(
@@ -157,7 +161,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          result <- resolver.ensureCached(testTree, nodeId("test-risk"), includeProvenance = true)
+          result <- resolver.ensureCached(testTree, nodeId("test-risk"), testEntity, includeProvenance = true)
         } yield {
           assertTrue(result.provenances.nonEmpty) &&
           assertTrue(result.provenances.exists(_.riskId == nodeId("test-risk")))
@@ -174,7 +178,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(1000L),
-          maxLoss = Some(10000L)
+          maxLoss = Some(10000L),
+          seedVarId = 2L
         )
         
         val testTree = RiskTree.singleNodeUnsafe(
@@ -185,38 +190,46 @@ object ProvenanceSpec extends ZIOSpecDefault {
         
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          result <- resolver.ensureCached(testTree, nodeId("test-risk"), includeProvenance = false)
+          result <- resolver.ensureCached(testTree, nodeId("test-risk"), testEntity, includeProvenance = false)
         } yield assertTrue(result.provenances.nonEmpty)
       },
       
-      test("provenance captures correct entityId from riskId hash") {
+      // PLAN-SEED-IDENTITY §11 Layer 1: recorded var-IDs equal the sampler's
+      // inputs — the single derivation site makes divergence impossible (§6.2
+      // killed bug 2, where provenance recorded different values than the
+      // sampler consumed). ULID has no influence on any recorded seed.
+      test("provenance records the derived streams: entity from workspace, (2k, 2k+1) from seedVarId") {
         val riskIdLabel = "cyber-attack"
         val riskId = nodeId(riskIdLabel)
-        val expectedEntityId = riskId.value.hashCode.toLong
-        
+
         val leaf = RiskLeaf.unsafeApply(
           id = riskId.value,
           name = "Cyber Attack",
           distributionType = "lognormal",
           probability = 0.25,
           minLoss = Some(1000L),
-          maxLoss = Some(50000L)
+          maxLoss = Some(50000L),
+          seedVarId = 3L
         )
-        
+
         val testTree = RiskTree.singleNodeUnsafe(
           id = treeId("tree-3"),
           name = SafeName.SafeName("Test Tree 3".refineUnsafe),
           root = leaf
         )
-        
+
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          result <- resolver.ensureCached(testTree, nodeId(riskIdLabel), includeProvenance = true)
+          result <- resolver.ensureCached(testTree, nodeId(riskIdLabel), testEntity, includeProvenance = true)
         } yield {
           val nodeProv = result.provenances.find(_.riskId == riskId).get
-          assertTrue(nodeProv.entityId == expectedEntityId) &&
-          assertTrue(nodeProv.occurrenceVarId == expectedEntityId.hashCode + 1000L) &&
-          assertTrue(nodeProv.lossVarId == expectedEntityId.hashCode + 2000L)
+          val expected = SeedDerivation.streams(testEntity, leaf.seedVarId, nodeProv.globalSeed3, nodeProv.globalSeed4)
+          assertTrue(nodeProv.entityId == testEntity.value) &&
+          assertTrue(nodeProv.occurrenceVarId == 6L) &&   // 2 · 3
+          assertTrue(nodeProv.lossVarId == 7L) &&          // 2 · 3 + 1
+          assertTrue(nodeProv.entityId == expected.entityId) &&
+          assertTrue(nodeProv.occurrenceVarId == expected.occurrenceVarId) &&
+          assertTrue(nodeProv.lossVarId == expected.lossVarId)
         }
       },
       
@@ -227,7 +240,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(1000L),
-          maxLoss = Some(10000L)
+          maxLoss = Some(10000L),
+          seedVarId = 4L
         )
         
         val testTree = RiskTree.singleNodeUnsafe(
@@ -238,7 +252,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          result <- resolver.ensureCached(testTree, nodeId("lognormal-risk"), includeProvenance = true)
+          result <- resolver.ensureCached(testTree, nodeId("lognormal-risk"), testEntity, includeProvenance = true)
         } yield {
           val nodeProv = result.provenances.find(_.riskId == nodeId("lognormal-risk")).get
           assertTrue(nodeProv.distributionType == "lognormal") &&
@@ -260,7 +274,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           probability = 0.5,
           minLoss = Some(1000L),
           maxLoss = Some(5000L),
-          parentId = Some(nodeId("portfolio"))
+          parentId = Some(nodeId("portfolio")),
+          seedVarId = 5L
         )
         
         val risk2 = RiskLeaf.unsafeApply(
@@ -270,7 +285,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           probability = 0.5,
           minLoss = Some(2000L),
           maxLoss = Some(8000L),
-          parentId = Some(nodeId("portfolio"))
+          parentId = Some(nodeId("portfolio")),
+          seedVarId = 6L
         )
         
         val portfolio = RiskPortfolio.unsafeFromStrings(
@@ -290,7 +306,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         for {
           resolver <- ZIO.service[RiskResultResolver]
           // Simulate portfolio (which aggregates children)
-          result <- resolver.ensureCached(testTree, nodeId("portfolio"), includeProvenance = true)
+          result <- resolver.ensureCached(testTree, nodeId("portfolio"), testEntity, includeProvenance = true)
         } yield {
           // Portfolio result should contain provenances from both leaves
           assertTrue(result.provenances.size == 2) &&
@@ -308,7 +324,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(5000L),
-          maxLoss = Some(20000L)
+          maxLoss = Some(20000L),
+          seedVarId = 7L
         )
         
         // Use different tree IDs to avoid cache hits
@@ -327,9 +344,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
         for {
           resolver <- ZIO.service[RiskResultResolver]
           // First simulation with provenance
-          firstResult <- resolver.ensureCached(testTree1, nodeId("deterministic-risk"), includeProvenance = true)
+          firstResult <- resolver.ensureCached(testTree1, nodeId("deterministic-risk"), testEntity, includeProvenance = true)
           // Second simulation with same parameters (different tree to avoid cache)
-          secondResult <- resolver.ensureCached(testTree2, nodeId("deterministic-risk"), includeProvenance = true)
+          secondResult <- resolver.ensureCached(testTree2, nodeId("deterministic-risk"), testEntity, includeProvenance = true)
         } yield {
           // Same inputs should produce identical outcomes (HDR determinism)
           assertTrue(firstResult.outcomes == secondResult.outcomes)
@@ -343,7 +360,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.3,
           minLoss = Some(1000L),
-          maxLoss = Some(15000L)
+          maxLoss = Some(15000L),
+          seedVarId = 8L
         )
         
         val testTree = RiskTree.singleNodeUnsafe(
@@ -354,7 +372,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          result <- resolver.ensureCached(testTree, nodeId("test-reconstruction"), includeProvenance = true)
+          result <- resolver.ensureCached(testTree, nodeId("test-reconstruction"), testEntity, includeProvenance = true)
         } yield {
           val nodeProv = result.provenances.find(_.riskId == nodeId("test-reconstruction")).get
           

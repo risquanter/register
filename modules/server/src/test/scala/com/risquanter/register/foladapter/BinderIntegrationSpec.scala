@@ -6,6 +6,7 @@ import com.risquanter.register.domain.data.{RiskResult, RiskLeaf, RiskPortfolio,
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.SafeName
+import com.risquanter.register.domain.data.iron.SeedVarId
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -43,12 +44,14 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
   private val cyberLeaf = RiskLeaf.unsafeApply(
     id = cyberId.value, name = "Cyber",
     distributionType = "lognormal", probability = 0.25,
-    minLoss = Some(1000L), maxLoss = Some(50000L), parentId = Some(itId)
+    minLoss = Some(1000L), maxLoss = Some(50000L), parentId = Some(itId),
+    seedVarId = 1L
   )
   private val hardwareLeaf = RiskLeaf.unsafeApply(
     id = hardwareId.value, name = "Hardware",
     distributionType = "lognormal", probability = 0.10,
-    minLoss = Some(500L), maxLoss = Some(10000L), parentId = Some(itId)
+    minLoss = Some(500L), maxLoss = Some(10000L), parentId = Some(itId),
+    seedVarId = 2L
   )
 
   private val allNodes: Map[NodeId, RiskNode] =
@@ -59,7 +62,8 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
     name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Test Tree").toOption.get,
     nodes  = allNodes.values.toSeq,
     rootId = rootId,
-    index  = TreeIndex.fromNodesUnsafe(allNodes)
+    index  = TreeIndex.fromNodesUnsafe(allNodes),
+      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get
   )
 
   // Five-trial outcomes; large enough that gt_loss(p95(x), 1000) is true for both leaves.
@@ -100,7 +104,8 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
       name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Bypass Tree").toOption.get,
       nodes  = nodes,
       rootId = root,
-      index  = TreeIndex.fromNodesUnsafe(map)
+      index  = TreeIndex.fromNodesUnsafe(map),
+      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get
     )
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =

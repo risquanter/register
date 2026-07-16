@@ -81,20 +81,40 @@ setup() {
 # E2E persistence: nginx → server → Irmin
 # ============================================================================
 
+# --------------------------------------------------------------------------
+# irmin_meta_path TREE_ID — resolve the workspace-scoped meta path for a tree.
+# The server stores metadata at workspaces/{wsId}/risk-trees/{treeId}/meta;
+# the HTTP API never exposes wsId, so locate the path by listing the store.
+# --------------------------------------------------------------------------
+irmin_meta_path() {
+    local tree_id="$1"
+    curl -s -X POST "${IRMIN_DIRECT_URL}/graphql" \
+        -H 'Content-Type: application/json' \
+        -d '{"query":"{ main { tree { get_tree(path: \"workspaces\") { list_contents_recursively { path } } } } }"}' \
+      | jq -r --arg t "$tree_id" \
+          '.data.main.tree.get_tree.list_contents_recursively[].path
+           | select(endswith("/risk-trees/" + $t + "/meta"))' \
+      | head -1 | sed 's|^/||'
+}
+
+irmin_get() {
+    local path="$1"
+    curl -s -X POST "${IRMIN_DIRECT_URL}/graphql" \
+        -H 'Content-Type: application/json' \
+        -d "{\"query\":\"{ main { tree { get(path: \\\"${path}\\\") } } }\"}" \
+      | jq -r '.data.main.tree.get'
+}
+
 @test "A02: workspace created via nginx is persisted to Irmin" {
     # Create workspace through the frontend (nginx) entry point.
     create_workspace "${FRONTEND_URL}"
 
     # Verify the tree landed in Irmin by querying Irmin directly.
-    # The server stores tree metadata at: risk-trees/{treeId}/meta
-    local irmin_meta
-    irmin_meta=$(curl -s -X POST "${IRMIN_DIRECT_URL}/graphql" \
-        -H 'Content-Type: application/json' \
-        -d "{\"query\":\"{ main { tree { get(path: \\\"risk-trees/${TREE_ID}/meta\\\") } } }\"}")
+    local meta_path meta_value
+    meta_path=$(irmin_meta_path "$TREE_ID")
+    [[ -n "$meta_path" ]]
 
-    # get returns a non-null scalar string if the path exists
-    local meta_value
-    meta_value=$(echo "$irmin_meta" | jq -r '.data.main.tree.get')
+    meta_value=$(irmin_get "$meta_path")
     [[ "$meta_value" != "null" ]]
     [[ -n "$meta_value" ]]
 }
@@ -103,23 +123,26 @@ setup() {
     create_workspace "${FRONTEND_URL}"
 
     # Read the raw metadata JSON from Irmin
-    local irmin_meta meta_json
-    irmin_meta=$(curl -s -X POST "${IRMIN_DIRECT_URL}/graphql" \
-        -H 'Content-Type: application/json' \
-        -d "{\"query\":\"{ main { tree { get(path: \\\"risk-trees/${TREE_ID}/meta\\\") } } }\"}")
-    meta_json=$(echo "$irmin_meta" | jq -r '.data.main.tree.get')
+    local meta_path meta_json
+    meta_path=$(irmin_meta_path "$TREE_ID")
+    [[ -n "$meta_path" ]]
+    meta_json=$(irmin_get "$meta_path")
 
     # The stored value is a JSON string — parse it and check fields
-    local id name rootId
+    local id name rootId seedVarHighWater
     id=$(echo "$meta_json" | jq -r '.id')
     name=$(echo "$meta_json" | jq -r '.name')
     rootId=$(echo "$meta_json" | jq -r '.rootId')
+    seedVarHighWater=$(echo "$meta_json" | jq -r '.seedVarHighWater')
 
     [[ "$id" == "$TREE_ID" ]]
     [[ -n "$name" ]]
     [[ "$name" != "null" ]]
     [[ -n "$rootId" ]]
     [[ "$rootId" != "null" ]]
+    # Seed identity watermark (PLAN-SEED-IDENTITY): present and positive
+    [[ "$seedVarHighWater" =~ ^[0-9]+$ ]]
+    [[ "$seedVarHighWater" -ge 1 ]]
 }
 
 @test "A04: list risk-trees via nginx returns Irmin-persisted data" {

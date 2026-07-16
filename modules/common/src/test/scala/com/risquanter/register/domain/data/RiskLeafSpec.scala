@@ -16,7 +16,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "expert",
           probability = 0.25,
           percentiles = Some(Array(0.05, 0.5, 0.95)),
-          quantiles = Some(Array(1000.0, 5000.0, 25000.0))
+          quantiles = Some(Array(1000.0, 5000.0, 25000.0)),
+          seedVarId = 1L
         )
         assertTrue(result.isSuccess)
       },
@@ -27,7 +28,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.15,
           minLoss = Some(1000L),
-          maxLoss = Some(50000L)
+          maxLoss = Some(50000L),
+          seedVarId = 2L
         )
         assertTrue(result.isSuccess)
       },
@@ -38,7 +40,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 3L
         )
         assertTrue(result.isSuccess)
       },
@@ -49,7 +52,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 4L
         )
         assertTrue(result.isSuccess)
       },
@@ -60,7 +64,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.3,
           minLoss = Some(500L),
-          maxLoss = Some(5000L)
+          maxLoss = Some(5000L),
+          seedVarId = 5L
         )
         assertTrue(result.isSuccess)
       },
@@ -71,7 +76,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.01,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 6L
         )
         assertTrue(result.isSuccess)
       }
@@ -84,7 +90,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 7L
         )
         assertTrue(result.isFailure)
       },
@@ -95,7 +102,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 8L
         )
         assertTrue(result.isFailure)
       },
@@ -106,7 +114,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 9L
         )
         assertTrue(result.isFailure)
       },
@@ -117,7 +126,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 10L
         )
         assertTrue(result.isFailure)
       },
@@ -128,7 +138,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 11L
         )
         assertTrue(result.isFailure)
       }
@@ -141,7 +152,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 12L
         )
         assertTrue(result.isFailure)
       },
@@ -152,7 +164,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 13L
         )
         assertTrue(result.isFailure)
       },
@@ -163,7 +176,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 14L
         )
         assertTrue(result.isFailure)
       }
@@ -176,7 +190,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.0,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 15L
         )
         assertTrue(result.isSuccess)
       },
@@ -187,7 +202,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 1.0,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 16L
         )
         assertTrue(result.isSuccess)
       },
@@ -198,7 +214,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = -0.1,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 17L
         )
         assertTrue(result.isFailure)
       },
@@ -209,7 +226,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 1.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 18L
         )
         assertTrue(result.isFailure)
       }
@@ -222,7 +240,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "normal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 19L
         )
         assertTrue(result.isFailure)
       },
@@ -233,7 +252,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 20L
         )
         assertTrue(result.isFailure)
       }
@@ -245,7 +265,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           name = "Valid Name",
           distributionType = "expert",
           probability = 0.5,
-          quantiles = Some(Array(1000.0, 5000.0))
+          quantiles = Some(Array(1000.0, 5000.0)),
+          seedVarId = 21L
         )
         assertTrue(result.isFailure)
       },
@@ -255,7 +276,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           name = "Valid Name",
           distributionType = "expert",
           probability = 0.5,
-          percentiles = Some(Array(0.05, 0.95))
+          percentiles = Some(Array(0.05, 0.95)),
+          seedVarId = 22L
         )
         assertTrue(result.isFailure)
       },
@@ -266,7 +288,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "expert",
           probability = 0.5,
           percentiles = Some(Array.empty[Double]),
-          quantiles = Some(Array(1000.0))
+          quantiles = Some(Array(1000.0)),
+          seedVarId = 23L
         )
         assertTrue(result.isFailure)
       },
@@ -277,7 +300,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "expert",
           probability = 0.5,
           percentiles = Some(Array(0.05, 0.5, 0.95)),
-          quantiles = Some(Array(1000.0, 5000.0))  // Length mismatch
+          quantiles = Some(Array(1000.0, 5000.0)),  // Length mismatch
+          seedVarId = 24L
         )
         assertTrue(result.isFailure)
       }
@@ -289,7 +313,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.5,
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 25L
         )
         assertTrue(result.isFailure)
       },
@@ -299,7 +324,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           name = "Valid Name",
           distributionType = "lognormal",
           probability = 0.5,
-          minLoss = Some(100L)
+          minLoss = Some(100L),
+          seedVarId = 26L
         )
         assertTrue(result.isFailure)
       },
@@ -310,7 +336,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(-100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 27L
         )
         assertTrue(result.isFailure)
       },
@@ -321,7 +348,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(-1000L)
+          maxLoss = Some(-1000L),
+          seedVarId = 28L
         )
         assertTrue(result.isFailure)
       },
@@ -332,7 +360,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(1000L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 29L
         )
         assertTrue(result.isFailure)
       },
@@ -343,7 +372,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(5000L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 30L
         )
         assertTrue(result.isFailure)
       }
@@ -356,7 +386,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "invalid", // Invalid type
           probability = 1.5,            // Out of range
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 31L
         )
         assertTrue(
           result.isFailure
@@ -371,7 +402,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "invalid", // Not "expert" or "lognormal"
           probability = 2.0,            // > 1.0
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 32L
         )
         
         result.toEither match {
@@ -395,7 +427,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 1.5,            // > 1.0 - invalid
           minLoss = Some(5000L),        // minLoss > maxLoss - cross-field error
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 33L
         )
         
         result.toEither match {
@@ -420,7 +453,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "expert",
           probability = 0.5,
           percentiles = None,           // Missing for expert mode
-          quantiles = None              // Missing for expert mode
+          quantiles = None,             // Missing for expert mode
+          seedVarId = 34L
         )
         
         result.toEither match {
@@ -444,7 +478,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 35L
         )
         assertTrue(
           result.map(_.id).toOption.contains(nodeId("test-risk"))
@@ -457,7 +492,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 36L
         )
         assertTrue(
           result.map(_.name).toOption.contains("Test Risk Name")
@@ -472,7 +508,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "expert",
           probability = 0.5,
           percentiles = Some(percentiles),
-          quantiles = Some(quantiles)
+          quantiles = Some(quantiles),
+          seedVarId = 37L
         )
         assertTrue(
           result.map(_.percentiles.isDefined).toOption.contains(true),
@@ -488,7 +525,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 38L
         )
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
@@ -503,7 +541,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 39L
         )
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
@@ -518,7 +557,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 1.5,  // Out of range
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 40L
         )
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
@@ -533,7 +573,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "invalid",
           probability = 0.5,
           minLoss = Some(100L),
-          maxLoss = Some(1000L)
+          maxLoss = Some(1000L),
+          seedVarId = 41L
         )
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
@@ -548,7 +589,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           probability = 0.5,
           minLoss = Some(1000L),
-          maxLoss = Some(100L)  // maxLoss < minLoss
+          maxLoss = Some(100L),  // maxLoss < minLoss
+          seedVarId = 42L
         )
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
@@ -561,8 +603,9 @@ object RiskLeafSpec extends ZIOSpecDefault {
           id = idStr("test-id"),
           name = "Test",
           distributionType = "expert",
-          probability = 0.5
+          probability = 0.5,
           // Missing percentiles and quantiles
+          seedVarId = 43L
         )
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
@@ -578,7 +621,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          fieldPrefix = "children[0]"
+          fieldPrefix = "children[0]",
+          seedVarId = 44L
         )
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
@@ -596,7 +640,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           percentiles = Some(Array(0.1, 0.5, 0.9)),
           quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(3)
+          terms = Some(3),
+          seedVarId = 45L
         )
         assertTrue(result.isSuccess)
       },
@@ -608,7 +653,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           percentiles = Some(Array(0.1, 0.5, 0.9)),
           quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(2)
+          terms = Some(2),
+          seedVarId = 46L
         )
         assertTrue(result.isSuccess)
       },
@@ -620,7 +666,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           percentiles = Some(Array(0.1, 0.5, 0.9)),
           quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = None
+          terms = None,
+          seedVarId = 47L
         )
         assertTrue(result.isSuccess)
       },
@@ -632,7 +679,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           percentiles = Some(Array(0.1, 0.5, 0.9)),
           quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(3)
+          terms = Some(3),
+          seedVarId = 48L
         )
         assertTrue(
           result.isSuccess,
@@ -646,7 +694,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           distributionType = "expert",
           probability = 0.5,
           percentiles = Some(Array(0.1, 0.5, 0.9)),
-          quantiles = Some(Array(100.0, 500.0, 2000.0))
+          quantiles = Some(Array(100.0, 500.0, 2000.0)),
+          seedVarId = 49L
         )
         assertTrue(
           result.isSuccess,
@@ -662,7 +711,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           percentiles = Some(Array(0.1, 0.5, 0.9)),
           quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(5)
+          terms = Some(5),
+          seedVarId = 50L
         )
         assertTrue(result.isFailure)
       },
@@ -674,7 +724,8 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           percentiles = Some(Array(0.1, 0.5, 0.9)),
           quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(0)
+          terms = Some(0),
+          seedVarId = 51L
         )
         assertTrue(result.isFailure)
       },
@@ -686,12 +737,136 @@ object RiskLeafSpec extends ZIOSpecDefault {
           probability = 0.5,
           percentiles = Some(Array(0.1, 0.5, 0.9)),
           quantiles = Some(Array(100.0, 500.0, 2000.0)),
-          terms = Some(5)
+          terms = Some(5),
+          seedVarId = 52L
         )
         val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
         assertTrue(
           result.isFailure,
           errorMsg.contains("terms")
+        )
+      }
+    ),
+    suite("SeedVarId Validation")(
+      test("rejects seedVarId = 0 with field path") {
+        val result = RiskLeaf.create(
+          id = idStr("seed-zero"),
+          name = "Seed Zero",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L),
+          seedVarId = 0L
+        )
+        val errorMsg = result.toEither.swap.getOrElse(zio.NonEmptyChunk.single("")).mkString("; ")
+        assertTrue(
+          result.isFailure,
+          errorMsg.contains("root.seedVarId")
+        )
+      },
+      test("rejects seedVarId = 50000000 (stream doubling budget)") {
+        val result = RiskLeaf.create(
+          id = idStr("seed-cap"),
+          name = "Seed Cap",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L),
+          seedVarId = 50000000L
+        )
+        assertTrue(result.isFailure)
+      },
+      test("accepts range bounds 1 and 49999999") {
+        val lo = RiskLeaf.create(
+          id = idStr("seed-lo"),
+          name = "Seed Lo",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L),
+          seedVarId = 1L
+        )
+        val hi = RiskLeaf.create(
+          id = idStr("seed-hi"),
+          name = "Seed Hi",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L),
+          seedVarId = 49999999L
+        )
+        assertTrue(lo.isSuccess, hi.isSuccess)
+      },
+      test("seedVarId error accumulates with other field errors") {
+        val result = RiskLeaf.create(
+          id = "x",           // too short
+          name = "Seed Accum",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L),
+          seedVarId = 0L      // out of range
+        )
+        result.toEither match {
+          case Left(errors) =>
+            val errorStr = errors.mkString("; ")
+            assertTrue(
+              errors.length >= 2,
+              errorStr.contains("root.id"),
+              errorStr.contains("root.seedVarId")
+            )
+          case Right(_) => assertTrue(false)
+        }
+      },
+      test("preserves seedVarId on created RiskLeaf") {
+        val result = RiskLeaf.create(
+          id = idStr("seed-preserved"),
+          name = "Seed Preserved",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L),
+          seedVarId = 77L
+        )
+        assertTrue(
+          result.isSuccess,
+          result.toOption.get.seedVarId.value == 77L
+        )
+      }
+    ),
+    suite("SeedVarId JSON")(
+      test("encoder writes seedVarId and decoder round-trips it") {
+        import zio.json.{EncoderOps, DecoderOps}
+        val leaf = RiskLeaf.unsafeApply(
+          id = idStr("seed-json"),
+          name = "Seed JSON",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(100L),
+          maxLoss = Some(1000L),
+          seedVarId = 42L
+        )
+        val json = leaf.toJson
+        val decoded = json.fromJson[RiskLeaf]
+        assertTrue(
+          json.contains("\"seedVarId\":42"),
+          decoded.map(_.seedVarId.value) == Right(42L)
+        )
+      },
+      test("decoder rejects leaf JSON without seedVarId") {
+        import zio.json.DecoderOps
+        val json =
+          s"""{"id":"${idStr("seed-missing")}","name":"Seed Missing","distributionType":"lognormal","probability":0.5,"minLoss":100,"maxLoss":1000}"""
+        assertTrue(json.fromJson[RiskLeaf].isLeft)
+      },
+      test("decoder rejects out-of-range seedVarId in JSON") {
+        import zio.json.DecoderOps
+        val json =
+          s"""{"id":"${idStr("seed-oor")}","name":"Seed OOR","distributionType":"lognormal","probability":0.5,"minLoss":100,"maxLoss":1000,"seedVarId":0}"""
+        val decoded = json.fromJson[RiskLeaf]
+        assertTrue(
+          decoded.isLeft,
+          decoded.swap.toOption.get.contains("seedVarId")
         )
       }
     )

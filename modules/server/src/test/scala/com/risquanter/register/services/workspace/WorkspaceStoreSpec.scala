@@ -8,8 +8,8 @@ import java.time.Duration
 import scala.concurrent.duration.*
 
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash}
-import com.risquanter.register.domain.errors.{TreeNotInWorkspace, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, SeedEntityId}
+import com.risquanter.register.domain.errors.{TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
@@ -184,5 +184,47 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         _       <- TestClock.adjust(2.minutes)
         evicted <- store.evictExpired
       yield assertTrue(evicted.size == 1, evicted.exists(_.id == ws.id))
+    },
+
+    // ── Seed identity (PLAN-SEED-IDENTITY §5.2 / §5.5) ──────────────────
+
+    test("fresh store assigns seedEntityIds 1, 2, 3 in creation order (§5.5 determinism)") {
+      for
+        store <- mkStore
+        k1    <- store.create()
+        k2    <- store.create()
+        k3    <- store.create()
+        ids   <- ZIO.foreach(List(k1, k2, k3))(store.resolve(_).map(_.seedEntityId.value))
+      yield assertTrue(ids == List(1L, 2L, 3L))
+    },
+
+    test("provided seedEntityId is stored and visible on resolve") {
+      for
+        store <- mkStore
+        id    <- ZIO.fromEither(SeedEntityId.fromLong(42L)).orDieWith(e => new AssertionError(e.toString))
+        key   <- store.create(Some(id))
+        ws    <- store.resolve(key)
+      yield assertTrue(ws.seedEntityId.value == 42L)
+    },
+
+    test("duplicate provided seedEntityId is rejected with DUPLICATE_VALUE") {
+      for
+        store <- mkStore
+        id    <- ZIO.fromEither(SeedEntityId.fromLong(7L)).orDieWith(e => new AssertionError(e.toString))
+        _     <- store.create(Some(id))
+        exit  <- store.create(Some(id)).exit
+      yield assert(exit)(fails(isSubtype[ValidationFailed](
+        hasField("errors", _.errors.map(_.code), contains(ValidationErrorCode.DUPLICATE_VALUE))
+      )))
+    },
+
+    test("assignment after a provided value skips past it (no collision, §5.2)") {
+      for
+        store <- mkStore
+        id    <- ZIO.fromEither(SeedEntityId.fromLong(10L)).orDieWith(e => new AssertionError(e.toString))
+        _     <- store.create(Some(id))
+        key   <- store.create()
+        ws    <- store.resolve(key)
+      yield assertTrue(ws.seedEntityId.value == 11L)
     }
   )

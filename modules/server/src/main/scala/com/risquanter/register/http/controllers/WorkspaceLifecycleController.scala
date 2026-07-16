@@ -44,14 +44,14 @@ class WorkspaceLifecycleController private (
     xff.flatMap(_.split(",").headOption).map(_.trim).filter(_.nonEmpty).getOrElse("unknown")
 
   val bootstrapWorkspace: ServerEndpoint[Any, Task] = bootstrapWorkspaceEndpoint.serverLogic {
-    case (xff, maybeUserId, req) =>
+    case (xff, maybeUserId, seedEntityId, req) =>
       val ip = normaliseIp(xff)
       (for
         _      <- rateLimiter.checkCreate(ip)
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission.Bootstrap.type] <- bootstrapProvisioner.bootstrapToken()
         // exempt: pre-resource-creation — no resource exists yet to check
-        key    <- workspaceStore.create()
+        key    <- workspaceStore.create(seedEntityId)
         ws     <- workspaceStore.resolve(key)  // exempt: Layer 0 capability gate
         tree   <- riskTreeService.create(ws.id, req)
         _      <- workspaceStore.addTree(key, tree.id)
@@ -59,7 +59,8 @@ class WorkspaceLifecycleController private (
       yield WorkspaceBootstrapResponse(
         workspaceKey = key,
         tree = SimulationResponse.fromRiskTree(tree),
-        expiresAt = ws.expiresAt
+        expiresAt = ws.expiresAt,
+        seedEntityId = ws.seedEntityId
       )).either
   }
 

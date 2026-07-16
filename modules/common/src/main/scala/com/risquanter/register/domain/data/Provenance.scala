@@ -18,13 +18,18 @@ import io.github.iltotore.iron.*
  * 2. Reconstruct RiskSampler with exact parameters
  * 3. Re-run simulation with same nTrials and parallelism
  * 4. Verify identical outcomes
+ *
+ * The recorded seed values are the same `HdrStreams` the sampler consumed —
+ * both come from the single derivation site (`SeedDerivation.streams`, server
+ * module), fed by the workspace's `seedEntityId` and the leaf's stored
+ * `seedVarId` (PLAN-SEED-IDENTITY §4). Names, ULIDs, and hashes play no role.
  * 
- * @param riskId Source risk identifier (e.g., "cyber-attack")
- * @param entityId Derived from riskId.hashCode.toLong (isolates random streams)
- * @param occurrenceVarId entityId.hashCode + 1000L (occurrence sampling stream)
- * @param lossVarId entityId.hashCode + 2000L (loss amount sampling stream)
- * @param globalSeed3 Global seed affecting all risks (currently 0L)
- * @param globalSeed4 Global seed affecting all risks (currently 0L)
+ * @param riskId Source risk identifier (e.g., "cyber-attack") — identity label only; it does not influence any seed
+ * @param entityId The workspace's seedEntityId (HDR Entity axis — isolates workspaces/organisations)
+ * @param occurrenceVarId 2 × the leaf's seedVarId (HDR Var axis, even stream)
+ * @param lossVarId 2 × the leaf's seedVarId + 1 (HDR Var axis, odd stream)
+ * @param globalSeed3 Global seed affecting all risks (SimulationConfig, currently 0L)
+ * @param globalSeed4 Global seed affecting all risks (SimulationConfig, currently 0L)
  * @param distributionType "expert" (Metalog) or "lognormal" (BCG 90% CI)
  * @param distributionParams Type-specific parameters for loss distribution
  * @param timestamp Simulation execution timestamp

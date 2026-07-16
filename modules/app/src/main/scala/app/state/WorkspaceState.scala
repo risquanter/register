@@ -119,7 +119,7 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
     onSuccess: SimulationResponse => Unit,
     onError: String => Unit
   ): Unit =
-    bootstrapWorkspaceEndpoint((None, currentUserId, request))
+    bootstrapWorkspaceEndpoint((None, currentUserId, None, request))
       .tap { response =>
         zio.ZIO.succeed {
           workspaceKey.set(Some(response.workspaceKey))

@@ -18,9 +18,10 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
   private val harnessLayer = DemoSpecSupport.harnessLayer
 
   /** Reproduces the tree from Step 1 of demo-enterprise-{httpie,curl}.sh
-    * (21 leaves, 11 portfolios — Financial Services Enterprise Risk)
+    * (21 leaves, 11 portfolios — Financial Services Enterprise Risk).
+    * Shared with SeedReproducibilityItSpec (order-independence, PLAN-SEED-IDENTITY §11).
     */
-  private val demoTreeRequest = RiskTreeDefinitionRequest(
+  private[http] val demoTreeRequest = RiskTreeDefinitionRequest(
     name = "Financial Services Enterprise Risk",
     portfolios = Seq(
       RiskPortfolioDefinitionRequest(name = "Enterprise Risk",               parentName = None),
@@ -297,35 +298,44 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           qc2  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x), 20000000))""")
           // Q-C2b: scope swap to Compliance + threshold lowered to $5M — 3/3 leaves clear it
           qc2b <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x), 5000000))""")
-          // Q-D: ~9-11/21 non-Cyber leaves have P95 > $1M (~43-52%) — proportion can land inside About(1/3,0.1) upper bound
-          //       when count=9 (9/21=42.86% < 43.33%); verdict disabled pending TODO §12 seed reproducibility fix
-          qd   <- query(client, key, treeId)("""Q[~]^{1/3} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))""")
+          // Q-D: 9/21 non-Cyber leaves have P95 > $1M (42.86%) — a full count-step outside
+          //      About(1/4,0.1)'s band [0.15,0.35]. A 1/3 quantifier would sit 0.005 inside
+          //      the band (knife-edge); 1/4 keeps the verdict margin-assertable.
+          qd   <- query(client, key, treeId)("""Q[~]^{1/4} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))""")
           // Q-Db: same proportion IS "about 1/2" — Q[~]^{1/2} showcases around tolerance vs strict Q[<=]
           qdb  <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))""")
 
-          // Diagnostic: log actual proportions for calibration (single call to avoid deep for-comprehension)
-        yield assertTrue(q1.rangeSize == 21, q1.satisfied) &&   // ~12/21≈57% sat Q[>=]^{1/4}(25%); margin≈0.32 ✓
-          assertTrue(q2.rangeSize == 21, q2.satisfied) &&         // 6/21≈29% sat Q[<=]^{1/2}(50%); margin=0.21 ✓
-          assertTrue(q3.rangeSize == 21) &&                       // typically false (~62% < 75% threshold); not asserted — boundary unstable
-          assertTrue(q4.rangeSize == 21, !q4.satisfied) &&
-          assertTrue(q4b.rangeSize == 21, q4b.satisfied) &&      // 4-5/21≈19-24% ≈ Q[~]^{1/5}(20%); around tolerance ✓
-          assertTrue(q5.rangeSize == 11, q5.satisfied) &&           // p95 replaces p99 for stability
-          assertTrue(q6.rangeSize == 21, q6.satisfied) &&
-          assertTrue(q7.rangeSize == 11) &&                       // boundary: satisfied unstable near 3/4
-          assertTrue(q7b.rangeSize == 11) &&                      // boundary: 6–7/11 ≈ 55–64% near About(2/3)±tolerance
-          assertTrue(q8.rangeSize == 11, q8.satisfied) &&
-          assertTrue(qa.rangeSize == 4, !qa.satisfied) &&
-          assertTrue(qab.rangeSize == 4, qab.satisfied) &&        // 4/4 all Cyber leaves have P99>$1M; margin=0.33 ✓
-          assertTrue(qb.rangeSize == 3, !qb.satisfied) &&
-          assertTrue(qbb.rangeSize == 4, qbb.satisfied) &&
-          assertTrue(qc1.rangeSize == 5, !qc1.satisfied) &&
-          assertTrue(qc1b.rangeSize == 5, qc1b.satisfied) &&
-          assertTrue(qc2.rangeSize == 10, !qc2.satisfied) &&
-          assertTrue(qc2b.rangeSize == 3, qc2b.satisfied) &&
-          // TODO §12: verdict disabled — flips at count=9 (9/21=42.86% inside About(1/3,0.1) upper bound 43.33%); re-enable after seed reproducibility fix
-          // assertTrue(qd.rangeSize == 21, !qd.satisfied) &&
-          assertTrue(qd.rangeSize == 21) &&
-          assertTrue(qdb.rangeSize == 21, qdb.satisfied)            // 9-11/21≈43-52% ≈ Q[~]^{1/2}(50%); around tolerance ✓
+          // With boundary-assigned seed identities every figure below is deterministic:
+          // verdicts re-recorded once (PLAN §11), and the three threshold-straddling
+          // queries (Q1, Q7b, Q-D) carry explicit margin assertions — the proportion
+          // must sit a stated distance from its quantifier boundary, so a future
+          // figure shift fails loudly instead of silently flipping a verdict.
+        yield assertTrue(q1.rangeSize == 21, q1.satisfied) &&   // 13/21=0.619 sat Q[>=]^{1/4}(0.25)
+          assertTrue(q1.proportion >= 0.25 + 0.10) &&             // Q1 margin: ≥0.10 above the bar (actual 0.37)
+          assertTrue(q2.rangeSize == 21, q2.satisfied) &&         // 6/21=0.286 sat Q[<=]^{1/2}(0.50); margin 0.21
+          assertTrue(q3.rangeSize == 21, !q3.satisfied) &&        // 13/21=0.619 < 0.75; margin 0.13 (was unstable pre-redesign)
+          assertTrue(q4.rangeSize == 21, !q4.satisfied) &&        // 5/21=0.238 outside About(1/2,0.1)
+          assertTrue(q4b.rangeSize == 21, q4b.satisfied) &&       // 5/21=0.238 inside About(1/5,0.1)
+          assertTrue(q5.rangeSize == 11, q5.satisfied) &&         // 0/11 sat Q[<=]^{1/3}
+          assertTrue(q6.rangeSize == 21, q6.satisfied) &&         // 2/21=0.095 sat Q[<=]^{1/4}
+          assertTrue(q7.rangeSize == 11, !q7.satisfied) &&        // 7/11=0.636 < 0.75; margin 0.11 (was unstable pre-redesign)
+          assertTrue(q7b.rangeSize == 11, q7b.satisfied) &&       // 7/11=0.636 inside About(2/3,0.1) band [0.567,0.767]
+          assertTrue(                                             // Q7b margin: ≥0.05 from both band edges
+            q7b.proportion >= (2.0 / 3 - 0.1) + 0.05,
+            q7b.proportion <= (2.0 / 3 + 0.1) - 0.05
+          ) &&
+          assertTrue(q8.rangeSize == 11, q8.satisfied) &&         // 10/11=0.909 sat Q[>=]^{1/2}
+          assertTrue(qa.rangeSize == 4, !qa.satisfied) &&         // 0/4
+          assertTrue(qab.rangeSize == 4, qab.satisfied) &&        // 4/4 all Cyber leaves have P99>$1M; margin 0.33
+          assertTrue(qb.rangeSize == 3, !qb.satisfied) &&         // 1/3
+          assertTrue(qbb.rangeSize == 4, qbb.satisfied) &&        // 4/4
+          assertTrue(qc1.rangeSize == 5, !qc1.satisfied) &&       // 1/5
+          assertTrue(qc1b.rangeSize == 5, qc1b.satisfied) &&      // 1/5 sat Q[<=]^{1/3}
+          assertTrue(qc2.rangeSize == 10, !qc2.satisfied) &&      // 1/10
+          assertTrue(qc2b.rangeSize == 3, qc2b.satisfied) &&      // 3/3
+          assertTrue(qd.rangeSize == 21, !qd.satisfied) &&        // 9/21=0.4286 outside About(1/4,0.1) band [0.15,0.35]
+          assertTrue(qd.proportion >= (0.25 + 0.1) + 0.05) &&     // Q-D margin: ≥0.05 above the band's upper edge (actual 0.079)
+          assertTrue(qdb.rangeSize == 21, qdb.satisfied)          // 9/21=0.4286 inside About(1/2,0.1); around-tolerance contrast
       }
     ).provideLayerShared(harnessLayer) @@
       TestAspect.withLiveClock @@

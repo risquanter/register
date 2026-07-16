@@ -125,6 +125,32 @@ object ValidationUtil {
       )))
   }
 
+  // Refinement for seed entity IDs (HDR Entity axis: 1 <= v < 10^8; 0 reserved)
+  def refineSeedEntityId(value: Long, fieldPath: String = "seedEntityId"): Either[List[ValidationError], SeedEntityId.SeedEntityId] = {
+    value
+      .refineEither[GreaterEqual[1L] & Less[100000000L]]
+      .map(SeedEntityId.SeedEntityId(_))
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.seedEntityIdOutOfRange
+      )))
+  }
+
+  // Refinement for seed var IDs (HDR Var axis: 1 <= v < 5*10^7; doubled to 2k/2k+1)
+  def refineSeedVarId(value: Long, fieldPath: String = "seedVarId"): Either[List[ValidationError], SeedVarId.SeedVarId] = {
+    value
+      .refineEither[GreaterEqual[1L] & Less[50000000L]]
+      .map(SeedVarId.SeedVarId(_))
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.seedVarIdOutOfRange
+      )))
+  }
+
   // Refinement for probability (must be between 0.0 and 1.0, exclusive)
   def refineProbability(value: Double, fieldPath: String = "probability"): Either[List[ValidationError], Probability] = {
     value

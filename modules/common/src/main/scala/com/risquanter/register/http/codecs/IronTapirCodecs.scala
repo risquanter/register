@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -184,4 +184,27 @@ object IronTapirCodecs {
   given Schema[NonNegativeInt] = Schema.schemaForInt.map[NonNegativeInt](
     i => ValidationUtil.refineNonNegativeInt(i).toOption
   )(identity)
+
+  /** Schema for SeedVarId for JSON body derivation. */
+  given Schema[SeedVarId.SeedVarId] = Schema.schemaForLong.map[SeedVarId.SeedVarId](
+    l => SeedVarId.fromLong(l).toOption
+  )(_.value)
+
+  /** Codec for SeedEntityId (Long in [1, 100000000)) — the workspace's HDR
+    * Entity-axis seed. Used as an optional query parameter on workspace
+    * bootstrap so exports can be re-imported with the same entity
+    * (PLAN-SEED-IDENTITY §7, §8 round-trip).
+    */
+  given Codec[String, SeedEntityId.SeedEntityId, CodecFormat.TextPlain] =
+    Codec.long.mapDecode[SeedEntityId.SeedEntityId](raw =>
+      SeedEntityId.fromLong(raw).fold(
+        errs => DecodeResult.Error(raw.toString, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.value)
+
+  /** Schema for SeedEntityId for JSON body derivation. */
+  given Schema[SeedEntityId.SeedEntityId] = Schema.schemaForLong.map[SeedEntityId.SeedEntityId](
+    l => SeedEntityId.fromLong(l).toOption
+  )(_.value)
 }

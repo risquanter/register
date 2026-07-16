@@ -31,7 +31,8 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     probability = 0.25,
     minLoss = Some(1000L),
     maxLoss = Some(50000L),
-    parentId = Some(nodeId("ops-risk"))
+    parentId = Some(nodeId("ops-risk")),
+    seedVarId = 1L
   )
 
   val hardwareLeaf = RiskLeaf.unsafeApply(
@@ -41,7 +42,8 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     probability = 0.1,
     minLoss = Some(500L),
     maxLoss = Some(10000L),
-    parentId = Some(nodeId("it-risk"))
+    parentId = Some(nodeId("it-risk")),
+    seedVarId = 2L
   )
 
   val softwareLeaf = RiskLeaf.unsafeApply(
@@ -51,7 +53,8 @@ object RiskResultCacheSpec extends ZIOSpecDefault {
     probability = 0.3,
     minLoss = Some(100L),
     maxLoss = Some(5000L),
-    parentId = Some(nodeId("it-risk"))
+    parentId = Some(nodeId("it-risk")),
+    seedVarId = 3L
   )
 
   val itPortfolio = RiskPortfolio.unsafeFromStrings(

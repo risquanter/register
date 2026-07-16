@@ -4,7 +4,7 @@ import zio.test.*
 import zio.prelude.Validation
 
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Distribution}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, OccurrenceProbability}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, OccurrenceProbability, SeedVarId}
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.tree.TreeIndex
 
@@ -33,7 +33,10 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       errs => throw new AssertionError(s"Invalid tree index: $errs"),
       identity
     )
-    RiskTree(treeId, safeName, nodes, rootId, index)
+    val highWater = nodes.collect { case l: RiskLeaf => l.seedVarId }.maxByOption(_.value).getOrElse(
+      SeedVarId.fromLong(1L).toOption.get
+    )
+    RiskTree(treeId, safeName, nodes, rootId, index, highWater)
 
   // ── Fixture nodes ────────────────────────────────────────────────────
 
@@ -44,7 +47,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     probability      = 0.3,
     minLoss          = Some(1000L),
     maxLoss          = Some(50000L),
-    parentId         = None
+    parentId         = None,
+    seedVarId = 1L
   )
 
   private val expertLeaf = RiskLeaf.unsafeApply(
@@ -55,7 +59,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     percentiles      = Some(Array(0.1, 0.5, 0.9)),
     quantiles        = Some(Array(1000.0, 5000.0, 20000.0)),
     terms            = Some(3),
-    parentId         = None
+    parentId         = None,
+    seedVarId = 2L
   )
 
   private val rootPortfolio = RiskPortfolio.unsafeFromStrings(
@@ -79,7 +84,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     probability      = 0.1,
     minLoss          = Some(500L),
     maxLoss          = Some(10000L),
-    parentId         = Some(childId)
+    parentId         = Some(childId),
+    seedVarId = 3L
   )
 
   private val rootPortfolioWithChild = RiskPortfolio.unsafeFromStrings(
@@ -124,7 +130,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 4L
         )
         val tree  = mkTree(treeUlid, "Root and Leaf", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -158,7 +165,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 5L
         )
         val tree  = mkTree(treeUlid, "Round Trip", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -179,7 +187,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 6L
         )
         val tree  = mkTree(treeUlid, "Identity", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -204,7 +213,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 7L
         )
         val tree  = mkTree(treeUlid, "Mixed", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -243,7 +253,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 8L
         )
         val tree  = mkTree(treeUlid, "RoundTripId", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -271,7 +282,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 9L
         )
         val tree  = mkTree(treeUlid, "UpdateLeaf", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -298,7 +310,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 10L
         )
         val tree  = mkTree(treeUlid, "LeafIdPreserve", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -314,8 +327,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
       test("fails when new name collides with another leaf") {
         val leaf2Ulid = "01HX9ABCDE0000000000000005"
-        val leaf1 = RiskLeaf.unsafeApply(id = leafUlid,  name = "LeafA", distributionType = "lognormal", probability = 0.1, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId))
-        val leaf2 = RiskLeaf.unsafeApply(id = leaf2Ulid, name = "LeafB", distributionType = "lognormal", probability = 0.2, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId))
+        val leaf1 = RiskLeaf.unsafeApply(id = leafUlid,  name = "LeafA", distributionType = "lognormal", probability = 0.1, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId), seedVarId = 11L)
+        val leaf2 = RiskLeaf.unsafeApply(id = leaf2Ulid, name = "LeafB", distributionType = "lognormal", probability = 0.2, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId), seedVarId = 12L)
         val root2 = RiskPortfolio.unsafeFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, leaf2Ulid), parentId = None)
         val tree  = mkTree(treeUlid, "Collision", Seq(root2, leaf1, leaf2), rootId)
         val state = new TreeBuilderState()
@@ -337,7 +350,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 13L
         )
         val tree  = mkTree(treeUlid, "CascadeRename", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -362,7 +376,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 14L
         )
         val tree  = mkTree(treeUlid, "PortIdPreserve", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -388,7 +403,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 15L
         )
         val tree  = mkTree(treeUlid, "ClearSel", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -408,7 +424,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 16L
         )
         val tree  = mkTree(treeUlid, "RemoveClearsSel", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -427,7 +444,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 17L
         )
         val leaf2 = RiskLeaf.unsafeApply(
           id               = childUlid,
@@ -436,7 +454,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.2,
           minLoss          = Some(500L),
           maxLoss          = Some(20000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 18L
         )
         val rootWithTwo = RiskPortfolio.unsafeFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, childUlid), parentId = None)
         val tree  = mkTree(treeUlid, "RemoveOther", Seq(rootWithTwo, leaf1, leaf2), rootId)
@@ -490,7 +509,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           percentiles      = Some(Array(0.1, 0.5, 0.9)),
           quantiles        = Some(Array(1000.0, 5000.0, 20000.0)),
           terms            = Some(3),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 19L
         )
         val tree  = mkTree(treeUlid, "PopulateExpert", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
@@ -516,7 +536,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           probability      = 0.3,
           minLoss          = Some(1000L),
           maxLoss          = Some(50000L),
-          parentId         = Some(rootId)
+          parentId         = Some(rootId),
+          seedVarId = 20L
         )
         val tree  = mkTree(treeUlid, "PopulateLognormal", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()

@@ -52,7 +52,8 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
     probability = 0.25,
     minLoss = Some(1000L),
     maxLoss = Some(50000L),
-    parentId = Some(nodeId("ops-risk"))
+    parentId = Some(nodeId("ops-risk")),
+    seedVarId = 1L
   )
 
   val hardwareLeaf = RiskLeaf.unsafeApply(
@@ -62,7 +63,8 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
     probability = 0.1,
     minLoss = Some(500L),
     maxLoss = Some(10000L),
-    parentId = Some(nodeId("ops-risk"))
+    parentId = Some(nodeId("ops-risk")),
+    seedVarId = 2L
   )
 
   val marketLeaf = RiskLeaf.unsafeApply(
@@ -72,7 +74,8 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
     probability = 0.2,
     minLoss = Some(2000L),
     maxLoss = Some(100000L),
-    parentId = Some(nodeId("portfolio"))
+    parentId = Some(nodeId("portfolio")),
+    seedVarId = 3L
   )
 
   val opsPortfolio = RiskPortfolio.unsafeFromStrings(
@@ -159,7 +162,8 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
           probability = 0.4,   // changed
           minLoss = Some(1000L),
           maxLoss = Some(50000L),
-          parentId = Some(nodeId("ops-risk"))
+          parentId = Some(nodeId("ops-risk")),
+          seedVarId = 4L
         )
         val newTree = unsafeGet(
           RiskTree.fromNodes(
@@ -200,7 +204,8 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
           probability = 0.4,
           minLoss = Some(1000L),
           maxLoss = Some(50000L),
-          parentId = Some(nodeId("ops-risk"))
+          parentId = Some(nodeId("ops-risk")),
+          seedVarId = 5L
         )
         val newTree = unsafeGet(
           RiskTree.fromNodes(
@@ -253,7 +258,8 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
           probability = 0.05,
           minLoss = Some(10000L),
           maxLoss = Some(500000L),
-          parentId = Some(nodeId("ops-risk"))
+          parentId = Some(nodeId("ops-risk")),
+          seedVarId = 6L
         )
         val expandedOps = RiskPortfolio.unsafeFromStrings(
           id = idStr("ops-risk"),
@@ -356,7 +362,8 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(500L),
           maxLoss = Some(10000L),
-          parentId = Some(nodeId("portfolio"))  // was ops-risk, now portfolio
+          parentId = Some(nodeId("portfolio")),  // was ops-risk, now portfolio
+          seedVarId = 7L
         )
         val expandedRoot = RiskPortfolio.unsafeFromStrings(
           id = idStr("portfolio"),
@@ -444,7 +451,8 @@ object MutationInvalidationSpec extends ZIOSpecDefault {
           probability = 0.4,
           minLoss = Some(1000L),
           maxLoss = Some(50000L),
-          parentId = Some(nodeId("ops-risk"))
+          parentId = Some(nodeId("ops-risk")),
+          seedVarId = 8L
         )
         val newTree = unsafeGet(
           RiskTree.fromNodes(

@@ -293,24 +293,36 @@ Requires pre-built production images and the `local/bats-runner:1.11` image.
 docker build -f containers/dev/Dockerfile.bats-runner \
   -t local/bats-runner:1.11 containers/dev/
 
-# Suite C — in-memory, quickest; run after any code change
-docker run --rm --network host \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$(pwd)":/workspace -w /workspace \
-  local/bats-runner:1.11 tests/bats/suite-c-in-memory.bats
+# All suites share one invocation — only the .bats file changes.
+run_bats() {
+  docker run --rm --userns=host --network host \
+    --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+    -e HOME=/tmp \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" \
+    -w "$(pwd)" \
+    local/bats-runner:1.11 "$1"
+}
 
-# Suite A — E2E with Irmin persistence
-docker run --rm --network host \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$(pwd)":/workspace -w /workspace \
-  local/bats-runner:1.11 tests/bats/suite-a-full-prod.bats
-
-# Suite B — standalone Irmin image
-docker run --rm --network host \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -v "$(pwd)":/workspace -w /workspace \
-  local/bats-runner:1.11 tests/bats/suite-b-irmin-prod.bats
+run_bats tests/bats/suite-c-in-memory.bats   # Suite C — in-memory, quickest; run after any code change
+run_bats tests/bats/suite-a-full-prod.bats   # Suite A — E2E with Irmin persistence
+run_bats tests/bats/suite-b-irmin-prod.bats  # Suite B — standalone Irmin image
 ```
+
+Why each flag (the runner drives the **host's** Docker daemon from inside a
+container, and this machine's daemon runs with user-namespace remapping):
+
+- `--userns=host` — the remapped daemon refuses `--network host` otherwise;
+  no-op on daemons without remapping, so the command is portable.
+- `--group-add $(stat -c '%g' /var/run/docker.sock)` — puts the container
+  user in the socket's group; without it every Docker call is permission-denied.
+- `-e HOME=/tmp` — the Docker CLI writes `$HOME/.docker`; the image's baked-in
+  home is not writable under the remap.
+- Mount the repo's **parent** directory at its **identical host path** (not
+  `/workspace`) — compose build contexts (`..` for frontend/builder images)
+  are resolved by the host daemon, so every path the runner passes must mean
+  the same thing on the host. A `/workspace` mount fails with errors like
+  `lstat /register: no such file or directory`.
 
 | Scenario | Suite |
 |----------|-------|

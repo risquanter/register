@@ -8,7 +8,7 @@ import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, SeedEntityId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
@@ -48,7 +48,7 @@ final case class RiskResultResolverLive(
   private val seed3: Long = config.defaultSeed3
   private val seed4: Long = config.defaultSeed4
 
-  override def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): Task[RiskResult] =
+  override def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[RiskResult] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
         _         <- tracing.setAttribute("tree_id", tree.id.value)
@@ -60,19 +60,19 @@ final case class RiskResultResolverLive(
           case Some(cached) =>
             tracing.setAttribute("cache_hit", true) *> ZIO.succeed(cached)
           case None =>
-            tracing.setAttribute("cache_hit", false) *> simulateSubtree(tree, nodeId, includeProvenance)
+            tracing.setAttribute("cache_hit", false) *> simulateSubtree(tree, nodeId, seedEntityId, includeProvenance)
         }
       } yield result
     }
 
-  override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]] =
-    ZIO.foreach(nodeIds.toList)(id => ensureCached(tree, id, includeProvenance).map(id -> _)).map(_.toMap)
+  override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]] =
+    ZIO.foreach(nodeIds.toList)(id => ensureCached(tree, id, seedEntityId, includeProvenance).map(id -> _)).map(_.toMap)
 
   /**
     * Simulate subtree rooted at nodeId, caching all results.
     * Wraps simulation in span with timing metrics.
     */
-  private def simulateSubtree(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean): Task[RiskResult] =
+  private def simulateSubtree(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[RiskResult] =
     tracing.span("simulateSubtree", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value)
@@ -91,7 +91,7 @@ final case class RiskResultResolverLive(
           ))))
         
         cache  <- cacheManager.cacheFor(tree.id)
-        result <- simulateNode(tree, cache, node, includeProvenance)
+        result <- simulateNode(tree, cache, node, seedEntityId, includeProvenance)
         
         endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
         durationMs = endTime - startTime
@@ -108,10 +108,10 @@ final case class RiskResultResolverLive(
       trialsCounter.add(nTrials.toLong, attrs)
   }
 
-  private def simulateNode(tree: RiskTree, cache: RiskResultCache, node: RiskNode, includeProvenance: Boolean): Task[RiskResult] =
+  private def simulateNode(tree: RiskTree, cache: RiskResultCache, node: RiskNode, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[RiskResult] =
     node match {
       case leaf: RiskLeaf =>
-        simulateLeaf(cache, leaf, includeProvenance)
+        simulateLeaf(cache, leaf, seedEntityId, includeProvenance)
 
       case portfolio: RiskPortfolio =>
         for
@@ -127,7 +127,7 @@ final case class RiskResultResolverLive(
                     code = ValidationErrorCode.CONSTRAINT_VIOLATION,
                     message = s"Child node not found in tree index: $childId"
                   ))))
-                  .flatMap(childNode => simulateNode(tree, cache, childNode, includeProvenance))
+                  .flatMap(childNode => simulateNode(tree, cache, childNode, seedEntityId, includeProvenance))
             }
           }
           combined <- ZIO.attempt {
@@ -144,11 +144,11 @@ final case class RiskResultResolverLive(
         yield combined
     }
 
-  private def simulateLeaf(cache: RiskResultCache, leaf: RiskLeaf, includeProvenance: Boolean): Task[RiskResult] =
+  private def simulateLeaf(cache: RiskResultCache, leaf: RiskLeaf, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[RiskResult] =
     for
       // Always capture provenance (filter at service layer)
       // Rationale: Maintain chain of truth - provenance always in cache
-      (sampler, provenance)  <- Simulator.createSamplerFromLeaf(leaf, seed3, seed4)
+      (sampler, provenance)  <- Simulator.createSamplerFromLeaf(leaf, seedEntityId, seed3, seed4)
       trials <- Simulator.performTrials(sampler, nTrials, parallelism)
       result = RiskResult(leaf.id, trials, List(provenance))
       _ <- cache.put(leaf.id, result)

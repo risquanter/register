@@ -579,46 +579,37 @@ docker build -f containers/dev/Dockerfile.bats-runner \
 All suites are invoked the same way — only the `.bats` file changes:
 
 ```bash
-docker run --rm --network host \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
-  -v "$(pwd):/workspace:ro" \
-  -w /workspace \
-  local/bats-runner:1.11 tests/bats/<SUITE>.bats
+run_bats() {
+  docker run --rm --userns=host --network host \
+    --group-add "$(stat -c '%g' /var/run/docker.sock)" \
+    -e HOME=/tmp \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v "$(dirname "$(pwd)")":"$(dirname "$(pwd)")" \
+    -w "$(pwd)" \
+    local/bats-runner:1.11 "$1"
+}
+
+run_bats tests/bats/suite-c-in-memory.bats   # Suite C — quickest, no Irmin dependency (start here)
+run_bats tests/bats/suite-a-full-prod.bats   # Suite A — E2E with Irmin persistence (REGISTER_REPOSITORY_TYPE=irmin)
+run_bats tests/bats/suite-b-irmin-prod.bats  # Suite B — standalone Irmin image validation
 ```
 
-**Suite C** — quickest, no Irmin dependency (start here):
+Why each flag — the runner drives the **host's** Docker daemon from inside a
+container, which makes four things fragile (all four bite on a daemon running
+with user-namespace remapping):
 
-```bash
-docker run --rm --network host \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
-  -v "$(pwd):/workspace:ro" \
-  -w /workspace \
-  local/bats-runner:1.11 tests/bats/suite-c-in-memory.bats
-```
-
-**Suite A** — E2E with Irmin persistence (server configured with `REGISTER_REPOSITORY_TYPE=irmin`):
-
-```bash
-docker run --rm --network host \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
-  -v "$(pwd):/workspace:ro" \
-  -w /workspace \
-  local/bats-runner:1.11 tests/bats/suite-a-full-prod.bats
-```
-
-**Suite B** — standalone Irmin image validation:
-
-```bash
-docker run --rm --network host \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  --group-add "$(stat -c '%g' /var/run/docker.sock)" \
-  -v "$(pwd):/workspace:ro" \
-  -w /workspace \
-  local/bats-runner:1.11 tests/bats/suite-b-irmin-prod.bats
-```
+- `--userns=host` — a remapped daemon refuses `--network host` otherwise.
+  No-op on daemons without remapping, so the command is portable.
+- `--group-add $(stat -c '%g' /var/run/docker.sock)` — puts the container
+  user in the socket's group; without it every Docker call is
+  permission-denied.
+- `-e HOME=/tmp` — the Docker CLI writes `$HOME/.docker`; the image's
+  baked-in home is not writable once the ID mapping changes.
+- Mount the repo's **parent** directory at its **identical host path** (not
+  `/workspace`) — compose build contexts (`..` for the frontend/builder
+  images) are resolved by the host daemon, so every path the runner passes
+  must mean the same thing on the host. A `/workspace` mount fails with
+  errors like `lstat /register: no such file or directory`.
 
 ### Which Suite to Run When
 

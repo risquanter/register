@@ -2,7 +2,7 @@ package com.risquanter.register.services.workspace
 
 import zio.*
 import com.risquanter.register.domain.data.WorkspaceRecord
-import com.risquanter.register.domain.data.iron.{WorkspaceId, WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, WorkspaceKeySecret, TreeId, SeedEntityId}
 import com.risquanter.register.domain.errors.{AppError, WorkspaceNotFound, WorkspaceExpired, TreeNotInWorkspace}
 
 /** Workspace lifecycle service — association/token index.
@@ -20,9 +20,17 @@ import com.risquanter.register.domain.errors.{AppError, WorkspaceNotFound, Works
   */
 trait WorkspaceStore:
   /** Create a new workspace with the configured TTL.
+    *
+    * `seedEntityId` is the workspace's stochastic identity (HDR Entity axis,
+    * PLAN-SEED-IDENTITY §5.2). `None` assigns the next value from the store's
+    * monotonic counter (contract responsibility, per backend: Postgres sequence /
+    * fixed-base in-memory counter — §12.2). `Some(v)` provides it explicitly;
+    * fails with ValidationFailed(DUPLICATE_VALUE) when a live workspace already
+    * holds `v`, and bumps the counter past `v` so later assignments cannot collide.
+    *
     * Security: logs creation event (A29).
     */
-  def create(): UIO[WorkspaceKeySecret]
+  def create(seedEntityId: Option[SeedEntityId.SeedEntityId] = None): IO[AppError, WorkspaceKeySecret]
 
   /** Associate a tree with a workspace. Fails if workspace expired or not found. */
   def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit]
@@ -93,8 +101,8 @@ trait WorkspaceStore:
 
 object WorkspaceStore:
   // Accessor methods for ZIO service pattern
-  def create(): ZIO[WorkspaceStore, Nothing, WorkspaceKeySecret] =
-    ZIO.serviceWithZIO[WorkspaceStore](_.create())
+  def create(seedEntityId: Option[SeedEntityId.SeedEntityId] = None): ZIO[WorkspaceStore, AppError, WorkspaceKeySecret] =
+    ZIO.serviceWithZIO[WorkspaceStore](_.create(seedEntityId))
 
   def resolve(key: WorkspaceKeySecret): ZIO[WorkspaceStore, AppError, WorkspaceRecord] =
     ZIO.serviceWithZIO[WorkspaceStore](_.resolve(key))

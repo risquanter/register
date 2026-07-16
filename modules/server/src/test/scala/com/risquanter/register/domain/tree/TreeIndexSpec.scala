@@ -32,7 +32,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
     probability = 0.25,
     minLoss = Some(1000L),
     maxLoss = Some(50000L),
-    parentId = Some(nodeId("ops-risk"))
+    parentId = Some(nodeId("ops-risk")),
+    seedVarId = 1L
   )
 
   val hardwareLeaf = RiskLeaf.unsafeApply(
@@ -42,7 +43,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
     probability = 0.1,
     minLoss = Some(500L),
     maxLoss = Some(10000L),
-    parentId = Some(nodeId("it-risk"))
+    parentId = Some(nodeId("it-risk")),
+    seedVarId = 2L
   )
 
   val softwareLeaf = RiskLeaf.unsafeApply(
@@ -52,7 +54,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
     probability = 0.3,
     minLoss = Some(100L),
     maxLoss = Some(5000L),
-    parentId = Some(nodeId("it-risk"))
+    parentId = Some(nodeId("it-risk")),
+    seedVarId = 3L
   )
 
   val itPortfolio = RiskPortfolio.unsafeFromStrings(
@@ -221,7 +224,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(nodeId("wrong-parent"))  // Points to non-existent parent
+          parentId = Some(nodeId("wrong-parent")),  // Points to non-existent parent
+          seedVarId = 4L
         )
         
         val root = RiskPortfolio.unsafeFromStrings(
@@ -274,7 +278,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(nodeId("root"))  // Claims root as parent
+          parentId = Some(nodeId("root")),  // Claims root as parent
+          seedVarId = 5L
         )
         
         val otherChild = RiskLeaf.unsafeApply(
@@ -284,7 +289,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(nodeId("root"))  // Correctly claims root
+          parentId = Some(nodeId("root")),  // Correctly claims root
+          seedVarId = 6L
         )
         
         val root = RiskPortfolio.unsafeFromStrings(
@@ -315,7 +321,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = None
+          parentId = None,
+          seedVarId = 7L
         )
         
         val child = RiskLeaf.unsafeApply(
@@ -325,7 +332,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(nodeId("parent-leaf"))  // Points to leaf, not portfolio
+          parentId = Some(nodeId("parent-leaf")),  // Points to leaf, not portfolio
+          seedVarId = 8L
         )
         
         val result = TreeIndex.fromNodeSeq(Seq(parent, child))
@@ -349,7 +357,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(nodeId("non-existent"))  // Points to missing parent
+          parentId = Some(nodeId("non-existent")),  // Points to missing parent
+          seedVarId = 9L
         )
         
         val result = TreeIndex.fromNodeSeq(Seq(orphan))
@@ -374,7 +383,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(nodeId("missing1"))
+          parentId = Some(nodeId("missing1")),
+          seedVarId = 10L
         )
         
         val orphan2 = RiskLeaf.unsafeApply(
@@ -384,7 +394,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(nodeId("missing2"))
+          parentId = Some(nodeId("missing2")),
+          seedVarId = 11L
         )
         
         val result = TreeIndex.fromNodeSeq(Seq(orphan1, orphan2))
@@ -404,7 +415,8 @@ object TreeIndexSpec extends ZIOSpecDefault {
           probability = 0.1,
           minLoss = Some(100L),
           maxLoss = Some(1000L),
-          parentId = Some(nodeId("valid-parent"))
+          parentId = Some(nodeId("valid-parent")),
+          seedVarId = 12L
         )
         
         val parent = RiskPortfolio.unsafeFromStrings(

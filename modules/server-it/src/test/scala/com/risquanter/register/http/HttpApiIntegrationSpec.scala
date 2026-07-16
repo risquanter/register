@@ -7,7 +7,7 @@ import sttp.client3.*
 import sttp.client3.ziojson.*
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
-import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.{RiskLeaf, RiskTree}
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
 import io.github.iltotore.iron.*
@@ -101,6 +101,33 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
         yield assertTrue(createdTree.name == request.name) &&
           assertTrue(listed.exists(_.id == createdTree.id)) &&
           assertTrue(structure.exists(_.id == createdTree.id))
+      },
+      test("bootstrap honours provided seedEntityId and seedVarId; structure exposes assigned seeds (PLAN §7)") {
+        // Export→import round-trip prerequisite: caller pins both seed axes and
+        // reads them back from the response / structure endpoint.
+        val base = sampleRequest()
+        val request = base.copy(
+          leaves = base.leaves.zipWithIndex.map { case (l, i) => l.copy(seedVarId = Some(41L + i)) }
+        )
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          bootstrapResp <- basicRequest
+            .post(uri"${client.baseUrl}/workspaces?seedEntityId=4242")
+            .body(request)
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key        = bootstrap.workspaceKey.reveal
+
+          structResp <- basicRequest
+            .get(uri"${client.baseUrl}/w/$key/risk-trees/${bootstrap.tree.id.value}/structure")
+            .response(asJson[Option[RiskTree]])
+            .send(client.backend)
+          structure <- ZIO.fromEither(structResp.body)
+          leafSeeds  = structure.toSeq.flatMap(_.nodes.collect { case l: RiskLeaf => l.seedVarId.value }).sorted
+        yield assertTrue(bootstrap.seedEntityId.value == 4242L) &&
+          assertTrue(leafSeeds == Seq(41L, 42L))
       },
       test("create additional tree in workspace via POST /w/{key}/risk-trees") {
         val bootstrapReq = sampleRequest()

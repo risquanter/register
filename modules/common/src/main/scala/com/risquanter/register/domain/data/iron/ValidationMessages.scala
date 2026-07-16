@@ -122,3 +122,26 @@ object ValidationMessages:
     "The inputs could not be fitted to a valid distribution. " +
     "Try reducing Terms, check that quantile values are strictly increasing, " +
     "or remove conflicting estimates."
+
+  // ══════════════════════════════════════════════════════════════════
+  // Seed identity (TODO item 12 / PLAN-SEED-IDENTITY.md)
+  // ══════════════════════════════════════════════════════════════════
+  // Bounds are fixed by the HDR generator's 8-decimal-digit ID budget and
+  // must match the Iron type-level literals in OpaqueTypes/ValidationUtil
+  // (type-level constraints cannot reference runtime constants).
+  val seedEntityIdOutOfRange: String =
+    "seedEntityId must be between 1 and 99999999 (0 is reserved)"
+  val seedVarIdOutOfRange: String =
+    "seedVarId must be between 1 and 49999999"
+
+  def seedVarIdInUse(id: Long, holders: Seq[String]): String =
+    s"seedVarId $id is used by multiple nodes: ${holders.mkString(", ")} — " +
+    "choose distinct values or omit to auto-assign"
+
+  def seedEntityIdInUse(id: Long): String =
+    s"seedEntityId $id is already used by another workspace — " +
+    "choose another value or omit to auto-assign"
+
+  val seedVarIdImmutable: String =
+    "seedVarId is immutable once assigned — omit it for existing nodes; " +
+    "to change a risk's stream, delete the leaf and recreate it"

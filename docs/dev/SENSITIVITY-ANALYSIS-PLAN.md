@@ -69,12 +69,13 @@ portfolio branch then recomputes each ancestor as `childResults.reduce(RiskResul
 where off-path children are cache hits and only the on-path child is recomputed. This is
 re-aggregation along the path — no subtraction.
 
-### Seeds derive from node id, not params
+### Seeds derive from stored seed identities, not params
 
 [`Simulator.createSamplerFromLeaf`](../../modules/server/src/main/scala/com/risquanter/register/services/helper/Simulator.scala):
-`entitySeed = leaf.id.value.hashCode`. Perturbing a leaf's *params* keeps its id, so the
-occurrence stream and uniform draws are identical to baseline. Any change in the result
-reflects only the parameter change — no manual seed threading required.
+streams derive from the workspace's `seedEntityId` and the leaf's stored `seedVarId`
+(`SeedDerivation.streams`; PLAN-SEED-IDENTITY). Perturbing a leaf's *params* keeps its
+`seedVarId`, so the occurrence stream and uniform draws are identical to baseline. Any
+change in the result reflects only the parameter change — no manual seed threading required.
 
 ---
 

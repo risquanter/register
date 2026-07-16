@@ -24,7 +24,11 @@ object RiskTreeUpdateRequest:
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV, newPortfoliosV, newLeavesV) {
       (treeName, portfolios, leaves, newPortfolios, newLeaves) =>
-        validateTopologyUpdate(treeName, portfolios, leaves.map { case (_, name, parent, _, _) => (name, parent) }, newPortfolios, newLeaves.map { case (name, parent, _, _) => (name, parent) }).map { rootName =>
+        val providedSeeds = newLeaves.collect { case (name, _, _, _, Some(seed)) => name -> seed }
+        Validation.validateWith(
+          validateTopologyUpdate(treeName, portfolios, leaves.map { case (_, name, parent, _, _) => (name, parent) }, newPortfolios, newLeaves.map { case (name, parent, _, _, _) => (name, parent) }),
+          requireUniqueSeedVarIds(providedSeeds)
+        ) { (rootName, _) =>
           val existingPortfolioNodes = portfolios.map { case (id, name, parent) =>
             name -> ResolvedNode(id, name, parent, NodeKind.Portfolio)
           }
@@ -34,12 +38,12 @@ object RiskTreeUpdateRequest:
           val addedPortfolioNodes = newPortfolios.map { case (name, parent) =>
             name -> ResolvedNode(newId(), name, parent, NodeKind.Portfolio)
           }
-          val addedLeafNodes = newLeaves.map { case (name, parent, _, _) =>
+          val addedLeafNodes = newLeaves.map { case (name, parent, _, _, _) =>
             name -> ResolvedNode(newId(), name, parent, NodeKind.Leaf)
           }
 
           val existingLeafOccurrenceAndShape = leaves.collect { case (_, name, _, prob, dist) => name -> (prob, dist) }.toMap
-          val addedLeafOccurrenceAndShape = newLeaves.map { case (name, _, prob, dist) => name -> (prob, dist) }.toMap
+          val addedLeafOccurrenceAndShape = newLeaves.map { case (name, _, prob, dist, _) => name -> (prob, dist) }.toMap
 
           ResolvedUpdate(
             treeName = treeName,
@@ -47,6 +51,7 @@ object RiskTreeUpdateRequest:
             added = (addedPortfolioNodes ++ addedLeafNodes).toMap,
             existingLeafOccurrenceAndShape = existingLeafOccurrenceAndShape,
             addedLeafOccurrenceAndShape = addedLeafOccurrenceAndShape,
+            providedSeedVarIds = providedSeeds.toMap,
             rootName = rootName
           )
         }
@@ -66,7 +71,8 @@ final case class RiskLeafUpdateRequest(
   name:              String,
   parentName:        Option[String],
   probability:       Double,
-  distributionShape: DistributionShapeRequest
+  distributionShape: DistributionShapeRequest,
+  seedVarId:         Option[Long] = None
 )
 object RiskLeafUpdateRequest:
   given JsonCodec[RiskLeafUpdateRequest] = DeriveJsonCodec.gen

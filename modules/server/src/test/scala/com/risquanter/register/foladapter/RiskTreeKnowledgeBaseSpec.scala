@@ -5,6 +5,7 @@ import zio.test.*
 import com.risquanter.register.domain.data.{RiskResult, RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.SeedVarId
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -56,14 +57,16 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     id = cyberId.value, name = "Cyber",
     distributionType = "lognormal", probability = 0.25,
     minLoss = Some(1000L), maxLoss = Some(50000L),
-    parentId = Some(itId)
+    parentId = Some(itId),
+    seedVarId = 1L
   )
 
   private val hardwareLeaf = RiskLeaf.unsafeApply(
     id = hardwareId.value, name = "Hardware",
     distributionType = "lognormal", probability = 0.10,
     minLoss = Some(500L), maxLoss = Some(10000L),
-    parentId = Some(itId)
+    parentId = Some(itId),
+    seedVarId = 2L
   )
 
   private val allNodes: Map[NodeId, RiskNode] =
@@ -76,7 +79,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Test Tree").toOption.get,
     nodes  = allNodes.values.toSeq,
     rootId = rootId,
-    index  = index
+    index  = index,
+      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get
   )
 
   // ── Fixtures: simulation results ───────────────────────────────────
@@ -509,7 +513,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Bypass Tree").toOption.get,
       nodes  = nodes,
       rootId = root,
-      index  = idx
+      index  = idx,
+      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get
     )
 
   private val constantsSuite = suite("catalog.constants (PLAN §5.4)")(
@@ -532,12 +537,14 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val a = RiskLeaf.unsafeApply(
         id = aIdStr, name = "Cyber",
         distributionType = "lognormal", probability = 0.1,
-        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root2")))
+        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root2"))),
+        seedVarId = 3L
       )
       val b = RiskLeaf.unsafeApply(
         id = bIdStr, name = "Cyber",
         distributionType = "lognormal", probability = 0.2,
-        minLoss = Some(3L), maxLoss = Some(4L), parentId = Some(NodeId(safeId("root2")))
+        minLoss = Some(3L), maxLoss = Some(4L), parentId = Some(NodeId(safeId("root2"))),
+        seedVarId = 4L
       )
       val t = bypassTree(Seq(rootP, a, b))
       val kb2 = RiskTreeKnowledgeBase(t, Map.empty)
@@ -557,7 +564,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       val c = RiskLeaf.unsafeApply(
         id = cIdStr, name = "leaf",
         distributionType = "lognormal", probability = 0.1,
-        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root3")))
+        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root3"))),
+        seedVarId = 5L
       )
       val t = bypassTree(Seq(rootP, c))
       val kb3 = RiskTreeKnowledgeBase(t, Map.empty)

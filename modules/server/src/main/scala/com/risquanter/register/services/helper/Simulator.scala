@@ -1,7 +1,7 @@
 package com.risquanter.register.services.helper
 
 import com.risquanter.register.BuildInfo
-import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution}
+import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution, SeedDerivation}
 import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, NodeProvenance, ExpertDistributionParams, LognormalDistributionParams}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.iron.{PositiveInt, Probability}
@@ -166,19 +166,26 @@ object Simulator {
   /**
    * Create RiskSampler from RiskLeaf definition.
    * Validates parameters and builds Metalog distribution.
-   * Optionally captures provenance metadata.
-   * 
+   * Always captures provenance metadata.
+   *
+   * Stochastic identity is assigned data (PLAN-SEED-IDENTITY §1): the streams
+   * derive from the workspace's seedEntityId and the leaf's seedVarId in one
+   * place (SeedDerivation), and the sampler and NodeProvenance consume the
+   * same HdrStreams value — recorded provenance cannot diverge from what was
+   * simulated (§6.2).
+   *
    * Note: leaf.probability is already refined to Probability type at the boundary,
    * so no additional validation is needed here.
-   * 
+   *
    * @param leaf RiskLeaf definition
-   * @param includeProvenance Whether to capture provenance metadata
+   * @param seedEntityId The owning workspace's stochastic identity (HDR Entity axis)
    * @param seed3 Global seed 3 for HDR random number generation
    * @param seed4 Global seed 4 for HDR random number generation
-   * @return Tuple of (RiskSampler, Option[NodeProvenance])
+   * @return Tuple of (RiskSampler, NodeProvenance)
    */
   private[services] def createSamplerFromLeaf(
     leaf: RiskLeaf,
+    seedEntityId: SeedEntityId.SeedEntityId,
     seed3: Long = 0L,
     seed4: Long = 0L
   ): Task[(RiskSampler, NodeProvenance)] = {
@@ -186,36 +193,31 @@ object Simulator {
       // Create distribution based on mode
       distAndParams <- createDistributionWithParams(leaf)
       (distribution, distParams) = distAndParams
-      
-      // Build sampler (using entityId = hash of leaf.id for determinism)
-      // Entity ID derived from leaf ID ensures unique random streams per risk
-      // Entity ID is a seed of the random number generator, so it must be consistent for the same leaf ID
-      // TODO: review seed generation (hashcode) to ensure good distribution and avoid collisions 
-      entitySeed = leaf.id.value.hashCode.toLong
+
+      // Single derivation site: even/odd streams from the leaf's assigned seedVarId
+      streams = SeedDerivation.streams(seedEntityId, leaf.seedVarId, seed3, seed4)
       sampler = RiskSampler.fromDistribution(
-        entitySeed = entitySeed,
-        riskSeed = leaf.id,
+        nodeId = leaf.id,
+        streams = streams,
         occurrenceProb = leaf.probability, // Already OccurrenceProbability type from domain model
-        lossDistribution = distribution,
-        seed3 = seed3,
-        seed4 = seed4
+        lossDistribution = distribution
       )
-      
-      // Capture provenance if requested
-      provenance = 
+
+      // Provenance records the very same stream tuple the sampler consumes
+      provenance =
         NodeProvenance(
           riskId = leaf.id,
-          entityId = entitySeed,
-          occurrenceVarId = entitySeed.hashCode + 1000L,
-          lossVarId = entitySeed.hashCode + 2000L,
-          globalSeed3 = seed3,
-          globalSeed4 = seed4,
+          entityId = streams.entityId,
+          occurrenceVarId = streams.occurrenceVarId,
+          lossVarId = streams.lossVarId,
+          globalSeed3 = streams.seed3,
+          globalSeed4 = streams.seed4,
           distributionType = leaf.distributionType,
           distributionParams = distParams,
           timestamp = Instant.now(),
           simulationUtilVersion = BuildInfo.simulationUtilVersion
         )
-      
+
     } yield (sampler, provenance)
   }
   

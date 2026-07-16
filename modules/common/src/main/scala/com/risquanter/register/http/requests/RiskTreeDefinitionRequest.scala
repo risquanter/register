@@ -20,16 +20,20 @@ object RiskTreeDefinitionRequest:
     val leavesV = refineLeafDefs(req.leaves, "request.leaves")
 
     Validation.validateWith(treeNameV, portfoliosV, leavesV) { (treeName, portfolios, leaves) =>
-      validateTopologyCreate(treeName, portfolios, leaves.map { case (name, parent, _, _) => (name, parent) }).map { rootName =>
+      val providedSeeds = leaves.collect { case (name, _, _, _, Some(seed)) => name -> seed }
+      Validation.validateWith(
+        validateTopologyCreate(treeName, portfolios, leaves.map { case (name, parent, _, _, _) => (name, parent) }),
+        requireUniqueSeedVarIds(providedSeeds)
+      ) { (rootName, _) =>
         val portfolioNodes = portfolios.map { case (name, parent) =>
           name -> ResolvedNode(newId(), name, parent, NodeKind.Portfolio)
         }
-        val leafNodes = leaves.map { case (name, parent, _, _) =>
+        val leafNodes = leaves.map { case (name, parent, _, _, _) =>
           name -> ResolvedNode(newId(), name, parent, NodeKind.Leaf)
         }
         val nodes = (portfolioNodes ++ leafNodes).toMap
-        val leafOccurrenceAndShape = leaves.map { case (name, _, prob, dist) => name -> (prob, dist) }.toMap
-        ResolvedCreate(treeName, nodes, leafOccurrenceAndShape, rootName)
+        val leafOccurrenceAndShape = leaves.map { case (name, _, prob, dist, _) => name -> (prob, dist) }.toMap
+        ResolvedCreate(treeName, nodes, leafOccurrenceAndShape, providedSeeds.toMap, rootName)
       }
     }.flatMap(identity)
   }
@@ -45,7 +49,8 @@ final case class RiskLeafDefinitionRequest(
   name:              String,
   parentName:        Option[String],
   probability:       Double,
-  distributionShape: DistributionShapeRequest
+  distributionShape: DistributionShapeRequest,
+  seedVarId:         Option[Long] = None
 )
 object RiskLeafDefinitionRequest:
   given JsonCodec[RiskLeafDefinitionRequest] = DeriveJsonCodec.gen

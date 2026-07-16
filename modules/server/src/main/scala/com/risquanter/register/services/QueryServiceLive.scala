@@ -4,7 +4,7 @@ import zio.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
 
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
@@ -34,7 +34,7 @@ class QueryServiceLive private (
   private def traced[A](name: String)(body: Task[A]): Task[A] =
     tracing.span(s"QueryService.$name", SpanKind.INTERNAL)(body)
 
-  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery): Task[QueryResponse] =
+  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId): Task[QueryResponse] =
     traced("evaluate") {
       for
         _ <- tracing.setAttribute("query.tree_id", treeId.value)
@@ -52,7 +52,7 @@ class QueryServiceLive private (
 
         // 2. Ensure all node simulations are cached
         allNodeIds = tree.index.nodes.keySet
-        results <- resolver.ensureCachedAll(tree, allNodeIds)
+        results <- resolver.ensureCachedAll(tree, allNodeIds, seedEntityId)
           .tapError(e => ZIO.logWarning(s"Simulation cache unavailable for tree ${treeId.value}: ${e.getMessage}"))
           .mapError { e =>
             FolQueryFailure.SimulationNotCached(treeId): Throwable

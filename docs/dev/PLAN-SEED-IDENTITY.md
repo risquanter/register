@@ -1,11 +1,16 @@
 # PLAN — Boundary-Assigned Seed Identity
 
-**Status:** **LOCKED 2026-07-15 — approved in full, no open decisions.**
+**Status:** **IMPLEMENTED 2026-07-16** (locked 2026-07-15 — approved in
+full, no open decisions). All §10 steps and the §11 test pyramid are
+complete — Layer 4 lives in `SeedStabilitySpec`, Layer 5 in
+`SeedStatisticalSanitySpec`, and the system-level integration (restart
+persistence, export → import round trip, demo order-independence) in
+`SeedReproducibilityItSpec`. Closure record: TODO item 12.
 Even/odd stream split re-confirmed by the user on corrected grounds (the
 offset-collision argument applies only to offsets on the varId axis; the
 seed3-constants alternative is mathematically sound and was declined on
-plumbing cost — §13). Remaining §12 items are Signature-Echo-time details,
-not decisions. **Implementation not started — awaits an explicit go signal.**
+plumbing cost — §13). Remaining §12 items were Signature-Echo-time details,
+not decisions.
 **Supersedes:** PLAN-NAME-ONLY-SEEDING.md (deleted 2026-07-15 — its hash-based design died twice, see §2).
 **Decision record:** [TODO item 12](./TODO.md).
 **API impact:** YES — additive optional request fields + seed IDs in responses. Trigger #1 acknowledged by the user 2026-07-15.

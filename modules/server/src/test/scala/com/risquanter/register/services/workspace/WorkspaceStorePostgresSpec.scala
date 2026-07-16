@@ -7,8 +7,8 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash}
-import com.risquanter.register.domain.errors.{WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, SeedEntityId}
+import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
@@ -102,5 +102,49 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         _       <- ZIO.sleep(2.seconds)
         evicted <- store.evictExpired
       yield assertTrue(evicted.exists(_.id == ws.id))
+    },
+
+    // ── Seed identity (PLAN-SEED-IDENTITY §5.2) ─────────────────────────
+    // DB is shared across the suite, so these assert relative properties
+    // (distinctness, monotonicity), not absolute counter values.
+
+    test("sequence assigns distinct, strictly increasing seedEntityIds") {
+      for
+        store <- ZIO.service[WorkspaceStore]
+        k1    <- store.create()
+        k2    <- store.create()
+        e1    <- store.resolve(k1).map(_.seedEntityId.value)
+        e2    <- store.resolve(k2).map(_.seedEntityId.value)
+      yield assertTrue(e2 > e1)
+    },
+
+    test("provided seedEntityId is stored and visible on resolve") {
+      for
+        store <- ZIO.service[WorkspaceStore]
+        id    <- ZIO.fromEither(SeedEntityId.fromLong(900042L)).orDieWith(e => new AssertionError(e.toString))
+        key   <- store.create(Some(id))
+        ws    <- store.resolve(key)
+      yield assertTrue(ws.seedEntityId.value == 900042L)
+    },
+
+    test("duplicate provided seedEntityId is rejected with DUPLICATE_VALUE") {
+      for
+        store <- ZIO.service[WorkspaceStore]
+        id    <- ZIO.fromEither(SeedEntityId.fromLong(900007L)).orDieWith(e => new AssertionError(e.toString))
+        _     <- store.create(Some(id))
+        exit  <- store.create(Some(id)).exit
+      yield assert(exit)(fails(isSubtype[ValidationFailed](
+        hasField("errors", _.errors.map(_.code), contains(ValidationErrorCode.DUPLICATE_VALUE))
+      )))
+    },
+
+    test("assignment after a provided value skips past it (sequence bumped, §5.2)") {
+      for
+        store <- ZIO.service[WorkspaceStore]
+        id    <- ZIO.fromEither(SeedEntityId.fromLong(900100L)).orDieWith(e => new AssertionError(e.toString))
+        _     <- store.create(Some(id))
+        key   <- store.create()
+        ws    <- store.resolve(key)
+      yield assertTrue(ws.seedEntityId.value > 900100L)
     }
   ).provideLayerShared(storeLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock @@ TestAspect.withLiveRandom

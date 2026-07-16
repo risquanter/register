@@ -2,7 +2,7 @@ package com.risquanter.register.services
 
 import zio.*
 
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId}
 import com.risquanter.register.http.responses.QueryResponse
 
 import fol.logic.ParsedQuery
@@ -31,9 +31,9 @@ trait QueryService:
     * @param parsed  Pre-parsed query (from `QueryRequest.resolve()`)
     * @return Query response with satisfaction result and matching node IDs
     */
-  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery): Task[QueryResponse]
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId): Task[QueryResponse]
 
 object QueryService:
 
-  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery): ZIO[QueryService, Throwable, QueryResponse] =
-    ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed))
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId): ZIO[QueryService, Throwable, QueryResponse] =
+    ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed, seedEntityId))

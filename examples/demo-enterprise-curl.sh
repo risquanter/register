@@ -613,10 +613,10 @@ run_query \
   'Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x), 5000000))'
 
 # Q-D — exclusion via negation: leaves outside the Cyber cluster
-# NOT SATISFIED: ~9-11/21 non-Cyber leaves have P95 > $1M (~43-52%) — far from "about 1/3"
+# NOT SATISFIED: 9/21 non-Cyber leaves have P95 > $1M (43%) — clearly not "about 1/4"
 run_query \
-  "Q-D: Do about 1/3 of non-Cyber leaves have P95 above \$1M?" \
-  'Q[~]^{1/3} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))'
+  "Q-D: Do about 1/4 of non-Cyber leaves have P95 above \$1M?" \
+  'Q[~]^{1/4} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))'
 
 # Q-Db — same proportion IS "about 1/2"; Q[~]^{1/2} showcases around tolerance vs strict Q[<=]
 run_query \

@@ -8,7 +8,7 @@ import java.time.Duration
 
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
 import com.risquanter.register.services.RiskTreeService
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId}
 import com.risquanter.register.domain.data.{RiskTree, LECPoint, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
@@ -30,8 +30,8 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest)(using Checked[Permission]): Task[RiskTree]                                  = ZIO.die(new UnsupportedOperationException)
     def delete(wsId: WorkspaceId, id: TreeId)(using Checked[Permission]): Task[RiskTree]                                                              = onDelete(wsId, id)
     def getById(wsId: WorkspaceId, id: TreeId)(using Checked[Permission]): Task[Option[RiskTree]]                                                     = ZIO.die(new UnsupportedOperationException)
-    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, includeProvenance: Boolean): Task[Double] = ZIO.die(new UnsupportedOperationException)
-    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
+    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[Double] = ZIO.die(new UnsupportedOperationException)
+    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
 
   /** No-op stub: `delete` always fails (simulates already-deleted tree). */
   private val noOpTreeServiceLayer: ULayer[RiskTreeService] =

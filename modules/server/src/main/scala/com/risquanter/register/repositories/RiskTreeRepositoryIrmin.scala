@@ -5,15 +5,12 @@ import zio.json.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoCastIron
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode}
-import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId, WorkspaceId}
-import com.risquanter.register.domain.data.RiskTree.{safeNameEncoder, safeNameDecoder}
-import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId}
 import com.risquanter.register.domain.errors.{RepositoryFailure, AppError, IrminError}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.repositories.model.TreeMetadata
 
-import java.time.Instant
 import java.util.UUID
 
 /** Irmin-backed implementation of RiskTreeRepository using per-node storage.
@@ -35,6 +32,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
                     id = riskTree.id,
                     name = riskTree.name,
                     rootId = riskTree.rootId,
+                    seedVarHighWater = riskTree.seedVarHighWater,
                     schemaVersion = CurrentSchemaVersion,
                     createdAt = now,
                     updatedAt = now
@@ -54,6 +52,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       updatedMeta     = existing.meta.copy(
                           name = updatedTree.name,
                           rootId = updatedTree.rootId,
+                          seedVarHighWater = updatedTree.seedVarHighWater,
                           schemaVersion = CurrentSchemaVersion,
                           updatedAt = now
                         )
@@ -118,19 +117,6 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   private def decodeMeta(json: String): Task[TreeMetadata] =
     ZIO.fromEither(json.fromJson[TreeMetadata].left.map(err => RepositoryFailure(s"Decode meta failed: $err")))
 
-  private def decodeLegacyMeta(json: String, treeId: TreeId): Task[TreeMetadata] =
-    ZIO.fromEither(json.fromJson[Meta].left.map(err => RepositoryFailure(s"Decode legacy meta failed: $err"))).map { meta =>
-      val now = Instant.EPOCH
-      TreeMetadata(
-        id = treeId,
-        name = meta.name,
-        rootId = meta.rootId,
-        schemaVersion = CurrentSchemaVersion,
-        createdAt = now,
-        updatedAt = now
-      )
-    }
-
   private def readNodes(basePath: String): Task[Seq[RiskNode]] =
     val nodePrefix = IrminPath.unsafeFrom(s"$basePath/nodes")
     for
@@ -153,9 +139,14 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     if nodes.isEmpty then
       ZIO.fail(RepositoryFailure(s"No nodes found for tree ${meta.id}"))
     else
-      ZIO.fromEither(TreeIndex.fromNodeSeq(nodes).toEither.left.map(errors => RepositoryFailure(errors.map(_.message).mkString("; ")))).map { index =>
-        RiskTree(id = meta.id, name = meta.name, rootId = meta.rootId, nodes = nodes, index = index)
-      }
+      // Route through the smart constructor so every tree invariant (structure,
+      // rootId, seedVarId distinctness, high-water >= max) also holds on load.
+      ZIO.fromEither(
+        RiskTree
+          .fromNodes(meta.id, meta.name, nodes, meta.rootId, Some(meta.seedVarHighWater))
+          .toEither
+          .left.map(errors => RepositoryFailure(errors.map(e => s"[${e.field}] ${e.message}").mkString("; ")))
+      )
 
   private def getRequired(wsId: WorkspaceId, id: TreeId): Task[TreeWithMeta] =
     getTreeWithMeta(wsId, id).either.flatMap {
@@ -178,7 +169,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
             if children.nonEmpty then ZIO.fail(RepositoryFailure(s"Metadata missing for tree $id but nodes exist"))
             else ZIO.succeed(None)
           }
-        case Some(json) => decodeMetaWithFallback(json, id).map(Some(_))
+        case Some(json) => decodeMeta(json).map(Some(_))
       result <- maybeMeta match
         case None => ZIO.succeed(None)
         case Some(meta) =>
@@ -193,9 +184,6 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       case Some(value) => ZIO.succeed(value)
       case None        => ZIO.fail(RepositoryFailure(s"RiskTree $id not found in workspace ${wsId.value}"))
     }
-
-  private def decodeMetaWithFallback(json: String, treeId: TreeId): Task[TreeMetadata] =
-    decodeMeta(json).catchSome { case _ => decodeLegacyMeta(json, treeId) }
 
   private def ensureRootPresent(rootId: NodeId, nodes: Seq[RiskNode]): Task[Unit] =
     if nodes.exists(_.id == rootId) then ZIO.unit
@@ -232,13 +220,11 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       RepositoryFailure(reason)
     }
 
-private final case class Meta(name: SafeName.SafeName, rootId: NodeId)
-object Meta:
-  given JsonCodec[Meta] = DeriveJsonCodec.gen[Meta]
-
 private final case class TreeWithMeta(meta: TreeMetadata, tree: RiskTree)
 
-private val CurrentSchemaVersion: Int = 1
+// v2: nodes carry seedVarId, meta carries seedVarHighWater (PLAN-SEED-IDENTITY).
+// v1 stores are wiped, not migrated (plan §12.1) — no legacy decode path.
+private val CurrentSchemaVersion: Int = 2
 
 object RiskTreeRepositoryIrmin:
   val layer: ZLayer[IrminClient, Nothing, RiskTreeRepository] =

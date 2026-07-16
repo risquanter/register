@@ -1,6 +1,6 @@
 package com.risquanter.register.domain.data
 
-import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId, SeedVarId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
@@ -22,13 +22,18 @@ import io.github.iltotore.iron.*
   * @param nodes Flat collection of all nodes in the tree
   * @param rootId ID of the root node
   * @param index Tree index for O(1) node lookup and O(depth) ancestor path (built from nodes)
+  * @param seedVarHighWater Highest seedVarId ever assigned in this tree — never
+  *        decreases, so deleted leaves' stream IDs are never reused by
+  *        auto-assignment (PLAN-SEED-IDENTITY §5.1). Merges as max across
+  *        branches. Invariant: >= every leaf's seedVarId (checked in fromNodes).
   */
 final case class RiskTree(
   id: TreeId,
   name: SafeName.SafeName,
   nodes: Seq[RiskNode],
   rootId: NodeId,
-  index: TreeIndex
+  index: TreeIndex,
+  seedVarHighWater: SeedVarId.SeedVarId
 ) {
   /** Get the root node */
   def root: RiskNode = index.nodes(rootId)
@@ -45,15 +50,16 @@ object RiskTree {
     id: TreeId,
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
-    rootId: NodeId
+    rootId: NodeId,
+    seedVarHighWater: SeedVarId.SeedVarId
   )
   private object RiskTreeJson:
     given jsonCodec: JsonCodec[RiskTreeJson] = DeriveJsonCodec.gen[RiskTreeJson]
 
   given schema: Schema[RiskTree] =
     Schema.derived[RiskTreeJson]
-      .map(w => RiskTree.fromNodes(w.id, w.name, w.nodes, w.rootId).toEither.toOption)(
-        t => RiskTreeJson(t.id, t.name, t.nodes, t.rootId)
+      .map(w => RiskTree.fromNodes(w.id, w.name, w.nodes, w.rootId, Some(w.seedVarHighWater)).toEither.toOption)(
+        t => RiskTreeJson(t.id, t.name, t.nodes, t.rootId, t.seedVarHighWater)
       )
 
   // JSON codecs for Iron refined types
@@ -66,57 +72,97 @@ object RiskTree {
     JsonDecoder[String].mapOrFail(s => SafeName.fromString(s).left.map(_.mkString(", ")))
   
   // TreeIndex is NOT serialized (reconstructed from nodes on load)
-  // Custom codec that omits index field and rebuilds it from nodes on deserialization
+  // Custom codec that omits index field and rebuilds it from nodes on deserialization.
+  // Decoding routes through fromNodes so every tree invariant (structure, rootId,
+  // seedVarId distinctness) is defined exactly once and holds for stored trees too.
   given codec: JsonCodec[RiskTree] = {
     JsonCodec(
       // Encoder: Serialize without index
       JsonEncoder[RiskTreeJson].contramap[RiskTree] { tree =>
-        RiskTreeJson(tree.id, tree.name, tree.nodes, tree.rootId)
+        RiskTreeJson(tree.id, tree.name, tree.nodes, tree.rootId, tree.seedVarHighWater)
       },
-      // Decoder: Deserialize and rebuild index from nodes
+      // Decoder: Deserialize via the smart constructor (rebuilds index, re-validates)
       JsonDecoder[RiskTreeJson].mapOrFail { json =>
-        // Validate and build TreeIndex
-        TreeIndex.fromNodeSeq(json.nodes).toEither match {
-          case Left(errors) =>
-            Left(s"Invalid tree structure: ${errors.map(_.message).mkString("; ")}")
-          case Right(index) =>
-            // Check rootId exists
-            if (!index.nodes.contains(json.rootId)) {
-              Left(s"rootId '${json.rootId.value}' not found in nodes")
-            } else {
-              Right(RiskTree(
-                id = json.id,
-                name = json.name,
-                nodes = json.nodes,
-                rootId = json.rootId,
-                index = index
-              ))
-            }
-        }
+        fromNodes(json.id, json.name, json.nodes, json.rootId, Some(json.seedVarHighWater)).toEither.left.map(errors =>
+          s"Invalid tree structure: ${errors.map(e => s"[${e.field}] ${e.message}").mkString("; ")}"
+        )
       }
     )
   }
+
+  /** Defense in depth: no two leaves in a tree may share a seedVarId.
+    *
+    * The request boundary enforces the same rule pre-assignment
+    * (RiskTreeRequests); the rule itself is defined once on the SeedVarId
+    * companion. This layer contributes the domain-scoped field path and covers
+    * programmatically-built and store-loaded trees (correct-by-construction
+    * layering, PLAN-SEED-IDENTITY §5.4).
+    */
+  private def requireDistinctSeedVarIds(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
+    SeedVarId.requireDistinct(
+      nodes.collect { case leaf: RiskLeaf => leaf.name.value -> leaf.seedVarId },
+      field = "nodes.seedVarId"
+    )
   
   /** Create a RiskTree from a flat list of nodes.
-    * 
+    *
     * Returns accumulated validation errors per ADR-010.
+    *
+    * @param seedVarHighWater `None` derives the always-valid floor — the highest
+    *        seedVarId currently in the tree. Pass `Some` to preserve a persisted
+    *        watermark (which may exceed the current max when leaves were deleted);
+    *        a value below the current max is rejected, since it would let
+    *        auto-assignment re-issue an in-use stream ID.
     */
   def fromNodes(
     id: TreeId,
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
-    rootId: NodeId
+    rootId: NodeId,
+    seedVarHighWater: Option[SeedVarId.SeedVarId] = None
   ): Validation[ValidationError, RiskTree] = {
-    TreeIndex.fromNodeSeq(nodes).flatMap { index =>
-      Validation
-        .fromPredicateWith[ValidationError, TreeIndex](
-          ValidationError(
-            field = "rootId",
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"rootId '${rootId.value}' not found in nodes"
-          )
-        )(index)((idx: TreeIndex) => idx.nodes.contains(rootId))
-        .as(RiskTree(id, name, nodes, rootId, index))
+    Validation
+      .validateWith(
+        TreeIndex.fromNodeSeq(nodes),
+        requireDistinctSeedVarIds(nodes),
+        resolveSeedVarHighWater(nodes, seedVarHighWater)
+      ) { (index, _, highWater) => (index, highWater) }
+      .flatMap { (index, highWater) =>
+        Validation
+          .fromPredicateWith[ValidationError, TreeIndex](
+            ValidationError(
+              field = "rootId",
+              code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+              message = s"rootId '${rootId.value}' not found in nodes"
+            )
+          )(index)((idx: TreeIndex) => idx.nodes.contains(rootId))
+          .as(RiskTree(id, name, nodes, rootId, index, highWater))
+      }
+  }
+
+  /** Resolve and validate the tree's seed watermark (see fromNodes scaladoc). */
+  private def resolveSeedVarHighWater(
+    nodes: Seq[RiskNode],
+    provided: Option[SeedVarId.SeedVarId]
+  ): Validation[ValidationError, SeedVarId.SeedVarId] = {
+    val maxAssigned = nodes.collect { case leaf: RiskLeaf => leaf.seedVarId }.maxByOption(_.value)
+    (provided, maxAssigned) match {
+      case (Some(hw), Some(mx)) if hw.value < mx.value =>
+        Validation.fail(ValidationError(
+          field = "seedVarHighWater",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = s"seedVarHighWater ${hw.value} is below the highest assigned seedVarId ${mx.value}"
+        ))
+      case (Some(hw), _) => Validation.succeed(hw)
+      case (None, Some(mx)) => Validation.succeed(mx)
+      case (None, None) =>
+        // Unreachable for valid trees (every path terminates at a leaf), but
+        // total: a leafless node collection has no derivable watermark.
+        Validation.fail(ValidationError(
+          field = "seedVarHighWater",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = "tree has no leaves — seedVarHighWater cannot be derived"
+        ))
     }
   }
   
@@ -130,9 +176,10 @@ object RiskTree {
     id: TreeId,
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
-    rootId: NodeId
+    rootId: NodeId,
+    seedVarHighWater: Option[SeedVarId.SeedVarId] = None
   ): RiskTree = {
-    fromNodes(id, name, nodes, rootId).toEither match {
+    fromNodes(id, name, nodes, rootId, seedVarHighWater).toEither match {
       case Right(tree) => tree
       case Left(errors) =>
         throw new IllegalArgumentException(

@@ -2,12 +2,13 @@ package com.risquanter.register.http.responses
 
 import java.time.Instant
 import zio.json.{DeriveJsonCodec, JsonCodec}
-import com.risquanter.register.domain.data.iron.WorkspaceKeySecret
+import com.risquanter.register.domain.data.iron.{SeedEntityId, WorkspaceKeySecret}
 
 final case class WorkspaceBootstrapResponse(
   workspaceKey: WorkspaceKeySecret,
   tree: SimulationResponse,
-  expiresAt: Option[Instant]
+  expiresAt: Option[Instant],
+  seedEntityId: SeedEntityId.SeedEntityId
 )
 
 object WorkspaceBootstrapResponse:

@@ -94,12 +94,15 @@ create_workspace() {
     "leaves": [{
         "name": "Test Risk",
         "parentName": "Root",
-        "distributionType": "lognormal",
         "probability": 0.1,
-        "minLoss": 1000,
-        "maxLoss": 50000,
-        "percentiles": null,
-        "quantiles": null
+        "distributionShape": {
+            "distributionType": "lognormal",
+            "minLoss": 1000,
+            "maxLoss": 50000,
+            "percentiles": null,
+            "quantiles": null,
+            "terms": null
+        }
     }]
 }
 EOF
