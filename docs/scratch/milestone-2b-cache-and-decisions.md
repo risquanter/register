@@ -17,8 +17,19 @@
 > [Review Addendum (2026-07-12)](#review-addendum-2026-07-12) for audit
 > insights, a recommended Phase A lean-down, implementation aid, and launch
 > prerequisites. Related: `docs/dev/TODO.md` item 17 (the cache-staleness
-> bug class this design eliminates) and item 12 (seed derivation — coupled
-> to the hashed bytes, see addendum).
+> bug class this design eliminates — still open) and item 12 (seed identity —
+> **CLOSED 2026-07-16**, implemented per `docs/dev/PLAN-SEED-IDENTITY.md`).
+>
+> **Consistency sweep 2026-07-16 (item 12 closed):** seeds no longer derive
+> from ULIDs — `seedVarId` sits inside the stored leaf JSON (covered by a
+> bytes-based hash automatically), but workspace-level `seedEntityId` is a
+> **new result input outside any node's bytes** (see the A1 table — it must
+> become cache scope). A3 is rewritten (branching is justified by merge,
+> history, no duplication and zero-care correctness — no longer by
+> comparability, which the seed design now guarantees), finding 5 is
+> superseded, and preimage narrowing (drop `id`/`name` from the hash) is now
+> domain-sound but conflicts with DD-14's binding "hash the returned bytes"
+> rule — opened as **DD-16**.
 
 ---
 
@@ -257,9 +268,12 @@ they must diverge — and Option A forecloses both, because you cannot subtract
 a field from someone else's hash:
 
 - **[A2](#a2-dedupe-claim-precision--coupling-to-todo-item-12) / TODO item
-  12:** if seed derivation moves off ULIDs to content, `id` should be dropped
-  from the hashed bytes so true cross-node dedupe becomes sound. Under Option
-  A, `id` is in the stored JSON and therefore permanently in the key.
+  12 — closed 2026-07-16; this divergence is now actual, not hypothetical:**
+  seed identity is a boundary-assigned `seedVarId` stored on the leaf, and
+  ULIDs influence no figure. `id` (and `name`) are therefore *droppable* from
+  the hashed bytes — a projection Option A could never express because you
+  cannot subtract a field from Irmin's hash. Whether to actually narrow the
+  preimage is DD-16.
 - **[A4](#a4-recommended-phase-a-lean-down-cache-leaf-results-only) trap 1:**
   if portfolios gain aggregation-relevant attributes (mitigation transforms —
   `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md`), the portfolio key must become
@@ -312,6 +326,14 @@ problem and are identical under both options.
 **Implementation rule (binding).** Hash **the bytes Irmin returns**, never a
 re-serialisation of the decoded object. Re-serialising would make cache keys
 hostage to zio-json's output stability for no benefit.
+
+> **Tension opened by item 12's closure (2026-07-16, DD-16).** Excluding
+> `name`/`id` from the key is now domain-sound (neither affects any figure),
+> but it cannot be done while hashing the exact returned bytes — both fields
+> are in the stored JSON. Until DD-16 closes, this binding rule stands and
+> the cost is bounded and *correct*: renames spuriously re-simulate
+> (finding 6) and cross-node dedupe never fires (A2) — cache misses, never
+> wrong results.
 
 | Aspect | Option A (hybrid) | Option B (full JVM) |
 |--------|-------------------|---------------------|
@@ -942,6 +964,7 @@ key to `(ContentHash, configHash)`.
 | DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. |
 | DD-11 | Workspace ↔ scenario ownership | Convention-based prefix matching vs explicit ownership records. |
 | DD-15 | Portfolio result caching scope | Cache portfolio results at all in Phase A, and if so under which key? **B** (leaf results only — the A4 lean-down) vs **C** (`sha256(ownJsonHash ++ childKeys)`). Option A (design as written) is dominated by C. Full analysis, including three review objections that collapsed, in [A4 review](#a4-review-2026-07-14--dd-15-still-open). |
+| DD-16 | Leaf hash preimage (opened 2026-07-16 by TODO item 12's closure) | Full stored bytes (DD-14's binding rule) vs a simulation-relevant projection that drops `id` and `name`. Item 12 made exclusion domain-sound (seeds are stored `seedVarId`s, not ULID-derived), but a projection is a re-serialisation — it breaks the binding rule unless storage splits params from metadata (the `sep/n1/params` layout validated in `dev/test-irmin-hashes.sh`). Cost of *not* narrowing: renames re-simulate (finding 6), no cross-node dedupe (A2) — misses only, never wrong results. |
 
 ### Deferred
 
@@ -960,7 +983,8 @@ MUST-FIX (`code-quality-review`). Co-locate with the existing wrappers in
 `OpaqueTypes.scala` (§11 Co-location).
 
 ```scala
-// ALREADY EXISTS — OpaqueTypes.scala:235. Do not redefine; it is Iron-refined
+// ALREADY EXISTS — OpaqueTypes.scala:327 (drifted from :235 when the item-12
+// seed types landed above it). Do not redefine; it is Iron-refined
 // today and used as an IrminConfig value (no other consumer yet).
 case class BranchRef(toBranchRef: BranchRefStr)              // Irmin branch name
 
@@ -1065,6 +1089,16 @@ branch. Content-addressed caching captures this correctly — the JSON includes
 `id`, so the hash changes if the ID changes.
 
 > Impact: None. Seed determinism aligns with content-addressed caching.
+>
+> **Superseded 2026-07-16 — item 12 closed; the hashCode derivation is
+> gone.** Streams now come from
+> `SeedDerivation.streams(workspace.seedEntityId, leaf.seedVarId, seed3,
+> seed4)`; the ULID influences nothing. The per-leaf input is still captured
+> by a bytes-based hash — `seedVarId` is a field of the stored leaf JSON
+> (`RiskLeafRaw`). **But one result input now lives outside every node's
+> bytes:** `seedEntityId` is workspace-level, so a content hash alone no
+> longer determines the result across workspaces. See the A1 table (new gap
+> row) and the cache-scope requirement in the A4 update.
 
 **6. Name change triggers re-simulation.** Renaming a node changes its JSON
 bytes (the JSON includes `name`) → new `sha256` → cache miss → re-simulation,
@@ -1102,8 +1136,11 @@ even though `name` does not affect simulation results.
 > rename preserves the cache too — the "unnecessary work on rename" impact
 > below disappears entirely.
 
-> Impact: Unnecessary work on rename. Accepted — **subject to the item-12
-> caveat above**.
+> Impact: Unnecessary work on rename. Accepted. (Item 12 closed and
+> implemented 2026-07-16: the domain now guarantees a rename changes no
+> figure, so the "different answer" inversion above is dead. Whether the
+> *cache* also survives a rename is exactly DD-16 — preimage narrowing — no
+> longer a domain question.)
 
 ---
 
@@ -1223,7 +1260,9 @@ RiskResultGroup
   flatten gives [aggregate, child1, child2, ...] for chart rendering.
 
 NodeProvenance
-  Audit record: distributionType, entitySeed, occurrenceCount, etc.
+  Audit record: distributionType, entityId / occurrenceVarId / lossVarId
+  (the derived HDR streams — since item 12, the same HdrStreams value the
+  sampler consumed), etc.
   Accumulated through portfolio aggregation via provenances ++ provenances.
 ```
 
@@ -1322,7 +1361,9 @@ Everything else in this design is a consequence. Current coverage:
 | Result input | Covered by the key? | Note |
 |---|---|---|
 | Leaf params (probability, distribution) | Yes — in the leaf JSON bytes | The point of the design |
-| Leaf `id` (ULID) | Yes — in the leaf JSON bytes | **Load-bearing**: `entitySeed` is derived from the ULID (`Simulator.createSamplerFromLeaf`, TODO item 12). Do NOT drop `id` from the hashed bytes while seeds derive from ULIDs. |
+| Leaf `seedVarId` (item 12, closed 2026-07-16) | Yes — a field of the stored leaf JSON (`RiskLeafRaw`) | The per-leaf stochastic input that replaced the ULID-derived seed. Covered automatically by any bytes-based hash. |
+| Leaf `id` (ULID) | Yes — in the leaf JSON bytes | ~~Load-bearing: `entitySeed` derived from the ULID~~ **No longer load-bearing** (item 12 removed the ULID→seed derivation 2026-07-16). Now pure over-coverage: keeping it costs only missed rename/dedupe hits. Dropping it is DD-16. |
+| Workspace `seedEntityId` (item 12) | **No — in no node's bytes** | **New gap (2026-07-16).** Workspace-level result input: identical leaves (same params, same `seedVarId`) in different workspaces produce *different* figures. Must be covered by cache scope — one `ContentCache` per workspace/entity (the `CacheScope` concept) or a key extension, same structural remedy as DD-9b. A global cross-workspace `ContentCache` is a wrong-result bug under the implemented seed design. |
 | `SimulationConfig` (nTrials, seeds) | No | Tolerable **only** while the cache is in-memory (restart clears). If the cache is ever persisted or config becomes per-branch, extend the key (DD-9b). |
 | Portfolio's own content | No — key is `sha256(sort(childHashes))` | Safe only while confirmed assumption 4 holds. See trap A4. |
 
@@ -1357,7 +1398,8 @@ worst case (every identical-spec leaf correlates); candidate 1 (name) is
 safer only because names *tend* to differ, which is not a guarantee.
 See TODO item 12 for the seed-path analysis.
 
-**Superseded 2026-07-15 — item 12 decided against derived seeds entirely.**
+**Superseded 2026-07-15 — item 12 decided against derived seeds entirely
+(implemented and closed 2026-07-16).**
 Seeds are now boundary-assigned IDs stored on the node
 (`docs/dev/PLAN-SEED-IDENTITY.md`): per-tree uniqueness is *enforced at the
 boundary*, so within-tree accidental correlation is unrepresentable. The
@@ -1367,15 +1409,33 @@ and caller-provided IDs may intentionally resurrect a deleted stream. Dedupe
 firing across such nodes is correct, expected behaviour — same event seen
 from two sides, now always by intent, never by accident.
 
-### A3. The strongest motivation, previously unstated: scenario comparability
+### A3. Scenario comparability — position after item 12 (rewritten 2026-07-16)
 
-Copy-based scenarios ("scenario = clone of the tree") are structurally broken
-today: cloned nodes get new ULIDs → new seeds → different simulation results
-for identical parameters → the scenario-vs-main diff shows phantom
-differences the user did not cause. Branch-based scenarios keep node ids
-stable across branches → same seeds → **differences reflect only the user's
-edits**. This is the headline argument for Irmin branches over tree copies,
-and it holds independent of any caching benefit.
+Comparability is guaranteed by the **seed design**, not by branching. Two
+trees with the same leaf parameters and the same seed identities produce
+byte-identical figures (`docs/dev/PLAN-SEED-IDENTITY.md`; proven by the
+`SeedStabilitySpec` recreate test and the `SeedReproducibilityItSpec`
+export→import round trip). A scenario-vs-main diff therefore shows only the
+user's edits — whether the scenario is a branch or a copy.
+
+The remaining difference is operational, not correctness-in-principle:
+
+- **A branch carries seed identity automatically.** Same nodes, same stored
+  `seedVarId`s, same workspace `seedEntityId`. Nothing to get wrong.
+- **A copy must carry it deliberately.** Re-entering names and params matches
+  the source only when the source has no deletion history; a tree with freed
+  IDs (`seedVarHighWater` above the current max) diverges under fresh
+  auto-assignment. A faithful copy must supply the source's `seedVarId`s
+  explicitly (the API accepts them) and pin the same `seedEntityId`.
+
+**The case for branches over copies:** no data duplication, merge (Phase D),
+history/time travel (Phase E), and zero-care correctness — nothing to copy
+correctly.
+
+*(Retired 2026-07-16: this section originally argued copies were structurally
+broken — cloned nodes got new ULIDs, hence new seeds, hence phantom diffs.
+Item 12 removed the ULID→seed derivation, so that argument is dead; do not
+re-raise it.)*
 
 ### A4. Recommended Phase A lean-down: cache leaf results only
 
@@ -1511,6 +1571,14 @@ this decision:
 - B vs C itself remains open, but C's "include your own content in your own
   key" now has the domain guarantee it previously lacked.
 
+**Confirmed in code 2026-07-16 — item 12 is implemented and closed.**
+`seedVarId` is a field of `RiskLeafRaw`, i.e. inside the stored leaf JSON and
+therefore inside any bytes-based hash automatically. `seedVarHighWater` lives
+in tree **meta**, not in any node's bytes — no key impact. One caution: the
+first bullet's "must exclude name and ULID" is an aspiration, not the current
+binding rule — DD-14's "hash the returned bytes" *includes* both fields. That
+conflict is now tracked as DD-16; B vs C (this decision) is orthogonal to it.
+
 ### A5. Scope honesty on UC4/UC6
 
 The cache is an in-memory `Ref`. "Time travel: 0 simulations" and free
@@ -1585,10 +1653,13 @@ But "live" has preconditions **outside** the phase outline:
    default compose stack still runs in-memory. TODO item 10 (`--profile
    persistence` was a no-op for the server) was **resolved 2026-07-12** by
    completing the `--env-file .env.irmin` path — no longer a blocker; the
-   sentence above predated the fix by hours. The residual is TODO item 19:
-   that fix was verified **statically only** (`docker compose --env-file
-   .env.irmin.example config` resolves the backends), with no live
-   restart-persistence test yet. Scenario branching should not be the first
+   sentence above predated the fix by hours. The residual is TODO item 19
+   (still open): that fix was verified **statically only** (`docker compose
+   --env-file .env.irmin.example config` resolves the backends), with no live
+   container-restart test yet. (Since 2026-07-16, `SeedReproducibilityItSpec`
+   does prove Irmin-backed reload through a completely fresh in-process
+   stack — repo/resolver-level evidence, but no container has been restarted
+   under test.) Scenario branching should not be the first
    feature to exercise the persistent tier end-to-end.
 3. **In-memory story:** decide explicitly what the in-memory backend does —
    feature-flagged off (scenario endpoints return 404/NOT_SUPPORTED) or
