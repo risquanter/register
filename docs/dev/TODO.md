@@ -1031,16 +1031,20 @@ which has an analogous pod-restart survival check as its step 5.
 
 ---
 
-## 20. `docs/test/TESTING.md` targets the retired `/api/risk-trees` surface
+## 20. `docs/test/TESTING.md` targeted the retired `/api/risk-trees` surface — DONE (2026-07-14)
 
-**Observed (2026-07-14, while fixing item 18):** `TESTING.md` drives the whole
-pre-workspace unscoped API — `POST/GET/PUT /api/risk-trees`,
-`PATCH /api/risk-trees/{id}/nodes/{ulid}/distribution`, `.../nodes/{ulid}`
-(rename), `DELETE .../nodes/{ulid}`. The live surface is workspace-scoped
-(`POST /workspaces`, then `/w/{key}/risk-trees/...`); no `/api/` route and no
-node-level PATCH-distribution / rename / delete endpoint exist in
-`modules/common/.../http/endpoints/`. The doc's bodies are also flat-leaf
-(pre-`distributionShape`). This is a broader reconciliation than item 18:
-decide per section whether the endpoint still exists under the scoped surface,
-map it, or drop it — do **not** just nest `distributionShape` and leave the
-`/api/` paths, which would be half-fixed. Left untouched pending that decision.
+**Resolved 2026-07-14 by purge (not reconciliation).** `TESTING.md` had driven
+the whole pre-workspace unscoped API — `POST/GET/PUT /api/risk-trees`,
+`PATCH .../nodes/{ulid}/distribution`, `.../nodes/{ulid}` (rename),
+`DELETE .../nodes/{ulid}` — all of which 404 on the live workspace-scoped
+surface (only `GET /health` still resolved), and three of those endpoints no
+longer exist at all (node PATCH-distribution / rename / delete; edits now go
+through full-tree PUT). Per Daniel: don't re-author to the new surface — the
+manual curl walkthrough is already covered by `docs/user/API-TUTORIAL.md`,
+`examples/demo-*.sh`, and the `server-it` specs. Removed: API-testing cases
+2–12, the `/api/` Protocol Cheatsheet + Payload-Fixtures blurb, the two `/api/`
+LEC response-time benchmarks, and the entire outdated "Automated Test Script"
+section (plus its TOC entry). Also dropped the dated "Expected Counts (as of
+2026-03-09)" table (stale + counts, against the pass/fail-only rule) and all
+"New API/DTO" framing. Kept: health check, SBT/Container/BATS/Irmin/Performance
+sections. No `/api/` or historical framing remains.
