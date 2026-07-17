@@ -1,9 +1,14 @@
 # PLAN — `TrialOutcomes` Monoid, Aggregation & Mitigation Design
 
-Status: **Draft / not approved for implementation — code audit completed 2026-06-18**
+Status: **APPROVED for implementation 2026-07-16 — Part A (Option 1), execute per A.6 Steps 1–5.**
+Part B (mitigation) remains unapproved: B.7 decisions 3–5 are open, and the B.8 MUST-FIX items
+gate any `RiskTransform` production wiring — they are **not** prerequisites of Part A
+(`RiskTransform` has zero production callers; verified 2026-07-16).
+Code audit completed 2026-06-18; A.1 Option 1 decided 2026-07-16 (see A.1).
 Scope: Internal implementation only (no API change intended). API implications flagged where relevant.
 Related: ADR-003 (provenance), ADR-014/ADR-015 (RiskResult as cache/runtime state, cache-aside),
-`docs/scratch/milestone-2b-cache-and-decisions.md` (Leaf-as-aggregate semantic smell).
+`docs/scratch/milestone-2b-cache-and-decisions.md` (Leaf-as-aggregate semantic smell;
+DD-18 cache value type — decided with A.1 Option 1; DD-19 provenance record shape — open).
 
 ---
 
@@ -65,7 +70,7 @@ Audit of `modules/common/src/main/scala/.../domain/data/` and
 
 1. **Resolver `reduce(RiskResult.combine)` is wrong** — must be replaced with `RiskResultGroup(portfolio.id, childResults*)`. Not just a wiring change; the false monoid instances must be deleted too.
 2. **`RiskResultGroup.children: List[RiskResult]`** — must widen to `List[LossDistribution]` to support nested portfolios. `apply` must accept `LossDistribution*`.
-3. **Cache and resolver return type** — `RiskResult` → `LossDistribution` throughout (mechanical substitution, zero logic change).
+3. **Resolver return type** — `RiskResult` → `LossDistribution` (mechanical substitution, zero logic change). **Corrected 2026-07-16: the widening applies to the resolver/read path only, not to the cache value.** `LossDistribution` carries `nodeId`, and milestone-2b DD-16/DD-18 fix the cache value as identity-free (`TrialOutcomes` + content-only provenance). Widening the existing `RiskResultCache` signatures is at most an interim step; milestone-2b replaces that cache with `ContentCache` (`Map[ContentHash, <DD-18 value>]`), and the widening is void if that lands first.
 4. **`LossDistributionType` enum + `distributionType` field** — dead code; can be deleted.
 5. **`RiskTransform` + widened cache type** — `RiskTransform` operates on `RiskResult` (not
    `LossDistribution`). After widening the cache to `LossDistribution`, any future call site that
@@ -166,6 +171,13 @@ Option 1 makes the algebra explicit and standalone-testable. Option 2 is the min
 fix. Both are correct; Option 1 is better long-term. The choice between them is a decision
 gate (new type on a shared domain module → trigger #4/#5).
 
+> **Decided 2026-07-16 — Option 1.** The cache value type decision in
+> `docs/scratch/milestone-2b-cache-and-decisions.md` (DD-18) fixes the
+> `ContentCache` value as a named case class of `TrialOutcomes` plus a
+> content-only provenance record, which requires the explicit type. The
+> trigger #4 gate was resolved by that user decision. The provenance
+> record's shape is DD-19 there (open).
+
 > The categorical framing in the source conversation (Profunctor / Kleisli / Comonad / CBRNG
 > generator fusion) is **not** adopted. Only the monoid lens is — and it now lives in the right place.
 
@@ -185,6 +197,18 @@ gate (new type on a shared domain module → trigger #4/#5).
    `RiskResult.provenances`; portfolio provenances are accessed as `children.flatMap(_.provenances)`
    on `RiskResultGroup`. This is structurally honest: provenance belongs to the node that was
    simulated, not to the aggregate. No manual provenance threading at aggregation time.
+
+   > **Provenance record shape (2026-07-16 — open, milestone-2b DD-19):**
+   > `NodeProvenance` bundles `riskId` (identity) with computation content
+   > (entity/stream ids, global seeds, distribution, timestamp, version). The
+   > cache value stores the content part only (DD-16/DD-18). Candidates:
+   > (a) nested split — `NodeProvenance(riskId, <content record>)`, workable
+   > before this plan lands; or (c)+(d) — drop `riskId` from the record and
+   > recover attribution structurally from `RiskResultGroup.children`,
+   > assembling `Map[NodeId, <content record>]` at the resolver edge if
+   > provenance is ever exposed — candidate, not finalized; requires Part A
+   > first. Facts: `riskId` is written once (`Simulator.scala:209`) and read
+   > by no production code; no endpoint response carries provenance today.
 
 ### A.3 What this is NOT
 
@@ -233,7 +257,9 @@ This must be in place before any call site switches to `RiskResultGroup`.
 **Widen (mechanical type substitution):**
 - `RiskResultGroup.children: List[LossDistribution]` (from `List[RiskResult]`)
 - `RiskResultGroup.apply(results: LossDistribution*)` (from `RiskResult*`)
-- `RiskResultCache.get/put` signature: `LossDistribution` (from `RiskResult`)
+- `RiskResultCache.get/put` signature: `LossDistribution` (from `RiskResult`) — interim only;
+  superseded by milestone-2b's `ContentCache` with the identity-free DD-18 value type
+  (see the gap 3 correction); void if milestone-2b Phase A lands first
 - `RiskResultResolver.ensureCached/ensureCachedAll` return type: `LossDistribution`
 - `LECGenerator` method signatures: `LossDistribution` (from `RiskResult`)
 - `RiskTreeKnowledgeBase` constructor and field: `Map[NodeId, LossDistribution]`
@@ -249,11 +275,11 @@ RiskResultGroup(portfolio.id, childResults*)
 // where childResults: List[LossDistribution]
 ```
 
-**Optional — introduce `TrialOutcomes`:**
-If Option 1 (explicit type) is chosen, add `case class TrialOutcomes` with `Associative`,
+**Introduce `TrialOutcomes` (Option 1 — decided 2026-07-16):**
+Add `case class TrialOutcomes` with `Associative`,
 `Commutative`, `Identity` instances and restructure `RiskResult`/`RiskResultGroup` to embed it.
-This makes the monoid property-testable in isolation. Decision gate: new type in shared domain
-module → trigger #4.
+This makes the monoid property-testable in isolation. The trigger #4 gate was resolved by the
+cache value type decision (milestone-2b DD-18).
 
 ### A.6 Test strategy — sequencing is mandatory
 
@@ -289,6 +315,9 @@ If it is not green on the current code, stop — the current implementation is b
 Add the `require` described in A.5. Run `sbt test` — must be green.
 
 **Step 3 — Write new property / unit tests for the replacement (gate)**
+
+> Option 1 was decided 2026-07-16 (see A.1) — the Option 2 branch below is moot
+> and kept only as a record of the alternative.
 
 - **For Option 1 (`TrialOutcomes`)**: property tests for `Associative[TrialOutcomes]`
   (associativity, commutativity) and `Identity[TrialOutcomes]` (left/right identity).
@@ -328,10 +357,17 @@ Run `sbt test` — must still be green.
    > **Audit update**: `RiskResultGroup` already exists as the correct composite type in
    > `LossDistribution.scala`. The design decision is already made in code — the question is
    > whether to wire the resolver to use it. This is a **behaviour change** → trigger #5.
+   > **Approved 2026-07-16** — the plan is approved for Part A implementation.
 
 ---
 
 ## PART B — Mitigation
+
+> **2026-07-16:** current knowledge on `RiskTransform` — verified facts, the
+> B.8 defects, and all open decisions in decision-guide format — is
+> consolidated in `docs/dev/PLAN-RISKTRANSFORM.md` (draft). This Part B stays
+> as the historical record and design-space scoring; pick up mitigation work
+> from that document.
 
 > **Audit update (2026-06-18)**: B3 (result-stage endomorphism) is **fully implemented** as
 > `RiskTransform` in `modules/common/.../domain/data/RiskTransform.scala`. It has `applyDeductible`,
@@ -582,7 +618,9 @@ aggregated portfolio.
 **The fix**: replace the `reduce` + `withNodeId` with `RiskResultGroup(portfolio.id, childResults*)`,
 which stores the children list and carries the correct `Composite` type tag. The resolver's
 return type for portfolio paths must change from `Task[RiskResult]` to `Task[LossDistribution]`
-(the common supertype) — or the cache must be widened. **This is a behaviour change → trigger #5.**
+(the common supertype). The cache side is settled by milestone-2b (DD-16/DD-18: `ContentCache`
+with an identity-free value), not by widening — see the gap 3 correction. **This is a behaviour
+change → trigger #5.**
 See A.7 gate 4.
 
 ### C.3 `includeProvenance` flag honesty
@@ -612,18 +650,20 @@ purely to close the door.
 
 **Remaining open items (each requires a Decision before work starts):**
 
-1. **Option 1 vs Option 2 for A.1** — Introduce explicit `TrialOutcomes` type (Option 1) or
-   proceed with minimum viable fix only (Option 2, delete false monoid + use `RiskResultGroup`)?
-   Option 1 is richer; Option 2 is smaller scope. New type in shared module → **trigger #4**.
+1. ~~Option 1 vs Option 2 for A.1~~ ✅ **Decided 2026-07-16 — Option 1 (explicit
+   `TrialOutcomes` type)**, jointly with milestone-2b DD-18: the `ContentCache` value is a
+   named case class of `TrialOutcomes` + a content-only provenance record. Trigger #4 resolved.
 
-2. **Delete false monoid + fix resolver** — once Option 1/2 decided, execute in the order
-   specified by A.6 (Steps 1–5). Key work items within that sequence:
+2. **Delete false monoid + fix resolver** — ✅ approved 2026-07-16 (plan approved for Part A);
+   execute in the order specified by A.6 (Steps 1–5). Key work items within that sequence:
    - Add `require` alignment guard to `RiskResultGroup.apply` (A.5, A.6 Step 2).
    - Delete `RiskResult.combine`, `Associative/Commutative[RiskResult]`, `RiskResultIdentityInstances`,
      `RiskResult.withNodeId`, `LossDistributionType` enum.
    - Widen `RiskResultGroup.children` to `List[LossDistribution]`.
    - Replace resolver `reduce(combine)` with `RiskResultGroup(portfolio.id, childResults*)`.
-   - Widen cache and all downstream signatures to `LossDistribution`.
+   - Widen resolver and downstream read-path signatures to `LossDistribution`. (Cache: see the
+     gap 3 correction — the value becomes the identity-free DD-18 type via milestone-2b's
+     `ContentCache`, not `LossDistribution`.)
    - Behaviour change in resolver → **trigger #5**.
 
 3. **Tests — follow A.6 sequencing (Steps 1–5 are mandatory gates)**. Step 1 must be
@@ -635,6 +675,14 @@ purely to close the door.
 6. **B.7 decision 4**: If mitigation becomes client-facing, open a separate ADR (trigger #1).
 7. Load `adr-constraints` before any implementation phase.
 8. End with mandatory `code-quality-review`.
+
+**Follow-up (post-landing, joint with milestone-2b DD-15):** after Part A here
+and milestone-2b Phase A have both landed, re-examine portfolio result caching
+(milestone-2b DD-15 alternatives A/C′; DD-15 closed 2026-07-16 → Option B,
+leaf results only). Goal: judge the alternative against the landed system's
+measured behaviour — re-aggregation cost on real trees, `RiskResultGroup` in
+the resolver, the DD-18 cache value type. Analysis to start from: the
+milestone-2b A4 re-examination.
 
 **MUST FIX before rollout — `RiskTransform` defects (gap 7, detail in [B.8](#b8-risktransform-defects--must-fix-before-any-production-wiring)):**
 

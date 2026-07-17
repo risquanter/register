@@ -21,15 +21,33 @@
 > **CLOSED 2026-07-16**, implemented per `docs/dev/PLAN-SEED-IDENTITY.md`).
 >
 > **Consistency sweep 2026-07-16 (item 12 closed):** seeds no longer derive
-> from ULIDs — `seedVarId` sits inside the stored leaf JSON (covered by a
-> bytes-based hash automatically), but workspace-level `seedEntityId` is a
-> **new result input outside any node's bytes** (see the A1 table — it must
-> become cache scope). A3 is rewritten (branching is justified by merge,
-> history, no duplication and zero-care correctness — no longer by
-> comparability, which the seed design now guarantees), finding 5 is
-> superseded, and preimage narrowing (drop `id`/`name` from the hash) is now
-> domain-sound but conflicts with DD-14's binding "hash the returned bytes"
-> rule — opened as **DD-16**.
+> from ULIDs — `seedVarId` sits inside the stored leaf JSON, but
+> workspace-level `seedEntityId` determines the figures but lives in **no
+> node's bytes**. Both consequences are now decided: **DD-16 (closed)** — leaf cache
+> keys hash a simulation-relevant projection (`seedVarId` + params; `name`
+> and ULID excluded), superseding DD-14's hash-the-returned-bytes rule;
+> **DD-17 (closed)** — one `ContentCache` per workspace isolates
+> `seedEntityId`. A3 is rewritten (branching is justified by merge, history,
+> no duplication and zero-care correctness — no longer by comparability,
+> which the seed design now guarantees); finding 5 is superseded; DD-15
+> narrowed to B vs C at that point (re-scored again by the second sweep
+> below).
+>
+> **Second consistency sweep 2026-07-16 (DD-18/DD-19):** the cache value
+> type is decided — **DD-18 (closed)**: a named case class holding
+> `TrialOutcomes` plus a content-only provenance record, no node ID inside;
+> this also decides the monoid plan's A.1 **Option 1** (explicit
+> `TrialOutcomes` type). The provenance record's shape is **DD-19 (open —
+> decide last, after every other open decision in this doc and the monoid
+> plan)**. Identity-free values re-open the DD-15 option set: equal
+> portfolio keys now imply equal figures, so an Option-A key collision is
+> correct dedupe — the previous sweep's "Option A definitively dead" verdict
+> is withdrawn; see the
+> [A4 re-examination](#a4-review-2026-07-14--dd-15-closed-2026-07-16-option-b).
+> DD-15 was re-scored to A vs B vs C′ and **closed later the same day →
+> Option B** (leaf results only; portfolios always re-aggregate on read).
+> The A/C′ alternative is parked as a post-landing follow-up in this doc and
+> the monoid plan.
 
 ---
 
@@ -68,8 +86,9 @@ The cache must support seven workflows:
 ### Core idea
 
 Replace `Map[(TreeId, NodeId), RiskResult]` with
-`Map[ContentHash, RiskResult]`. Two nodes with identical content share one
-cache entry regardless of branch or path. Cross-branch sharing is implicit.
+`Map[ContentHash, <identity-free value — DD-18>]`. Two nodes with identical
+content share one cache entry regardless of branch or path. Cross-branch
+sharing is implicit.
 
 A per-branch cache (`Map[(BranchRef, NodeId), RiskResult]`) cannot serve
 cross-branch comparison or cache warming — it has no concept of content
@@ -272,8 +291,8 @@ a field from someone else's hash:
   seed identity is a boundary-assigned `seedVarId` stored on the leaf, and
   ULIDs influence no figure. `id` (and `name`) are therefore *droppable* from
   the hashed bytes — a projection Option A could never express because you
-  cannot subtract a field from Irmin's hash. Whether to actually narrow the
-  preimage is DD-16.
+  cannot subtract a field from Irmin's hash. DD-16 (closed 2026-07-16) does
+  narrow the preimage exactly this way.
 - **[A4](#a4-recommended-phase-a-lean-down-cache-leaf-results-only) trap 1:**
   if portfolios gain aggregation-relevant attributes (mitigation transforms —
   `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md`), the portfolio key must become
@@ -323,17 +342,21 @@ the drift table costs one cold cache after a deploy. Routine orphans — every
 parameter edit strands the old hash's entry — are the `EvictionStrategy`'s
 problem and are identical under both options.
 
-**Implementation rule (binding).** Hash **the bytes Irmin returns**, never a
-re-serialisation of the decoded object. Re-serialising would make cache keys
-hostage to zio-json's output stability for no benefit.
-
-> **Tension opened by item 12's closure (2026-07-16, DD-16).** Excluding
-> `name`/`id` from the key is now domain-sound (neither affects any figure),
-> but it cannot be done while hashing the exact returned bytes — both fields
-> are in the stored JSON. Until DD-16 closes, this binding rule stands and
-> the cost is bounded and *correct*: renames spuriously re-simulate
-> (finding 6) and cross-node dedupe never fires (A2) — cache misses, never
-> wrong results.
+**Implementation rule — superseded 2026-07-16 by DD-16.** As originally
+written this rule said: hash **the bytes Irmin returns**, never a
+re-serialisation — re-serialising would make keys hostage to zio-json's
+output stability for no benefit. Item 12's closure inverted the trade:
+`name` and `id` sit in those bytes but influence no figure, so hashing raw
+bytes over-covers (renames spuriously re-simulate, dedupe never fires).
+**DD-16 (closed 2026-07-16): leaf key = `sha256` of a dedicated
+simulation-relevant projection** — `seedVarId` + probability + distribution
+params, encoded by its own snapshot-tested codec (see New Types). The
+stability cost the old rule avoided is real but bounded: the cache is
+in-memory, so encoder drift after an upgrade costs one cold cache after a
+deploy — this design's accepted failure mode everywhere else. Irmin
+byte-fidelity is no longer load-bearing for cache keys at all. DD-14's core
+choice (the JVM computes all hashes) is unchanged — in fact only JVM-side
+hashing makes a projection possible.
 
 | Aspect | Option A (hybrid) | Option B (full JVM) |
 |--------|-------------------|---------------------|
@@ -395,16 +418,15 @@ risk-trees/tree-1/
 
 Three data structures participate in cache resolution (Option B — DD-14).
 
-> **DD-15 is open and touches layers 2 and 3 below.** The portfolio cache key
-> (`merk-O`, `merk-P`) and the existence of portfolio entries in `ContentCache`
-> are **not settled**. This section documents the design as originally written
-> — DD-15 Option A — which the review found to be *dominated*: it is either
-> replaced by `sha256(ownJsonHash ++ childKeys)` (Option C) or portfolios are
-> not cached at all (Option B). Note in particular that layer 1's portfolio
-> hashes, labelled "can NOT be used as cache keys" below, are exactly the
-> ingredient Option C uses. Read
-> [A4 review](#a4-review-2026-07-14--dd-15-still-open) before implementing
-> anything here. Leaf keys (layer 1) are unaffected either way.
+> **DD-15 closed 2026-07-16 → Option B: portfolio results are not cached.**
+> Layer 2 (`ContentHashIndex`) stays exactly as drawn — portfolio Merkle keys
+> are still computed and serve the UC5 diff. Layer 3 holds **leaf entries
+> only**; portfolios re-aggregate from child results on every read (linear
+> sparse-map merge, A4). The A/C′ alternative (portfolio entries under
+> child-key hashing — valid under DD-18 identity-free values) is parked as a
+> post-landing follow-up; see the
+> [A4 re-examination](#a4-review-2026-07-14--dd-15-closed-2026-07-16-option-b).
+> Leaf keys (layer 1) are unaffected.
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
@@ -442,18 +464,20 @@ Three data structures participate in cache resolution (Option B — DD-14).
                               │
                               ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│ 3. ContentCache               [Scala — Ref[Map[ContentHash, RiskResult]]│
+│ 3. ContentCache      [Scala — Ref[Map[ContentHash, <DD-18 value type>]] │
 │                                                                          │
-│    Cache key  │ Value                                                    │
+│    Cache key  │ Value (identity-free per DD-16/DD-18 — no node ID)       │
 │    ───────────┼────────────────────────────────────────────────────────  │
-│    "abc111"   │ RiskResult(cyber,     outcomes={t3→5M, t17→12M, …})     │
-│    "abc222"   │ RiskResult(hardware,  outcomes={t8→1M, …})              │
-│    "abc333"   │ RiskResult(market,    outcomes={t2→3M, t11→8M, …})     │
-│    "merk-O"   │ RiskResult(ops-risk,  outcomes={t3→5M, t8→1M, …})      │
-│    "merk-P"   │ RiskResult(portfolio, outcomes={t2→3M, t3→5M, …})      │
+│    "abc111"   │ TrialOutcomes(outcomes={t3→5M, t17→12M, …}) + prov      │
+│    "abc222"   │ TrialOutcomes(outcomes={t8→1M, …}) + prov               │
+│    "abc333"   │ TrialOutcomes(outcomes={t2→3M, t11→8M, …}) + prov      │
+│                                                                          │
+│    Leaf entries only — portfolio results are NOT cached (DD-15 → B);    │
+│    portfolios re-aggregate from child results on every read.            │
 │                                                                          │
 │    Keyed by cache key from ContentHashIndex, NOT by (branch, nodeId).   │
-│    Same key from any branch → same entry. No duplication.               │
+│    Same key from any branch → same entry. No duplication. The resolver  │
+│    attaches the requested node's ID when it builds the response.        │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -470,18 +494,32 @@ For every node in a loaded tree:
    IrminClient.get(path, branch)                       [Scala → Irmin GraphQL]
    → returns value: String
 
-2. ContentHashIndex.build(tree, nodeJson)              [Scala, pure computation]
-   → leaf:      cacheKey = sha256(value.getBytes)   ← the bytes get() returned
-   → portfolio: cacheKey = sha256(sort(children's cacheKeys))
+2. ContentHashIndex.build(tree)                        [Scala, pure computation]
+   → leaf:      cacheKey = sha256(projection bytes)  ← seedVarId + params only,
+                canonical snapshot-tested encoding (DD-16; name/ULID excluded)
+   → portfolio: cacheKey = sha256(sort(children's cacheKeys))  ← UC5 diff only;
+                results not cached (DD-15 → B)
 
-3. ContentCache.get(cacheKey)                          [Scala, Ref lookup]
-   → hit:  return cached RiskResult
-   → miss: leaf      → Simulator.performTrials(leaf, config)  [Scala, Monte Carlo]
-           portfolio → children.reduce(RiskResult.combine)     [Scala, map merge]
-           then ContentCache.put(cacheKey, result)             [Scala, Ref update]
+3. Leaf: ContentCache.get(cacheKey)                    [Scala, Ref lookup]
+   → hit:  return cached content (identity-free, DD-16/DD-18); the resolver
+           attaches the requested node's ID when building the response
+   → miss: Simulator.performTrials(leaf, config)        [Scala, Monte Carlo]
+           then ContentCache.put(cacheKey, <content>)   [Scala, Ref update]
+
+   Portfolio: never cached (DD-15 → B) — aggregate child results on every
+   read (today RiskResult.combine; after the monoid plan:
+   RiskResultGroup(parentId, children*) — same figures).
 ```
 
 ### Serialization determinism
+
+> **Superseded 2026-07-16 (DD-16):** the leaf key is now `sha256` over the
+> leaf's *simulation-relevant projection* (`seedVarId` + probability +
+> distribution params), encoded by its own snapshot-tested codec — not over
+> the returned bytes. Property 1 below (write determinism) transfers to the
+> projection codec verbatim and remains the property to guard; property 2
+> (Irmin read determinism) is **no longer load-bearing for cache keys**. The
+> snapshot-test safeguard below now targets the projection type.
 
 The cache key is `sha256` over the bytes `IrminClient.get` returns, so key
 stability reduces to two properties:
@@ -543,9 +581,16 @@ leaf simulation.
 ### Algorithm
 
 `ContentHashIndex.build` [Scala, pure] runs once at tree-load time, after
-reading all nodes from Irmin. Per DD-14 (Option B) it takes the **raw JSON
-bytes `IrminClient.get` returned** per node and hashes them itself — one code
-path, no Irmin coupling, unit-testable without a running Irmin:
+reading all nodes from Irmin. Per DD-14 (Option B) the JVM computes every
+hash itself — one code path, no Irmin coupling, unit-testable without a
+running Irmin.
+
+> **DD-16 (closed 2026-07-16) changes the leaf input:** the sketch below
+> predates DD-16 and hashes raw `nodeJson` bytes. As closed, the leaf branch
+> hashes the canonical projection instead —
+> `ContentHash(sha256(LeafSimContent.from(leaf).toJson))` — and `build` takes
+> decoded leaves, not raw bytes. The memoised bottom-up structure is
+> unchanged.
 
 ```scala
 import java.security.MessageDigest
@@ -620,10 +665,18 @@ other as a **sequential narrative**. Each step shows:
 - what `ContentHashIndex.build` [Scala] produces
 - what `ContentCache` [Scala] hits or misses
 
-> **Hash notation (Option B — DD-14):** leaf hashes are
-> `sha256(jsonBytes)` [Scala], computed at tree-load time from what
-> `IrminClient.get` [Scala→Irmin] returns. Labels like `"abc111"` and
-> `"merk-O"` are illustrative stand-ins for 64-hex SHA-256 digests.
+> **Hash notation (Option B — DD-14; preimage per DD-16):** leaf hashes are
+> `sha256` over the leaf's simulation-relevant projection (`LeafSimContent`:
+> seedVarId + params — name and ULID excluded), computed at tree-load time.
+> Labels like `"abc111"` and `"merk-O"` are illustrative stand-ins for 64-hex
+> SHA-256 digests. The examples' hit/miss behaviour is unchanged by DD-16,
+> with one addition: a pure rename would now be a full cache HIT (it changes
+> no projection). **DD-15 closed 2026-07-16 → Option B:** the `.get("merk-…")`
+> and portfolio `put` lines in the boxes below are Option-A history —
+> portfolio results are not cached. Read them as: every full-tree read
+> performs its 2 portfolio aggregations (linear sparse-map merge); the leaf
+> hit/miss lines are unchanged. Deltas vs the Summary table: Step 3's
+> `merk-O2` HIT becomes a re-aggregation; Step 5 becomes 0 sims + 2 aggs.
 
 ### Step 1: First load on `main` (UC1 / UC2)
 
@@ -922,7 +975,7 @@ service-wide, set at startup. It is NOT stored in node JSON and therefore NOT
 part of Irmin content hashes.
 
 If `SimulationConfig` changes (e.g., server restart with different config),
-all cached `RiskResult` entries become stale: same content hash, but results
+all cached entries become stale: same content hash, but results
 computed with different trial counts or seeds.
 
 Caches are in-memory `Ref` [Scala]. Server restart empties the cache →
@@ -941,11 +994,15 @@ key to `(ContentHash, configHash)`.
 |----|-------|----------|-----------|
 | DD-1 | `IrminClient` branch parameterization | Optional `branch` param on existing methods | Branch-aware reads required for scenarios. Default `None` = backward compatible. |
 | DD-2 | New `IrminClient` operations | Add 6 ops: `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca` | Mechanical GraphQL wrappers. **`getContents` dropped**: DD-14 closed on Option B, so leaf hashes come from `sha256(json)` [Scala] and the existing `get` suffices. Add `getContents` only if a concrete commit-info caller appears — an op with no call site is a code-quality MUST-FIX (§4, unused API is a liability). |
-| DD-3 | Cache strategy | Content-addressed: `Map[ContentHash, RiskResult]` | Content-identical nodes share one cache entry regardless of branch. |
+| DD-3 | Cache strategy | Content-addressed: `Map[ContentHash, <value>]` | Content-identical nodes share one cache entry regardless of branch. Value type as originally written was `RiskResult`; refined by DD-16/DD-18 to the identity-free value. |
 | DD-4 | Repository branch threading | Optional `branch` param on trait methods | Comparison workflow needs explicit branch args (read both in one effect). |
 | DD-10 | Error types | Flat hierarchy extending `AppError` | `BranchNotFound`, `MergeConflictError`, `CommitNotFound`, etc. Follows existing pattern. **Naming not settled** — `MergeConflict` already exists in the hierarchy; see [A7](#a7-implementation-aid-corrections-against-the-current-codebase). |
 | DD-12 | Test backward compat | Default args are source- and binary-compatible | ~60 new tests estimated across new capabilities. |
-| DD-14 | Leaf hash source | **Option B — full JVM `sha256(jsonBytes)`** (closed 2026-07-14) | One hash system (SHA-256, uniform 64-hex → tight Iron refinement); no `getContents` in Phase A; no SHA-1; works on the in-memory backend, which Option A cannot. See [Leaf hash source](#leaf-hash-source-dd-14--closed-option-b). |
+| DD-14 | Leaf hash source | **Option B — full JVM `sha256(jsonBytes)`** (closed 2026-07-14) | One hash system (SHA-256, uniform 64-hex → tight Iron refinement); no `getContents` in Phase A; no SHA-1; works on the in-memory backend, which Option A cannot. See [Leaf hash source](#leaf-hash-source-dd-14--closed-option-b). *Which* bytes get hashed was refined by DD-16. |
+| DD-15 | Portfolio result caching scope | **Option B — cache leaf results only** (closed 2026-07-16) | Portfolio results are not cached; portfolios re-aggregate from child results on every read (linear sparse-map merge; A4: milliseconds at n=100, unmeasured). Smallest Phase A, smaller memory, no portfolio-key surface, decoupled from the resolver refactor. Reduces caching below current `TreeCacheManager` behaviour — the trigger #5 tradeoff is accepted by this decision. Alternatives A/C′ (portfolio entries under child-key hashing; a portfolio projection prepended if simulation-relevant portfolio fields ever appear) remain correct under DD-18 and are **parked as a post-landing follow-up in this doc and the monoid plan** — re-examine after both plans land, against measured behaviour. See the [A4 re-examination](#a4-review-2026-07-14--dd-15-closed-2026-07-16-option-b). |
+| DD-16 | Leaf hash preimage | **Simulation-relevant projection, not raw stored bytes** (closed 2026-07-16) | The key hashes exactly what determines the figures: `seedVarId` + probability + distribution params, via a dedicated spec type with a byte-stability snapshot test. `name` and ULID are excluded — renames preserve the cache and cross-node hits become possible. **Corollary: cached values are identity-free** — the cache stores content only (trial map + stream provenance), never a node ID; the resolver attaches the *requested* node's ID when building the response. (`RiskResult` as it exists bundles `nodeId` with the outcomes and cannot be the cache value type unchanged; the replacement value type was fixed by DD-18 on 2026-07-16.) Supersedes DD-14's hash-the-returned-bytes rule; opened and closed 2026-07-16 after TODO item 12 removed the ULID→seed derivation. |
+| DD-17 | Cache scope vs `seedEntityId` | **One `ContentCache` per workspace** (closed 2026-07-16) | `seedEntityId` determines figures but lives in no node's bytes. Per-workspace cache instances make cross-workspace contamination structurally impossible; a global map keyed by (entity, hash) buys nothing — different entity ⇒ different figures ⇒ cross-workspace hits are impossible by design — while mixing tenants in one structure and complicating workspace reaping. Cache lifecycle = workspace lifecycle. |
+| DD-18 | `ContentCache` value type | **Named case class: `TrialOutcomes` + content-only provenance record** (closed 2026-07-16) | The cached value is a product of the monoid carrier (`TrialOutcomes` = nTrials + sparse `Map[TrialId, Loss]`; `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` A.1 — **Option 1 thereby decided**) and a provenance record containing no `riskId`. No node identity anywhere in the value — the DD-16 corollary made concrete. A named case class, not a tuple (nominal-type rule, ADR-018); provenance sits beside `TrialOutcomes`, not inside it, because provenance does not participate in combination (portfolio provenance is read from children, never merged). Class name chosen at implementation time. Provenance record shape: DD-19 (open). |
 
 ### Influenced by cache strategy
 
@@ -963,8 +1020,7 @@ key to `(ContentHash, configHash)`.
 | DD-8 | HTTP endpoint design | Branch state: client-side header (`X-Active-Branch`) vs server session. Two-tab problem. |
 | DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. |
 | DD-11 | Workspace ↔ scenario ownership | Convention-based prefix matching vs explicit ownership records. |
-| DD-15 | Portfolio result caching scope | Cache portfolio results at all in Phase A, and if so under which key? **B** (leaf results only — the A4 lean-down) vs **C** (`sha256(ownJsonHash ++ childKeys)`). Option A (design as written) is dominated by C. Full analysis, including three review objections that collapsed, in [A4 review](#a4-review-2026-07-14--dd-15-still-open). |
-| DD-16 | Leaf hash preimage (opened 2026-07-16 by TODO item 12's closure) | Full stored bytes (DD-14's binding rule) vs a simulation-relevant projection that drops `id` and `name`. Item 12 made exclusion domain-sound (seeds are stored `seedVarId`s, not ULID-derived), but a projection is a re-serialisation — it breaks the binding rule unless storage splits params from metadata (the `sep/n1/params` layout validated in `dev/test-irmin-hashes.sh`). Cost of *not* narrowing: renames re-simulate (finding 6), no cross-node dedupe (A2) — misses only, never wrong results. |
+| DD-19 | Provenance content/identity representation | `NodeProvenance` mixes computation content (`entityId`, `occurrenceVarId`/`lossVarId`, global seeds, distribution type/params, timestamp, version) with identity (`riskId: NodeId`). The cached record must be the content part only (DD-16/DD-18). How is identity attached? **(a)** nested split — `NodeProvenance(riskId, <content record>)`; works before the monoid refactor; user prefers (a) over (b) (keep `NodeProvenance` unchanged, build it at the edge). **(c)+(d)** — drop `riskId` from the record entirely; attribution recovered from structure (`RiskResultGroup` keeps children) and, when ever exposed, a `Map[NodeId, <content record>]` assembled at the resolver edge — **candidate, not finalized**; requires the monoid plan's Part A first. Facts (verified 2026-07-16): `riskId` is written once (`Simulator.scala:209`) and read by no production code; no endpoint response carries provenance today (the `LECCurveResponse` type once named in an LEC.scala comment never existed — comment fixed). **Decide last — after every other open decision in this doc and the monoid plan is locked.** |
 
 ### Deferred
 
@@ -996,6 +1052,33 @@ type ContentHashConstraint = Match["^[a-f0-9]{64}$"]
 type ContentHashStr        = String :| ContentHashConstraint
 case class ContentHash(toContentHash: ContentHashStr)        // SHA-256 hex digest
 
+// NEW (DD-16, closed 2026-07-16). The leaf hash preimage: exactly the fields
+// that determine the figures — nothing else. name and ULID deliberately
+// absent. Field order is a storage contract: byte-stability snapshot test
+// REQUIRED on its codec (see Serialization determinism).
+final case class LeafSimContent(
+  seedVarId: SeedVarId.SeedVarId,
+  probability: OccurrenceProbability,
+  distributionType: DistributionType,
+  percentiles: Option[Array[Double]],
+  quantiles: Option[Array[Double]],
+  minLoss: Option[NonNegativeLong],
+  maxLoss: Option[NonNegativeLong],
+  terms: Option[PositiveInt]
+)  // leaf cache key = ContentHash(sha256(leafSimContent.toJson))
+
+// NEW (DD-18, closed 2026-07-16). The ContentCache value: identity-free
+// result content. A named case class, NOT a tuple; final name chosen at
+// implementation time. TrialOutcomes is the monoid plan's A.1 Option 1 type
+// (nTrials + sparse Map[TrialId, Loss] — the lawful monoid). The provenance
+// record is the content part of NodeProvenance — its shape is DD-19 (open);
+// it must contain no riskId. No codec needed: cache values are never
+// serialized (in-memory Ref, ADR-015).
+final case class <CacheValue>(          // placeholder name — DD-18
+  outcomes: TrialOutcomes,
+  provenance: <content-only provenance record>   // DD-19: no riskId
+)
+
 // NEW. Irmin commit hash — refine to Irmin's actual commit-hash charset/length
 // before implementing; do not ship as a bare String.
 case class CommitHash(toCommitHash: CommitHashStr)
@@ -1018,10 +1101,11 @@ Reintroduce only alongside a `getContents` caller, if one ever appears (DD-2).
 | `IrminClient` | Scala→Irmin | Add optional `branch` param to `get`/`set`/`remove`/`list`. Add `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca`. (`getContents` dropped — DD-14 → Option B.) |
 | `IrminQueries` | Scala | New GraphQL query strings for `branch`, `merge_with_branch`, `revert`, `commit`, `last_modified`, `lcas`. (`get_contents` dropped — DD-14 → Option B.) Note `getValueFromBranch` already exists here with no caller — the branch-parameterised `get` should subsume it rather than sit alongside it. |
 | `RiskTreeRepositoryIrmin` | Scala→Irmin | Thread `branch` param. Use the existing `get`; pass the returned JSON to `ContentHashIndex.build`, which hashes it (DD-14 → Option B). No read-path type change. |
-| `ContentCache` (new) | Scala | `Ref[Map[ContentHash, RiskResult]]` with `EvictionStrategy`. Replaces `RiskResultCache`. |
+| `ContentCache` (new) | Scala | `Ref[Map[ContentHash, <DD-18 value>]]` with `EvictionStrategy`. Replaces `RiskResultCache`. Value type decided (DD-18): a named case class of `TrialOutcomes` + a content-only provenance record — not `RiskResult`, which bundles `nodeId` (and provenance `riskId`) with the outcomes. Identity is attached by the resolver at the edge; provenance record shape is DD-19 (open). |
 | `ContentHashIndex` (new) | Scala | At tree load: leaf hashes = `sha256(json bytes returned by get)`, portfolio Merkle hashes computed bottom-up (DD-14 → Option B). Pure function, unit-testable without Irmin. Returns `Map[NodeId, ContentHash]`. |
-| `CacheScope` (new) | Scala | Abstraction over cache resolution. `RiskResultResolver` calls `CacheScope` instead of `TreeCacheManager`. |
-| `TreeCacheManager` | Scala | **Retired.** Replaced by `CacheScope` + `ContentCache`. |
+| `CacheScope` (new) | Scala | Abstraction over cache resolution — **one instance per workspace (DD-17), isolating `seedEntityId`**. `RiskResultResolver` calls `CacheScope` instead of `TreeCacheManager`. Cache values are identity-free (DD-16); the resolver attaches the requested node's ID when building the response. |
+| `TreeCacheManager` | Scala | **Retired — deleted, not rewritten** (with `RiskResultCache`). Replaced by `CacheScope` + `ContentCache`. Consumers: `RiskResultResolverLive` rewires to `CacheScope`; `InvalidationHandler` keeps only its SSE half; `CacheController` — see its row. What the old design has that the new one drops: (1) portfolio result caching — decided away, DD-15 → B, post-landing follow-up; (2) explicit O(depth) ancestor-path invalidation with immediate memory reclamation — unnecessary under content addressing (a changed leaf *is* a different key; stale entries become orphans for the `EvictionStrategy`), and it is the mechanism behind the TODO item 17 bug class; (3) per-tree cache deletion on tree delete — lifecycle moves to workspace level (DD-17); a deleted tree's entries linger as orphans until eviction. |
+| `CacheController` / `CacheEndpoints` | Scala | **Gap found 2026-07-16 — not previously in this table.** Four admin endpoints (`cacheStats`, `cacheNodes`, `cacheClear`, `cacheClearAll`) are built on `TreeCacheManager`'s `(TreeId, NodeId)` view. Under `ContentCache`, "which nodes of tree X are cached" is answerable only by joining the current `ContentHashIndex` with the cache keys — the cache alone stores identity-free values under content hashes and does not know node IDs. The endpoints must be redesigned (stats/clear port naturally to workspace scope; node listing needs the index) or retired. Changes API shape → **decision trigger #1; settle before Phase A**, alongside the A7 error-type collision. |
 | `InvalidationHandler` | Scala | Simplified — cache misses driven by hash changes, not explicit `ancestorPath` invalidation. Structural mutation logic still needed for SSE notifications. |
 
 ---
@@ -1059,9 +1143,9 @@ even for portfolio aggregates. A separate `RiskResultGroup` class with
 `LossDistributionType.Composite` exists but is never produced by the cache
 pipeline. Semantic mismatch, no correctness impact.
 
-> Impact: None. `ContentCache` stores `RiskResult` regardless of declared
-> type. See [RiskResult Type Hierarchy](#riskresult-type-hierarchy) for
-> details.
+> Impact: None. Under DD-18 the cache stores identity-free values, so no
+> declared subtype enters the cache at all. See
+> [RiskResult Type Hierarchy](#riskresult-type-hierarchy) for details.
 
 **3. `nTrials` alignment enforced at combine time.** `RiskResult.combine`
 [Scala] calls `require(a.nTrials == b.nTrials)`. All leaves use the same
@@ -1078,8 +1162,9 @@ provenances are **returned to the caller** at the service layer — they're
 always in the cache. Portfolio provenances accumulate all descendant
 provenances via `a.provenances ++ b.provenances`.
 
-> Impact: `RiskResult` entries in `ContentCache` always carry full provenance
-> chains. Increases entry size for deep portfolios. Not a concern for v1 but
+> Impact: cached values always carry full provenance content (per DD-18/DD-19
+> the content part only — no `riskId`). Entries stay single-leaf sized —
+> portfolio results are not cached (DD-15 → B). Not a concern for v1 but
 > relevant for eviction sizing estimates.
 
 **5. Entity seed derived from node ID hashCode.** `entitySeed =
@@ -1095,8 +1180,8 @@ branch. Content-addressed caching captures this correctly — the JSON includes
 > `SeedDerivation.streams(workspace.seedEntityId, leaf.seedVarId, seed3,
 > seed4)`; the ULID influences nothing. The per-leaf input is still captured
 > by a bytes-based hash — `seedVarId` is a field of the stored leaf JSON
-> (`RiskLeafRaw`). **But one result input now lives outside every node's
-> bytes:** `seedEntityId` is workspace-level, so a content hash alone no
+> (`RiskLeafRaw`). **But one input that determines the figures now lives
+> outside every node's bytes:** `seedEntityId` is workspace-level, so a content hash alone no
 > longer determines the result across workspaces. See the A1 table (new gap
 > row) and the cache-scope requirement in the A4 update.
 
@@ -1136,11 +1221,10 @@ even though `name` does not affect simulation results.
 > rename preserves the cache too — the "unnecessary work on rename" impact
 > below disappears entirely.
 
-> Impact: Unnecessary work on rename. Accepted. (Item 12 closed and
-> implemented 2026-07-16: the domain now guarantees a rename changes no
-> figure, so the "different answer" inversion above is dead. Whether the
-> *cache* also survives a rename is exactly DD-16 — preimage narrowing — no
-> longer a domain question.)
+> Impact: **dissolved 2026-07-16.** Item 12 guarantees a rename changes no
+> figure (the "different answer" inversion above is dead), and DD-16 (closed
+> same day — projection preimage excludes `name`/`id`) means a rename no
+> longer touches the cache either. No re-simulation, no invalidation.
 
 ---
 
@@ -1178,6 +1262,25 @@ Phase E: History / Time Travel
 ```
 
 ### Follow-up improvements (post-launch)
+
+**Re-examine portfolio result caching (DD-15 alternatives A/C′).** DD-15
+closed 2026-07-16 → Option B (leaf results only). After both this design's
+Phase A and `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part A have landed,
+re-examine whether caching portfolio results improves anything measurable —
+the goal is to judge the alternative against the landed system, not the
+designed one. Inputs available then: measured re-aggregation cost on real
+trees, `RiskResultGroup` in the resolver, the DD-18 value type in
+`ContentCache`. Analysis to start from: the
+[A4 re-examination](#a4-review-2026-07-14--dd-15-closed-2026-07-16-option-b).
+Key variants to examine then (user, 2026-07-16): the recursive
+sorted-child-key hash (Option A as designed) and the coarser **flattened
+sorted-leaf-key list** of the whole subtree. The flat variant merges entries
+across different internal tree shapes over the same leaf multiset — still
+sound for identity-free values, because the merge is associative and
+commutative (any bracketing of the same leaf multiset yields the same
+figures and the same provenance content). Both variants stop being sound the
+day portfolios gain simulation-relevant fields of their own (then C′ is the
+required shape).
 
 **Risk-level simulation parallelism.** `RiskResultResolverLive` [Scala]
 simulates portfolio children sequentially (`ZIO.foreach`). Only trial-level
@@ -1336,8 +1439,10 @@ the field, so it misleads no caller. (Beware the name collision when
 grepping: `RiskLeaf.distributionType` is an unrelated `String` field holding
 `"lognormal"`/`"expert"`.) Its pickup checklist files it under "Resolved — no
 action needed: confirmed dead code, safe to delete." It has **not** been
-deleted — deletion is gated behind the same plan's open Option 1 vs Option 2
-decision.
+deleted — deletion was gated behind the plan's Option 1 vs Option 2 decision,
+taken 2026-07-16 (Option 1); it proceeds with that plan's A.6 gated sequence.
+Cache entries shown as `RiskResult(...)` in this section also predate
+DD-16/DD-18 — cached values are identity-free.
 
 Consequence for this design: **this is not a cache concern at all.** It is
 neither an argument for nor against caching portfolio results, and the "bonus"
@@ -1362,8 +1467,8 @@ Everything else in this design is a consequence. Current coverage:
 |---|---|---|
 | Leaf params (probability, distribution) | Yes — in the leaf JSON bytes | The point of the design |
 | Leaf `seedVarId` (item 12, closed 2026-07-16) | Yes — a field of the stored leaf JSON (`RiskLeafRaw`) | The per-leaf stochastic input that replaced the ULID-derived seed. Covered automatically by any bytes-based hash. |
-| Leaf `id` (ULID) | Yes — in the leaf JSON bytes | ~~Load-bearing: `entitySeed` derived from the ULID~~ **No longer load-bearing** (item 12 removed the ULID→seed derivation 2026-07-16). Now pure over-coverage: keeping it costs only missed rename/dedupe hits. Dropping it is DD-16. |
-| Workspace `seedEntityId` (item 12) | **No — in no node's bytes** | **New gap (2026-07-16).** Workspace-level result input: identical leaves (same params, same `seedVarId`) in different workspaces produce *different* figures. Must be covered by cache scope — one `ContentCache` per workspace/entity (the `CacheScope` concept) or a key extension, same structural remedy as DD-9b. A global cross-workspace `ContentCache` is a wrong-result bug under the implemented seed design. |
+| Leaf `id` (ULID) and `name` | **No — excluded by DD-16 (closed 2026-07-16)** | Not result inputs since item 12. Exclusion is deliberate: renames no longer invalidate, and identical-content nodes share entries — safe because cached values are identity-free (no node ID inside the cache; the resolver attaches the requested node's ID at the edge). |
+| Workspace `seedEntityId` (item 12) | No — in no node's bytes | **Covered by DD-17 (closed 2026-07-16): one `ContentCache` per workspace.** Identical leaves in different workspaces produce *different* figures; per-workspace instances make cross-contamination structurally impossible. (A global cross-workspace cache would be a wrong-result bug.) |
 | `SimulationConfig` (nTrials, seeds) | No | Tolerable **only** while the cache is in-memory (restart clears). If the cache is ever persisted or config becomes per-branch, extend the key (DD-9b). |
 | Portfolio's own content | No — key is `sha256(sort(childHashes))` | Safe only while confirmed assumption 4 holds. See trap A4. |
 
@@ -1409,9 +1514,11 @@ and caller-provided IDs may intentionally resurrect a deleted stream. Dedupe
 firing across such nodes is correct, expected behaviour — same event seen
 from two sides, now always by intent, never by accident.
 
-### A3. Scenario comparability — position after item 12 (rewritten 2026-07-16)
+### A3. Branching chosen over copying — position after item 12 (rewritten 2026-07-16)
 
-Comparability is guaranteed by the **seed design**, not by branching. Two
+**The decision stands: scenarios are Irmin branches, not tree copies.** What
+item 12 changed is the *justification*, not the choice. Comparability is
+guaranteed by the **seed design**, not by branching. Two
 trees with the same leaf parameters and the same seed identities produce
 byte-identical figures (`docs/dev/PLAN-SEED-IDENTITY.md`; proven by the
 `SeedStabilitySpec` recreate test and the `SeedReproducibilityItSpec`
@@ -1439,6 +1546,10 @@ re-raise it.)*
 
 ### A4. Recommended Phase A lean-down: cache leaf results only
 
+> **Adopted 2026-07-16 — DD-15 closed → Option B.** The A/C′ alternative is
+> parked as a post-landing follow-up (see
+> [Follow-up improvements](#follow-up-improvements-post-launch)).
+
 Portfolio *result* caching is the least valuable, most trap-laden element:
 
 - Confirmed assumption 1 already says aggregation is cheap (sparse map
@@ -1464,7 +1575,7 @@ mismatch for cache entries (see previous section).
 
 ---
 
-#### A4 review (2026-07-14) — DD-15, still OPEN
+#### A4 review (2026-07-14) — DD-15, closed 2026-07-16 (Option B)
 
 A4's proposal was reviewed against the code. **Three of the four objections
 raised in review collapsed; one survived.** The net effect is that A4's own
@@ -1551,7 +1662,8 @@ is correct regardless of how the monoid plan's B.7 decision 3 or item 12 land,
 so it is the conservative choice rather than a bet on the future. B remains
 fully coherent and is the smaller Phase A.
 
-**Not decided. The live choice is B vs C.**
+**Decided 2026-07-16 → Option B**, after the re-scoring recorded below; the
+A/C′ alternative is a post-landing follow-up.
 
 **Update 2026-07-15 — item 12's final decision constrains the key
 composition, whichever of B/C wins.** Seed identity is now boundary-assigned
@@ -1572,12 +1684,56 @@ this decision:
   key" now has the domain guarantee it previously lacked.
 
 **Confirmed in code 2026-07-16 — item 12 is implemented and closed.**
-`seedVarId` is a field of `RiskLeafRaw`, i.e. inside the stored leaf JSON and
-therefore inside any bytes-based hash automatically. `seedVarHighWater` lives
-in tree **meta**, not in any node's bytes — no key impact. One caution: the
-first bullet's "must exclude name and ULID" is an aspiration, not the current
-binding rule — DD-14's "hash the returned bytes" *includes* both fields. That
-conflict is now tracked as DD-16; B vs C (this decision) is orthogonal to it.
+`seedVarId` is a field of `RiskLeafRaw`, i.e. inside the stored leaf JSON.
+`seedVarHighWater` lives in tree **meta**, not in any node's bytes — no key
+impact. The first bullet's "must exclude name and ULID" became **DD-16,
+closed the same day**: the leaf preimage is the simulation-relevant
+projection.
+
+**Update 2026-07-16 — DD-16/DD-17 closed; consequences for B vs C.** With
+ULIDs out of the leaf preimage, the "surviving objection" above is no longer
+hypothetical: identity-free portfolio keys (Option A) can genuinely collide
+within a workspace — read at the time as fatal (**withdrawn same day by the
+DD-18 re-examination below**: with identity-free values such a collision
+returns correct figures). The DD-16
+identity-free-value rule applies to portfolio entries too, under C. What does
+*not* enter this decision: seeds. Portfolios have no `seedVarId` and need
+none — a portfolio's figures are fully determined by its children's results,
+and the child keys carry the seeds (and, via DD-17's per-workspace cache, the
+`seedEntityId`) transitively. **B vs C remained the live choice until the
+DD-18 re-examination below (same day).**
+
+##### Re-examination after DD-18 (2026-07-16 sweep)
+
+DD-18 fixes cached values as identity-free: `TrialOutcomes` plus a
+content-only provenance record — no `nodeId`, no `riskId`. That removes the
+premise of this review's surviving objection, which was formulated while
+values carried `nodeId`:
+
+- **The wrong-ID defect in the O1/O2 example is gone.** The cached entry
+  carries no node ID; a read for O2 returns content and the resolver attaches
+  O2's ID. Equal Option-A keys now imply equal figures: same child keys ⇒
+  same child results (per-workspace scope, DD-17) ⇒ same commutative sum
+  (confirmed assumptions 2 and 4). Provenance content is equal too — equal
+  leaf keys ⇒ equal `seedVarId`s ⇒ equal streams. An Option-A key collision
+  is therefore correct dedupe, exactly like leaf-level sharing under DD-16.
+- **Option A is resurrected.** The previous sweep's "definitively dead"
+  verdict is withdrawn — it was correct only while cached values carried
+  identity.
+- **Option C's `ownJsonHash` now over-covers.** A portfolio's own record
+  (`id`, `name`, `childIds`) influences no figure, so hashing it into the key
+  contradicts the DD-16 projection principle and buys spurious misses (a
+  portfolio rename would invalidate). The consistent form is **C′**: prepend
+  the portfolio's *simulation-relevant projection* to the child keys. Today
+  that projection has no fields, so **C′ degenerates to A**. If portfolios
+  ever gain simulation-relevant attributes (reified transform specs — trap 1),
+  C′ is the shape the key must take; A is C′ with an empty projection.
+- **The live choice is therefore B (do not cache portfolio results) vs A/C′
+  (cache portfolios under the projection principle).** Trap 2 (ordered
+  aggregation) remains speculative and unplanned.
+- **Closed 2026-07-16 → Option B** (user decision). A/C′ is parked as a
+  post-landing follow-up in this doc and the monoid plan — re-examine once
+  both plans have landed and the system's measured behaviour is known.
 
 ### A5. Scope honesty on UC4/UC6
 
