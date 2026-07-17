@@ -63,6 +63,9 @@ type PositiveInt = Int :| Greater[0]
 // Non-negative integers (>= 0)
 type NonNegativeInt = Int :| GreaterEqual[0]
 
+// Non-negative doubles (>= 0.0, e.g. scale factors)
+type NonNegativeDouble = Double :| GreaterEqual[0.0]
+
 /**
  * Common constant values for Iron refined types.
  * 

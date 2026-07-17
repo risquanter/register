@@ -534,13 +534,18 @@ children).
 
 1. ~~Which stage(s) to support — single (B3?) or a small combination (B1 + B3)?~~ ✅ **Resolved** — B3 (`RiskTransform`) is implemented. B1 has no implementation and no use case identified yet.
 2. ~~Composition algebra: ordered endomorphisms vs. monoid (recommendation: ordered).~~ ✅ **Resolved** — `Identity[RiskTransform]` uses ordered composition (`l then r`); `andThen`/`compose` methods explicit.
-3. **Caching of pre- vs. post-mitigation results.** Still open. Current cache stores raw results; `RiskTransform` is applied outside the cache. Decision needed before any production wiring. → **trigger #5**
-4. **Whether mitigation becomes a client-facing concept** → if yes, this is a deliberate **API-shape decision** (trigger #1) requiring its own ADR, not a refactor.
-5. **Provenance representation of a mitigation event** — `RiskTransform` currently does not append to `RiskResult.provenances`. What `NodeProvenance` or new type should record a transform application is unresolved.
+3. ~~Caching of pre- vs. post-mitigation results.~~ ✅ **Decided 2026-07-17 (PLAN-RISKTRANSFORM.md D3, Option 1):** cache raw simulation results; apply the transform at the resolver edge on every read. Transform parameters never enter the cache-key projection.
+4. **Whether mitigation becomes a client-facing concept** → if yes, this is a deliberate **API-shape decision** (trigger #1) requiring its own ADR, not a refactor. (PLAN-RISKTRANSFORM.md D5; open, gated on its D1.)
+5. **Provenance representation of a mitigation event** — `RiskTransform` does not record provenance. What record should represent a transform application is unresolved (PLAN-RISKTRANSFORM.md D4; blocked on DD-19, user-sequenced last).
 
 ---
 
-### B.8 `RiskTransform` defects — MUST FIX before any production wiring
+### B.8 `RiskTransform` defects — ✅ FIXED 2026-07-17
+
+All four defects below were fixed on 2026-07-17, before any production wiring
+existed, together with the D6 retarget of `run` to `TrialOutcomes => TrialOutcomes`
+(see `PLAN-RISKTRANSFORM.md` §2 and D6 for what was done). The original findings
+are kept below as the record.
 
 Code review 2026-07-14 against `RiskTransform.scala`. **Gap 6 is the opportunity, not an
 excuse**: `RiskTransform` is public API in a shared module (`commonJVM`/`commonJS`) with zero

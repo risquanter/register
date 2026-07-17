@@ -159,10 +159,6 @@ case class RiskResult private (
   provenances: List[NodeProvenance] = Nil
 ) extends LossDistribution(nodeId, trialOutcomes) {
 
-  /** Create a new result with updated outcomes while preserving metadata. */
-  def withOutcomes(updatedOutcomes: Map[TrialId, Loss]): RiskResult =
-    copy(trialOutcomes = trialOutcomes.copy(outcomes = updatedOutcomes))
-
   override def flatten: Vector[LossDistribution] = Vector(this)
 }
 

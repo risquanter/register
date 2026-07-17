@@ -1615,6 +1615,18 @@ shared-module type → trigger #4). It works only because a transform's
 already do; portfolio keys do not. That asymmetry, not mitigation, is the
 durable point.
 
+> **Update 2026-07-17.** Two facts above changed (`PLAN-RISKTRANSFORM.md`):
+> (1) `RiskTransform.run` was retargeted to `TrialOutcomes => TrialOutcomes`
+> (decision D6), so a transform can now be applied to a portfolio result's
+> `trialOutcomes` — but this is application *after* aggregation, outside the
+> combine; the B3 stage decision stands and portfolios still do not *carry*
+> transforms, so Trap 1 stays withdrawn for the same reason. (2) B.7
+> decision 3 is decided (D3, Option 1): the cache stores raw simulation
+> results and transforms apply at the resolver edge — transform parameters
+> never enter any cache key, which makes the transform-hashing concern above
+> moot rather than merely constrained. The transform is still a function, not
+> data (reification remains open as D1).
+
 **Trap 2 is speculative.** `LossDistribution.merge` is an outer join plus sum
 — genuinely commutative. `sort` only misleads under a weighted/ordered
 aggregation that nothing plans.

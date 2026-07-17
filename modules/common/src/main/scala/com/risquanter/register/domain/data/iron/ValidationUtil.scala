@@ -199,6 +199,18 @@ object ValidationUtil {
       )))
   }
 
+  // Refinement for non-negative double values (must be >= 0.0)
+  def refineNonNegativeDouble(value: Double, fieldPath: String = "value"): Either[List[ValidationError], NonNegativeDouble] = {
+    value
+      .refineEither[GreaterEqual[0.0]]
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.valueMustBeNonNegative
+      )))
+  }
+
   // Refinement for distribution type (must be "expert" or "lognormal")
   def refineDistributionType(value: String, fieldPath: String = "distributionType"): Either[List[ValidationError], DistributionType] = {
     value

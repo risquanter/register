@@ -1,6 +1,9 @@
 # PLAN — RiskTransform (Mitigation): Knowledge Consolidation & Open Decisions
 
-Status: **Draft — knowledge consolidation, nothing approved.** Created 2026-07-16.
+Status: **Partially executed.** Created 2026-07-16. On 2026-07-17 the user decided
+and the following was implemented: B.8 defect fixes, D2 Option 1 (delete `Equal`),
+D6 Option 1 (retarget to `TrialOutcomes`); D3 was decided (Option 1, cache raw)
+as policy — no code exists to wire it yet. D1, D4, D5 remain open.
 Source material: `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B (B.0–B.8, which
 remains the historical record and scoring of the design space),
 `docs/scratch/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
@@ -10,47 +13,58 @@ the decision-guide format: goal and context, options, recommendation (labelled).
 
 ---
 
-## 1. Current state — verified facts (2026-07-16)
+## 1. Current state — verified facts (updated 2026-07-17)
 
 - `RiskTransform` is a `case class` wrapping a single function
-  `run: RiskResult => RiskResult`, in
+  `run: TrialOutcomes => TrialOutcomes` (retargeted 2026-07-17, decision D6), in
   `modules/common/.../domain/data/RiskTransform.scala` — a shared module, so it
   is public API for both server and frontend builds.
 - Operations: `applyDeductible`, `capLosses`, `scaleLosses`, `insurancePolicy`,
   `filterBelowThreshold`. All work per-trial on the sparse
-  `Map[TrialId, Loss]` inside `RiskResult`.
+  `Map[TrialId, Loss]` inside `TrialOutcomes`.
+- Constructor parameters are Iron-refined (`NonNegativeLong` /
+  `NonNegativeDouble`); the four single-parameter constructors are total.
+  `insurancePolicy` returns `Validation` for the cross-field rule
+  `cap > deductible` (B.8 fixes, implemented 2026-07-17).
 - `Identity[RiskTransform]` is lawful (ordered composition, `l` then `r`);
-  property tests live in `RiskTransformSpec`.
+  property tests live in `RiskTransformSpec`, including a property that every
+  transform preserves `nTrials` (required by the `TrialOutcomes.combine`
+  alignment invariant).
 - **Zero production callers.** No service, controller, or endpoint references
-  the type (grep-verified 2026-07-16). Consequence: every fix below is a local,
-  non-breaking edit today; each becomes a breaking change the moment a call
-  path exists.
-- No transform records provenance (ADR-003 gap).
-- A transform cannot act on a portfolio result: `RiskResultGroup` is a sibling
-  of `RiskResult` under `LossDistribution`, not a subtype.
+  the type (grep-verified 2026-07-16 and 2026-07-17). Consequence: the fixes
+  above were local, non-breaking edits; anything further becomes a breaking
+  change the moment a call path exists.
+- No transform records provenance (ADR-003 gap) — see D4.
+- A transform applies to any node's result, leaf or portfolio, by acting on
+  its `trialOutcomes` field (since D6; before that it accepted only
+  `RiskResult`, so portfolio results were out of reach).
 - The pipeline stage is decided: B3, result-stage endomorphism (monoid plan
   B.5/B.6). Portfolio-stage mitigation (B4) was scored and not chosen; if it
   ever returns, it must be an operation applied after aggregation, outside the
   combine (it would otherwise break the associativity law).
 
-## 2. Defects (monoid plan B.8) — fix before any production wiring
+## 2. Defects (monoid plan B.8) — ✅ FIXED 2026-07-17
 
-Not prerequisites of monoid Part A or milestone-2b Phase A; they gate only the
-first production wiring of `RiskTransform`.
+Fixed before any production wiring existed, as required. What was done:
 
-1–3. Three `require` guards throw `IllegalArgumentException` on raw primitives
-(`RiskTransform.scala:154` scale factor ≥ 0; `:172` deductible ≥ 0; `:173`
-cap > deductible). ADR-001 requires Iron-refined parameters and smart
-constructors returning `Validation`; the cross-field rule belongs in
-`Validation.validateWith`.
+1–3. The three `require` guards (scale factor ≥ 0, deductible ≥ 0,
+cap > deductible) are gone. Single-field rules moved into Iron-refined
+parameter types (`NonNegativeLong`, new alias `NonNegativeDouble` with
+`ValidationUtil.refineNonNegativeDouble`), making `applyDeductible`,
+`capLosses`, `scaleLosses`, and `filterBelowThreshold` total. The cross-field
+rule lives in `insurancePolicy`, which returns
+`Validation[ValidationError, RiskTransform]`. `capLosses` and
+`filterBelowThreshold` gained the non-negativity constraint they previously
+lacked (user-approved narrowing).
 
-4. `given Equal[RiskTransform] = Equal.default` compares the wrapped lambda by
-reference: `capLosses(1000) === capLosses(1000)` is `false`. Unlawful, unused,
-and unexercised — the law suite compares `.outcomes`, not the instance.
+4. `given Equal[RiskTransform] = Equal.default` deleted (decision D2 below).
 
-**Shared root cause:** a transform is an opaque function, not data. It cannot
-be compared, hashed, serialized, or logged. Every decision below runs into
-this fact.
+Also removed: `RiskResult.withOutcomes`, whose only callers were the transform
+constructors (user-approved; zero call sites after D6).
+
+**Shared root cause (still true for the remaining decisions):** a transform is
+an opaque function, not data. It cannot be compared, hashed, serialized, or
+logged. D1, D4, and D5 all run into this fact.
 
 ## 3. Constraints inherited from the locked cache decisions
 
@@ -88,23 +102,29 @@ module → decision trigger #4.
 case rather than built speculatively now. Do the B.8 Iron fixes on the
 constructors either way — they are independent of reification.
 
-### D2 — The unlawful `Equal[RiskTransform]` instance
+### D2 — The unlawful `Equal[RiskTransform]` instance — ✅ DECIDED & DONE (Option 1, 2026-07-17)
 
-**Decision goal and context.** The instance is wrong today and consumed by
-nothing; it waits in a shared module for a caller to trip over it.
+**Decision goal and context.** The instance was wrong and consumed by
+nothing; it waited in a shared module for a caller to trip over it. A lawful
+`Equal` cannot be written for a bare function (function equality is
+undecidable; reference comparison and sample-based comparison are both
+incorrect), so the only real fix is deriving `Equal` from reified data —
+which is D1.
 
-**Options.**
+**Decision (user, 2026-07-17): Option 1 — deleted.** If D1 Option 1 later
+reifies transforms, reintroduce `Equal` derived from the spec, with a
+law-suite case that exercises it directly. Option 2 (keep until D1 resolves)
+was rejected: it left a known-unlawful instance public in `common` for no
+benefit.
 
-1. **Delete it now.** Smallest correct state; nothing breaks (verified: no
-   consumer). If D1 Option 1 later reifies transforms, reintroduce `Equal`
-   derived from the spec, with a law-suite case that exercises it directly.
-2. **Keep it until D1 resolves,** then derive from the spec. Cost: a known-
-   unlawful instance stays public in `common` in the meantime.
+### D3 — Caching policy for mitigated results (monoid B.7 decision 3) — ✅ DECIDED (Option 1, 2026-07-17)
 
-**Recommendation (mine):** Option 1 — delete now, together with the B.8
-`require` fixes; both are free while there are no callers.
-
-### D3 — Caching policy for mitigated results (monoid B.7 decision 3)
+**Decision (user, 2026-07-17): Option 1 — cache raw simulation results; apply
+the transform at the resolver edge on every read.** Consequences: transform
+parameters never enter the `LeafSimContent` cache-key projection (DD-16), and
+milestone-2b Phase A can design the cache key without any transform fields.
+No code exists to wire yet; this is policy, recorded for Phase A and for the
+first mitigation wiring. Original decision text kept below for the record.
 
 **Decision goal and context.** When a transform is wired into the read path,
 does the cache store the raw simulation result (transform applied on every
@@ -142,9 +162,31 @@ If mitigation becomes a concept clients send and receive, that is an API-shape
 decision (trigger #1) requiring its own ADR. It presupposes D1 Option 1 (only
 data can cross the API boundary). Not before D1 is decided.
 
-## 5. Sequencing
+### D6 — Transform input type (added 2026-07-17) — ✅ DECIDED & DONE (Option 1)
 
-1. None of the above blocks monoid Part A or milestone-2b Phase A.
-2. When mitigation work is picked up: B.8 `require` fixes + D2 (free now) →
-   D1 with the first concrete use case → D3 before any wiring → D4 after
-   DD-19 → D5 as its own ADR.
+**Decision goal and context.** Monoid Part A introduced `TrialOutcomes` (trial
+count + sparse trial→loss map) as a standalone type, which did not exist when
+`RiskTransform` was written against `RiskResult`. Every operation only reads
+and writes the loss map; none touches node identity or provenance. The B.8
+constructor rewrite forced the question: fix the input type in the same pass,
+or rewrite the constructors twice.
+
+**Decision (user, 2026-07-17): Option 1 — `run: TrialOutcomes => TrialOutcomes`.**
+A transform now applies to any node's result (leaf or portfolio) via its
+`trialOutcomes` field and cannot see identity or provenance. The alternative
+(keep `RiskResult => RiskResult`) preserved the portfolio limitation and
+guaranteed a second, breaking rewrite once callers exist. Accepted cost:
+`nTrials` is visible to a transform; a `RiskTransformSpec` property asserts
+every constructor-built transform preserves it. This does not reopen the
+pipeline-stage decision (B3 stands).
+
+## 5. Sequencing (updated 2026-07-17)
+
+1. ~~B.8 `require` fixes + D2~~ ✅ done 2026-07-17, together with D6.
+2. ~~D3 before any wiring~~ ✅ decided 2026-07-17 (Option 1, cache raw).
+3. Remaining, in order of external trigger:
+   - **D1** — with the first concrete mitigation use case (direction favoured:
+     reify; not yet decided).
+   - **D4** — after DD-19 (provenance shape, user-sequenced last).
+   - **D5** — after D1, as its own ADR.
+4. None of the remaining items blocks milestone-2b Phase A.
