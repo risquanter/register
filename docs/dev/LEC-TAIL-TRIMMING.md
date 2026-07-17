@@ -27,7 +27,7 @@ It does **not** affect:
 | `RiskResult` (cached simulation outcomes) | ✅ | The full Monte Carlo outcome set is preserved in memory. Nothing is deleted. |
 | `probOfExceedance(threshold)` | ✅ | Any threshold can be queried at any time via the API, regardless of what the chart displays. |
 | Quantile calculations (VaR, p95, p99) | ✅ | Computed directly from the outcome distribution, not from chart points. |
-| Risk aggregation (`Identity[RiskResult].combine`) | ✅ | Operates on raw trial-wise losses, not on rendered curves. |
+| Risk aggregation (`TrialOutcomes.combine` via `RiskResultGroup`) | ✅ | Operates on raw trial-wise losses, not on rendered curves. |
 | Provenance and reproducibility | ✅ | Trial-level data and PRNG seeds remain intact. |
 
 In summary: the chart is a **window onto the data**, not the data itself.

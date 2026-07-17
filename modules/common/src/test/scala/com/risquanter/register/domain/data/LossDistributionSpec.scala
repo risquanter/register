@@ -4,7 +4,6 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.*
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.RiskResultIdentityInstances.given
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -131,62 +130,6 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(merged == Map(1 -> 3000L, 2 -> 2000L, 3 -> 3000L))
       }
     ),
-    suite("RiskResult combine - laws")(
-      test("identity law: combine(identity, a) == a") {
-        withCfg(100) {
-          val a = RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
-          val identity = Identity[RiskResult].identity
-
-          val combined = RiskResult.combine(identity, a)
-
-          assertTrue(combined.outcomes == a.outcomes) &&
-          assertTrue(combined.nTrials == a.nTrials)
-        }
-      },
-      test("identity law: combine(a, identity) == a") {
-        withCfg(100) {
-          val a = RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
-          val identity = Identity[RiskResult].identity
-
-          val combined = RiskResult.combine(a, identity)
-
-          assertTrue(combined.outcomes == a.outcomes) &&
-          assertTrue(combined.nTrials == a.nTrials)
-        }
-      },
-      test("associativity: combine(a, combine(b, c)) == combine(combine(a, b), c)") {
-        val a = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val b = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 2000L, 2 -> 500L), Nil) }
-        val c = withCfg(100) { RiskResult(nodeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L), Nil) }
-
-        val left  = RiskResult.combine(a, RiskResult.combine(b, c))
-        val right = RiskResult.combine(RiskResult.combine(a, b), c)
-
-        assertTrue(left.outcomes == right.outcomes)
-      },
-      test("commutativity (bonus property): combine(a, b) == combine(b, a)") {
-        val a = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val b = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
-
-        val ab = RiskResult.combine(a, b)
-        val ba = RiskResult.combine(b, a)
-
-        assertTrue(ab.outcomes == ba.outcomes)
-      },
-      test("rejects combining results with different trial counts") {
-        val a = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val b = withCfg(200) { RiskResult(nodeId("risk-002"), Map(1 -> 2000L), Nil) }
-
-        assertTrue(
-          try {
-            RiskResult.combine(a, b)
-            false
-          } catch {
-            case _: IllegalArgumentException => true
-          }
-        )
-      }
-    ),
     suite("RiskResultGroup - aggregation")(
       test("empty group has no outcomes") {
         val group = withCfg(1000) { RiskResultGroup(nodeId("TOTAL")) }
@@ -231,8 +174,15 @@ object LossDistributionSpec extends ZIOSpecDefault {
         val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
         val r2 = withCfg(200) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
 
-        // With config-driven constructors, mixed nTrials are prevented at construction time.
-        assertTrue(r1.nTrials != r2.nTrials)
+        // Alignment guard: RiskResultGroup.apply refuses misaligned children
+        assertTrue(
+          try {
+            withCfg(100) { RiskResultGroup(nodeId("TOTAL"), r1, r2) }
+            false
+          } catch {
+            case _: IllegalArgumentException => true
+          }
+        )
       }
     ),
     suite("RiskResult - flatten")(

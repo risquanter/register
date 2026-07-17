@@ -55,14 +55,16 @@ case class NodeProvenance(
 ```scala
 case class RiskResult private (
   nodeId: NodeId,
-  outcomes: Map[TrialId, Loss],   // sparse — only non-zero trials
-  nTrials: Int,
+  trialOutcomes: TrialOutcomes,   // nTrials + sparse Map[TrialId, Loss]
   provenances: List[NodeProvenance] = Nil
 )
 ```
 
-`RiskResult.combine(a, b)` merges two results: adds losses per-trial, concatenates provenances.
-A portfolio result's `provenances` is therefore the union of all leaf provenances in its subtree.
+Portfolio aggregation is `RiskResultGroup(parentId, childResults*)`, which sums losses per-trial
+via the `TrialOutcomes` monoid. Provenance is not accumulated during aggregation:
+`RiskResultGroup.provenances` reads its children's lists at access time
+(`children.flatMap(_.provenances)`). A portfolio result's `provenances` is therefore still the
+union of all leaf provenances in its subtree — the guarantee this plan relies on is unchanged.
 
 ### Simulation and provenance capture
 
@@ -77,7 +79,7 @@ The Monte Carlo engine lives in `modules/server`:
   ```
 
 **There is no code path that stores a `RiskResult` in cache with `provenances = Nil`** for a real
-leaf. `Nil` only appears in test data and `withNodeId`/`withOutcomes` helpers.
+leaf. `Nil` only appears in test data and the `withOutcomes` helper.
 
 ### `ensureCached` semantics
 
@@ -376,7 +378,9 @@ override def getProvenance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId): T
 ```
 
 `lookupNodeInTree` is an existing private helper in the same class. `traced` is an existing private
-helper in the same class. `resolver.ensureCached` signature after Phase 1: `(RiskTree, NodeId): Task[RiskResult]`.
+helper in the same class. `resolver.ensureCached` signature after Phase 1: `(RiskTree, NodeId): Task[LossDistribution]`
+(`provenances` is a member of the `LossDistribution` base class, so the read below compiles for
+both leaf and portfolio results).
 
 ### New controller route
 
@@ -479,7 +483,7 @@ single-leaf tree where the root IS the leaf. Verify assertions match the tree sh
 - ADR-001 (Iron types): `WorkspaceKeySecret`, `TreeId`, `NodeId` path params are all refined. ✅
 - ADR-002 (Logging): `traced("getProvenance")` span; `tree_id`, `node_id`, `provenance_count` OTel attributes. ✅
 - ADR-003 (Provenance): This phase is the primary implementation surface for ADR-003's audit intent. ✅
-- ADR-009 (Identity aggregation): Provenances accumulated by `RiskResult.combine` — untouched. ✅
+- ADR-009 (TrialOutcomes monoid): Provenances read from children by `RiskResultGroup.provenances` — untouched. ✅
 - ADR-010 (Error handling): `.either` at controller boundary; `lookupNodeInTree` uses `ValidationFailed`. ✅
 - ADR-011 (Import conventions): All new imports at top-level; no FQNs in logic. ✅
 
@@ -500,8 +504,8 @@ single-leaf tree where the root IS the leaf. Verify assertions match the tree sh
 
 - Provenance for `lec-multi` via `LECNodeCurve` enrichment — not in this plan
 - Per-trial outcome replay — provenance captures parameters to reconstruct; it does not replay draws
-- Provenance for portfolio nodes beyond accumulating leaf provenances — portfolios have no own
-  provenance; their list is derived from `RiskResult.combine`
+- Provenance for portfolio nodes beyond their leaves' records — portfolios have no own
+  provenance; their list is derived from children at read time (`RiskResultGroup.provenances`)
 
 ---
 

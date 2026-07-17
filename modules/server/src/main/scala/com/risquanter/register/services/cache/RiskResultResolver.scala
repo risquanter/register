@@ -1,7 +1,7 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.data.{RiskResult, RiskTree}
+import com.risquanter.register.domain.data.{LossDistribution, RiskTree}
 import com.risquanter.register.domain.data.iron.{NodeId, SeedEntityId}
 
 /**
@@ -41,9 +41,9 @@ trait RiskResultResolver {
     * @param seedEntityId Owning workspace's stochastic identity (HDR Entity axis) —
     *                     threaded explicitly from the controller's resolved workspace
     * @param includeProvenance Whether to capture provenance metadata (default: false)
-    * @return RiskResult (from cache or freshly simulated)
+    * @return LossDistribution (from cache or freshly simulated)
     */
-  def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[RiskResult]
+  def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[LossDistribution]
 
   /**
     * Batch version of ensureCached for multiple nodes.
@@ -56,17 +56,17 @@ trait RiskResultResolver {
     * @param nodeIds Set of node identifiers
     * @param seedEntityId Owning workspace's stochastic identity (HDR Entity axis)
     * @param includeProvenance Whether to capture provenance metadata (default: false)
-    * @return Map from nodeId to RiskResult
+    * @return Map from nodeId to LossDistribution
     */
-  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]]
+  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, LossDistribution]]
 }
 
 object RiskResultResolver {
 
   // Accessor methods for ZIO service pattern
-  def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): ZIO[RiskResultResolver, Throwable, RiskResult] =
+  def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): ZIO[RiskResultResolver, Throwable, LossDistribution] =
     ZIO.serviceWithZIO[RiskResultResolver](_.ensureCached(tree, nodeId, seedEntityId, includeProvenance))
 
-  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): ZIO[RiskResultResolver, Throwable, Map[NodeId, RiskResult]] =
+  def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): ZIO[RiskResultResolver, Throwable, Map[NodeId, LossDistribution]] =
     ZIO.serviceWithZIO[RiskResultResolver](_.ensureCachedAll(tree, nodeIds, seedEntityId, includeProvenance))
 }

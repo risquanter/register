@@ -1,13 +1,13 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.data.RiskResult
+import com.risquanter.register.domain.data.LossDistribution
 import com.risquanter.register.domain.data.iron.NodeId
 
 /**
   * RiskResult cache service (ADR-014).
   *
-  * Pure storage for simulation outcomes (RiskResult) by node ID.
+  * Pure storage for simulation outcomes (LossDistribution) by node ID.
   * This is a simple cache with no tree-awareness — invalidation logic
   * is handled by TreeCacheManager which uses TreeIndex.
   *
@@ -22,8 +22,8 @@ import com.risquanter.register.domain.data.iron.NodeId
   * on which nodes are displayed together. Caching rendered curves would require
   * interpolation when the tick domain changes, producing mathematical errors.
   *
-  * By caching RiskResult (simulation outcomes), we can compute exact exceedance
-  * probabilities at any tick value using RiskResult.probOfExceedance(loss).
+  * By caching LossDistribution (simulation outcomes), we can compute exact exceedance
+  * probabilities at any tick value using LossDistribution.probOfExceedance(loss).
   *
   * == Cache Invalidation ==
   *
@@ -36,17 +36,17 @@ trait RiskResultCache {
     * Get cached result for a node.
     *
     * @param nodeId Node identifier (SafeId.SafeId)
-    * @return Cached RiskResult if present
+    * @return Cached LossDistribution if present
     */
-  def get(nodeId: NodeId): UIO[Option[RiskResult]]
+  def get(nodeId: NodeId): UIO[Option[LossDistribution]]
 
   /**
     * Store result in cache.
     *
     * @param nodeId Node identifier (SafeId.SafeId)
-    * @param result RiskResult to cache
+    * @param result LossDistribution to cache
     */
-  def put(nodeId: NodeId, result: RiskResult): UIO[Unit]
+  def put(nodeId: NodeId, result: LossDistribution): UIO[Unit]
 
   /**
     * Remove result from cache.
@@ -114,7 +114,7 @@ object RiskResultCache {
     * @return Effect producing a new RiskResultCache
     */
   def make: UIO[RiskResultCache] =
-    Ref.make(Map.empty[NodeId, RiskResult]).map(RiskResultCacheLive(_))
+    Ref.make(Map.empty[NodeId, LossDistribution]).map(RiskResultCacheLive(_))
 
   // Accessor methods removed - use TreeCacheManager.cacheFor(treeId) instead
 }
@@ -127,13 +127,13 @@ object RiskResultCache {
   * @param cacheRef Thread-safe cache storage
   */
 final class RiskResultCacheLive(
-    cacheRef: Ref[Map[NodeId, RiskResult]]
+    cacheRef: Ref[Map[NodeId, LossDistribution]]
 ) extends RiskResultCache {
 
-  override def get(nodeId: NodeId): UIO[Option[RiskResult]] =
+  override def get(nodeId: NodeId): UIO[Option[LossDistribution]] =
     cacheRef.get.map(_.get(nodeId))
 
-  override def put(nodeId: NodeId, result: RiskResult): UIO[Unit] =
+  override def put(nodeId: NodeId, result: LossDistribution): UIO[Unit] =
     for
       _ <- cacheRef.update(_ + (nodeId -> result))
       _ <- ZIO.logDebug(s"RiskResultCache PUT: ${nodeId.value} (${result.outcomes.size} outcomes, max=${result.maxLoss})")

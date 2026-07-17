@@ -1,6 +1,9 @@
 # PLAN — `TrialOutcomes` Monoid, Aggregation & Mitigation Design
 
-Status: **APPROVED for implementation 2026-07-16 — Part A (Option 1), execute per A.6 Steps 1–5.**
+Status: **Part A IMPLEMENTED 2026-07-17** (Option 1, executed per A.6 Steps 1–5; includes the
+C.1 resolver parallelization and follow-up cleanups: single `Commutative` instance, unified
+`LossDistribution.merge`, `TrialOutcomes.nTrials: PositiveInt`). All unit, Scala.js, and
+integration test gates passed. ADR-009 rewritten to the implemented design.
 Part B (mitigation) remains unapproved: B.7 decisions 3–5 are open, and the B.8 MUST-FIX items
 gate any `RiskTransform` production wiring — they are **not** prerequisites of Part A
 (`RiskTransform` has zero production callers; verified 2026-07-16).
@@ -654,8 +657,8 @@ purely to close the door.
    `TrialOutcomes` type)**, jointly with milestone-2b DD-18: the `ContentCache` value is a
    named case class of `TrialOutcomes` + a content-only provenance record. Trigger #4 resolved.
 
-2. **Delete false monoid + fix resolver** — ✅ approved 2026-07-16 (plan approved for Part A);
-   execute in the order specified by A.6 (Steps 1–5). Key work items within that sequence:
+2. **Delete false monoid + fix resolver** — ✅ **implemented 2026-07-17** (approved 2026-07-16);
+   executed in the order specified by A.6 (Steps 1–5). Key work items within that sequence:
    - Add `require` alignment guard to `RiskResultGroup.apply` (A.5, A.6 Step 2).
    - Delete `RiskResult.combine`, `Associative/Commutative[RiskResult]`, `RiskResultIdentityInstances`,
      `RiskResult.withNodeId`, `LossDistributionType` enum.
@@ -666,8 +669,9 @@ purely to close the door.
      `ContentCache`, not `LossDistribution`.)
    - Behaviour change in resolver → **trigger #5**.
 
-3. **Tests — follow A.6 sequencing (Steps 1–5 are mandatory gates)**. Step 1 must be
-   completed on the current code before any implementation begins.
+3. **Tests — follow A.6 sequencing (Steps 1–5 are mandatory gates)** — ✅ **completed
+   2026-07-17**. Step 1 was completed on the old code before implementation began; every
+   step's gate was green, including the final unit + Scala.js + integration runs.
 
 4. **B.7 decision 3**: Caching policy for pre- vs. post-mitigation results before wiring
    `RiskTransform` into any production call path. → **trigger #5**.

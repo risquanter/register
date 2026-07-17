@@ -1,8 +1,26 @@
 # Plan: Tree Sensitivity Analysis (one-at-a-time / tornado)
 
-**Status:** Draft — design exploration, not yet approved
+**Status:** Draft — design exploration, not yet approved. **Requires redesign
+before approval** (see notice below).
 **Date:** 2026-06-18
 **Tags:** simulation, sensitivity-analysis, risk-tree, aggregation, cache
+
+---
+
+> **⚠ Requires redesign after the TrialOutcomes refactor (2026-07-17).**
+> This plan builds on primitives that no longer exist: `RiskResult.combine`,
+> `given Associative/Commutative[RiskResult]`, and `RiskResult.withNodeId` were
+> deleted when the monoid moved to `TrialOutcomes` (see ADR-009 and
+> `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part A). The current replacements:
+> per-trial summation is `TrialOutcomes.combine`; portfolio construction is the
+> named constructor `RiskResultGroup(parentId, childResults*)`, which assigns the
+> parent ID directly (no `withNodeId` relabeling step). The plan's underlying
+> guarantees (trial-aligned additive results, equal-nTrials enforcement,
+> path-only recompute) still hold, but every code sketch that calls the deleted
+> primitives — the off-baseline recompute rule (§3), the annotated driver (§3a),
+> the worked trace (§3b), correctness invariant 1, and the effort table — must be
+> re-derived against `TrialOutcomes`/`RiskResultGroup` before this plan can be
+> approved. No redesign has been attempted; the text below is unmodified.
 
 ---
 

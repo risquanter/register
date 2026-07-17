@@ -1,7 +1,7 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.data.{RiskResult, RiskTree}
+import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /**

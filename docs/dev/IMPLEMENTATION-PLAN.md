@@ -2540,13 +2540,15 @@ After (parallel):       cyber    ──────┐
 
 **Implementation:** Replace `ZIO.foreach(childIds)(simulateNode)` with `ZIO.foreachPar(childIds)(simulateNode)` in the portfolio branch of `simulateNode`, constrained by a concurrency semaphore.
 
+> **Done (2026-07-17, monoid plan Part A step C.1):** the resolver's portfolio branch now uses `ZIO.foreachPar` over child IDs, licensed by the `TrialOutcomes` monoid laws. No additional semaphore was added — the existing `SimulationSemaphore` bounds concurrent requests, and CPU concurrency is capped by the runtime thread pool (see `SimulationConfig` scaladoc).
+
 #### Name-Change Re-Simulation Avoidance
 
 Renaming a node changes its content hash (the JSON includes `name`) → cache miss → re-simulation, even though `name` does not affect simulation output. Avoiding this would require hashing only simulation-relevant fields on the JVM side — a canonicalisation layer that strips non-simulation fields before hashing. Renames are rare and re-simulation of one node is fast, so this is acceptable for v1. Revisit if user feedback indicates otherwise.
 
 #### RiskResultGroup for Drill-Down
 
-`RiskResult.combine` returns a `RiskResult` with `distributionType = Leaf` even for portfolio aggregates. A `RiskResultGroup` type with `Composite` distribution type exists but is unused. Switching portfolio entries to `RiskResultGroup` would preserve child references for component-contribution drill-down in the UI. Adds memory overhead per portfolio entry. Implement when drill-down feature is prioritised.
+**Done (2026-07-17, monoid plan Part A — see ADR-009).** The defect described here — portfolio aggregates typed as leaf `RiskResult` — is fixed: the resolver now builds portfolio entries as `RiskResultGroup(parentId, childResults*)`, which preserves child references (`children: List[LossDistribution]`) for component-contribution drill-down. `RiskResult.combine` and the `distributionType` field no longer exist; per-trial summation lives in `TrialOutcomes.combine`.
 
 #### Eviction Strategy
 

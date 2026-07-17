@@ -139,15 +139,21 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
       test("simulates portfolio by aggregating children") {
         for {
           resolver <- ZIO.service[RiskResultResolver]
-          
-          // Simulate root portfolio
-          rootResult <- resolver.ensureCached(testTree, rootId, testEntity)
-          
+
+          risk1Result <- resolver.ensureCached(testTree, risk1Id, testEntity)
+          risk2Result <- resolver.ensureCached(testTree, risk2Id, testEntity)
+          rootResult  <- resolver.ensureCached(testTree, rootId, testEntity)
+          allTrialIds = risk1Result.outcomes.keySet ++ risk2Result.outcomes.keySet
         } yield assertTrue(
-          // Verify root aggregates child risks
           rootResult.nodeId == rootId,
-          // Root should have outcomes (aggregated from children)
-          rootResult.outcomes.size >= 0
+          // Deterministic seeds: both leaves fire in at least one trial
+          allTrialIds.nonEmpty,
+          // Every trial in either child: root outcome = pointwise sum (missing = 0)
+          allTrialIds.forall { t =>
+            rootResult.outcomes.getOrElse(t, 0L) ==
+              risk1Result.outcomes.getOrElse(t, 0L) +
+              risk2Result.outcomes.getOrElse(t, 0L)
+          }
         )
       }
     ),

@@ -11,8 +11,13 @@ import com.risquanter.register.domain.errors.ValidationError
   *
   * @param defaultNTrials Default number of Monte Carlo trials per simulation
   * @param maxTreeDepth Maximum allowed depth for risk tree hierarchy
-  * @param defaultParallelism Default ZIO fiber parallelism for tree traversal
-  * @param maxConcurrentSimulations Maximum concurrent simulations (semaphore permits)
+  * @param defaultTrialParallelism Trial-batch parallelism within one leaf simulation.
+  *   This bounds fibers per leaf, not per request: the resolver simulates sibling
+  *   leaves concurrently (ZIO.foreachPar), so one request may hold up to
+  *   (leaves in flight) × defaultTrialParallelism runnable fibers. Actual CPU
+  *   concurrency stays capped by the ZIO runtime thread pool (core count).
+  * @param maxConcurrentSimulations Maximum concurrent top-level simulation requests
+  *   admitted by SimulationSemaphore (permits count requests, not fibers)
   * @param maxNTrials Hard limit on trials per simulation (reject if exceeded)
   * @param maxParallelism Hard limit on parallelism per simulation (reject if exceeded)
   * @param defaultSeed3 Global seed 3 for HDR random number generation (reproducibility)

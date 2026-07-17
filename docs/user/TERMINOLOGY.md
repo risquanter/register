@@ -72,17 +72,17 @@ final case class LECCurveResponse(
 
 ## Mathematical Structure
 
-### Identity (Monoid) for Loss Distributions
-Loss distributions can be **combined** using outer join semantics:
+### Identity (Monoid) for Trial Outcomes
+Trial-aligned outcomes can be **combined** using outer join semantics. The monoid
+lives on `TrialOutcomes` (trial count + trial→loss map); node identity is a label
+supplied by tree context and does not participate in combination:
 
 ```scala
-given identity: Identity[RiskResult] with {
-  def identity: RiskResult = RiskResult("", Map.empty, 0)
-  
-  def combine(a: => RiskResult, b: => RiskResult): RiskResult = {
-    // Union of trial IDs, sum losses per trial
-    RiskResult(name, merge(a, b), nTrials)
-  }
+case class TrialOutcomes(nTrials: Int, outcomes: Map[TrialId, Loss])
+
+object TrialOutcomes {
+  def empty(using cfg: SimulationConfig): TrialOutcomes  // zero losses, configured nTrials
+  def combine(a: TrialOutcomes, b: TrialOutcomes): TrialOutcomes  // union of trial IDs, sum losses per trial
 }
 ```
 

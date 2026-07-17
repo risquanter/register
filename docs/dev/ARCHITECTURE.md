@@ -820,7 +820,7 @@ allTrialIds.map { trialId =>
 HDR histograms cannot provide `outcomeOf(trialId)` - they only know "bucket 5000-6000 had 47 occurrences". This breaks:
 
 1. **Exact aggregation:** Cannot sum losses for specific trial IDs across risks
-2. **Identity-based composition:** `Identity[RiskResult].combine` requires trial-level granularity
+2. **Monoid composition:** `TrialOutcomes.combine` requires trial-level granularity
 3. **Hierarchical merge:** Bottom-up tree aggregation depends on matching trial sequences
 4. **Provenance/reproducibility:** Cannot reconstruct exact trial outcomes from bucketed histogram
 

@@ -6,7 +6,7 @@ import zio.telemetry.opentelemetry.metrics.{Meter, Histogram, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
+import com.risquanter.register.domain.data.{LossDistribution, RiskResult, RiskResultGroup, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, SeedEntityId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
@@ -48,7 +48,7 @@ final case class RiskResultResolverLive(
   private val seed3: Long = config.defaultSeed3
   private val seed4: Long = config.defaultSeed4
 
-  override def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[RiskResult] =
+  override def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[LossDistribution] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
         _         <- tracing.setAttribute("tree_id", tree.id.value)
@@ -65,14 +65,14 @@ final case class RiskResultResolverLive(
       } yield result
     }
 
-  override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]] =
+  override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, LossDistribution]] =
     ZIO.foreach(nodeIds.toList)(id => ensureCached(tree, id, seedEntityId, includeProvenance).map(id -> _)).map(_.toMap)
 
   /**
     * Simulate subtree rooted at nodeId, caching all results.
     * Wraps simulation in span with timing metrics.
     */
-  private def simulateSubtree(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[RiskResult] =
+  private def simulateSubtree(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[LossDistribution] =
     tracing.span("simulateSubtree", SpanKind.INTERNAL) {
       for {
         _ <- tracing.setAttribute("node_id", nodeId.value)
@@ -108,18 +108,22 @@ final case class RiskResultResolverLive(
       trialsCounter.add(nTrials.toLong, attrs)
   }
 
-  private def simulateNode(tree: RiskTree, cache: RiskResultCache, node: RiskNode, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[RiskResult] =
+  private def simulateNode(tree: RiskTree, cache: RiskResultCache, node: RiskNode, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[LossDistribution] =
     node match {
       case leaf: RiskLeaf =>
         simulateLeaf(cache, leaf, seedEntityId, includeProvenance)
 
       case portfolio: RiskPortfolio =>
         for
-          childResults <- ZIO.foreach(portfolio.childIds.toList) { childId =>
+          // Parallel child resolution: children root disjoint subtrees (single-parent
+          // tree), and TrialOutcomes aggregation is associative and commutative, so
+          // evaluation order cannot change the aggregated figures. foreachPar
+          // preserves list order, keeping provenance order identical to sequential.
+          childResults <- ZIO.foreachPar(portfolio.childIds.toList) { childId =>
             // Look up child node from index, then check cache or simulate
             cache.get(childId).flatMap {
               case Some(cached) => ZIO.succeed(cached)
-              case None         => 
+              case None         =>
                 // Look up child node from tree index
                 ZIO.fromOption(tree.index.nodes.get(childId))
                   .orElseFail(ValidationFailed(List(ValidationError(
@@ -130,16 +134,14 @@ final case class RiskResultResolverLive(
                   .flatMap(childNode => simulateNode(tree, cache, childNode, seedEntityId, includeProvenance))
             }
           }
-          combined <- ZIO.attempt {
-            if childResults.isEmpty then
-              throw ValidationFailed(List(ValidationError(
-                field = s"riskPortfolio.${portfolio.id}.childIds",
-                code = ValidationErrorCode.EMPTY_COLLECTION,
-                message = s"RiskPortfolio '${portfolio.id}' has no children"
-              )))
-            childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b))
-              .withNodeId(updatedNodeId = portfolio.id)
+          _ <- ZIO.when(childResults.isEmpty) {
+            ZIO.fail(ValidationFailed(List(ValidationError(
+              field = s"riskPortfolio.${portfolio.id}.childIds",
+              code = ValidationErrorCode.EMPTY_COLLECTION,
+              message = s"RiskPortfolio '${portfolio.id}' has no children"
+            ))))
           }
+          combined <- ZIO.attempt(RiskResultGroup(portfolio.id, childResults*))
           _ <- cache.put(portfolio.id, combined)
         yield combined
     }

@@ -308,10 +308,11 @@ object ProvenanceSpec extends ZIOSpecDefault {
           // Simulate portfolio (which aggregates children)
           result <- resolver.ensureCached(testTree, nodeId("portfolio"), testEntity, includeProvenance = true)
         } yield {
-          // Portfolio result should contain provenances from both leaves
+          // Portfolio result should contain provenances from both leaves,
+          // in childIds declaration order (parallel child resolution preserves
+          // list order — foreachPar returns results in input order)
           assertTrue(result.provenances.size == 2) &&
-          assertTrue(result.provenances.exists(_.riskId == nodeId("risk1"))) &&
-          assertTrue(result.provenances.exists(_.riskId == nodeId("risk2")))
+          assertTrue(result.provenances.map(_.riskId) == List(nodeId("risk1"), nodeId("risk2")))
         }
       }
     ).provideLayerShared(testLayer),

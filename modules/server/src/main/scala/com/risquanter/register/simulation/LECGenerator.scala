@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.RiskResult
+import com.risquanter.register.domain.data.LossDistribution
 import scala.collection.immutable.TreeMap
 
 /** Utility for generating Loss Exceedance Curve (LEC) data from simulation outcomes.
@@ -30,11 +30,11 @@ object LECGenerator {
     * the loss value below which a fraction p of ALL Monte Carlo trials
     * fall — not just those where the risk event fired.
     *
-    * @param result RiskResult carrying nTrials and sparse outcomeCount
+    * @param result LossDistribution carrying nTrials and sparse outcomeCount
     * @param p      Percentile as fraction in [0.0, 1.0]
     * @return Loss value at the unconditional percentile, or 0L if empty / nTrials=0
     */
-  def unconditionalQuantile(result: RiskResult, p: Double): Long =
+  def unconditionalQuantile(result: LossDistribution, p: Double): Long =
     val outcomes = result.outcomeCount
     if outcomes.isEmpty || result.nTrials == 0 then 0L
     else
@@ -57,7 +57,7 @@ object LECGenerator {
     * @return Map of quantile names to loss values
     *         Keys: "p50" (median), "p90", "p95", "p99"
     */
-  def calculateQuantiles(result: RiskResult): Map[String, Double] =
+  def calculateQuantiles(result: LossDistribution): Map[String, Double] =
     if result.outcomeCount.isEmpty || result.nTrials == 0 then Map.empty
     else Map(
       "p50" -> unconditionalQuantile(result, 0.50).toDouble,
@@ -76,7 +76,7 @@ object LECGenerator {
     * @param percentile Target percentile in [0, 1] (e.g. 0.995 for p99.5)
     * @return Loss value at the unconditional percentile, or None if no outcomes
     */
-  def findQuantileLoss(result: RiskResult, percentile: Double): Option[Long] =
+  def findQuantileLoss(result: LossDistribution, percentile: Double): Option[Long] =
     Option.when(result.nTrials > 0 && result.outcomeCount.nonEmpty) {
       unconditionalQuantile(result, percentile)
     }
@@ -89,7 +89,7 @@ object LECGenerator {
     * @param maxPoints Maximum number of data points (default 100 for performance)
     * @return Vega-Lite JSON as string, or None if no data
     */
-  def generateVegaLiteSpec(result: RiskResult, maxPoints: Int = 100): Option[String] = {
+  def generateVegaLiteSpec(result: LossDistribution, maxPoints: Int = 100): Option[String] = {
     val outcomes = result.outcomeCount
     if (outcomes.isEmpty || outcomes.values.sum == 0) None
     else {
@@ -146,7 +146,7 @@ object LECGenerator {
   /** Generate both quantiles and Vega-Lite spec in one pass
     * More efficient than calling both methods separately
     */
-  def generateLEC(result: RiskResult, maxVegaPoints: Int = 100): (Map[String, Double], Option[String]) = {
+  def generateLEC(result: LossDistribution, maxVegaPoints: Int = 100): (Map[String, Double], Option[String]) = {
     (calculateQuantiles(result), generateVegaLiteSpec(result, maxVegaPoints))
   }
   
@@ -184,7 +184,7 @@ object LECGenerator {
     * @param nEntries Number of sample points
     * @return Vector of (loss, exceedanceProbability) tuples
     */
-  def generateCurvePoints(result: RiskResult, nEntries: Int = 100): Vector[(Long, Double)] = {
+  def generateCurvePoints(result: LossDistribution, nEntries: Int = 100): Vector[(Long, Double)] = {
     if (result.outcomeCount.isEmpty) Vector.empty
     else {
       val minLoss = result.minLoss
@@ -222,14 +222,14 @@ object LECGenerator {
     * This is the core of ADR-014's render-time computation strategy:
     * - No interpolation (mathematically exact probOfExceedance)
     * - Display-context dependent tick domain
-    * - Cached RiskResult enables this without re-simulation
+    * - Cached LossDistribution enables this without re-simulation
     * 
-    * @param results Map of node ID to RiskResult (simulation outcomes)
+    * @param results Map of node ID to LossDistribution (simulation outcomes)
     * @param nEntries Number of sample points for the shared tick domain
     * @return Map of node ID to curve points (loss, exceedanceProbability)
     */
   def generateCurvePointsMulti[K](
-    results: Map[K, RiskResult], 
+    results: Map[K, LossDistribution], 
     nEntries: Int = 100
   ): Map[K, Vector[(Long, Double)]] = {
     if (results.isEmpty) return Map.empty

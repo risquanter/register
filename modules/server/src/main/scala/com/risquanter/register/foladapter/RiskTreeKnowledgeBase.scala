@@ -1,6 +1,6 @@
 package com.risquanter.register.foladapter
 
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LossDistribution, RiskResult}
+import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LossDistribution}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
@@ -50,7 +50,7 @@ import fol.typed.MapDispatcher
   * @param tree    Risk tree providing structure (TreeIndex) and node metadata
   * @param results Simulation results indexed by NodeId (from RiskResultResolver.ensureCachedAll)
   */
-class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
+class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistribution]):
 
   // ── Sort declarations ──────────────────────────────────────────────
 
@@ -65,8 +65,8 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
   val nameToNodeId: Map[String, NodeId] =
     tree.index.nodes.map { case (nodeId, node) => node.name.value -> nodeId }
 
-  /** Maps node name → RiskResult for simulation dispatch. */
-  private val nameToResult: Map[String, RiskResult] =
+  /** Maps node name → LossDistribution for simulation dispatch. */
+  private val nameToResult: Map[String, LossDistribution] =
     results.flatMap { case (nodeId, result) =>
       tree.index.nodes.get(nodeId).map(_.name.value -> result)
     }
@@ -84,7 +84,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
     * @param p      Percentile as fraction in [0.0, 1.0]
     * @return Loss value at the unconditional percentile, or 0L if empty
     */
-  private def percentile(result: RiskResult, p: Double): Long =
+  private def percentile(result: LossDistribution, p: Double): Long =
     LECGenerator.unconditionalQuantile(result, p)
 
   // ── TypeCatalog ────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, RiskResult]):
       node.name.value.toString -> descNames
     }
 
-  private def lookupResult(assetName: String, ctx: String): Either[String, RiskResult] =
+  private def lookupResult(assetName: String, ctx: String): Either[String, LossDistribution] =
     nameToResult.get(assetName).toRight(s"$ctx: no simulation result for asset '$assetName'")
 
   val dispatcher: MapDispatcher = MapDispatcher(

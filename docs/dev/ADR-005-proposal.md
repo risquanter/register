@@ -10,7 +10,7 @@
 
 - LEC simulation is **expensive** (Monte Carlo with thousands of trials)
 - Tree updates should trigger **O(depth)** recomputation, not O(n)
-- Aggregates are **composable** via `Identity[RiskResult].combine(a, b)` (see ADR-009)
+- Aggregates are **composable** via the `TrialOutcomes` monoid / `RiskResultGroup` (see ADR-009)
 - Cache lives in **ZIO backend**, not Irmin (computation stays in Scala)
 - Irmin notifications trigger **cache invalidation**
 

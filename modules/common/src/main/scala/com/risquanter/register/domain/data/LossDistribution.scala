@@ -1,111 +1,167 @@
 package com.risquanter.register.domain.data
 
-import zio.prelude.{Associative, Commutative, Debug, Equal, Ord}
+import zio.prelude.{Commutative, Debug, Equal, Identity, Ord}
 import com.risquanter.register.configs.SimulationConfig
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
-import com.risquanter.register.domain.data.iron.NodeId
-
-/**
- * Risk type discriminator for loss distributions.
- */
-enum LossDistributionType:
-  case Leaf      // Single risk distribution
-  case Composite // Aggregated distributions
+import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt}
 
 /**
  * Loss Exceedance Curve functional interface.
- * 
+ *
  * Represents the mathematical function: Loss → Probability
  * This is the core abstraction for risk quantification.
  */
 trait LECCurve {
   /** Number of Monte Carlo trials backing this distribution */
   def nTrials: Int
-  
+
   /** Probability that loss exceeds the given threshold: P(Loss ≥ threshold) */
   def probOfExceedance(threshold: Loss): Double
-  
+
   /** Maximum loss observed across all trials */
   def maxLoss: Loss
-  
+
   /** Minimum loss observed across all trials */
   def minLoss: Loss
 }
 
 /**
+ * Trial-aligned simulation outcomes — the lawful commutative monoid.
+ *
+ * The algebraic content of a simulation result: the trial count plus the
+ * sparse trial→loss map. Node identity does not participate in combination,
+ * which is why the monoid lives here and not on `LossDistribution`
+ * (`LossDistribution = NodeId × TrialOutcomes`; the label comes from tree
+ * context, never from the algebra).
+ *
+ * Laws (all enforced under the same-nTrials alignment invariant):
+ * - Associative: combine(a, combine(b, c)) == combine(combine(a, b), c)
+ * - Commutative: combine(a, b) == combine(b, a)
+ * - Identity: combine(empty, a) == a == combine(a, empty)
+ */
+case class TrialOutcomes(nTrials: PositiveInt, outcomes: Map[TrialId, Loss]) {
+  /** Get outcome for specific trial (0 if not present) */
+  def outcomeOf(trial: TrialId): Loss = outcomes.getOrElse(trial, 0L)
+
+  /** All trial IDs with non-zero outcomes */
+  def trialIds: Set[TrialId] = outcomes.keySet
+}
+
+object TrialOutcomes {
+  /** Zero losses across the configured number of trials — the monoid identity. */
+  def empty(using cfg: SimulationConfig): TrialOutcomes =
+    TrialOutcomes(cfg.defaultNTrials, Map.empty)
+
+  /**
+   * Outer-join pointwise sum: union of trial IDs, missing trial = 0 loss.
+   * Enforces the same-nTrials alignment invariant — pointwise summation is
+   * only meaningful when both operands share the same trial coordinate space.
+   */
+  def combine(a: TrialOutcomes, b: TrialOutcomes): TrialOutcomes = {
+    require(a.nTrials == b.nTrials, s"Cannot merge outcomes with different trial counts: ${a.nTrials} vs ${b.nTrials}")
+    val allTrialIds = a.outcomes.keySet ++ b.outcomes.keySet
+    TrialOutcomes(
+      a.nTrials,
+      allTrialIds.iterator.map(t => t -> (a.outcomeOf(t) + b.outcomeOf(t))).toMap
+    )
+  }
+
+  /** The Associative instance as well: Commutative extends Associative in
+    * zio-prelude, so this single instance provides both laws.
+    */
+  given commutative: Commutative[TrialOutcomes] with
+    override def combine(a: => TrialOutcomes, b: => TrialOutcomes): TrialOutcomes =
+      TrialOutcomes.combine(a, b)
+
+  given identity(using cfg: SimulationConfig): Identity[TrialOutcomes] with
+    def identity: TrialOutcomes = TrialOutcomes.empty
+    def combine(a: => TrialOutcomes, b: => TrialOutcomes): TrialOutcomes =
+      TrialOutcomes.combine(a, b)
+
+  given Debug[TrialOutcomes] = Debug.make { t =>
+    s"TrialOutcomes(${t.nTrials} trials, ${t.outcomes.size} outcomes)"
+  }
+}
+
+/**
  * Loss Distribution - the empirical distribution backing an LEC curve.
- * 
+ *
  * This represents the complete simulation data from Monte Carlo trials.
  * It provides both the raw loss data and the derived LEC function.
- * 
+ *
  * Mathematical structure:
- * - Explicit combine operation for aggregation (trial-wise loss summation)
+ * - Product type: `NodeId × TrialOutcomes`. The node ID is a label supplied
+ *   by tree context; `TrialOutcomes` carries the algebra (see its scaladoc).
  * - LECCurve: Provides Loss → Probability function via probOfExceedance
- * 
+ *
  * Storage:
  * - Sparse Map[TrialId, Loss]: Memory-efficient for low-probability events
  * - TreeMap[Loss, Int]: Frequency distribution for fast quantile queries
- * 
+ *
  * Design decisions:
  * - Renamed from BCG's "Risk" to avoid confusion with Risk sampling trait
  * - Outer join merge semantics (union of trial IDs, sum losses)
- * - Identity/Monoid instance for compositional aggregation
  * - Uses NodeId for node ID per ADR-018 (nominal wrapper over Iron type)
  */
 sealed abstract class LossDistribution(
   val nodeId: NodeId,
-  val outcomes: Map[TrialId, Loss],
-  override val nTrials: Int,
-  val distributionType: LossDistributionType
+  val trialOutcomes: TrialOutcomes
 ) extends LECCurve {
+
+  /** Sparse trial→loss map (delegates to the embedded TrialOutcomes) */
+  final def outcomes: Map[TrialId, Loss] = trialOutcomes.outcomes
+
+  final override def nTrials: Int = trialOutcomes.nTrials
+
   /** Frequency distribution of loss amounts (histogram view) */
-  def outcomeCount: TreeMap[Loss, Int]
-  
+  final lazy val outcomeCount: TreeMap[Loss, Int] =
+    TreeMap.from(outcomes.values.groupMapReduce(x => x)(_ => 1)(_ + _))(using Ord[Loss].toScala)
+
+  final override lazy val maxLoss: Loss =
+    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.max(using Ord[Loss].toScala)
+
+  final override lazy val minLoss: Loss =
+    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
+
+  final override def probOfExceedance(threshold: Loss): Double = {
+    val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
+    exceedingCount.toDouble / nTrials.toDouble
+  }
+
   /** Get outcome for specific trial (0 if not present) */
-  def outcomeOf(trial: TrialId): Loss = outcomes.getOrElse(trial, 0L)
-  
+  def outcomeOf(trial: TrialId): Loss = trialOutcomes.outcomeOf(trial)
+
   /** All trial IDs with non-zero outcomes */
-  def trialIds(): Set[TrialId] = outcomes.keySet
-  
+  def trialIds(): Set[TrialId] = trialOutcomes.trialIds
+
+  /** Provenance records reachable from this distribution.
+    *
+    * Leaves carry their own records; aggregates read their children's at
+    * access time (provenance belongs to the node that was simulated, never
+    * to the aggregate).
+    */
+  def provenances: List[NodeProvenance]
+
   /** Flatten hierarchy to vector of all distributions */
   def flatten: Vector[LossDistribution]
 }
 
 /**
  * Single risk loss distribution (leaf node in hierarchy).
- * 
+ *
  * Represents the empirical loss distribution from simulating one risk
  * across multiple Monte Carlo trials.
  */
 case class RiskResult private (
   override val nodeId: NodeId,
-  override val outcomes: Map[TrialId, Loss],
-  override val nTrials: Int,
+  override val trialOutcomes: TrialOutcomes,
   provenances: List[NodeProvenance] = Nil
-) extends LossDistribution(nodeId, outcomes, nTrials, LossDistributionType.Leaf) {
-  
-  override lazy val outcomeCount: TreeMap[Loss, Int] = 
-    TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))(using Ord[Loss].toScala)
-  
-  override lazy val maxLoss: Loss = 
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.max(using Ord[Loss].toScala)
-  
-  override lazy val minLoss: Loss = 
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
-  
-  override def probOfExceedance(threshold: Loss): Double = {
-    val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
-    exceedingCount.toDouble / nTrials.toDouble
-  }
-  
+) extends LossDistribution(nodeId, trialOutcomes) {
+
   /** Create a new result with updated outcomes while preserving metadata. */
   def withOutcomes(updatedOutcomes: Map[TrialId, Loss]): RiskResult =
-    copy(outcomes = updatedOutcomes)
-
-  def withNodeId(updatedNodeId: NodeId): RiskResult =
-    copy(nodeId = updatedNodeId)
-
+    copy(trialOutcomes = trialOutcomes.copy(outcomes = updatedOutcomes))
 
   override def flatten: Vector[LossDistribution] = Vector(this)
 }
@@ -117,27 +173,12 @@ object RiskResult {
     outcomes: Map[TrialId, Loss],
     provenances: List[NodeProvenance]
   )(using cfg: SimulationConfig): RiskResult =
-    RiskResult(nodeId, outcomes, cfg.defaultNTrials, provenances)
+    RiskResult(nodeId, TrialOutcomes(cfg.defaultNTrials, outcomes), provenances)
 
   /** Empty result (no losses occurred); uses SimulationConfig.defaultNTrials */
   def empty(nodeId: NodeId)(using cfg: SimulationConfig): RiskResult =
-    RiskResult(nodeId, Map.empty, cfg.defaultNTrials, Nil)
+    RiskResult(nodeId, TrialOutcomes.empty, Nil)
 
-  /**
-   * Total combine operation for RiskResult.
-   * Enforces trial-count alignment and aggregates outcomes/provenance.
-   */
-  def combine(a: RiskResult, b: RiskResult): RiskResult = {
-    require(a.nTrials == b.nTrials, s"Cannot merge results with different trial counts: ${a.nTrials} vs ${b.nTrials}")
-    val combinedNodeId = a.nodeId
-    RiskResult(
-      combinedNodeId,
-      LossDistribution.merge(a, b),
-      a.nTrials,
-      a.provenances ++ b.provenances
-    )
-  }
-  
   /** Value equality for RiskResult.
     *
     * Identity is defined over the simulation outcome (outcomes, nTrials, nodeId).
@@ -149,14 +190,6 @@ object RiskResult {
     a.outcomes == b.outcomes && a.nTrials == b.nTrials && a.nodeId == b.nodeId
   }
 
-  /** Associative combine for RiskResult (trial-aligned summation) */
-  given Associative[RiskResult] with
-    override def combine(a: => RiskResult, b: => RiskResult): RiskResult = RiskResult.combine(a, b)
-
-  /** Commutative combine inherits associative semantics */
-  given Commutative[RiskResult] with
-    override def combine(a: => RiskResult, b: => RiskResult): RiskResult = RiskResult.combine(a, b)
-  
   /** Human-readable representation */
   given Debug[RiskResult] = Debug.make { r =>
     s"RiskResult(${r.nodeId}, ${r.outcomes.size} outcomes, ${r.nTrials} trials, max=${r.maxLoss}, ${r.provenances.size} provenances)"
@@ -165,32 +198,20 @@ object RiskResult {
 
 /**
  * Aggregated loss distribution (composite node in hierarchy).
- * 
+ *
  * Represents the sum of multiple risk distributions, preserving individual
  * children for drill-down analysis. The aggregate distribution models the
  * total loss from a portfolio of risks.
  */
 case class RiskResultGroup private (
-  children: List[RiskResult],
+  children: List[LossDistribution],
   override val nodeId: NodeId,
-  override val outcomes: Map[TrialId, Loss],
-  override val nTrials: Int
-) extends LossDistribution(nodeId, outcomes, nTrials, LossDistributionType.Composite) {
-  
-  override lazy val outcomeCount: TreeMap[Loss, Int] = 
-    TreeMap.from(outcomes.values.groupMapReduce(identity)(_ => 1)(_ + _))(using Ord[Loss].toScala)
-  
-  override lazy val maxLoss: Loss = 
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.max(using Ord[Loss].toScala)
-  
-  override lazy val minLoss: Loss = 
-    if (outcomeCount.isEmpty) 0L else outcomeCount.keys.min(using Ord[Loss].toScala)
-  
-  override def probOfExceedance(threshold: Loss): Double = {
-    val exceedingCount = outcomeCount.rangeFrom(threshold).values.sum
-    exceedingCount.toDouble / nTrials.toDouble
-  }
-  
+  override val trialOutcomes: TrialOutcomes
+) extends LossDistribution(nodeId, trialOutcomes) {
+
+  override def provenances: List[NodeProvenance] =
+    children.flatMap(_.provenances)
+
   override def flatten: Vector[LossDistribution] =
     this +: children.toVector.sortBy(_.nodeId.value)
 }
@@ -198,57 +219,56 @@ case class RiskResultGroup private (
 object RiskResultGroup {
   /**
    * Create aggregated loss distribution from multiple risks.
-   * 
+   *
+   * Portfolio construction is a named constructor, not a monoid operation:
+   * the parent node ID comes from tree context; the outcomes are the
+   * outer-join sum of the children (empty children list → empty outcomes).
+   *
    * @param nodeId Node ID for the aggregate distribution
    * @param results Individual risk loss distributions to aggregate
    */
   def apply(
     nodeId: NodeId,
-    results: RiskResult*
+    results: LossDistribution*
   )(using cfg: SimulationConfig): RiskResultGroup = {
-    val nTrials = cfg.defaultNTrials
-    if results.isEmpty then
-      RiskResultGroup(List.empty, nodeId, Map.empty, nTrials)
-    else
-      RiskResultGroup(
-        results.toList,
-        nodeId,
-        LossDistribution.merge(results*),
-        nTrials
-      )
+    require(
+      results.isEmpty || results.map(_.nTrials).distinct.size == 1,
+      s"Cannot aggregate distributions with different trial counts: ${results.map(_.nTrials).mkString(", ")}"
+    )
+    RiskResultGroup(
+      results.toList,
+      nodeId,
+      TrialOutcomes(cfg.defaultNTrials, LossDistribution.merge(results*))
+    )
   }
 }
 
 object LossDistribution {
   /**
    * Outer join merge operation for loss distributions.
-   * 
+   *
   * Combine operation for aggregating loss distributions:
   * - Takes union of all trial IDs across distributions
   * - Sums losses for each trial (missing trials treated as 0 loss)
   * - Preserves trial alignment for portfolio aggregation
-   * 
+   *
    * Mathematical properties:
    * - Associative: merge(a, merge(b, c)) == merge(merge(a, b), c)
    * - Commutative: merge(a, b) == merge(b, a)
    * - Identity: merge(empty, a) == a
-   * 
+   *
    * Loss semantics: Long represents millions of dollars (1L = $1M)
    * - Maximum representable: ±9.2 quintillion dollars
    * - Overflow check: Individual losses should be < Long.MaxValue / numDistributions
-   * 
+   *
    * @param distributions Loss distributions to merge
    * @return Map of trial ID to aggregated loss
    * @throws IllegalArgumentException if distributions have different trial counts
    */
-  def merge(distributions: LossDistribution*): Map[TrialId, Loss] = {
-    // Union of all trial IDs across all distributions
-    val allTrialIds: Set[TrialId] = 
-      distributions.foldLeft(Set.empty[TrialId])((acc, d) => acc ++ d.trialIds())
-    
-    // For each trial, sum losses from all distributions (missing = 0)
-    allTrialIds.map { trial =>
-      trial -> distributions.foldLeft(0L)((acc, d) => acc + d.outcomeOf(trial))
-    }.toMap
-  }
+  def merge(distributions: LossDistribution*): Map[TrialId, Loss] =
+    distributions
+      .map(_.trialOutcomes)
+      .reduceOption(TrialOutcomes.combine)
+      .map(_.outcomes)
+      .getOrElse(Map.empty)
 }
