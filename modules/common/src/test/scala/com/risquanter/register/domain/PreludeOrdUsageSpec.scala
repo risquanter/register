@@ -138,7 +138,7 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
         val group = withCfg(10) {
           val child1 = RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
           val child2 = RiskResult(nodeId("risk-002"), Map(1 -> 3000L, 2 -> 4000L), Nil)
-          RiskResultGroup(nodeId("total-risk"), child1, child2)
+          RiskResultGroup.create(nodeId("total-risk"), child1, child2).toEither.toOption.get
         }
         
         // Trial 1: 1000 + 3000 = 4000
@@ -150,7 +150,7 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
         val group = withCfg(10) {
           val child1 = RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
           val child2 = RiskResult(nodeId("risk-002"), Map(1 -> 3000L, 2 -> 4000L), Nil)
-          RiskResultGroup(nodeId("total-risk"), child1, child2)
+          RiskResultGroup.create(nodeId("total-risk"), child1, child2).toEither.toOption.get
         }
         
         // Trial 1: 1000 + 3000 = 4000 <- Min
@@ -162,7 +162,7 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
         val group = withCfg(10) {
           val child1 = RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
           val child2 = RiskResult(nodeId("risk-002"), Map(1 -> 500L, 2 -> 3000L), Nil)
-          RiskResultGroup(nodeId("total-risk"), child1, child2)
+          RiskResultGroup.create(nodeId("total-risk"), child1, child2).toEither.toOption.get
         }
         
         val losses = group.outcomeCount.keys.toVector
@@ -173,7 +173,7 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
       },
       
       test("empty group has zero max/min") {
-        val group = withCfg(10) { RiskResultGroup(nodeId("empty-risk")) }
+        val group = withCfg(10) { RiskResultGroup.create(nodeId("empty-risk")).toEither.toOption.get }
         
         assertTrue(group.maxLoss == 0L) &&
         assertTrue(group.minLoss == 0L)

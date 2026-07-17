@@ -199,10 +199,14 @@ object ValidationUtil {
       )))
   }
 
-  // Refinement for non-negative double values (must be >= 0.0)
+  // Refinement for non-negative double values (must be >= 0.0 and finite).
+  // LessEqual[1.7976931348623157e308] rejects +Infinity; GreaterEqual[0.0] already
+  // rejects -Infinity and NaN (IEEE 754 comparisons against them are always
+  // false). See NonNegativeDouble in OpaqueTypes.scala for why Not[Infinity]
+  // isn't used here instead.
   def refineNonNegativeDouble(value: Double, fieldPath: String = "value"): Either[List[ValidationError], NonNegativeDouble] = {
     value
-      .refineEither[GreaterEqual[0.0]]
+      .refineEither[GreaterEqual[0.0] & LessEqual[1.7976931348623157e308]]
       .left
       .map(_ => List(ValidationError(
         field = fieldPath,

@@ -130,6 +130,14 @@ object TrialOutcomesSpec extends ZIOSpecDefault {
         val e = TrialOutcomes(100, Map.empty)
         assertTrue(TrialOutcomes.combine(TrialOutcomes.combine(e, e), e).outcomes.isEmpty)
       },
+      test("overflowing pointwise sum throws instead of wrapping to a negative loss") {
+        val a = TrialOutcomes(100, Map(1 -> Long.MaxValue))
+        val b = TrialOutcomes(100, Map(1 -> 1L))
+        assertTrue(
+          try { TrialOutcomes.combine(a, b); false }
+          catch { case _: ArithmeticException => true }
+        )
+      },
       test("large loss values don't overflow with reasonable aggregation") {
         val largeLoss = Long.MaxValue / 100
         val a = TrialOutcomes(100, Map(1 -> largeLoss))

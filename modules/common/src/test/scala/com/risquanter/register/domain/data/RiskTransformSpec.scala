@@ -287,6 +287,14 @@ object RiskTransformSpec extends ZIOSpecDefault {
           ValidationUtil.refineNonNegativeDouble(0.0).isRight,
           ValidationUtil.refineNonNegativeDouble(2.5).isRight
         )
+      },
+
+      test("refineNonNegativeDouble rejects non-finite values") {
+        assertTrue(
+          ValidationUtil.refineNonNegativeDouble(Double.PositiveInfinity).isLeft,
+          ValidationUtil.refineNonNegativeDouble(Double.NegativeInfinity).isLeft,
+          ValidationUtil.refineNonNegativeDouble(Double.NaN).isLeft
+        )
       }
     ),
 

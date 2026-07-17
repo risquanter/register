@@ -141,7 +141,8 @@ final case class RiskResultResolverLive(
               message = s"RiskPortfolio '${portfolio.id}' has no children"
             ))))
           }
-          combined <- ZIO.attempt(RiskResultGroup(portfolio.id, childResults*))
+          combined <- ZIO.fromEither(RiskResultGroup.create(portfolio.id, childResults*).toEither)
+            .mapError(errors => ValidationFailed(errors.toList))
           _ <- cache.put(portfolio.id, combined)
         yield combined
     }

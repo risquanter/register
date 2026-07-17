@@ -3,7 +3,9 @@
 Status: **Partially executed.** Created 2026-07-16. On 2026-07-17 the user decided
 and the following was implemented: B.8 defect fixes, D2 Option 1 (delete `Equal`),
 D6 Option 1 (retarget to `TrialOutcomes`); D3 was decided (Option 1, cache raw)
-as policy — no code exists to wire it yet. D1, D4, D5 remain open.
+as policy — no code exists to wire it yet. D1 is decided (stratified
+`TransformSpec` + `TransformPipeline` design locked; build deferred to the first
+consumer). D4 (blocked on DD-19) and D5 (after D1's build) remain open.
 Source material: `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B (B.0–B.8, which
 remains the historical record and scoring of the design space),
 `docs/scratch/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
@@ -78,7 +80,62 @@ logged. D1, D4, and D5 all run into this fact.
 
 ## 4. Decisions
 
-### D1 — Reify transforms as data (`TransformSpec`)?
+### D1 — Reify transforms as data (`TransformSpec`)? — ✅ DECIDED (2026-07-17): stratified design locked, build deferred
+
+**Decision (user, 2026-07-17):** Reify, with the **stratified** design — atomic
+operations plus a flat pipeline, no recursion:
+
+```scala
+sealed trait TransformSpec  // pure data: comparable, hashable, serializable
+object TransformSpec {
+  final case class ApplyDeductible(deductible: NonNegativeLong)       extends TransformSpec
+  final case class CapLosses(cap: NonNegativeLong)                    extends TransformSpec
+  final case class ScaleLosses(factor: NonNegativeDouble)             extends TransformSpec
+  final case class FilterBelowThreshold(threshold: NonNegativeLong)   extends TransformSpec
+  final case class InsurancePolicy private (deductible: NonNegativeLong, cap: NonNegativeLong)
+      extends TransformSpec
+  object InsurancePolicy {   // cross-field rule cap > deductible (ADR-001)
+    def create(deductible: NonNegativeLong, cap: NonNegativeLong)
+        : Validation[ValidationError, InsurancePolicy]
+  }
+
+  def toTransform(spec: TransformSpec): RiskTransform   // single exhaustive match
+  given Equal[TransformSpec] = Equal.default            // lawful: structural equality on scalar data
+  given JsonCodec[TransformSpec]                        // discriminated; per-case Raw + mapOrFail
+                                                        // (DistributionParams precedent, Provenance.scala)
+}
+
+final case class TransformPipeline(steps: List[TransformSpec])
+object TransformPipeline {
+  val empty: TransformPipeline = TransformPipeline(Nil)
+  given Identity[TransformPipeline]   // list concatenation; empty = identity;
+                                      // associative, deliberately NOT commutative (order matters)
+  def toTransform(p: TransformPipeline): RiskTransform =
+    p.steps.foldLeft(RiskTransform.identityTransform)((acc, s) => acc.andThen(TransformSpec.toTransform(s)))
+  // law to test: toTransform(a <> b) behaves as toTransform(a) andThen toTransform(b)
+}
+```
+
+Design properties the decision rests on: the pipeline is an ordered list —
+position is application order; interpretation folds front-to-back with
+`andThen`; combining pipelines is list concatenation (appends, never reorders);
+equality means same operations in the same order. Flattening is safe because
+composition is associative; order is never touched. The rejected recursive
+alternative (`Sequence` as a case of the trait) gave the same ordered sequence
+multiple representations, required special recursive serialization
+(trigger #7), and departed from the repo's flatten-recursion storage strategy
+(`RiskPortfolio.childIds`, `RiskTreeJson`). Full ADR-by-ADR constraint sweep:
+conversation record 2026-07-17; every accepted ADR is satisfied without
+exception or workaround.
+
+**Build is deferred to the first consumer** (D5 endpoint, D4 provenance
+wiring, or other concrete mitigation use case). Reason: `RiskTransform` has
+zero production callers, so building now would add public shared-module API
+with zero call sites — a MUST-FIX dead-code state under the
+code-quality-review checklist (§4). Implementation starts from the sketch
+above.
+
+Original decision write-up kept below for the record.
 
 **Decision goal and context.** Equality, caching, API exposure, and provenance
 all fail on the same fact: a transform is an opaque function. The decision is
@@ -184,9 +241,13 @@ pipeline-stage decision (B3 stands).
 
 1. ~~B.8 `require` fixes + D2~~ ✅ done 2026-07-17, together with D6.
 2. ~~D3 before any wiring~~ ✅ decided 2026-07-17 (Option 1, cache raw).
-3. Remaining, in order of external trigger:
-   - **D1** — with the first concrete mitigation use case (direction favoured:
-     reify; not yet decided).
-   - **D4** — after DD-19 (provenance shape, user-sequenced last).
-   - **D5** — after D1, as its own ADR.
-4. None of the remaining items blocks milestone-2b Phase A.
+3. ~~D1 design~~ ✅ decided 2026-07-17 (stratified `TransformSpec` +
+   `TransformPipeline`; sketch in D1 above). **D1 build** waits for the first
+   concrete mitigation use case (dead-code rule; see D1).
+4. Remaining, in order of external trigger:
+   - **D1 build** — with the first consumer, starting from the locked sketch.
+   - **D4** — after DD-19 (provenance shape, user-sequenced last). If D1's
+     pipeline is the record embedded in provenance, D4 reduces to a placement
+     question.
+   - **D5** — after D1's build, as its own ADR.
+5. None of the remaining items blocks milestone-2b Phase A.

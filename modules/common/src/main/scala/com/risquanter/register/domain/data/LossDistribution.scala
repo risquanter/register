@@ -1,10 +1,11 @@
 package com.risquanter.register.domain.data
 
-import zio.prelude.{Commutative, Debug, Equal, Identity, Ord}
+import zio.prelude.{Commutative, Debug, Equal, Identity, Ord, Validation}
 import com.risquanter.register.configs.SimulationConfig
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
-import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt}
+import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt, ValidationMessages}
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
 /**
  * Loss Exceedance Curve functional interface.
@@ -57,13 +58,23 @@ object TrialOutcomes {
    * Outer-join pointwise sum: union of trial IDs, missing trial = 0 loss.
    * Enforces the same-nTrials alignment invariant — pointwise summation is
    * only meaningful when both operands share the same trial coordinate space.
+   *
+   * Partiality: per-trial sums use `Math.addExact`, so a sum exceeding
+   * `Long.MaxValue` throws `ArithmeticException` instead of silently wrapping
+   * to a negative loss. The signature must stay total-shaped because the
+   * zio-prelude instances below delegate to it, so there is deliberately no
+   * `Validation`-returning variant of `combine` itself. Any construction
+   * entry point that feeds user-derived data through this function must
+   * catch `ArithmeticException` and convert it to a `ValidationError` before
+   * it crosses a public API (ADR-010) — `RiskResultGroup.create` is the
+   * conversion layer for the production aggregation path.
    */
   def combine(a: TrialOutcomes, b: TrialOutcomes): TrialOutcomes = {
     require(a.nTrials == b.nTrials, s"Cannot merge outcomes with different trial counts: ${a.nTrials} vs ${b.nTrials}")
     val allTrialIds = a.outcomes.keySet ++ b.outcomes.keySet
     TrialOutcomes(
       a.nTrials,
-      allTrialIds.iterator.map(t => t -> (a.outcomeOf(t) + b.outcomeOf(t))).toMap
+      allTrialIds.iterator.map(t => t -> Math.addExact(a.outcomeOf(t), b.outcomeOf(t))).toMap
     )
   }
 
@@ -220,10 +231,33 @@ object RiskResultGroup {
    * the parent node ID comes from tree context; the outcomes are the
    * outer-join sum of the children (empty children list → empty outcomes).
    *
+   * Failure modes are separated by origin (ADR-010):
+   * - Loss overflow is reachable from validated user data (extreme
+   *   distribution parameters), so the `ArithmeticException` thrown by
+   *   `TrialOutcomes.combine` is converted here to a `ValidationError` —
+   *   no exception crosses this public API.
+   * - Mismatched trial counts are a programming error (the resolver builds
+   *   all children under one `SimulationConfig`), so that `require` is left
+   *   to propagate as a defect.
+   *
    * @param nodeId Node ID for the aggregate distribution
    * @param results Individual risk loss distributions to aggregate
    */
-  def apply(
+  def create(
+    nodeId: NodeId,
+    results: LossDistribution*
+  )(using cfg: SimulationConfig): Validation[ValidationError, RiskResultGroup] =
+    try Validation.succeed(RiskResultGroup(nodeId, results*))
+    catch {
+      case _: ArithmeticException =>
+        Validation.fail(ValidationError(
+          field = s"riskPortfolio.${nodeId.value}",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = ValidationMessages.aggregatedLossOverflow
+        ))
+    }
+
+  private def apply(
     nodeId: NodeId,
     results: LossDistribution*
   )(using cfg: SimulationConfig): RiskResultGroup = {
@@ -255,7 +289,9 @@ object LossDistribution {
    *
    * Loss semantics: Long represents millions of dollars (1L = $1M)
    * - Maximum representable: ±9.2 quintillion dollars
-   * - Overflow check: Individual losses should be < Long.MaxValue / numDistributions
+   * - Overflow: per-trial sums are checked (`Math.addExact` in
+   *   `TrialOutcomes.combine`) and throw `ArithmeticException`;
+   *   `RiskResultGroup.create` converts that to a `ValidationError`
    *
    * @param distributions Loss distributions to merge
    * @return Map of trial ID to aggregated loss

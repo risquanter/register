@@ -64,7 +64,17 @@ type PositiveInt = Int :| Greater[0]
 type NonNegativeInt = Int :| GreaterEqual[0]
 
 // Non-negative doubles (>= 0.0, e.g. scale factors)
-type NonNegativeDouble = Double :| GreaterEqual[0.0]
+// LessEqual[1.7976931348623157e308] is Double.MaxValue as a literal type
+// (Iron's compile-time literal refinement needs a literal, not a reference
+// to the `Double.MaxValue` val) and excludes +Infinity: unlike Probability/
+// OccurrenceProbability, this type has no upper bound to reject +Infinity as
+// a side effect, and downstream arithmetic (e.g. RiskTransform.scaleLosses'
+// `.toLong`) silently converts an unchecked Infinity/NaN into
+// Long.MaxValue/0L instead of failing. (-Infinity and NaN already fail
+// GreaterEqual[0.0], since IEEE 754 comparisons against them are always
+// false.) Not[Infinity] is semantically clearer but isn't compile-time
+// foldable for literal autoRefine in this Iron version.
+type NonNegativeDouble = Double :| (GreaterEqual[0.0] & LessEqual[1.7976931348623157e308])
 
 /**
  * Common constant values for Iron refined types.

@@ -5,6 +5,7 @@ import zio.test.Assertion.*
 import zio.prelude.*
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.errors.ValidationErrorCode
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
@@ -132,7 +133,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     ),
     suite("RiskResultGroup - aggregation")(
       test("empty group has no outcomes") {
-        val group = withCfg(1000) { RiskResultGroup(nodeId("TOTAL")) }
+        val group = withCfg(1000) { RiskResultGroup.create(nodeId("TOTAL")).toEither.toOption.get }
 
         assertTrue(group.children.isEmpty) &&
         assertTrue(group.outcomes.isEmpty) &&
@@ -142,7 +143,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         val child = withCfg(100) {
           RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
         }
-        val group = withCfg(100) { RiskResultGroup(nodeId("TOTAL"), child) }
+        val group = withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), child).toEither.toOption.get }
 
         assertTrue(group.outcomes == child.outcomes) &&
         assertTrue(group.maxLoss == child.maxLoss) &&
@@ -152,7 +153,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
         val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
 
-        val group = withCfg(100) { RiskResultGroup(nodeId("TOTAL"), r1, r2) }
+        val group = withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), r1, r2).toEither.toOption.get }
 
         // Aggregated outcomes: trial 1 = 1500, trial 2 = 2000, trial 3 = 3000
         assertTrue(group.outcomes == Map(1 -> 1500L, 2 -> 2000L, 3 -> 3000L)) &&
@@ -162,7 +163,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       test("flatten returns hierarchy") {
         val r1    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
         val r2    = withCfg(100) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
-        val group = withCfg(100) { RiskResultGroup(nodeId("TOTAL"), r1, r2) }
+        val group = withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), r1, r2).toEither.toOption.get }
 
         val flattened = group.flatten
 
@@ -174,15 +175,32 @@ object LossDistributionSpec extends ZIOSpecDefault {
         val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
         val r2 = withCfg(200) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
 
-        // Alignment guard: RiskResultGroup.apply refuses misaligned children
+        // Alignment guard: misaligned children are a programming error, so the
+        // require propagates through create as an exception (not a ValidationError)
         assertTrue(
           try {
-            withCfg(100) { RiskResultGroup(nodeId("TOTAL"), r1, r2) }
+            withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), r1, r2) }
             false
           } catch {
             case _: IllegalArgumentException => true
           }
         )
+      },
+      test("create converts aggregation overflow to a ValidationError") {
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> Long.MaxValue), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 1L), Nil) }
+
+        val parentId = nodeId("TOTAL")
+        val result = withCfg(100) { RiskResultGroup.create(parentId, r1, r2) }
+
+        result.toEither match {
+          case Left(errors) =>
+            assertTrue(
+              errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
+              errors.head.field == s"riskPortfolio.${parentId.value}"
+            )
+          case Right(_) => assertTrue(false)
+        }
       }
     ),
     suite("RiskResult - flatten")(
@@ -249,15 +267,23 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(result.maxLoss == largeLoss)
       },
       test("merge handles potential overflow scenario") {
-        // Note: This doesn't prevent overflow, just documents the behavior
+        // Long.MaxValue/2 + Long.MaxValue/2 = Long.MaxValue - 1: the largest
+        // sum that still fits, so the checked addition must accept it
         val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> Long.MaxValue / 2), Nil) }
         val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> Long.MaxValue / 2), Nil) }
 
         val merged = LossDistribution.merge(r1, r2)
 
-        // This will overflow in current implementation
-        // In production, consider BigInt or bounds checking
         assertTrue(merged.contains(1))
+      },
+      test("merge throws on Long overflow (checked addition)") {
+        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> Long.MaxValue), Nil) }
+        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 1L), Nil) }
+
+        assertTrue(
+          try { LossDistribution.merge(r1, r2); false }
+          catch { case _: ArithmeticException => true }
+        )
       }
     )
   )

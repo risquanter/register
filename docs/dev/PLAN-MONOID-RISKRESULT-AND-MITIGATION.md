@@ -544,8 +544,11 @@ children).
 
 All four defects below were fixed on 2026-07-17, before any production wiring
 existed, together with the D6 retarget of `run` to `TrialOutcomes => TrialOutcomes`
-(see `PLAN-RISKTRANSFORM.md` §2 and D6 for what was done). The original findings
-are kept below as the record.
+(see `PLAN-RISKTRANSFORM.md` §2 and D6 for what was done). The `TransformSpec`
+shape speculated at the end of this section was decided on 2026-07-17 as
+PLAN-RISKTRANSFORM.md D1: stratified — a non-recursive sealed trait of atomic
+operations plus a flat ordered `TransformPipeline` list; build deferred to the
+first consumer. The original findings are kept below as the record.
 
 Code review 2026-07-14 against `RiskTransform.scala`. **Gap 6 is the opportunity, not an
 excuse**: `RiskTransform` is public API in a shared module (`commonJVM`/`commonJS`) with zero
