@@ -1,9 +1,10 @@
 package com.risquanter.register.services.pipeline
 
 import zio.*
+import zio.json.EncoderOps
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
-import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.{RiskTree, RiskNode}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /**
@@ -188,7 +189,8 @@ final case class InvalidationHandlerLive(
           else Set.empty
 
         val fromContentChange: Set[NodeId] =
-          if oldTree.index.nodes.get(nid) != newTree.index.nodes.get(nid) then Set(nid)
+          if oldTree.index.nodes.get(nid).map(nodeContent) != newTree.index.nodes.get(nid).map(nodeContent)
+          then Set(nid)
           else Set.empty
 
         fromReparent ++ fromContentChange
@@ -196,4 +198,13 @@ final case class InvalidationHandlerLive(
 
     (affectedFromAdded ++ affectedFromRemoved ++ affectedFromChanged, removed)
   }
+
+  /** Content comparison key for a node. Case-class `==` is unusable here:
+    * `RiskLeaf.percentiles`/`quantiles` and `RiskPortfolio.childIds` are
+    * arrays, which compare by reference — and every mutation rebuilds the
+    * tree, so untouched nodes would always look "changed" (over-notifying
+    * every portfolio on every PUT). The JSON codecs are deterministic and
+    * byte-stable, so encoded equality is content equality.
+    */
+  private def nodeContent(node: RiskNode): String = node.toJson
 }

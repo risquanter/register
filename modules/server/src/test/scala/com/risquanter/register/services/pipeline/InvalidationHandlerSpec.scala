@@ -179,6 +179,76 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         assertTrue(result.subscribersNotified == 0)
     },
 
+    test("a freshly REBUILT identical tree publishes nothing (content comparison, not reference)") {
+      // Every PUT rebuilds the tree from the request, so arrays
+      // (expert percentiles/quantiles, portfolio childIds) are fresh
+      // instances. Case-class `==` compares arrays by reference and would
+      // report every portfolio (and every expert leaf) as changed on every
+      // mutation. Includes an expert leaf to cover the array-valued fields.
+      def buildExpertTree(): RiskTree = treeWith(Seq(
+        RiskPortfolio.unsafeFromStrings(
+          id = idStr("ops-risk"),
+          name = "Operational Risk",
+          childIds = Array(idStr("cyber"), idStr("expert-leaf")),
+          parentId = None
+        ),
+        cyberLeaf,
+        RiskLeaf.unsafeApply(
+          id = idStr("expert-leaf"),
+          name = "Expert Leaf",
+          distributionType = "expert",
+          probability = 0.2,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(Array(1000.0, 5000.0, 25000.0)),
+          terms = Some(3),
+          parentId = Some(nodeId("ops-risk")),
+          seedVarId = 4L
+        )
+      ))
+      for {
+        handler <- ZIO.service[InvalidationHandler]
+        result  <- handler.handleMutation(buildExpertTree(), buildExpertTree())
+      } yield assertTrue(result.invalidatedNodes.isEmpty)
+    },
+
+    test("changing only an expert leaf's quantile VALUES publishes exactly that leaf + ancestors") {
+      def expertLeaf(quantiles: Array[Double]): RiskLeaf =
+        RiskLeaf.unsafeApply(
+          id = idStr("expert-leaf"),
+          name = "Expert Leaf",
+          distributionType = "expert",
+          probability = 0.2,
+          percentiles = Some(Array(0.1, 0.5, 0.9)),
+          quantiles = Some(quantiles),
+          terms = Some(3),
+          parentId = Some(nodeId("it-risk")),
+          seedVarId = 4L
+        )
+      def build(quantiles: Array[Double]): RiskTree = treeWith(Seq(
+        rootPortfolio,
+        cyberLeaf,
+        RiskPortfolio.unsafeFromStrings(
+          id = idStr("it-risk"),
+          name = "IT Risk",
+          childIds = Array(idStr("hardware"), idStr("software"), idStr("expert-leaf")),
+          parentId = Some(nodeId("ops-risk"))
+        ),
+        hardwareLeaf,
+        softwareLeaf,
+        expertLeaf(quantiles)
+      ))
+      for {
+        handler <- ZIO.service[InvalidationHandler]
+        result  <- handler.handleMutation(
+          build(Array(1000.0, 5000.0, 25000.0)),
+          build(Array(1000.0, 5000.0, 30000.0))
+        )
+      } yield assertTrue(
+        result.invalidatedNodes.map(_.value).toSet ==
+          Set(idStr("expert-leaf"), idStr("it-risk"), idStr("ops-risk"))
+      )
+    },
+
     test("removed node is published (browsers must drop it)") {
       val newItPortfolio = RiskPortfolio.unsafeFromStrings(
         id = idStr("it-risk"),

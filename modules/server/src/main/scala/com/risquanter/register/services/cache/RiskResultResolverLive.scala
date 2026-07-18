@@ -60,21 +60,36 @@ final case class RiskResultResolverLive(
         _      <- tracing.setAttribute("node_id", nodeId.value)
         _      <- tracing.setAttribute("include_provenance", includeProvenance)
         cache  <- cacheScope.cacheFor(seedEntityId)
-        hashes  = ContentHashIndex.build(tree)
-        node   <- ZIO.fromOption(tree.index.nodes.get(nodeId))
-          .orElseFail(ValidationFailed(List(ValidationError(
-            field = "nodeId",
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node not found in tree index: $nodeId"
-          ))))
-        result <- resolveNode(tree, hashes, cache, node, seedEntityId)
+        result <- resolveWithIndex(tree, ContentHashIndex.build(tree), cache, nodeId, seedEntityId)
         stats  <- cache.stats
         _      <- ZIO.logDebug(s"ContentCache stats: entries=${stats.entries}, hits=${stats.hits}, misses=${stats.misses}, evicted=${stats.evictedTotal}")
       } yield result
     }
 
   override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, LossDistribution]] =
-    ZIO.foreach(nodeIds.toList)(id => ensureCached(tree, id, seedEntityId, includeProvenance).map(id -> _)).map(_.toMap)
+    for {
+      cache  <- cacheScope.cacheFor(seedEntityId)
+      // One tree fingerprint serves the whole batch
+      hashes  = ContentHashIndex.build(tree)
+      results <- ZIO.foreach(nodeIds.toList)(id =>
+        resolveWithIndex(tree, hashes, cache, id, seedEntityId).map(id -> _)
+      )
+    } yield results.toMap
+
+  private def resolveWithIndex(
+    tree: RiskTree,
+    hashes: Map[NodeId, ContentHash],
+    cache: ContentCache,
+    nodeId: NodeId,
+    seedEntityId: SeedEntityId.SeedEntityId
+  ): Task[LossDistribution] =
+    ZIO.fromOption(tree.index.nodes.get(nodeId))
+      .orElseFail(ValidationFailed(List(ValidationError(
+        field = "nodeId",
+        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"Node not found in tree index: $nodeId"
+      ))))
+      .flatMap(node => resolveNode(tree, hashes, cache, node, seedEntityId))
 
   private def resolveNode(
     tree: RiskTree,
