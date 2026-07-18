@@ -5,7 +5,8 @@ and the following was implemented: B.8 defect fixes, D2 Option 1 (delete `Equal`
 D6 Option 1 (retarget to `TrialOutcomes`); D3 was decided (Option 1, cache raw)
 as policy — no code exists to wire it yet. D1 is decided (stratified
 `TransformSpec` + `TransformPipeline` design locked; build deferred to the first
-consumer). D4 (blocked on DD-19) and D5 (after D1's build) remain open.
+consumer). D4 (unblocked 2026-07-18 by DD-19's closure; decide with D1's
+build or the first mitigation wiring) and D5 (after D1's build) remain open.
 Source material: `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B (B.0–B.8, which
 remains the historical record and scoring of the design space),
 `docs/scratch/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
@@ -76,7 +77,9 @@ logged. D1, D4, and D5 all run into this fact.
 - **DD-15 → Option B:** portfolio results are not cached. The transform-versus-
   portfolio-cache interaction is therefore moot for now; the leaf path is the
   only cached path.
-- **DD-19 (open):** provenance record shape. Decision D4 below is blocked on it.
+- **DD-19 (closed 2026-07-18 → (c)+(d) + A′):** `riskId` deleted; `NodeProvenance`
+  becomes the content-only record; provenance lives on `RiskResult` only,
+  attribution is structural. D4 below is thereby unblocked (itself still open).
 
 ## 4. Decisions
 
@@ -249,7 +252,8 @@ pipeline-stage decision (B3 stands).
    concrete mitigation use case (dead-code rule; see D1).
 4. Remaining, in order of external trigger:
    - **D1 build** — with the first consumer, starting from the locked sketch.
-   - **D4** — after DD-19 (provenance shape, user-sequenced last). If D1's
+   - **D4** — DD-19 closed 2026-07-18, so no longer gated on it; decide with
+     D1's build or the first mitigation wiring. If D1's
      pipeline is the record embedded in provenance, D4 reduces to a placement
      question.
    - **D5** — after D1's build, as its own ADR.

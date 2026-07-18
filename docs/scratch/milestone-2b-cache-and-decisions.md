@@ -1006,7 +1006,8 @@ key to `(ContentHash, configHash)`.
 | DD-16 | Leaf hash preimage | **Simulation-relevant projection, not raw stored bytes** (closed 2026-07-16) | The key hashes exactly what determines the figures: `seedVarId` + probability + distribution params, via a dedicated spec type with a byte-stability snapshot test. `name` and ULID are excluded — renames preserve the cache and cross-node hits become possible. **Corollary: cached values are identity-free** — the cache stores content only (trial map + stream provenance), never a node ID; the resolver attaches the *requested* node's ID when building the response. (`RiskResult` as it exists bundles `nodeId` with the outcomes and cannot be the cache value type unchanged; the replacement value type was fixed by DD-18 on 2026-07-16.) Supersedes DD-14's hash-the-returned-bytes rule; opened and closed 2026-07-16 after TODO item 12 removed the ULID→seed derivation. |
 | DD-17 | Cache scope vs `seedEntityId` | **One `ContentCache` per workspace** (closed 2026-07-16) | `seedEntityId` determines figures but lives in no node's bytes. Per-workspace cache instances make cross-workspace contamination structurally impossible; a global map keyed by (entity, hash) buys nothing — different entity ⇒ different figures ⇒ cross-workspace hits are impossible by design — while mixing tenants in one structure and complicating workspace reaping. Cache lifecycle = workspace lifecycle. |
 | DD-19 | Provenance content/identity representation | **(c)+(d) plus A′ — `riskId` deleted; provenance leaf-only** (closed 2026-07-18) | `NodeProvenance` loses `riskId` and becomes the content-only record itself (the DD-18 cache value embeds it directly — no second type). Attribution is structural: `provenances` moves off the sealed `LossDistribution` supertype to `RiskResult` only (A′, user refinement — the unattributed flat portfolio list becomes unrepresentable); portfolio provenance is read by walking `RiskResultGroup.children`, pairing `nodeId` with each record one level above any flattening (never by zipping parallel lists — flatMap multiplicities misalign). A provenance endpoint assembles `Map[NodeId, NodeProvenance]` at the resolver edge: one call, server-side join, the client never sees an unattributed list. Facts that decided it: `riskId` written once (`Simulator.scala:209`), zero production readers; Part A landed so `children` guarantees recovery. Consequences: `ProvenanceSpec` attribution assertions migrate to the structural walk; `PLAN-PROVENANCE-ENDPOINT` response shape revises to the attributed map; ADR-003 `NodeProvenance` sections rewrite; `collectProvenance` built with its first consumer. Falsifier: a consumer needing attribution where no result structure is reachable resurrects the self-attributing wrapper (candidate (a)). |
-| DD-18 | `ContentCache` value type | **Named case class: `TrialOutcomes` + content-only provenance record** (closed 2026-07-16) | The cached value is a product of the monoid carrier (`TrialOutcomes` = nTrials + sparse `Map[TrialId, Loss]`; `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` A.1 — **Option 1 thereby decided**) and a provenance record containing no `riskId`. No node identity anywhere in the value — the DD-16 corollary made concrete. A named case class, not a tuple (nominal-type rule, ADR-018); provenance sits beside `TrialOutcomes`, not inside it, because provenance does not participate in combination (portfolio provenance is read from children, never merged). Class name chosen at implementation time. Provenance record shape: DD-19 (open). |
+| DD-20 | Fate of `invalidateWorkspaceCache` endpoint | **Retire in Phase A** (closed 2026-07-18, opened same day by the item-17 package-b decision). The endpoint (`POST …/invalidate/{nodeId}`, `WorkspaceTreeEndpoints.scala:57`, + `TreeCacheInvalidationResponse`) is the item-17 interim workaround and the last public surface over `TreeCacheManager`'s `(TreeId, NodeId)` view; under `ContentCache` the operation is undefinable (nothing keyed by NodeId). Zero consumers beyond the controller wiring (no SPA/test/script/docs callers, verified 2026-07-18). Sequencing: Phase A ships in one run and there are no existing clients, so no deprecation step — the endpoint dies in the same change that retires `TreeCacheManager`. No-op-keep (b) rejected: nothing to keep compatibility for, and a 200-answering no-op would mislead exactly the operator probing for staleness. Mirrors the CacheController precedent (48caa83). |
+| DD-18 | `ContentCache` value type | **Named case class: `TrialOutcomes` + content-only provenance record** (closed 2026-07-16) | The cached value is a product of the monoid carrier (`TrialOutcomes` = nTrials + sparse `Map[TrialId, Loss]`; `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` A.1 — **Option 1 thereby decided**) and a provenance record containing no `riskId`. No node identity anywhere in the value — the DD-16 corollary made concrete. A named case class, not a tuple (nominal-type rule, ADR-018); provenance sits beside `TrialOutcomes`, not inside it, because provenance does not participate in combination (portfolio provenance is read from children, never merged). Class name chosen at implementation time. Provenance record shape: DD-19 (closed 2026-07-18 → the content-only `NodeProvenance` itself, `riskId` deleted). |
 
 ### Influenced by cache strategy
 
@@ -1024,6 +1025,7 @@ key to `(ContentHash, configHash)`.
 | DD-8 | HTTP endpoint design | Branch state: client-side header (`X-Active-Branch`) vs server session. Two-tab problem. |
 | DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. |
 | DD-11 | Workspace ↔ scenario ownership | Convention-based prefix matching vs explicit ownership records. |
+| ~~DD-20~~ | ~~Fate of `invalidateWorkspaceCache` endpoint~~ | **CLOSED 2026-07-18 → (a) retire in Phase A; moved to the Closed table.** |
 | ~~DD-19~~ | ~~Provenance content/identity representation~~ | **CLOSED 2026-07-18 → (c)+(d) + A′; moved to the Closed table above.** Original write-up: `NodeProvenance` mixes computation content (`entityId`, `occurrenceVarId`/`lossVarId`, global seeds, distribution type/params, timestamp, version) with identity (`riskId: NodeId`). The cached record must be the content part only (DD-16/DD-18). How is identity attached? **(a)** nested split — `NodeProvenance(riskId, <content record>)`; works before the monoid refactor; user prefers (a) over (b) (keep `NodeProvenance` unchanged, build it at the edge). **(c)+(d)** — drop `riskId` from the record entirely; attribution recovered from structure (`RiskResultGroup` keeps children) and, when ever exposed, a `Map[NodeId, <content record>]` assembled at the resolver edge — **candidate, not finalized**; requires the monoid plan's Part A first. Facts (verified 2026-07-16): `riskId` is written once (`Simulator.scala:209`) and read by no production code; no endpoint response carries provenance today (the `LECCurveResponse` type once named in an LEC.scala comment never existed — comment fixed). **Decide last — after every other open decision in this doc and the monoid plan is locked.** |
 
 ### Deferred
@@ -1075,9 +1077,9 @@ final case class LeafSimContent(
 // result content. A named case class, NOT a tuple; final name chosen at
 // implementation time. TrialOutcomes is the monoid plan's A.1 Option 1 type
 // (nTrials + sparse Map[TrialId, Loss] — the lawful monoid). The provenance
-// record is the content part of NodeProvenance — its shape is DD-19 (open);
-// it must contain no riskId. No codec needed: cache values are never
-// serialized (in-memory Ref, ADR-015).
+// record is NodeProvenance itself (DD-19, closed 2026-07-18: riskId deleted,
+// so NodeProvenance IS the content-only record — no second type). No codec
+// needed: cache values are never serialized (in-memory Ref, ADR-015).
 final case class <CacheValue>(          // placeholder name — DD-18
   outcomes: TrialOutcomes,
   provenance: <content-only provenance record>   // DD-19: no riskId
@@ -1105,12 +1107,12 @@ Reintroduce only alongside a `getContents` caller, if one ever appears (DD-2).
 | `IrminClient` | Scala→Irmin | Add optional `branch` param to `get`/`set`/`remove`/`list`. Add `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca`. (`getContents` dropped — DD-14 → Option B.) |
 | `IrminQueries` | Scala | New GraphQL query strings for `branch`, `merge_with_branch`, `revert`, `commit`, `last_modified`, `lcas`. (`get_contents` dropped — DD-14 → Option B.) Note `getValueFromBranch` already exists here with no caller — the branch-parameterised `get` should subsume it rather than sit alongside it. |
 | `RiskTreeRepositoryIrmin` | Scala→Irmin | Thread `branch` param. Use the existing `get`; pass the returned JSON to `ContentHashIndex.build`, which hashes it (DD-14 → Option B). No read-path type change. |
-| `ContentCache` (new) | Scala | `Ref[Map[ContentHash, <DD-18 value>]]` with `EvictionStrategy`. Replaces `RiskResultCache`. Value type decided (DD-18): a named case class of `TrialOutcomes` + a content-only provenance record — not `RiskResult`, which bundles `nodeId` (and provenance `riskId`) with the outcomes. Identity is attached by the resolver at the edge; provenance record shape is DD-19 (open). |
+| `ContentCache` (new) | Scala | `Ref[Map[ContentHash, <DD-18 value>]]` with `EvictionStrategy`. Replaces `RiskResultCache`. Value type decided (DD-18): a named case class of `TrialOutcomes` + a content-only provenance record — not `RiskResult`, which bundles `nodeId` (and provenance `riskId`) with the outcomes. Identity is attached by the resolver at the edge; the provenance record is the content-only `NodeProvenance` (DD-19, closed 2026-07-18 — `riskId` deleted). |
 | `ContentHashIndex` (new) | Scala | At tree load: leaf hashes = `sha256(json bytes returned by get)`, portfolio Merkle hashes computed bottom-up (DD-14 → Option B). Pure function, unit-testable without Irmin. Returns `Map[NodeId, ContentHash]`. |
 | `CacheScope` (new) | Scala | Abstraction over cache resolution — **one instance per workspace (DD-17), isolating `seedEntityId`**. `RiskResultResolver` calls `CacheScope` instead of `TreeCacheManager`. Cache values are identity-free (DD-16); the resolver attaches the requested node's ID when building the response. |
 | `TreeCacheManager` | Scala | **Retired — deleted, not rewritten** (with `RiskResultCache`). Replaced by `CacheScope` + `ContentCache`. Consumers: `RiskResultResolverLive` rewires to `CacheScope`; `InvalidationHandler` keeps only its SSE half; `CacheController` — see its row. What the old design has that the new one drops: (1) portfolio result caching — decided away, DD-15 → B, post-landing follow-up; (2) explicit O(depth) ancestor-path invalidation with immediate memory reclamation — unnecessary under content addressing (a changed leaf *is* a different key; stale entries become orphans for the `EvictionStrategy`), and it is the mechanism behind the TODO item 17 bug class; (3) per-tree cache deletion on tree delete — lifecycle moves to workspace level (DD-17); a deleted tree's entries linger as orphans until eviction. |
 | `CacheController` / `CacheEndpoints` | Scala | **✅ DECIDED 2026-07-18 → retired, implemented same day.** The four admin endpoints (`cacheStats`, `cacheNodes`, `cacheClear`, `cacheClearAll`) had zero consumers (server-module-only Tapir definitions — no SPA client, no test or script callers) and their `(TreeId, NodeId)` semantics do not survive `ContentCache` (per-tree clear is not even well-defined for shared content-addressed entries). Both files deleted, wiring removed from `HttpApi`/`Application`. Workspace-scoped `stats`/`clear` can be reintroduced when a concrete caller appears (DD-2 pattern for `getContents`). Residual: `TreeCacheManager.clearAll` and `onTreeStructureChanged` now have no production caller (spec coverage only) — they retire with `TreeCacheManager` itself in Phase A. Original gap analysis: four admin endpoints were built on `TreeCacheManager`'s `(TreeId, NodeId)` view; under `ContentCache`, "which nodes of tree X are cached" is answerable only by joining the current `ContentHashIndex` with the cache keys. |
-| `InvalidationHandler` | Scala | Simplified — cache misses driven by hash changes, not explicit `ancestorPath` invalidation. Structural mutation logic still needed for SSE notifications. |
+| `InvalidationHandler` | Scala | Simplified — cache misses driven by hash changes, not explicit `ancestorPath` invalidation. Structural mutation logic still needed for SSE notifications. **In the rewrite, `computeAffectedNodes` must union reparent + content-change contributions additively** — its current exclusive `if/else if` is TODO item 17's bug; with the tactical fix skipped (2026-07-18, package b) this rewrite is where it gets corrected. `MutationInvalidationSpec` retires with `TreeCacheManager`; the e2e item-17 regression test (Phase Outline) replaces it. |
 
 ---
 
@@ -1255,14 +1257,56 @@ even though `name` does not affect simulation results.
 
 ```
 Phase A: Foundation
+  - Pin CommitHash's Iron refinement to Irmin's REAL commit-hash
+    charset/length (inspect live GraphQL output) before the type
+    ships — a bare-String CommitHash is a Pass 0a MUST-FIX        [Scala]
   - ContentHash, CommitHash types (BranchRef exists)      [Scala]
   - IrminClient branch parameterization                   [Scala→Irmin]
   - IrminClient branch operations (create/merge/revert)   [Scala→Irmin]
   - Repository branch threading                           [Scala]
-  - ContentCache + NoOpEvictionStrategy                   [Scala]
+  - ContentCache + NoOpEvictionStrategy — holds LEAF entries
+    only (DD-15 → B); portfolios re-aggregate from child
+    results on every read, never enter the cache          [Scala]
   - ContentHashIndex (leaf: Irmin hash, portfolio: Merkle) [Scala]
   - CacheScope → RiskResultResolver wiring                [Scala]
   - Retire TreeCacheManager                               [Scala]
+  - InvalidationHandler → SSE-only rewrite; computeAffectedNodes
+    unions reparent + content-change contributions ADDITIVELY
+    (the exclusive if/else-if is TODO item 17's bug and must
+    not survive into the SSE node list)                   [Scala]
+  - End-to-end item-17 regression test (Phase A acceptance
+    probe): service-level create → LEC → one update combining
+    reparent + param change → LEC; assert root exceedance
+    matches analytic 1−∏(1−pᵢ) for the NEW params. Harness
+    template: SeedStabilitySpec's layer set. Replaces
+    MutationInvalidationSpec, which dies with TreeCacheManager.
+    (Tactical fix skipped by decision — TODO item 17.)     [Scala]
+  - Execute DD-20 (closed → retire): delete
+    invalidateWorkspaceCache endpoint + TreeCacheInvalidation-
+    Response + controller wiring, in the SAME change that
+    retires TreeCacheManager (it is the item-17 workaround
+    until that moment)                                     [Scala]
+  - Cache-transparency equivalence test: with fixed seeds, any
+    edit sequence must yield BYTE-IDENTICAL figures with the
+    real ContentCache vs a pass-through (never-hit) cache —
+    this converts "staleness is structurally impossible" from
+    a design claim into an executable assertion             [Scala]
+  - Cache observability: expose ContentCache entry count +
+    hit/miss via EvictionStrategy.stats to logs (no endpoint —
+    DD-20/CacheController precedent: build API surface only
+    with a concrete consumer); assert in tests that a param
+    edit strands the old entry (orphan) and a re-read after
+    edit MISSES the old key                                 [Scala]
+  - Thorough deletion review (explicit gate, before done):
+    sweep for stale/obsolete logic and API left behind by the
+    cutover — TreeCacheManager, RiskResultCache, Invalidation-
+    Handler's cache half, MutationInvalidationSpec /
+    RiskResultCacheSpec / InvalidationHandlerSpec coverage,
+    invalidateWorkspaceCache + response DTO + OpenAPI output,
+    getValueFromBranch (subsumed by branch-param get), doc
+    claims (ARCHITECTURE.md NodeId-keying section, TESTING/
+    API docs mentioning invalidate). Nothing NodeId-keyed and
+    nothing answering "invalidate" may survive               [review]
 
 Phase B: Scenario CRUD + Minimal UI
   - ScenarioService (create/list/delete/switch)           [Scala]
@@ -1794,8 +1838,14 @@ ancestor/root invalidation can recover, because the resolver recomposes
 portfolios from cached child entries. Content addressing removes the entire
 hand-written diff class — a changed leaf *is* a different key — and
 `InvalidationHandler` survives only for SSE notifications, as the component
-table already says. **The tactical item-17 fix must land regardless**: it
-protects the current PUT path now and does not conflict with this design.
+table already says. ~~**The tactical item-17 fix must land regardless**: it
+protects the current PUT path now and does not conflict with this design.~~
+**Superseded 2026-07-18 (user decision, "package b"): the tactical fix is
+skipped.** The bug stays live until Phase A ships (workaround:
+`invalidate/{leafId}` on the changed leaf). In exchange Phase A gains two
+explicit deliverables (see Phase Outline): the end-to-end item-17 regression
+test as the acceptance probe, and the additive-union correction inside the
+SSE-half rewrite of `computeAffectedNodes`. Full record: TODO item 17.
 
 ### A7. Implementation aid (corrections against the current codebase)
 

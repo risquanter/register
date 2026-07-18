@@ -948,9 +948,39 @@ reparent-plus-param-change case — exactly the hole.
    NodeId keying; top-level claims of a "Merkle-tree cache" (CLAUDE.md/README)
    describe the *planned* state.
 
-**Outcome wanted:** failing test in `MutationInvalidationSpec`
-(reparent + param change in one mutation → node itself must be invalidated),
-then the fix, then re-verify with the API repro above.
+**Outcome wanted (superseded 2026-07-18 — see decision below):** failing test in
+`MutationInvalidationSpec` (reparent + param change in one mutation → node
+itself must be invalidated), then the fix, then re-verify with the API repro
+above.
+
+**DECIDED 2026-07-18 (user) — tactical fix will NOT be implemented ("package
+b").** Milestone-2b Phase A retires the bug class structurally: on every read
+the leaf cache key is recomputed from the leaf's stored content
+(`sha256(LeafSimContent)`), so a param change *is* a different key — no
+hand-written diff decides invalidation, hence nothing to get wrong.
+Consequences, now explicit Phase A deliverables in
+`docs/scratch/milestone-2b-cache-and-decisions.md` (Phase Outline):
+
+1. **End-to-end regression test** replicating this item's live repro at service
+   level (create tree → LEC → one update combining reparent + param change →
+   LEC again → root exceedance matches the analytic `1−∏(1−pᵢ)` for the *new*
+   params; the repro's stale-vs-correct gap is ≈0.3575 vs ≈0.507 — wide and
+   deterministic under fixed seeds). It is the acceptance probe for Phase A's
+   central claim and is cache-implementation-agnostic. It cannot land earlier:
+   it fails against the current design, and a failing test is a merge blocker.
+2. **`InvalidationHandler` SSE half**: when Phase A rewrites the handler
+   (SSE-only), `computeAffectedNodes` must union the reparent and
+   content-change contributions additively — the current exclusive `if/else if`
+   is this bug and would otherwise survive into the SSE node list (currently
+   harmless: `CacheInvalidated` has zero subscribers, verified 2026-07-18).
+3. `MutationInvalidationSpec` asserts cache-entry survival inside
+   `TreeCacheManager` and dies with it; the e2e test above replaces its role.
+
+**Until Phase A ships this bug stays live.** Interim workaround (reliable,
+verified): `POST …/invalidate/{leafId}` on the *changed leaf* after a combined
+reparent+param PUT. The endpoint itself retires in Phase A — DD-20, closed
+2026-07-18 → (a) in the milestone-2b doc — deleted in the same change that
+retires `TreeCacheManager`.
 
 ---
 

@@ -1,6 +1,12 @@
 # Plan: Provenance Endpoint (Option 1)
 
-**Status:** Approved — awaiting implementation  
+**Status:** Approved — awaiting implementation. **Response shape needs revision
+before implementing (DD-19, closed 2026-07-18 → (c)+(d) + A′):** `NodeProvenance`
+loses `riskId` and provenance moves to `RiskResult` only, so the response becomes
+an attributed `Map[NodeId, NodeProvenance]` assembled at the resolver edge
+(structural walk over `RiskResultGroup.children`) — not the flat list keyed by
+`riskId` this plan sketches. See `docs/scratch/milestone-2b-cache-and-decisions.md`
+DD-19 (Closed table).  
 **Date:** 2026-05-12  
 **ADR reference:** ADR-003 (Provenance & Reproducibility)
 
