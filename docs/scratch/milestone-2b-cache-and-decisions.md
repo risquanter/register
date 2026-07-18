@@ -2047,3 +2047,14 @@ introspection plus mutation/read round trips on a fresh store.
    by hash via `commit(hash:)`. Orphaning is a storage-growth concern only
    (unreachable commits linger until any future Irmin GC) — same accepted
    class as ContentCache orphans — never a correctness concern.
+6. **DD-7 falsifier discharged — `set_tree` has no payload limit at any
+   realistic tree size** (probed 2026-07-19, throwaway scoped container,
+   client wire format: inline escaped strings). 500 nodes/0.3 MB → 0.3 s;
+   2 000/1.1 MB → 1.1 s; 8 000/4.5 MB → 4.5 s; 32 000 nodes/18.6 MB →
+   17.3 s — all committed and readable, no error at any size (scaling is
+   linear, no cliff). Same probe verified the remaining shape questions:
+   `TreeItem` paths are **relative** to the mutation `path` argument;
+   `set_tree` with an **empty** `tree: []` removes the whole subtree and
+   leaves no empty directory (clean delete vehicle); one commit per
+   mutation confirmed via `commit(hash:){ parents }` (parent = previous
+   head). Alternative A stays eliminated.
