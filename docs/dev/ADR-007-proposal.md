@@ -22,46 +22,53 @@
 
 ### 1. Branch as Named Scenario
 
-Each scenario is an Irmin branch:
+> **DD-5 closed 2026-07-18 → Option A (milestone-2b doc, Closed table):
+> a scenario is (workspace, name) — nothing more.** No `Scenario` record
+> type, no `ScenarioId`, no metadata store (Irmin or Postgres). The branch
+> name is the complete domain model; everything else is derived from Irmin
+> on demand (fork point via `lca`, creation time via `getHistory`). The
+> earlier sketch below is superseded.
+
+Each scenario is an Irmin branch, and the branch name is its identity:
 
 ```scala
-// Conceptual: Scenario model
-case class Scenario(
-  id: ScenarioId,          // Unique identifier (e.g., UUID)
-  name: ScenarioName,      // User-friendly name (validated with Iron)
-  branchRef: BranchRef,    // Irmin branch reference
-  createdFrom: CommitHash, // Fork point
-  createdBy: UserId,
-  createdAt: Instant,
-  description: Option[String]
-)
-
-// ScenarioName validated with Iron (non-empty, valid characters)
-type ScenarioName = String :| (Not[Blank] & Match["^[a-zA-Z0-9_-]+$"])
+// ScenarioName: user input accepting only slug-mappable characters —
+// letters (folded to lowercase), digits, space (mapped to '-'), '-', '_'.
+// Anything else is a 400 at the Tapir boundary; no lossy slugification.
+type ScenarioName = String :| (Not[Blank] & Match["^[a-zA-Z0-9 _-]+$"])
 ```
 
 ### 2. Branch Naming Convention
 
-Irmin branch names follow pattern for uniqueness:
+**TWO segments after the prefix** (DD-5; `BranchRefConstraint` changes from
+three to two segments when Phase B ships):
 
 ```
-scenarios.{userId}.{scenarioId}.{name}
+scenarios.{workspaceId}.{name-slug}
 
-Examples:
-- scenarios.user-123.abc-456.optimistic-growth
-- scenarios.user-123.def-789.recession-impact
+Examples (workspaceId = lowercased ULID; lowercasing is bijective for ULIDs):
+- scenarios.01j8zq3fkwp2x9m4v7rtbnd6ea.high-cyber
+- scenarios.01j8zq3fkwp2x9m4v7rtbnd6ea.recession-impact
+- main  (the canonical tree)
 
 > **Separator pinned 2026-07-18:** `.`, not `/` — Irmin rejects `/` in branch
 > names (verified live against local/irmin-prod:3.11; `BranchRefConstraint`
-> in OpaqueTypes.scala is the source of truth). Segment semantics remain
-> DD-5 (open).
-- main  (the canonical tree)
+> in OpaqueTypes.scala is the source of truth).
 ```
 
 This ensures:
-- No collisions between users
-- Multiple scenarios with same display name allowed
-- Easy filtering by user
+- Workspace is the ownership boundary (DD-11: listing, authorization, and
+  reaper cleanup are prefix operations on the first segment)
+- Name collisions within a workspace are rejected by the store itself
+  (`test_and_set_branch` CAS create fails if the ref exists) — duplicate
+  display names are impossible by the filename rule
+- **Create** must fork explicitly: `test_and_set_branch(test: null,
+  set: <main head>)` — a branch created by a bare first write starts EMPTY
+  (live-verified; milestone-2b A9 fact 3)
+- **Rename = recreate**: new branch at the old head + CAS-delete the old
+  ref. Content, history, and `lca` merge bases survive; deleting a branch
+  removes only the pointer, never commits (A9 facts 2+5, live-verified).
+  Open tabs holding the old ref get a clean `BranchNotFound` and re-select.
 
 ### 3. Scenario Operations
 
@@ -140,16 +147,11 @@ case class LECComparison(
 
 ### Branch Name Validation
 
-**Issue:** Need to decide exact validation rules for scenario names.
-
-**Current approach:** Iron type with regex `^[a-zA-Z0-9_-]+$`
-
-**Open questions:**
-- Maximum length?
-- Allow spaces (URL-encode in branch path)?
-- Case sensitivity?
-
-**Action required:** Finalize naming constraints.
+**Resolved by DD-5 (2026-07-18).** `ScenarioName` accepts
+`^[a-zA-Z0-9 _-]+$` (uppercase folds to lowercase, space maps to `-`);
+anything unmappable is a 400 at the boundary — no lossy slugification.
+Max slug length 64 (the `BranchRefConstraint` segment cap); case-insensitive
+by construction (the slug is the canonical lowercase form).
 
 ### Orphan Branch Cleanup
 
@@ -213,19 +215,10 @@ main ─────●─────●─────●─────●─
 ### ❌ No Fork Point Tracking
 
 ```scala
-// BAD: Lose track of where branch started
-case class Scenario(
-  name: String,
-  branchRef: BranchRef
-)
-// Can't compute proper 3-way merge without base
-
-// GOOD: Track fork point
-case class Scenario(
-  name: ScenarioName,
-  branchRef: BranchRef,
-  createdFrom: CommitHash  // Fork point for merge base
-)
+// Superseded by DD-5 (2026-07-18): no Scenario record exists at all.
+// The fork point is never stored — it is computed on demand from Irmin:
+//   lca(branchRef, mainHead)   // 3-way merge base, live-verified (A9)
+// Storing createdFrom would duplicate a derivable fact.
 ```
 
 ### ❌ Branch Name Collisions
@@ -235,11 +228,12 @@ case class Scenario(
 def createBranch(name: String): Task[BranchRef] =
   irminClient.createBranch(name)  // "optimistic" already exists!
 
-// GOOD: Namespaced unique names
-def createBranch(name: ScenarioName, userId: UserId): Task[BranchRef] =
-  val scenarioId = ScenarioId.generate()
-  val branchName = s"scenarios.${userId}.${scenarioId}.${name}"
-  irminClient.createBranch(branchName)
+// GOOD (DD-5): workspace-namespaced; collision rejected by the CAS create
+def createScenario(name: ScenarioName, wsId: WorkspaceId): Task[BranchRef] =
+  val branchName = s"scenarios.${wsId.lowercased}.${slug(name)}"
+  // test_and_set_branch(branch = branchName, test = null, set = mainHead)
+  // fails (returns false) if the branch already exists
+  irminClient.createBranchAt(branchName, mainHead)
 ```
 
 ### ❌ No Merge Conflict Handling

@@ -1008,6 +1008,10 @@ key to `(ContentHash, configHash)`.
 | DD-19 | Provenance content/identity representation | **(c)+(d) plus A′ — `riskId` deleted; provenance leaf-only** (closed 2026-07-18) | `NodeProvenance` loses `riskId` and becomes the content-only record itself (the DD-18 cache value embeds it directly — no second type). Attribution is structural: `provenances` moves off the sealed `LossDistribution` supertype to `RiskResult` only (A′, user refinement — the unattributed flat portfolio list becomes unrepresentable); portfolio provenance is read by walking `RiskResultGroup.children`, pairing `nodeId` with each record one level above any flattening (never by zipping parallel lists — flatMap multiplicities misalign). A provenance endpoint assembles `Map[NodeId, NodeProvenance]` at the resolver edge: one call, server-side join, the client never sees an unattributed list. Facts that decided it: `riskId` written once (`Simulator.scala:209`), zero production readers; Part A landed so `children` guarantees recovery. Consequences: `ProvenanceSpec` attribution assertions migrate to the structural walk; `PLAN-PROVENANCE-ENDPOINT` response shape revises to the attributed map; ADR-003 `NodeProvenance` sections rewrite; `collectProvenance` built with its first consumer. Falsifier: a consumer needing attribution where no result structure is reachable resurrects the self-attributing wrapper (candidate (a)). |
 | DD-21 | `BranchRef` separator vs Irmin's branch-name charset | **`.` separator — `scenarios.<a>.<b>.<c>`** (closed 2026-07-18 during Phase A implementation). Surfaced by the first-ever live branch-op integration tests: Irmin rejects `/` (and `~`) in branch names with HTTP 500 (verified against `local/irmin-prod:3.11`; `.`, `_`, `-`, alphanumerics accepted), so the pre-Phase-A `scenarios/a/b/c` constraint could never name a usable branch. User criterion: the ref is never a verbatim URL path segment per the plans (DD-8: header or session; today's only wire exposure is the `MergeConflict` error payload), so Irmin validity is the only wire contract — "it should be Irmin-like". Rejected: keeping the slash form with a boundary encoding layer (bijective but a permanent two-representation liability for a cosmetic gain). Segment *semantics* remain DD-5 (open). `BranchRefConstraint` in `OpaqueTypes.scala` is the source of truth; ADR-007 proposal/appendix updated. |
 | DD-20 | Fate of `invalidateWorkspaceCache` endpoint | **Retire in Phase A** (closed 2026-07-18, opened same day by the item-17 package-b decision). The endpoint (`POST …/invalidate/{nodeId}`, `WorkspaceTreeEndpoints.scala:57`, + `TreeCacheInvalidationResponse`) is the item-17 interim workaround and the last public surface over `TreeCacheManager`'s `(TreeId, NodeId)` view; under `ContentCache` the operation is undefinable (nothing keyed by NodeId). Zero consumers beyond the controller wiring (no SPA/test/script/docs callers, verified 2026-07-18). Sequencing: Phase A ships in one run and there are no existing clients, so no deprecation step — the endpoint dies in the same change that retires `TreeCacheManager`. No-op-keep (b) rejected: nothing to keep compatibility for, and a 200-answering no-op would mislead exactly the operator probing for staleness. Mirrors the CacheController precedent (48caa83). |
+| DD-8 | HTTP endpoint design — branch state transport | **Per-request header (`X-Active-Branch`), absent = main** (closed 2026-07-18) | The server stack is per-request and stateless end to end: every repository method already takes `branch: Option[BranchRef]` per call (Phase A), auth is per-request workspace-key verification, and no session store exists anywhere in `modules/server`. A header is the wire-level continuation of that design; a server session would be new stateful infrastructure whose main deliverable is the two-tab bug (tab 1's switch silently redirecting tab 2's reads). Under the header model each tab carries its own branch — two-tab correctness is structural, not managed. Header decodes through the `BranchRef` smart constructor at the Tapir boundary (invalid → 400; validate-once rule). `BranchRef`'s charset is header-safe ASCII, no encoding layer. Residual (not part of this decision): `SSEHub` is `TreeId`-keyed and branch-unaware — branch-scoped SSE is a Phase B design point either way. Falsifier recorded: server-initiated work needing a user's "current" branch without a triggering request would reopen a limited session form. |
+| DD-7 | HistoryService API — granularity + revert | **One history entry = one user action, via write-side batching; revert = forward commit** (closed 2026-07-18) | The write path is rewritten so `create`/`update`/`delete` each produce ONE Irmin commit using `set_tree` (subtree-replace semantics: unlisted keys deleted; multi-key upsert+delete atomic — live-verified, A9 fact 4). Irmin's commit log then IS the user's history: no message parsing, no grouping code, and the pre-existing write-atomicity defect (crash mid-save leaves a half-written tree) disappears in the same change. The txn-token read-side grouping (Alternative A) is eliminated by the probe — the token stays as an unread message tag; pre-cutover multi-commit history displays as-is with a legacy label if any store's history must survive. Revert = a NEW commit restoring the chosen earlier state (mistake and undo both visible, redo possible, `lca`/merge bases of forked branches intact); history rewrite rejected on the merge-base mechanism. Falsifier on the vehicle only: a `set_tree` payload limit for very large trees would force Alternative A back — one probe at implementation time. |
+| DD-5 | Scenario domain model | **Option A — scenario = (workspace, name); rename = recreate; no metadata store** (closed 2026-07-18) | Branch name is `scenarios.<workspaceId-lowercased-ulid>.<name-slug>` — TWO segments after the prefix (`BranchRefConstraint` changes from 3 to 2 segments; implementation ships with Phase B `ScenarioService`). The name IS the identity: no `ScenarioId` type, no metadata record anywhere (Irmin or Postgres). Create = `test_and_set_branch(test: null, set: <main head>)` — explicit fork required because a first-write branch starts EMPTY (A9 fact 3); name collision rejected by the CAS itself. Rename = create new branch at old head + CAS-delete old — same content, full history, `lca` intact; forks of the old branch and even its head commit survive deletion (A9 facts 2+5, probed). Scenario input name = Iron `ScenarioName` accepting only slug-mappable chars (letters fold to lowercase, space→`-`, digits/`-`/`_`; anything else 400 at boundary — no lossy slugification). Deciding rule: nothing in Phases B–E durably stores a scenario reference (only open tabs), so a mutable-name-in-record design (eliminated Options B/C) protects consumers that do not exist — DD-20 no-surface-without-consumer precedent. Costs accepted: rename invalidates the old ref in open tabs (clean `BranchNotFound`, re-select); duplicate display names per workspace impossible (filename rule); true delete leaves unreachable commits as storage growth (same accepted orphan class as ContentCache). Falsifier: the first accepted feature that stores a scenario reference durably resurrects Option B (immutable `scenarios.<ws>.<scenarioId>` ref + display-name record); migration is mechanical. |
+| DD-11 | Workspace ↔ scenario ownership | **Prefix convention — corollary of DD-5** (closed 2026-07-18) | Ownership IS the first name segment: listing/reaper cleanup = branch-prefix filter on the lowercased `WorkspaceId`; authorization = string comparison of the segment against the already-authenticated workspace. No ownership records — an explicit record would duplicate a fact the name states, and the two could diverge (an authz bug class). Forged prefixes unreachable: branches are only created by `ScenarioService` after workspace-key auth, from the authenticated workspace's own ID; one invariant test pins that creation accepts a slug, never a caller-supplied full `BranchRef`. Would have reopened only if DD-5 had rejected workspace-first naming. |
 | DD-18 | `ContentCache` value type | **Named case class: `TrialOutcomes` + content-only provenance record** (closed 2026-07-16) | The cached value is a product of the monoid carrier (`TrialOutcomes` = nTrials + sparse `Map[TrialId, Loss]`; `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` A.1 — **Option 1 thereby decided**) and a provenance record containing no `riskId`. No node identity anywhere in the value — the DD-16 corollary made concrete. A named case class, not a tuple (nominal-type rule, ADR-018); provenance sits beside `TrialOutcomes`, not inside it, because provenance does not participate in combination (portfolio provenance is read from children, never merged). Class name chosen at implementation time. Provenance record shape: DD-19 (closed 2026-07-18 → the content-only `NodeProvenance` itself, `riskId` deleted). |
 
 ### Influenced by cache strategy
@@ -1021,11 +1025,11 @@ key to `(ContentHash, configHash)`.
 
 | DD | Topic | Core question |
 |----|-------|---------------|
-| DD-5 | Scenario domain model | Branch naming convention and scenario metadata storage location. |
-| DD-7 | HistoryService API | History granularity (raw Irmin commits vs transaction-grouped). Revert UX semantics. |
-| DD-8 | HTTP endpoint design | Branch state: client-side header (`X-Active-Branch`) vs server session. Two-tab problem. |
-| DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. |
-| DD-11 | Workspace ↔ scenario ownership | Convention-based prefix matching vs explicit ownership records. |
+| ~~DD-5~~ | ~~Scenario domain model~~ | **CLOSED 2026-07-18 → Option A: scenario = (workspace, name), `scenarios.<ws>.<name>`, rename = recreate, no metadata store; moved to the Closed table.** |
+| ~~DD-7~~ | ~~HistoryService API~~ | **CLOSED 2026-07-18 → one entry = one user action (write-side batching via `set_tree`); revert = forward commit; moved to the Closed table.** |
+| ~~DD-8~~ | ~~HTTP endpoint design~~ | **CLOSED 2026-07-18 → per-request `X-Active-Branch` header; moved to the Closed table.** |
+| DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. **Postponed by decision 2026-07-18**: close at Phase B start by confirming (or amending) the phase outline's default (BranchBar in workspace header, comparison in Analyze) against a rendered sketch. Fully reversible, no dependents. |
+| ~~DD-11~~ | ~~Workspace ↔ scenario ownership~~ | **CLOSED 2026-07-18 → prefix convention, corollary of DD-5 Option A; moved to the Closed table.** |
 | ~~DD-20~~ | ~~Fate of `invalidateWorkspaceCache` endpoint~~ | **CLOSED 2026-07-18 → (a) retire in Phase A; moved to the Closed table.** |
 | ~~DD-19~~ | ~~Provenance content/identity representation~~ | **CLOSED 2026-07-18 → (c)+(d) + A′; moved to the Closed table above.** Original write-up: `NodeProvenance` mixes computation content (`entityId`, `occurrenceVarId`/`lossVarId`, global seeds, distribution type/params, timestamp, version) with identity (`riskId: NodeId`). The cached record must be the content part only (DD-16/DD-18). How is identity attached? **(a)** nested split — `NodeProvenance(riskId, <content record>)`; works before the monoid refactor; user prefers (a) over (b) (keep `NodeProvenance` unchanged, build it at the edge). **(c)+(d)** — drop `riskId` from the record entirely; attribution recovered from structure (`RiskResultGroup` keeps children) and, when ever exposed, a `Map[NodeId, <content record>]` assembled at the resolver edge — **candidate, not finalized**; requires the monoid plan's Part A first. Facts (verified 2026-07-16): `riskId` is written once (`Simulator.scala:209`) and read by no production code; no endpoint response carries provenance today (the `LECCurveResponse` type once named in an LEC.scala comment never existed — comment fixed). **Decide last — after every other open decision in this doc and the monoid plan is locked.** |
 
@@ -1090,8 +1094,10 @@ final case class <CacheValue>(          // placeholder name — DD-18
 // before implementing; do not ship as a bare String.
 case class CommitHash(toCommitHash: CommitHashStr)
 
-// NEW. ULID, same pattern as TreeId (ADR-018).
-case class ScenarioId(toSafeId: SafeId.SafeId)
+// ~~ScenarioId~~ — DELETED from the plan by DD-5 (closed 2026-07-18 → Option
+// A): a scenario is (workspace, name); the branch name is the identity, no
+// separate ID type exists. Resurrect only with DD-5's falsifier (a feature
+// durably storing scenario references → Option B's immutable-ref form).
 ```
 
 **`IrminContents(value, hash)` is dropped.** It existed solely as the
@@ -1911,10 +1917,13 @@ Phase B alone ships a usable end-to-end slice (create scenario, switch,
 edit, switch back); C–E complete the feature (comparison, merge, history).
 But "live" has preconditions **outside** the phase outline:
 
-1. **Open decisions:** DD-5, DD-7, DD-8, DD-9, DD-11 must be closed. (DD-14
-   was closed 2026-07-14 → Option B; see
-   [Decision](#decision-option-b-full-jvm--closed-2026-07-14).) DD-8 (branch
-   state: header vs session, the two-tab problem) is the hardest UX call.
+1. **Open decisions:** ~~DD-5, DD-7, DD-8, DD-11~~ — **all closed
+   2026-07-18** (DD-8 → `X-Active-Branch` header; DD-5 → Option A
+   (workspace, name); DD-7 → write-side batching + forward-commit revert;
+   DD-11 → prefix convention, DD-5 corollary; see the Closed table). DD-9
+   (UI placement) is postponed by decision to Phase B start — confirm the
+   outline's default against a sketch. Only the in-memory story (item 3
+   below) remains genuinely open.
 2. **Deployment backend:** branching requires the Irmin repository, and the
    default compose stack still runs in-memory. TODO item 10 (`--profile
    persistence` was a no-op for the server) was **resolved 2026-07-12** by
@@ -1937,3 +1946,48 @@ But "live" has preconditions **outside** the phase outline:
 
 With 1–3 resolved: yes — scenario branching is live for Irmin-backed
 deployments at Phase B (minimal) / Phase E (complete).
+
+### A9. Live-verified Irmin branch-op facts (probed 2026-07-18, `local/irmin-prod:3.11`, throwaway scoped container)
+
+Behavioral probes against the real image; these replace the guessed
+assumptions in the DD-5/DD-7/DD-8 briefings. Method: GraphQL schema
+introspection plus mutation/read round trips on a fresh store.
+
+1. **No branch-removal mutation exists** — the full mutation list is: `set`,
+   `set_tree`, `update_tree`, `set_all`, `test_and_set`, `test_set_and_get`,
+   `test_and_set_branch`, `remove`, `merge`, `merge_tree`,
+   `merge_with_branch`, `merge_with_commit`, `revert`, `clone`, `push`,
+   `pull`.
+2. **`test_and_set_branch(branch, test: CommitKey, set: CommitKey) → Boolean`
+   is a CAS on a branch head and covers create-at-commit AND delete:**
+   - `test: null, set: <commit>` creates the branch pointing at that commit —
+     a **true fork** (reading main's content through it returns main's
+     values; verified).
+   - `test: <head>, set: null` **deletes** the branch (verified; gone from
+     `branches`).
+   - A stale `test` value returns `false` and changes nothing (verified) —
+     safe under concurrency.
+   - `CommitKey` accepts the same 40-hex value as `Commit.hash` (`hash` and
+     `key` are identical on this build; verified).
+3. **A branch implicitly created by first `set(branch: …)` starts EMPTY —
+   it is NOT a fork of main** (verified: main's keys read `null` through
+   it). Scenario creation must therefore use `test_and_set_branch` with
+   main's head, never a bare first write. (The Phase A integration tests
+   only ever wrote-then-read their own keys, which is why this never
+   surfaced.)
+4. **`update_tree(path, branch, tree: [TreeItem])` commits multiple keys in
+   ONE commit** (verified: new head's sole parent is the previous head), and
+   a `TreeItem` with `value: null` **removes** that key in the same commit —
+   mixed upsert+delete is atomic. `set_tree` is subtree **replace**
+   semantics: keys under `path` not listed in `tree` are deleted (verified) —
+   maps 1:1 onto "PUT whole tree". Both return the new `Commit`. This makes
+   DD-7 Alternative B (one mutation = one commit; write-path atomicity)
+   viable as probed fact, not assumption.
+5. **Deleting a branch removes only the pointer, never the commits**
+   (probed 2026-07-18, second session): after fork-at-head + delete-old
+   (rename-by-recreate), the new branch keeps the full content, parent
+   chain, and `lca` with main; a branch forked from the deleted branch is
+   untouched; even the deleted branch's own head commit remains resolvable
+   by hash via `commit(hash:)`. Orphaning is a storage-growth concern only
+   (unreachable commits linger until any future Irmin GC) — same accepted
+   class as ContentCache orphans — never a correctness concern.
