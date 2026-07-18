@@ -6,7 +6,7 @@ import java.time.{Instant, Duration as JDuration}
 import zio.test.*
 import zio.json.*
 import sttp.model.StatusCode
-import com.risquanter.register.domain.data.iron.{WorkspaceId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchRef, WorkspaceId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.FolQueryFailure
 
 object ErrorResponseSpec extends ZIOSpecDefault {
@@ -180,15 +180,20 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         )
       },
       
-      test("encodes MergeConflict to Conflict (409)") {
-        val error = MergeConflict("feature-branch", "Conflicting changes in node X")
+      test("encodes MergeConflict to Conflict (409) with branchName detail") {
+        val branch = BranchRef.fromString("scenarios/ws1/s1/feature-1").toOption.get
+        val error = MergeConflict(branch, "Conflicting changes in node X")
         val (status, response) = ErrorResponse.encode(error)
-        
+
         assertTrue(
           status == StatusCode.Conflict,
           response.error.code == 409,
           response.error.message.contains("Merge conflict"),
-          response.error.errors.head.field == "branch"
+          response.error.errors.head.field == "branch",
+          response.error.errors.head.message == "Conflicting changes in node X",
+          response.error.errors.exists(d =>
+            d.field == "branchName" && d.message == "scenarios/ws1/s1/feature-1"
+          )
         )
       }
     ),
@@ -221,14 +226,30 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         assertTrue(throwable.isInstanceOf[VersionConflict])
       },
 
-      test("decodes 409 with branch field to MergeConflict") {
+      test("decodes 409 MERGE_CONFLICT with branchName detail to MergeConflict, non-lossy") {
         val response = ErrorResponse(
-          JsonHttpError(409, "Merge conflict", List(
-            ErrorDetail("scenarios", "branch", ValidationErrorCode.MERGE_CONFLICT, "Merge conflict on feature-1")
+          JsonHttpError(409, "Merge conflict on branch scenarios/ws1/s1/feature-1: node X diverged", List(
+            ErrorDetail("scenarios", "branch", ValidationErrorCode.MERGE_CONFLICT, "node X diverged"),
+            ErrorDetail("scenarios", "branchName", ValidationErrorCode.MERGE_CONFLICT, "scenarios/ws1/s1/feature-1")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
-        assertTrue(throwable.isInstanceOf[MergeConflict])
+        assertTrue(
+          throwable.isInstanceOf[MergeConflict],
+          throwable.asInstanceOf[MergeConflict].branch.toBranchRef == "scenarios/ws1/s1/feature-1",
+          throwable.asInstanceOf[MergeConflict].details == "node X diverged"
+        )
+      },
+
+      test("decodes 409 MERGE_CONFLICT without a refinable branchName to DataConflict") {
+        val response = ErrorResponse(
+          JsonHttpError(409, "Merge conflict", List(
+            ErrorDetail("scenarios", "branch", ValidationErrorCode.MERGE_CONFLICT, "conflict"),
+            ErrorDetail("scenarios", "branchName", ValidationErrorCode.MERGE_CONFLICT, "NOT A VALID BRANCH!")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
+        assertTrue(throwable.isInstanceOf[DataConflict])
       },
 
       test("decodes 409 with generic field to DataConflict") {
@@ -369,7 +390,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         val vc = VersionConflict("n1", "v1", "v2")
         val vcDecoded = ErrorResponse.decode(ErrorResponse.encode(vc))
         // MergeConflict
-        val mc = MergeConflict("feat", "conflict detail")
+        val mc = MergeConflict(BranchRef.fromString("scenarios/ws1/s1/feat").toOption.get, "conflict detail")
         val mcDecoded = ErrorResponse.decode(ErrorResponse.encode(mc))
         // IrminUnavailable
         val iu = IrminUnavailable("Connection refused")
@@ -390,6 +411,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
           dcDecoded.isInstanceOf[DataConflict],
           vcDecoded.isInstanceOf[VersionConflict],
           mcDecoded.isInstanceOf[MergeConflict],
+          mcDecoded.asInstanceOf[MergeConflict] == mc,  // full value round trip (non-lossy)
           iuDecoded.isInstanceOf[IrminUnavailable],
           ntDecoded.isInstanceOf[NetworkTimeout],
           sfDecoded.isInstanceOf[SimulationFailure],

@@ -208,7 +208,10 @@ application dominating read latency.
 
 ### D4 — Provenance of a transform application (monoid B.7 decision 5)
 
-Blocked on DD-19 (provenance record shape). A transform application is
+**Unblocked 2026-07-18:** DD-19 closed → (c)+(d) + A′ (identity-free
+content record; provenance leaf-only; structural attribution). D4 itself
+remains open — decide with D1's build or the first mitigation wiring.
+Original note: Blocked on DD-19 (provenance record shape). A transform application is
 analytically meaningful and must be explainable (ADR-003), so whatever record
 DD-19 produces needs a representation for "transform X with parameters Y was
 applied". **Decide together with DD-19 — last, per the agreed sequencing.**

@@ -5,6 +5,7 @@ import scala.concurrent.duration.Duration
 import zio.json.{JsonCodec, DeriveJsonCodec}
 import sttp.model.StatusCode
 
+import com.risquanter.register.domain.data.iron.BranchRef
 import com.risquanter.register.domain.errors.FolQueryFailure.*
 
 /** Wrapper for error responses sent to clients */
@@ -69,9 +70,17 @@ object ErrorResponse {
           // SimulationNotCached requires TreeId (valid ULID) which is lost through HTTP;
           // reconstruct as DataConflict — the frontend already knows the treeId from context.
           DataConflict(message)
+        case ValidationErrorCode.MERGE_CONFLICT =>
+          // Non-lossy: the "branchName" detail carries the raw branch reference
+          // (see makeMergeConflictResponse); reconstruct the typed BranchRef.
+          // A wire without a refinable branchName degrades to DataConflict.
+          val branch = details.collectFirst { case d if d.field == "branchName" => d.message }
+            .flatMap(s => BranchRef.fromString(s).toOption)
+          val conflictDetails = details.collectFirst { case d if d.field == "branch" => d.message }
+            .getOrElse(message)
+          branch.fold[Throwable](DataConflict(message))(b => MergeConflict(b, conflictDetails))
         case _ => firstField match
           case "version" => VersionConflict("unknown", "unknown", message)  // nodeId lost through HTTP
-          case "branch"  => MergeConflict("unknown", message)               // branch name lost through HTTP
           case _         => DataConflict(message)
 
       // 502 → IrminGraphQLError
@@ -267,9 +276,17 @@ object ErrorResponse {
     response(StatusCode.Conflict, "version", ValidationErrorCode.VERSION_CONFLICT,
       s"Version conflict on node $nodeId: expected $expected, found $actual", domain, requestId)
 
-  def makeMergeConflictResponse(branch: String, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.Conflict, "branch", ValidationErrorCode.MERGE_CONFLICT,
-      s"Merge conflict on branch $branch: $details", domain, requestId)
+  /** Two details by design: field "branch" carries the conflict details, field
+    * "branchName" carries the raw branch reference so `decode` can reconstruct
+    * the typed `BranchRef` without parsing prose (non-lossy round trip).
+    */
+  def makeMergeConflictResponse(branch: BranchRef, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"Merge conflict on branch ${branch.toBranchRef}: $details"
+    val errors = List(
+      ErrorDetail(domain, "branch", ValidationErrorCode.MERGE_CONFLICT, details, requestId),
+      ErrorDetail(domain, "branchName", ValidationErrorCode.MERGE_CONFLICT, branch.toBranchRef, requestId)
+    )
+    (StatusCode.Conflict, ErrorResponse(JsonHttpError(StatusCode.Conflict.code, message, errors)))
 
   // ── FOL Query Error Responses (ADR-028) ─────────────────────────────────
 

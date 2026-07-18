@@ -10,7 +10,6 @@ import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.Url
 import com.risquanter.register.http.HttpApi
-import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
@@ -55,8 +54,8 @@ object StubHttpTestHarness {
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       simConfig: SimulationConfig = defaultSimulationConfig
   ): ZIO[Any, Throwable, SttpBackend[Task, Any]] =
-    val controllersLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & DistributionPreviewController] =
-      ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & DistributionPreviewController](
+    val controllersLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController] =
+      ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController](
         ZLayer.succeed(simConfig),
         ZLayer.succeed(defaultTelemetryConfig),
         ZLayer.succeed(WorkspaceConfig()),
@@ -79,8 +78,7 @@ object StubHttpTestHarness {
         ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
         ZLayer.fromZIO(WorkspaceAnalysisController.makeZIO),
         SSEController.layer,
-        CacheController.layer,
-        QueryServiceLive.layer,
+          QueryServiceLive.layer,
         ZLayer.fromZIO(QueryController.makeZIO),
         DistributionPreviewService.layer,
         ZLayer.fromZIO(DistributionPreviewController.makeZIO)

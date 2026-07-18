@@ -1042,12 +1042,9 @@ Complete route census as of the current codebase. Every route is assigned a `Per
 | 17 | POST | `/w/{key}/risk-trees/{treeId}/lec-chart` | Workspace | `ViewTree` | RiskTree | L0+ | Vega-Lite chart spec |
 | 18 | GET | `/w/{key}/events/tree/{treeId}` | SSE | `ViewTree` | RiskTree | L0+ | SSE stream — same gate as the REST read |
 | 23 | POST | `/distribution/preview` | DistributionPreview | — | Public | L0+ | Stateless distribution fitting + sampling; no tree resource, no workspace key. L0: open. L1+: JWT required (mesh + userCtx.extract). Rate limiting at nginx level. Workspace-scoped path removed 2026-06-10 (Option B decision). |
-| 19 | GET | `/risk-trees/{treeId}/cache/stats` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
-| 20 | GET | `/risk-trees/{treeId}/cache/nodes` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
-| 21 | DELETE | `/risk-trees/{treeId}/cache` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
-| 22 | DELETE | `/cache/clear-all` | Cache | **Mesh-only** | — | Mesh | Istio/OPA `admin` role; no app-level check |
+| 19–22 | — | ~~`/risk-trees/{treeId}/cache/*`, `/cache/clear-all`~~ | Cache | — | — | — | **Retired 2026-07-18** (milestone-2b pre-Phase-A decision): the four cache admin endpoints had zero consumers and their `(TreeId, NodeId)` semantics do not survive the content-addressed cache. `CacheController`/`CacheEndpoints` deleted; no mesh policy needed. |
 
-**Cache endpoints (19–22) remain mesh-only.** They are not under `/w/{key}/...` — no workspace key in the path — so `AuthorizationService.check()` has no workspace-scoped context. Istio `AuthorizationPolicy` with `roles[admin]` OPA claim is the correct enforcement point (already documented in `CacheEndpoints.scala`). This is consistent with ADR-024: the app does not implement admin-role logic.
+**Cache endpoints (19–22) retired 2026-07-18.** The mesh-only enforcement note that stood here is preserved for the record: they were not under `/w/{key}/...`, so Istio `AuthorizationPolicy` with `roles[admin]` was the designated enforcement point (ADR-024-consistent). If workspace-scoped cache ops return with a concrete caller, they will be under `/w/{key}/...` and get the standard `check()` wiring instead.
 
 ---
 

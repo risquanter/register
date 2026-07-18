@@ -4,14 +4,16 @@ Status: **Part A IMPLEMENTED 2026-07-17** (Option 1, executed per A.6 Steps 1–
 C.1 resolver parallelization and follow-up cleanups: single `Commutative` instance, unified
 `LossDistribution.merge`, `TrialOutcomes.nTrials: PositiveInt`). All unit, Scala.js, and
 integration test gates passed. ADR-009 rewritten to the implemented design.
-Part B (mitigation) remains unapproved: B.7 decisions 3–5 are open, and the B.8 MUST-FIX items
-gate any `RiskTransform` production wiring — they are **not** prerequisites of Part A
-(`RiskTransform` has zero production callers; verified 2026-07-16).
+Part B (mitigation): the B.8 MUST-FIX items were **fixed 2026-07-17**, and B.7 decision 3 was
+**decided the same day** (cache raw, transform at the resolver edge — `PLAN-RISKTRANSFORM.md`
+D3). B.7 decisions 4–5 remain open there (D5, D4). `RiskTransform` still has zero production
+callers (verified 2026-07-17).
 Code audit completed 2026-06-18; A.1 Option 1 decided 2026-07-16 (see A.1).
 Scope: Internal implementation only (no API change intended). API implications flagged where relevant.
 Related: ADR-003 (provenance), ADR-014/ADR-015 (RiskResult as cache/runtime state, cache-aside),
 `docs/scratch/milestone-2b-cache-and-decisions.md` (Leaf-as-aggregate semantic smell;
-DD-18 cache value type — decided with A.1 Option 1; DD-19 provenance record shape — open).
+DD-18 cache value type — decided with A.1 Option 1; DD-19 provenance record shape — closed
+2026-07-18 → (c)+(d) + A′, see milestone-2b Closed table).
 
 ---
 
@@ -256,6 +258,11 @@ require(
 )
 ```
 This must be in place before any call site switches to `RiskResultGroup`.
+
+> **As implemented (2026-07-17):** the guard landed as a smart constructor —
+> `RiskResultGroup.create(nodeId, results*)(using SimulationConfig): Validation[ValidationError, RiskResultGroup]`
+> — rather than a `require` in `apply` (ADR-001: typed validation over exceptions). The
+> resolver calls `create` and lifts the failure into the effect.
 
 **Widen (mechanical type substitution):**
 - `RiskResultGroup.children: List[LossDistribution]` (from `List[RiskResult]`)
@@ -681,8 +688,9 @@ purely to close the door.
    2026-07-17**. Step 1 was completed on the old code before implementation began; every
    step's gate was green, including the final unit + Scala.js + integration runs.
 
-4. **B.7 decision 3**: Caching policy for pre- vs. post-mitigation results before wiring
-   `RiskTransform` into any production call path. → **trigger #5**.
+4. ~~**B.7 decision 3**: Caching policy for pre- vs. post-mitigation results~~ ✅ **Decided
+   2026-07-17** — cache raw results, apply transforms at the resolver edge
+   (`PLAN-RISKTRANSFORM.md` D3, Option 1).
 5. **B.7 decision 5**: Provenance representation for a `RiskTransform` application (ADR-003).
 6. **B.7 decision 4**: If mitigation becomes client-facing, open a separate ADR (trigger #1).
 7. Load `adr-constraints` before any implementation phase.
@@ -696,19 +704,15 @@ measured behaviour — re-aggregation cost on real trees, `RiskResultGroup` in
 the resolver, the DD-18 cache value type. Analysis to start from: the
 milestone-2b A4 re-examination.
 
-**MUST FIX before rollout — `RiskTransform` defects (gap 7, detail in [B.8](#b8-risktransform-defects--must-fix-before-any-production-wiring)):**
+**MUST FIX before rollout — `RiskTransform` defects (gap 7, detail in [B.8](#b8-risktransform-defects--must-fix-before-any-production-wiring)) — ✅ ALL FIXED 2026-07-17:**
 
-These are **not** gated behind the Option 1 / Option 2 decision and do not touch the monoid
-work — they can land independently and should land first. `RiskTransform` is public API in a
-shared module with zero callers (gap 6); that window is what makes them free.
+Fixed inside the zero-caller window (gap 6), as required, together with the D6 retarget to
+`TrialOutcomes` (`PLAN-RISKTRANSFORM.md` §2).
 
-- [ ] Replace the three `require` guards (`RiskTransform.scala:154, 172, 173`) with
-      Iron-refined parameters + smart constructors returning `Validation` (ADR-001).
-      Cross-field rule `cap > deductible` via `Validation.validateWith`, not `.flatMap`.
-      Public signature change → **trigger #4** if the refined types are new.
-- [ ] Delete or replace `given Equal[RiskTransform] = Equal.default` (`RiskTransform.scala:88`)
-      — currently reference equality on a lambda.
-- [ ] Add a law-suite case that exercises `Equal[RiskTransform]` directly if the instance is
-      kept. The current suite compares `.outcomes` and would not have caught this.
-- [ ] **Blocking gate:** none of the above may be deferred past `RiskTransform`'s first
-      production call path. After that they are breaking changes.
+- [x] The three `require` guards replaced with Iron-refined parameters
+      (`NonNegativeLong` / `NonNegativeDouble`); the cross-field rule `cap > deductible`
+      lives in `insurancePolicy`, which returns `Validation` (ADR-001).
+- [x] `given Equal[RiskTransform] = Equal.default` deleted (D2, Option 1).
+- [x] Law-suite `Equal` case: moot — the instance was deleted, not kept. If D1's
+      `TransformSpec` later reintroduces a derived `Equal`, add the law case then.
+- [x] **Blocking gate satisfied:** all fixes landed before any production call path exists.

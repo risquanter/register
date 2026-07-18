@@ -215,10 +215,10 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 | Get LEC curve | GET | `/risk-trees/{treeId}/nodes/{nodeId}/lec` | ✅ |
 | Prob of exceedance | GET | `/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance` | ✅ |
 | Multi LEC curves | POST | `/risk-trees/{treeId}/nodes/lec-multi` | ✅ |
-| Cache stats | GET | `/risk-trees/{treeId}/cache/stats` | ✅ |
-| Cache nodes | GET | `/risk-trees/{treeId}/cache/nodes` | ✅ |
-| Clear tree cache | DELETE | `/risk-trees/{treeId}/cache` | ✅ |
-| Clear all caches | DELETE | `/caches` | ✅ |
+| Cache stats | GET | `/risk-trees/{treeId}/cache/stats` | ❌ retired 2026-07-18 (zero consumers; milestone-2b pre-Phase-A decision) |
+| Cache nodes | GET | `/risk-trees/{treeId}/cache/nodes` | ❌ retired 2026-07-18 (same decision) |
+| Clear tree cache | DELETE | `/risk-trees/{treeId}/cache` | ❌ retired 2026-07-18 (same decision) |
+| Clear all caches | DELETE | `/caches` | ❌ retired 2026-07-18 (same decision; workspace-scoped ops can return with a concrete caller — DD-2 pattern) |
 | SSE events | GET | `/w/{key}/events/tree/{treeId}` | ✅ (A15: workspace-scoped) |
 
 ### Backend Services (Implemented)

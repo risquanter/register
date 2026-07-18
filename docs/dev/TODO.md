@@ -652,7 +652,12 @@ Version bump: MINOR — `0.4.0` (user-decided, executed).
 
 ---
 
-## 13. 
+## 13. DELETED ITEM, placeholder kept for consistent numbering only
+
+(The content — "[POST USER-DOCS] Document threshold-pie normalisation behaviour
+in user documentation" — was removed in commit `413e042` together with item 14
+but did not receive this marker at the time. Recoverable via
+`git show 8d94ce8:docs/dev/TODO.md` if the doc task should be revived.)
 
 ---
 

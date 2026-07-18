@@ -3,7 +3,7 @@ package com.risquanter.register.domain.errors
 import scala.concurrent.duration.Duration
 import sttp.model.StatusCode
 import java.time.{Duration as JDuration, Instant}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{BranchRef, WorkspaceId, WorkspaceKeySecret, TreeId}
 
 sealed trait AppError extends Throwable
 sealed trait SimError extends AppError
@@ -129,9 +129,11 @@ case class VersionConflict(nodeId: String, expected: String, actual: String) ext
   override def getMessage: String = s"Version conflict on node $nodeId: expected $expected, found $actual"
 }
 
-/** Branch merge conflict - requires user intervention */
-case class MergeConflict(branch: String, details: String) extends SimError {
-  override def getMessage: String = s"Merge conflict on branch $branch: $details"
+/** Branch merge conflict - requires user intervention.
+  * `branch` is the typed Irmin branch reference (ADR-018 nominal wrapper).
+  */
+case class MergeConflict(branch: BranchRef, details: String) extends SimError {
+  override def getMessage: String = s"Merge conflict on branch ${branch.toBranchRef}: $details"
 }
 
 // ============================================================================

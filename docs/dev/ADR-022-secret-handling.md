@@ -173,7 +173,7 @@ sealed trait AppError extends Throwable
 │   ├── WorkspaceExpired(key: WorkspaceKeySecret, createdAt: Instant, ttl: Duration)
 │   ├── TreeNotInWorkspace(key: WorkspaceKeySecret, treeId: TreeId)
 │   ├── VersionConflict(nodeId: String, expected: String, actual: String)
-│   └── MergeConflict(branch: String, details: String)
+│   └── MergeConflict(branch: BranchRef, details: String)
 └── sealed trait IrminError extends AppError
     ├── IrminUnavailable(reason: String)
     ├── IrminHttpError(status: StatusCode, body: String)

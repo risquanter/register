@@ -37,9 +37,11 @@
 > type is decided — **DD-18 (closed)**: a named case class holding
 > `TrialOutcomes` plus a content-only provenance record, no node ID inside;
 > this also decides the monoid plan's A.1 **Option 1** (explicit
-> `TrialOutcomes` type). The provenance record's shape is **DD-19 (open —
-> decide last, after every other open decision in this doc and the monoid
-> plan)**. Identity-free values re-open the DD-15 option set: equal
+> `TrialOutcomes` type). The provenance record's shape was **DD-19 — closed
+> 2026-07-18 → (c)+(d) + A′** (riskId deleted, provenance leaf-only,
+> structural attribution; see the Closed table). Its "decide last" sequencing
+> was relaxed deliberately: the still-open DD-5/7/8/9/11 are Phase B–E UX
+> decisions that cannot change the record's field list. Identity-free values re-open the DD-15 option set: equal
 > portfolio keys now imply equal figures, so an Option-A key collision is
 > correct dedupe — the previous sweep's "Option A definitively dead" verdict
 > is withdrawn; see the
@@ -507,8 +509,8 @@ For every node in a loaded tree:
            then ContentCache.put(cacheKey, <content>)   [Scala, Ref update]
 
    Portfolio: never cached (DD-15 → B) — aggregate child results on every
-   read (today RiskResult.combine; after the monoid plan:
-   RiskResultGroup(parentId, children*) — same figures).
+   read (RiskResultGroup.create(parentId, children*) since 2026-07-17, when
+   the monoid plan landed; formerly RiskResult.combine — same figures).
 ```
 
 ### Serialization determinism
@@ -569,9 +571,10 @@ test("RiskLeaf JSON serialization is byte-stable") {
 
 ### Portfolio aggregation cost
 
-`RiskResult.combine` [Scala] = trial-aligned loss summation via sparse map
-merge. This is O(|union-of-trial-IDs| × nChildren) — **no Monte Carlo
-sampling**. Re-aggregating a portfolio on cache miss is cheap compared to
+Portfolio aggregation (`RiskResultGroup.create` via `LossDistribution.merge`
+since 2026-07-17; formerly `RiskResult.combine`) = trial-aligned loss summation
+via sparse map merge. This is O(|union-of-trial-IDs| × nChildren) — **no Monte
+Carlo sampling**. Re-aggregating a portfolio on cache miss is cheap compared to
 leaf simulation.
 
 ---
@@ -996,12 +999,13 @@ key to `(ContentHash, configHash)`.
 | DD-2 | New `IrminClient` operations | Add 6 ops: `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca` | Mechanical GraphQL wrappers. **`getContents` dropped**: DD-14 closed on Option B, so leaf hashes come from `sha256(json)` [Scala] and the existing `get` suffices. Add `getContents` only if a concrete commit-info caller appears — an op with no call site is a code-quality MUST-FIX (§4, unused API is a liability). |
 | DD-3 | Cache strategy | Content-addressed: `Map[ContentHash, <value>]` | Content-identical nodes share one cache entry regardless of branch. Value type as originally written was `RiskResult`; refined by DD-16/DD-18 to the identity-free value. |
 | DD-4 | Repository branch threading | Optional `branch` param on trait methods | Comparison workflow needs explicit branch args (read both in one effect). |
-| DD-10 | Error types | Flat hierarchy extending `AppError` | `BranchNotFound`, `MergeConflictError`, `CommitNotFound`, etc. Follows existing pattern. **Naming not settled** — `MergeConflict` already exists in the hierarchy; see [A7](#a7-implementation-aid-corrections-against-the-current-codebase). |
+| DD-10 | Error types | Flat hierarchy extending `AppError` | `BranchNotFound`, `CommitNotFound`, etc. Follows existing pattern. **Naming settled 2026-07-18**: merge conflicts reuse the existing `MergeConflict` (upgraded to carry `BranchRef`, non-lossy codec) — `MergeConflictError` dropped; see [A7](#a7-implementation-aid-corrections-against-the-current-codebase). |
 | DD-12 | Test backward compat | Default args are source- and binary-compatible | ~60 new tests estimated across new capabilities. |
 | DD-14 | Leaf hash source | **Option B — full JVM `sha256(jsonBytes)`** (closed 2026-07-14) | One hash system (SHA-256, uniform 64-hex → tight Iron refinement); no `getContents` in Phase A; no SHA-1; works on the in-memory backend, which Option A cannot. See [Leaf hash source](#leaf-hash-source-dd-14--closed-option-b). *Which* bytes get hashed was refined by DD-16. |
 | DD-15 | Portfolio result caching scope | **Option B — cache leaf results only** (closed 2026-07-16) | Portfolio results are not cached; portfolios re-aggregate from child results on every read (linear sparse-map merge; A4: milliseconds at n=100, unmeasured). Smallest Phase A, smaller memory, no portfolio-key surface, decoupled from the resolver refactor. Reduces caching below current `TreeCacheManager` behaviour — the trigger #5 tradeoff is accepted by this decision. Alternatives A/C′ (portfolio entries under child-key hashing; a portfolio projection prepended if simulation-relevant portfolio fields ever appear) remain correct under DD-18 and are **parked as a post-landing follow-up in this doc and the monoid plan** — re-examine after both plans land, against measured behaviour. See the [A4 re-examination](#a4-review-2026-07-14--dd-15-closed-2026-07-16-option-b). |
 | DD-16 | Leaf hash preimage | **Simulation-relevant projection, not raw stored bytes** (closed 2026-07-16) | The key hashes exactly what determines the figures: `seedVarId` + probability + distribution params, via a dedicated spec type with a byte-stability snapshot test. `name` and ULID are excluded — renames preserve the cache and cross-node hits become possible. **Corollary: cached values are identity-free** — the cache stores content only (trial map + stream provenance), never a node ID; the resolver attaches the *requested* node's ID when building the response. (`RiskResult` as it exists bundles `nodeId` with the outcomes and cannot be the cache value type unchanged; the replacement value type was fixed by DD-18 on 2026-07-16.) Supersedes DD-14's hash-the-returned-bytes rule; opened and closed 2026-07-16 after TODO item 12 removed the ULID→seed derivation. |
 | DD-17 | Cache scope vs `seedEntityId` | **One `ContentCache` per workspace** (closed 2026-07-16) | `seedEntityId` determines figures but lives in no node's bytes. Per-workspace cache instances make cross-workspace contamination structurally impossible; a global map keyed by (entity, hash) buys nothing — different entity ⇒ different figures ⇒ cross-workspace hits are impossible by design — while mixing tenants in one structure and complicating workspace reaping. Cache lifecycle = workspace lifecycle. |
+| DD-19 | Provenance content/identity representation | **(c)+(d) plus A′ — `riskId` deleted; provenance leaf-only** (closed 2026-07-18) | `NodeProvenance` loses `riskId` and becomes the content-only record itself (the DD-18 cache value embeds it directly — no second type). Attribution is structural: `provenances` moves off the sealed `LossDistribution` supertype to `RiskResult` only (A′, user refinement — the unattributed flat portfolio list becomes unrepresentable); portfolio provenance is read by walking `RiskResultGroup.children`, pairing `nodeId` with each record one level above any flattening (never by zipping parallel lists — flatMap multiplicities misalign). A provenance endpoint assembles `Map[NodeId, NodeProvenance]` at the resolver edge: one call, server-side join, the client never sees an unattributed list. Facts that decided it: `riskId` written once (`Simulator.scala:209`), zero production readers; Part A landed so `children` guarantees recovery. Consequences: `ProvenanceSpec` attribution assertions migrate to the structural walk; `PLAN-PROVENANCE-ENDPOINT` response shape revises to the attributed map; ADR-003 `NodeProvenance` sections rewrite; `collectProvenance` built with its first consumer. Falsifier: a consumer needing attribution where no result structure is reachable resurrects the self-attributing wrapper (candidate (a)). |
 | DD-18 | `ContentCache` value type | **Named case class: `TrialOutcomes` + content-only provenance record** (closed 2026-07-16) | The cached value is a product of the monoid carrier (`TrialOutcomes` = nTrials + sparse `Map[TrialId, Loss]`; `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` A.1 — **Option 1 thereby decided**) and a provenance record containing no `riskId`. No node identity anywhere in the value — the DD-16 corollary made concrete. A named case class, not a tuple (nominal-type rule, ADR-018); provenance sits beside `TrialOutcomes`, not inside it, because provenance does not participate in combination (portfolio provenance is read from children, never merged). Class name chosen at implementation time. Provenance record shape: DD-19 (open). |
 
 ### Influenced by cache strategy
@@ -1020,7 +1024,7 @@ key to `(ContentHash, configHash)`.
 | DD-8 | HTTP endpoint design | Branch state: client-side header (`X-Active-Branch`) vs server session. Two-tab problem. |
 | DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. |
 | DD-11 | Workspace ↔ scenario ownership | Convention-based prefix matching vs explicit ownership records. |
-| DD-19 | Provenance content/identity representation | `NodeProvenance` mixes computation content (`entityId`, `occurrenceVarId`/`lossVarId`, global seeds, distribution type/params, timestamp, version) with identity (`riskId: NodeId`). The cached record must be the content part only (DD-16/DD-18). How is identity attached? **(a)** nested split — `NodeProvenance(riskId, <content record>)`; works before the monoid refactor; user prefers (a) over (b) (keep `NodeProvenance` unchanged, build it at the edge). **(c)+(d)** — drop `riskId` from the record entirely; attribution recovered from structure (`RiskResultGroup` keeps children) and, when ever exposed, a `Map[NodeId, <content record>]` assembled at the resolver edge — **candidate, not finalized**; requires the monoid plan's Part A first. Facts (verified 2026-07-16): `riskId` is written once (`Simulator.scala:209`) and read by no production code; no endpoint response carries provenance today (the `LECCurveResponse` type once named in an LEC.scala comment never existed — comment fixed). **Decide last — after every other open decision in this doc and the monoid plan is locked.** |
+| ~~DD-19~~ | ~~Provenance content/identity representation~~ | **CLOSED 2026-07-18 → (c)+(d) + A′; moved to the Closed table above.** Original write-up: `NodeProvenance` mixes computation content (`entityId`, `occurrenceVarId`/`lossVarId`, global seeds, distribution type/params, timestamp, version) with identity (`riskId: NodeId`). The cached record must be the content part only (DD-16/DD-18). How is identity attached? **(a)** nested split — `NodeProvenance(riskId, <content record>)`; works before the monoid refactor; user prefers (a) over (b) (keep `NodeProvenance` unchanged, build it at the edge). **(c)+(d)** — drop `riskId` from the record entirely; attribution recovered from structure (`RiskResultGroup` keeps children) and, when ever exposed, a `Map[NodeId, <content record>]` assembled at the resolver edge — **candidate, not finalized**; requires the monoid plan's Part A first. Facts (verified 2026-07-16): `riskId` is written once (`Simulator.scala:209`) and read by no production code; no endpoint response carries provenance today (the `LECCurveResponse` type once named in an LEC.scala comment never existed — comment fixed). **Decide last — after every other open decision in this doc and the monoid plan is locked.** |
 
 ### Deferred
 
@@ -1105,7 +1109,7 @@ Reintroduce only alongside a `getContents` caller, if one ever appears (DD-2).
 | `ContentHashIndex` (new) | Scala | At tree load: leaf hashes = `sha256(json bytes returned by get)`, portfolio Merkle hashes computed bottom-up (DD-14 → Option B). Pure function, unit-testable without Irmin. Returns `Map[NodeId, ContentHash]`. |
 | `CacheScope` (new) | Scala | Abstraction over cache resolution — **one instance per workspace (DD-17), isolating `seedEntityId`**. `RiskResultResolver` calls `CacheScope` instead of `TreeCacheManager`. Cache values are identity-free (DD-16); the resolver attaches the requested node's ID when building the response. |
 | `TreeCacheManager` | Scala | **Retired — deleted, not rewritten** (with `RiskResultCache`). Replaced by `CacheScope` + `ContentCache`. Consumers: `RiskResultResolverLive` rewires to `CacheScope`; `InvalidationHandler` keeps only its SSE half; `CacheController` — see its row. What the old design has that the new one drops: (1) portfolio result caching — decided away, DD-15 → B, post-landing follow-up; (2) explicit O(depth) ancestor-path invalidation with immediate memory reclamation — unnecessary under content addressing (a changed leaf *is* a different key; stale entries become orphans for the `EvictionStrategy`), and it is the mechanism behind the TODO item 17 bug class; (3) per-tree cache deletion on tree delete — lifecycle moves to workspace level (DD-17); a deleted tree's entries linger as orphans until eviction. |
-| `CacheController` / `CacheEndpoints` | Scala | **Gap found 2026-07-16 — not previously in this table.** Four admin endpoints (`cacheStats`, `cacheNodes`, `cacheClear`, `cacheClearAll`) are built on `TreeCacheManager`'s `(TreeId, NodeId)` view. Under `ContentCache`, "which nodes of tree X are cached" is answerable only by joining the current `ContentHashIndex` with the cache keys — the cache alone stores identity-free values under content hashes and does not know node IDs. The endpoints must be redesigned (stats/clear port naturally to workspace scope; node listing needs the index) or retired. Changes API shape → **decision trigger #1; settle before Phase A**, alongside the A7 error-type collision. |
+| `CacheController` / `CacheEndpoints` | Scala | **✅ DECIDED 2026-07-18 → retired, implemented same day.** The four admin endpoints (`cacheStats`, `cacheNodes`, `cacheClear`, `cacheClearAll`) had zero consumers (server-module-only Tapir definitions — no SPA client, no test or script callers) and their `(TreeId, NodeId)` semantics do not survive `ContentCache` (per-tree clear is not even well-defined for shared content-addressed entries). Both files deleted, wiring removed from `HttpApi`/`Application`. Workspace-scoped `stats`/`clear` can be reintroduced when a concrete caller appears (DD-2 pattern for `getContents`). Residual: `TreeCacheManager.clearAll` and `onTreeStructureChanged` now have no production caller (spec coverage only) — they retire with `TreeCacheManager` itself in Phase A. Original gap analysis: four admin endpoints were built on `TreeCacheManager`'s `(TreeId, NodeId)` view; under `ContentCache`, "which nodes of tree X are cached" is answerable only by joining the current `ContentHashIndex` with the cache keys. |
 | `InvalidationHandler` | Scala | Simplified — cache misses driven by hash changes, not explicit `ancestorPath` invalidation. Structural mutation logic still needed for SSE notifications. |
 
 ---
@@ -1125,6 +1129,12 @@ Review of the simulation/aggregation pipeline against design assumptions.
 | 5 | SimulationConfig is global, not per-node | **Confirmed.** Injected once at layer construction. All nodes share `defaultNTrials`, `seed3`, `seed4`. |
 | 6 | Each leaf generates sparse Map[TrialId, Loss] | **Confirmed.** `performTrials` [Scala] filters for occurrence first, then samples loss only for hits. |
 
+> **2026-07-17 — monoid Part A landed; rows 2–4 describe the pre-Part-A code.**
+> The resolver now builds `RiskResultGroup.create(parentId, children*)` (variadic
+> merge, typed `Validation` alignment guard) instead of
+> `reduce(RiskResult.combine)` + `withNodeId`. The assumptions themselves (cheap
+> aggregation, child-only dependence, ancestor-path invalidation) still hold.
+
 ### Deviations and nuances
 
 **1. No risk-level parallelism in the resolver.** `RiskResultResolverLive`
@@ -1136,6 +1146,10 @@ used. Independent subtrees are not parallelised.
 > Impact: Follow-up improvement opportunity. Content-addressed cache makes
 > this more valuable — fewer nodes need simulation on branch switch, so
 > parallelising remaining misses has higher relative payoff.
+>
+> **Superseded 2026-07-17:** landed with monoid Part A (C.1) — the resolver
+> now uses `ZIO.foreachPar` over portfolio children, semaphore-bounded,
+> licensed by the Part A associativity law.
 
 **2. `RiskResult` is always typed as `Leaf`.** `RiskResult.combine` [Scala]
 returns a `RiskResult` with `distributionType = LossDistributionType.Leaf`
@@ -1146,6 +1160,10 @@ pipeline. Semantic mismatch, no correctness impact.
 > Impact: None. Under DD-18 the cache stores identity-free values, so no
 > declared subtype enters the cache at all. See
 > [RiskResult Type Hierarchy](#riskresult-type-hierarchy) for details.
+>
+> **Resolved 2026-07-17:** the resolver builds `RiskResultGroup.create` for
+> portfolios; `RiskResult.combine` and the `LossDistributionType` enum are
+> deleted. The mismatch no longer exists.
 
 **3. `nTrials` alignment enforced at combine time.** `RiskResult.combine`
 [Scala] calls `require(a.nTrials == b.nTrials)`. All leaves use the same
@@ -1155,6 +1173,11 @@ with old `nTrials` would cause a **runtime crash** during combine.
 
 > Impact: Reinforces the need to clear `ContentCache` on `SimulationConfig`
 > change — which is automatic on restart (in-memory cache).
+>
+> **Updated 2026-07-17:** `RiskResult.combine` is deleted; the alignment
+> invariant is now enforced by `TrialOutcomes.combine` /
+> `RiskResultGroup.create` (typed `Validation`, not `require`). The
+> restart-clears-cache point stands unchanged.
 
 **4. Provenance is always captured.** `simulateLeaf` [Scala] always records
 `NodeProvenance`. The `includeProvenance` parameter only controls whether
@@ -1282,7 +1305,12 @@ figures and the same provenance content). Both variants stop being sound the
 day portfolios gain simulation-relevant fields of their own (then C′ is the
 required shape).
 
-**Risk-level simulation parallelism.** `RiskResultResolverLive` [Scala]
+**Risk-level simulation parallelism — ✅ LANDED 2026-07-17 (monoid plan C.1,
+with Part A).** `RiskResultResolverLive` now simulates portfolio children with
+`ZIO.foreachPar` under a concurrency semaphore, licensed by the Part A
+associativity law. The original analysis below is kept as the rationale.
+
+*(As originally written:)* `RiskResultResolverLive` [Scala]
 simulates portfolio children sequentially (`ZIO.foreach`). Only trial-level
 parallelism exists (inside `Simulator.performTrials`). A `Simulator.simulate`
 method with `ZIO.collectAllPar` exists but is not wired into the
@@ -1438,9 +1466,11 @@ subclass constructor args, all inside `LossDistribution.scala`. Nothing reads
 the field, so it misleads no caller. (Beware the name collision when
 grepping: `RiskLeaf.distributionType` is an unrelated `String` field holding
 `"lognormal"`/`"expert"`.) Its pickup checklist files it under "Resolved — no
-action needed: confirmed dead code, safe to delete." It has **not** been
-deleted — deletion was gated behind the plan's Option 1 vs Option 2 decision,
-taken 2026-07-16 (Option 1); it proceeds with that plan's A.6 gated sequence.
+action needed: confirmed dead code, safe to delete." **Deleted 2026-07-17** —
+the plan's A.6 gated sequence ran to completion (Option 1, decided 2026-07-16):
+the enum, `RiskResult.combine`, `withNodeId`, and the false monoid instances
+are gone from the codebase. This whole section describes the pre-Part-A shape
+and is retained as the record of why.
 Cache entries shown as `RiskResult(...)` in this section also predate
 DD-16/DD-18 — cached values are identity-free.
 
@@ -1779,7 +1809,16 @@ protects the current PUT path now and does not conflict with this design.
   (DD-10) join the sealed `AppError` hierarchy; inexhaustive matches are
   compile **errors**, so every existing match site must be updated — budget
   for that sweep.
-- **Error-type collision — settle before Phase A, not during it.** DD-10 names
+- **Error-type collision — ✅ DECIDED 2026-07-18 → option (a), implemented same
+  day.** `MergeConflict` is reused; `MergeConflictError` is dropped from DD-10.
+  The ADR-018 cost noted under (a) was eliminated in the same change:
+  `MergeConflict.branch` is now `BranchRef`, and the lossy decode is fixed —
+  `makeMergeConflictResponse` emits a second `ErrorDetail` (field
+  `"branchName"`) carrying the raw branch reference, which `decode`
+  reconstructs via `BranchRef.fromString` (degrading to `DataConflict` on a
+  malformed wire). Codec round trip is value-lossless and tested. Original
+  decision text below kept for the record.
+- **Error-type collision — original write-up.** DD-10 names
   `MergeConflictError`, but `MergeConflict(branch: String, details: String)`
   **already exists** as a `SimError` subtype in `AppError.scala`, with a 409
   `ErrorResponse` mapping (`makeMergeConflictResponse`, domain `"scenarios"`)

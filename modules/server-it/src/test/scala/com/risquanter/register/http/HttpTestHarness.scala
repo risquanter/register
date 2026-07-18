@@ -11,7 +11,6 @@ import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.configs.*
-import com.risquanter.register.http.cache.CacheController
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.support.TestSafeUrls
@@ -115,9 +114,9 @@ object HttpTestHarness:
       port: Int,
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       cfg: HarnessConfig
-  ): ZLayer[Any, Throwable, Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & DistributionPreviewController] =
+  ): ZLayer[Any, Throwable, Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController] =
     ZLayer.make[
-      Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & CacheController & QueryController & DistributionPreviewController
+      Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController
     ](
       ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port, healthPort = port + 1)),
       ZLayer.succeed(cfg.simulation),
@@ -146,7 +145,6 @@ object HttpTestHarness:
       ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
       ZLayer.fromZIO(WorkspaceAnalysisController.makeZIO),
       SSEController.layer,
-      CacheController.layer,
       QueryServiceLive.layer,
       ZLayer.fromZIO(QueryController.makeZIO),
       DistributionPreviewService.layer,
