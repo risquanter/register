@@ -9,16 +9,21 @@
 ## 1. BranchRef
 
 `BranchRef` is a nominal wrapper (per ADR-018) around the Irmin branch name
-string. It does not yet exist in the codebase; it is a new type to be
-introduced.
+string. It exists in `OpaqueTypes.scala` (Iron-refined `BranchRefStr`) and
+since Phase A (2026-07-18) is threaded through `IrminClient` and the
+repositories as the optional `branch` parameter, and carried by
+`MergeConflict`.
 
 ```scala
-case class BranchRef(value: String)
+case class BranchRef(toBranchRef: BranchRefStr)   // BranchRefStr: Iron-refined
 ```
 
 It is **not** a generated ID like `TreeId` or `NodeId` (which are ULIDs). It
 is the human-readable Irmin branch name — a string like `"main"` or
-`"scenarios.ws123.01HXYZ.high-cyber"` (separator pinned to `.` 2026-07-18 — Irmin rejects `/` in branch names).
+`"scenarios.01j8zq3fkwp2x9m4v7rtbnd6ea.high-cyber"` (separator pinned to `.`
+2026-07-18 — Irmin rejects `/` in branch names; segments pinned to TWO by
+DD-5 2026-07-18: lowercased `WorkspaceId` ULID + name slug — the constraint
+change from three segments ships with Phase B).
 
 `BranchRef` identifies which line of history (which "version of reality") the
 system reads from and writes to.
@@ -43,6 +48,14 @@ User changes cyber probability to 0.6
 The active branch's HEAD pointer advances from the previous commit to
 `abc123`. Every edit, no matter how small, is immediately persisted as
 an immutable commit.
+
+> **Granularity update (DD-7, closed 2026-07-18):** today one user action
+> (one tree PUT) produces N commits — one per node write plus meta. DD-7
+> rewrites the repository write path to `set_tree`, so one user action = ONE
+> atomic commit (live-verified: multi-key upsert+delete in a single commit,
+> milestone-2b A9 fact 4). The example message above shows the current
+> per-node format; after the cutover the commit message describes the whole
+> action.
 
 ---
 
@@ -69,6 +82,12 @@ edit.
 Creating a scenario means creating a new Irmin branch that initially points
 to the same commit as `main`. Subsequent edits on the scenario branch diverge
 from `main`, while `main` remains unaffected.
+
+> **Creation mechanics (A9 fact 3, live-verified 2026-07-18):** the fork MUST
+> be explicit — `test_and_set_branch(branch: <ref>, test: null, set: <main
+> head>)`. A branch implicitly created by a first `set(branch: …)` starts
+> **empty**, not as a fork of main. The same CAS primitive deletes a branch
+> (`set: null`) and rejects name collisions (create fails if the ref exists).
 
 ```
 Step 1 — Create scenario (fork):

@@ -2,23 +2,26 @@
 
 > Empirical validation: `dev/test-irmin-hashes.sh` (9/9 tests passed).
 >
-> **Status (audited 2026-07-12): designed and validated, NOT implemented.**
-> None of the Phase A–E deliverables exist in code (`ContentHash`,
-> `ContentCache`, `ContentHashIndex`, `CacheScope`, eviction strategies,
-> branch-parameterized `IrminClient` operations, `Scenario*`/`History*`
-> services). `TreeCacheManager` is still the live NodeId-keyed cache. The
-> only Phase A item present is `BranchRef`, used solely as an Irmin config
-> value; `IrminQueries.getValueFromBranch` exists but has no caller.
+> **Status (updated 2026-07-18): Phase A IMPLEMENTED; all decisions for
+> Phases B–E closed except DD-9 (postponed to Phase B start) and the
+> in-memory story (A8 item 3).** The content-addressed cache, branch-
+> parameterized `IrminClient` (+6 branch ops), repository branch threading,
+> SSE-only `InvalidationHandler`, and all deletions (TreeCacheManager,
+> RiskResultCache, invalidate endpoint) are live — all four test gates
+> green; TODO item 17 RESOLVED. `Scenario*`/`History*` services are Phase
+> B/E work. The paragraph below and the audit sections record the
+> pre-implementation state and the rationale trail.
 >
-> **This design is the required substrate for scenario branching.** The
-> Phase B–E features (scenarios, comparison, merge, time travel) cannot be
-> built on the current NodeId-keyed cache — see Problem Statement: branch
-> switching would silently return wrong results. See the
-> [Review Addendum (2026-07-12)](#review-addendum-2026-07-12) for audit
-> insights, a recommended Phase A lean-down, implementation aid, and launch
-> prerequisites. Related: `docs/dev/TODO.md` item 17 (the cache-staleness
-> bug class this design eliminates — still open) and item 12 (seed identity —
-> **CLOSED 2026-07-16**, implemented per `docs/dev/PLAN-SEED-IDENTITY.md`).
+> *(Original status, audited 2026-07-12, retained as record:)* designed and
+> validated, NOT implemented; `TreeCacheManager` still the live NodeId-keyed
+> cache. **This design is the required substrate for scenario branching** —
+> the Phase B–E features cannot be built on a NodeId-keyed cache (see
+> Problem Statement: branch switching would silently return wrong results).
+> See the [Review Addendum (2026-07-12)](#review-addendum-2026-07-12) for
+> audit insights, the Phase A lean-down, implementation aid, and launch
+> prerequisites. Related: `docs/dev/TODO.md` item 17 (**RESOLVED 2026-07-18**
+> with Phase A) and item 12 (seed identity — **CLOSED 2026-07-16**,
+> implemented per `docs/dev/PLAN-SEED-IDENTITY.md`).
 >
 > **Consistency sweep 2026-07-16 (item 12 closed):** seeds no longer derive
 > from ULIDs — `seedVarId` sits inside the stored leaf JSON, but
@@ -1006,7 +1009,7 @@ key to `(ContentHash, configHash)`.
 | DD-16 | Leaf hash preimage | **Simulation-relevant projection, not raw stored bytes** (closed 2026-07-16) | The key hashes exactly what determines the figures: `seedVarId` + probability + distribution params, via a dedicated spec type with a byte-stability snapshot test. `name` and ULID are excluded — renames preserve the cache and cross-node hits become possible. **Corollary: cached values are identity-free** — the cache stores content only (trial map + stream provenance), never a node ID; the resolver attaches the *requested* node's ID when building the response. (`RiskResult` as it exists bundles `nodeId` with the outcomes and cannot be the cache value type unchanged; the replacement value type was fixed by DD-18 on 2026-07-16.) Supersedes DD-14's hash-the-returned-bytes rule; opened and closed 2026-07-16 after TODO item 12 removed the ULID→seed derivation. |
 | DD-17 | Cache scope vs `seedEntityId` | **One `ContentCache` per workspace** (closed 2026-07-16) | `seedEntityId` determines figures but lives in no node's bytes. Per-workspace cache instances make cross-workspace contamination structurally impossible; a global map keyed by (entity, hash) buys nothing — different entity ⇒ different figures ⇒ cross-workspace hits are impossible by design — while mixing tenants in one structure and complicating workspace reaping. Cache lifecycle = workspace lifecycle. |
 | DD-19 | Provenance content/identity representation | **(c)+(d) plus A′ — `riskId` deleted; provenance leaf-only** (closed 2026-07-18) | `NodeProvenance` loses `riskId` and becomes the content-only record itself (the DD-18 cache value embeds it directly — no second type). Attribution is structural: `provenances` moves off the sealed `LossDistribution` supertype to `RiskResult` only (A′, user refinement — the unattributed flat portfolio list becomes unrepresentable); portfolio provenance is read by walking `RiskResultGroup.children`, pairing `nodeId` with each record one level above any flattening (never by zipping parallel lists — flatMap multiplicities misalign). A provenance endpoint assembles `Map[NodeId, NodeProvenance]` at the resolver edge: one call, server-side join, the client never sees an unattributed list. Facts that decided it: `riskId` written once (`Simulator.scala:209`), zero production readers; Part A landed so `children` guarantees recovery. Consequences: `ProvenanceSpec` attribution assertions migrate to the structural walk; `PLAN-PROVENANCE-ENDPOINT` response shape revises to the attributed map; ADR-003 `NodeProvenance` sections rewrite; `collectProvenance` built with its first consumer. Falsifier: a consumer needing attribution where no result structure is reachable resurrects the self-attributing wrapper (candidate (a)). |
-| DD-21 | `BranchRef` separator vs Irmin's branch-name charset | **`.` separator — `scenarios.<a>.<b>.<c>`** (closed 2026-07-18 during Phase A implementation). Surfaced by the first-ever live branch-op integration tests: Irmin rejects `/` (and `~`) in branch names with HTTP 500 (verified against `local/irmin-prod:3.11`; `.`, `_`, `-`, alphanumerics accepted), so the pre-Phase-A `scenarios/a/b/c` constraint could never name a usable branch. User criterion: the ref is never a verbatim URL path segment per the plans (DD-8: header or session; today's only wire exposure is the `MergeConflict` error payload), so Irmin validity is the only wire contract — "it should be Irmin-like". Rejected: keeping the slash form with a boundary encoding layer (bijective but a permanent two-representation liability for a cosmetic gain). Segment *semantics* remain DD-5 (open). `BranchRefConstraint` in `OpaqueTypes.scala` is the source of truth; ADR-007 proposal/appendix updated. |
+| DD-21 | `BranchRef` separator vs Irmin's branch-name charset | **`.` separator — `scenarios.<a>.<b>.<c>`** (closed 2026-07-18 during Phase A implementation). Surfaced by the first-ever live branch-op integration tests: Irmin rejects `/` (and `~`) in branch names with HTTP 500 (verified against `local/irmin-prod:3.11`; `.`, `_`, `-`, alphanumerics accepted), so the pre-Phase-A `scenarios/a/b/c` constraint could never name a usable branch. User criterion: the ref is never a verbatim URL path segment per the plans (DD-8: header or session; today's only wire exposure is the `MergeConflict` error payload), so Irmin validity is the only wire contract — "it should be Irmin-like". Rejected: keeping the slash form with a boundary encoding layer (bijective but a permanent two-representation liability for a cosmetic gain). Segment *semantics* remain DD-5 (open). `BranchRefConstraint` in `OpaqueTypes.scala` is the source of truth; ADR-007 proposal/appendix updated. Segment semantics since closed by DD-5 (2026-07-18): TWO segments, `scenarios.<ws>.<name>` — the three-segment example here is historical. |
 | DD-20 | Fate of `invalidateWorkspaceCache` endpoint | **Retire in Phase A** (closed 2026-07-18, opened same day by the item-17 package-b decision). The endpoint (`POST …/invalidate/{nodeId}`, `WorkspaceTreeEndpoints.scala:57`, + `TreeCacheInvalidationResponse`) is the item-17 interim workaround and the last public surface over `TreeCacheManager`'s `(TreeId, NodeId)` view; under `ContentCache` the operation is undefinable (nothing keyed by NodeId). Zero consumers beyond the controller wiring (no SPA/test/script/docs callers, verified 2026-07-18). Sequencing: Phase A ships in one run and there are no existing clients, so no deprecation step — the endpoint dies in the same change that retires `TreeCacheManager`. No-op-keep (b) rejected: nothing to keep compatibility for, and a 200-answering no-op would mislead exactly the operator probing for staleness. Mirrors the CacheController precedent (48caa83). |
 | DD-8 | HTTP endpoint design — branch state transport | **Per-request header (`X-Active-Branch`), absent = main** (closed 2026-07-18) | The server stack is per-request and stateless end to end: every repository method already takes `branch: Option[BranchRef]` per call (Phase A), auth is per-request workspace-key verification, and no session store exists anywhere in `modules/server`. A header is the wire-level continuation of that design; a server session would be new stateful infrastructure whose main deliverable is the two-tab bug (tab 1's switch silently redirecting tab 2's reads). Under the header model each tab carries its own branch — two-tab correctness is structural, not managed. Header decodes through the `BranchRef` smart constructor at the Tapir boundary (invalid → 400; validate-once rule). `BranchRef`'s charset is header-safe ASCII, no encoding layer. Residual (not part of this decision): `SSEHub` is `TreeId`-keyed and branch-unaware — branch-scoped SSE is a Phase B design point either way. Falsifier recorded: server-initiated work needing a user's "current" branch without a triggering request would reopen a limited session form. |
 | DD-7 | HistoryService API — granularity + revert | **One history entry = one user action, via write-side batching; revert = forward commit** (closed 2026-07-18) | The write path is rewritten so `create`/`update`/`delete` each produce ONE Irmin commit using `set_tree` (subtree-replace semantics: unlisted keys deleted; multi-key upsert+delete atomic — live-verified, A9 fact 4). Irmin's commit log then IS the user's history: no message parsing, no grouping code, and the pre-existing write-atomicity defect (crash mid-save leaves a half-written tree) disappears in the same change. The txn-token read-side grouping (Alternative A) is eliminated by the probe — the token stays as an unread message tag; pre-cutover multi-commit history displays as-is with a legacy label if any store's history must survive. Revert = a NEW commit restoring the chosen earlier state (mistake and undo both visible, redo possible, `lca`/merge bases of forked branches intact); history rewrite rejected on the merge-base mechanism. Falsifier on the vehicle only: a `set_tree` payload limit for very large trees would force Alternative A back — one probe at implementation time. |
@@ -1050,9 +1053,10 @@ MUST-FIX (`code-quality-review`). Co-locate with the existing wrappers in
 `OpaqueTypes.scala` (§11 Co-location).
 
 ```scala
-// ALREADY EXISTS — OpaqueTypes.scala:327 (drifted from :235 when the item-12
-// seed types landed above it). Do not redefine; it is Iron-refined
-// today and used as an IrminConfig value (no other consumer yet).
+// ALREADY EXISTS — OpaqueTypes.scala. Since Phase A (2026-07-18) it is
+// threaded through IrminClient/repositories as the optional branch param
+// and carried by MergeConflict. Constraint changes 3 → 2 segments with
+// Phase B (DD-5).
 case class BranchRef(toBranchRef: BranchRefStr)              // Irmin branch name
 
 // NEW. DD-14 → Option B ⇒ SHA-256 only ⇒ uniform 64 hex chars, so the
@@ -1111,15 +1115,15 @@ Reintroduce only alongside a `getContents` caller, if one ever appears (DD-2).
 
 | Component | Layer | Change |
 |-----------|-------|--------|
-| `IrminClient` | Scala→Irmin | Add optional `branch` param to `get`/`set`/`remove`/`list`. Add `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca`. (`getContents` dropped — DD-14 → Option B.) |
+| `IrminClient` | Scala→Irmin | ✅ Phase A: optional `branch` param on `get`/`set`/`remove`/`list`; `getBranch`, `mergeBranch`, `revert`, `getCommit`, `getHistory`, `lca`. (`getContents` dropped — DD-14 → Option B.) **Phase B adds** (per DD-5/DD-7 + A9): `createBranchAt`/`deleteBranch` (`test_and_set_branch` CAS), branch listing, `setTree` (atomic whole-subtree write for DD-7 batching). |
 | `IrminQueries` | Scala | New GraphQL query strings for `branch`, `merge_with_branch`, `revert`, `commit`, `last_modified`, `lcas`. (`get_contents` dropped — DD-14 → Option B.) Note `getValueFromBranch` already exists here with no caller — the branch-parameterised `get` should subsume it rather than sit alongside it. |
-| `RiskTreeRepositoryIrmin` | Scala→Irmin | Thread `branch` param. Use the existing `get`; pass the returned JSON to `ContentHashIndex.build`, which hashes it (DD-14 → Option B). No read-path type change. |
+| `RiskTreeRepositoryIrmin` | Scala→Irmin | ✅ Phase A: `branch` param threaded through all five methods. **DD-7 (closed 2026-07-18) rewrites the write path**: `create`/`update`/`delete` become one `set_tree` commit each (atomic; subtree-replace covers node deletions) — scheduling decided at Phase B kickoff, required by Phase E. |
 | `ContentCache` (new) | Scala | `Ref[Map[ContentHash, <DD-18 value>]]` with `EvictionStrategy`. Replaces `RiskResultCache`. Value type decided (DD-18): a named case class of `TrialOutcomes` + a content-only provenance record — not `RiskResult`, which bundles `nodeId` (and provenance `riskId`) with the outcomes. Identity is attached by the resolver at the edge; the provenance record is the content-only `NodeProvenance` (DD-19, closed 2026-07-18 — `riskId` deleted). |
 | `ContentHashIndex` (new) | Scala | At tree load: leaf hashes = `sha256(json bytes returned by get)`, portfolio Merkle hashes computed bottom-up (DD-14 → Option B). Pure function, unit-testable without Irmin. Returns `Map[NodeId, ContentHash]`. |
 | `CacheScope` (new) | Scala | Abstraction over cache resolution — **one instance per workspace (DD-17), isolating `seedEntityId`**. `RiskResultResolver` calls `CacheScope` instead of `TreeCacheManager`. Cache values are identity-free (DD-16); the resolver attaches the requested node's ID when building the response. |
 | `TreeCacheManager` | Scala | **Retired — deleted, not rewritten** (with `RiskResultCache`). Replaced by `CacheScope` + `ContentCache`. Consumers: `RiskResultResolverLive` rewires to `CacheScope`; `InvalidationHandler` keeps only its SSE half; `CacheController` — see its row. What the old design has that the new one drops: (1) portfolio result caching — decided away, DD-15 → B, post-landing follow-up; (2) explicit O(depth) ancestor-path invalidation with immediate memory reclamation — unnecessary under content addressing (a changed leaf *is* a different key; stale entries become orphans for the `EvictionStrategy`), and it is the mechanism behind the TODO item 17 bug class; (3) per-tree cache deletion on tree delete — lifecycle moves to workspace level (DD-17); a deleted tree's entries linger as orphans until eviction. |
 | `CacheController` / `CacheEndpoints` | Scala | **✅ DECIDED 2026-07-18 → retired, implemented same day.** The four admin endpoints (`cacheStats`, `cacheNodes`, `cacheClear`, `cacheClearAll`) had zero consumers (server-module-only Tapir definitions — no SPA client, no test or script callers) and their `(TreeId, NodeId)` semantics do not survive `ContentCache` (per-tree clear is not even well-defined for shared content-addressed entries). Both files deleted, wiring removed from `HttpApi`/`Application`. Workspace-scoped `stats`/`clear` can be reintroduced when a concrete caller appears (DD-2 pattern for `getContents`). Residual: `TreeCacheManager.clearAll` and `onTreeStructureChanged` now have no production caller (spec coverage only) — they retire with `TreeCacheManager` itself in Phase A. Original gap analysis: four admin endpoints were built on `TreeCacheManager`'s `(TreeId, NodeId)` view; under `ContentCache`, "which nodes of tree X are cached" is answerable only by joining the current `ContentHashIndex` with the cache keys. |
-| `InvalidationHandler` | Scala | Simplified — cache misses driven by hash changes, not explicit `ancestorPath` invalidation. Structural mutation logic still needed for SSE notifications. **In the rewrite, `computeAffectedNodes` must union reparent + content-change contributions additively** — its current exclusive `if/else if` is TODO item 17's bug; with the tactical fix skipped (2026-07-18, package b) this rewrite is where it gets corrected. `MutationInvalidationSpec` retires with `TreeCacheManager`; the e2e item-17 regression test (Phase Outline) replaces it. |
+| `InvalidationHandler` | Scala | ✅ Phase A: SSE-only rewrite landed — `computeAffectedNodes` unions reparent + content-change contributions **additively** (item-17 bug corrected; content comparison via deterministic JSON encoding, not case-class `==` on Array fields), `handleNodeChange` deleted, `MutationInvalidationSpec` retired, e2e item-17 regression test + additive-union tests in place. Phase B residual: `SSEHub` is `TreeId`-keyed and branch-unaware — a scenario edit notifies same-tree subscribers on other branches (harmless over-notification: their re-fetch returns unchanged figures); branch-scoped events are a Phase B/C design point. |
 
 ---
 
@@ -1143,6 +1147,11 @@ Review of the simulation/aggregation pipeline against design assumptions.
 > merge, typed `Validation` alignment guard) instead of
 > `reduce(RiskResult.combine)` + `withNodeId`. The assumptions themselves (cheap
 > aggregation, child-only dependence, ancestor-path invalidation) still hold.
+>
+> **2026-07-18 — Phase A landed; row 3 describes retired code.** Ancestor-path
+> invalidation is gone with `TreeCacheManager`: under `ContentCache` there is
+> no invalidation operation at all — an edited leaf hashes to a new key and
+> misses; ancestors re-aggregate on read (portfolios are never cached, DD-15).
 
 ### Deviations and nuances
 
@@ -1324,9 +1333,31 @@ Phase A: Foundation
     nothing answering "invalidate" may survive               [review]
 
 Phase B: Scenario CRUD + Minimal UI
-  - ScenarioService (create/list/delete/switch)           [Scala]
-  - BranchBar UI component                                [Scala.js/Laminar]
+  (updated 2026-07-18 to the closed DD-5/7/8/11 — see Closed table + A9)
+  - BranchRefConstraint: 3 → 2 segments (scenarios.<ws>.<name>);
+    ScenarioName Iron type (^[a-zA-Z0-9 _-]+$, fold+map to slug) [Scala]
+  - IrminClient: createBranchAt / deleteBranch (both =
+    test_and_set_branch CAS, A9 fact 2); expose branch listing  [Scala→Irmin]
+  - ScenarioService: create (explicit fork at main head — first
+    write does NOT fork, A9 fact 3), list (prefix filter),
+    rename (recreate at head + CAS-delete old), delete (CAS)   [Scala]
+  - Tapir: scenario endpoints in modules/common; X-Active-Branch
+    optional header input on branch-aware endpoints (DD-8),
+    decoded via BranchRef smart constructor; Checked-permission
+    wiring per ADR-024/030                                     [Scala]
+  - Invariant test: creation accepts a slug, never a
+    caller-supplied full BranchRef (DD-11)                     [Scala]
+  - In-memory backend: execute the A8-item-3 decision
+    (recommended: feature-flag off, typed NOT_SUPPORTED)       [Scala]
+  - Workspace reaper: delete scenarios.<ws>.* branches on reap  [Scala]
+  - BranchBar UI component + per-tab branch state (DD-9:
+    confirm placement against sketch at phase start)     [Scala.js/Laminar]
   - End-to-end: create scenario, switch, edit, switch back
+  - DD-7 write-side batching (set_tree, one commit per user
+    action) — scheduling decision at Phase B kickoff: doing it
+    early limits legacy multi-commit history and fixes the
+    non-atomic-save defect now; strictly required only by
+    Phase E                                                    [Scala]
 
 Phase C: Comparison
   - ScenarioDiff service (hash-based diff, UC5)           [Scala]
@@ -1870,10 +1901,10 @@ SSE-half rewrite of `computeAffectedNodes`. Full record: TODO item 17.
 - **Endpoints:** define scenario/history endpoints once in `modules/common`
   as Tapir endpoints (JVM server routes + SPA sttp clients derive from the
   same definition, per the existing pattern).
-- **Error types:** `BranchNotFound`, `MergeConflictError`, `CommitNotFound`
-  (DD-10) join the sealed `AppError` hierarchy; inexhaustive matches are
-  compile **errors**, so every existing match site must be updated — budget
-  for that sweep.
+- **Error types:** `BranchNotFound`, `CommitNotFound` (DD-10; merge
+  conflicts reuse the upgraded `MergeConflict` — next bullet) join the
+  sealed `AppError` hierarchy; inexhaustive matches are compile **errors**,
+  so every existing match site must be updated — budget for that sweep.
 - **Error-type collision — ✅ DECIDED 2026-07-18 → option (a), implemented same
   day.** `MergeConflict` is reused; `MergeConflictError` is dropped from DD-10.
   The ADR-018 cost noted under (a) was eliminated in the same change:
@@ -1904,10 +1935,12 @@ SSE-half rewrite of `computeAffectedNodes`. Full record: TODO item 17.
   it before Phase A avoids discovering it mid-sweep.
 - **Auth:** this design predates ADR-024/ADR-030. Scenario and history
   endpoints need the same `Checked`-permission wiring as existing tree
-  endpoints, and DD-11 (workspace ↔ scenario ownership) is now partly an
-  authorization-model question, not just a naming convention.
+  endpoints. (The authorization half of DD-11 was closed 2026-07-18 with
+  DD-5: the workspace segment of the branch name is compared against the
+  already-authenticated workspace — a string check, no lookup.)
 - **New types** follow ADR-001/ADR-018: Iron refinements + nominal wrappers
-  (`ContentHash`, `CommitHash`, `ScenarioId` as listed under New Types).
+  (`ContentHash`, `CommitHash` as listed under New Types; `ScenarioId`
+  deleted from the plan by DD-5).
 - **Workspace reaper:** cascade deletion currently covers trees; scenario
   branches of a reaped workspace are new state that must be cleaned too.
 
