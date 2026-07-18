@@ -6,33 +6,38 @@ import zio.telemetry.opentelemetry.metrics.{Meter, Histogram, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.{LossDistribution, RiskResult, RiskResultGroup, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
-import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, SeedEntityId}
+import com.risquanter.register.domain.data.{LossDistribution, RiskResult, RiskResultGroup, RiskNode, RiskLeaf, RiskPortfolio, RiskTree, TrialOutcomes}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
 
 /**
-  * Live implementation of RiskResultResolver (ADR-015).
+  * Live implementation of RiskResultResolver (ADR-015), content-addressed
+  * (milestone 2b Phase A).
   *
-  * Dependencies:
-  * - TreeCacheManager: Per-tree cache management
-  * - SimulationConfig: Simulation parameters (nTrials, parallelism)
-  * - Tracing: OpenTelemetry tracing for observability
-  * - Meter: Metrics instrumentation
+  * Resolution pipeline per request:
+  * 1. `ContentHashIndex.build(tree)` — pure, O(n): leaf keys hash the
+  *    DD-16 projection; portfolio Merkle hashes ride along for diffing.
+  * 2. Leaf: look up `ContentCache` by content hash — hit returns the cached
+  *    identity-free content with the requested node's ID attached at this
+  *    edge (DD-16/DD-18); miss simulates and stores.
+  * 3. Portfolio: never cached (DD-15 → B) — child results are aggregated
+  *    with `RiskResultGroup.create` on every read.
   *
-  * TreeIndex is obtained from RiskTree parameter per operation (tree-scoped design).
-  * Cache is obtained from TreeCacheManager using tree.id.
-  * Simulation parameters are read from config at construction time.
-  * Seeds are hardwired for now (TODO: add to config when reproducibility API is defined).
+  * There is no invalidation path: an edited leaf hashes to a new key and
+  * simply misses; the old entry becomes an unreachable orphan for the
+  * `EvictionStrategy`.
+  *
+  * Cache instances are per-workspace via `CacheScope` (DD-17), keyed by the
+  * workspace's `seedEntityId`.
   *
   * Telemetry (ADR-002):
-  * - Spans: ensureCached with cache_hit attribute, simulateSubtree on miss
-  * - Metrics: simulation duration histogram, trials counter
+  * - Spans: ensureCached; simulateLeaf on miss (with duration + trials metrics)
+  * - Cache stats (entries/hits/misses) logged at debug after each resolution
   */
 final case class RiskResultResolverLive(
-    cacheManager: TreeCacheManager,
+    cacheScope: CacheScope,
     config: SimulationConfig,
     tracing: Tracing,
     simulationDuration: Histogram[Double],
@@ -51,88 +56,51 @@ final case class RiskResultResolverLive(
   override def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[LossDistribution] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
-        _         <- tracing.setAttribute("tree_id", tree.id.value)
-        _         <- tracing.setAttribute("node_id", nodeId.value)
-        _         <- tracing.setAttribute("include_provenance", includeProvenance)
-        cache     <- cacheManager.cacheFor(tree.id)
-        resultOpt <- cache.get(nodeId)
-        result <- resultOpt match {
-          case Some(cached) =>
-            tracing.setAttribute("cache_hit", true) *> ZIO.succeed(cached)
-          case None =>
-            tracing.setAttribute("cache_hit", false) *> simulateSubtree(tree, nodeId, seedEntityId, includeProvenance)
-        }
+        _      <- tracing.setAttribute("tree_id", tree.id.value)
+        _      <- tracing.setAttribute("node_id", nodeId.value)
+        _      <- tracing.setAttribute("include_provenance", includeProvenance)
+        cache  <- cacheScope.cacheFor(seedEntityId)
+        hashes  = ContentHashIndex.build(tree)
+        node   <- ZIO.fromOption(tree.index.nodes.get(nodeId))
+          .orElseFail(ValidationFailed(List(ValidationError(
+            field = "nodeId",
+            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+            message = s"Node not found in tree index: $nodeId"
+          ))))
+        result <- resolveNode(tree, hashes, cache, node, seedEntityId)
+        stats  <- cache.stats
+        _      <- ZIO.logDebug(s"ContentCache stats: entries=${stats.entries}, hits=${stats.hits}, misses=${stats.misses}, evicted=${stats.evictedTotal}")
       } yield result
     }
 
   override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, LossDistribution]] =
     ZIO.foreach(nodeIds.toList)(id => ensureCached(tree, id, seedEntityId, includeProvenance).map(id -> _)).map(_.toMap)
 
-  /**
-    * Simulate subtree rooted at nodeId, caching all results.
-    * Wraps simulation in span with timing metrics.
-    */
-  private def simulateSubtree(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[LossDistribution] =
-    tracing.span("simulateSubtree", SpanKind.INTERNAL) {
-      for {
-        _ <- tracing.setAttribute("node_id", nodeId.value)
-        _ <- tracing.setAttribute("n_trials", nTrials.toLong)
-        _ <- tracing.setAttribute("parallelism", parallelism.toLong)
-        _ <- tracing.setAttribute("include_provenance", includeProvenance)
-        _ <- tracing.addEvent("simulation_started")
-        
-        startTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
-        
-        node <- ZIO.fromOption(tree.index.nodes.get(nodeId))
-          .orElseFail(ValidationFailed(List(ValidationError(
-            field = "nodeId",
-            code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-            message = s"Node not found in tree index: $nodeId"
-          ))))
-        
-        cache  <- cacheManager.cacheFor(tree.id)
-        result <- simulateNode(tree, cache, node, seedEntityId, includeProvenance)
-        
-        endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
-        durationMs = endTime - startTime
-        
-        _ <- tracing.addEvent("simulation_completed")
-        _ <- recordSimulationMetrics(nodeId.value, nTrials, durationMs)
-      } yield result
-    }
-  
-  /** Record simulation performance metrics (ADR-002) */
-  private def recordSimulationMetrics(nodeName: String, nTrials: PositiveInt, durationMs: Long): UIO[Unit] = {
-    val attrs = Attributes(Attribute.string("node_name", nodeName))
-    simulationDuration.record(durationMs.toDouble, attrs) *>
-      trialsCounter.add(nTrials.toLong, attrs)
-  }
-
-  private def simulateNode(tree: RiskTree, cache: RiskResultCache, node: RiskNode, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[LossDistribution] =
+  private def resolveNode(
+    tree: RiskTree,
+    hashes: Map[NodeId, ContentHash],
+    cache: ContentCache,
+    node: RiskNode,
+    seedEntityId: SeedEntityId.SeedEntityId
+  ): Task[LossDistribution] =
     node match {
       case leaf: RiskLeaf =>
-        simulateLeaf(cache, leaf, seedEntityId, includeProvenance)
+        resolveLeaf(hashes, cache, leaf, seedEntityId)
 
       case portfolio: RiskPortfolio =>
-        for
+        for {
           // Parallel child resolution: children root disjoint subtrees (single-parent
           // tree), and TrialOutcomes aggregation is associative and commutative, so
           // evaluation order cannot change the aggregated figures. foreachPar
           // preserves list order, keeping provenance order identical to sequential.
           childResults <- ZIO.foreachPar(portfolio.childIds.toList) { childId =>
-            // Look up child node from index, then check cache or simulate
-            cache.get(childId).flatMap {
-              case Some(cached) => ZIO.succeed(cached)
-              case None         =>
-                // Look up child node from tree index
-                ZIO.fromOption(tree.index.nodes.get(childId))
-                  .orElseFail(ValidationFailed(List(ValidationError(
-                    field = s"riskPortfolio.${portfolio.id}.childIds",
-                    code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-                    message = s"Child node not found in tree index: $childId"
-                  ))))
-                  .flatMap(childNode => simulateNode(tree, cache, childNode, seedEntityId, includeProvenance))
-            }
+            ZIO.fromOption(tree.index.nodes.get(childId))
+              .orElseFail(ValidationFailed(List(ValidationError(
+                field = s"riskPortfolio.${portfolio.id}.childIds",
+                code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+                message = s"Child node not found in tree index: $childId"
+              ))))
+              .flatMap(childNode => resolveNode(tree, hashes, cache, childNode, seedEntityId))
           }
           _ <- ZIO.when(childResults.isEmpty) {
             ZIO.fail(ValidationFailed(List(ValidationError(
@@ -141,21 +109,66 @@ final case class RiskResultResolverLive(
               message = s"RiskPortfolio '${portfolio.id}' has no children"
             ))))
           }
+          // Portfolios are never cached (DD-15 → B): re-aggregate every read
           combined <- ZIO.fromEither(RiskResultGroup.create(portfolio.id, childResults*).toEither)
             .mapError(errors => ValidationFailed(errors.toList))
-          _ <- cache.put(portfolio.id, combined)
-        yield combined
+        } yield combined
     }
 
-  private def simulateLeaf(cache: RiskResultCache, leaf: RiskLeaf, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean): Task[RiskResult] =
-    for
-      // Always capture provenance (filter at service layer)
-      // Rationale: Maintain chain of truth - provenance always in cache
-      (sampler, provenance)  <- Simulator.createSamplerFromLeaf(leaf, seedEntityId, seed3, seed4)
-      trials <- Simulator.performTrials(sampler, nTrials, parallelism)
-      result = RiskResult(leaf.id, trials, List(provenance))
-      _ <- cache.put(leaf.id, result)
-    yield result
+  private def resolveLeaf(
+    hashes: Map[NodeId, ContentHash],
+    cache: ContentCache,
+    leaf: RiskLeaf,
+    seedEntityId: SeedEntityId.SeedEntityId
+  ): Task[RiskResult] =
+    for {
+      key <- ZIO.fromOption(hashes.get(leaf.id))
+        .orElseFail(ValidationFailed(List(ValidationError(
+          field = s"riskLeaf.${leaf.id}",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = s"Leaf not reachable from tree root (no content hash): ${leaf.id}"
+        ))))
+      cached <- cache.get(key)
+      result <- cached match {
+        case Some(content) =>
+          // Hit: identity attached at the edge — the entry may have been
+          // written for any content-identical leaf (DD-16/DD-18)
+          ZIO.succeed(RiskResult.fromTrialOutcomes(leaf.id, content.outcomes, List(content.provenance)))
+        case None =>
+          simulateLeaf(cache, key, leaf, seedEntityId)
+      }
+    } yield result
+
+  private def simulateLeaf(
+    cache: ContentCache,
+    key: ContentHash,
+    leaf: RiskLeaf,
+    seedEntityId: SeedEntityId.SeedEntityId
+  ): Task[RiskResult] =
+    tracing.span("simulateLeaf", SpanKind.INTERNAL) {
+      for {
+        _         <- tracing.setAttribute("node_id", leaf.id.value)
+        _         <- tracing.setAttribute("n_trials", nTrials.toLong)
+        startTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+
+        // Always capture provenance (filter at service layer)
+        // Rationale: Maintain chain of truth - provenance always in cache
+        (sampler, provenance) <- Simulator.createSamplerFromLeaf(leaf, seedEntityId, seed3, seed4)
+        trials                <- Simulator.performTrials(sampler, nTrials, parallelism)
+        outcomes               = TrialOutcomes(nTrials, trials)
+        _                     <- cache.put(key, LeafSimResult(outcomes, provenance))
+
+        endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
+        _       <- recordSimulationMetrics(leaf.id.value, nTrials, endTime - startTime)
+      } yield RiskResult.fromTrialOutcomes(leaf.id, outcomes, List(provenance))
+    }
+
+  /** Record simulation performance metrics (ADR-002) */
+  private def recordSimulationMetrics(nodeName: String, nTrials: PositiveInt, durationMs: Long): UIO[Unit] = {
+    val attrs = Attributes(Attribute.string("node_name", nodeName))
+    simulationDuration.record(durationMs.toDouble, attrs) *>
+      trialsCounter.add(nTrials.toLong, attrs)
+  }
 }
 
 object RiskResultResolverLive {
@@ -165,7 +178,7 @@ object RiskResultResolverLive {
     val simulationDuration = "risk_result.simulation.duration_ms"
     val simulationDurationUnit = "ms"
     val simulationDurationDesc = "Duration of node simulation in milliseconds"
-    
+
     val trialsCounter = "risk_result.simulation.trials"
     val trialsUnit = "1"
     val trialsDesc = "Total number of simulation trials executed"
@@ -173,16 +186,16 @@ object RiskResultResolverLive {
 
   /**
     * Create ZLayer for RiskResultResolver with telemetry.
-    * Uses TreeCacheManager for per-tree cache access.
+    * Uses CacheScope for per-workspace content-addressed cache access (DD-17).
     */
-  val layer: ZLayer[TreeCacheManager & SimulationConfig & Tracing & Meter, Throwable, RiskResultResolver] =
+  val layer: ZLayer[CacheScope & SimulationConfig & Tracing & Meter, Throwable, RiskResultResolver] =
     ZLayer.fromZIO {
-      for
-        cacheManager <- ZIO.service[TreeCacheManager]
-        config       <- ZIO.service[SimulationConfig]
-        tracing      <- ZIO.service[Tracing]
-        meter        <- ZIO.service[Meter]
-        
+      for {
+        cacheScope <- ZIO.service[CacheScope]
+        config     <- ZIO.service[SimulationConfig]
+        tracing    <- ZIO.service[Tracing]
+        meter      <- ZIO.service[Meter]
+
         // Create metric instruments
         simDuration <- meter.histogram(
           MetricNames.simulationDuration,
@@ -194,6 +207,6 @@ object RiskResultResolverLive {
           Some(MetricNames.trialsUnit),
           Some(MetricNames.trialsDesc)
         )
-      yield RiskResultResolverLive(cacheManager, config, tracing, simDuration, trials)
+      } yield RiskResultResolverLive(cacheScope, config, tracing, simDuration, trials)
     }
 }

@@ -4,16 +4,16 @@ import zio.*
 import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
-import com.risquanter.register.http.endpoints.{InvalidationResponse, WorkspaceTreeEndpoints}
+import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.services.RiskTreeService
-import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.WorkspaceStore
-import com.risquanter.register.domain.errors.TreeNotInWorkspace
 
 /** Workspace tree controller.
   *
-  * Owns workspace-scoped CRUD and cache invalidation for trees.
+  * Owns workspace-scoped CRUD for trees. (The manual cache-invalidation
+  * endpoint was retired with the content-addressed cache — DD-20: under
+  * content addressing there is nothing NodeId-keyed to invalidate.)
   *
   * Authorization layers:
   *  - Layer 0: [[WorkspaceStore.resolveTreeWorkspace]] validates the workspace key
@@ -32,7 +32,6 @@ import com.risquanter.register.domain.errors.TreeNotInWorkspace
 class WorkspaceTreeController private (
   riskTreeService: RiskTreeService,
   workspaceStore: WorkspaceStore,
-  invalidationHandler: InvalidationHandler,
   authzService: AuthorizationService,
   userCtx: UserContextExtractor
 ) extends BaseController
@@ -80,35 +79,19 @@ class WorkspaceTreeController private (
       yield result).either
   }
 
-  val invalidateCache: ServerEndpoint[Any, Task] = invalidateWorkspaceCacheEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, nodeId) =>
-      (for
-        userId <- userCtx.requireAuthenticated(maybeUserId)
-        given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
-        ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        tree   <- riskTreeService.getById(ws.id, treeId).someOrFail(TreeNotInWorkspace(key, treeId))
-        r      <- invalidationHandler.handleNodeChange(nodeId, tree)
-      yield InvalidationResponse(
-        invalidatedNodes = r.invalidatedNodes.map(_.value.toString),
-        subscribersNotified = r.subscribersNotified
-      )).either
-  }
-
   override val routes: List[ServerEndpoint[Any, Task]] =
     List(
       getTreeById,
       getTreeStructure,
       updateTree,
-      deleteTree,
-      invalidateCache
+      deleteTree
     )
 
 object WorkspaceTreeController:
-  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & InvalidationHandler & AuthorizationService & UserContextExtractor, Nothing, WorkspaceTreeController] =
+  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, WorkspaceTreeController] =
     for
       riskTreeService      <- ZIO.service[RiskTreeService]
       workspaceStore       <- ZIO.service[WorkspaceStore]
-      invalidationHandler  <- ZIO.service[InvalidationHandler]
       authzService         <- ZIO.service[AuthorizationService]
       userCtx              <- ZIO.service[UserContextExtractor]
-    yield WorkspaceTreeController(riskTreeService, workspaceStore, invalidationHandler, authzService, userCtx)
+    yield WorkspaceTreeController(riskTreeService, workspaceStore, authzService, userCtx)

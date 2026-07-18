@@ -18,7 +18,7 @@ import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.pipeline.InvalidationHandler
-import com.risquanter.register.services.cache.{TreeCacheManager, RiskResultResolverLive}
+import com.risquanter.register.services.cache.{CacheScope, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive, WorkspaceStorePostgres, RateLimiterLive, WorkspaceReaper}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
@@ -211,11 +211,11 @@ object Application extends ZIOAppDefault {
       // Concurrency control - limits concurrent simulations (requires SimulationConfig)
       com.risquanter.register.services.SimulationSemaphore.layer,
       RepositoryConfig.layer >>> chooseRepo,
-      // Per-tree cache management (ADR-014)
-      TreeCacheManager.layer,
+      // Per-workspace content-addressed cache (milestone 2b Phase A, DD-17)
+      CacheScope.layer,
       RiskResultResolverLive.layer,  // ADR-015: ensureCached primitive
       SSEHub.live,
-      InvalidationHandler.live,     // Requires TreeCacheManager & SSEHub (no RiskTreeService dep)
+      InvalidationHandler.live,     // SSE-only mutation notifications (requires SSEHub)
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + SimulationConfig + Tracing + SimulationSemaphore + Meter
       QueryServiceLive.layer,       // Requires RiskTreeRepository + RiskResultResolver + Tracing
       chooseWorkspaceStore,

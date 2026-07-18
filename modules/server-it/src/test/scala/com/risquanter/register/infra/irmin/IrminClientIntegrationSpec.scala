@@ -5,7 +5,9 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.infra.irmin.model.IrminPath
 import com.risquanter.register.domain.errors.IrminUnavailable
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt}
 import com.risquanter.register.testcontainers.IrminCompose
+import io.github.iltotore.iron.refineUnsafe
 
 /**
   * Integration tests for IrminClient.
@@ -119,6 +121,105 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         commit2.hash != commit3.hash,
         current.contains("\"v3\"")
       )
+    },
+
+    // ---- Branch operations (milestone 2b, DD-1/DD-2) ----
+
+    test("set/get on a named branch is isolated from main") {
+      for
+        testPath <- uniquePath("branch-isolation")
+        branch   <- freshBranch
+        _        <- IrminClient.set(testPath, "\"main-value\"", "main write")
+        _        <- IrminClient.set(testPath, "\"branch-value\"", "branch write", Some(branch))
+        onMain   <- IrminClient.get(testPath)
+        onBranch <- IrminClient.get(testPath, Some(branch))
+        listed   <- IrminClient.branches
+      yield assertTrue(
+        onMain.contains("\"main-value\""),
+        onBranch.contains("\"branch-value\""),
+        listed.contains(branch.toBranchRef)
+      )
+    },
+
+    test("getBranch returns head info for a named branch, None head for unknown") {
+      for
+        testPath <- uniquePath("branch-head")
+        branch   <- freshBranch
+        commit   <- IrminClient.set(testPath, "\"head-probe\"", "branch head write", Some(branch))
+        known    <- IrminClient.getBranch(branch)
+        unknown  <- IrminClient.getBranch(unsafeBranch("scenarios.never.created.here"))
+      yield assertTrue(
+        known.flatMap(_.head).map(_.hash).contains(commit.hash),
+        unknown.flatMap(_.head).isEmpty
+      )
+    },
+
+    test("mergeBranch folds branch writes into main") {
+      for
+        testPath <- uniquePath("merge-test")
+        branch   <- freshBranch
+        _        <- IrminClient.set(testPath, "\"merged-value\"", "branch write", Some(branch))
+        _        <- IrminClient.mergeBranch(branch, None, "merge branch into main")
+        onMain   <- IrminClient.get(testPath)
+      yield assertTrue(onMain.contains("\"merged-value\""))
+    },
+
+    test("getCommit finds a commit by hash; revert restores an earlier state") {
+      for
+        testPath <- uniquePath("revert-test")
+        branch   <- freshBranch
+        c1       <- IrminClient.set(testPath, "\"before\"", "v1", Some(branch))
+        _        <- IrminClient.set(testPath, "\"after\"", "v2", Some(branch))
+        found    <- IrminClient.getCommit(commitHash(c1.hash))
+        _        <- IrminClient.revert(commitHash(c1.hash), Some(branch))
+        value    <- IrminClient.get(testPath, Some(branch))
+      yield assertTrue(
+        found.map(_.hash).contains(c1.hash),
+        value.contains("\"before\"")
+      )
+    },
+
+    test("getHistory lists every commit touching a path") {
+      // last_modified gives no ordering guarantee for same-second commits
+      // (dates have second resolution), so the contract pinned here is
+      // completeness, not order.
+      for
+        testPath <- uniquePath("history-test")
+        branch   <- freshBranch
+        _        <- IrminClient.set(testPath, "\"h1\"", "history v1", Some(branch))
+        _        <- IrminClient.set(testPath, "\"h2\"", "history v2", Some(branch))
+        history  <- IrminClient.getHistory(testPath, positiveInt(10), Some(branch))
+      yield assertTrue(
+        history.size == 2,
+        history.map(_.info.message).toSet == Set("history v1", "history v2")
+      )
+    },
+
+    test("lca finds the merge base of a branch and a main commit") {
+      for
+        basePath   <- uniquePath("lca-base")
+        branchPath <- uniquePath("lca-branch")
+        branch     <- freshBranch
+        base       <- IrminClient.set(basePath, "\"common\"", "common base")
+        // Fork: branch starts from main's head, then diverges
+        _          <- IrminClient.mergeBranch(unsafeBranch("main"), Some(branch), "fork from main")
+        _          <- IrminClient.set(branchPath, "\"diverged\"", "branch diverges", Some(branch))
+        lcas       <- IrminClient.lca(Some(branch), commitHash(base.hash))
+      yield assertTrue(lcas.map(_.hash).contains(base.hash))
     }
 
   ).provideLayerShared(testLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock
+
+  // ---- branch test helpers ----
+
+  /** Unique BranchRef per test (constraint: main | scenarios.<a>.<b>.<c>). */
+  private def freshBranch: ZIO[Any, Nothing, BranchRef] =
+    ZIO.clockWith(_.instant).map(i => unsafeBranch(s"scenarios.it.test.t${i.toEpochMilli}"))
+
+  private def unsafeBranch(s: String): BranchRef =
+    BranchRef.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
+
+  private def commitHash(s: String): CommitHash =
+    CommitHash.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
+
+  private def positiveInt(n: Int): PositiveInt = n.refineUnsafe

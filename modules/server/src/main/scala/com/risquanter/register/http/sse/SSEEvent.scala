@@ -12,7 +12,7 @@ import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
   * Event types:
   * - LECUpdated: LEC curve recomputed for a node
   * - NodeChanged: Tree structure modified (add/update/remove)
-  * - CacheInvalidated: Cache entries cleared (debugging/monitoring)
+  * - CacheInvalidated: These nodes' figures changed — re-fetch (name kept for wire compatibility)
   * - ConnectionStatus: Client connection lifecycle events
   */
 sealed trait SSEEvent {
@@ -52,9 +52,11 @@ object SSEEvent {
   }
 
   /**
-    * Cache entries have been invalidated.
+    * These nodes' figures changed — clients should re-fetch them. (The event
+    * name predates the content-addressed cache, which has no invalidation;
+    * kept as the wire event type.)
     *
-    * @param nodeIds List of invalidated node IDs (root to leaf)
+    * @param nodeIds Node IDs whose figures changed (nodes + ancestors)
     * @param treeId Tree containing the nodes
     */
   final case class CacheInvalidated(

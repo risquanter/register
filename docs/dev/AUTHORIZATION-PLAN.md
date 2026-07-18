@@ -1035,7 +1035,7 @@ Complete route census as of the current codebase. Every route is assigned a `Per
 | 10 | GET | `/w/{key}/risk-trees/{treeId}/structure` | Workspace | `ViewTree` | RiskTree | L0+ | Full tree structure |
 | 11 | PUT | `/w/{key}/risk-trees/{treeId}` | Workspace | `DesignWrite` | RiskTree | L0+ | Full tree replacement |
 | 12 | DELETE | `/w/{key}/risk-trees/{treeId}` | Workspace | `DesignWrite` | RiskTree | L0+ | Tree deletion |
-| 13 | POST | `/w/{key}/risk-trees/{treeId}/invalidate/{nodeId}` | Workspace | `AdminTree` | RiskTree | L0+ | Cache invalidation — operational action on tree |
+| 13 | ~~POST~~ | ~~`/w/{key}/risk-trees/{treeId}/invalidate/{nodeId}`~~ | — | — | — | — | **Removed 2026-07-18 (DD-20):** content-addressed cache has no invalidation |
 | 14 | GET | `/w/{key}/risk-trees/{treeId}/nodes/{nodeId}/lec` | Workspace | `ViewTree` | RiskTree | L0+ | LEC curve for one node |
 | 15 | GET | `/w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance` | Workspace | `ViewTree` | RiskTree | L0+ | Probability of exceedance query |
 | 16 | POST | `/w/{key}/risk-trees/{treeId}/nodes/lec-multi` | Workspace | `ViewTree` | RiskTree | L0+ | Multi-node LEC batch |

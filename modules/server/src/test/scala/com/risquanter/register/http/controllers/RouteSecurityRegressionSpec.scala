@@ -8,12 +8,12 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.WorkspaceStoreLive
-import com.risquanter.register.services.cache.{TreeCacheManager, RiskResultResolverLive}
+import com.risquanter.register.services.cache.{CacheScope, RiskResultResolverLive}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.SimulationSemaphore
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef}
 import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.util.IdGenerators
@@ -36,13 +36,13 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
   // ── Stub repository (minimal — tests don't exercise business logic) ──
 
   private val stubRepo = new RiskTreeRepository:
-    override def create(wsId: WorkspaceId, t: RiskTree): Task[RiskTree] = ZIO.succeed(t)
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree): Task[RiskTree] =
+    override def create(wsId: WorkspaceId, t: RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] = ZIO.succeed(t)
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
       ZIO.fail(RuntimeException("stub"))
-    override def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree] =
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[RiskTree] =
       ZIO.fail(RuntimeException("stub"))
-    override def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]] = ZIO.succeed(None)
-    override def getAllForWorkspace(wsId: WorkspaceId): Task[List[Either[RepositoryFailure, RiskTree]]] = ZIO.succeed(Nil)
+    override def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[Option[RiskTree]] = ZIO.succeed(None)
+    override def getAllForWorkspace(wsId: WorkspaceId, branch: Option[BranchRef] = None): Task[List[Either[RepositoryFailure, RiskTree]]] = ZIO.succeed(Nil)
 
   // ── Shared layer for controller instantiation ────────────────────────
 
@@ -54,7 +54,7 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
     TestConfigs.telemetryLayer >>> MetricsLive.console,
     SimulationSemaphore.layer,
     RiskTreeServiceLive.layer,
-    TreeCacheManager.layer,
+    CacheScope.layer,
     RiskResultResolverLive.layer,
     SSEHub.live,
     InvalidationHandler.live,

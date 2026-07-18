@@ -181,7 +181,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
       },
       
       test("encodes MergeConflict to Conflict (409) with branchName detail") {
-        val branch = BranchRef.fromString("scenarios/ws1/s1/feature-1").toOption.get
+        val branch = BranchRef.fromString("scenarios.ws1.s1.feature-1").toOption.get
         val error = MergeConflict(branch, "Conflicting changes in node X")
         val (status, response) = ErrorResponse.encode(error)
 
@@ -192,7 +192,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
           response.error.errors.head.field == "branch",
           response.error.errors.head.message == "Conflicting changes in node X",
           response.error.errors.exists(d =>
-            d.field == "branchName" && d.message == "scenarios/ws1/s1/feature-1"
+            d.field == "branchName" && d.message == "scenarios.ws1.s1.feature-1"
           )
         )
       }
@@ -228,15 +228,15 @@ object ErrorResponseSpec extends ZIOSpecDefault {
 
       test("decodes 409 MERGE_CONFLICT with branchName detail to MergeConflict, non-lossy") {
         val response = ErrorResponse(
-          JsonHttpError(409, "Merge conflict on branch scenarios/ws1/s1/feature-1: node X diverged", List(
+          JsonHttpError(409, "Merge conflict on branch scenarios.ws1.s1.feature-1: node X diverged", List(
             ErrorDetail("scenarios", "branch", ValidationErrorCode.MERGE_CONFLICT, "node X diverged"),
-            ErrorDetail("scenarios", "branchName", ValidationErrorCode.MERGE_CONFLICT, "scenarios/ws1/s1/feature-1")
+            ErrorDetail("scenarios", "branchName", ValidationErrorCode.MERGE_CONFLICT, "scenarios.ws1.s1.feature-1")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
         assertTrue(
           throwable.isInstanceOf[MergeConflict],
-          throwable.asInstanceOf[MergeConflict].branch.toBranchRef == "scenarios/ws1/s1/feature-1",
+          throwable.asInstanceOf[MergeConflict].branch.toBranchRef == "scenarios.ws1.s1.feature-1",
           throwable.asInstanceOf[MergeConflict].details == "node X diverged"
         )
       },
@@ -390,7 +390,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         val vc = VersionConflict("n1", "v1", "v2")
         val vcDecoded = ErrorResponse.decode(ErrorResponse.encode(vc))
         // MergeConflict
-        val mc = MergeConflict(BranchRef.fromString("scenarios/ws1/s1/feat").toOption.get, "conflict detail")
+        val mc = MergeConflict(BranchRef.fromString("scenarios.ws1.s1.feat").toOption.get, "conflict detail")
         val mcDecoded = ErrorResponse.decode(ErrorResponse.encode(mc))
         // IrminUnavailable
         val iu = IrminUnavailable("Connection refused")

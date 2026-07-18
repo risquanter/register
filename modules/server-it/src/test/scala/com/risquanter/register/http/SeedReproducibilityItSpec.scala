@@ -18,7 +18,7 @@ import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, SimulationSemaphore}
-import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, TreeCacheManager}
+import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -60,7 +60,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       RiskTreeServiceLive.layer,
       TestConfigs.simulationLayer,
       RiskResultResolverLive.layer,
-      TreeCacheManager.layer,
+      CacheScope.layer,
       InvalidationHandler.live,
       SSEHub.live,
       TestConfigs.simulationLayer >>> SimulationSemaphore.layer,

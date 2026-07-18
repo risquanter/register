@@ -5,7 +5,7 @@ import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLo
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
-import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, TreeCacheManager}
+import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, CacheScope}
 import com.risquanter.register.simulation.SeedDerivation
 import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId}
 import zio.*
@@ -28,21 +28,29 @@ object ProvenanceSpec extends ZIOSpecDefault {
   private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
   // Test layer with all dependencies for provenance tests
-  val testLayer: ZLayer[Any, Throwable, RiskResultResolver & TreeCacheManager] = 
-    ZLayer.make[RiskResultResolver & TreeCacheManager](
-      TreeCacheManager.layer,
+  val testLayer: ZLayer[Any, Throwable, RiskResultResolver & CacheScope] =
+    ZLayer.make[RiskResultResolver & CacheScope](
+      CacheScope.layer,
       ZLayer.succeed(TestConfigs.simulation),
       TestConfigs.telemetryLayer >>> TracingLive.console,
       TestConfigs.telemetryLayer >>> MetricsLive.console,
       RiskResultResolverLive.layer
     )
+
+  /** DD-19 structural attribution: a leaf's records sit on its RiskResult,
+    * whose nodeId is beside them — no riskId inside the record.
+    */
+  private def leafProvenances(result: LossDistribution): List[NodeProvenance] =
+    result match {
+      case r: RiskResult => r.provenances
+      case _             => Nil
+    }
   
   def spec = suite("ProvenanceSpec")(
     
     suite("JSON Serialization")(
       test("NodeProvenance serializes and deserializes correctly") {
         val provenance = NodeProvenance(
-          riskId = nodeId("cyber-attack"),
           entityId = 42L,
           occurrenceVarId = 1042L,
           lossVarId = 2042L,
@@ -62,7 +70,6 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val decoded = json.fromJson[NodeProvenance]
         
         assertTrue(decoded.isRight) &&
-        assertTrue(decoded.toOption.get.riskId == nodeId("cyber-attack")) &&
         assertTrue(decoded.toOption.get.entityId == 42L) &&
         assertTrue(decoded.toOption.get.distributionType == "lognormal")
       },
@@ -163,14 +170,17 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("test-risk"), testEntity, includeProvenance = true)
         } yield {
-          assertTrue(result.provenances.nonEmpty) &&
-          assertTrue(result.provenances.exists(_.riskId == nodeId("test-risk")))
+          // Structural attribution (DD-19): the record carries no riskId —
+          // the result's own nodeId is the attribution
+          assertTrue(leafProvenances(result).nonEmpty) &&
+          assertTrue(result.nodeId == nodeId("test-risk"))
         }
       },
       
       // Resolver always captures provenance for cache consistency.
       // Filtering (based on includeProvenance flag) happens at the service layer.
-      // This ensures cache keys remain simple (nodeId only) and avoids cache fragmentation.
+      // The cached value embeds the content-only record (DD-18/DD-19), so
+      // every hit returns provenance without fragmenting the cache.
       test("resolver always captures provenance regardless of includeProvenance flag") {
         val leaf = RiskLeaf.unsafeApply(
           id = idStr("test-risk"),
@@ -191,7 +201,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         for {
           resolver <- ZIO.service[RiskResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("test-risk"), testEntity, includeProvenance = false)
-        } yield assertTrue(result.provenances.nonEmpty)
+        } yield assertTrue(leafProvenances(result).nonEmpty)
       },
       
       // PLAN-SEED-IDENTITY §11 Layer 1: recorded var-IDs equal the sampler's
@@ -222,8 +232,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           result <- resolver.ensureCached(testTree, nodeId(riskIdLabel), testEntity, includeProvenance = true)
         } yield {
-          val nodeProv = result.provenances.find(_.riskId == riskId).get
+          val nodeProv = leafProvenances(result).head
           val expected = SeedDerivation.streams(testEntity, leaf.seedVarId, nodeProv.globalSeed3, nodeProv.globalSeed4)
+          assertTrue(result.nodeId == riskId) &&
           assertTrue(nodeProv.entityId == testEntity.value) &&
           assertTrue(nodeProv.occurrenceVarId == 6L) &&   // 2 · 3
           assertTrue(nodeProv.lossVarId == 7L) &&          // 2 · 3 + 1
@@ -254,7 +265,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("lognormal-risk"), testEntity, includeProvenance = true)
         } yield {
-          val nodeProv = result.provenances.find(_.riskId == nodeId("lognormal-risk")).get
+          val nodeProv = leafProvenances(result).head
+          assertTrue(result.nodeId == nodeId("lognormal-risk")) &&
           assertTrue(nodeProv.distributionType == "lognormal") &&
           assertTrue(nodeProv.distributionParams.isInstanceOf[LognormalDistributionParams]) &&
           assertTrue(
@@ -308,11 +320,16 @@ object ProvenanceSpec extends ZIOSpecDefault {
           // Simulate portfolio (which aggregates children)
           result <- resolver.ensureCached(testTree, nodeId("portfolio"), testEntity, includeProvenance = true)
         } yield {
-          // Portfolio result should contain provenances from both leaves,
-          // in childIds declaration order (parallel child resolution preserves
-          // list order — foreachPar returns results in input order)
-          assertTrue(result.provenances.size == 2) &&
-          assertTrue(result.provenances.map(_.riskId) == List(nodeId("risk1"), nodeId("risk2")))
+          // Portfolio provenance is read structurally (DD-19 A′): walk the
+          // group's children and pair each child's nodeId with its records
+          // one level above any flattening — never via ids inside the records.
+          val attributed = result match {
+            case g: RiskResultGroup =>
+              g.children.collect { case r: RiskResult => r.nodeId -> r.provenances }
+            case _ => Nil
+          }
+          assertTrue(attributed.map(_._1) == List(nodeId("risk1"), nodeId("risk2"))) &&
+          assertTrue(attributed.forall(_._2.size == 1))
         }
       }
     ).provideLayerShared(testLayer),
@@ -329,7 +346,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
           seedVarId = 7L
         )
         
-        // Use different tree IDs to avoid cache hits
+        // Two trees, same leaf content: under content addressing the second
+        // read is a deliberate cache HIT — identical content must yield
+        // identical outcomes either way (simulated or served from cache)
         val testTree1 = RiskTree.singleNodeUnsafe(
           id = treeId("tree-6"),
           name = SafeName.SafeName("Test Tree 6".refineUnsafe),
@@ -375,10 +394,11 @@ object ProvenanceSpec extends ZIOSpecDefault {
           resolver <- ZIO.service[RiskResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("test-reconstruction"), testEntity, includeProvenance = true)
         } yield {
-          val nodeProv = result.provenances.find(_.riskId == nodeId("test-reconstruction")).get
-          
-          // Verify all essential information is captured
-          assertTrue(nodeProv.riskId == nodeId("test-reconstruction")) &&
+          val nodeProv = leafProvenances(result).head
+
+          // Verify all essential information is captured; attribution is the
+          // result's own nodeId (DD-19 — no identity inside the record)
+          assertTrue(result.nodeId == nodeId("test-reconstruction")) &&
           assertTrue(nodeProv.entityId != 0L) &&
           assertTrue(nodeProv.occurrenceVarId != 0L) &&
           assertTrue(nodeProv.lossVarId != 0L) &&

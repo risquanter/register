@@ -45,11 +45,16 @@ type ScenarioName = String :| (Not[Blank] & Match["^[a-zA-Z0-9_-]+$"])
 Irmin branch names follow pattern for uniqueness:
 
 ```
-scenarios/{userId}/{scenarioId}/{name}
+scenarios.{userId}.{scenarioId}.{name}
 
 Examples:
-- scenarios/user-123/abc-456/optimistic-growth
-- scenarios/user-123/def-789/recession-impact
+- scenarios.user-123.abc-456.optimistic-growth
+- scenarios.user-123.def-789.recession-impact
+
+> **Separator pinned 2026-07-18:** `.`, not `/` — Irmin rejects `/` in branch
+> names (verified live against local/irmin-prod:3.11; `BranchRefConstraint`
+> in OpaqueTypes.scala is the source of truth). Segment semantics remain
+> DD-5 (open).
 - main  (the canonical tree)
 ```
 
@@ -233,7 +238,7 @@ def createBranch(name: String): Task[BranchRef] =
 // GOOD: Namespaced unique names
 def createBranch(name: ScenarioName, userId: UserId): Task[BranchRef] =
   val scenarioId = ScenarioId.generate()
-  val branchName = s"scenarios/${userId}/${scenarioId}/${name}"
+  val branchName = s"scenarios.${userId}.${scenarioId}.${name}"
   irminClient.createBranch(branchName)
 ```
 

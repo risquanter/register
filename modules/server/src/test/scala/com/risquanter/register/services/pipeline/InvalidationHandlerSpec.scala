@@ -6,26 +6,25 @@ import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskResult}
 import com.risquanter.register.domain.data.iron.*
-import com.risquanter.register.services.cache.TreeCacheManager
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
 import com.risquanter.register.testutil.TestHelpers.*
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /**
-  * Tests for InvalidationHandler (ADR-005, ADR-014).
+  * Tests for the SSE-only InvalidationHandler (milestone 2b Phase A).
   *
-  * Verifies that handleNodeChange returns both:
-  * - invalidatedNodes: the node + ancestor path whose cache entries were cleared
-  * - subscribersNotified: how many SSE subscribers received the event
-  *
-  * Uses real TreeCacheManager and SSEHub implementations.
-  * Caller provides the tree directly (no internal lookup).
+  * The handler no longer touches any cache — the content-addressed
+  * ContentCache has no invalidation operation. What it must get right is the
+  * SSE node list: every node whose figures changed (nodes + ancestors), with
+  * reparent and content-change contributions unioned ADDITIVELY (TODO item
+  * 17: the old exclusive if/else-if dropped the content change for a node
+  * that was both reparented and param-changed in one mutation).
   */
 object InvalidationHandlerSpec extends ZIOSpecDefault {
 
   // ========================================
-  // Test fixtures — same tree shape as RiskResultCacheSpec
+  // Test fixtures
   // ========================================
 
   val cyberLeaf = RiskLeaf.unsafeApply(
@@ -87,10 +86,20 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     "Test fixture has invalid RiskTree"
   )
 
+  private def treeWith(nodes: Seq[com.risquanter.register.domain.data.RiskNode]): RiskTree =
+    unsafeGet(
+      RiskTree.fromNodes(
+        id = testTreeId,
+        name = SafeName.SafeName("Test Tree".refineUnsafe),
+        nodes = nodes,
+        rootId = nodeId("ops-risk")
+      ),
+      "Mutated fixture has invalid RiskTree"
+    )
+
   val testLayer: ZLayer[Any, Nothing, InvalidationHandler & SSEHub] =
     ZLayer.make[InvalidationHandler & SSEHub](
       InvalidationHandler.live,
-      TreeCacheManager.layer,
       SSEHub.live
     )
 
@@ -100,32 +109,116 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
 
   def spec = suite("InvalidationHandlerSpec")(
 
-    test("returns invalidated nodes (node + ancestors) and subscriber count") {
+    test("param change publishes the node and its full ancestor path") {
+      val changedSoftware = RiskLeaf.unsafeApply(
+        id = idStr("software"),
+        name = "Software Bug",
+        distributionType = "lognormal",
+        probability = 0.7,
+        minLoss = Some(100L),
+        maxLoss = Some(5000L),
+        parentId = Some(nodeId("it-risk")),
+        seedVarId = 3L
+      )
+      val newTree = treeWith(Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, changedSoftware))
       for {
         handler <- ZIO.service[InvalidationHandler]
-        // Invalidate a leaf node — should clear cyber + ops-risk (root)
-        result  <- handler.handleNodeChange(nodeId("cyber"), testTree)
+        result  <- handler.handleMutation(testTree, newTree)
       } yield {
-        // cyber's ancestor path: cyber → ops-risk (root)
-        assertTrue(result.invalidatedNodes.map(_.value).toSet == Set(idStr("cyber"), idStr("ops-risk"))) &&
-        // No SSE subscribers connected, so 0 notified
+        val ids = result.invalidatedNodes.map(_.value).toSet
+        // software's aggregates changed with it: software → it-risk → ops-risk
+        assertTrue(ids == Set(idStr("software"), idStr("it-risk"), idStr("ops-risk"))) &&
         assertTrue(result.subscribersNotified == 0)
       }
     },
 
-    test("invalidating deeper node includes full ancestor path") {
+    test("reparent + param change in ONE mutation includes the node itself (additive union — TODO item 17)") {
+      // hardware moves it-risk → ops-risk AND its probability changes in the same PUT
+      val movedChangedHardware = RiskLeaf.unsafeApply(
+        id = idStr("hardware"),
+        name = "Hardware Failure",
+        distributionType = "lognormal",
+        probability = 0.6,               // param change
+        minLoss = Some(500L),
+        maxLoss = Some(10000L),
+        parentId = Some(nodeId("ops-risk")),  // reparent
+        seedVarId = 2L
+      )
+      val newItPortfolio = RiskPortfolio.unsafeFromStrings(
+        id = idStr("it-risk"),
+        name = "IT Risk",
+        childIds = Array(idStr("software")),
+        parentId = Some(nodeId("ops-risk"))
+      )
+      val newRoot = RiskPortfolio.unsafeFromStrings(
+        id = idStr("ops-risk"),
+        name = "Operational Risk",
+        childIds = Array(idStr("cyber"), idStr("it-risk"), idStr("hardware")),
+        parentId = None
+      )
+      val newTree = treeWith(Seq(newRoot, cyberLeaf, newItPortfolio, movedChangedHardware, softwareLeaf))
       for {
         handler <- ZIO.service[InvalidationHandler]
-        // hardware is nested: hardware → it-risk → ops-risk
-        result  <- handler.handleNodeChange(nodeId("hardware"), testTree)
+        result  <- handler.handleMutation(testTree, newTree)
       } yield {
         val ids = result.invalidatedNodes.map(_.value).toSet
-        assertTrue(ids == Set(idStr("hardware"), idStr("it-risk"), idStr("ops-risk"))) &&
-        assertTrue(result.subscribersNotified == 0)
+        // The exclusive if/else-if dropped hardware itself here — the node
+        // whose params changed MUST be in the published list
+        assertTrue(ids.contains(idStr("hardware"))) &&
+        // Both the old parent's and new parent's aggregates changed
+        assertTrue(ids.contains(idStr("it-risk"))) &&
+        assertTrue(ids.contains(idStr("ops-risk")))
       }
+    },
+
+    test("no-change mutation publishes nothing") {
+      for {
+        handler <- ZIO.service[InvalidationHandler]
+        result  <- handler.handleMutation(testTree, testTree)
+      } yield assertTrue(result.invalidatedNodes.isEmpty) &&
+        assertTrue(result.subscribersNotified == 0)
+    },
+
+    test("removed node is published (browsers must drop it)") {
+      val newItPortfolio = RiskPortfolio.unsafeFromStrings(
+        id = idStr("it-risk"),
+        name = "IT Risk",
+        childIds = Array(idStr("software")),
+        parentId = Some(nodeId("ops-risk"))
+      )
+      val newTree = treeWith(Seq(rootPortfolio, cyberLeaf, newItPortfolio, softwareLeaf))
+      for {
+        handler <- ZIO.service[InvalidationHandler]
+        result  <- handler.handleMutation(testTree, newTree)
+      } yield {
+        val ids = result.invalidatedNodes.map(_.value).toSet
+        assertTrue(ids.contains(idStr("hardware"))) &&     // removed node
+        assertTrue(ids.contains(idStr("it-risk")))          // surviving parent
+      }
+    },
+
+    test("tree deletion publishes every node ID") {
+      for {
+        handler <- ZIO.service[InvalidationHandler]
+        result  <- handler.handleTreeDeletion(testTree)
+      } yield assertTrue(
+        result.invalidatedNodes.map(_.value).toSet ==
+          Set(idStr("ops-risk"), idStr("cyber"), idStr("it-risk"), idStr("hardware"), idStr("software"))
+      )
     },
 
     test("SSE subscribers are counted when present") {
+      val changedCyber = RiskLeaf.unsafeApply(
+        id = idStr("cyber"),
+        name = "Cyber Attack",
+        distributionType = "lognormal",
+        probability = 0.5,
+        minLoss = Some(1000L),
+        maxLoss = Some(50000L),
+        parentId = Some(nodeId("ops-risk")),
+        seedVarId = 1L
+      )
+      val newTree = treeWith(Seq(rootPortfolio, changedCyber, itPortfolio, hardwareLeaf, softwareLeaf))
       for {
         handler <- ZIO.service[InvalidationHandler]
         hub     <- ZIO.service[SSEHub]
@@ -136,7 +229,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         fiber   <- stream.foreach(queue.offer).fork
         // Wait for subscriber to be registered
         _       <- hub.subscriberCount(testTreeId).repeatUntil(_ >= 1)
-        result  <- handler.handleNodeChange(nodeId("cyber"), testTree)
+        result  <- handler.handleMutation(testTree, newTree)
         _       <- fiber.interrupt
         // Verify subscriber was counted
       } yield assertTrue(result.subscribersNotified == 1)

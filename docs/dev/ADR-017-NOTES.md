@@ -71,8 +71,10 @@ occurred — see audit point above.
 
 ### WebSocket/SSE "readiness"
 
-**Mostly served already.** Real-time **read** sync is the existing SSE + cache-invalidate
-path (`SSEHub`, `POST .../invalidate/{nodeId}`). Real-time **write** sync is not a
+**Mostly served already.** Real-time **read** sync is the existing SSE stale-figure
+notification path (`SSEHub`; the manual `POST .../invalidate/{nodeId}` endpoint was
+removed 2026-07-18 — DD-20, content addressing needs no invalidation). Real-time
+**write** sync is not a
 distinct benefit — it collapses back into "concurrent collaboration" (case 1). The
 WebSocket angle is a transport for the collaboration decision, not an independent reason.
 

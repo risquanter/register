@@ -5,7 +5,7 @@
 **Tags:** persistence, irmin, graphql, websocket, architecture
 
 > **Note:** Code examples in this ADR are conceptual patterns showing the intended data flow.
-> See actual implementations: `IrminClient`, `RiskResultCache`, `SSEHub`.
+> See actual implementations: `IrminClient`, `ContentCache` (content-addressed, milestone 2b Phase A — replaced `RiskResultCache`), `SSEHub`.
 
 ---
 

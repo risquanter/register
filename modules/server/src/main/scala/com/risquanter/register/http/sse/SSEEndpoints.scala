@@ -32,7 +32,7 @@ trait SSEEndpoints extends BaseEndpoint {
     * Clients connect to receive real-time notifications about:
     * - LEC curve updates
     * - Node changes (add/update/remove)
-    * - Cache invalidation events
+    * - Stale-figure notifications (nodes whose results changed)
     *
     * Response format: text/event-stream with newline-delimited JSON events
     */
@@ -49,7 +49,7 @@ trait SSEEndpoints extends BaseEndpoint {
           |Event types:
           |- `lec_updated`: LEC curve recomputed for a node
           |- `node_changed`: Tree structure modified
-          |- `cache_invalidated`: Cache entries cleared
+          |- `cache_invalidated`: These nodes' figures changed — re-fetch
           |- `connection_status`: Heartbeat and lifecycle events
           |
           |Each event is formatted as:

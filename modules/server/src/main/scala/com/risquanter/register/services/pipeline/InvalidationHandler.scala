@@ -1,43 +1,33 @@
 package com.risquanter.register.services.pipeline
 
 import zio.*
-import com.risquanter.register.services.cache.TreeCacheManager
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
 
 /**
-  * Handles cache invalidation and SSE notification when nodes change.
+  * Notifies SSE subscribers which nodes' figures changed after a tree
+  * mutation (ADR-004a: SSE provides unidirectional server→client push).
   *
-  * Per ADR-005-proposal: "When Irmin notifies of a change, invalidate from node to root"
-  * Per ADR-004a-proposal: "SSE provides simple unidirectional streaming for server→client push"
+  * SSE-only since milestone 2b Phase A: the content-addressed `ContentCache`
+  * has no invalidation operation — an edited leaf hashes to a new key and
+  * misses naturally, so this handler's former cache half (ancestor-path
+  * invalidation via `TreeCacheManager`) is gone. What remains is the tree
+  * diff that tells browsers which nodes to re-fetch: the changed node plus
+  * every ancestor up to the root (their aggregates changed too).
   *
-  * This service bridges the gap between data changes and client notifications:
-  * 1. Invalidates affected cache entries (node + ancestors) using TreeCacheManager
-  * 2. Broadcasts CacheInvalidated event via SSE to all subscribers
+  * The published event is still `SSEEvent.CacheInvalidated` — for a browser
+  * the semantics are unchanged ("these nodes' figures are stale, re-fetch").
   *
-  * Callers provide the tree directly — no internal tree lookup.
-  * Triggered by RiskTreeServiceLive mutations (update, delete) and manually
-  * via API endpoint. Future: also by Irmin watch subscription
-  * (Irmin-specific, for external mutations).
-  *
-  * == Example ==
-  * {{{
-  * // User modifies "cyber-risk" node parameters
-  * InvalidationHandler.handleNodeChange(nodeId = "cyber-risk", tree)
-  * 
-  * // Result:
-  * // 1. Cache entries cleared: cyber-risk, ops-risk, portfolio (ancestors)
-  * // 2. SSE event sent: CacheInvalidated(List("cyber-risk", "ops-risk", "portfolio"), tree.id)
-  * // 3. Connected browsers receive event (can refresh if needed)
-  * }}}
+  * Triggered by RiskTreeServiceLive mutations (update, delete). Future: also
+  * by Irmin watch subscription (for external mutations).
   */
 /**
-  * Result of a cache invalidation operation.
+  * Result of a mutation notification.
   *
-  * @param invalidatedNodes Node IDs whose cache entries were cleared (node + ancestors)
-  * @param subscribersNotified Number of SSE subscribers who received the invalidation event
+  * @param invalidatedNodes Node IDs whose figures changed (nodes + ancestors)
+  * @param subscribersNotified Number of SSE subscribers who received the event
   */
 final case class InvalidationResult(
     invalidatedNodes: List[NodeId],
@@ -47,47 +37,41 @@ final case class InvalidationResult(
 trait InvalidationHandler {
 
   /**
-    * Handle a node change by invalidating cache and notifying clients.
-    *
-    * '''Deprecation candidate:''' This method is a special case of `handleMutation`
-    * for single-node invalidation (manual API / future Irmin watch). Review when
-    * implementing ADR-017 Phase 2 (TreeOp algebra) — if TreeOp covers all mutation
-    * entry points, this method should be removed in favour of `handleMutation`.
-    *
-    * @param nodeId Changed node identifier
-    * @param tree   Current tree (treeId derived from tree.id)
-    * @return Invalidation result containing affected nodes and subscriber count
-    */
-  def handleNodeChange(nodeId: NodeId, tree: RiskTree): UIO[InvalidationResult]
-
-  /**
-    * Handle a tree mutation by diffing old vs new tree, invalidating affected
-    * ancestor paths, cleaning up orphaned cache entries, and publishing a
-    * single SSE event.
+    * Handle a tree mutation by diffing old vs new tree and publishing a
+    * single SSE event covering every node whose figures changed.
     *
     * Affected nodes are determined by:
     * - Added nodes: parent in new tree
-    * - Removed nodes: parent in old tree (if it survives in new tree) + orphan cleanup
-    * - Reparented nodes: old parent + new parent
-    * - Parameter-changed nodes: the node itself
+    * - Removed nodes: parent in old tree (if it survives in new tree)
+    * - Reparented nodes: old parent (if surviving) + new parent
+    * - Content-changed nodes: the node itself
+    * Reparent and content-change contributions are unioned ADDITIVELY — a
+    * node that is both reparented and param-changed in one mutation yields
+    * both contributions (TODO item 17: the pre-Phase-A exclusive if/else-if
+    * dropped the content change in that case, which was the invalidation
+    * bug; the cache no longer depends on this diff, but the SSE node list
+    * must not repeat it).
     *
-    * TODO: Review when implementing ADR-017 Phase 2 (Batch Operations / TreeOp algebra).
-    * TreeOp operations carry explicit change semantics, which may simplify or replace
-    * the old-vs-new tree diffing logic.
+    * Each affected node expands to its ancestor path in the new tree, plus
+    * removed nodes verbatim (browsers drop them after re-fetch).
+    *
+    * TODO: Review when implementing ADR-017 Phase 2 (Batch Operations / TreeOp
+    * algebra). TreeOp operations carry explicit change semantics, which may
+    * simplify or replace the old-vs-new tree diffing logic.
     *
     * @param oldTree Tree state before mutation
     * @param newTree Tree state after mutation (treeId derived from newTree.id)
-    * @return Invalidation result containing affected nodes and subscriber count
+    * @return Notification result containing affected nodes and subscriber count
     */
   def handleMutation(oldTree: RiskTree, newTree: RiskTree): UIO[InvalidationResult]
 
   /**
-    * Handle tree deletion by clearing the entire cache and publishing a
-    * CacheInvalidated event with all node IDs. Browsers that receive this
-    * event will re-fetch and get NOT_FOUND, signaling the tree is gone.
+    * Handle tree deletion by publishing a CacheInvalidated event with all
+    * node IDs. Browsers that receive this event will re-fetch and get
+    * NOT_FOUND, signaling the tree is gone.
     *
     * @param tree The deleted tree (treeId and node IDs derived from tree)
-    * @return Invalidation result containing all node IDs and subscriber count
+    * @return Notification result containing all node IDs and subscriber count
     */
   def handleTreeDeletion(tree: RiskTree): UIO[InvalidationResult]
 }
@@ -97,13 +81,10 @@ object InvalidationHandler {
   /**
     * Create live InvalidationHandler layer.
     */
-  val live: ZLayer[TreeCacheManager & SSEHub, Nothing, InvalidationHandler] =
-    ZLayer.fromFunction(InvalidationHandlerLive(_, _))
+  val live: ZLayer[SSEHub, Nothing, InvalidationHandler] =
+    ZLayer.fromFunction(InvalidationHandlerLive(_))
 
   // Accessor methods for ZIO service pattern
-  def handleNodeChange(nodeId: NodeId, tree: RiskTree): URIO[InvalidationHandler, InvalidationResult] =
-    ZIO.serviceWithZIO[InvalidationHandler](_.handleNodeChange(nodeId, tree))
-
   def handleMutation(oldTree: RiskTree, newTree: RiskTree): URIO[InvalidationHandler, InvalidationResult] =
     ZIO.serviceWithZIO[InvalidationHandler](_.handleMutation(oldTree, newTree))
 
@@ -115,13 +96,12 @@ object InvalidationHandler {
   * Live implementation of InvalidationHandler.
   */
 final case class InvalidationHandlerLive(
-    cacheManager: TreeCacheManager,
     hub: SSEHub
 ) extends InvalidationHandler {
 
   /**
     * Publish a CacheInvalidated SSE event and return the InvalidationResult.
-    * Shared by all three handler methods to ensure consistent event shape and logging.
+    * Shared by both handler methods to ensure consistent event shape and logging.
     */
   private def publishInvalidation(treeId: TreeId, nodeIds: List[NodeId], context: String): UIO[InvalidationResult] =
     if nodeIds.isEmpty then
@@ -133,69 +113,45 @@ final case class InvalidationHandlerLive(
         _               <- ZIO.logInfo(s"$context: treeId=$treeId, nodes=${nodeIds.size}, subscribers=$subscriberCount")
       yield InvalidationResult(invalidatedNodes = nodeIds, subscribersNotified = subscriberCount)
 
-  override def handleNodeChange(nodeId: NodeId, tree: RiskTree): UIO[InvalidationResult] =
-    for
-      invalidated <- cacheManager.invalidate(tree, nodeId)
-      result      <- publishInvalidation(tree.id, invalidated, s"Cache invalidated: nodeId=${nodeId.value}")
-    yield result
-
   override def handleMutation(oldTree: RiskTree, newTree: RiskTree): UIO[InvalidationResult] =
     // Defense-in-depth (ADR-010 §3): internal precondition — caller controls both trees
     require(oldTree.id == newTree.id,
       s"handleMutation precondition violated: oldTree.id=${oldTree.id} != newTree.id=${newTree.id}")
 
     val treeId = newTree.id
-    val (affected, orphans) = computeAffectedNodes(oldTree, newTree)
+    val (affected, removed) = computeAffectedNodes(oldTree, newTree)
 
-    if affected.isEmpty && orphans.isEmpty then
+    if affected.isEmpty && removed.isEmpty then
       ZIO.succeed(InvalidationResult(invalidatedNodes = Nil, subscribersNotified = 0))
     else
-      for
-        // Invalidate ancestor paths for each affected node
-        invalidatedPerNode <- ZIO.foreach(affected.toList)(nid =>
-          cacheManager.invalidate(newTree, nid)
-        )
-        allInvalidated = invalidatedPerNode.flatten.toSet
-
-        // Clean up orphaned cache entries (removed nodes)
-        _ <- if orphans.nonEmpty then
-          for
-            cache <- cacheManager.cacheFor(treeId)
-            _     <- cache.removeAll(orphans.toList)
-            _     <- ZIO.logInfo(s"Orphan cleanup: treeId=$treeId, removed=${orphans.map(_.value).mkString(", ")}")
-          yield ()
-        else ZIO.unit
-
-        // Publish single SSE event covering invalidated + orphans
-        allAffectedNodes = (allInvalidated ++ orphans).toList
-        result <- publishInvalidation(treeId, allAffectedNodes, "Mutation invalidation")
-      yield result
+      // Each affected node's aggregates up to the root changed with it
+      val withAncestors = affected.flatMap(nid => newTree.index.ancestorPath(nid))
+      val allAffectedNodes = (withAncestors ++ removed).toList
+      publishInvalidation(treeId, allAffectedNodes, "Mutation notification")
 
   override def handleTreeDeletion(tree: RiskTree): UIO[InvalidationResult] =
-    val treeId = tree.id
-    for
-      _          <- cacheManager.deleteTree(treeId)
-      allNodeIds  = tree.index.nodes.keys.toList  // browser re-fetches → gets NOT_FOUND
-      result     <- publishInvalidation(treeId, allNodeIds, "Tree deletion invalidation")
-    yield result
+    val allNodeIds = tree.index.nodes.keys.toList // browser re-fetches → gets NOT_FOUND
+    publishInvalidation(tree.id, allNodeIds, "Tree deletion notification")
 
   // ========================================
   // Tree diff logic
   // ========================================
 
   /**
-    * Compute affected nodes and orphans from old vs new tree diff.
+    * Compute affected nodes and removed nodes from old vs new tree diff.
     *
-    * Affected nodes are the "entry points" for ancestor-path invalidation:
+    * Affected nodes are the "entry points" for ancestor-path expansion:
     * - Added node → its parent in new tree
     * - Removed node → its parent in old tree (if parent survives in new tree)
-    * - Reparented node → old parent + new parent
-    * - Parameter-changed node → the node itself
+    * - Reparented node → old parent (if surviving) + new parent
+    * - Content-changed node → the node itself
     *
-    * Orphans are removed nodes whose cache entries need cleanup (they no longer
-    * exist in the tree so their cache entries are unreachable dead weight).
+    * Reparent and content-change checks are independent and their
+    * contributions are unioned ADDITIVELY (TODO item 17 — see trait doc).
     *
-    * @return (affectedNodes, orphanNodes)
+    * Removed nodes are reported verbatim so subscribers learn they are gone.
+    *
+    * @return (affectedNodes, removedNodes)
     */
   private def computeAffectedNodes(oldTree: RiskTree, newTree: RiskTree): (Set[NodeId], Set[NodeId]) = {
     val oldKeys = oldTree.index.nodes.keySet
@@ -205,11 +161,11 @@ final case class InvalidationHandlerLive(
     val removed = oldKeys -- newKeys
     val common  = oldKeys.intersect(newKeys)
 
-    // Added nodes: invalidate their parent's ancestor path
+    // Added nodes: their parent's aggregates changed
     val affectedFromAdded: Set[NodeId] =
       added.flatMap(nid => newTree.index.parents.get(nid))
 
-    // Removed nodes: invalidate the surviving parent's ancestor path
+    // Removed nodes: the surviving parent's aggregates changed.
     // Only include parents that still exist in the new tree — if the parent
     // was also removed, its own removal entry handles the surviving ancestor.
     val affectedFromRemoved: Set[NodeId] =
@@ -217,27 +173,27 @@ final case class InvalidationHandlerLive(
         oldTree.index.parents.get(nid).filter(newTree.index.nodes.contains)
       }
 
-    // Common nodes: check for reparent or parameter change
+    // Common nodes: reparent and content change are INDEPENDENT contributions.
+    // A node can be both reparented and param-changed in a single mutation —
+    // it must then contribute its parents AND itself (additive union; the
+    // exclusive if/else-if here was TODO item 17's bug).
     val affectedFromChanged: Set[NodeId] =
       common.flatMap { nid =>
         val oldParent = oldTree.index.parents.get(nid)
         val newParent = newTree.index.parents.get(nid)
 
-        if oldParent != newParent then
-          // Reparented: invalidate both old parent (if it survives) and new parent
-          oldParent.filter(newTree.index.nodes.contains).toSet ++ newParent.toSet
-        else if oldTree.index.nodes.get(nid) != newTree.index.nodes.get(nid) then
-          // Node data changed (params, name, etc.) — invalidate the node itself
-          Set(nid)
-        else
-          Set.empty
+        val fromReparent: Set[NodeId] =
+          if oldParent != newParent then
+            oldParent.filter(newTree.index.nodes.contains).toSet ++ newParent.toSet
+          else Set.empty
+
+        val fromContentChange: Set[NodeId] =
+          if oldTree.index.nodes.get(nid) != newTree.index.nodes.get(nid) then Set(nid)
+          else Set.empty
+
+        fromReparent ++ fromContentChange
       }
 
-    val affected = affectedFromAdded ++ affectedFromRemoved ++ affectedFromChanged
-
-    // Orphans: all removed nodes need cache entry cleanup
-    val orphans = removed
-
-    (affected, orphans)
+    (affectedFromAdded ++ affectedFromRemoved ++ affectedFromChanged, removed)
   }
 }

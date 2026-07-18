@@ -236,7 +236,6 @@ object LossDistributionSpec extends ZIOSpecDefault {
         import io.github.iltotore.iron.refineUnsafe
         val params = LognormalDistributionParams(1000L.refineUnsafe, 5000L.refineUnsafe, 0.9)
         val prov1 = NodeProvenance(
-          riskId = nodeId("risk-001"),
           entityId = 1L,
           occurrenceVarId = 1001L,
           lossVarId = 2001L,

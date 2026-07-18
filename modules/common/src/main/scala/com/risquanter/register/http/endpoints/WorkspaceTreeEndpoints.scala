@@ -7,7 +7,7 @@ import sttp.tapir.generic.auto.*
 import com.risquanter.register.http.requests.RiskTreeUpdateRequest
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Workspace-scoped tree endpoints.
@@ -53,12 +53,3 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
       .delete
       .out(jsonBody[SimulationResponse])
-
-  val invalidateWorkspaceCacheEndpoint =
-    authedBaseEndpoint
-      .tag("workspaces")
-      .name("invalidateWorkspaceCache")
-      .description("Invalidate cache for a node (workspace-scoped)")
-      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "invalidate" / path[NodeId]("nodeId"))
-      .post
-      .out(jsonBody[InvalidationResponse])

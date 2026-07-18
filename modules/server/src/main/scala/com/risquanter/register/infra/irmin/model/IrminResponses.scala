@@ -152,6 +152,103 @@ object RemoveValueResponse:
   given JsonCodec[RemoveValueData] = DeriveJsonCodec.gen[RemoveValueData]
   given JsonCodec[RemoveValueResponse] = DeriveJsonCodec.gen[RemoveValueResponse]
 
+/**
+  * Response for `merge_with_branch(from, branch, info)` mutation.
+  */
+final case class MergeBranchResponse(
+    data: Option[MergeBranchData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class MergeBranchData(
+    merge_with_branch: Option[CommitData]
+)
+
+object MergeBranchResponse:
+  import SetValueResponse.given
+  given JsonCodec[MergeBranchData] = DeriveJsonCodec.gen[MergeBranchData]
+  given JsonCodec[MergeBranchResponse] = DeriveJsonCodec.gen[MergeBranchResponse]
+
+/**
+  * Response for `revert(commit, branch)` mutation.
+  */
+final case class RevertResponse(
+    data: Option[RevertData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class RevertData(
+    revert: Option[CommitData]
+)
+
+object RevertResponse:
+  import SetValueResponse.given
+  given JsonCodec[RevertData] = DeriveJsonCodec.gen[RevertData]
+  given JsonCodec[RevertResponse] = DeriveJsonCodec.gen[RevertResponse]
+
+/**
+  * Response for `commit(hash)` query.
+  */
+final case class CommitQueryResponse(
+    data: Option[CommitQueryData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class CommitQueryData(
+    commit: Option[CommitData]
+)
+
+object CommitQueryResponse:
+  import SetValueResponse.given
+  given JsonCodec[CommitQueryData] = DeriveJsonCodec.gen[CommitQueryData]
+  given JsonCodec[CommitQueryResponse] = DeriveJsonCodec.gen[CommitQueryResponse]
+
+/**
+  * Response for `{ main { last_modified(path, n) } }` query.
+  * Branch reads alias the branch as `main` (IrminQueries.branchSelector).
+  */
+final case class HistoryResponse(
+    data: Option[HistoryData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class HistoryData(
+    main: Option[HistoryBranchData]
+)
+
+final case class HistoryBranchData(
+    last_modified: List[CommitData]
+)
+
+object HistoryResponse:
+  import SetValueResponse.given
+  given JsonCodec[HistoryBranchData] = DeriveJsonCodec.gen[HistoryBranchData]
+  given JsonCodec[HistoryData] = DeriveJsonCodec.gen[HistoryData]
+  given JsonCodec[HistoryResponse] = DeriveJsonCodec.gen[HistoryResponse]
+
+/**
+  * Response for `{ main { lcas(commit) } }` query.
+  * Branch reads alias the branch as `main` (IrminQueries.branchSelector).
+  */
+final case class LcaResponse(
+    data: Option[LcaData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class LcaData(
+    main: Option[LcaBranchData]
+)
+
+final case class LcaBranchData(
+    lcas: List[CommitData]
+)
+
+object LcaResponse:
+  import SetValueResponse.given
+  given JsonCodec[LcaBranchData] = DeriveJsonCodec.gen[LcaBranchData]
+  given JsonCodec[LcaData] = DeriveJsonCodec.gen[LcaData]
+  given JsonCodec[LcaResponse] = DeriveJsonCodec.gen[LcaResponse]
+
 // ============================================================================
 // Common Types
 // ============================================================================

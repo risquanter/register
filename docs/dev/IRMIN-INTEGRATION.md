@@ -127,7 +127,7 @@ What's implemented now:
 
 ### Phase 3: Tree Index & Cache
 
-*Current state:* Per-node Irmin storage is wired; node IDs are ULIDs (uppercase, Crockford base32) validated via `SafeId`, with deterministic fixtures (`safeId`/`idStr`). Ancestor-path invalidation is implemented (TreeCacheManager walks the TreeIndex and clears only the affected node and its ancestors). LEC curve caching was intentionally rejected; we cache `RiskResult` outcomes only and render curves on demand to avoid tick-domain staleness.
+*Current state:* Per-node Irmin storage is wired; node IDs are ULIDs (uppercase, Crockford base32) validated via `SafeId`, with deterministic fixtures (`safeId`/`idStr`). Caching is content-addressed (milestone 2b Phase A): leaf results are cached under `ContentHash` keys and there is no invalidation — an edited leaf hashes to a new key and misses, siblings stay hits. LEC curve caching was intentionally rejected; we cache leaf outcomes only and render curves on demand to avoid tick-domain staleness.
 
 **Path Convention (Current):**
 Irmin paths encode `treeId` (ULID `TreeId`) and ULID node IDs:

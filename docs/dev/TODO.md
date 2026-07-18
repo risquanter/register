@@ -872,7 +872,21 @@ and should be reviewed at Phase K.5 / K.6 planning.
 
 ---
 
-## 17. Stale simulation served after tree update (PUT) without explicit invalidation
+## 17. Stale simulation served after tree update (PUT) without explicit invalidation — RESOLVED by Phase A (2026-07-18)
+
+**RESOLVED 2026-07-18 — milestone-2b Phase A shipped.** The content-addressed
+`ContentCache` retired the bug class as designed: leaf cache keys are
+recomputed from stored content on every read, so no diff decides invalidation.
+All three package-b deliverables landed: `Item17RegressionSpec` (service-level
+combined reparent+param-change PUT → root exceedance pinned to the analytic
+`1−∏(1−pᵢ)` for the new params, 10σ away from the stale signature),
+the SSE-only `InvalidationHandler` rewrite with the ADDITIVE union in
+`computeAffectedNodes` (+ dedicated additive-union test), and
+`MutationInvalidationSpec` retired with `TreeCacheManager` (DD-20 executed in
+the same change: `invalidateWorkspaceCache` endpoint + `InvalidationResponse`
+DTO deleted). `CacheTransparencySpec` additionally pins cache-transparency:
+real cache vs pass-through cache, byte-identical figures over an edit sequence
+including this item's exact mutation shape. Original record below.
 
 **Observed (2026-07-11, `APP_VERSION` 0.3.0):** full docker-compose stack
 (`localhost:18080`, default in-memory repository). After

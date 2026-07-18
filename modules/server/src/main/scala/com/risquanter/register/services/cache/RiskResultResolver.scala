@@ -13,8 +13,9 @@ import com.risquanter.register.domain.data.iron.{NodeId, SeedEntityId}
   * Methods now take `RiskTree` parameter to access tree-scoped TreeIndex.
   *
   * == Separation of Concerns ==
-  * - RiskResultCache: Pure storage (get/put/invalidate)
-  * - RiskResultResolver: Orchestration (cache + simulation)
+  * - ContentCache: Pure content-addressed storage (get/put; no invalidation —
+  *   an edited leaf hashes to a new key and misses naturally)
+  * - RiskResultResolver: Orchestration (content hashing + cache + simulation)
   *
   * == Usage Pattern ==
   * {{{
@@ -31,10 +32,11 @@ trait RiskResultResolver {
   /**
     * Ensure result is cached for a node.
     *
-    * Cache-aside pattern:
-    * 1. Check cache for nodeId
-    * 2. If hit: return cached result
-    * 3. If miss: simulate node using tree's index, cache result, return it
+    * Cache-aside pattern (content-addressed since milestone 2b Phase A):
+    * 1. Compute the node's content hash from the tree (ContentHashIndex)
+    * 2. Leaf hit: return cached content with this node's ID attached
+    * 3. Leaf miss: simulate, cache under the content hash, return
+    * 4. Portfolio: aggregate child results on every read (never cached)
     *
     * @param tree Risk tree containing the node (provides TreeIndex)
     * @param nodeId Node identifier

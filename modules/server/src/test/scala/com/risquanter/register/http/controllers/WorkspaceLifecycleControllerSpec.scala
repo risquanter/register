@@ -16,12 +16,12 @@ import com.risquanter.register.auth.{
 }
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef}
 import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
-import com.risquanter.register.services.cache.{RiskResultResolverLive, TreeCacheManager}
+import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.{RateLimiterLive, WorkspaceStoreLive}
@@ -49,17 +49,17 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
 
   private def stubRepo: RiskTreeRepository = new RiskTreeRepository:
     private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
-    override def create(wsId: WorkspaceId, t: RiskTree): Task[RiskTree] =
+    override def create(wsId: WorkspaceId, t: RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
       com.risquanter.register.util.IdGenerators.nextTreeId.map { id =>
         val tree = t.copy(id = id); db += ((wsId, id) -> tree); tree
       }
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree): Task[RiskTree] =
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
       ZIO.attempt { val t = db((wsId, id)); val u = op(t); db += ((wsId, id) -> u); u }
-    override def delete(wsId: WorkspaceId, id: TreeId): Task[RiskTree] =
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[RiskTree] =
       ZIO.attempt { val t = db((wsId, id)); db -= ((wsId, id)); t }
-    override def getById(wsId: WorkspaceId, id: TreeId): Task[Option[RiskTree]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[Option[RiskTree]] =
       ZIO.succeed(db.get((wsId, id)))
-    override def getAllForWorkspace(wsId: WorkspaceId): Task[List[Either[RepositoryFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, branch: Option[BranchRef] = None): Task[List[Either[RepositoryFailure, RiskTree]]] =
       ZIO.succeed(db.collect { case ((wid, _), t) if wid == wsId => Right(t) }.toList)
 
   // ── Controller factory ───────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         TestConfigs.telemetryLayer >>> MetricsLive.console,
         SimulationSemaphore.layer,
         RiskTreeServiceLive.layer,
-        TreeCacheManager.layer,
+        CacheScope.layer,
         RiskResultResolverLive.layer,
         SSEHub.live,
         InvalidationHandler.live,

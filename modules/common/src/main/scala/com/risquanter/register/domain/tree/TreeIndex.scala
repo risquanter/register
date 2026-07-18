@@ -6,9 +6,12 @@ import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCo
 import zio.prelude.Validation
 
 /**
-  * Parent-pointer index for O(depth) cache invalidation.
+  * Parent-pointer index for O(depth) ancestor traversal.
   *
-  * This data structure enables efficient ancestor lookup when a node changes:
+  * This data structure enables efficient ancestor lookup when a node changes
+  * (used for change-notification fan-out — the aggregates above a changed
+  * node change with it; the content-addressed cache itself needs no
+  * invalidation):
   * - O(1) node lookup by ID
   * - O(1) parent lookup
   * - O(depth) ancestor path construction
@@ -33,7 +36,7 @@ import zio.prelude.Validation
   * 1. Look up NodeId("hardware") → parent = NodeId("it-risk")
   * 2. Look up NodeId("it-risk") → parent = NodeId("ops-risk")
   * 3. Look up NodeId("ops-risk") → parent = None (root)
-  * 4. Invalidate cache for: [NodeId("hardware"), NodeId("it-risk"), NodeId("ops-risk")]
+  * 4. Affected figures: [NodeId("hardware"), NodeId("it-risk"), NodeId("ops-risk")]
   *
   * @param nodes Map from node ID to RiskNode (all nodes in tree)
   * @param parents Map from child ID to parent ID (no entry for root)

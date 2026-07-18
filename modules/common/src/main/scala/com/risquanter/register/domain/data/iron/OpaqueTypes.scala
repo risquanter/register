@@ -43,8 +43,14 @@ type PrintableAscii = Match["^[\\x21-\\x7E]+$"]
 // Named ExternalTokenStr (not service-specific) so it can be reused for any external API credential.
 type ExternalTokenStr = String :| (Not[Blank] & MaxLength[2048] & PrintableAscii)
 
+// Separator is `.` — pinned to Irmin's real branch-name charset (verified
+// against live local/irmin-prod:3.11, 2026-07-18: `/` and `~` are rejected
+// with HTTP 500; `.`, `_`, `-`, alphanumerics are accepted). Segments allow
+// only [a-z0-9_-], never `.`, so the three-segment split is unambiguous. The
+// ref is never a URL path segment (DD-8: header or session), so Irmin
+// validity is the only wire contract. Segment semantics: DD-5 (open).
 type BranchRefConstraint =
-  Not[Blank] & MaxLength[160] & Match["^(main|scenarios/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63}/[a-z0-9][a-z0-9_-]{0,63})$"]
+  Not[Blank] & MaxLength[160] & Match["^(main|scenarios\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63})$"]
 
 type BranchRefStr = String :| BranchRefConstraint
 
@@ -357,6 +363,58 @@ object BranchRef:
         )
       )
       .map(BranchRef(_))
+
+// ContentHash: SHA-256 hex digest computed by the JVM (DD-14 → Option B).
+// Keys the content-addressed ContentCache: leaf keys hash the LeafSimContent
+// projection (DD-16), portfolio index hashes are Merkle over sorted child
+// hashes. SHA-256 only ⇒ uniform 64 lowercase hex chars, pinned exactly.
+type ContentHashConstraint = Match["^[a-f0-9]{64}$"]
+type ContentHashStr = String :| ContentHashConstraint
+
+case class ContentHash(toContentHash: ContentHashStr):
+  def value: String = toContentHash
+
+object ContentHash:
+  def fromString(s: String, fieldPath: String = "contentHash"): Either[List[ValidationError], ContentHash] =
+    s.refineEither[ContentHashConstraint]
+      .left
+      .map(err =>
+        List(
+          ValidationError(
+            field = fieldPath,
+            code = ValidationErrorCode.INVALID_FORMAT,
+            message = s"Content hash is invalid: $err"
+          )
+        )
+      )
+      .map(ContentHash(_))
+
+// CommitHash: an Irmin commit/store hash. Pinned to Irmin's real format,
+// verified against a live local/irmin-prod:3.11 instance (2026-07-18): every
+// GraphQL Hash scalar (commit head, set result, contents_hash) is a SHA-1
+// digest rendered as 40 lowercase hex chars, identical on main and branches.
+// Distinct from ContentHash (our SHA-256, 64 hex) by construction — the
+// refinements cannot accept each other's values.
+type CommitHashConstraint = Match["^[a-f0-9]{40}$"]
+type CommitHashStr = String :| CommitHashConstraint
+
+case class CommitHash(toCommitHash: CommitHashStr):
+  def value: String = toCommitHash
+
+object CommitHash:
+  def fromString(s: String, fieldPath: String = "commitHash"): Either[List[ValidationError], CommitHash] =
+    s.refineEither[CommitHashConstraint]
+      .left
+      .map(err =>
+        List(
+          ValidationError(
+            field = fieldPath,
+            code = ValidationErrorCode.INVALID_FORMAT,
+            message = s"Commit hash is invalid: $err"
+          )
+        )
+      )
+      .map(CommitHash(_))
 
 // SafeId: Canonical ULID (Crockford base32, 26 chars, uppercase)
 // Accepts input case-insensitively, normalizes to uppercase canonical string.

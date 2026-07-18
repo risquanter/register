@@ -105,7 +105,7 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
   Server.default,
   RiskTreeRepositoryInMemory.layer,
   RiskResultResolverLive.layer,
-  TreeCacheManager.layer,
+  CacheScope.layer,
   RiskTreeServiceLive.layer,
   ZLayer.fromZIO(RiskTreeController.makeZIO)
 )
@@ -303,7 +303,8 @@ See [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogr
 │ Service Layer (modules/server)                  │
 │  - RiskTreeService: Business logic              │
 │  - RiskResultResolver: Simulation orchestration │
-│  - TreeCacheManager: Result caching             │
+│  - CacheScope/ContentCache: content-addressed   │
+│    result caching (per workspace)               │
 └─────────────────────────────────────────────────┘
                      ↓
 ┌─────────────────────────────────────────────────┐
@@ -369,7 +370,7 @@ RiskResultResolver.ensureCached(tree, nodeId)
       ├─→ RiskLeaf: Create Metalog → Sample trials → RiskResult
       └─→ RiskPortfolio: Simulate children in parallel → Aggregate
   ↓
-RiskResult (per-node, cached in TreeCacheManager)
+RiskResult (leaf content cached in ContentCache by ContentHash; portfolios re-aggregated per read)
   ↓
 LECGenerator.generateCurvePoints
   ↓
@@ -490,7 +491,7 @@ ZIO.foreachPar(successfulTrials) { trial =>
 ### **Current Test Coverage: 512 Tests**
 - **Common Module:** 289 tests (domain model, validation, Iron types, tree operations)
 - **Server Module:** 223 tests (service, simulation, HTTP, cache, SSE, provenance)
-- **Focus:** Simulation determinism, parallel execution, tree aggregation, cache invalidation
+- **Focus:** Simulation determinism, parallel execution, tree aggregation, content-addressed cache transparency
 
 ### **Test Pyramid**
 
@@ -661,21 +662,22 @@ Persistence Strategy:
 - ✅ Future consideration: WebSocket for real-time progress updates
 - ✅ Future consideration: Caching computed LECs via memoization
 
-#### **Caching Strategy** ✅ (Implemented)
+#### **Caching Strategy** ✅ (Implemented — content-addressed, milestone 2b Phase A)
 ```scala
-// TreeCacheManager: per-tree cache lifecycle
-trait TreeCacheManager:
-  def cacheFor(treeId: TreeId): UIO[RiskResultCache]
-  def onTreeStructureChanged(treeId: TreeId): UIO[Unit]
-  def deleteTree(treeId: TreeId): UIO[Unit]
+// CacheScope: one ContentCache per workspace (DD-17, keyed by seedEntityId)
+trait CacheScope:
+  def cacheFor(seedEntityId: SeedEntityId): UIO[ContentCache]
 
-// RiskResultCache: per-node result cache
-trait RiskResultCache:
-  def get(nodeId: NodeId): UIO[Option[RiskResult]]
-  def put(nodeId: NodeId, result: RiskResult): UIO[Unit]
+// ContentCache: content-addressed leaf result cache (DD-15: leaves only)
+trait ContentCache:
+  def get(key: ContentHash): UIO[Option[LeafSimResult]]
+  def put(key: ContentHash, value: LeafSimResult): UIO[Unit]
+  def stats: UIO[CacheStats]
 
-// Cache key: NodeId (ULID)
-// Invalidate: onTreeStructureChanged clears all nodes for that tree
+// Cache key: ContentHash = sha256(LeafSimContent projection) — DD-14/DD-16
+// There is NO invalidation: an edited leaf hashes to a new key and misses;
+// stale entries become unreachable orphans (EvictionStrategy's concern).
+// Portfolio results are never cached — re-aggregated from children per read.
 ```
 
 #### **Incremental Recomputation (Future)**
@@ -903,7 +905,7 @@ HDR Histogram would require fundamental architecture changes (approximate merge,
 - **Alternatives Rejected:** Store raw trials, store histograms
 
 #### **ADR-005: SSE for Server→Client Push**
-- **Decision:** Use Server-Sent Events for cache invalidation notifications
+- **Decision:** Use Server-Sent Events for stale-figure notifications (nodes whose results changed)
 - **Rationale:** Simple unidirectional streaming, browser-native support
 - **Status:** ✅ Implemented
 
@@ -918,13 +920,12 @@ HDR Histogram would require fundamental architecture changes (approximate merge,
 - **Status:** ✅ Implemented
 
 #### **ADR-014: LEC Caching Architecture**
-- **Decision:** Per-tree cache with O(depth) node-to-root invalidation
-- **Rationale:** Incremental recomputation, memory isolation per tree
-- **Status:** ✅ Implemented
+- **Decision:** ~~Per-tree cache with O(depth) node-to-root invalidation~~ Superseded by the content-addressed ContentCache (milestone 2b Phase A): keys are content hashes, so no invalidation exists; isolation is per workspace (DD-17)
+- **Status:** ✅ Superseded, 2026-07-18
 
 #### **ADR-015: Cache-Aside LEC Resolution**
 - **Decision:** RiskResultResolver uses cache-aside pattern for LEC queries
-- **Rationale:** Lazy computation, transparent caching, simple invalidation
+- **Rationale:** Lazy computation, transparent caching; no invalidation needed under content addressing
 - **Status:** ✅ Accepted
 
 #### **ADR-018: Nominal Wrappers for Identity Types**

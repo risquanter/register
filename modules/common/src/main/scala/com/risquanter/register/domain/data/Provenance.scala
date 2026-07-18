@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import java.time.Instant
-import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt, NonNegativeLong, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeLong, ValidationUtil}
 import io.github.iltotore.iron.*
 
 /**
@@ -23,8 +23,15 @@ import io.github.iltotore.iron.*
  * both come from the single derivation site (`SeedDerivation.streams`, server
  * module), fed by the workspace's `seedEntityId` and the leaf's stored
  * `seedVarId` (PLAN-SEED-IDENTITY §4). Names, ULIDs, and hashes play no role.
- * 
- * @param riskId Source risk identifier (e.g., "cyber-attack") — identity label only; it does not influence any seed
+ *
+ * This record is content-only (DD-19, closed 2026-07-18): it carries no node
+ * identity. Attribution is structural — a leaf's record sits on its
+ * `RiskResult` (whose `nodeId` is beside it); portfolio provenance is read by
+ * walking `RiskResultGroup.children`, pairing each child's `nodeId` with its
+ * records one level above any flattening. This is what lets the record double
+ * as the content-addressed cache value's provenance half (DD-18): two nodes
+ * with identical simulation content share one record.
+ *
  * @param entityId The workspace's seedEntityId (HDR Entity axis — isolates workspaces/organisations)
  * @param occurrenceVarId 2 × the leaf's seedVarId (HDR Var axis, even stream)
  * @param lossVarId 2 × the leaf's seedVarId + 1 (HDR Var axis, odd stream)
@@ -37,7 +44,6 @@ import io.github.iltotore.iron.*
  */
 case class NodeProvenance(
   // HDR Configuration - Deterministic Random Number Generation
-  riskId: NodeId,
   entityId: Long,
   occurrenceVarId: Long,
   lossVarId: Long,
@@ -145,8 +151,7 @@ object DistributionParams {
 
 object NodeProvenance {
   import sttp.tapir.Schema
-  import NodeId.given
-  
+
   given codec: JsonCodec[NodeProvenance] = DeriveJsonCodec.gen[NodeProvenance]
   
   // Tapir Schema for HTTP endpoint serialization

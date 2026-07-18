@@ -4,6 +4,12 @@
 **Date:** 2026-01-16  
 **Tags:** caching, performance, lec, aggregation, zio
 
+> **2026-07-18 (milestone 2b Phase A):** the `RiskResultCache`/
+> `TreeCacheManager` implementation this proposal describes is retired,
+> replaced by the content-addressed `ContentCache` (no invalidation; leaf
+> entries only). The SSE notification half survives in the SSE-only
+> `InvalidationHandler`.
+
 ---
 
 ## Context

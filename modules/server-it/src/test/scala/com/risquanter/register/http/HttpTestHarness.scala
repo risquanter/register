@@ -20,7 +20,7 @@ import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeReposit
 import com.risquanter.register.services.{RiskTreeServiceLive, SimulationSemaphore}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
-import com.risquanter.register.services.cache.{RiskResultResolverLive, TreeCacheManager}
+import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
 import com.risquanter.register.services.sse.SSEHub
@@ -131,7 +131,7 @@ object HttpTestHarness:
       SimulationSemaphore.layer,
       repoLayer,
       RiskTreeServiceLive.layer,
-      TreeCacheManager.layer,
+      CacheScope.layer,
       RiskResultResolverLive.layer,
       SSEHub.live,
       InvalidationHandler.live,

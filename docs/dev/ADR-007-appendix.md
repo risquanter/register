@@ -18,7 +18,7 @@ case class BranchRef(value: String)
 
 It is **not** a generated ID like `TreeId` or `NodeId` (which are ULIDs). It
 is the human-readable Irmin branch name — a string like `"main"` or
-`"scenarios/ws123/01HXYZ/high-cyber"`.
+`"scenarios.ws123.01HXYZ.high-cyber"` (separator pinned to `.` 2026-07-18 — Irmin rejects `/` in branch names).
 
 `BranchRef` identifies which line of history (which "version of reality") the
 system reads from and writes to.

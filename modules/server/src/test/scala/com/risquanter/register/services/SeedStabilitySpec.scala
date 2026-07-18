@@ -220,7 +220,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
       RiskTreeRepositoryInMemory.layer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
       com.risquanter.register.services.cache.RiskResultResolverLive.layer,
-      com.risquanter.register.services.cache.TreeCacheManager.layer,
+      com.risquanter.register.services.cache.CacheScope.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
       com.risquanter.register.configs.TestConfigs.simulationLayer >>> SimulationSemaphore.layer,

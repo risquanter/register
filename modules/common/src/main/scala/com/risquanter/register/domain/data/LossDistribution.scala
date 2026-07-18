@@ -146,14 +146,6 @@ sealed abstract class LossDistribution(
   /** All trial IDs with non-zero outcomes */
   def trialIds(): Set[TrialId] = trialOutcomes.trialIds
 
-  /** Provenance records reachable from this distribution.
-    *
-    * Leaves carry their own records; aggregates read their children's at
-    * access time (provenance belongs to the node that was simulated, never
-    * to the aggregate).
-    */
-  def provenances: List[NodeProvenance]
-
   /** Flatten hierarchy to vector of all distributions */
   def flatten: Vector[LossDistribution]
 }
@@ -186,6 +178,20 @@ object RiskResult {
   def empty(nodeId: NodeId)(using cfg: SimulationConfig): RiskResult =
     RiskResult(nodeId, TrialOutcomes.empty, Nil)
 
+  /** Attach node identity to identity-free result content (DD-16 corollary).
+    *
+    * The content-addressed cache stores `TrialOutcomes` + content-only
+    * provenance with no node ID; the resolver labels the content with the
+    * *requested* node's ID at the edge — the same content may serve any
+    * number of content-identical nodes.
+    */
+  def fromTrialOutcomes(
+    nodeId: NodeId,
+    trialOutcomes: TrialOutcomes,
+    provenances: List[NodeProvenance]
+  ): RiskResult =
+    RiskResult(nodeId, trialOutcomes, provenances)
+
   /** Value equality for RiskResult.
     *
     * Identity is defined over the simulation outcome (outcomes, nTrials, nodeId).
@@ -215,9 +221,6 @@ case class RiskResultGroup private (
   override val nodeId: NodeId,
   override val trialOutcomes: TrialOutcomes
 ) extends LossDistribution(nodeId, trialOutcomes) {
-
-  override def provenances: List[NodeProvenance] =
-    children.flatMap(_.provenances)
 
   override def flatten: Vector[LossDistribution] =
     this +: children.toVector.sortBy(_.nodeId.value)

@@ -203,10 +203,11 @@ object Simulator {
         lossDistribution = distribution
       )
 
-      // Provenance records the very same stream tuple the sampler consumes
+      // Provenance records the very same stream tuple the sampler consumes.
+      // Content-only (DD-19): no node identity — attribution is structural,
+      // via the RiskResult that carries this record.
       provenance =
         NodeProvenance(
-          riskId = leaf.id,
           entityId = streams.entityId,
           occurrenceVarId = streams.occurrenceVarId,
           lossVarId = streams.lossVarId,

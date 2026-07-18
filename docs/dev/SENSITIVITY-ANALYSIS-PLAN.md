@@ -81,10 +81,11 @@ and must never be used for cross-node aggregation.
 
 ### Recompute already walks only the affected path
 
-[`TreeCacheManager.invalidate`](../../modules/server/src/main/scala/com/risquanter/register/services/cache/TreeCacheManager.scala)
-removes only `tree.index.ancestorPath(nodeId)`; siblings stay cached. The resolver's
-portfolio branch then recomputes each ancestor as `childResults.reduce(RiskResult.combine)`
-where off-path children are cache hits and only the on-path child is recomputed. This is
+Under the content-addressed cache (milestone 2b Phase A; formerly
+`TreeCacheManager.invalidate` walking `ancestorPath`), an edited leaf hashes to a new
+key and misses while sibling leaves stay cache hits. The resolver's portfolio branch
+re-aggregates each ancestor from child results (`RiskResultGroup.create`) where
+off-path leaves are cache hits and only the edited leaf is recomputed. This is
 re-aggregation along the path — no subtraction.
 
 ### Seeds derive from stored seed identities, not params

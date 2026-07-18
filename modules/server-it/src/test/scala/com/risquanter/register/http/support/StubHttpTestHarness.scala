@@ -15,7 +15,7 @@ import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.SimulationSemaphore
-import com.risquanter.register.services.cache.{RiskResultResolverLive, TreeCacheManager}
+import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
@@ -63,7 +63,7 @@ object StubHttpTestHarness {
         MetricsLive.console,
         SimulationSemaphore.layer,
         repoLayer,
-        TreeCacheManager.layer,
+        CacheScope.layer,
         RiskResultResolverLive.layer,
         RiskTreeServiceLive.layer,
         SSEHub.live,
