@@ -2,16 +2,1747 @@
   {
     "name": "com.risquanter.register.Application",
     "methods": [
-      {"name": "<init>", "parameterTypes": []},
-      {"name": "run", "parameterTypes": []}
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "run",
+        "parameterTypes": []
+      }
     ]
   },
   {
     "name": "com.risquanter.register.Application$",
-    "methods": [{"name": "MODULE$", "parameterTypes": []}]
+    "methods": [
+      {
+        "name": "MODULE$",
+        "parameterTypes": []
+      }
+    ]
   },
   {
     "name": "scala.runtime.Statics$VM",
-    "methods": [{"name": "<clinit>", "parameterTypes": []}]
+    "methods": [
+      {
+        "name": "<clinit>",
+        "parameterTypes": []
+      }
+    ]
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "byte[]",
+    "serializable": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.logging.log4j2.Log4j2LogCreator"
+    },
+    "name": "byte[][]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "com.fasterxml.jackson.core.sym.CharsToNameCanonicalizer$Bucket[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "com.fasterxml.jackson.databind.ext.Java7SupportImpl",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "com.sun.crypto.provider.AESCipher$General",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "com.sun.crypto.provider.AESParameters",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "com.sun.crypto.provider.HmacCore$HmacSHA256",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "com.sun.crypto.provider.PBKDF2Core$HmacSHA256",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.slf4j.LoggerFactory"
+    },
+    "name": "java.lang.ClassLoader",
+    "fields": [
+      {
+        "name": "classLoaderValueMap"
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.Comparable",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "java.lang.Comparable",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.Iterable",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "java.lang.Object",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "java.lang.Object",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.resource.ResourceNameParser"
+    },
+    "name": "java.lang.Object[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "java.lang.StackTraceElement[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.String",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "java.lang.String",
+    "serializable": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.String[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.annotation.Annotation[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "java.lang.annotation.Annotation[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.annotation.ElementType[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.reflect.Constructor[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "java.lang.reflect.Constructor[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.reflect.Field[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "java.lang.reflect.Field[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.MergeUtils"
+    },
+    "name": "java.lang.reflect.Field[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.lang.reflect.Method[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "java.lang.reflect.Method[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "java.lang.reflect.Method[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "java.security.AlgorithmParametersSpi",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.util.AbstractCollection",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.util.AbstractList",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.util.AbstractMap",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.util.Collection",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.util.Map",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.util.Map$Entry[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.util.RandomAccess",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "java.util.SequencedCollection",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "javax.crypto.SealedObject",
+    "serializable": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.slf4j.LoggerFactory"
+    },
+    "name": "jdk.internal.misc.Unsafe",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.apache.commons.logging.LogFactory"
+    },
+    "name": "org.apache.commons.logging.LogFactory",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.apache.commons.logging.LogFactory"
+    },
+    "name": "org.apache.commons.logging.impl.Log4jApiLogFactory",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.apache.commons.logging.LogFactory"
+    },
+    "name": "org.apache.commons.logging.impl.WeakHashtable",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.logging.apachecommons.ApacheCommonsLogCreator"
+    },
+    "name": "org.apache.commons.logging.impl.WeakHashtable",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.logging.log4j2.Log4j2LogCreator"
+    },
+    "name": "org.apache.logging.log4j.util.EnvironmentPropertySource",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.logging.log4j2.Log4j2LogCreator"
+    },
+    "name": "org.apache.logging.log4j.util.SystemPropertiesPropertySource",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.apache.commons.logging.LogFactory"
+    },
+    "name": "org.apache.logging.slf4j.SLF4JProvider",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.api.Location[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.info.MigrationInfoServiceImpl"
+    },
+    "name": "org.flywaydb.core.api.MigrationInfo[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "org.flywaydb.core.api.configuration.ClassicConfiguration",
+    "fields": [
+      {
+        "name": "TEMP_ENVIRONMENT_NAME"
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.api.migration.baseline.BaselineAppliedMigration",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.api.migration.baseline.BaselineMigrationConfigurationExtension",
+    "allDeclaredFields": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.api.migration.baseline.BaselineMigrationConfigurationExtension",
+    "allDeclaredFields": true,
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "getBaselineMigrationPrefix",
+        "parameterTypes": []
+      },
+      {
+        "name": "setBaselineMigrationPrefix",
+        "parameterTypes": [
+          "java.lang.String"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.configuration.ConfigUtils"
+    },
+    "name": "org.flywaydb.core.api.migration.baseline.BaselineMigrationConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.api.migration.baseline.BaselineMigrationConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "org.flywaydb.core.api.migration.baseline.BaselineMigrationConfigurationExtension",
+    "fields": [
+      {
+        "name": "baselineMigrationPrefix"
+      }
+    ],
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "getBaselineMigrationPrefix",
+        "parameterTypes": []
+      },
+      {
+        "name": "getConfigurationParameterFromEnvironmentVariable",
+        "parameterTypes": [
+          "java.lang.String"
+        ]
+      },
+      {
+        "name": "getNamespace",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.api.migration.baseline.BaselineMigrationResolver",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.api.migration.baseline.BaselineResourceTypeProvider",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.Flyway"
+    },
+    "name": "org.flywaydb.core.api.pattern.ValidatePattern[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.resolver.sql.SqlMigrationResolver"
+    },
+    "name": "org.flywaydb.core.api.resource.LoadableResource[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.extensibility.ConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.extensibility.ConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.extensibility.Plugin",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.extensibility.Plugin",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "org.flywaydb.core.extensibility.Plugin",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.NullFlywayTelemetryManager",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.CleanModeConfigurationExtension",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "setClean",
+        "parameterTypes": [
+          "org.flywaydb.core.internal.command.clean.CleanModel"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.CleanModeConfigurationExtension",
+    "allDeclaredFields": true,
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "getClean",
+        "parameterTypes": []
+      },
+      {
+        "name": "setClean",
+        "parameterTypes": [
+          "org.flywaydb.core.internal.command.clean.CleanModel"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.configuration.ConfigUtils"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.CleanModeConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.CleanModeConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.MergeUtils"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.CleanModeConfigurationExtension",
+    "fields": [
+      {
+        "name": "clean"
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.CleanModel",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "setMode",
+        "parameterTypes": [
+          "java.lang.String"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.CleanModel",
+    "allDeclaredFields": true,
+    "methods": [
+      {
+        "name": "getMode",
+        "parameterTypes": []
+      },
+      {
+        "name": "getSchemas",
+        "parameterTypes": []
+      },
+      {
+        "name": "setSchemas",
+        "parameterTypes": [
+          "org.flywaydb.core.internal.command.clean.SchemaModel"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.SchemaModel",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.internal.command.clean.SchemaModel",
+    "allDeclaredFields": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.internal.configuration.extensions.DeployScriptFilenameConfigurationExtension",
+    "allDeclaredFields": true,
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "getScriptFilename",
+        "parameterTypes": []
+      },
+      {
+        "name": "setScriptFilename",
+        "parameterTypes": [
+          "java.lang.String"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.configuration.ConfigUtils"
+    },
+    "name": "org.flywaydb.core.internal.configuration.extensions.DeployScriptFilenameConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.configuration.extensions.DeployScriptFilenameConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.internal.configuration.extensions.PrepareScriptFilenameConfigurationExtension",
+    "allDeclaredFields": true,
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "getScriptFilename",
+        "parameterTypes": []
+      },
+      {
+        "name": "getUndoFilename",
+        "parameterTypes": []
+      },
+      {
+        "name": "setScriptFilename",
+        "parameterTypes": [
+          "java.lang.String"
+        ]
+      },
+      {
+        "name": "setUndoFilename",
+        "parameterTypes": [
+          "java.lang.String"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.configuration.ConfigUtils"
+    },
+    "name": "org.flywaydb.core.internal.configuration.extensions.PrepareScriptFilenameConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.configuration.extensions.PrepareScriptFilenameConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.configuration.resolvers.EnvironmentProvisionerNone",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.configuration.resolvers.EnvironmentVariableResolver",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.configuration.resolvers.PlaceholderPropertyResolver",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.FlywayExecutor"
+    },
+    "name": "org.flywaydb.core.internal.database.base.Schema[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.database.base.TestContainersDatabaseType",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.database.h2.H2DatabaseType",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "org.flywaydb.core.internal.database.h2.H2DatabaseType",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.database.sqlite.SQLiteDatabaseType",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.exception.FlywaySqlException"
+    },
+    "name": "org.flywaydb.core.internal.exception.sqlExceptions.FlywaySqlNoDriversForInteractiveAuthException",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.exception.FlywaySqlException"
+    },
+    "name": "org.flywaydb.core.internal.exception.sqlExceptions.FlywaySqlNoIntegratedAuthException",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.exception.FlywaySqlException"
+    },
+    "name": "org.flywaydb.core.internal.exception.sqlExceptions.FlywaySqlServerUntrustedCertificateSqlException",
+    "methods": [
+      {
+        "name": "isFlywaySpecificVersionOf",
+        "parameterTypes": [
+          "java.sql.SQLException"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.info.MigrationInfoServiceImpl"
+    },
+    "name": "org.flywaydb.core.internal.info.MigrationInfoImpl[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.jdbc.ErrorOverrideInitializerStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "org.flywaydb.core.internal.logging.apachecommons.ApacheCommonsLogCreator",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "org.flywaydb.core.internal.logging.log4j2.Log4j2LogCreator",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.ClassUtils"
+    },
+    "name": "org.flywaydb.core.internal.logging.slf4j.Slf4jLogCreator",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.AuthCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.CheckCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.DeployCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.DiffCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.DiffTextCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.GenerateCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.LicensingConfigurationExtensionStub",
+    "allDeclaredFields": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.configuration.ConfigUtils"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.LicensingConfigurationExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.LicensingConfigurationExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.ModelCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.OfflinePermitConfigurationExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.configuration.ConfigUtils"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.OfflinePermitConfigurationExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.OfflinePermitConfigurationExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.PATTokenConfigurationExtensionStub",
+    "allDeclaredFields": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.configuration.ConfigUtils"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.PATTokenConfigurationExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.PATTokenConfigurationExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.PrepareCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.proprietaryStubs.UndoCommandExtensionStub",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "org.flywaydb.core.internal.publishing.PublishingConfigurationExtension",
+    "allDeclaredFields": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.ConfigurationExtension"
+    },
+    "name": "org.flywaydb.core.internal.publishing.PublishingConfigurationExtension",
+    "allDeclaredFields": true,
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "isCheckDriftOnMigrate",
+        "parameterTypes": []
+      },
+      {
+        "name": "isPublishResult",
+        "parameterTypes": []
+      },
+      {
+        "name": "setCheckDriftOnMigrate",
+        "parameterTypes": [
+          "boolean"
+        ]
+      },
+      {
+        "name": "setPublishResult",
+        "parameterTypes": [
+          "boolean"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.configuration.ConfigUtils"
+    },
+    "name": "org.flywaydb.core.internal.publishing.PublishingConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.publishing.PublishingConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.resource.CoreResourceTypeProvider",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.scanner.classpath.ClasspathLocationHandlerImpl",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.scanner.filesystem.FilesystemLocationHandler",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.plugin.PluginRegister"
+    },
+    "name": "org.flywaydb.core.internal.schemahistory.BaseAppliedMigration",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcUtils"
+    },
+    "name": "org.h2.engine.SessionLocal[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcTemplate"
+    },
+    "name": "org.h2.expression.Expression[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcConnectionFactory"
+    },
+    "name": "org.h2.mvstore.MVStore$TxCounter",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcUtils"
+    },
+    "name": "org.h2.mvstore.MVStore$TxCounter",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcConnectionFactory"
+    },
+    "name": "org.h2.mvstore.Page",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcUtils"
+    },
+    "name": "org.h2.mvstore.Page",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcTemplate"
+    },
+    "name": "org.h2.table.Column[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcUtils"
+    },
+    "name": "org.h2.table.Column[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcTemplate"
+    },
+    "name": "org.h2.table.IndexColumn[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcTemplate"
+    },
+    "name": "org.h2.table.TableFilter[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcTemplate"
+    },
+    "name": "org.h2.table.Table[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcUtils"
+    },
+    "name": "org.h2.table.Table[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.TransactionalExecutionTemplate"
+    },
+    "name": "org.h2.table.Table[]",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.apache.logging.log4j.util.OsgiServiceLocator"
+    },
+    "name": "org.osgi.framework.FrameworkUtil",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.FeatureDetector"
+    },
+    "name": "org.slf4j.Logger",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.FeatureDetector"
+    },
+    "name": "org.slf4j.impl.StaticLoggerBinder",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.extensibility.LicenseGuard"
+    },
+    "name": "org.slf4j.simple.SimpleServiceProvider",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.logging.slf4j.Slf4jLogCreator"
+    },
+    "name": "org.slf4j.simple.SimpleServiceProvider",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.FeatureDetector"
+    },
+    "name": "org.slf4j.simple.SimpleServiceProvider",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.util.FeatureDetector"
+    },
+    "name": "org.slf4j.spi.SLF4JServiceProvider",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "sun.security.provider.NativePRNG",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": [
+          "java.security.SecureRandomParameters"
+        ]
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "sun.security.provider.SHA",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcConnectionFactory"
+    },
+    "name": "sun.security.provider.SHA2$SHA256",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.jdbc.JdbcUtils"
+    },
+    "name": "sun.security.provider.SHA2$SHA256",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.internal.license.EncryptionUtils"
+    },
+    "name": "sun.security.provider.SHA2$SHA256",
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      }
+    ],
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "condition": {
+      "typeReachable": "org.flywaydb.core.api.configuration.ClassicConfiguration"
+    },
+    "name": "sun.util.resources.cldr.CalendarData",
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "name": "org.flywaydb.core.extensibility.ConfigurationExtension",
+    "queryAllDeclaredMethods": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "name": "org.flywaydb.core.extensibility.Plugin",
+    "queryAllDeclaredMethods": true,
+    "queryAllPublicMethods": true
+  },
+  {
+    "name": "org.flywaydb.database.postgresql.PostgreSQLConfigurationExtension",
+    "allDeclaredFields": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true,
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "isTransactionalLock",
+        "parameterTypes": []
+      },
+      {
+        "name": "setTransactionalLock",
+        "parameterTypes": [
+          "boolean"
+        ]
+      },
+      {
+        "name": "getTransactional",
+        "parameterTypes": []
+      },
+      {
+        "name": "setTransactional",
+        "parameterTypes": [
+          "org.flywaydb.database.postgresql.TransactionalModel"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "org.flywaydb.database.postgresql.TransactionalModel",
+    "allDeclaredFields": true,
+    "queryAllDeclaredMethods": true,
+    "queryAllDeclaredConstructors": true,
+    "queryAllPublicMethods": true,
+    "methods": [
+      {
+        "name": "<init>",
+        "parameterTypes": []
+      },
+      {
+        "name": "getLock",
+        "parameterTypes": []
+      },
+      {
+        "name": "setLock",
+        "parameterTypes": [
+          "java.lang.Boolean"
+        ]
+      }
+    ]
+  },
+  {
+    "name": "org.postgresql.Driver",
+    "allDeclaredConstructors": true,
+    "allDeclaredMethods": true
   }
 ]

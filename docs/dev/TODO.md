@@ -1038,7 +1038,45 @@ scripts PUT then immediately fetch LECs.
 
 ---
 
-## 19. Verify persistence end-to-end with a live restart test (follow-up to item 10)
+## 19. Verify persistence end-to-end with a live restart test (follow-up to item 10) — DONE (2026-07-19)
+
+**Resolved 2026-07-19 — the live test found and fixed a real boot defect, then
+passed end-to-end.** First live boot of the native image with
+`REGISTER_WORKSPACE_STORE_BACKEND=postgres` crash-looped: Flyway's
+`ClassicConfiguration` reflectively copies every registered
+`ConfigurationExtension` through a Jackson round trip
+(`ConfigurationExtension.copy`), and the GraalVM reflection metadata for those
+classes was missing — `MissingReflectionRegistrationError` on
+`CleanModeConfigurationExtension.getNamespace()`. Invisible until now because
+`WorkspaceStorePostgres`/Flyway only ever ran on the JVM; exactly the gap this
+item predicted. Fix (in `modules/server/src/main/resources/META-INF/native-image/`):
+`reflect-config.json` regenerated from the official GraalVM
+reachability-metadata for flyway-core 11.x (converted to the old per-file
+format with explicit `queryAll*` flags — the new combined format implies
+query access that the old format must spell out; Jackson needs it to resolve
+`@JsonIgnore` on `ConfigurationExtension.getNamespace()`, which lives on the
+*interface* method), plus hand-written entries for
+`PostgreSQLConfigurationExtension`/`TransactionalModel` (flyway-database-postgresql
+has no official metadata) and `org.postgresql.Driver`; `resource-config.json`
+gained `db/migration/*.sql` (migrations were not baked into the image at all)
+and Flyway's service/version resources. The fix was validated in isolation
+with a 12-second probe build inside `local/graalvm-builder:21` (same GraalVM,
+`--static --libc=musl`) before the full server rebuild — use that loop for any
+future native-reflection issue instead of 5-minute full rebuilds.
+
+Live test then passed in full (disposable workspace, volumes untouched):
+persistent stack up via `--env-file .env --env-file .env.irmin` (both files —
+`.env.irmin` alone drops `APP_VERSION` and mis-tags the image `dev`); startup
+logs confirmed Irmin repository + PostgreSQL workspace store + "Flyway
+migrations complete"; workspace + tree created via API; `docker compose
+restart register-server` → workspace and tree still resolve (the exact item-10
+failure); full `down` (no `-v`) + `up` → still resolve. Test workspace deleted
+(204) and probe DB dropped afterwards; stack restored to the in-memory dev
+default. The BATS promotion idea below stays open — suite A does not cover the
+postgres workspace store; a restart-survival case would have caught the
+Flyway-metadata defect in CI.
+
+<details><summary>Original item text (for the promoted-test follow-up)</summary>
 
 Item 10 (`--profile persistence` no-op) was fixed on 2026-07-12 by completing
 the `.env.irmin` env-file path. The fix was verified **statically only** —
@@ -1077,6 +1115,8 @@ survival would guard against a regression in the compose wiring or the
 `WorkspaceStorePostgres` boot path. See also the K8s twin in
 `register-infra/docs/TODO.md` ("Deferred — Blocked on App-Side Changes"),
 which has an analogous pod-restart survival check as its step 5.
+
+</details>
 
 ---
 

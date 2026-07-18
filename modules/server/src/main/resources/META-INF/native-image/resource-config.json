@@ -1,9 +1,66 @@
 {
   "resources": {
     "includes": [
-      {"pattern": "application.conf"},
-      {"pattern": "reference.conf"},
-      {"pattern": "logback.xml"}
+      {
+        "pattern": "application.conf"
+      },
+      {
+        "pattern": "reference.conf"
+      },
+      {
+        "pattern": "logback.xml"
+      },
+      {
+        "pattern": "db/migration/.*\\.sql"
+      },
+      {
+        "pattern": "META\\-INF/log4j\\-provider\\.properties"
+      },
+      {
+        "pattern": "META\\-INF/services/java\\.net\\.spi\\.URLStreamHandlerProvider"
+      },
+      {
+        "pattern": "META\\-INF/services/java\\.time\\.zone\\.ZoneRulesProvider"
+      },
+      {
+        "pattern": "META\\-INF/services/org\\.apache\\.commons\\.logging\\.LogFactory"
+      },
+      {
+        "pattern": "META\\-INF/services/org\\.apache\\.logging\\.log4j\\.spi\\.Provider"
+      },
+      {
+        "pattern": "META\\-INF/services/org\\.flywaydb\\.core\\.extensibility\\.Plugin"
+      },
+      {
+        "pattern": "META\\-INF/services/org\\.slf4j\\.spi\\.SLF4JServiceProvider"
+      },
+      {
+        "pattern": "commons\\-logging\\.properties"
+      },
+      {
+        "pattern": "db/callback"
+      },
+      {
+        "pattern": "db/migration"
+      },
+      {
+        "pattern": "log4j2\\.StatusLogger\\.properties"
+      },
+      {
+        "pattern": "log4j2\\.component\\.properties"
+      },
+      {
+        "pattern": "log4j2\\.simplelog\\.properties"
+      },
+      {
+        "pattern": "log4j2\\.system\\.properties"
+      },
+      {
+        "pattern": "org/flywaydb/core/internal/version\\.txt"
+      },
+      {
+        "pattern": "simplelogger\\.properties"
+      }
     ]
   }
 }

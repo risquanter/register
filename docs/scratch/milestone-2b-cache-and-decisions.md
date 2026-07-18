@@ -1031,7 +1031,7 @@ key to `(ContentHash, configHash)`.
 | ~~DD-5~~ | ~~Scenario domain model~~ | **CLOSED 2026-07-18 → Option A: scenario = (workspace, name), `scenarios.<ws>.<name>`, rename = recreate, no metadata store; moved to the Closed table.** |
 | ~~DD-7~~ | ~~HistoryService API~~ | **CLOSED 2026-07-18 → one entry = one user action (write-side batching via `set_tree`); revert = forward commit; moved to the Closed table.** |
 | ~~DD-8~~ | ~~HTTP endpoint design~~ | **CLOSED 2026-07-18 → per-request `X-Active-Branch` header; moved to the Closed table.** |
-| DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. **Postponed by decision 2026-07-18**: close at Phase B start by confirming (or amending) the phase outline's default (BranchBar in workspace header, comparison in Analyze) against a rendered sketch. Fully reversible, no dependents. |
+| DD-9 | Frontend UI placement | Branch bar location, comparison view placement in Analyze section. **Postponed by decision 2026-07-18**: close at Phase B start by confirming (or amending) the phase outline's default (BranchBar in workspace header, comparison in Analyze) against a rendered sketch. **Scope extended 2026-07-19:** the sketch must also show the feature-disabled state (in-memory backend / kill-switch off — see the Phase B kill-switch item), so the later grayed-out-vs-removed decision has a design to decide against. Fully reversible, no dependents. |
 | ~~DD-11~~ | ~~Workspace ↔ scenario ownership~~ | **CLOSED 2026-07-18 → prefix convention, corollary of DD-5 Option A; moved to the Closed table.** |
 | ~~DD-20~~ | ~~Fate of `invalidateWorkspaceCache` endpoint~~ | **CLOSED 2026-07-18 → (a) retire in Phase A; moved to the Closed table.** |
 | ~~DD-19~~ | ~~Provenance content/identity representation~~ | **CLOSED 2026-07-18 → (c)+(d) + A′; moved to the Closed table above.** Original write-up: `NodeProvenance` mixes computation content (`entityId`, `occurrenceVarId`/`lossVarId`, global seeds, distribution type/params, timestamp, version) with identity (`riskId: NodeId`). The cached record must be the content part only (DD-16/DD-18). How is identity attached? **(a)** nested split — `NodeProvenance(riskId, <content record>)`; works before the monoid refactor; user prefers (a) over (b) (keep `NodeProvenance` unchanged, build it at the edge). **(c)+(d)** — drop `riskId` from the record entirely; attribution recovered from structure (`RiskResultGroup` keeps children) and, when ever exposed, a `Map[NodeId, <content record>]` assembled at the resolver edge — **candidate, not finalized**; requires the monoid plan's Part A first. Facts (verified 2026-07-16): `riskId` is written once (`Simulator.scala:209`) and read by no production code; no endpoint response carries provenance today (the `LECCurveResponse` type once named in an LEC.scala comment never existed — comment fixed). **Decide last — after every other open decision in this doc and the monoid plan is locked.** |
@@ -1349,9 +1349,27 @@ Phase B: Scenario CRUD + Minimal UI
     caller-supplied full BranchRef (DD-11)                     [Scala]
   - In-memory backend: execute the A8-item-3 decision
     (recommended: feature-flag off, typed NOT_SUPPORTED)       [Scala]
+  - Scenario feature kill-switch (added 2026-07-19): one
+    mechanism disables scenarios as a whole feature across
+    every surface. Implementation starts with an enumeration
+    pass — find ALL scenario surfaces, not just the known
+    ones: API endpoints (CRUD + X-Active-Branch handling →
+    typed NOT_SUPPORTED when off), UI elements (BranchBar,
+    save-as affordance, branch indicators), SSE, service
+    entry points. Minimum bar: when the server starts with
+    the in-memory repository, a clear startup log entry
+    states that scenario analysis features are unavailable
+    because the backend is in-memory. Whether disabled UI
+    elements are grayed out (unclickable) or removed outright
+    is deliberately undecided — decide after DD-9. The UI
+    half of this item is therefore sequenced AFTER the DD-9
+    sketch confirmation; DD-9 must consider the disabled
+    state as a design input (see DD-9 row)          [Scala + Scala.js]
   - Workspace reaper: delete scenarios.<ws>.* branches on reap  [Scala]
   - BranchBar UI component + per-tab branch state (DD-9:
-    confirm placement against sketch at phase start)     [Scala.js/Laminar]
+    confirm placement against sketch at phase start; the
+    sketch must show the disabled/feature-off state too —
+    see kill-switch item)                            [Scala.js/Laminar]
   - End-to-end: create scenario, switch, edit, switch back
   - DD-7 write-side batching (set_tree, one commit per user
     action) — scheduling decision at Phase B kickoff: doing it
@@ -1961,18 +1979,23 @@ But "live" has preconditions **outside** the phase outline:
    default compose stack still runs in-memory. TODO item 10 (`--profile
    persistence` was a no-op for the server) was **resolved 2026-07-12** by
    completing the `--env-file .env.irmin` path — no longer a blocker; the
-   sentence above predated the fix by hours. The residual is TODO item 19
-   (still open): that fix was verified **statically only** (`docker compose
-   --env-file .env.irmin.example config` resolves the backends), with no live
-   container-restart test yet. (Since 2026-07-16, `SeedReproducibilityItSpec`
-   does prove Irmin-backed reload through a completely fresh in-process
-   stack — repo/resolver-level evidence, but no container has been restarted
-   under test.) Scenario branching should not be the first
-   feature to exercise the persistent tier end-to-end.
+   sentence above predated the fix by hours. The residual, TODO item 19, was
+   **closed 2026-07-19 by a live restart test**: persistent stack booted
+   (Irmin + Postgres + Flyway confirmed in logs), workspace + tree survived
+   both a server-only restart and a full stack down/up. The test first
+   exposed and fixed a native-image boot crash (missing GraalVM reflection
+   metadata for Flyway's config-extension copy + migrations SQL not baked
+   into the image — see TODO item 19 for the full mechanism). The persistent
+   tier is now live-verified end-to-end; scenario branching no longer has to
+   be its first exerciser.
 3. **In-memory story:** decide explicitly what the in-memory backend does —
    feature-flagged off (scenario endpoints return 404/NOT_SUPPORTED) or
    branch semantics emulated in memory. The plan currently has no answer;
-   silent partial behavior is not an option.
+   silent partial behavior is not an option. **Extended 2026-07-19:** the
+   flag-off path is the first consumer of the Phase B scenario
+   kill-switch item — one mechanism covering API, UI, and SSE, with a
+   mandatory startup log entry when running in-memory ("scenario analysis
+   features unavailable: in-memory backend").
 4. **Frontend phases included:** "fully implemented" per the outline already
    includes the Laminar UI (BranchBar, comparison view, history panel), so
    no separate frontend project remains.
