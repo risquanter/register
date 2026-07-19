@@ -1,0 +1,588 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Milestone-2b UI mockup v5 — three-state compare toggle (off / overlay / tiles)</title>
+<style>
+  /* Tokens mirrored from modules/app/styles/app.css (Figma UI library).
+     The mockup deliberately commits to the app's dark scheme — these screens
+     must show the product as it actually renders. */
+  :root {
+    --surface: #060f11;
+    --surface-raised: #0d1a1e;
+    --overlay: rgba(230,232,232,.08);
+    --overlay-hover: rgba(230,232,232,.14);
+    --fg: #e6e8e8;
+    --fg-muted: #7e8385;
+    --fg-variant: #b8bbbc;
+    --border: rgba(230,232,232,.12);
+    --accent: #b8bbbc;                 /* app.css --accent: neutral highlight */
+    --accent-dim: rgba(184,187,188,.14);
+    --info: #42c9ed;                   /* app.css --info (workspace-expiry notices) */
+    --info-dim: rgba(66,201,237,.12);
+    /* user-assigned per-branch palettes (mock assignment via ColorSwatchPicker):
+       main=green, stress-2026=purple, new-vendor-risk=orange — all curve-palette stops */
+    --pal-main: #4ade80;
+    --pal-stress: #c084fc;
+    --pal-vendor: #fbbf24;
+    --yellow: #facc15;
+    --red: #ef4444;
+    --red-dim: rgba(239,68,68,.12);
+    --green: #4ade80;
+    --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+  html { color-scheme: dark; }
+  body {
+    background: var(--surface);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-weight: 400;
+    margin: 0;
+    padding: 2rem 1.5rem 4rem;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 1.25rem; }
+
+  header.intro h1 { font-size: 1.35rem; font-weight: 450; margin: 0 0 .35rem; text-wrap: balance; }
+  header.intro p  { color: var(--fg-variant); margin: 0; max-width: 62ch; font-size: .92rem; }
+  .dd { font-family: var(--font-mono); font-size: .8em; color: var(--fg-variant); background: var(--overlay); padding: .1em .45em; border-radius: 3px; }
+
+  /* Screen switcher — order = phase order, labels carry the phase */
+  nav.tabs { display: flex; flex-wrap: wrap; gap: .4rem; }
+  nav.tabs button {
+    font: 450 .85rem var(--font-sans); color: var(--fg-variant);
+    background: var(--overlay); border: 1px solid transparent; border-radius: 4px;
+    padding: .45rem .8rem; cursor: pointer;
+  }
+  nav.tabs button:hover { background: var(--overlay-hover); }
+  nav.tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  nav.tabs button.on { color: var(--fg); border-color: var(--accent); background: var(--accent-dim); }
+  nav.tabs .ph { font-family: var(--font-mono); font-size: .72rem; color: var(--fg-muted); margin-right: .45em; }
+  nav.tabs button.on .ph { color: var(--fg); }
+
+  .screen { display: none; flex-direction: column; gap: .8rem; }
+  .screen.on { display: flex; }
+  .screen > .note { color: var(--fg-variant); font-size: .9rem; max-width: 72ch; margin: 0; }
+  .note strong { font-weight: 450; color: var(--fg); }
+
+  /* ── App-shell mock ─────────────────────────────────────── */
+  .shell {
+    display: grid; grid-template-columns: 150px 1fr;
+    border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+    background: var(--surface); min-height: 480px; position: relative;
+    font-size: .82rem;
+  }
+  .sidebar { background: var(--surface-raised); border-right: 1px solid var(--border); padding: .9rem .7rem; display: flex; flex-direction: column; gap: .25rem; }
+  .brand { font-weight: 450; letter-spacing: .02em; margin-bottom: .7rem; display: flex; align-items: center; gap: .4rem; }
+  .brand::before { content: ""; width: 14px; height: 14px; border: 2px solid var(--fg-variant); border-radius: 3px; display: inline-block; }
+  .side-label { font-size: .62rem; text-transform: uppercase; letter-spacing: .12em; color: var(--fg-muted); margin: .3rem 0 .2rem; }
+  .nav-item { padding: .4rem .55rem; border-radius: 4px; color: var(--fg-variant); }
+  .nav-item.active { background: var(--overlay); color: var(--fg); }
+  .side-foot { margin-top: auto; color: var(--fg-muted); font-size: .68rem; }
+
+  .main { display: flex; flex-direction: column; }
+  .topbar { display: flex; align-items: center; padding: .55rem .9rem; border-bottom: 1px solid var(--border); gap: .6rem; }
+  .topbar .title { font-weight: 450; }
+  .topbar .right { margin-left: auto; display: flex; align-items: center; gap: .55rem; }
+  .health { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .badge { font-family: var(--font-mono); font-size: .7rem; color: var(--fg-variant); background: var(--overlay); padding: .18rem .5rem; border-radius: 3px; }
+
+  .sw { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+  .chip { font-family: var(--font-mono); font-size: .7rem; padding: .18rem .5rem; border-radius: 3px; display: inline-flex; align-items: center; gap: .35em; }
+  .chip::before { content: "⎇"; font-size: .85em; }
+  .chip.main { color: var(--fg-muted); background: var(--overlay); }
+  .chip.scen { color: var(--fg); background: var(--overlay); } /* neutral — identity via user-assigned swatch, no role colour */
+  .chip.dis  { color: var(--fg-muted); background: transparent; border: 1px dashed var(--border); }
+
+  .content { flex: 1; display: flex; min-height: 0; }
+  .panel { border-right: 1px solid var(--border); padding: .7rem .8rem; display: flex; flex-direction: column; gap: .55rem; min-width: 0; }
+  .panel:last-child { border-right: 0; }
+  .panel h4 { margin: 0; font-size: .78rem; font-weight: 450; color: var(--fg-variant); }
+  .ph-box { border: 1px dashed var(--border); border-radius: 5px; color: var(--fg-muted); display: flex; align-items: center; justify-content: center; padding: .6rem; text-align: center; font-size: .74rem; }
+  .grow { flex: 1; }
+
+  /* Scenario toolbar (Design, Phase B) */
+  .scen-bar { display: flex; align-items: center; gap: .55rem; padding: .45rem .9rem; border-bottom: 1px solid var(--border); background: var(--surface-raised); position: relative; }
+  .scen-bar .lbl { font-size: .72rem; color: var(--fg-muted); }
+  .btn { font: 450 .74rem var(--font-sans); padding: .28rem .6rem; border-radius: 4px; border: 1px solid var(--border); background: var(--overlay); color: var(--fg); cursor: default; }
+  .btn.primary { border-color: var(--accent); color: var(--fg); background: var(--overlay-hover); }
+  .btn.disabled { opacity: .38; }
+  .dropdown {
+    position: absolute; top: 2.3rem; left: 4.6rem; z-index: 5;
+    background: var(--surface-raised); border: 1px solid var(--border); border-radius: 6px;
+    min-width: 240px; box-shadow: 0 8px 28px rgba(0,0,0,.55); font-size: .76rem;
+    padding: .3rem 0;
+  }
+  .dropdown .item { padding: .34rem .8rem; display: flex; gap: .5em; align-items: center; color: var(--fg-variant); }
+  .dropdown .item.sel { color: var(--fg); }
+  .dropdown .item.sel::after { content: "✓"; margin-left: auto; color: var(--accent); }
+  .dropdown .item .mono { font-family: var(--font-mono); font-size: .72rem; }
+  .dropdown hr { border: 0; border-top: 1px solid var(--border); margin: .3rem 0; }
+  .dropdown .item.action { color: var(--fg); }
+  .dropdown .item.danger { color: var(--red); }
+  .dropdown .item.future { color: var(--fg-muted); }
+  .dropdown .item .tag { margin-left: auto; font-size: .62rem; font-family: var(--font-mono); color: var(--fg-muted); border: 1px solid var(--border); border-radius: 3px; padding: 0 .35em; }
+
+  /* callout markers */
+  .mark { display: inline-flex; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: #101617; font: 600 .68rem/16px var(--font-mono); justify-content: center; flex: none; }
+  .callouts { display: flex; flex-direction: column; gap: .3rem; font-size: .85rem; color: var(--fg-variant); margin: 0; padding: 0; list-style: none; }
+  .callouts li { display: flex; gap: .55rem; align-items: baseline; }
+  .callouts .mark { transform: translateY(2px); }
+
+  /* variant toggle inside disabled screen */
+  .variant-toggle { display: inline-flex; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; width: max-content; }
+  .variant-toggle button { font: 450 .78rem var(--font-sans); background: transparent; color: var(--fg-variant); border: 0; padding: .35rem .8rem; cursor: pointer; }
+  .variant-toggle button.on { background: var(--accent-dim); color: var(--fg); }
+  .variant-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* history list */
+  .commits { display: flex; flex-direction: column; font-family: var(--font-mono); font-size: .7rem; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+  .commits .c { display: flex; gap: .5em; padding: .38rem .55rem; border-bottom: 1px solid var(--border); color: var(--fg-variant); }
+  .commits .c:last-child { border-bottom: 0; }
+  .commits .c.head .dot { color: var(--green); }
+  .commits .c.sel { background: var(--overlay-hover); color: var(--fg); }
+  .commits .dot { color: var(--fg-muted); }
+  .commit-actions { display: flex; flex-direction: column; gap: .35rem; }
+  .commit-actions .btn { text-align: left; }
+
+  .subtabs { display: flex; gap: .2rem; }
+  .subtabs span { font-size: .72rem; padding: .22rem .6rem; border-radius: 4px 4px 0 0; color: var(--fg-muted); border: 1px solid transparent; }
+  .subtabs span.on { color: var(--fg); background: var(--overlay); border-color: var(--border); border-bottom-color: transparent; }
+
+  /* compare mode bits */
+  .mode-row { display: flex; align-items: center; gap: .5rem; font-size: .74rem; color: var(--fg-variant); }
+  .switch { width: 26px; height: 14px; border-radius: 7px; background: var(--accent); position: relative; flex: none; }
+  .switch::after { content: ""; position: absolute; right: 2px; top: 2px; width: 10px; height: 10px; border-radius: 50%; background: #101617; }
+  .legend { display: flex; gap: 1rem; font-size: .7rem; color: var(--fg-variant); font-family: var(--font-mono); }
+  .legend .sw { margin-right: .4em; transform: translateY(1px); }
+  .diffrow { font-family: var(--font-mono); font-size: .7rem; display: flex; gap: .6em; color: var(--fg-variant); padding: .22rem .4rem; border-radius: 3px; }
+  .diffrow:hover { background: var(--overlay); }
+  .diffrow .op { flex: none; width: 1em; }
+  .diffrow .op.mod { color: var(--yellow); }
+  .diffrow .op.add { color: var(--green); }
+
+  /* merge modal */
+  .modal-veil { position: absolute; inset: 0; background: rgba(2,6,7,.6); display: flex; align-items: center; justify-content: center; z-index: 8; }
+  .modal { background: var(--surface-raised); border: 1px solid var(--border); border-radius: 8px; width: min(480px, 90%); padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: .7rem; box-shadow: 0 14px 44px rgba(0,0,0,.6); }
+  .modal h3 { margin: 0; font-size: .95rem; font-weight: 450; }
+  .modal .conflict { background: var(--red-dim); border: 1px solid rgba(239,68,68,.35); border-radius: 5px; padding: .5rem .65rem; font-size: .76rem; display: flex; flex-direction: column; gap: .4rem; }
+  .modal .conflict .row { display: flex; gap: .5rem; align-items: center; }
+  .modal .foot { display: flex; justify-content: flex-end; gap: .5rem; }
+  .btn.merge-off { opacity: .38; border-color: var(--accent); color: var(--fg); }
+
+  .banner { background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 5px; padding: .35rem .6rem; font-size: .72rem; color: var(--fg); display: flex; gap: .6rem; align-items: center; } /* neutral */
+  .banner .btn { padding: .12rem .5rem; font-size: .68rem; }
+
+  svg.lec { width: 100%; height: auto; display: block; }
+  /* three-position slider, same visual family as the v3/v4 two-state switch */
+  .tri { width: 58px; height: 14px; border-radius: 7px; background: var(--overlay); border: 1px solid var(--border); position: relative; cursor: pointer; flex: none; }
+  .tri .knob { position: absolute; top: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); left: 2px; transition: left .15s ease; }
+  .tri.s1 .knob { left: 23px; }
+  .tri.s2 .knob { left: 44px; }
+  .tri:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .tri-labels { display: inline-flex; gap: .7em; }
+  .tri-labels button { font: 450 .72rem var(--font-sans); background: none; border: 0; padding: 0; color: var(--fg-muted); cursor: pointer; }
+  .tri-labels button.on { color: var(--fg); }
+  .tri-labels button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .charts-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: .6rem; }
+  .charts-row .mini { border: 1px solid var(--border); border-radius: 5px; padding: .35rem .45rem; min-width: 0; }
+  .charts-row .mini .cap { font-size: .68rem; color: var(--fg-variant); display: flex; align-items: center; gap: .35em; margin-bottom: .2rem; }
+  .cmp-pane { display: none; } .cmp-pane.on { display: block; }
+
+  .tree-mini { font-family: var(--font-mono); font-size: .7rem; color: var(--fg-variant); white-space: pre; line-height: 1.5; overflow-x: auto; }
+  .tree-mini .hit { color: var(--pal-stress); } /* comparand's user-assigned palette */
+
+  @media (max-width: 720px) {
+    .shell { grid-template-columns: 110px 1fr; font-size: .74rem; min-height: 380px; }
+    body { padding: 1.2rem .8rem 3rem; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tri .knob { transition: none; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .screen.on { animation: fade .18s ease-out; }
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="intro">
+    <h1>Milestone-2b UI — placement mockups for <span class="dd">DD-9</span></h1>
+    <p>Rendered on the app's own design tokens (app.css). Screens follow phase order; each states
+    what it proposes and what stays open. Source record: <span style="font-family:var(--font-mono); font-size:.85em">docs/dev/PLAN-UI-MILESTONE-2B.md</span>.</p>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="on" data-s="s1" role="tab"><span class="ph">B</span>Design + scenarios</button>
+    <button data-s="s2" role="tab"><span class="ph">B</span>Feature disabled</button>
+    <button data-s="s3" role="tab"><span class="ph">C</span>Analyze · compare</button>
+    <button data-s="s4" role="tab"><span class="ph">E</span>Analyze · history + fork</button>
+    <button data-s="s5" role="tab"><span class="ph">D</span>Merge preview</button>
+  </nav>
+
+  <!-- ══════ Screen 1 — Phase B: Design with scenario toolbar ══════ -->
+  <section class="screen on" id="s1">
+    <p class="note"><strong>Proposes:</strong> branch chip in the shared topbar (always visible, both views);
+    scenario management concentrated in a toolbar row above the Design split panes. Dropdown shown open.</p>
+    <div class="shell">
+      <div class="sidebar">
+        <div class="brand">Risquanter</div>
+        <div class="side-label">Tool</div>
+        <div class="nav-item active">Design</div>
+        <div class="nav-item">Analyze</div>
+        <div class="side-foot">v0.4</div>
+      </div>
+      <div class="main">
+        <div class="topbar">
+          <span class="title">Design</span>
+          <span class="right">
+            <span class="health"></span>
+            <span class="chip scen"><span class="sw" style="background:var(--pal-stress)"></span>stress-2026</span> <span class="mark">1</span>
+            <span class="badge">WS: A4T…KQ</span>
+          </span>
+        </div>
+        <div class="scen-bar">
+          <span class="lbl">Scenario</span>
+          <span class="btn primary">⎇ stress-2026 ▾</span> <span class="mark">2</span>
+          <span class="btn">+ New scenario</span>
+          <div class="dropdown">
+            <div class="item"><span class="sw" style="background:var(--pal-main)"></span><span class="mono">⎇ main</span></div>
+            <div class="item sel"><span class="sw" style="background:var(--pal-stress)"></span><span class="mono">⎇ stress-2026</span></div>
+            <div class="item"><span class="sw" style="background:var(--pal-vendor)"></span><span class="mono">⎇ new-vendor-risk</span></div>
+            <hr>
+            <div class="item action">+ New scenario from main…</div>
+            <div class="item action">✎ Rename current…</div>
+            <div class="item action">◩ Assign palette… <span class="tag">ColorSwatchPicker</span></div>
+            <div class="item future">⇪ Merge into main… <span class="tag">Phase D</span></div>
+            <div class="item future">↩ Revert this branch… <span class="tag">Phase E</span></div>
+            <hr>
+            <div class="item danger">✕ Delete current…</div>
+          </div>
+        </div>
+        <div class="content">
+          <div class="panel" style="flex: 0 0 40%">
+            <h4>TreeBuilderView</h4>
+            <div class="ph-box grow">forms — unchanged</div>
+          </div>
+          <div class="panel grow">
+            <h4>TreeListView + TreePreview</h4>
+            <div class="ph-box" style="flex: 0 0 46%">tree selector + ASCII preview — unchanged</div>
+            <h4>DistributionChartView</h4>
+            <div class="ph-box grow">distribution chart — unchanged</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="callouts">
+      <li><span class="mark">1</span>Chip is global and never absent; it names the tab's branch and carries the branch's <em>user-assigned</em> palette swatch — no built-in role colour, no "default vs non-default" semantics. In Analyze it is indicator-only (inert).</li>
+      <li><span class="mark">2</span>All branch mutations live here: switch, create (CAS at main head, DD-5), rename (recreate+delete), delete. Merge/revert slots reserved, hidden until their phase. Rename/delete disabled while on <code>main</code>.</li>
+    </ul>
+  </section>
+
+  <!-- ══════ Screen 2 — Phase B: disabled state, both variants ══════ -->
+  <section class="screen" id="s2">
+    <p class="note"><strong>Decision input (deliberately open):</strong> in-memory backend / kill-switch off.
+    Toggle between the two candidate treatments — this is the design the grayed-vs-removed decision is made against.</p>
+    <div class="variant-toggle" role="tablist">
+      <button class="on" data-v="g">Variant G — grayed</button>
+      <button data-v="r">Variant R — removed</button>
+    </div>
+    <div class="shell" id="vshell">
+      <div class="sidebar">
+        <div class="brand">Risquanter</div>
+        <div class="side-label">Tool</div>
+        <div class="nav-item active">Design</div>
+        <div class="nav-item">Analyze</div>
+        <div class="side-foot">v0.4</div>
+      </div>
+      <div class="main">
+        <div class="topbar">
+          <span class="title">Design</span>
+          <span class="right">
+            <span class="health"></span>
+            <span class="chip dis" data-only="g" title="Scenario features require the Irmin backend">scenarios unavailable</span>
+            <span class="badge">WS: A4T…KQ</span>
+          </span>
+        </div>
+        <div class="scen-bar" data-only="g">
+          <span class="lbl">Scenario</span>
+          <span class="btn disabled">⎇ — ▾</span>
+          <span class="btn disabled">+ New scenario</span>
+          <span class="lbl" style="margin-left:.4rem">requires the Irmin backend</span>
+        </div>
+        <div class="content">
+          <div class="panel" style="flex: 0 0 40%">
+            <h4>TreeBuilderView</h4>
+            <div class="ph-box grow">forms — unchanged</div>
+          </div>
+          <div class="panel grow">
+            <h4>TreeListView + TreePreview</h4>
+            <div class="ph-box" style="flex: 0 0 46%">tree selector + preview</div>
+            <h4>DistributionChartView</h4>
+            <div class="ph-box grow">distribution chart</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note">Variant R is byte-identical to today's UI — no scenario trace anywhere.
+    Doc recommendation (non-binding): R for the toolbar; keep at most the single muted topbar note from G if
+    feature discoverability matters for demo deployments.</p>
+  </section>
+
+  <!-- ══════ Screen 3 — Phase C: Analyze compare ══════ -->
+  <section class="screen" id="s3">
+    <p class="note"><strong>Proposes:</strong> a three-state compare control — <strong>Off / Overlay / Side by side</strong> —
+    with branch multi-select. The toggle below is live: click the states to switch layouts. Three branches selected to show the N-way case.</p>
+    <div class="shell">
+      <div class="sidebar">
+        <div class="brand">Risquanter</div>
+        <div class="side-label">Tool</div>
+        <div class="nav-item">Design</div>
+        <div class="nav-item active">Analyze</div>
+        <div class="side-foot">v0.4</div>
+      </div>
+      <div class="main">
+        <div class="topbar">
+          <span class="title">Analyze</span>
+          <span class="right">
+            <span class="health"></span>
+            <span class="chip main"><span class="sw" style="background:var(--pal-main)"></span>main</span>
+            <span class="badge">WS: A4T…KQ</span>
+          </span>
+        </div>
+        <div class="content">
+          <div class="panel grow" style="flex: 1 1 72%">
+            <div class="mode-row">
+              <h4 style="margin-right:auto">Query</h4>
+              <span class="tri s1" id="cmpTri" tabindex="0" role="tablist" aria-label="Compare mode"><span class="knob"></span></span>
+              <span class="tri-labels">
+                <button data-cmp="off">Off</button>
+                <button data-cmp="overlay" class="on">Overlay</button>
+                <button data-cmp="tiles">Side by side</button>
+              </span> <span class="mark">1</span>
+              <span class="btn primary"><span class="sw" style="background:var(--pal-main)"></span> main ✓</span>
+              <span class="btn primary"><span class="sw" style="background:var(--pal-stress)"></span> stress-2026 ✓</span>
+              <span class="btn primary"><span class="sw" style="background:var(--pal-vendor)"></span> new-vendor-risk ✓</span>
+            </div>
+            <div class="ph-box">query textarea + Run — unchanged</div>
+<div class="cmp-pane" id="cmp-off">
+              <svg class="lec" viewBox="0 0 420 130" aria-label="LEC chart, active branch only">
+                <g stroke="rgba(230,232,232,.08)" stroke-width="1">
+                <line x1="40" y1="10" x2="40" y2="110"/><line x1="40" y1="110" x2="410" y2="110"/>
+                <line x1="40" y1="60" x2="410" y2="60" stroke-dasharray="2 4"/>
+                <line x1="225" y1="10" x2="225" y2="110" stroke-dasharray="2 4"/>
+              </g>
+                <path d="M40,18 C 120,22 180,50 250,78 C 310,98 370,106 410,108" fill="none" stroke="#4ade80" stroke-width="2"/>
+                <text x="46" y="20" fill="#7e8385" font-size="8" font-family="monospace">P(exceed)</text>
+              </svg>
+              <div class="legend"><span><span class="sw" style="background:var(--pal-main)"></span>main (active branch — compare off)</span></div>
+            </div>
+            <div class="cmp-pane on" id="cmp-overlay">
+              <svg class="lec" viewBox="0 0 420 130" aria-label="LEC overlay: one chart, curves of all selected branches">
+                <g stroke="rgba(230,232,232,.08)" stroke-width="1">
+                <line x1="40" y1="10" x2="40" y2="110"/><line x1="40" y1="110" x2="410" y2="110"/>
+                <line x1="40" y1="60" x2="410" y2="60" stroke-dasharray="2 4"/>
+                <line x1="225" y1="10" x2="225" y2="110" stroke-dasharray="2 4"/>
+              </g>
+                <path d="M40,18 C 120,22 180,50 250,78 C 310,98 370,106 410,108" fill="none" stroke="#4ade80" stroke-width="2"/>
+                <path d="M40,14 C 130,20 200,38 270,62 C 330,84 380,100 410,104" fill="none" stroke="#c084fc" stroke-width="2"/>
+                <path d="M40,16 C 125,20 190,44 260,70 C 320,92 375,103 410,106" fill="none" stroke="#fbbf24" stroke-width="2"/>
+                <circle cx="270" cy="62" r="3" fill="#c084fc"/>
+                <text x="46" y="20" fill="#7e8385" font-size="8" font-family="monospace">P(exceed)</text>
+                <text x="360" y="122" fill="#7e8385" font-size="8" font-family="monospace">loss</text>
+              </svg>
+              <div class="legend">
+                <span><span class="sw" style="background:var(--pal-main)"></span>main</span>
+                <span><span class="sw" style="background:var(--pal-stress)"></span>stress-2026</span>
+                <span><span class="sw" style="background:var(--pal-vendor)"></span>new-vendor-risk</span>
+              </div>
+            </div>
+            <div class="cmp-pane" id="cmp-tiles">
+              <div class="charts-row">
+                <div class="mini">
+                  <div class="cap"><span class="sw" style="background:var(--pal-main)"></span>main</div>
+                  <svg class="lec" viewBox="0 0 200 110" aria-label="LEC chart for main, shared pinned axes">
+                    <g stroke="rgba(230,232,232,.08)" stroke-width="1">
+                    <line x1="24" y1="8" x2="24" y2="94"/><line x1="24" y1="94" x2="194" y2="94"/>
+                    <line x1="24" y1="51" x2="194" y2="51" stroke-dasharray="2 4"/>
+                  </g>
+                    <path d="M24,14 C 60,18 90,44 125,68 C 155,84 180,90 194,92" fill="none" stroke="#4ade80" stroke-width="2"/>
+                  </svg>
+                </div>
+                <div class="mini">
+                  <div class="cap"><span class="sw" style="background:var(--pal-stress)"></span>stress-2026</div>
+                  <svg class="lec" viewBox="0 0 200 110" aria-label="LEC chart for stress-2026, shared pinned axes">
+                    <g stroke="rgba(230,232,232,.08)" stroke-width="1">
+                    <line x1="24" y1="8" x2="24" y2="94"/><line x1="24" y1="94" x2="194" y2="94"/>
+                    <line x1="24" y1="51" x2="194" y2="51" stroke-dasharray="2 4"/>
+                  </g>
+                    <path d="M24,12 C 65,16 100,34 135,54 C 165,74 185,86 194,89" fill="none" stroke="#c084fc" stroke-width="2"/>
+                    <circle cx="135" cy="54" r="3" fill="#c084fc"/>
+                  </svg>
+                </div>
+                <div class="mini">
+                  <div class="cap"><span class="sw" style="background:var(--pal-vendor)"></span>new-vendor-risk</div>
+                  <svg class="lec" viewBox="0 0 200 110" aria-label="LEC chart for new-vendor-risk, shared pinned axes">
+                    <g stroke="rgba(230,232,232,.08)" stroke-width="1">
+                    <line x1="24" y1="8" x2="24" y2="94"/><line x1="24" y1="94" x2="194" y2="94"/>
+                    <line x1="24" y1="51" x2="194" y2="51" stroke-dasharray="2 4"/>
+                  </g>
+                    <path d="M24,13 C 62,17 95,40 130,62 C 160,80 183,88 194,90" fill="none" stroke="#fbbf24" stroke-width="2"/>
+                  </svg>
+                </div>
+              </div>
+            </div>
+
+          </div>
+          <div class="panel" style="flex: 0 0 26%">
+            <div class="subtabs"><span class="on">Tree</span><span>History</span></div>
+            <span class="mark">2</span>
+            <div class="tree-mini">▾ enterprise
+  ▾ ops-risk
+    <span class="hit">cyber-outage ✎</span>
+    hardware-fail
+    <span class="hit">vendor-lock ✎</span>
+  market-shock
+  <span class="hit">new-vendor-risk +</span></div>
+            <div class="ph-box grow">TreeDetailView — nodes <em>edited</em> in stress-2026 vs main marked ✎ (input edits, not result differences)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="callouts">
+      <li><span class="mark">1</span>Three-state control: <strong>Off</strong> = today's single-branch chart. <strong>Overlay</strong> = one chart, all selected branches; colour becomes branch identity, so per-node distinction must move to shades within each branch's palette — readable to roughly 3–4 branches × 1–3 nodes. <strong>Side by side</strong> = one panel per branch on shared pinned axes; node colours keep their normal meaning inside each panel, scaling to more branches by tiling — panels keep a minimum width and wrap to further rows automatically. Diff panel is pairwise in every state — with 3+ branches the diff pair is picked explicitly.</li>
+      <li><span class="mark">2</span>The ✎ markers show <em>input edits</em> between two chosen branches (hash diff, UC5): what the user changed, not which curves differ — in a with/without-mitigation comparison every curve differs while the edit list is exactly the mitigation change. The separate diff list under the chart was removed as clutter; the edit markers in the tree carry the same information in place.</li>
+    </ul>
+  </section>
+
+  <!-- ══════ Screen 4 — Phase E: history + fork bridge ══════ -->
+  <section class="screen" id="s4">
+    <p class="note"><strong>Proposes:</strong> right panel of Analyze gains a History tab (commit messages are per-tree
+    and human-readable since DD-7). The fork action is the <em>single</em> sanctioned write affordance in Analyze —
+    it creates a new branch and hands off to Design.</p>
+    <div class="shell">
+      <div class="sidebar">
+        <div class="brand">Risquanter</div>
+        <div class="side-label">Tool</div>
+        <div class="nav-item">Design</div>
+        <div class="nav-item active">Analyze</div>
+        <div class="side-foot">v0.4</div>
+      </div>
+      <div class="main">
+        <div class="topbar">
+          <span class="title">Analyze</span>
+          <span class="right">
+            <span class="health"></span>
+            <span class="chip main"><span class="sw" style="background:var(--pal-main)"></span>main</span>
+            <span class="badge">WS: A4T…KQ</span>
+          </span>
+        </div>
+        <div class="content">
+          <div class="panel grow" style="flex: 1 1 72%">
+            <div class="banner"><span class="mark">1</span> Viewing 2026-07-18 09:31 (point-in-time, read-only)
+              <span class="btn">back to current</span><span class="btn primary">⎇ fork</span></div>
+            <div class="ph-box" style="flex: 0 0 30%">LEC chart — figures at the selected commit</div>
+            <div class="ph-box grow">query panel — runs against the selected commit</div>
+          </div>
+          <div class="panel" style="flex: 0 0 28%">
+            <div class="subtabs"><span>Tree</span><span class="on">History</span></div>
+            <div class="commits">
+              <div class="c head"><span class="dot">●</span>07-19 14:02 update</div>
+              <div class="c sel"><span class="dot">○</span>07-18 09:31 update</div>
+              <div class="c"><span class="dot">○</span>07-15 16:20 create</div>
+            </div>
+            <div class="commit-actions">
+              <span class="btn">👁 View at this point</span>
+              <span class="btn">⇄ Compare to current</span>
+              <span class="btn primary">⎇ Create scenario from here</span> <span class="mark">2</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="callouts">
+      <li><span class="mark">1</span>Point-in-time view stays entirely inside Analyze: banner marks the state, zero edit affordances. No detached Design mode exists.</li>
+      <li><span class="mark">2</span>The fork bridge: prompts for a ScenarioName, CAS-creates the branch at this commit (same primitive as DD-5 create, pointed at a historical hash), switches the tab's branch, navigates to Design. Editing an old state is always editing a scenario. Revert stays in Design as the explicit destructive action.</li>
+    </ul>
+  </section>
+
+  <!-- ══════ Screen 5 — Phase D: merge modal ══════ -->
+  <section class="screen" id="s5">
+    <p class="note"><strong>Proposes placement only:</strong> merge is a mutation of main → Design, launched from the
+    Scenario menu, as a preview-then-confirm modal. Conflict <em>semantics</em> are Phase D design work, not fixed here.</p>
+    <div class="shell">
+      <div class="sidebar">
+        <div class="brand">Risquanter</div>
+        <div class="side-label">Tool</div>
+        <div class="nav-item active">Design</div>
+        <div class="nav-item">Analyze</div>
+        <div class="side-foot">v0.4</div>
+      </div>
+      <div class="main">
+        <div class="topbar">
+          <span class="title">Design</span>
+          <span class="right">
+            <span class="health"></span>
+            <span class="chip scen"><span class="sw" style="background:var(--pal-stress)"></span>stress-2026</span>
+            <span class="badge">WS: A4T…KQ</span>
+          </span>
+        </div>
+        <div class="content"><div class="panel grow"><div class="ph-box grow">Design view (dimmed under modal)</div></div></div>
+      </div>
+      <div class="modal-veil">
+        <div class="modal">
+          <h3>Merge <span class="chip scen"><span class="sw" style="background:var(--pal-stress)"></span>stress-2026</span> → <span class="chip main"><span class="sw" style="background:var(--pal-main)"></span>main</span></h3>
+          <div style="font-size:.78rem; color: var(--fg-variant)">3 nodes changed · 1 added · 0 removed (preview reuses the Phase C diff)</div>
+          <div>
+            <div class="diffrow"><span class="op mod">~</span> cyber-outage <span style="margin-left:auto">p: 0.02 → 0.05</span></div>
+            <div class="diffrow"><span class="op mod">~</span> vendor-lock <span style="margin-left:auto">loss σ: 1.2M → 2.0M</span></div>
+            <div class="diffrow"><span class="op add">+</span> new-vendor-risk <span style="margin-left:auto">added</span></div>
+          </div>
+          <div class="conflict">
+            <div>⚠ 1 conflict — <span style="font-family:var(--font-mono)">ops-risk</span> edited on both branches since the fork point</div>
+            <div class="row"><span class="btn">keep main</span><span class="btn">keep scenario</span></div>
+          </div>
+          <div class="foot">
+            <span class="btn">Cancel</span>
+            <span class="btn merge-off" title="enabled once conflicts are resolved">Merge</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('nav.tabs button');
+  tabs.forEach(b => b.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.toggle('on', x === b));
+    document.querySelectorAll('.screen').forEach(s =>
+      s.classList.toggle('on', s.id === b.dataset.s));
+  }));
+  const states = ['off', 'overlay', 'tiles'];
+  const tri = document.getElementById('cmpTri');
+  const cbtns = document.querySelectorAll('.tri-labels button');
+  function setCmp(state) {
+    tri.className = 'tri s' + states.indexOf(state);
+    cbtns.forEach(x => x.classList.toggle('on', x.dataset.cmp === state));
+    document.querySelectorAll('.cmp-pane').forEach(p =>
+      p.classList.toggle('on', p.id === 'cmp-' + state));
+  }
+  cbtns.forEach(b => b.addEventListener('click', () => setCmp(b.dataset.cmp)));
+  tri.addEventListener('click', () => {
+    const cur = states.findIndex(st => tri.classList.contains('s' + states.indexOf(st)));
+    setCmp(states[(cur + 1) % states.length]);
+  });
+  const vbtns = document.querySelectorAll('.variant-toggle button');
+  vbtns.forEach(b => b.addEventListener('click', () => {
+    vbtns.forEach(x => x.classList.toggle('on', x === b));
+    const grayed = b.dataset.v === 'g';
+    document.querySelectorAll('#vshell [data-only="g"]').forEach(el =>
+      el.style.display = grayed ? '' : 'none');
+  }));
+</script>
+</body>
+</html>

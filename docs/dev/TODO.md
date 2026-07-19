@@ -1137,3 +1137,59 @@ section (plus its TOC entry). Also dropped the dated "Expected Counts (as of
 2026-03-09)" table (stale + counts, against the pass/fail-only rule) and all
 "New API/DTO" framing. Kept: health check, SBT/Container/BATS/Irmin/Performance
 sections. No `/api/` or historical framing remains.
+
+## 21. Automated guard for user input crossing the validation boundary (SAST-equivalent) — OPEN
+
+**Origin (2026-07-19):** the DD-7 security review hand-verified that every
+interpolation slot in the new `set_tree` query builder is either constant,
+server-minted, or Iron-refined-then-escaped. That verification is manual and
+repeats on every change to a query/command builder. Question: can it be
+automated so that stringly-typed code introduced by convention-unaware
+contributors fails CI instead of relying on review?
+
+**Status: undecided.** Everything below is an assumption to investigate, not a
+decision. No tooling has been added; no dependency approved.
+
+### Assumptions to validate before deciding
+
+- **A1 — Market gap (assumed, spot-checked only):** no mature taint-tracking
+  SAST for Scala 3. CodeQL: no Scala. Semgrep: parses Scala, but cross-function
+  taint analysis assumed too weak to rely on. SonarQube: taint engine excludes
+  Scala. Fortify: legacy Scala plugin, Scala 3 support assumed dead. Each of
+  these is a point-in-time claim — re-verify current state before ruling
+  commercial/OSS SAST out.
+- **A2 — Type system as taint tracker (assumed sound):** Iron already encodes
+  taint labels (raw primitive = tainted, refined = sanitized, smart constructor
+  = sanitizer), so "does user input cross unvalidated" reduces to two finite
+  checks: (1) no raw-primitive signatures/fields past the boundary, (2) audit
+  of the enumerable escape hatches (`refineUnsafe`, `unsafeFrom`, `assume`,
+  `asInstanceOf`). Validate that this reduction has no fourth escape channel
+  (e.g. pattern-match extraction, `.value` widening chains, macro-generated
+  code).
+- **A3 — Default-deny is the ignorance-proof shape (assumed):** package-scoped
+  allowlist rules ("no raw String in these packages") fail against contributors
+  who put new code in unlisted packages. The rule must be project-wide ban +
+  explicit allowlist, so violations fail loudly and the allowlist diff line is
+  itself review bait. Validate noise level: how many legitimate allowlist
+  entries would the current codebase need?
+- **A4 — Highest-leverage single rule (assumed):** "no raw primitives in any
+  Tapir endpoint input type" — taint is only born at decode, so closing the
+  decode surface contains stringly code downstream even when it exists.
+  Validate against current `common` endpoint DTOs.
+- **A5 — Tooling candidates (none chosen):** Scalafix semantic rules
+  (SemanticDB, Scala 3-capable) for A3/A4 + escape-hatch zoning; Semgrep for
+  syntactic seam policies (e.g. "interpolation inside `IrminQueries` must pass
+  through `escapeGraphQLString`"); WartRemover as lighter-weight alternative to
+  Scalafix. Each adds a build dependency — decision trigger, user-owned.
+- **A6 — Known residual gaps (assumed irreducible by tooling):** semantic
+  stringlyness stays with human review regardless of tooling — String-where-ADT
+  -belongs, missing nominal distinctness between same-typed fields (ADR-018),
+  vacuous refinements. The code-quality-review skill's Layer A₀ questions
+  remain the guard for these.
+
+### Exit criteria
+
+Decide: adopt (which tool(s), which rules, allowlist policy), or reject with
+reasoning recorded here. If adopted: rules live in the build, run in CI, and
+the DD-7-style slot-by-slot injection audit becomes automated for every new
+query/command builder.
