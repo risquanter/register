@@ -136,6 +136,23 @@ object SetValueResponse:
   given JsonCodec[SetValueResponse] = DeriveJsonCodec.gen[SetValueResponse]
 
 /**
+  * Response for `set_tree(path, tree, info)` mutation (DD-7).
+  */
+final case class SetTreeResponse(
+    data: Option[SetTreeData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class SetTreeData(
+    set_tree: Option[CommitData]
+)
+
+object SetTreeResponse:
+  import SetValueResponse.given  // Reuse CommitData and InfoData codecs
+  given JsonCodec[SetTreeData] = DeriveJsonCodec.gen[SetTreeData]
+  given JsonCodec[SetTreeResponse] = DeriveJsonCodec.gen[SetTreeResponse]
+
+/**
   * Response for `remove(path, info)` mutation.
   */
 final case class RemoveValueResponse(

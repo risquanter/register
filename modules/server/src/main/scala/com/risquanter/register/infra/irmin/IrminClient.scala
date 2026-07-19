@@ -45,6 +45,21 @@ trait IrminClient:
   def set(path: IrminPath, value: String, message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit]
 
   /**
+    * Replace an entire subtree in ONE commit (DD-7).
+    *
+    * Subtree-replace semantics: keys under `path` absent from `entries` are
+    * deleted; an empty `entries` removes the whole subtree cleanly. Entry
+    * paths are relative to `path`.
+    *
+    * @param path Subtree root to replace
+    * @param entries Full desired content of the subtree (relative paths)
+    * @param message Commit message describing the change
+    * @param branch Branch to write to (None = main; first write creates the branch)
+    * @return Commit metadata from the write operation
+    */
+  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit]
+
+  /**
     * Remove a value at the specified path.
     *
     * @param path Path to remove
@@ -148,6 +163,9 @@ object IrminClient:
 
   def set(path: IrminPath, value: String, message: String, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.set(path, value, message, branch))
+
+  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, IrminCommit] =
+    ZIO.serviceWithZIO[IrminClient](_.setTree(path, entries, message, branch))
 
   def remove(path: IrminPath, message: String, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.remove(path, message, branch))

@@ -55,6 +55,17 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin SET committed: ${commit.hash.take(12)}")
     yield commit
 
+  override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit] =
+    for
+      _        <- ZIO.logInfo(s"Irmin SET_TREE: ${path.value} (${entries.size} entries)${branchLog(branch)}")
+      query     = IrminQueries.setTree(path, entries, message, defaultAuthor, branchName(branch))
+      response <- executeQuery[SetTreeResponse](query)
+      commit   <- response.data.flatMap(_.set_tree) match
+                    case Some(c) => commitFromData(c)
+                    case None    => failWithError(response.errors)
+      _        <- ZIO.logInfo(s"Irmin SET_TREE committed: ${commit.hash.take(12)}")
+    yield commit
+
   override def remove(path: IrminPath, message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin REMOVE: ${path.value}${branchLog(branch)}")

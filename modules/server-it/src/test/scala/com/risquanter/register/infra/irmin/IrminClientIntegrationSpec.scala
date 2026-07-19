@@ -3,7 +3,7 @@ package com.risquanter.register.infra.irmin
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
-import com.risquanter.register.infra.irmin.model.IrminPath
+import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 import com.risquanter.register.domain.errors.IrminUnavailable
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt}
 import com.risquanter.register.testcontainers.IrminCompose
@@ -195,6 +195,86 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       )
     },
 
+    // ---- set_tree (DD-7: one commit per write action) ----
+
+    test("setTree writes several entries atomically in ONE commit") {
+      for
+        base    <- uniquePath("settree-atomic")
+        branch  <- freshBranch
+        commit  <- IrminClient.setTree(
+                     base,
+                     List(entry("meta", "\"m1\""), entry("nodes/n1", "\"v1\""), entry("nodes/n2", "\"v2\"")),
+                     "settree atomic write",
+                     Some(branch)
+                   )
+        meta    <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/meta"), Some(branch))
+        n1      <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/n1"), Some(branch))
+        n2      <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/n2"), Some(branch))
+        head    <- IrminClient.getBranch(branch)
+        // Same single commit touches every entry — meta and node histories coincide.
+        hMeta   <- IrminClient.getHistory(IrminPath.unsafeFrom(s"${base.value}/meta"), positiveInt(10), Some(branch))
+        hNode   <- IrminClient.getHistory(IrminPath.unsafeFrom(s"${base.value}/nodes/n1"), positiveInt(10), Some(branch))
+      yield assertTrue(
+        meta.contains("\"m1\""),
+        n1.contains("\"v1\""),
+        n2.contains("\"v2\""),
+        head.flatMap(_.head).map(_.hash).contains(commit.hash),
+        hMeta.map(_.hash) == List(commit.hash),
+        hNode.map(_.hash) == List(commit.hash)
+      )
+    },
+
+    test("setTree replaces the subtree: unlisted keys are deleted") {
+      for
+        base   <- uniquePath("settree-replace")
+        branch <- freshBranch
+        _      <- IrminClient.setTree(base, List(entry("nodes/a", "\"a1\""), entry("nodes/b", "\"b1\"")), "settree v1", Some(branch))
+        _      <- IrminClient.setTree(base, List(entry("nodes/b", "\"b2\""), entry("nodes/c", "\"c1\"")), "settree v2", Some(branch))
+        a      <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/a"), Some(branch))
+        b      <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/b"), Some(branch))
+        c      <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/c"), Some(branch))
+      yield assertTrue(
+        a.isEmpty,
+        b.contains("\"b2\""),
+        c.contains("\"c1\"")
+      )
+    },
+
+    test("setTree with empty entries removes the whole subtree") {
+      for
+        base   <- uniquePath("settree-delete")
+        branch <- freshBranch
+        _      <- IrminClient.setTree(base, List(entry("meta", "\"m\""), entry("nodes/n1", "\"v\"")), "settree create", Some(branch))
+        _      <- IrminClient.setTree(base, Nil, "settree delete", Some(branch))
+        meta   <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/meta"), Some(branch))
+        n1     <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/n1"), Some(branch))
+        rest   <- IrminClient.list(base, Some(branch))
+      yield assertTrue(
+        meta.isEmpty,
+        n1.isEmpty,
+        rest.isEmpty
+      )
+    },
+
+    test("setTree handles a large tree in one commit") {
+      val nodeCount = 2000
+      val payload   = "x" * 300
+      for
+        base    <- uniquePath("settree-large")
+        branch  <- freshBranch
+        entries  = entry("meta", "\"large\"") ::
+                     (0 until nodeCount).toList.map(i => entry(s"nodes/n$i", s"""{"id":"n$i","pad":"$payload"}"""))
+        commit  <- IrminClient.setTree(base, entries, "settree large write", Some(branch))
+        first   <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/n0"), Some(branch))
+        last    <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/n${nodeCount - 1}"), Some(branch))
+        head    <- IrminClient.getBranch(branch)
+      yield assertTrue(
+        first.isDefined,
+        last.isDefined,
+        head.flatMap(_.head).map(_.hash).contains(commit.hash)
+      )
+    },
+
     test("lca finds the merge base of a branch and a main commit") {
       for
         basePath   <- uniquePath("lca-base")
@@ -223,3 +303,6 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
     CommitHash.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
 
   private def positiveInt(n: Int): PositiveInt = n.refineUnsafe
+
+  private def entry(relPath: String, value: String): IrminTreeEntry =
+    IrminTreeEntry(IrminPath.unsafeFrom(relPath), value)

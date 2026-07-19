@@ -8,65 +8,61 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, R
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef}
 import com.risquanter.register.domain.errors.{RepositoryFailure, AppError, IrminError}
 import com.risquanter.register.infra.irmin.IrminClient
-import com.risquanter.register.infra.irmin.model.IrminPath
+import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 import com.risquanter.register.repositories.model.TreeMetadata
-
-import java.util.UUID
 
 /** Irmin-backed implementation of RiskTreeRepository using per-node storage.
   *
   * Path conventions (per ADR-004a, workspace-scoped):
   * - Nodes: workspaces/{wsId}/risk-trees/{treeId}/nodes/{nodeId}
   * - Meta:  workspaces/{wsId}/risk-trees/{treeId}/meta
+  *
+  * Write path (DD-7): every mutation is ONE `set_tree` commit replacing the
+  * whole tree subtree — atomic saves, one history entry per user action, and
+  * obsolete nodes vanish via subtree-replace semantics (unlisted keys are
+  * deleted). Delete is `set_tree` with an empty entry list.
   */
 final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeRepository:
 
   override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
     val basePath = s"workspaces/${wsId.value}/risk-trees/${riskTree.id.value}"
     for
-      _        <- ensureRootPresent(riskTree.rootId, riskTree.nodes)
-      now      <- Clock.instant
-      txn       = txnId()
-      _        <- writeNodes(basePath, riskTree.nodes, txn, wsId, riskTree.id, branch)
-      meta      = TreeMetadata(
-                    id = riskTree.id,
-                    name = riskTree.name,
-                    rootId = riskTree.rootId,
-                    seedVarHighWater = riskTree.seedVarHighWater,
-                    schemaVersion = CurrentSchemaVersion,
-                    createdAt = now,
-                    updatedAt = now
-                  )
-      _        <- writeMeta(basePath, meta, txn, wsId, isUpdate = false, branch)
+      _   <- ensureRootPresent(riskTree.rootId, riskTree.nodes)
+      now <- Clock.instant
+      meta = TreeMetadata(
+               id = riskTree.id,
+               name = riskTree.name,
+               rootId = riskTree.rootId,
+               seedVarHighWater = riskTree.seedVarHighWater,
+               schemaVersion = CurrentSchemaVersion,
+               createdAt = now,
+               updatedAt = now
+             )
+      _   <- writeTree(basePath, meta, riskTree.nodes, createMessage(wsId, riskTree.id), branch)
     yield riskTree
 
   override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
     val basePath = s"workspaces/${wsId.value}/risk-trees/${id.value}"
     for
-      existing      <- getTreeWithMeta(wsId, id, branch)
-      updatedTree    = op(existing.tree)
-      _             <- ensureRootPresent(updatedTree.rootId, updatedTree.nodes)
-      now           <- Clock.instant
-      txn            = txnId()
-      _             <- writeNodes(basePath, updatedTree.nodes, txn, wsId, id, branch)
-      updatedMeta     = existing.meta.copy(
-                          name = updatedTree.name,
-                          rootId = updatedTree.rootId,
-                          seedVarHighWater = updatedTree.seedVarHighWater,
-                          schemaVersion = CurrentSchemaVersion,
-                          updatedAt = now
-                        )
-      _             <- writeMeta(basePath, updatedMeta, txn, wsId, isUpdate = true, branch)
-      obsoleteNodes  = obsoleteNodeIds(existing.tree.nodes, updatedTree.nodes)
-      _             <- removeNodes(basePath, obsoleteNodes, txn, wsId, id, branch)
+      existing    <- getTreeWithMeta(wsId, id, branch)
+      updatedTree  = op(existing.tree)
+      _           <- ensureRootPresent(updatedTree.rootId, updatedTree.nodes)
+      now         <- Clock.instant
+      updatedMeta  = existing.meta.copy(
+                       name = updatedTree.name,
+                       rootId = updatedTree.rootId,
+                       seedVarHighWater = updatedTree.seedVarHighWater,
+                       schemaVersion = CurrentSchemaVersion,
+                       updatedAt = now
+                     )
+      _           <- writeTree(basePath, updatedMeta, updatedTree.nodes, updateMessage(wsId, id), branch)
     yield updatedTree
 
   override def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[RiskTree] =
     val basePath = s"workspaces/${wsId.value}/risk-trees/${id.value}"
     for
       existing <- getTreeWithMeta(wsId, id, branch)
-      _        <- ZIO.foreachDiscard(existing.tree.nodes)(node => removeNode(basePath, node.id, deleteMessage(wsId, id, node.id), branch))
-      _        <- removeMeta(basePath, deleteMetaMessage(wsId, id), branch)
+      _        <- handleIrmin(irmin.setTree(IrminPath.unsafeFrom(basePath), Nil, deleteMessage(wsId, id), branch))
     yield existing.tree
 
   override def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[Option[RiskTree]] =
@@ -92,27 +88,16 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   // Helpers
   // ----------------------------------------------------------------------------
 
-  private def writeMeta(basePath: String, meta: TreeMetadata, txn: String, wsId: WorkspaceId, isUpdate: Boolean, branch: Option[BranchRef]): Task[Unit] =
-    val message = if isUpdate then updateMetaMessage(wsId, meta.id, txn) else createMetaMessage(wsId, meta.id, txn)
-    handleIrmin(irmin.set(IrminPath.unsafeFrom(s"$basePath/meta"), meta.toJson, message, branch)).unit
+  /** One atomic commit: meta + every node, replacing the whole subtree (DD-7). */
+  private def writeTree(basePath: String, meta: TreeMetadata, nodes: Seq[RiskNode], message: String, branch: Option[BranchRef]): Task[Unit] =
+    val entries =
+      IrminTreeEntry(IrminPath.unsafeFrom("meta"), meta.toJson) ::
+        nodes.toList.map(node => IrminTreeEntry(IrminPath.unsafeFrom(s"nodes/${node.id.value}"), nodeJson(node)))
+    handleIrmin(irmin.setTree(IrminPath.unsafeFrom(basePath), entries, message, branch)).unit
 
-  private def writeNodes(basePath: String, nodes: Seq[RiskNode], txn: String, wsId: WorkspaceId, treeId: TreeId, branch: Option[BranchRef]): Task[Unit] =
-    ZIO.foreachDiscard(nodes)(node => writeNode(basePath, node, txn, wsId, treeId, branch))
-
-  private def writeNode(basePath: String, node: RiskNode, txn: String, wsId: WorkspaceId, treeId: TreeId, branch: Option[BranchRef]): Task[Unit] =
-    val json = node match
-      case leaf: RiskLeaf           => leaf.toJson
-      case portfolio: RiskPortfolio => portfolio.toJson
-    handleIrmin(irmin.set(IrminPath.unsafeFrom(s"$basePath/nodes/${node.id.value}"), json, upsertNodeMessage(wsId, treeId, node.id, txn), branch)).unit
-
-  private def removeNodes(basePath: String, nodeIds: Set[NodeId], txn: String, wsId: WorkspaceId, treeId: TreeId, branch: Option[BranchRef]): Task[Unit] =
-    ZIO.foreachDiscard(nodeIds)(id => removeNode(basePath, id, deleteNodeMessage(wsId, treeId, id, txn), branch))
-
-  private def removeNode(basePath: String, nodeId: NodeId, message: String, branch: Option[BranchRef]): Task[Unit] =
-    handleIrmin(irmin.remove(IrminPath.unsafeFrom(s"$basePath/nodes/${nodeId.value}"), message, branch)).unit
-
-  private def removeMeta(basePath: String, message: String, branch: Option[BranchRef]): Task[Unit] =
-    handleIrmin(irmin.remove(IrminPath.unsafeFrom(s"$basePath/meta"), message, branch)).unit
+  private def nodeJson(node: RiskNode): String = node match
+    case leaf: RiskLeaf           => leaf.toJson
+    case portfolio: RiskPortfolio => portfolio.toJson
 
   private def decodeMeta(json: String): Task[TreeMetadata] =
     ZIO.fromEither(json.fromJson[TreeMetadata].left.map(err => RepositoryFailure(s"Decode meta failed: $err")))
@@ -183,30 +168,14 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     if nodes.exists(_.id == rootId) then ZIO.unit
     else ZIO.fail(RepositoryFailure(s"Root ${rootId.value} not found in provided nodes"))
 
-  private def obsoleteNodeIds(previous: Seq[RiskNode], current: Seq[RiskNode]): Set[NodeId] =
-    val before = previous.map(_.id).toSet
-    val after  = current.map(_.id).toSet
-    before.diff(after)
+  private def createMessage(wsId: WorkspaceId, treeId: TreeId): String =
+    s"workspace:${wsId.value}:risk-tree:${treeId.value}:create"
 
-  private def txnId(): String = UUID.randomUUID().toString.take(8)
+  private def updateMessage(wsId: WorkspaceId, treeId: TreeId): String =
+    s"workspace:${wsId.value}:risk-tree:${treeId.value}:update"
 
-  private def upsertNodeMessage(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, txn: String): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:update:$txn:set-node:${nodeId.value}"
-
-  private def deleteNodeMessage(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, txn: String): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:update:$txn:remove-node:${nodeId.value}"
-
-  private def deleteMessage(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:delete:remove-node:${nodeId.value}"
-
-  private def createMetaMessage(wsId: WorkspaceId, treeId: TreeId, txn: String): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:create:$txn:meta"
-
-  private def updateMetaMessage(wsId: WorkspaceId, treeId: TreeId, txn: String): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:update:$txn:meta"
-
-  private def deleteMetaMessage(wsId: WorkspaceId, treeId: TreeId): String =
-    s"workspace:${wsId.value}:risk-tree:${treeId.value}:delete:meta"
+  private def deleteMessage(wsId: WorkspaceId, treeId: TreeId): String =
+    s"workspace:${wsId.value}:risk-tree:${treeId.value}:delete"
 
   private def handleIrmin[A](effect: IO[IrminError, A]): Task[A] =
     effect.mapError { err =>

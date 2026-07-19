@@ -1,6 +1,6 @@
 package com.risquanter.register.infra.irmin
 
-import com.risquanter.register.infra.irmin.model.IrminPath
+import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 
 /**
   * GraphQL query and mutation strings for Irmin operations.
@@ -109,6 +109,47 @@ object IrminQueries:
     |  set(
     |    ${branchArg(branch)}path: "${path.value}",
     |    value: "$escapedValue",
+    |    info: {
+    |      message: "$escapedMessage",
+    |      author: "$escapedAuthor"
+    |    }
+    |  ) {
+    |    hash
+    |    key
+    |    info {
+    |      date
+    |      author
+    |      message
+    |    }
+    |  }
+    |}
+    """.stripMargin.trim
+
+  /**
+    * Mutation to replace an entire subtree in one commit (DD-7).
+    *
+    * Irmin's `set_tree` has subtree-replace semantics: keys under `path` that
+    * are absent from `tree` are deleted; an empty `tree` removes the whole
+    * subtree with no empty directory left behind (probe-verified, milestone-2b
+    * A9 fact 6). Entry paths are relative to `path`.
+    *
+    * @param path Subtree root to replace
+    * @param entries Full desired content of the subtree (relative paths)
+    * @param message Commit message
+    * @param author Commit author
+    * @param branch Branch to write to (None = main; Irmin creates the branch on first write)
+    */
+  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, author: String, branch: Option[String] = None): String =
+    val escapedMessage = escapeGraphQLString(message)
+    val escapedAuthor = escapeGraphQLString(author)
+    val items = entries
+      .map(e => s"""{path: "${e.path.value}", value: "${escapeGraphQLString(e.value)}"}""")
+      .mkString(", ")
+    s"""
+    |mutation {
+    |  set_tree(
+    |    ${branchArg(branch)}path: "${path.value}",
+    |    tree: [$items],
     |    info: {
     |      message: "$escapedMessage",
     |      author: "$escapedAuthor"

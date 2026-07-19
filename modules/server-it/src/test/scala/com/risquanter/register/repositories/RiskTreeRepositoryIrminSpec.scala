@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId, SeedVarId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NodeId, TreeId, WorkspaceId, SeedVarId, PositiveInt}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
@@ -124,6 +124,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       seedVarHighWater = original.seedVarHighWater
     )
 
+  private def positiveInt(n: Int): PositiveInt = n.refineUnsafe
+
   private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient] =
     ZLayer.make[RiskTreeRepository & IrminClient](
       IrminCompose.irminConfigLayer,
@@ -172,6 +174,64 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         yield assertTrue(res.isEmpty)
       },
 
+      // DD-7: every repository write action is exactly ONE Irmin commit whose
+      // message names the user action — the commit log IS the user history.
+      test("create is one commit covering meta and all nodes, with the action message") {
+        for
+          repo    <- ZIO.service[RiskTreeRepository]
+          irmin   <- ZIO.service[IrminClient]
+          tree     = sampleTree(treeId("tree-dd7-create"), "DD7 Create")
+          base     = s"workspaces/${wsId.value}/risk-trees/${tree.id.value}"
+          _       <- repo.create(wsId, tree)
+          hMeta   <- irmin.getHistory(IrminPath.unsafeFrom(s"$base/meta"), positiveInt(10))
+          hNode   <- irmin.getHistory(IrminPath.unsafeFrom(s"$base/nodes/${nodeId("leaf-1").value}"), positiveInt(10))
+        yield assertTrue(
+          hMeta.map(_.hash) == hNode.map(_.hash),   // same single commit wrote meta and node
+          hMeta.size == 1,
+          hMeta.headOption.exists(_.info.message == s"workspace:${wsId.value}:risk-tree:${tree.id.value}:create")
+        )
+      },
+
+      test("update is one commit; node removal happens in that same commit") {
+        for
+          repo    <- ZIO.service[RiskTreeRepository]
+          irmin   <- ZIO.service[IrminClient]
+          tree     = sampleTree(treeId("tree-dd7-update"), "DD7 Update")
+          base     = s"workspaces/${wsId.value}/risk-trees/${tree.id.value}"
+          _       <- repo.create(wsId, tree)
+          _       <- repo.update(wsId, tree.id, _ => updatedTree(tree))
+          hMeta   <- irmin.getHistory(IrminPath.unsafeFrom(s"$base/meta"), positiveInt(10))
+          leaf2   <- irmin.get(IrminPath.unsafeFrom(s"$base/nodes/${nodeId("leaf-2").value}"))
+        yield assertTrue(
+          hMeta.size == 2,                          // create + update, nothing else
+          hMeta.map(_.info.message).toSet == Set(
+            s"workspace:${wsId.value}:risk-tree:${tree.id.value}:create",
+            s"workspace:${wsId.value}:risk-tree:${tree.id.value}:update"
+          ),
+          leaf2.isEmpty                             // pruned by subtree replace, no extra commit
+        )
+      },
+
+      test("delete is one commit that leaves no residue under the tree path") {
+        for
+          repo    <- ZIO.service[RiskTreeRepository]
+          irmin   <- ZIO.service[IrminClient]
+          tree     = sampleTree(treeId("tree-dd7-delete"), "DD7 Delete")
+          base     = s"workspaces/${wsId.value}/risk-trees/${tree.id.value}"
+          _       <- repo.create(wsId, tree)
+          headC   <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
+          _       <- repo.delete(wsId, tree.id)
+          headD   <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
+          res     <- repo.getById(wsId, tree.id)
+          residue <- irmin.list(IrminPath.unsafeFrom(base))
+        yield assertTrue(
+          res.isEmpty,
+          residue.isEmpty,                          // no meta, no nodes dir, nothing
+          headC != headD,
+          headD.isDefined
+        )
+      },
+
       // Git-semantics guarantee that later enables path-scoped time travel:
       // an identity-preserving edit rewrites the node at the SAME path and records a
       // NEW commit on top of the old one — it does not delete the node and recreate it
@@ -202,4 +262,4 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           reloaded.exists(_.index.nodes.contains(leaf1Id))  // NodeId preserved across the update
         )
       }
-    ).provideLayerShared(irminLayer) @@ TestAspect.sequential
+    ).provideLayerShared(irminLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock
