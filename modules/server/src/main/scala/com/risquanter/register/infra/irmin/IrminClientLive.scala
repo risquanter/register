@@ -100,7 +100,7 @@ final class IrminClientLive private (
                         IrminCommit(
                           hash = h.hash,
                           key = h.key,
-                          parents = Nil, // Not fetched in this query
+                          parents = h.parents.getOrElse(Nil),
                           info = IrminInfo(
                             date = h.info.date,
                             author = h.info.author,
@@ -240,7 +240,7 @@ final class IrminClientLive private (
     ZIO.succeed(IrminCommit(
       hash = c.hash,
       key = c.key,
-      parents = Nil, // Not returned in mutation response
+      parents = c.parents.getOrElse(Nil),
       info = IrminInfo(
         date = c.info.date,
         author = c.info.author,
@@ -279,6 +279,7 @@ private final case class MainBranchInfo(
 private final case class HeadCommit(
     hash: String,
     key: String,
+    parents: Option[List[String]] = None,
     info: InfoData
 )
 

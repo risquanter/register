@@ -116,6 +116,7 @@ object IrminQueries:
     |  ) {
     |    hash
     |    key
+    |    parents
     |    info {
     |      date
     |      author
@@ -130,8 +131,8 @@ object IrminQueries:
     *
     * Irmin's `set_tree` has subtree-replace semantics: keys under `path` that
     * are absent from `tree` are deleted; an empty `tree` removes the whole
-    * subtree with no empty directory left behind (probe-verified, milestone-2b
-    * A9 fact 6). Entry paths are relative to `path`.
+    * subtree with no empty directory left behind. Entry paths are relative
+    * to `path`.
     *
     * @param path Subtree root to replace
     * @param entries Full desired content of the subtree (relative paths)
@@ -157,6 +158,7 @@ object IrminQueries:
     |  ) {
     |    hash
     |    key
+    |    parents
     |    info {
     |      date
     |      author
@@ -188,6 +190,7 @@ object IrminQueries:
     |  ) {
     |    hash
     |    key
+    |    parents
     |    info {
     |      date
     |      author
@@ -211,6 +214,7 @@ object IrminQueries:
     |    head {
     |      hash
     |      key
+    |      parents
     |      info {
     |        date
     |        author
@@ -246,6 +250,7 @@ object IrminQueries:
     |  ) {
     |    hash
     |    key
+    |    parents
     |    info {
     |      date
     |      author
@@ -269,6 +274,7 @@ object IrminQueries:
     |  ) {
     |    hash
     |    key
+    |    parents
     |    info {
     |      date
     |      author
@@ -287,6 +293,7 @@ object IrminQueries:
     |  commit(hash: "$commitHash") {
     |    hash
     |    key
+    |    parents
     |    info {
     |      date
     |      author
@@ -310,6 +317,7 @@ object IrminQueries:
     |    last_modified(path: "${path.value}", n: $n) {
     |      hash
     |      key
+    |      parents
     |      info {
     |        date
     |        author
@@ -334,6 +342,7 @@ object IrminQueries:
     |    lcas(commit: "$commitHash") {
     |      hash
     |      key
+    |      parents
     |      info {
     |        date
     |        author

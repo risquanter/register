@@ -120,6 +120,7 @@ final case class SetValueData(
 final case class CommitData(
     hash: String,
     key: String,
+    parents: Option[List[String]] = None,
     info: InfoData
 )
 

@@ -12,9 +12,8 @@ package com.risquanter.register.infra.irmin.model
   * }
   * ```
   *
-  * @param path Path RELATIVE to the mutation's `path` argument (probe-verified,
-  *             milestone-2b A9 fact 6) — e.g. "meta" or "nodes/n1", never the
-  *             absolute store path
+  * @param path Path RELATIVE to the mutation's `path` argument — e.g. "meta"
+  *             or "nodes/n1", never the absolute store path
   * @param value JSON string value to store at that path
   */
 final case class IrminTreeEntry(

@@ -224,19 +224,21 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       )
     },
 
-    test("setTree replaces the subtree: unlisted keys are deleted") {
+    test("setTree replaces the subtree: unlisted keys are deleted, parent chain has no extra commits") {
       for
         base   <- uniquePath("settree-replace")
         branch <- freshBranch
-        _      <- IrminClient.setTree(base, List(entry("nodes/a", "\"a1\""), entry("nodes/b", "\"b1\"")), "settree v1", Some(branch))
-        _      <- IrminClient.setTree(base, List(entry("nodes/b", "\"b2\""), entry("nodes/c", "\"c1\"")), "settree v2", Some(branch))
+        c1     <- IrminClient.setTree(base, List(entry("nodes/a", "\"a1\""), entry("nodes/b", "\"b1\"")), "settree v1", Some(branch))
+        c2     <- IrminClient.setTree(base, List(entry("nodes/b", "\"b2\""), entry("nodes/c", "\"c1\"")), "settree v2", Some(branch))
         a      <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/a"), Some(branch))
         b      <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/b"), Some(branch))
         c      <- IrminClient.get(IrminPath.unsafeFrom(s"${base.value}/nodes/c"), Some(branch))
       yield assertTrue(
         a.isEmpty,
         b.contains("\"b2\""),
-        c.contains("\"c1\"")
+        c.contains("\"c1\""),
+        c1.parents.isEmpty,             // first write on a fresh branch is a root commit
+        c2.parents == List(c1.hash)     // sole parent = previous head: exactly one commit per mutation
       )
     },
 
