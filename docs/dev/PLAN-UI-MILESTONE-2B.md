@@ -431,6 +431,6 @@ fixes only the placement (Design, modal, preview-then-confirm).
 | 3 | Comparison placement in Analyze | **APPROVED 2026-07-19 (v5, conceptual per fidelity boundary)**: three-state compare control (Off / Overlay / Side by side), branch multi-select, auto-fit tile grid, stacked per-branch selection trees, Ctrl+Alt+click mirror. |
 | 4 | History placement + fork bridge | **Proposed here** (Analyze right-panel tab; fork = sole Analyze write affordance). |
 | 5 | Merge placement | **Proposed here** (Design, modal preview). Conflict semantics = Phase D work, not this doc. |
-| 6 | SSE branch-scoping (over-notification across branches) | Out of scope for placement; noted as Phase B/C design point in the milestone doc. |
+| 6 | SSE branch-scoping (over-notification across branches) | **CLOSED 2026-07-19 → DD-22** (milestone doc, Closed table): branch tag in event payload (absent = main, DD-8 symmetry); hub and subscription unchanged; lands in Phase B. |
 
 Nothing in this document changes code, API shapes, or tests.

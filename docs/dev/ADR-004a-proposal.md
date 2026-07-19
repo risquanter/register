@@ -1,53 +1,25 @@
-# ADR-004a-proposal: Persistence Architecture (SSE Variant)
+# ADR-004a: Persistence Architecture (SSE Variant)
 
-**Status:** Proposed  
-**Date:** 2026-01-16  
+**Status:** Accepted
+**Date:** 2026-07-20
 **Tags:** persistence, irmin, graphql, sse, architecture
 
-> **Note:** Code examples in this ADR are conceptual patterns showing the intended data flow.
-> See actual implementations: `IrminClient`, `RiskResultCache`, `SSEHub`, `SSEController`.
+> Proposed 2026-01-16; accepted 2026-07-20 with text aligned to the implemented
+> system. Where implementation refined a proposed mechanism without changing the
+> decision, the refinement is marked **[Refined → DD-n]**, pointing into the
+> milestone-2b decision log (`docs/scratch/milestone-2b-cache-and-decisions.md`).
+> Tree terminology and the exact domain-to-storage mapping:
+> [ADR-004a-appendix](ADR-004a-appendix.md). ADR-004b (WebSocket variant) is
+> unadopted; its trigger would be multi-user collaborative editing.
 
 ---
 
 ## Context
 
-- Versioned persistence is **non-negotiable** for scenario analysis and time travel
-- Computation and persistence must be **separated** (ZIO/Scala vs Irmin/OCaml)
-- Two communication channels required: Irmin↔ZIO (internal) and ZIO↔Browser (external)
-- SSE provides **simple unidirectional streaming** for server→client push
-- Full requirements documented in [REQUIREMENTS-PERSISTENCE.md](./REQUIREMENTS-PERSISTENCE.md)
-
----
-
-## Architecture Layers
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         Data Flow Architecture                               │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────┐      ┌─────────────────┐      ┌─────────────────────────┐ │
-│  │   Irmin     │      │   ZIO Backend   │      │   Browser (Scala.js)   │ │
-│  │   (OCaml)   │      │   (Scala)       │      │   Laminar              │ │
-│  └─────────────┘      └─────────────────┘      └─────────────────────────┘ │
-│         │                     │                          │                  │
-│  ┌──────┴──────┐       ┌──────┴──────┐           ┌───────┴───────┐         │
-│  │ Stores:     │       │ Computes:   │           │ Displays:     │         │
-│  │ • Tree      │       │ • LEC sims  │           │ • Tree view   │         │
-│  │   structure │       │ • Aggregates│           │ • Vega charts │         │
-│  │ • Versions  │       │             │           │               │         │
-│  │ • Branches  │       │ Caches:     │           │ Caches:       │         │
-│  │             │       │ • LEC curves│           │ • Rendered    │         │
-│  │ Notifies:   │       │   per node  │           │   chart specs │         │
-│  │ • watch API │       │             │           │               │         │
-│  └─────────────┘       └─────────────┘           └───────────────┘         │
-│         │                     │                          │                  │
-│         │  GraphQL (Channel A)│       SSE (Channel B)    │                  │
-│         │◀───────────────────▶│─────────────────────────▶│                  │
-│         │  Irmin ↔ ZIO        │     ZIO → Browser        │                  │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+- Versioned persistence (branches, history, time travel) is **non-negotiable** for scenario analysis
+- Computation and persistence must be **separated** (ZIO/Scala computes; Irmin/OCaml stores)
+- Two communication channels are required: Irmin↔ZIO (internal) and ZIO↔Browser (external)
+- Server→client push needs only **unidirectional** streaming; bidirectional adds cost without a collaborative-editing requirement
 
 ---
 
@@ -55,159 +27,130 @@
 
 ### 1. Irmin as Versioned Persistence Layer
 
-Irmin (OCaml) stores tree structure with Git-like semantics:
+Irmin stores tree structure with Git-like semantics; one whole-node JSON blob
+per path (`RiskTreeRepositoryIrmin`; mapping details in the appendix §2):
 
 ```
-/nodes/<id>/v          → RiskLeaf | RiskPortfolio parameters
-/nodes/<id>/children   → List[NodeId] for portfolios
-/branches/<name>       → Commit hash (scenarios)
+workspaces/<wsId>/risk-trees/<treeId>/nodes/<nodeId>  → RiskLeaf | RiskPortfolio JSON
 ```
 
-### 2. GraphQL for Irmin↔ZIO Communication
+Scenarios are **Irmin branches**, not paths: `scenarios.<wsId>.<name-slug>`
+**[Refined → DD-5, DD-21]** (Irmin rejects `/` in branch names). Absent branch
+selector = `main` **[Refined → DD-8]**.
 
-ZIO connects to Irmin via GraphQL subscriptions for real-time watch:
+### 2. GraphQL for Irmin↔ZIO (Channel A) — Single Writer
+
+`IrminClient` / `IrminQueries`: queries for reads, `set_tree` mutations for
+writes, branch ops (create/delete/CAS) for scenarios. Each user action produces
+exactly **one** commit — Irmin's log *is* the user-visible history, saves are
+atomic **[Refined → DD-7]**.
+
+ZIO is the **only writer** to Irmin, so change detection happens at the
+mutation path, not via watch subscriptions **[Refined]**:
 
 ```scala
-// Conceptual: ZIO subscribes to tree changes
-val subscription = """
-  subscription WatchTree($path: [String!]!) {
-    treeChanged(path: $path) {
-      kind      // Added | Updated | Removed
-      path      // ["nodes", "42"]
-      nodeId    // affected node
-    }
-  }
-"""
+// InvalidationHandler, in the same request that writes:
+// diff(oldTree, newTree) → affected nodeIds → SSE publish
+// (a watch channel would only echo ZIO's own writes back to it)
 ```
 
-### 3. SSE for ZIO→Browser Push
+### 3. SSE for ZIO→Browser Push (Channel B)
 
-Server-Sent Events stream LEC updates to connected browsers:
+Per-tree fan-out (`SSEHub` ZIO Hub) behind a Tapir stream endpoint
+(`SSEController`):
+
+```
+GET /w/{key}/events/tree/{treeId}        text/event-stream, workspace-scoped
+
+cache_invalidated   nodes whose figures changed — re-fetch   (live publisher)
+node_changed        tree structure modified                  (defined)
+lec_updated         recomputed quantiles push                (defined, unpublished)
+connection_status   connect / heartbeat lifecycle
+```
+
+SSE is a **notification** channel, not a data channel: clients re-fetch over
+HTTP, which carries auth and `X-Active-Branch`. Events carry
+`branch: Option[BranchRef]` in the payload (absent = main); subscription stays
+tree-scoped — one stream hears all branches, as the compare view requires, and
+`EventSource` cannot set headers **[Refined → DD-22]**.
+
+### 4. Content-Addressed ZIO-Side Result Cache
+
+Computed results live in ZIO, never in Irmin. One `ContentCache` per workspace
+**[Refined → DD-15…DD-19]**:
 
 ```scala
-// Conceptual: Endpoint pattern
-// GET /w/{key}/events/tree/{treeId}  (A15: workspace-scoped)
-case class TreeEvent(
-  nodeId: NodeId,
-  eventType: String,  // "lec_updated" | "node_changed" | "conflict"
-  payload: Json
-)
+// key:   ContentHash of the simulation-relevant leaf projection (DD-16)
+// value: TrialOutcomes + content-only provenance, no node identity (DD-18/19)
+// no invalidation: a changed leaf IS a different key; stale entries
+//   become orphans for the EvictionStrategy
+// portfolios re-aggregate from child results on read — never cached (DD-15)
 ```
 
-### 4. ZIO-Side Cache for Computed Aggregates
-
-LEC curves cached in ZIO, invalidated on Irmin notifications:
-
-```scala
-// Conceptual: Cache pattern
-class RiskResultCache:
-  private val cache: Ref[Map[NodeId, RiskResult]]
-  
-  def invalidatePath(nodeId: NodeId): UIO[List[NodeId]] =
-    // Walk parent pointers, invalidate ancestors
-    // Returns list of invalidated nodes for recomputation
-```
-
----
-
-## Complete Data Flow
+### 5. Data Flow
 
 ```
-1. User edits risk parameter in Browser
-   │
-   ▼
-2. Browser sends REST mutation to ZIO
-   │
-   ▼
-3. ZIO sends GraphQL mutation to Irmin
-   │
-   ▼
-4. Irmin commits new tree version
-   │
-   ▼
-5. Irmin watch fires (GraphQL subscription)
-   │
-   ▼
-6. ZIO receives notification: "node X changed"
-   │
-   ▼
-7. ZIO invalidates cache for X and ancestors
-   │
-   ▼
-8. ZIO recomputes LEC for affected path (O(depth))
-   │
-   ▼
-9. ZIO pushes update via SSE to Browser
-   │
-   ▼
-10. Browser updates Vega chart
+Browser edit → REST mutation (X-Active-Branch)
+  → ZIO writes ONE Irmin commit (set_tree)
+  → InvalidationHandler diffs old vs new tree in-request
+  → SSE cache_invalidated {nodeIds, treeId, branch}
+  → Browser re-fetches affected figures over HTTP
+      (ContentCache hit = replay, miss = re-simulate)
+  → chart updates
 ```
 
 ---
 
 ## Code Smells
 
-### ❌ Polling Instead of Subscriptions
+### ❌ A Second Writer to Irmin
 
 ```scala
-// BAD: Polling Irmin for changes
-def pollForChanges: Task[Unit] =
-  ZIO.sleep(1.second) *> checkIrmin *> pollForChanges
+// BAD: any component writing to Irmin outside the repository layer
+//      (breaks §2's in-request change detection — SSE goes silent)
+irminGraphQL.mutate(...)             // from anywhere else
 
-// GOOD: GraphQL subscription
-irminClient.subscribe(watchQuery).foreach(handleChange)
+// GOOD: all writes flow through the single path
+RiskTreeRepositoryIrmin → IrminClient.setTree(...)
 ```
 
-### ❌ Full Tree Transmission
+### ❌ Data-Carrying Push as Source of Truth
 
 ```scala
-// BAD: Send entire tree on any change
-def getTree: Task[RiskTree] = irminClient.query(fullTreeQuery)
+// BAD: client renders figures from the SSE payload (bypasses auth + branch header)
+es.onmessage = e => renderChart(e.data.quantiles)
 
-// GOOD: Stream individual node updates
-def streamChanges: ZStream[Any, Throwable, NodeUpdate]
+// GOOD: notification only; re-fetch over HTTP
+es.onmessage = e => refetch(e.data.nodeIds)   // request carries X-Active-Branch
 ```
 
 ### ❌ Computation in Irmin Layer
 
 ```scala
-// BAD: OCaml computes LEC
-// Irmin stores: /nodes/<id>/lec_cache (computed in OCaml)
+// BAD: OCaml computes; Irmin stores results
+//   workspaces/.../nodes/<id>/lec_cache
 
-// GOOD: Scala computes, Irmin stores structure only
-// Irmin stores: /nodes/<id>/v (parameters only)
-// ZIO computes and caches RiskResult
+// GOOD: Irmin stores parameters only; ZIO computes and caches
 ```
 
 ---
 
 ## Implementation
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| `IrminClient` | sttp + GraphQL | Mutations and subscriptions to Irmin |
-| `RiskResultCache` | ZIO Ref + Map | In-memory simulation result storage |
-| `SSEController` | Tapir streamBody + ZioStreams | Push updates to browsers (text/event-stream) |
-| `SSEHub` | ZIO Hub | Fan-out broadcasting to SSE subscribers |
-| `TreeWatcher` | ZStream | Process Irmin notifications |
-
-### SSE Implementation Notes
-
-Tapir does not have a dedicated `serverSentEventsBody` output type. SSE is implemented using:
-- `streamBody(ZioStreams)` with `text/event-stream` content type
-- Standard Tapir endpoint definition for Swagger documentation
-- ZIO Hub for fan-out broadcasting to multiple subscribers
-
-This maintains consistency with existing Tapir endpoint patterns while providing 
-proper SSE semantics (newline-delimited JSON events with `event:` and `data:` fields).
+| Location | Pattern |
+|----------|---------|
+| `IrminClient` / `IrminClientLive` / `IrminQueries` | GraphQL queries, `set_tree` mutations, branch ops |
+| `RiskTreeRepositoryIrmin` | Domain-to-storage mapping, branch-parameterized methods |
+| `InvalidationHandler` | In-request tree diff → SSE publish |
+| `ContentCache` | Per-workspace content-addressed result cache |
+| `SSEHub` | Per-tree ZIO Hub fan-out |
+| `SSEController` / `SSEEndpoints` | Tapir `streamBody(ZioStreams)` as `text/event-stream` |
 
 ---
 
 ## References
 
 - [Irmin Documentation](https://irmin.org/)
-- [irmin-graphql](https://github.com/mirage/irmin)
 - [Tapir Streaming Support](https://tapir.softwaremill.com/en/latest/endpoint/streaming.html)
-- [REQUIREMENTS-PERSISTENCE.md](./REQUIREMENTS-PERSISTENCE.md)
-- ADR-003: Provenance (simulation reproducibility)
-
+- [ADR-004a-appendix](ADR-004a-appendix.md) — tree terminology, domain-to-storage mapping
+- `docs/scratch/milestone-2b-cache-and-decisions.md` — decision log (DD-5, DD-7, DD-8, DD-15…DD-19, DD-21, DD-22)
