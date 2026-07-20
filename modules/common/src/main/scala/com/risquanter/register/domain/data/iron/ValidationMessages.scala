@@ -25,6 +25,15 @@ object ValidationMessages:
   val nameInvalidChars: String  = "Name must use only letters, digits, spaces, hyphens, and forward slashes"
 
   // ══════════════════════════════════════════════════════════════════
+  // Scenario name (DD-5: ScenarioName — input whitelist folds to a BranchRef
+  // segment slug: letters -> lowercase, space -> '-')
+  // ══════════════════════════════════════════════════════════════════
+  val scenarioNameRequired: String     = "Scenario name must not be blank"
+  val scenarioNameTooLong: String      = s"Scenario name must be at most ${Constants.MaxScenarioNameLength} characters"
+  val scenarioNameInvalidChars: String = "Scenario name must use only letters, digits, spaces, hyphens, and underscores"
+  val scenarioNameInvalidStart: String = "Scenario name must start with a letter or digit"
+
+  // ══════════════════════════════════════════════════════════════════
   // Reserved FOL symbol names
   // ══════════════════════════════════════════════════════════════════
   val reservedNodeName: String  = "Node name must not be a reserved query symbol (e.g. 'leaf', 'p95')"

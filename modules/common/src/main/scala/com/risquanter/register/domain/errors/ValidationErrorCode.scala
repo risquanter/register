@@ -42,6 +42,7 @@ enum ValidationErrorCode(val code: String, val description: String):
 
   // ── Infrastructure codes ──────────────────────────────────────────────────
   case INTERNAL_ERROR extends ValidationErrorCode("INTERNAL_ERROR", "Unexpected server-side error")
+  case NOT_SUPPORTED extends ValidationErrorCode("NOT_SUPPORTED", "Operation not supported by this deployment configuration")
 
   // ── FOL query codes (ADR-028) ─────────────────────────────────────────────
   case PARSE_ERROR extends ValidationErrorCode("PARSE_ERROR", "Query syntax is malformed")

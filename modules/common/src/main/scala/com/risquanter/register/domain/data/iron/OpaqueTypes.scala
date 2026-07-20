@@ -46,11 +46,14 @@ type ExternalTokenStr = String :| (Not[Blank] & MaxLength[2048] & PrintableAscii
 // Separator is `.` — pinned to Irmin's real branch-name charset (verified
 // against live local/irmin-prod:3.11, 2026-07-18: `/` and `~` are rejected
 // with HTTP 500; `.`, `_`, `-`, alphanumerics are accepted). Segments allow
-// only [a-z0-9_-], never `.`, so the three-segment split is unambiguous. The
+// only [a-z0-9_-], never `.`, so the two-segment split is unambiguous. The
 // ref is never a URL path segment (DD-8: header or session), so Irmin
-// validity is the only wire contract. Segment semantics: DD-5 (open).
+// validity is the only wire contract. Segment semantics: DD-5 (closed
+// 2026-07-18) — TWO segments after the prefix, `scenarios.<workspaceId-
+// lowercased-ulid>.<name-slug>`; the name segment is produced by ScenarioName
+// (below), which shares this exact segment shape by construction.
 type BranchRefConstraint =
-  Not[Blank] & MaxLength[160] & Match["^(main|scenarios\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63})$"]
+  Not[Blank] & MaxLength[160] & Match["^(main|scenarios\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63})$"]
 
 type BranchRefStr = String :| BranchRefConstraint
 
@@ -348,6 +351,21 @@ case class BranchRef(toBranchRef: BranchRefStr)
 object BranchRef:
   val Main: BranchRef = BranchRef("main")
 
+  /** Whether `branch` is a value `wsId` is entitled to request via
+    * `X-Active-Branch` (milestone-2b Phase B item 4b) — either the shared
+    * `main` branch (dev/irmin-schema.graphql:149 — a single store-wide
+    * branch, not workspace-local) or a scenario branch namespaced under this
+    * workspace's own segment (`scenarios.<wsId>.<name>`, the naming
+    * `ScenarioServiceLive` always constructs). Any other value — in
+    * particular another workspace's scenario branch — must be rejected by
+    * the caller (2026-07-20 security review, Option B): never resolved as
+    * if it were owned, and never distinguished from "branch does not exist"
+    * in the response, so probing this header cannot be used to enumerate
+    * other workspaces' scenario names.
+    */
+  def belongsTo(branch: BranchRef, wsId: WorkspaceId): Boolean =
+    branch == Main || branch.toBranchRef.startsWith(s"scenarios.${wsId.value.toLowerCase}.")
+
   def fromString(s: String, fieldPath: String = "branch"): Either[List[ValidationError], BranchRef] =
     val sanitized = if s == null then "" else s.trim
     sanitized
@@ -363,6 +381,46 @@ object BranchRef:
         )
       )
       .map(BranchRef(_))
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[BranchRef] = JsonEncoder[String].contramap(_.toBranchRef)
+  given JsonDecoder[BranchRef] = JsonDecoder[String].mapOrFail(s =>
+    BranchRef.fromString(s).left.map(_.mkString(", ")))
+
+// ScenarioName: user-supplied scenario name (DD-5, closed 2026-07-18). Two
+// stages: an input whitelist (letters/digits/space/hyphen/underscore only —
+// anything else is a 400 at the boundary, never silently stripped: "no lossy
+// slugification") folded to the exact shape of one BranchRef segment (letters
+// -> lowercase, space -> '-'). MaxLength[64] on the input mirrors the segment
+// length so a validated ScenarioName always composes into BranchRef
+// (scenarios.<workspaceId>.<name-slug>) without a second failure point.
+type ScenarioNameInputConstraint = Not[Blank] & MaxLength[64] & Match["^[a-zA-Z0-9 _-]+$"]
+type ScenarioNameInputStr = String :| ScenarioNameInputConstraint
+
+// Final slug shape — identical to a BranchRefConstraint segment.
+type ScenarioNameConstraint = Match["^[a-z0-9][a-z0-9_-]{0,63}$"]
+type ScenarioNameStr = String :| ScenarioNameConstraint
+
+// Opaque type for scenario names - prevents mixing with other string types
+object ScenarioName:
+  opaque type ScenarioName = ScenarioNameStr
+
+  object ScenarioName:
+    def apply(s: ScenarioNameStr): ScenarioName = s
+    // Extractor for pattern matching:
+    def unapply(sn: ScenarioName): Option[ScenarioNameStr] = Some(sn)
+
+  extension (sn: ScenarioName)
+    def value: ScenarioNameStr = sn
+
+  // Convenience constructor from plain String
+  def fromString(s: String): Either[List[ValidationError], ScenarioName] =
+    ValidationUtil.refineScenarioName(s)
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[ScenarioName] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[ScenarioName] = JsonDecoder[String].mapOrFail(s =>
+    fromString(s).left.map(_.mkString(", ")))
 
 // ContentHash: SHA-256 hex digest computed by the JVM (DD-14 → Option B).
 // Keys the content-addressed ContentCache: leaf keys hash the LeafSimContent
@@ -415,6 +473,11 @@ object CommitHash:
         )
       )
       .map(CommitHash(_))
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[CommitHash] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[CommitHash] = JsonDecoder[String].mapOrFail(s =>
+    CommitHash.fromString(s).left.map(_.mkString(", ")))
 
 // SafeId: Canonical ULID (Crockford base32, 26 chars, uppercase)
 // Accepts input case-insensitively, normalizes to uppercase canonical string.

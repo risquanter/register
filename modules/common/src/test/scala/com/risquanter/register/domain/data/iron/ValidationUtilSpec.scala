@@ -61,6 +61,86 @@ object ValidationUtilSpec extends ZIOSpecDefault {
       }
     ),
     
+    suite("refineScenarioName")(
+      test("accepts valid name unchanged") {
+        val result = ValidationUtil.refineScenarioName("stress-2026")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("stress-2026")
+        )
+      },
+
+      test("folds letters to lowercase and maps space to hyphen") {
+        val result = ValidationUtil.refineScenarioName("New Vendor Risk")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("new-vendor-risk")
+        )
+      },
+
+      test("accepts underscores and digits") {
+        val result = ValidationUtil.refineScenarioName("vendor_risk_1")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("vendor_risk_1")
+        )
+      },
+
+      test("trims surrounding whitespace") {
+        val result = ValidationUtil.refineScenarioName("  stress-2026  ")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("stress-2026")
+        )
+      },
+
+      test("rejects blank string") {
+        val result = ValidationUtil.refineScenarioName("   ")
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(_.head.message == ValidationMessages.scenarioNameRequired)
+        )
+      },
+
+      test("rejects null") {
+        val result = ValidationUtil.refineScenarioName(null)
+        assertTrue(result.isLeft)
+      },
+
+      test("rejects string over 64 chars") {
+        val longName = "a" * 65
+        val result = ValidationUtil.refineScenarioName(longName)
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(_.head.message == ValidationMessages.scenarioNameTooLong)
+        )
+      },
+
+      test("rejects a character outside the whitelist, without stripping it (no lossy slugification)") {
+        val result = ValidationUtil.refineScenarioName("stress!2026")
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(_.head.message == ValidationMessages.scenarioNameInvalidChars)
+        )
+      },
+
+      test("rejects a name that folds to a leading hyphen") {
+        val result = ValidationUtil.refineScenarioName("-leading-hyphen")
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(_.head.message == ValidationMessages.scenarioNameInvalidStart)
+        )
+      },
+
+      test("rejects a name that folds to a leading underscore") {
+        val result = ValidationUtil.refineScenarioName("_leading_underscore")
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(_.head.message == ValidationMessages.scenarioNameInvalidStart)
+        )
+      }
+    ),
+
     suite("refineEmail")(
       test("accepts valid email with @") {
         val result = ValidationUtil.refineEmail("user@example.com")

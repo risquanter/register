@@ -47,6 +47,37 @@ object ValidationUtil {
       }
   }
 
+  // Refinement for scenario names (DD-5): input whitelist letters/digits/space/
+  // hyphen/underscore (max 64), then fold letters to lowercase and map space ->
+  // '-' to produce the BranchRef segment slug (scenarios.<ws>.<name-slug>).
+  // Invalid characters are rejected outright (400) — never silently stripped
+  // ("no lossy slugification").
+  def refineScenarioName(value: String, fieldPath: String = "name"): Either[List[ValidationError], ScenarioName.ScenarioName] = {
+    val sanitized = nonEmpty(value)
+    sanitized
+      .refineEither[ScenarioNameInputConstraint]
+      .left
+      .map { err =>
+        val (code, message) = (sanitized.isEmpty || err.toLowerCase.contains("blank"), sanitized.length > 64) match
+          case (true, _) => (ValidationErrorCode.REQUIRED_FIELD,  ValidationMessages.scenarioNameRequired)
+          case (_, true) => (ValidationErrorCode.INVALID_LENGTH,  ValidationMessages.scenarioNameTooLong)
+          case _         => (ValidationErrorCode.INVALID_PATTERN, ValidationMessages.scenarioNameInvalidChars)
+        List(ValidationError(field = fieldPath, code = code, message = message))
+      }
+      .flatMap { validInput =>
+        val slug = validInput.toLowerCase.replace(' ', '-')
+        slug
+          .refineEither[ScenarioNameConstraint]
+          .map(ScenarioName.ScenarioName(_))
+          .left
+          .map(_ => List(ValidationError(
+            field = fieldPath,
+            code = ValidationErrorCode.INVALID_FORMAT,
+            message = ValidationMessages.scenarioNameInvalidStart
+          )))
+      }
+  }
+
   // Refinement for email; whitelist regex: local-part, @, domain with TLD
   def refineEmail(value: String, fieldPath: String = "email"): Either[List[ValidationError], Email.Email] = {
     val sanitized = nonEmpty(value)
