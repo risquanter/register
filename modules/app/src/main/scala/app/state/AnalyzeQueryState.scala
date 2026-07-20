@@ -133,7 +133,7 @@ final class AnalyzeQueryState(
             case (Some(key), Some(treeId)) =>
               queryResult.set(LoadState.Loading)
               queryServerError.set(None)
-              queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(queryText)))
+              queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(queryText), None))
                 .foldZIO(
                   failure = {
                     case e: FolQueryFailure if isQueryDomainError(e) =>

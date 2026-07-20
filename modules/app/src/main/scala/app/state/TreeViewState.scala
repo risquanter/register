@@ -88,7 +88,7 @@ final class TreeViewState(
     chartState.reset()
     keySignal.now() match
       case Some(key) =>
-        getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id)).loadOptionInto(selectedTree, "Tree not found")
+        getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, None)).loadOptionInto(selectedTree, "Tree not found")
       case None => ()
 
   /** Select a tree by id — sets `selectedTreeId` and triggers structure fetch. */

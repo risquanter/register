@@ -7,13 +7,19 @@ import sttp.tapir.generic.auto.*
 import com.risquanter.register.http.requests.RiskTreeUpdateRequest
 import com.risquanter.register.http.responses.SimulationResponse
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, BranchRef}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Workspace-scoped tree endpoints.
   *
   * All tree-specific operations are served exclusively under `/w/{key}/...`
   * to enforce workspace capability checks.
+  *
+  * Each endpoint accepts an optional `X-Active-Branch` header (milestone-2b
+  * Phase B item 4b) selecting which branch to read/write — absent header
+  * targets `main` (DD-4 default), unchanged from pre-Phase-B behaviour.
+  * The controller, not this trait, is responsible for rejecting a branch the
+  * caller's workspace does not own — see `ActiveBranch.resolve`.
   */
 trait WorkspaceTreeEndpoints extends BaseEndpoint:
 
@@ -24,6 +30,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .description("Get tree summary (workspace-scoped)")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
       .get
+      .in(header[Option[BranchRef]]("X-Active-Branch"))
       .out(jsonBody[Option[SimulationResponse]])
 
   val getWorkspaceTreeStructureEndpoint =
@@ -33,6 +40,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .description("Get full tree structure (workspace-scoped)")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "structure")
       .get
+      .in(header[Option[BranchRef]]("X-Active-Branch"))
       .out(jsonBody[Option[RiskTree]])
 
   val updateWorkspaceTreeEndpoint =
@@ -43,6 +51,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
       .put
       .in(jsonBody[RiskTreeUpdateRequest])
+      .in(header[Option[BranchRef]]("X-Active-Branch"))
       .out(jsonBody[SimulationResponse])
 
   val deleteWorkspaceTreeEndpoint =
@@ -52,4 +61,5 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .description("Delete a single tree from workspace")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
       .delete
+      .in(header[Option[BranchRef]]("X-Active-Branch"))
       .out(jsonBody[SimulationResponse])

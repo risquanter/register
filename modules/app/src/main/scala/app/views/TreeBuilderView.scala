@@ -42,7 +42,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
             case Some(key) =>
               state.toUpdateRequest() match
                 case Validation.Success(_, request) =>
-                  updateWorkspaceTreeEndpoint((wsState.currentUserId, key, treeId, request)).submitInto(submitState)(onSuccess)
+                  updateWorkspaceTreeEndpoint((wsState.currentUserId, key, treeId, request, None)).submitInto(submitState)(onSuccess)
                 case Validation.Failure(_, errors) => validationFailed(errors)
 
         // ── Create mode ──

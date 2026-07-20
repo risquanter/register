@@ -38,43 +38,53 @@ class WorkspaceTreeController private (
     with WorkspaceTreeEndpoints:
 
   val getTreeById: ServerEndpoint[Any, Task] = getWorkspaceTreeByIdEndpoint.serverLogic {
-    case (maybeUserId, key, treeId) =>
+    case (maybeUserId, key, treeId, activeBranch) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        result <- riskTreeService.getById(ws.id, treeId).map(_.map(SimulationResponse.fromRiskTree))
+        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        result <- riskTreeService.getById(ws.id, treeId, branch).map(_.map(SimulationResponse.fromRiskTree))
       yield result).either
   }
 
   val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
-    case (maybeUserId, key, treeId) =>
+    case (maybeUserId, key, treeId, activeBranch) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        result <- riskTreeService.getById(ws.id, treeId)
+        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        result <- riskTreeService.getById(ws.id, treeId, branch)
       yield result).either
   }
 
   val updateTree: ServerEndpoint[Any, Task] = updateWorkspaceTreeEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, req) =>
+    case (maybeUserId, key, treeId, req, activeBranch) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        result <- riskTreeService.update(ws.id, treeId, req).map(SimulationResponse.fromRiskTree)
+        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        result <- riskTreeService.update(ws.id, treeId, req, branch).map(SimulationResponse.fromRiskTree)
       yield result).either
   }
 
   val deleteTree: ServerEndpoint[Any, Task] = deleteWorkspaceTreeEndpoint.serverLogic {
-    case (maybeUserId, key, treeId) =>
+    case (maybeUserId, key, treeId, activeBranch) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        result <- riskTreeService.delete(ws.id, treeId)
-                      .tap(_ => workspaceStore.removeTree(key, treeId))
+        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        // removeTree disassociates the tree from the workspace as a whole
+        // (WorkspaceRecord.trees spans every branch — reaper cascade-delete,
+        // listTrees) — only correct when the delete targets `main`. Deleting
+        // from a scenario branch removes it from that branch alone; the tree
+        // still exists on `main` and any other scenario, so the workspace
+        // must keep tracking it.
+        result <- riskTreeService.delete(ws.id, treeId, branch)
+                      .tap(_ => ZIO.when(branch.isEmpty)(workspaceStore.removeTree(key, treeId)))
                       .map(SimulationResponse.fromRiskTree)
       yield result).either
   }

@@ -178,7 +178,7 @@ final class LECChartState(
     (keySignal.now(), selectedTreeId.now()) match
       case (Some(key), Some(treeId)) =>
         getWorkspaceLECCurvesMultiEndpoint(
-          (userIdAccessor(), key, treeId, false, nodeIds)
+          (userIdAccessor(), key, treeId, false, nodeIds, None)
         ).loadInto(curveCache)
       case _ => () // No workspace or tree selected — nothing to do
 

@@ -18,7 +18,7 @@ object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
   private val someTree = treeId("branch-spec-tree")
 
   private val scenarioBranch: BranchRef =
-    BranchRef.fromString("scenarios.ws.tree.alt").toOption.get
+    BranchRef.fromString("scenarios.ws.alt").toOption.get
 
   def spec = suite("RiskTreeRepositoryInMemory branch handling")(
 

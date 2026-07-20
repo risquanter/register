@@ -5,7 +5,7 @@ import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import sttp.model.{Header, MediaType}
 
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId, BranchRef}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.domain.data.LECNodeCurve
 
@@ -13,6 +13,11 @@ import com.risquanter.register.domain.data.LECNodeCurve
   *
   * All operations are served exclusively under `/w/{key}/...` to enforce
   * workspace capability checks.
+  *
+  * Each endpoint accepts an optional `X-Active-Branch` header (milestone-2b
+  * Phase B item 4b) selecting which branch to read — absent header targets
+  * `main` (DD-4 default). The controller is responsible for rejecting a
+  * branch the caller's workspace does not own — see `ActiveBranch.resolve`.
   */
 trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
 
@@ -27,6 +32,7 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .get
       .in(query[Long]("threshold"))
       .in(query[Boolean]("includeProvenance").default(false))
+      .in(header[Option[BranchRef]]("X-Active-Branch"))
       .out(jsonBody[Double])
 
   val getWorkspaceLECCurvesMultiEndpoint =
@@ -38,4 +44,5 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .post
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[List[NodeId]].description("Array of node IDs"))
+      .in(header[Option[BranchRef]]("X-Active-Branch"))
       .out(jsonBody[Map[NodeId, LECNodeCurve]])

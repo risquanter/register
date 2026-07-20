@@ -10,7 +10,7 @@ import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
@@ -44,8 +44,8 @@ class RiskTreeServiceLive private (
   import RiskTreeServiceLive.ErrorContext
   
   /** Fetch tree by id or fail with ValidationFailed. */
-  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId): Task[RiskTree] =
-    repo.getById(wsId, treeId).flatMap {
+  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, branch: Option[BranchRef] = None): Task[RiskTree] =
+    repo.getById(wsId, treeId, branch).flatMap {
       case Some(tree) => ZIO.succeed(tree)
       case None =>
         ZIO.fail(ValidationFailed(List(ValidationError(
@@ -54,11 +54,11 @@ class RiskTreeServiceLive private (
           message = s"Tree not found: $treeId"
         ))))
     }
-    
+
   /** Fetch tree and node together or fail with ValidationFailed. */
-  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId): Task[(RiskTree, RiskNode)] =
+  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, branch: Option[BranchRef] = None): Task[(RiskTree, RiskNode)] =
     for
-      tree <- getTreeOrFail(wsId, treeId)
+      tree <- getTreeOrFail(wsId, treeId, branch)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
         field = "nodeId",
         code = ValidationErrorCode.NOT_FOUND,
@@ -67,9 +67,9 @@ class RiskTreeServiceLive private (
     yield (tree, node)
 
   /** Fetch tree and all requested nodes; fail with aggregated validation errors when any node is missing. */
-  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId]): Task[(RiskTree, Map[NodeId, RiskNode])] =
+  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], branch: Option[BranchRef] = None): Task[(RiskTree, Map[NodeId, RiskNode])] =
     for
-      tree <- getTreeOrFail(wsId, treeId)
+      tree <- getTreeOrFail(wsId, treeId, branch)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
       _ <- if missing.isEmpty then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
         field = "nodeIds",
@@ -330,9 +330,9 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
     val operation = for {
-      oldTree <- getTreeOrFail(wsId, id)
+      oldTree <- getTreeOrFail(wsId, id, branch)
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
       resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, excludeId = Some(id))
@@ -357,7 +357,7 @@ class RiskTreeServiceLive private (
         rootId = rootId,
         seedVarHighWater = Some(seedVarHighWater)
       ).toZIOValidation
-      updated <- repo.update(wsId, id, _ => riskTree)
+      updated <- repo.update(wsId, id, _ => riskTree, branch)
       _ <- invalidationHandler.handleMutation(oldTree, updated)
     } yield updated
     
@@ -367,16 +367,16 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def delete(wsId: WorkspaceId, id: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] =
-    repo.delete(wsId, id)
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] =
+    repo.delete(wsId, id, branch)
       .tap(tree => invalidationHandler.handleTreeDeletion(tree))
       .tapBoth(
       error => logIfUnexpected("delete")(error) *> recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
     )
-  
-  override def getById(wsId: WorkspaceId, id: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]] =
-    repo.getById(wsId, id).tapBoth(
+
+  override def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]] =
+    repo.getById(wsId, id, branch).tapBoth(
       error => logIfUnexpected("getById")(error) *> recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
     )
@@ -385,16 +385,16 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Double] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: Option[BranchRef] = None): Task[Double] =
     traced("probOfExceedance") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_id", nodeId.value)
         _ <- tracing.setAttribute("threshold", threshold)
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
-        
+
         // Fetch requested tree and ensure node exists within it
-        (tree, _) <- lookupNodeInTree(wsId, treeId, nodeId)
+        (tree, _) <- lookupNodeInTree(wsId, treeId, nodeId, branch)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
         result <- resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
@@ -406,14 +406,14 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, LECNodeCurve]] =
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: Option[BranchRef] = None): Task[Map[NodeId, LECNodeCurve]] =
     traced("getLECCurvesMulti") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
         _ <- tracing.setAttribute("node_count", nodeIds.size.toLong)
         _ <- tracing.setAttribute("node_ids", nodeIds.map(_.value).mkString(","))
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
-        
+
         // Validate inputs and fetch requested tree + nodes
         treeWithNodes <- if (nodeIds.isEmpty) {
           ZIO.fail(ValidationFailed(List(ValidationError(
@@ -422,7 +422,7 @@ class RiskTreeServiceLive private (
             message = "nodeIds set is empty"
           ))))
         } else {
-          lookupNodesInTree(wsId, treeId, nodeIds)
+          lookupNodesInTree(wsId, treeId, nodeIds, branch)
         }
         (tree, nodesMap) = treeWithNodes
         

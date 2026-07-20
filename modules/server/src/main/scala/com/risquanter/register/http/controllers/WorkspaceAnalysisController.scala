@@ -35,22 +35,24 @@ class WorkspaceAnalysisController private (
     with WorkspaceAnalysisEndpoints:
 
   val probOfExceedance: ServerEndpoint[Any, Task] = getWorkspaceProbOfExceedanceEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance) =>
+    case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance, activeBranch) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        result <- riskTreeService.probOfExceedance(ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance)
+        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        result <- riskTreeService.probOfExceedance(ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance, branch)
       yield result).either
   }
 
   val getLECCurvesMulti: ServerEndpoint[Any, Task] = getWorkspaceLECCurvesMultiEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, includeProvenance, nodeIds) =>
+    case (maybeUserId, key, treeId, includeProvenance, nodeIds, activeBranch) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance)
+        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance, branch)
       yield result).either
   }
 
