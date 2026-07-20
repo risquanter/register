@@ -47,8 +47,10 @@ A "decision" is only real if there are **two or more viable options with genuine
 - A plan already explicitly specifies the change (e.g. the implementation plan names the new header, the new parameter, the new file). A plan passage quoting the signature is the decision. Do not re-decide what the plan already decided.
 - The "decision" amounts to "do the work" vs "don't do the work" with no real trade-off between approaches.
 - A trigger fires but the change is fully covered and scoped by the approved plan being executed. The Decision Trigger list gates *unplanned* changes, not plan execution.
+- **No genuine argument exists for the option you'd reject.** Before raising anything, try to state a real pro for it — one a reasonable engineer could hold, not "it's technically possible" or "it's less typing." If you can't produce that argument, there is no second option, only a strawman next to the one correct answer. Do the correct thing; don't stage a choice around it.
+- **Every comparable existing case in the codebase already does it one way, and deviating would itself need justification you don't have.** That is a specification, not a judgment call. State "doing X, matching existing convention Y" and proceed — do not gate conformance to an already-uniform pattern behind a formal ask.
 
-Pseudo-decisions are noise. Noise erodes trust in the protocol. Raise only real decisions.
+Decision Required is for cases where the deciding factor is a value judgement specific to this project's priorities — cost vs. correctness, friction vs. complexity, one stakeholder's need against another's — not for "does this match what's already there." Pseudo-decisions are noise. Noise erodes trust in the protocol. Raise only real decisions.
 
 ---
 

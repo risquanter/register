@@ -249,13 +249,34 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `REGISTER_WORKSPACE_MAX_TREES` | `10` | Max risk trees per workspace |
 | `OTEL_SERVICE_NAME` | `risk-register` | OpenTelemetry service name |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP endpoint |
-| `REGISTER_REPOSITORY_TYPE` | `in-memory` | Set to `irmin` to enable Irmin backend |
+| `REGISTER_REPOSITORY_TYPE` | `in-memory` | Set to `irmin` to enable Irmin backend. Read by **both** `register-server` and `frontend` (see `/config.json` below) — one variable, one source of truth, so the two containers can never disagree on whether scenarios are available. |
 | `IRMIN_URL` | `http://localhost:9080` | Irmin GraphQL URL (use `http://irmin:8080` inside compose) |
 | `IRMIN_BRANCH` | `main` | Irmin default branch |
 | `IRMIN_TIMEOUT` | `30s` | Irmin request timeout (HOCON duration, e.g. `30s`, `2m`) |
 | `IRMIN_HEALTHCHECK_ATTEMPT_TIMEOUT` | `5s` | Startup readiness: per-attempt probe timeout (ADR-031) |
 | `IRMIN_HEALTHCHECK_BUDGET` | `45s` | Startup readiness: total bounded wait before failing closed (ADR-031) |
 | `BACKEND_URL` | `http://register-server:8090` | **Frontend (nginx) only** — register-server URL for proxy_pass |
+
+### `/config.json` — frontend capability discovery
+
+The `frontend` container's entrypoint script writes `/tmp/config.json` at startup
+(served by nginx at `GET /config.json`, `Cache-Control: no-cache`) from the same
+`REGISTER_REPOSITORY_TYPE` variable `register-server` reads:
+
+```json
+{"scenariosEnabled": true}
+```
+
+`true` when `REGISTER_REPOSITORY_TYPE=irmin`, `false` otherwise. This lets the SPA
+know whether scenario branching is available without an API round trip, and without
+the two containers being configured to disagree — set the variable once, both
+containers read it. The backend's own `ScenarioServiceNotSupported` stub (501 on
+`repository.type=in-memory`) is what actually enforces this; `/config.json` only
+controls whether the SPA shows the UI for it (milestone-2b Phase B item 6). No SPA
+code consumes it yet — there is no scenario UI to gate until item 9 (BranchBar).
+
+Kubernetes: set `REGISTER_REPOSITORY_TYPE` on both the `register-server` and
+`frontend` pod specs from the same source (e.g. the same ConfigMap key).
 
 ---
 
@@ -284,6 +305,7 @@ curl -s -X POST http://localhost:9080/graphql \
   -H "Content-Type: application/json" \
   -d '{"query":"{ __typename }"}'          # Irmin GraphQL
 curl -s http://localhost:18080/ | grep -q '<html' && echo OK   # nginx frontend
+curl -s http://localhost:18080/config.json                     # {"scenariosEnabled": true|false}
 ```
 
 ### Irmin data volume

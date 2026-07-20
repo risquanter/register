@@ -1193,3 +1193,77 @@ Decide: adopt (which tool(s), which rules, allowlist policy), or reject with
 reasoning recorded here. If adopted: rules live in the build, run in CI, and
 the DD-7-style slot-by-slot injection audit becomes automated for every new
 query/command builder.
+
+---
+
+## 22. `Option[BranchRef]` lets "main" be spelled two different ways — investigate a dedicated type
+
+**Origin (2026-07-20):** surfaced while reviewing the signature chosen for the
+new `ScenarioService.create`'s source parameter (`Option[ScenarioName]`,
+milestone-2b Phase B). That specific parameter turned out fine — `ScenarioName`
+has no value that means "main" (main is not a scenario, DD-11), so `None` is
+the only way to say it. But the review found that the existing, unrelated
+`Option[BranchRef]` parameter used across `IrminClient` and
+`RiskTreeRepository` (`get`, `set`, `setTree`, `remove`, `getHistory`, `list`,
+`create`, `update`, `delete`, `getById`, `getAllForWorkspace` — roughly 70 call
+sites) does not have that property, and the gap is not hypothetical.
+
+**Observed:** `BranchRef.Main` (`OpaqueTypes.scala:352`) is a constructible
+value equal in meaning to `None` wherever `Option[BranchRef]` is used to mean
+"target branch, default main." `RiskTreeRepositoryInMemory.requireMain`
+(`RiskTreeRepositoryInMemory.scala:21-23`) already has to handle both:
+
+```scala
+branch match
+  case None | Some(BranchRef.Main) => ZIO.unit
+  case Some(other) => ZIO.fail(...)
+```
+
+Any future consumer of the same `Option[BranchRef]` parameter that branches on
+"is this main?" and checks only `None` (forgetting `Some(BranchRef.Main)`, or
+vice versa) would silently misclassify a main-targeted call — the "branch
+switching silently returns wrong results" failure class the milestone-2b cache
+doc's problem statement opens with. `IrminClientLive` currently avoids this
+only because it forwards the raw `Option[BranchRef]` to Irmin's GraphQL query
+without ever branching on it (`branch.map(_.toBranchRef)`,
+`IrminClientLive.scala:36`), and "no branch argument" happens to behave the
+same as "branch=main" on Irmin's side — a property of Irmin's API, not a
+guarantee the Scala types provide.
+
+**What needs investigating:** whether a dedicated two-case type — e.g. a
+selector distinguishing "main" from "a named branch" — should replace
+`Option[BranchRef]` at the layers where it represents a real business choice
+(`IrminClient`, `RiskTreeRepository` and implementations). Under such a type,
+"main" would have exactly one representable value; `Some(BranchRef.Main)` as
+an alternate spelling of the default would become structurally impossible
+rather than something each new consumer has to remember to normalize — the
+same "not just documented against, actually unrepresentable" property the
+project's correct-by-construction principle asks for elsewhere (Iron
+refinements, `Checked[P]` proof tokens in item 15).
+
+**Where `Option` stays correct and should not change:** the `X-Active-Branch`
+HTTP header (DD-8, closed 2026-07-18, not yet implemented — TODO app item 4).
+A header is genuinely either present or absent on the wire; `Option[BranchRef]`
+there reflects that real optionality, not a business classification standing
+in for it. The investigation is about what the value becomes *after* decoding,
+not the decode step itself — i.e. whether the decoded `None` (header absent)
+should be normalized into the dedicated type's `Main` case immediately at the
+Tapir boundary, so nothing past that point ever carries a bare `Option` that
+could be confused with wire-level absence again.
+
+**Also relevant to scope:** `IrminConfig.scala:27` (`branch: BranchRef =
+BranchRef.Main`) is a plain, required `BranchRef` field, not an `Option` — a
+context where `BranchRef.Main` is the correct tool and must keep working
+whatever the outcome here. A clean design keeps that usage valid while closing
+the duplicate-spelling hole in the optional-parameter contexts.
+
+**Why not implement immediately:** this changes public method signatures
+across `IrminClient` and `RiskTreeRepository` (and both implementations,
+`IrminClientLive` and `RiskTreeRepositoryInMemory`/`RiskTreeRepositoryIrmin`),
+which is a hard Decision Trigger under the project's working protocol, and is
+unrelated in scope to the `ScenarioService` work in progress when this was
+found. Also worth deciding whether `ScenarioService`'s own use of `BranchRef`
+(item 3/4, milestone-2b Phase B) should be designed against the new type from
+the start or added as a plain consumer now and migrated later.
+
+**Status:** investigation only, no decision made, no code changed.

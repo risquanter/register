@@ -49,8 +49,10 @@ kept as record).
    Both views must always show which branch the tab is on — otherwise Analyze
    silently shows scenario figures that look like main. The indicator (a
    "branch chip") sits in the shared topbar next to the workspace badge.
-   Create / switch / rename / delete / merge affordances concentrate in
-   Design.
+   Create / switch / duplicate / delete / merge affordances concentrate in
+   Design. ("Rename" is not a server operation — DD-5 amendment,
+   2026-07-20 — it is the user doing duplicate then delete as two
+   separate actions; see §4.2.)
 3. **Time travel splits by intent.** *Browsing* history and point-in-time
    comparison is read-only → Analyze. *Working from* an old state is a write
    intent → served by **fork-from-history** (see rule 4), keeping revert as
@@ -130,7 +132,7 @@ history are modes/panels of the two existing sections, per principle 1.
 | Surface | Phase | Placement | Notes |
 |---|---|---|---|
 | Branch chip (indicator) | B | Topbar, left of workspace badge | Always visible, both views. Neutral chrome + the branch's user-assigned palette swatch (§1.1) — no role colour. |
-| Scenario menu (switch, create, rename, delete) | B | Design — chip becomes a button there; also a "Scenarios" toolbar row atop TreeBuilder | In Analyze the chip is inert (indicator only). |
+| Scenario menu (switch, create, duplicate, delete) | B | Design — chip becomes a button there; also a "Scenarios" toolbar row atop TreeBuilder | In Analyze the chip is inert (indicator only). No bundled rename (DD-5 amendment, 2026-07-20) — duplicate then delete is two explicit actions. |
 | Feature-disabled state | B | Topbar + Design toolbar | Both grayed and removed variants sketched (§5); decision deliberately after DD-9. |
 | Comparison view | C | Analyze — three-state compare control (Off / Overlay / Side by side) in the query panel header | Branch multi-select; N-way limits per layout in §6; edit markers in tree panel (no diff list). |
 | Merge preview + confirm | D | Design — action on the active scenario in the Scenario menu | Modal preview → confirm; conflicts surface in the modal. |
@@ -176,7 +178,7 @@ Scenario dropdown (opened):
  │ ⎇ new-vendor-risk           │
  ├─────────────────────────────┤
  │ + New scenario from main…   │   CAS create at main head (DD-5)
- │ ✎ Rename current…           │   recreate at head + CAS-delete (DD-5)
+ │ ⧉ Duplicate current…        │   CAS create at this branch's head (DD-5)
  │ ⇪ Merge into main…          │   Phase D — hidden until then
  │ ↩ Revert this branch…       │   Phase E — hidden until then
  │ ✕ Delete current…           │   destructive confirm
@@ -185,7 +187,9 @@ Scenario dropdown (opened):
 
 - Create prompts for a `ScenarioName` (slug-mappable charset, 400 at boundary
   otherwise — DD-5); collision rejected by the CAS itself, surfaced inline.
-- Rename/delete on `main` are disabled — main is not a scenario.
+- Delete on `main` is disabled — main is not a scenario. "Duplicate current"
+  on `main` is redundant with "New scenario from main" (same operation, same
+  source head) and is hidden there rather than shown twice.
 - Switching with a dirty draft reuses the existing dirty-draft confirm flow in
   `DesignView` (same guard as switching trees).
 
@@ -416,7 +420,7 @@ fixes only the placement (Design, modal, preview-then-confirm).
                         (browse, view-at-point, compare)
 ```
 
-- Scenario lifecycle: create/switch/rename/delete/merge/revert — Design.
+- Scenario lifecycle: create/switch/duplicate/delete/merge/revert — Design.
 - Observation: query, chart, compare, history browsing — Analyze.
 - The single bridge Analyze→Design is the fork action (creates, never edits).
 
