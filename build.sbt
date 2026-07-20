@@ -76,7 +76,7 @@ val serverDependencies = Seq(
   "org.scala-lang.modules"        %% "scala-parallel-collections"        % "1.0.4",
   "com.risquanter"                 % "simulation.util"                   % "0.8.0",
   // HDR counter-based PRNG (pure Scala, cross-compiled)
-  "com.risquanter"                %% "hdr-rng"                           % "0.1.0-SNAPSHOT",
+  "com.risquanter"                %% "hdr-rng"                           % "0.1.0",
   // STTP zio-json integration for Irmin GraphQL client
   "com.softwaremill.sttp.client3" %% "zio-json"                          % sttpVersion,
   "com.bilal-fazlani"             %% "zio-ulid"                          % zioUlidVersion,

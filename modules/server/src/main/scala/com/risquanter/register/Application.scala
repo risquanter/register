@@ -10,11 +10,12 @@ import io.getquill.SnakeCase
 import com.risquanter.register.configs.{AuthConfig, AuthMode, Configs, CorsConfig, FlywayConfig, IrminConfig, PostgresDataSourceConfig, RepositoryConfig, RepositoryType, ServerConfig, SimulationConfig, SpiceDbConfig, TelemetryConfig, WorkspaceConfig, WorkspaceStoreBackend, WorkspaceStoreConfig}
 import com.risquanter.register.auth.{AuthorizationService, AuthorizationServiceNoOp, AuthorizationServiceSpiceDB, BootstrapProvisioner, BootstrapProvisionerNoOp, BootstrapProvisionerSpiceDB, UserContextExtractor}
 import com.risquanter.register.http.{HealthProbeServer, HttpApi, SecurityHeadersInterceptor}
-import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
+import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.persistence.{FlywayService, FlywayServiceLive, Repository}
 import com.risquanter.register.services.RiskTreeServiceLive
+import com.risquanter.register.services.{ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.pipeline.InvalidationHandler
@@ -74,6 +75,33 @@ object Application extends ZIOAppDefault {
               ZIO.scoped(inMemoryRepoLayer.build.map(_.get[RiskTreeRepository]))
         }
       } yield repo
+    }
+
+  // Independent IrminClient + health check from irminRepoLayer's — a second
+  // connection/health-check at startup when repository.type=irmin, rather than
+  // sharing RiskTreeRepositoryIrmin's client. Simpler and scoped to only what's
+  // new here; refactoring chooseRepo to expose a shared IrminClient would touch
+  // already-working wiring beyond this item's scope (milestone-2b Phase B item 6).
+  private val irminScenarioServiceLayer: ZLayer[Any, Throwable, ScenarioService] =
+    ZLayer.make[ScenarioService](
+      IrminConfig.layer,
+      IrminClientLive.layer >>> irminHealthCheck,
+      ScenarioServiceLive.layer
+    )
+
+  private val chooseScenarioService: ZLayer[RepositoryConfig, Throwable, ScenarioService] =
+    ZLayer.fromZIO {
+      for {
+        repoCfg <- ZIO.service[RepositoryConfig]
+        svc <- repoCfg.repositoryType match {
+          case RepositoryType.Irmin =>
+            ZIO.logInfo("repository.type=irmin; scenarios enabled") *>
+              ZIO.scoped(irminScenarioServiceLayer.build.map(_.get[ScenarioService]))
+          case RepositoryType.InMemory =>
+            ZIO.logInfo("repository.type=in-memory; scenarios disabled (ScenarioServiceNotSupported, item 6)") *>
+              ZIO.succeed(ScenarioServiceNotSupported: ScenarioService)
+        }
+      } yield svc
     }
 
   private val postgresWorkspaceStoreLayer: ZLayer[WorkspaceConfig & PostgresDataSourceConfig, Throwable, WorkspaceStore] =
@@ -183,8 +211,8 @@ object Application extends ZIOAppDefault {
     )
 
   // Application layers (with config dependencies)
-  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig] =
-    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig](
+  val appLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig] =
+    ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController & FlywayService & Server & ServerConfig & CorsConfig & WorkspaceReaper & UserContextExtractor & AuthConfig](
       // Config layers
       Configs.makeLayer[ServerConfig]("register.server"),
       Configs.makeLayer[SimulationConfig]("register.simulation"),
@@ -211,6 +239,7 @@ object Application extends ZIOAppDefault {
       // Concurrency control - limits concurrent simulations (requires SimulationConfig)
       com.risquanter.register.services.SimulationSemaphore.layer,
       RepositoryConfig.layer >>> chooseRepo,
+      RepositoryConfig.layer >>> chooseScenarioService,
       // Per-workspace content-addressed cache (milestone 2b Phase A, DD-17)
       CacheScope.layer,
       RiskResultResolverLive.layer,  // ADR-015: ensureCached primitive
@@ -229,6 +258,7 @@ object Application extends ZIOAppDefault {
       ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
       ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
       ZLayer.fromZIO(WorkspaceAnalysisController.makeZIO),
+      ZLayer.fromZIO(ScenarioController.makeZIO),
       SSEController.layer,
       ZLayer.fromZIO(QueryController.makeZIO),
       DistributionPreviewService.layer,

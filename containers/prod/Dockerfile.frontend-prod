@@ -132,6 +132,11 @@ COPY --from=builder /app/modules/app/dist/ /srv/app/
 #   /w/*  + Accept: text/html        → try_files → index.html (SPA shell)
 #   /w/*  + anything else            → proxy to register-server:8090
 #   /workspaces, /health, /docs      → proxy unconditionally
+#   /config.json                     → served locally by nginx (NOT proxied) —
+#                                       generated at container startup from
+#                                       REGISTER_REPOSITORY_TYPE, tells the SPA
+#                                       whether to show scenario UI without an
+#                                       API round trip (milestone-2b item 6)
 #   / and everything else            → try_files → index.html (SPA fallback)
 #
 # The /w/ routing uses an inverted Accept check: proxy by default, serve
@@ -234,6 +239,17 @@ http {
         }
 
         # ----------------------------------------------------------------
+        # /config.json — generated at container startup (see entrypoint
+        # below) from REGISTER_REPOSITORY_TYPE, served locally, never
+        # proxied. Must never be cached: it can differ across deployments
+        # of the same image, unlike the content-hashed static assets above.
+        # ----------------------------------------------------------------
+        location = /config.json {
+            root /tmp;
+            add_header Cache-Control "no-cache";
+        }
+
+        # ----------------------------------------------------------------
         # Everything else — SPA fallback. nginx generates this response.
         # index.html MUST NOT be immutably cached — it references content-
         # hashed JS/CSS bundles. no-cache forces the browser to revalidate
@@ -271,6 +287,19 @@ BACKEND=${BACKEND_URL:-http://register-server:8090}
 sed -e "s|__RESOLVER__|${RESOLVER}|g" \
     -e "s|__BACKEND__|${BACKEND}|g" \
     /etc/nginx/nginx.conf.template > /tmp/nginx.conf
+
+# /config.json — tells the SPA whether to show scenario UI, without an API
+# call. Same variable and same default register-server reads for its own
+# ScenarioServiceNotSupported/live choice (docker-compose.yml,
+# REGISTER_REPOSITORY_TYPE) — one source of truth, set once, read by both
+# containers, so this can never disagree with what the backend actually
+# supports. Kubernetes: set the same env var on both pod specs.
+if [ "${REGISTER_REPOSITORY_TYPE:-in-memory}" = "irmin" ]; then
+    SCENARIOS_ENABLED=true
+else
+    SCENARIOS_ENABLED=false
+fi
+printf '{"scenariosEnabled": %s}' "${SCENARIOS_ENABLED}" > /tmp/config.json
 
 exec nginx -c /tmp/nginx.conf -g "daemon off;"
 EOF

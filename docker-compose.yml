@@ -180,6 +180,12 @@ services:
       # Backend URL — uses Compose service name (resolved via Docker DNS).
       # Override with k8s FQDN in Helm values for Kubernetes deployment.
       BACKEND_URL: "http://register-server:8090"
+      # Same variable register-server reads (line 97) — one source of truth so
+      # the frontend's /config.json can never disagree with what the backend
+      # actually supports. Determines only whether the SPA shows scenario UI;
+      # the backend's own ScenarioServiceNotSupported stub is what actually
+      # enforces this (milestone-2b Phase B item 6).
+      REGISTER_REPOSITORY_TYPE: "${REGISTER_REPOSITORY_TYPE:-in-memory}"
     read_only: true
     security_opt:
       - no-new-privileges:true
