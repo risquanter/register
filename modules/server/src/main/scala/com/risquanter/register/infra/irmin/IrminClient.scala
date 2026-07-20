@@ -112,6 +112,33 @@ trait IrminClient:
   def revert(commit: CommitHash, branch: Option[BranchRef]): IO[IrminError, IrminCommit]
 
   /**
+    * Create a branch at a specific commit via CAS (Phase B, DD-5, A9 fact
+    * 2/3). Unlike a bare first write — which starts the branch EMPTY, not as
+    * a fork (A9 fact 3) — this makes the new branch's content `at`'s
+    * content, a true fork.
+    *
+    * @param branch Branch to create
+    * @param at Commit the new branch should point at (e.g. main's head)
+    * @return Unit on success
+    * @see BranchAlreadyExists — fails with this typed error if the branch
+    *      already has a head; the CAS itself rejects name collisions.
+    */
+  def createBranchAt(branch: BranchRef, at: CommitHash): IO[IrminError, Unit]
+
+  /**
+    * Delete a branch via CAS (Phase B, DD-5, A9 fact 2). Only removes the
+    * branch pointer — commits remain reachable by hash (A9 fact 5).
+    *
+    * @param branch Branch to delete
+    * @param currentHead Expected current head
+    * @return Unit on success
+    * @see BranchHeadStale — fails with this typed error if `currentHead`
+    *      doesn't match the branch's actual head (concurrent modification);
+    *      never silently deletes the wrong state.
+    */
+  def deleteBranch(branch: BranchRef, currentHead: CommitHash): IO[IrminError, Unit]
+
+  /**
     * Find a commit by hash.
     *
     * @return Commit metadata, or None if unknown
@@ -184,6 +211,12 @@ object IrminClient:
 
   def revert(commit: CommitHash, branch: Option[BranchRef]): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.revert(commit, branch))
+
+  def createBranchAt(branch: BranchRef, at: CommitHash): ZIO[IrminClient, IrminError, Unit] =
+    ZIO.serviceWithZIO[IrminClient](_.createBranchAt(branch, at))
+
+  def deleteBranch(branch: BranchRef, currentHead: CommitHash): ZIO[IrminClient, IrminError, Unit] =
+    ZIO.serviceWithZIO[IrminClient](_.deleteBranch(branch, currentHead))
 
   def getCommit(hash: CommitHash): ZIO[IrminClient, IrminError, Option[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.getCommit(hash))

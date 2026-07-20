@@ -285,6 +285,27 @@ object IrminQueries:
     """.stripMargin.trim
 
   /**
+    * CAS mutation on a branch head (Phase B: DD-5 scenario create/delete;
+    * A9 fact 2). `test` is the expected current head (`None` = branch must
+    * not currently exist); `set` is the desired new head (`None` = delete
+    * the branch). Returns a raw Boolean: `true` on success, `false` if the
+    * branch's actual head didn't match `test` — a stale/collision result,
+    * not a GraphQL error.
+    *
+    * @param branch Branch to create/delete
+    * @param test Expected current head (None = branch must not exist)
+    * @param set Desired new head (None = delete the branch)
+    */
+  def testAndSetBranch(branch: String, test: Option[String], set: Option[String]): String =
+    val testArg = test.fold("test: null")(h => s"""test: "$h"""")
+    val setArg = set.fold("set: null")(h => s"""set: "$h"""")
+    s"""
+    |mutation {
+    |  test_and_set_branch(branch: "$branch", $testArg, $setArg)
+    |}
+    """.stripMargin.trim
+
+  /**
     * Query to find a commit by hash.
     */
   def getCommit(commitHash: String): String =

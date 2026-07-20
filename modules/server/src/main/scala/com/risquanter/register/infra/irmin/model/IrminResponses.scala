@@ -205,6 +205,23 @@ object RevertResponse:
   given JsonCodec[RevertResponse] = DeriveJsonCodec.gen[RevertResponse]
 
 /**
+  * Response for `test_and_set_branch(branch, test, set)` mutation (Phase B,
+  * A9 fact 2). The mutation itself returns a raw Boolean, not a Commit.
+  */
+final case class TestAndSetBranchResponse(
+    data: Option[TestAndSetBranchData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class TestAndSetBranchData(
+    test_and_set_branch: Option[Boolean]
+)
+
+object TestAndSetBranchResponse:
+  given JsonCodec[TestAndSetBranchData] = DeriveJsonCodec.gen[TestAndSetBranchData]
+  given JsonCodec[TestAndSetBranchResponse] = DeriveJsonCodec.gen[TestAndSetBranchResponse]
+
+/**
   * Response for `commit(hash)` query.
   */
 final case class CommitQueryResponse(

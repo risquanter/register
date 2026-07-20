@@ -133,6 +133,26 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin REVERT new head: ${newHead.hash.take(12)}")
     yield newHead
 
+  override def createBranchAt(branch: BranchRef, at: CommitHash): IO[IrminError, Unit] =
+    for
+      _        <- ZIO.logInfo(s"Irmin CREATE BRANCH: ${branch.toBranchRef} at ${at.value.take(12)}")
+      query     = IrminQueries.testAndSetBranch(branch.toBranchRef, test = None, set = Some(at.value))
+      response <- executeQuery[TestAndSetBranchResponse](query)
+      applied  <- extractCasResult(response)
+      _        <- if applied then ZIO.unit else ZIO.fail(BranchAlreadyExists(branch))
+      _        <- ZIO.logInfo(s"Irmin CREATE BRANCH ${branch.toBranchRef}: applied")
+    yield ()
+
+  override def deleteBranch(branch: BranchRef, currentHead: CommitHash): IO[IrminError, Unit] =
+    for
+      _        <- ZIO.logInfo(s"Irmin DELETE BRANCH: ${branch.toBranchRef} at ${currentHead.value.take(12)}")
+      query     = IrminQueries.testAndSetBranch(branch.toBranchRef, test = Some(currentHead.value), set = None)
+      response <- executeQuery[TestAndSetBranchResponse](query)
+      applied  <- extractCasResult(response)
+      _        <- if applied then ZIO.unit else ZIO.fail(BranchHeadStale(branch, currentHead))
+      _        <- ZIO.logInfo(s"Irmin DELETE BRANCH ${branch.toBranchRef}: applied")
+    yield ()
+
   override def getCommit(hash: CommitHash): IO[IrminError, Option[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET COMMIT: ${hash.value.take(12)}")
@@ -221,6 +241,13 @@ final class IrminClientLive private (
     response.data.flatMap(_.remove) match
       case Some(c) => commitFromData(c)
       case None    => failWithError(response.errors)
+
+  private def extractCasResult(response: TestAndSetBranchResponse): IO[IrminError, Boolean] =
+    response.data.flatMap(_.test_and_set_branch) match
+      case Some(applied) => ZIO.succeed(applied)
+      case None =>
+        val (messages, path) = collectGraphQl(response.errors)
+        ZIO.fail(IrminGraphQLError(messages, path))
 
   private def extractList(prefix: IrminPath, response: ListTreeResponse): IO[IrminError, List[IrminPath]] =
     response.data.flatMap(_.main).flatMap(_.tree.get_tree).map(_.list) match

@@ -4,7 +4,7 @@ import zio.*
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
-import com.risquanter.register.domain.errors.IrminUnavailable
+import com.risquanter.register.domain.errors.{IrminUnavailable, BranchAlreadyExists, BranchHeadStale}
 import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt}
 import com.risquanter.register.testcontainers.IrminCompose
 import io.github.iltotore.iron.refineUnsafe
@@ -147,11 +147,57 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
         branch   <- freshBranch
         commit   <- IrminClient.set(testPath, "\"head-probe\"", "branch head write", Some(branch))
         known    <- IrminClient.getBranch(branch)
-        unknown  <- IrminClient.getBranch(unsafeBranch("scenarios.never.created.here"))
+        unknown  <- IrminClient.getBranch(unsafeBranch("scenarios.never.created"))
       yield assertTrue(
         known.flatMap(_.head).map(_.hash).contains(commit.hash),
         unknown.flatMap(_.head).isEmpty
       )
+    },
+
+    // ---- CAS branch create/delete (Phase B, DD-5, A9 fact 2/3) ----
+
+    test("createBranchAt forks main's content, unlike a bare first write (A9 fact 3)") {
+      for
+        testPath <- uniquePath("cas-fork")
+        branch   <- freshBranch
+        mainHead <- IrminClient.set(testPath, "\"main-value\"", "main write before fork")
+        _        <- IrminClient.createBranchAt(branch, commitHash(mainHead.hash))
+        onBranch <- IrminClient.get(testPath, Some(branch))
+      yield assertTrue(onBranch.contains("\"main-value\""))
+    },
+
+    test("createBranchAt fails with BranchAlreadyExists on a name collision") {
+      for
+        testPath <- uniquePath("cas-collision")
+        branch   <- freshBranch
+        mainHead <- IrminClient.set(testPath, "\"v\"", "main write")
+        _        <- IrminClient.createBranchAt(branch, commitHash(mainHead.hash))
+        exit     <- IrminClient.createBranchAt(branch, commitHash(mainHead.hash)).exit
+      yield assert(exit)(fails(isSubtype[BranchAlreadyExists](anything)))
+    },
+
+    test("deleteBranch removes the pointer; the commit remains resolvable by hash (A9 fact 5)") {
+      for
+        testPath <- uniquePath("cas-delete")
+        branch   <- freshBranch
+        commit   <- IrminClient.set(testPath, "\"v\"", "branch write", Some(branch))
+        _        <- IrminClient.deleteBranch(branch, commitHash(commit.hash))
+        listed   <- IrminClient.branches
+        found    <- IrminClient.getCommit(commitHash(commit.hash))
+      yield assertTrue(
+        !listed.contains(branch.toBranchRef),
+        found.map(_.hash).contains(commit.hash)
+      )
+    },
+
+    test("deleteBranch fails with BranchHeadStale when the expected head is out of date") {
+      for
+        testPath <- uniquePath("cas-stale-delete")
+        branch   <- freshBranch
+        c1       <- IrminClient.set(testPath, "\"v1\"", "branch write v1", Some(branch))
+        _        <- IrminClient.set(testPath, "\"v2\"", "branch write v2", Some(branch))
+        exit     <- IrminClient.deleteBranch(branch, commitHash(c1.hash)).exit
+      yield assert(exit)(fails(isSubtype[BranchHeadStale](anything)))
     },
 
     test("mergeBranch folds branch writes into main") {
@@ -294,9 +340,9 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
 
   // ---- branch test helpers ----
 
-  /** Unique BranchRef per test (constraint: main | scenarios.<a>.<b>.<c>). */
+  /** Unique BranchRef per test (constraint: main | scenarios.<a>.<b>). */
   private def freshBranch: ZIO[Any, Nothing, BranchRef] =
-    ZIO.clockWith(_.instant).map(i => unsafeBranch(s"scenarios.it.test.t${i.toEpochMilli}"))
+    ZIO.clockWith(_.instant).map(i => unsafeBranch(s"scenarios.it.t${i.toEpochMilli}"))
 
   private def unsafeBranch(s: String): BranchRef =
     BranchRef.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
