@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, BranchRef, ScenarioName, CommitHash}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -149,6 +149,61 @@ object IronTapirCodecs {
     )(_.value)
 
   given Schema[UserId.Authenticated] = Schema.string
+
+  /** Schema for ScenarioName for JSON body derivation and path-segment use
+    * (e.g. DELETE /w/{key}/scenarios/{name}).
+    */
+  given Schema[ScenarioName.ScenarioName] = Schema.string.map[ScenarioName.ScenarioName](
+    (s: String) => ScenarioName.fromString(s).toOption
+  )(_.value)
+
+  /** Codec for ScenarioName as a path segment. */
+  given Codec[String, ScenarioName.ScenarioName, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[ScenarioName.ScenarioName](raw =>
+      ScenarioName.fromString(raw).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.value)
+
+  /** Schema for BranchRef for JSON body derivation (e.g. scenario create response). */
+  given Schema[BranchRef] = Schema.string.map[BranchRef](
+    (s: String) => BranchRef.fromString(s).toOption
+  )(_.toBranchRef)
+
+  /** Schema for CommitHash for JSON body derivation (e.g. scenario list response). */
+  given Schema[CommitHash] = Schema.string.map[CommitHash](
+    (s: String) => CommitHash.fromString(s).toOption
+  )(_.value)
+
+  /** Codec for CommitHash as the `If-Match` header value on `deleteScenario`
+    * (DD-5 CAS precondition, transport locked 2026-07-20 — see
+    * milestone-2b-cache-and-decisions.md DD-8 note). RFC 7232 renders
+    * `If-Match` as a quoted string (`"<hash>"`); this codec strips the
+    * quotes on decode and re-adds them on encode, so the same definition
+    * works both server-side (decode) and in the generated sttp client
+    * (encode).
+    */
+  given Codec[String, CommitHash, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[CommitHash](raw =>
+      val unquoted = raw.strip.stripPrefix("\"").stripSuffix("\"")
+      CommitHash.fromString(unquoted).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(hash => s"\"${hash.value}\"")
+
+  /** Codec for BranchRef as the `X-Active-Branch` header value (milestone-2b
+    * Phase B item 4b). Plain header, not a structured-syntax one like
+    * `If-Match` (RFC 7232) — no quoting on either side.
+    */
+  given Codec[String, BranchRef, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[BranchRef](raw =>
+      BranchRef.fromString(raw.strip).fold(
+        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+        DecodeResult.Value(_)
+      )
+    )(_.toBranchRef)
 
   /** Schema for SafeName.SafeName for JSON body derivation. */
   given Schema[SafeName.SafeName] = Schema.string.map[SafeName.SafeName](
