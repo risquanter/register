@@ -22,4 +22,7 @@ object Constants {
 
   /** Maximum length for short optional text fields (SafeExtraShortStr constraint) */
   val MaxShortTextLength = 20
+
+  /** Maximum length for scenario names (ScenarioNameInputConstraint; DD-5) */
+  val MaxScenarioNameLength = 64
 }
