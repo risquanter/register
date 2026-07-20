@@ -5,7 +5,7 @@ import scala.concurrent.duration.Duration
 import zio.json.{JsonCodec, DeriveJsonCodec}
 import sttp.model.StatusCode
 
-import com.risquanter.register.domain.data.iron.BranchRef
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.FolQueryFailure.*
 
 /** Wrapper for error responses sent to clients */
@@ -83,6 +83,10 @@ object ErrorResponse {
           case "version" => VersionConflict("unknown", "unknown", message)  // nodeId lost through HTTP
           case _         => DataConflict(message)
 
+      // 501 → ScenariosNotSupported
+      case 501 =>
+        ScenariosNotSupported(message)
+
       // 502 → IrminGraphQLError
       case 502 =>
         IrminGraphQLError(details.map(_.message), Some(List(firstField)))
@@ -156,11 +160,14 @@ object ErrorResponse {
     case _: WorkspaceExpired                       => makeWorkspaceOpaqueNotFoundResponse()
     case _: WorkspaceExpiredById                   => makeWorkspaceOpaqueNotFoundResponse()
     case _: TreeNotInWorkspace                     => makeWorkspaceOpaqueNotFoundResponse()
+    case _: BranchNotInWorkspace                   => makeWorkspaceOpaqueNotFoundResponse()
     case RepositoryFailure(reason)                 => makeRepositoryFailureResponse(reason)
     case SimulationFailure(id, cause)              => makeSimulationFailureResponse(id)
     case DataConflict(reason)                      => makeDataConflictResponse(reason)
     case VersionConflict(nodeId, expected, actual) => makeVersionConflictResponse(nodeId, expected, actual)
     case MergeConflict(branch, details)            => makeMergeConflictResponse(branch, details)
+    case ScenarioHeadStale(branch, expected, actual) => makeScenarioHeadStaleResponse(branch, expected, actual)
+    case ScenariosNotSupported(reason)             => makeScenariosNotSupportedResponse(reason)
   }
 
   /** Exhaustive match on AuthError — both subtypes intentionally map to 403.
@@ -174,12 +181,20 @@ object ErrorResponse {
     case _: AuthServiceUnavailable               => makeAccessDeniedResponse("Access denied")
   }
 
-  /** Exhaustive match on IrminError — compiler-enforced coverage (ADR-008). */
+  /** Exhaustive match on IrminError — compiler-enforced coverage (ADR-008).
+    * BranchAlreadyExists/BranchHeadStale (Phase B CAS results) are expected
+    * to be intercepted and translated into a domain SimError one layer up
+    * (ScenarioService) before reaching this boundary — these two cases are
+    * the safety net if that interception is ever skipped, matching every
+    * other IrminError case here.
+    */
   private def encodeIrminError(error: IrminError): (StatusCode, ErrorResponse) = error match {
     case IrminUnavailable(reason)            => makeServiceUnavailableResponse(reason)
     case NetworkTimeout(operation, duration) => makeNetworkTimeoutResponse(operation, duration)
     case IrminHttpError(status, body)        => makeIrminHttpErrorResponse(status, body)
     case IrminGraphQLError(messages, path)   => makeIrminGraphQlErrorResponse(messages, path)
+    case BranchAlreadyExists(branch)         => makeBranchAlreadyExistsResponse(branch)
+    case BranchHeadStale(branch, expected)   => makeBranchHeadStaleResponse(branch, expected)
   }
 
   /** Exhaustive match on FolQueryFailure — compiler-enforced coverage (ADR-028). */
@@ -287,6 +302,34 @@ object ErrorResponse {
       ErrorDetail(domain, "branchName", ValidationErrorCode.MERGE_CONFLICT, branch.toBranchRef, requestId)
     )
     (StatusCode.Conflict, ErrorResponse(JsonHttpError(StatusCode.Conflict.code, message, errors)))
+
+  /** Phase B CAS safety net (see encodeIrminError) — a scenario name collision
+    * that reached the HTTP boundary without being translated by ScenarioService.
+    * Reuses DUPLICATE_VALUE, the existing code for "this identity is taken".
+    */
+  def makeBranchAlreadyExistsResponse(branch: BranchRef, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.Conflict, "branch", ValidationErrorCode.DUPLICATE_VALUE,
+      s"Branch already exists: ${branch.toBranchRef}", domain, requestId)
+
+  /** Phase B CAS safety net (see encodeIrminError) — a stale branch head
+    * (concurrent modification) that reached the HTTP boundary without being
+    * translated by ScenarioService. Reuses VERSION_CONFLICT, the existing
+    * code for "your expectation of the current state is stale".
+    */
+  def makeBranchHeadStaleResponse(branch: BranchRef, expectedHead: CommitHash, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.Conflict, "branch", ValidationErrorCode.VERSION_CONFLICT,
+      s"Branch ${branch.toBranchRef} head is not ${expectedHead.value}", domain, requestId)
+
+  /** Scenario-level translation of a stale CAS head (see `ScenarioHeadStale`) —
+    * the branch's head no longer matches what the caller last observed.
+    */
+  def makeScenarioHeadStaleResponse(branch: BranchRef, expectedHead: CommitHash, actual: Option[CommitHash], domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"Scenario branch ${branch.toBranchRef} head is not ${expectedHead.value}" +
+      actual.fold(" (branch no longer exists)")(a => s" (currently ${a.value})")
+    response(StatusCode.Conflict, "branch", ValidationErrorCode.VERSION_CONFLICT, message, domain, requestId)
+
+  def makeScenariosNotSupportedResponse(reason: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.NotImplemented, "scenarios", ValidationErrorCode.NOT_SUPPORTED, reason, domain, requestId)
 
   // ── FOL Query Error Responses (ADR-028) ─────────────────────────────────
 

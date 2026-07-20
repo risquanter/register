@@ -3,7 +3,7 @@ package com.risquanter.register.domain.errors
 import scala.concurrent.duration.Duration
 import sttp.model.StatusCode
 import java.time.{Duration as JDuration, Instant}
-import com.risquanter.register.domain.data.iron.{BranchRef, WorkspaceId, WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, WorkspaceId, WorkspaceKeySecret, TreeId}
 
 sealed trait AppError extends Throwable
 sealed trait SimError extends AppError
@@ -99,6 +99,17 @@ case class TreeNotInWorkspace(key: WorkspaceKeySecret, treeId: TreeId) extends S
   override def getMessage: String = s"Tree ${treeId.value} not found in workspace"
 }
 
+/** `X-Active-Branch` header names a branch this workspace does not own — maps
+  * to the same opaque 404 as every other workspace-scoping failure (A13).
+  * Deliberately indistinguishable from "branch doesn't exist" — see
+  * `BranchRef.belongsTo` scaladoc and the 2026-07-20 security review — so
+  * this header cannot be used to enumerate another workspace's scenario
+  * names. ADR-022: getMessage omits the raw key.
+  */
+case class BranchNotInWorkspace(key: WorkspaceKeySecret, branch: BranchRef) extends SimError {
+  override def getMessage: String = s"Branch ${branch.toBranchRef} not found in workspace"
+}
+
 // ============================================================================
 // Infrastructure Errors (ADR-008: Error Handling & Resilience)
 // ============================================================================
@@ -124,6 +135,26 @@ case class NetworkTimeout(operation: String, duration: Duration) extends IrminEr
   override def getMessage: String = s"Network timeout after ${duration.toMillis}ms during: $operation"
 }
 
+/** CAS branch-create rejected (Phase B, DD-5 / A9 fact 2): `test_and_set_branch`
+  * with `test: null` failed because the branch already has a head. Not a
+  * transport failure — Irmin answered correctly, the precondition (branch must
+  * not yet exist) just didn't hold. Framed in IrminClient's own vocabulary
+  * (branch), not scenario vocabulary: whether this means "scenario name taken"
+  * is a judgment ScenarioService makes one layer up, the same way `IrminGraphQLError`
+  * is translated into the domain-level `MergeConflict` below, not inside IrminClient.
+  * Non-retriable as-is. */
+case class BranchAlreadyExists(branch: BranchRef) extends IrminError {
+  override def getMessage: String = s"Branch already exists: ${branch.toBranchRef}"
+}
+
+/** CAS branch-delete rejected (Phase B, DD-5 / A9 fact 2): `test_and_set_branch`
+  * with `test: expectedHead` failed because the branch's actual head no longer
+  * matches — concurrent modification since it was last read. Non-retriable
+  * without re-reading the branch's current state first. */
+case class BranchHeadStale(branch: BranchRef, expectedHead: CommitHash) extends IrminError {
+  override def getMessage: String = s"Branch ${branch.toBranchRef} head is not ${expectedHead.value}"
+}
+
 /** Optimistic locking conflict - client should refresh and retry */
 case class VersionConflict(nodeId: String, expected: String, actual: String) extends SimError {
   override def getMessage: String = s"Version conflict on node $nodeId: expected $expected, found $actual"
@@ -134,6 +165,30 @@ case class VersionConflict(nodeId: String, expected: String, actual: String) ext
   */
 case class MergeConflict(branch: BranchRef, details: String) extends SimError {
   override def getMessage: String = s"Merge conflict on branch ${branch.toBranchRef}: $details"
+}
+
+/** Scenario delete/duplicate rejected — the branch's head no longer matches what
+  * the caller last observed (concurrent modification). Domain-level translation of
+  * `BranchHeadStale` (`ScenarioService`, milestone-2b Phase B); kept typed like
+  * `MergeConflict.branch` rather than reusing `VersionConflict`'s generic `String`
+  * fields, which would mislabel a branch reference as a `nodeId`.
+  * `actual` is `None` when the branch no longer exists at all.
+  */
+case class ScenarioHeadStale(branch: BranchRef, expected: CommitHash, actual: Option[CommitHash]) extends SimError {
+  override def getMessage: String =
+    s"Scenario branch ${branch.toBranchRef} head is not ${expected.value}" +
+    actual.fold(" (branch no longer exists)")(a => s" (currently ${a.value})")
+}
+
+/** Scenarios are unavailable in this deployment (repository.type=in-memory has no
+  * Irmin to hold branches). A deliberate, expected condition — not a server
+  * malfunction — so it gets its own type mapping to 501, not `RepositoryFailure`'s
+  * 500 (which also scrubs the reason from the client response, wrong here since the
+  * reason is exactly what the caller needs to act on it). `ScenarioServiceNotSupported`
+  * (milestone-2b Phase B item 6) fails every method with this.
+  */
+case class ScenariosNotSupported(reason: String) extends SimError {
+  override def getMessage: String = s"Scenarios not supported: $reason"
 }
 
 // ============================================================================
