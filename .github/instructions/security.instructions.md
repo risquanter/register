@@ -63,3 +63,61 @@ capability identifiers (ADR-021).
 Error messages must never contain secrets, PII, or internal paths.
 Typed error channels (`ZIO` error channel, sealed `AppError` hierarchy) over
 `getMessage` string matching (ADR-010).
+
+## Internal identifiers — never accepted as input, never returned as output (hard rule)
+
+`WorkspaceId` (and any future internal identifier that participates in a
+storage path, branch name, or other server-side scoping decision) must never
+cross the client boundary in **either** direction:
+
+- **Output:** must never appear in a JSON response body, header, error
+  message, or any other client-visible surface. No `case class` response
+  field, no log line returned to a client, no query-string echo.
+- **Input:** no Tapir endpoint may accept a bare `WorkspaceId` as a path
+  segment, query parameter, header, or JSON body field — not even on an
+  endpoint that also separately checks a capability. The correct pattern is
+  what every existing endpoint already does: accept `WorkspaceKeySecret`,
+  derive `WorkspaceId` server-side via `WorkspaceStore.resolve`. Accepting the
+  ID directly is an enumeration oracle **even if it is never echoed back** —
+  any endpoint that behaves observably differently for a valid vs. invalid ID
+  (a different status code, error shape, or timing) lets an attacker script
+  through the ID space with no need to ever see the value returned. This is
+  also the stronger, recommended fix, not merely a stricter one: OWASP's IDOR
+  Prevention guidance is to never accept a caller-supplied object identifier
+  when the caller's own identity already determines the correct scope — not
+  "accept it and check ownership every request," which depends on that check
+  being present and correct on every call site forever. Since no current or
+  planned endpoint has a legitimate reason to accept a bare `WorkspaceId`,
+  this costs nothing today and forecloses the failure mode permanently.
+
+This is a hard rule, not a per-endpoint judgement call, because:
+
+- Authorization in this system is entirely capability-based — possessing a
+  valid `WorkspaceKeySecret` grants access, never knowledge of a
+  `WorkspaceId`. That invariant is what keeps any endpoint accepting a
+  cross-tenant-shaped reference (e.g. the `X-Active-Branch` header,
+  2026-07-20 review) narrow rather than exploitable: an attacker needs
+  another workspace's ID and today has no way to obtain one, because nothing
+  returns it. Exposing it in even one legitimate-looking place (an audit log,
+  a "list my workspaces" feature, telemetry) hands a future feature — one
+  that does not exist yet and whose author cannot anticipate this one — the
+  missing ingredient to target another tenant. Unexposed data cannot be
+  repurposed by a feature that has not been designed yet; exposed data can.
+- `WorkspaceId` is a ULID, not a `SecureRandom` capability token — it encodes
+  a timestamp and is not designed to resist guessing. Its safety today comes
+  entirely from never being returned, not from its own entropy. Exposing it
+  converts a value that is safe-because-absent into one whose safety would
+  depend on brute-force resistance it was never built to provide.
+- It blurs the deliberate boundary between `WorkspaceKeySecret` (the one
+  bearer capability, ADR-022 R1–R8) and `WorkspaceId` (an internal lookup
+  key). The more places `WorkspaceId` legitimately appears in responses, the
+  more it looks like a normal, safe-to-use value — inviting the exact mistake
+  `WorkspaceStore.resolveById` stands as a warning against (resolving a
+  workspace from a bare ID, no capability check).
+
+If a client-facing feature genuinely needs a stable per-workspace reference
+(e.g. a "my workspaces" list), it must expose something that carries no
+server-side scoping power on its own — `WorkspaceKeySecret` itself (already
+how `WorkspaceBootstrapResponse`/`WorkspaceRotateResponse` work), never the
+raw `WorkspaceId`. Any new response field, log line, or header that would
+return a `WorkspaceId` to a client is a Decision Trigger — stop and ask.

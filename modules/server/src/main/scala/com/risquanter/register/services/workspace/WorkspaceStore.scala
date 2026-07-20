@@ -48,7 +48,34 @@ trait WorkspaceStore:
     */
   def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord]
 
-  /** Resolve a workspace by stable identity. */
+  /** Resolve a workspace by stable identity.
+    *
+    * ⚠️ SECURITY WARNING — no capability check. This method authenticates
+    * nothing: it trusts the caller's `WorkspaceId` outright, unlike every other
+    * method on this trait, which requires presenting a valid `WorkspaceKeySecret`
+    * first. `WorkspaceId` is an internal identifier — it is never returned in any
+    * API response today, but it is also not designed to be unguessable (it is a
+    * ULID, not a `SecureRandom` capability token), so treat it as a plain
+    * database key, not a credential.
+    *
+    * NEVER call this with a `WorkspaceId` that originated from client input
+    * (a path/query/header/body value, or anything derived from one). Doing so
+    * is a direct object-level-authorization bypass (OWASP API1:2023 Broken
+    * Object Level Authorization / IDOR): any caller who can name or guess a
+    * `WorkspaceId` would get that workspace's record with no proof they were
+    * ever issued its key.
+    *
+    * Existing callers only ever use `WorkspaceId` values already resolved
+    * server-side from an authenticated key earlier in the same call chain
+    * (internal reconciliation, tests) — never a value taken directly from a
+    * request. As of 2026-07-20 this method has no controller call sites at all.
+    *
+    * If a future feature needs to look up a workspace by ID from a
+    * caller-supplied value, that is a Decision Trigger (new authorization
+    * surface) — stop and ask before wiring it to any endpoint; do not add a
+    * direct call from a controller without an explicit ownership/capability
+    * check at that boundary.
+    */
   def resolveById(id: WorkspaceId): IO[AppError, WorkspaceRecord]
 
   /** Resolve a workspace, verify tree membership, and return the workspace.

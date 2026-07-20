@@ -169,7 +169,10 @@ final class WorkspaceStoreLive private (
       ws <- ZIO.fromEither(result)
     yield ws
 
-  /** Resolve by immutable workspace ID (delegates to key-based resolve). */
+  /** Resolve by immutable workspace ID (delegates to key-based resolve).
+    * No capability check — see the security warning on `WorkspaceStore.resolveById`.
+    * Never call with a client-supplied `WorkspaceId`.
+    */
   override def resolveById(id: WorkspaceId): IO[AppError, WorkspaceRecord] =
     for
       now    <- Clock.instant

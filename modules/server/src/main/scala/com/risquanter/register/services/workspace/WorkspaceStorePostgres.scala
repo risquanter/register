@@ -135,6 +135,9 @@ final class WorkspaceStorePostgres private (
             ).unit
     yield ws.touch(now)
 
+  /** No capability check — see the security warning on `WorkspaceStore.resolveById`.
+    * Never call with a client-supplied `WorkspaceId`.
+    */
   override def resolveById(id: WorkspaceId): IO[AppError, WorkspaceRecord] =
     for
       row <- loadWorkspaceRowById(id)

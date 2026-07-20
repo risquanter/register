@@ -186,6 +186,149 @@ When Iron type constraints exclude HTML-meaningful characters (`<`, `>`, `&`, `"
   letters) can form payloads depending on the output language. Flag any new output
   path that consumes a user-input type without visible encoding. **MUST-FIX.**
 
+### OWASP-grounded checklist (run on every diff touching an endpoint, service signature, or container config)
+
+Derived 2026-07-20 from the actual content (not headlines) of the OWASP API Security
+Top 10 (2023), the OWASP Top 10 (2021) → Cheat Sheet Series mapping, and the
+Authorization / IDOR Prevention / REST Security / Java Security / Secrets Management
+cheat sheets. Register's attack-surface shape (capability-URL + optional JWT +
+SpiceDB layered auth, Tapir/ZIO REST API, Quill/Postgres, Docker Compose/K8s
+deployment, no browser session cookies) is stable, so this list is meant to be
+reused as-is, not re-derived per review — update it only when the architecture
+itself changes (e.g. a new auth mechanism, a new external API integration).
+
+**Hard rule — `WorkspaceId` never crosses the client boundary, either direction
+(2026-07-20).** Full reasoning in `security.instructions.md`'s "Internal
+identifiers" section; check both halves on every diff:
+- **Output:** no response field, header, error message, or log line returned
+  to a client may contain a raw `WorkspaceId`. **MUST-FIX.**
+- **Input:** no endpoint may accept a bare `WorkspaceId` as a path segment,
+  query parameter, header, or body field — not even alongside a capability
+  check. Every endpoint must derive `WorkspaceId` server-side from a resolved
+  `WorkspaceKeySecret`, never accept it directly. This holds even if the value
+  is never echoed back: an endpoint that behaves observably differently for a
+  valid vs. invalid ID (status code, error shape, timing) is an enumeration
+  oracle on its own. **MUST-FIX.**
+
+**API1:2023 Broken Object Level Authorization (BOLA) — the finding that produced
+this checklist (2026-07-20 X-Active-Branch review).** For every new parameter
+that is a *reference* (an ID, name, or key naming some other object) rather than
+a value:
+- Is it resolved into a scoped principal server-side (`workspaceStore.resolve(key)`
+  → `WorkspaceId`), or is a client-supplied value used directly to select data?
+  **MUST-FIX if used directly.**
+- If it names a resource that could belong to a different tenant/workspace
+  (a branch, another workspace's tree/scenario), is ownership checked explicitly
+  — not merely relied upon because of how an unrelated code path (e.g. storage
+  path construction) happens to be scoped today? Per the Authorization Cheat
+  Sheet's "Authorization Bypass Through User-Controlled Key" and the IDOR
+  Prevention Cheat Sheet: "just because a user has access to an object of a
+  particular type does not mean they should have access to every object of that
+  type" — restrict the *lookup itself* to the authenticated principal's own
+  resources, don't rely on the result happening to come back empty.
+  **MUST-FIX.**
+- Does the rejection path for "belongs to someone else" return the exact same
+  shape as "doesn't exist"? A distinct 403 vs 404 is itself an enumeration
+  oracle (existence disclosure) — collapse both to one response. **SHOULD-FIX.**
+
+**API2:2023 Broken Authentication.** Register's Layer 0 already uses
+`SecureRandom` for capability tokens (ADR-021) and Layer 1 JWT validation is
+delegated to the mesh, never parsed in-app (see `security.instructions.md`).
+Check: does new code introduce any other credential/session mechanism, or
+weaken `WorkspaceStore`'s dual-timeout (absolute + idle) expiry? **MUST-FIX**
+if so — this is a Decision Trigger (auth boundary), not a routine change.
+
+**API3:2023 Broken Object Property Level Authorization (mass assignment /
+over-exposure).** For every new request DTO field: if a client set it to a
+value belonging to another tenant, does the service layer re-derive the scope
+from the authenticated principal instead of trusting the field (mirrors
+`ScenarioServiceLive` building the branch string itself from the resolved
+`wsId`, never from client input — DD-11)? For every new response DTO field:
+does it leak data the caller shouldn't see (internal IDs, other branches'
+state)? **MUST-FIX** on either direction. (`WorkspaceId` specifically is
+covered by the standalone hard rule above, not just this general check.)
+
+**API4:2023 Unrestricted Resource Consumption.** New endpoints accepting a
+count/size/depth must be bounded at the type boundary (Iron refinement with a
+max), matching `REGISTER_MAX_NTRIALS`/`REGISTER_MAX_PARALLELISM`/
+`REGISTER_WORKSPACE_MAX_TREES`. Flag any new unbounded `List[_]`/`Set[_]`
+request body (e.g. a node-ID list with no max-size constraint) as
+**SHOULD-FIX** — note as a known existing gap on `getWorkspaceLECCurvesMultiEndpoint`'s
+`jsonBody[List[NodeId]]`, worth a follow-up item, not blocking on its own.
+
+**API5:2023 Broken Function Level Authorization.** Every new service method
+that reads or mutates privileged data must require `using Checked[Permission]`
+in its signature (ADR-024) — a method that can be called without that proof
+type is a function-level authorization gap. **MUST-FIX.**
+
+**API6:2023 Unrestricted Access to Sensitive Business Flows.** New
+resource-creation endpoints should be evaluated for abuse potential the same
+way workspace bootstrap already is (`REGISTER_WORKSPACE_MAX_CREATES_PER_IP`).
+Note as a known gap: scenario creation has no per-workspace rate limit today
+— flag if a diff touches scenario creation without addressing it.
+**SHOULD-FIX** (not a regression, but worth closing opportunistically).
+
+**API7:2023 Server-Side Request Forgery.** Not applicable today — no endpoint
+fetches a client-supplied URL server-side (`IRMIN_URL` is operator-configured,
+never client input). Any future feature that fetches-by-reference (import from
+URL, webhook, remote export) must validate against an allowlist before
+fetching. **MUST-FIX** if introduced without one.
+
+**API8:2023 Security Misconfiguration.** New Docker services/config must
+default to the most restrictive setting, matching the existing precedent
+(`read_only: true`, `no-new-privileges:true`, CORS origin allowlist,
+fail-closed `REGISTER_AUTH_MODE` — see the A-numbered items in
+`docs/dev/IMPLEMENTATION-PLAN.md` and `docker-compose.yml`). Document new env vars
+in `DOCKER-DEVELOPMENT.md`'s
+Configuration table in the same diff that introduces them (this was the gap
+found and fixed for `/config.json` on 2026-07-20). **MUST-FIX** on a missing
+restrictive default; **SHOULD-FIX** on missing documentation.
+
+**API9:2023 Improper Inventory Management.** Every new Tapir endpoint is
+automatically inventoried via the generated OpenAPI/swagger-ui — no action
+needed there. But dead-but-reachable-if-misused code (see `WorkspaceStore.resolveById`,
+warned 2026-07-20) is the same root problem in a different shape: an
+undocumented, unmonitored surface. Any method that bypasses the normal
+key-resolution path must carry an explicit warning and zero controller call
+sites, checked at review time. **MUST-FIX** if such a method gains a call
+site without the ownership check being added alongside it.
+
+**API10:2023 Unsafe Consumption of APIs.** Applies to the Irmin GraphQL client
+— already handled via typed `IrminError` decoding and `StartupReadiness`
+bounded-wait (ADR-031), not blind trust. Any future third-party API
+integration (e.g. an EPSS feed, per the README's cyber-risk roadmap) must
+follow the same typed-error, bounded-timeout discipline. **MUST-FIX** if a new
+integration parses external responses without a typed error channel.
+
+**OWASP Top 10 (2021, web) items not already covered above:**
+- **A03 Injection — Postgres/Quill.** `WorkspaceStorePostgres` must use Quill's
+  type-safe query DSL (`run(query[...].filter(...))`) exclusively — never a raw
+  `sql"..."` string built from user input. Flag any raw SQL interpolation.
+  **MUST-FIX.**
+- **A01 CSRF.** Not applicable while auth stays capability-URL + header-based
+  JWT (no ambient cookie authority) — classic CSRF targets cookie sessions.
+  Re-open this line item the moment any browser-cookie-based session is
+  introduced. **Note, not a current finding.**
+- **A08 Insecure Deserialization.** No `java.io.Serializable`/`ObjectInputStream`
+  anywhere in the codebase — all wire formats are typed zio-json codecs. Flag
+  any new use of Java native serialization on untrusted input as **MUST-FIX**.
+
+**Java/JVM-specific (OWASP Java Security Cheat Sheet — no separate "OWASP Java
+guide" exists beyond this cheat sheet; SEI CERT's Oracle Coding Standard for
+Java is the closest independent reference and largely overlaps, so not
+duplicated here).** Register's actual JVM-adjacent surfaces:
+- Logging: use parameterized/structured logging (`ZIO.logInfo(s"...")` with
+  values, not raw string concatenation of untrusted input into a format that
+  could contain control characters) — already the codebase's convention; flag
+  any new log line built by directly concatenating unescaped user input.
+  **SHOULD-FIX.**
+- No `Runtime.exec`/`ProcessBuilder` invoked with user-controlled input
+  anywhere in Scala code (shell scripts in Docker entrypoints are a separate,
+  operator-controlled surface, not user input). **MUST-FIX** if introduced.
+- Cryptography: never hand-roll — `SecureRandom` for tokens (ADR-021) is
+  already the only crypto primitive in use; any new crypto need must go
+  through a vetted library, not custom code. **MUST-FIX** on custom crypto.
+
 ---
 
 ## 7. Compiler Hygiene
