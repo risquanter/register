@@ -30,7 +30,8 @@ object FormInputs:
     filter: String => Boolean = _ => true,
     onBlurCallback: () => Unit = () => (),
     placeholderText: String = "",
-    inputModeAttr: String = "text"
+    inputModeAttr: String = "text",
+    disabledSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
     div(
       cls := "form-field",
@@ -40,6 +41,7 @@ object FormInputs:
         inputMode := inputModeAttr,
         cls <-- errorSignal.map(err => if err.isDefined then "form-input error" else "form-input"),
         placeholder := placeholderText,
+        disabled <-- disabledSignal,
         controlled(
           value <-- valueVar.signal,
           onInput.mapToValue.filter(filter) --> valueVar
@@ -65,7 +67,8 @@ object FormInputs:
     onBlurCallback: () => Unit = () => (),
     placeholderText: String = "",
     rowCount: Int = 2,
-    inputModeAttr: String = "text"
+    inputModeAttr: String = "text",
+    disabledSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
     div(
       cls := "form-field",
@@ -75,6 +78,7 @@ object FormInputs:
         cls <-- errorSignal.map(err => if err.isDefined then "form-input form-textarea error" else "form-input form-textarea"),
         placeholder := placeholderText,
         rows := rowCount,
+        disabled <-- disabledSignal,
         controlled(
           value <-- valueVar.signal,
           onInput.mapToValue.filter(filter) --> valueVar
@@ -92,7 +96,8 @@ object FormInputs:
   def radioGroup[T](
     labelText: String,
     options: List[(T, String)],  // (value, displayLabel)
-    selectedVar: Var[T]
+    selectedVar: Var[T],
+    disabledSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
     div(
       cls := "form-field",
@@ -106,6 +111,7 @@ object FormInputs:
               typ := "radio",
               nameAttr := labelText.toLowerCase.replace(" ", "-"),
               checked <-- selectedVar.signal.map(_ == optValue),
+              disabled <-- disabledSignal,
               onChange.mapTo(optValue) --> selectedVar
             ),
             span(cls := "radio-label", optLabel)
@@ -159,13 +165,15 @@ object FormInputs:
   def parentSelect(
     parentVar: Var[Option[String]],
     options: Signal[List[String]],
-    rootLabel: String
+    rootLabel: String,
+    disabledSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
     div(
       cls := "form-field",
       label(cls := "form-label", "Parent Portfolio"),
       select(
         cls := "form-input",
+        disabled <-- disabledSignal,
         controlled(
           value <-- parentVar.signal.combineWith(options).map { (sel, opts) =>
             val display = sel.getOrElse(rootLabel)

@@ -51,8 +51,14 @@ object DesignView:
       builderState.loadFromTree(tree)
       loadedBranch.set(scenarioState.activeBranch.now())
 
+    // Whole-tree changes (isDirty) plus an in-progress, uncommitted node edit
+    // (isEditDirtyVar — an Editing/Templating form, or a filled-in Blank one,
+    // that never touched leavesVar/portfoliosVar). Same "is it safe to discard
+    // the builder" question every guard below is asking; one definition, reused.
+    def hasUnsavedWork: Boolean = builderState.isDirty || builderState.isEditDirtyVar.now()
+
     def onNewTree(): Unit =
-      val proceed = !builderState.isDirty || dom.window.confirm("Starting a new tree will clear your current draft. Continue?")
+      val proceed = !hasUnsavedWork || dom.window.confirm("Starting a new tree will clear your current draft. Continue?")
       if proceed then
         builderState.startNewTree()
         treeViewState.selectedTreeId.set(None)
@@ -63,7 +69,7 @@ object DesignView:
     // nothing valid left to show — offer the same start-fresh flow as "+ New Tree",
     // or revert the branch switch if the user declines to lose a real draft.
     def handleTreeUnavailableOnBranch(): Unit =
-      val proceed = !builderState.isDirty ||
+      val proceed = !hasUnsavedWork ||
         dom.window.confirm("This tree doesn't exist on the new branch. Starting a new tree will clear your current draft. Continue?")
       if proceed then
         builderState.startNewTree()
@@ -106,7 +112,7 @@ object DesignView:
       treeViewState.selectedTree.signal.changes --> {
         case LoadState.Loaded(tree) =>
           val previousId = builderState.editingTreeId.now()
-          TreeLoadPolicy.decide(previousId, loadedBranch.now(), tree.id, scenarioState.activeBranch.now(), builderState.isDirty) match
+          TreeLoadPolicy.decide(previousId, loadedBranch.now(), tree.id, scenarioState.activeBranch.now(), hasUnsavedWork) match
             case TreeLoadDecision.SameContext =>
               // Same tree, same branch, reloaded after successful submit — do not
               // clear currentDraftVar so that the preview checkbox works immediately

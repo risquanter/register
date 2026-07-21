@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.{Validation, ForEach}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.data.{Distribution, RiskTree, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability, IronConstants}
+import com.risquanter.register.domain.data.iron.{ValidationUtil, TreeId, SafeName, NodeId, OccurrenceProbability}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest, DistributionShapeRequest}
 import com.risquanter.register.frontend.TreeBuilderLogic
@@ -55,19 +55,29 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   val currentDraftVar: Var[Option[Distribution]] = Var(None)
   val draftSignal: StrictSignal[Option[Distribution]] = currentDraftVar.signal
 
+  /** Whether the currently-active node-editing form (leaf or portfolio) has
+    * unsaved content — i.e. whether `FormMode.isFormDirty` is currently true.
+    *
+    * Written by whichever of [[app.views.RiskLeafFormView]] /
+    * [[app.views.PortfolioFormView]] currently owns `activeForm`'s target
+    * (the other one's own dirty check is pinned to `activeForm`'s target not
+    * matching its kind, so it always writes `false`); the inactive form never
+    * clobbers the active one's value. Read by [[app.views.TreePreview]]'s
+    * navigate-away confirm gate and by `DesignView`'s branch/tree-switch guard.
+    */
+  val isEditDirtyVar: Var[Boolean] = Var(false)
+
   val rootLabel = "(root)"
 
   // ── Node selection (Design view in-place editing) ────────────
 
-  /** Name of the currently selected leaf node, or None when in add-leaf mode.
-    * Selecting a leaf clears `selectedPortfolioName` (mutual exclusivity).
+  /** The node-editing form's current state — nothing selected, viewing a saved
+    * node read-only, editing one in place, or templating a new node from one.
+    * Replaces the former independently-mutated `selectedLeafName`/
+    * `selectedPortfolioName` pair; only one target can be represented at all,
+    * so mutual exclusivity is structural rather than hand-maintained.
     */
-  val selectedLeafName: Var[Option[SafeName.SafeName]] = Var(None)
-
-  /** Name of the currently selected portfolio node, or None when in add-portfolio mode.
-    * Selecting a portfolio clears `selectedLeafName` (mutual exclusivity).
-    */
-  val selectedPortfolioName: Var[Option[SafeName.SafeName]] = Var(None)
+  val activeForm: Var[FormMode] = Var(FormMode.Blank)
 
   // ── Tree-name validation ──────────────────────────────────────
   private val treeNameErrorRaw: Signal[Option[String]] = treeNameVar.signal.map { v =>
@@ -97,7 +107,9 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       leavesVar.now().map(l => l.name.value.toString -> l.parent.map(_.value.toString))
     ).map(_ => draft)
     result match
-      case Validation.Success(_, _) => portfoliosVar.update(_ :+ draft)
+      case Validation.Success(_, _) =>
+        portfoliosVar.update(_ :+ draft)
+        activeForm.set(FormMode.Locked(FormTarget.Portfolio(draft.name)))
       case _ => ()
     result
 
@@ -112,41 +124,40 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       )
     yield draft
     result match
-      case Validation.Success(_, draft) => leavesVar.update(_ :+ draft)
+      case Validation.Success(_, draft) =>
+        leavesVar.update(_ :+ draft)
+        activeForm.set(FormMode.Locked(FormTarget.Leaf(draft.name)))
       case _ => ()
     result
 
-  /** Populate a [[RiskLeafFormState]] from a loaded [[LeafDraft]].
+  /** Populate a [[RiskLeafFormState]] from a loaded [[LeafDraft]], via the one
+    * shared domain-to-display mapping ([[FormMode.leafDraftToFieldSnapshot]])
+    * also used by `isFormDirty` — so populating and dirty-checking can never
+    * disagree about what a saved leaf looks like as raw field values.
     *
-    * Sets all field vars from the draft, including `parentVar`. Probability and
-    * percentiles are rescaled from the 0-1 domain representation to the 0-100
-    * form display scale.
+    * Sets every field unconditionally (not just the active distribution
+    * mode's), so switching from viewing one mode to viewing the other never
+    * leaves the previous node's stale text sitting in the now-hidden fields.
     */
   def populateLeafForm(state: RiskLeafFormState, leaf: LeafDraft): Unit =
-    val mode = leaf.distribution.distributionType match
-      case IronConstants.Expert    => DistributionMode.Expert
-      case IronConstants.Lognormal => DistributionMode.Lognormal
-      case other => throw new IllegalStateException(s"Unrecognised DistributionType: $other — update populateLeafForm")
-    state.distributionModeVar.set(mode)
-    state.nameVar.set(leaf.name.value)
-    // Form field is on the 0-100 (percent) scale; domain value is 0-1.
-    state.probabilityVar.set(RiskLeafFormState.domainToDisplayPct(leaf.probability, 2))
-    state.parentVar.set(leaf.parent.map(_.value))
-    mode match
-      case DistributionMode.Expert =>
-        val pcts   = leaf.distribution.percentiles.fold("")(arr => arr.map(RiskLeafFormState.domainToDisplayPct(_, 0)).mkString(", "))
-        val quants = leaf.distribution.quantiles.fold("")(arr => arr.map(_.toString).mkString(", "))
-        state.percentilesVar.set(pcts)
-        state.quantilesVar.set(quants)
-        state.termsVar.set(leaf.distribution.terms.fold("")(_.toString))
-      case DistributionMode.Lognormal =>
-        state.minLossVar.set(leaf.distribution.minLoss.fold("")(_.toString))
-        state.maxLossVar.set(leaf.distribution.maxLoss.fold("")(_.toString))
+    val snapshot = FormMode.leafDraftToFieldSnapshot(leaf)
+    state.distributionModeVar.set(snapshot.mode)
+    state.nameVar.set(snapshot.name)
+    state.probabilityVar.set(snapshot.probability)
+    state.parentVar.set(snapshot.parent)
+    state.percentilesVar.set(snapshot.percentiles)
+    state.quantilesVar.set(snapshot.quantiles)
+    state.termsVar.set(snapshot.terms)
+    state.minLossVar.set(snapshot.minLoss)
+    state.maxLossVar.set(snapshot.maxLoss)
 
-  /** Populate a [[PortfolioFormState]] from a loaded [[PortfolioDraft]]. */
+  /** Populate a [[PortfolioFormState]] from a loaded [[PortfolioDraft]], via
+    * the shared mapping also used by `isFormDirty`.
+    */
   def populatePortfolioForm(state: PortfolioFormState, portfolio: PortfolioDraft): Unit =
-    state.nameVar.set(portfolio.name.value)
-    state.parentVar.set(portfolio.parent.map(_.value))
+    val snapshot = FormMode.portfolioDraftToFieldSnapshot(portfolio)
+    state.nameVar.set(snapshot.name)
+    state.parentVar.set(snapshot.parent)
 
   /** Update an existing leaf in-place. Preserves the node's server identity (`id`).
     *
@@ -174,7 +185,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     result match
       case Validation.Success(_, draft) =>
         leavesVar.update(_.map(l => if l.name == originalName then draft else l))
-        selectedLeafName.set(None)
+        activeForm.set(FormMode.Locked(FormTarget.Leaf(draft.name)))
       case _ => ()
     result
 
@@ -208,7 +219,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case Validation.Success(_, _) =>
         portfoliosVar.set(updatedPortfolios)
         leavesVar.set(updatedLeaves)
-        selectedPortfolioName.set(None)
+        activeForm.set(FormMode.Locked(FormTarget.Portfolio(draft.name)))
       case _ => ()
     result
 
@@ -219,12 +230,10 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     val toRemove = TreeBuilderLogic.collectCascade(Set(name), portfolios.map(p => p.name.value.toString -> p.parent.map(_.value.toString)))
     portfoliosVar.set(portfolios.filterNot(p => toRemove.contains(p.name.value.toString)))
     leavesVar.set(leaves.filterNot(l => toRemove.contains(l.name.value.toString) || l.parent.exists(n => toRemove.contains(n.value.toString))))
-    // Clear selection if the selected node was removed — otherwise the form
-    // stays in "Update" mode with a ghost selection pointing at a deleted leaf/portfolio.
-    if selectedLeafName.now().exists(n => toRemove.contains(n.value.toString)) then
-      selectedLeafName.set(None)
-    if selectedPortfolioName.now().exists(n => toRemove.contains(n.value.toString)) then
-      selectedPortfolioName.set(None)
+    // Clear the active form if it was pointing at a removed node — otherwise it
+    // stays locked/mid-edit on a ghost target pointing at a deleted leaf/portfolio.
+    if activeForm.now().currentTarget.exists(t => toRemove.contains(t.name.value.toString)) then
+      activeForm.set(FormMode.Blank)
 
   /** Build backend request with client-side validation. */
   def toRequest(): Validation[ValidationError, RiskTreeDefinitionRequest] =
@@ -310,8 +319,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     portfoliosVar.set(Nil)
     leavesVar.set(Nil)
     editingTreeId.set(None)
-    selectedLeafName.set(None)
-    selectedPortfolioName.set(None)
+    activeForm.set(FormMode.Blank)
     currentDraftVar.set(None)
     loadedSnapshotVar.set(None)
     resetTouched()
@@ -358,6 +366,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     leavesVar.set(leaves)
     editingTreeId.set(Some(tree.id))
     loadedSnapshotVar.set(Some((tree.name.value, portfolios, leaves)))
+    activeForm.set(FormMode.Blank)
     resetTouched()
 
   // ------------------------------------------------------------

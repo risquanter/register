@@ -2,7 +2,7 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.Validation
-import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState}
+import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormTarget, FieldSnapshot}
 import app.components.FormInputs.*
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.errors.ValidationError
@@ -16,21 +16,117 @@ object RiskLeafFormView:
   def apply(builderState: TreeBuilderState, chartState: DistributionChartState): HtmlElement =
     val state = new RiskLeafFormState
     val submitError: Var[Option[String]] = Var(None)
-    val isEditMode: Signal[Boolean] = builderState.selectedLeafName.signal.map(_.isDefined)
-    
+
+    // This form's view of `activeForm`: a Portfolio target (or no target at all)
+    // is irrelevant to the leaf form, and collapses to Blank — matching how
+    // `selectedLeafName` was implicitly None whenever a portfolio was selected.
+    val leafMode: Signal[FormMode] = builderState.activeForm.signal.map {
+      case m @ FormMode.Locked(_: FormTarget.Leaf)     => m
+      case m @ FormMode.Editing(_: FormTarget.Leaf)    => m
+      case m @ FormMode.Templating(_: FormTarget.Leaf) => m
+      case _                                           => FormMode.Blank
+    }
+    val isLocked: Signal[Boolean] = leafMode.map { case FormMode.Locked(_) => true; case _ => false }
+
+    // Same combine-as-trigger, read-via-.now()-inside-map idiom as `draftSignal`
+    // above: the combined signals only decide *when* to recompute, the actual
+    // values are read fresh from the Vars at that moment.
+    val currentSnapshot: Signal[FieldSnapshot.LeafFields] =
+      state.nameVar.signal.combineWith(state.parentVar.signal, state.probabilityVar.signal, state.distributionModeVar.signal)
+        .combineWith(state.percentilesVar.signal, state.quantilesVar.signal, state.termsVar.signal, state.minLossVar.signal, state.maxLossVar.signal)
+        .map { _ =>
+          FieldSnapshot.LeafFields(
+            name        = state.nameVar.now(),
+            parent      = state.parentVar.now(),
+            probability = state.probabilityVar.now(),
+            mode        = state.distributionModeVar.now(),
+            percentiles = state.percentilesVar.now(),
+            quantiles   = state.quantilesVar.now(),
+            terms       = state.termsVar.now(),
+            minLoss     = state.minLossVar.now(),
+            maxLoss     = state.maxLossVar.now()
+          )
+        }
+    val isDirty: Signal[Boolean] = leafMode.combineWith(currentSnapshot).map { (mode, snapshot) =>
+      FormMode.isFormDirty(mode, snapshot, builderState.leavesVar.now(), builderState.portfoliosVar.now())
+    }
+
+    val addSubmitLabel: Signal[String] = leafMode.map {
+      case FormMode.Templating(_) => "Submit"
+      case _                      => "Add Leaf"
+    }
+    val addSubmitDisabled: Signal[Boolean] = leafMode.combineWith(state.hasErrors).map {
+      case (FormMode.Editing(_), _)  => true  // mid-edit of an existing leaf; finish or Clear Form first
+      case (FormMode.Locked(_), _)   => false // just unlocks a template copy, nothing to validate yet
+      case (_, hasErrors)            => hasErrors
+    }
+    val editSaveLabel: Signal[String] = leafMode.map {
+      case FormMode.Editing(_) => "Save"
+      case _                   => "Edit"
+    }
+    val editSaveDisabled: Signal[Boolean] = leafMode.combineWith(state.hasErrors).map {
+      case (FormMode.Blank, _)         => true
+      case (FormMode.Templating(_), _) => true
+      case (FormMode.Locked(_), _)     => false // just unlocks in place, nothing to validate yet
+      case (_, hasErrors)              => hasErrors
+    }
+    val clearFormDisabled: Signal[Boolean] = leafMode.map {
+      case FormMode.Locked(_) => true
+      case _                  => false
+    }
+
+    def onAddSubmitClick(): Unit =
+      builderState.activeForm.now() match
+        case FormMode.Blank                    => handleSubmit(state, builderState, submitError)
+        case FormMode.Locked(t: FormTarget.Leaf) => builderState.activeForm.set(FormMode.Templating(t))
+        case FormMode.Templating(_: FormTarget.Leaf) => handleSubmit(state, builderState, submitError)
+        case _ => ()
+
+    def onEditSaveClick(): Unit =
+      builderState.activeForm.now() match
+        case FormMode.Locked(t: FormTarget.Leaf)      => builderState.activeForm.set(FormMode.Editing(t))
+        case FormMode.Editing(FormTarget.Leaf(name))  => handleUpdate(state, name, builderState, submitError)
+        case _ => ()
+
+    // Reverting to a saved node's own values is exactly what populating from it
+    // already does — the reactive populate subscription below fires again as soon
+    // as `activeForm` moves back to `Locked(t)`, so there is nothing else to do here.
+    def onClearFormClick(): Unit =
+      builderState.activeForm.now() match
+        case FormMode.Blank =>
+          state.resetFields()
+          state.parentVar.set(None)
+        case FormMode.Editing(t: FormTarget.Leaf)     => builderState.activeForm.set(FormMode.Locked(t))
+        case FormMode.Templating(t: FormTarget.Leaf)  => builderState.activeForm.set(FormMode.Locked(t))
+        case _ => ()
+      submitError.set(None)
+
     div(
       cls := "risk-leaf-form",
-      h2(child.text <-- isEditMode.map(if _ then "Edit Risk Leaf" else "Add Risk Leaf")),
+      h2(child.text <-- leafMode.map {
+        case FormMode.Blank         => "Add Risk Leaf"
+        case FormMode.Locked(_)     => "Risk Leaf Details"
+        case FormMode.Editing(_)    => "Edit Risk Leaf"
+        case FormMode.Templating(_) => "Add Risk Leaf"
+      }),
       p(
         cls := "form-description",
         "Configure a risk leaf node with either expert distribution or lognormal distribution."
       ),
 
-      // When a leaf is selected, populate the form from its draft.
-      builderState.selectedLeafName.signal.changes.collect { case Some(name) => name } --> { name =>
-        builderState.leavesVar.now().find(_.name == name).foreach { leaf =>
-          builderState.populateLeafForm(state, leaf)
-        }
+      // When the active target is this leaf, populate the form from its saved
+      // draft (covers viewing, editing, and templating alike — all three show
+      // the target's values, just with different lock/edit semantics on top).
+      // Any other target (Blank, or a portfolio) clears the fields.
+      builderState.activeForm.signal.changes --> { mode =>
+        val leafName = mode match
+          case FormMode.Locked(FormTarget.Leaf(n))     => Some(n)
+          case FormMode.Editing(FormTarget.Leaf(n))    => Some(n)
+          case FormMode.Templating(FormTarget.Leaf(n)) => Some(n)
+          case _                                       => None
+        leafName match
+          case Some(name) => builderState.leavesVar.now().find(_.name == name).foreach(builderState.populateLeafForm(state, _))
+          case None       => state.resetFields()
       },
 
       // Clear stale submit + per-field errors whenever the user edits a field
@@ -68,9 +164,14 @@ object RiskLeafFormView:
       // name/probability are still empty (submit validation is separate and unchanged).
       // Cleared on unmount so the chart returns to Idle when the leaf form is not active.
       state.draftSignal --> builderState.currentDraftVar.writer,
+      // Keep the shared dirty flag in sync with this form's own dirty check.
+      // Harmless when this form isn't the active target: `leafMode` collapses
+      // to `Blank` and `isDirty` is pinned to false, so it never clobbers
+      // whatever the actually-active form (portfolio, in that case) writes.
+      isDirty --> builderState.isEditDirtyVar.writer,
       onUnmountCallback { _ =>
         builderState.currentDraftVar.set(None)
-        builderState.selectedLeafName.set(None)
+        builderState.activeForm.set(FormMode.Blank)
       },
 
       // Common Fields
@@ -80,9 +181,10 @@ object RiskLeafFormView:
         errorSignal = state.nameError,
         filter = state.nameFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Name),
-        placeholderText = "e.g., Cyber Attack Risk"
+        placeholderText = "e.g., Cyber Attack Risk",
+        disabledSignal = isLocked
       ),
-      
+
       textInput(
         labelText = "Probability",
         valueVar = state.probabilityVar,
@@ -90,9 +192,10 @@ object RiskLeafFormView:
         filter = state.probabilityFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Probability),
         placeholderText = "e.g., 40 (= 40%)",
-        inputModeAttr = "decimal"
+        inputModeAttr = "decimal",
+        disabledSignal = isLocked
       ),
-      
+
       // Distribution Mode Toggle
       radioGroup(
         labelText = "Distribution Type",
@@ -100,32 +203,26 @@ object RiskLeafFormView:
           (DistributionMode.Expert, "Expert Opinion"),
           (DistributionMode.Lognormal, "Lognormal (BCG)")
         ),
-        selectedVar = state.distributionModeVar
+        selectedVar = state.distributionModeVar,
+        disabledSignal = isLocked
       ),
-      
+
       // Parent selection
-      parentSelect(state.parentVar, builderState.parentOptions, builderState.rootLabel),
-      
-      // Conditional Fields based on mode
+      parentSelect(state.parentVar, builderState.parentOptions, builderState.rootLabel, isLocked),
+
+      // Conditional Fields based on mode. Only `distributionModeVar` triggers a
+      // subtree rebuild here — `isLocked` is threaded through as a Signal so
+      // locking/unlocking toggles the `disabled` attribute on the already-mounted
+      // inputs instead of rebuilding them (Signal granularity, ADR-019).
       child <-- state.distributionModeVar.signal.map {
-        case DistributionMode.Expert => expertFields(state)
-        case DistributionMode.Lognormal => lognormalFields(state)
+        case DistributionMode.Expert    => expertFields(state, isLocked)
+        case DistributionMode.Lognormal => lognormalFields(state, isLocked)
       },
-      
-      // Submit / Clear Buttons + preview toggle
+
+      // Add/Submit, Edit/Save, Clear Form — right-aligned as a group, Clear Form
+      // immediately right of Add/Submit.
       div(
         cls := "form-actions",
-        button(
-          typ := "button",
-          cls := "form-clear",
-          "Clear Form",
-          onClick --> { _ =>
-            state.resetFields()
-            state.parentVar.set(None)
-            builderState.selectedLeafName.set(None)
-            submitError.set(None)
-          }
-        ),
         // Preview toggle — always enabled; endpoint is public (no workspace key required)
         label(
           cls := "form-preview-toggle",
@@ -137,23 +234,32 @@ object RiskLeafFormView:
           span("Show preview")
         ),
         submitButton(
-          textSignal = isEditMode.map(if _ then "Update Leaf" else "Add Leaf"),
-          isDisabled = state.hasErrors,
-          onClickCallback = () =>
-            builderState.selectedLeafName.now() match
-              case Some(originalName) => handleUpdate(state, originalName, builderState, submitError)
-              case None               => handleSubmit(state, builderState, submitError)
+          textSignal = addSubmitLabel,
+          isDisabled = addSubmitDisabled,
+          onClickCallback = () => onAddSubmitClick()
+        ),
+        button(
+          typ := "button",
+          cls := "form-clear",
+          "Clear Form",
+          disabled <-- clearFormDisabled,
+          onClick --> (_ => onClearFormClick())
+        ),
+        submitButton(
+          textSignal = editSaveLabel,
+          isDisabled = editSaveDisabled,
+          onClickCallback = () => onEditSaveClick()
         )
       ),
       child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
     )
   
   /** Expert mode specific fields */
-  private def expertFields(state: RiskLeafFormState): HtmlElement =
+  private def expertFields(state: RiskLeafFormState, isLocked: Signal[Boolean]): HtmlElement =
     div(
       cls := "mode-fields",
       div(cls := "mode-fields-title", "Expert Opinion Parameters"),
-      
+
       textInput(
         labelText = "Percentiles",
         valueVar = state.percentilesVar,
@@ -161,9 +267,10 @@ object RiskLeafFormView:
         filter = state.percentilesFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Percentiles),
         placeholderText = "e.g., 10, 50, 90",
-        inputModeAttr = "decimal"
+        inputModeAttr = "decimal",
+        disabledSignal = isLocked
       ),
-      
+
       textInput(
         labelText = "Quantiles (loss in $M)",
         valueVar = state.quantilesVar,
@@ -171,7 +278,8 @@ object RiskLeafFormView:
         filter = state.quantilesFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Quantiles),
         placeholderText = "e.g., 50, 200, 1000 ($50M, $200M, $1B)",
-        inputModeAttr = "decimal"
+        inputModeAttr = "decimal",
+        disabledSignal = isLocked
       ),
 
       // Implied ratio warning: shown when P90/P10 ratio exceeds 100×
@@ -186,16 +294,17 @@ object RiskLeafFormView:
         filter = state.lossFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Terms),
         placeholderText = "e.g. 3",
-        inputModeAttr = "numeric"
+        inputModeAttr = "numeric",
+        disabledSignal = isLocked
       )
     )
-  
+
   /** Lognormal mode specific fields */
-  private def lognormalFields(state: RiskLeafFormState): HtmlElement =
+  private def lognormalFields(state: RiskLeafFormState, isLocked: Signal[Boolean]): HtmlElement =
     div(
       cls := "mode-fields",
       div(cls := "mode-fields-title", "Lognormal Parameters (80% CI)"),
-      
+
       textInput(
         labelText = "Minimum Loss",
         valueVar = state.minLossVar,
@@ -203,9 +312,10 @@ object RiskLeafFormView:
         filter = state.lossFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.MinLoss),
         placeholderText = "e.g., 1000",
-        inputModeAttr = "numeric"
+        inputModeAttr = "numeric",
+        disabledSignal = isLocked
       ),
-      
+
       textInput(
         labelText = "Maximum Loss",
         valueVar = state.maxLossVar,
@@ -213,7 +323,8 @@ object RiskLeafFormView:
         filter = state.lossFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.MaxLoss),
         placeholderText = "e.g., 50000",
-        inputModeAttr = "numeric"
+        inputModeAttr = "numeric",
+        disabledSignal = isLocked
       )
     )
   
@@ -228,16 +339,12 @@ object RiskLeafFormView:
       case (Validation.Success(_, shape), Some(prob)) =>
         builderState.addLeaf(state.nameVar.now(), state.parentVar.now(), shape, prob) match
           case Validation.Success(_, _) =>
+            // Fields are left as-is — TreeBuilderState.addLeaf already moved
+            // `activeForm` to `Locked(newTarget)`, which locks these same,
+            // just-submitted values for viewing. A fast successive add is the
+            // Templating flow now (click Add again to unlock a copy), not a
+            // touched-state reset here.
             submitError.set(None)
-            // Intentional: parentVar is NOT reset — it is auto-synced by
-            // FormInputs.parentSelect based on available options.  Resetting
-            // it to None races with auto-sync and causes the displayed value
-            // ("Root") to diverge from the Var (None), making subsequent
-            // leaf additions fail with "must select a parent portfolio".
-            // Intentional: resetTouched() (not resetFields()) preserves form values
-            // so the user can quickly add successive leaves with similar parameters,
-            // only changing name/parent between submits.
-            state.resetTouched()
           case Validation.Failure(_, errs) =>
             FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError, {
               case "name"   => Some(RiskLeafField.Name)
@@ -261,8 +368,9 @@ object RiskLeafFormView:
       case (Validation.Success(_, shape), Some(prob)) =>
         builderState.updateLeaf(originalName, state.nameVar.now(), state.parentVar.now(), shape, prob) match
           case Validation.Success(_, _) =>
+            // TreeBuilderState.updateLeaf already moved `activeForm` back to
+            // `Locked(t)`, locking these same, just-saved values for viewing.
             submitError.set(None)
-            state.resetTouched()
           case Validation.Failure(_, errs) =>
             FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError, {
               case "name"   => Some(RiskLeafField.Name)
