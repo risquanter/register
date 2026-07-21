@@ -17,7 +17,7 @@ import com.risquanter.register.http.support.TestSafeUrls
 import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
-import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioServiceNotSupported, SimulationSemaphore}
+import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioDiffServiceLive, ScenarioServiceNotSupported, SimulationSemaphore}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
@@ -131,6 +131,7 @@ object HttpTestHarness:
       SimulationSemaphore.layer,
       repoLayer,
       RiskTreeServiceLive.layer,
+      ScenarioDiffServiceLive.layer,
       CacheScope.layer,
       RiskResultResolverLive.layer,
       SSEHub.live,

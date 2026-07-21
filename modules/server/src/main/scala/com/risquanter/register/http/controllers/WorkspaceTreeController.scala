@@ -5,8 +5,8 @@ import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
-import com.risquanter.register.http.responses.SimulationResponse
-import com.risquanter.register.services.RiskTreeService
+import com.risquanter.register.http.responses.{SimulationResponse, ScenarioDiffResponse, NodeDiffEntry}
+import com.risquanter.register.services.{RiskTreeService, ScenarioDiffService, ScenarioDiffResult}
 import com.risquanter.register.services.workspace.WorkspaceStore
 
 /** Workspace tree controller.
@@ -31,6 +31,7 @@ import com.risquanter.register.services.workspace.WorkspaceStore
   */
 class WorkspaceTreeController private (
   riskTreeService: RiskTreeService,
+  scenarioDiffService: ScenarioDiffService,
   workspaceStore: WorkspaceStore,
   authzService: AuthorizationService,
   userCtx: UserContextExtractor
@@ -57,6 +58,24 @@ class WorkspaceTreeController private (
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.getById(ws.id, treeId, branch)
       yield result).either
+  }
+
+  val getScenarioDiff: ServerEndpoint[Any, Task] = getScenarioDiffEndpoint.serverLogic {
+    case (maybeUserId, key, treeId, activeBranch, compareBranch) =>
+      (for
+        userId  <- userCtx.requireAuthenticated(maybeUserId)
+        given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        ws      <- workspaceStore.resolveTreeWorkspace(key, treeId)
+        branchA <- ActiveBranch.resolve(ws.id, activeBranch)
+        branchB <- ActiveBranch.resolve(ws.id, compareBranch)
+        result  <- scenarioDiffService.diff(ws.id, treeId, branchA, branchB)
+      yield result match
+        case ScenarioDiffResult.Diff(entries) =>
+          ScenarioDiffResponse("ok", entries.map(d => NodeDiffEntry(d.nodeId.value, d.status.toWire)))
+        case ScenarioDiffResult.MissingOnA    => ScenarioDiffResponse("missing-on-a", Nil)
+        case ScenarioDiffResult.MissingOnB    => ScenarioDiffResponse("missing-on-b", Nil)
+        case ScenarioDiffResult.MissingOnBoth => ScenarioDiffResponse("missing-on-both", Nil)
+      ).either
   }
 
   val updateTree: ServerEndpoint[Any, Task] = updateWorkspaceTreeEndpoint.serverLogic {
@@ -93,15 +112,17 @@ class WorkspaceTreeController private (
     List(
       getTreeById,
       getTreeStructure,
+      getScenarioDiff,
       updateTree,
       deleteTree
     )
 
 object WorkspaceTreeController:
-  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, WorkspaceTreeController] =
+  val makeZIO: ZIO[RiskTreeService & ScenarioDiffService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, WorkspaceTreeController] =
     for
       riskTreeService      <- ZIO.service[RiskTreeService]
+      scenarioDiffService  <- ZIO.service[ScenarioDiffService]
       workspaceStore       <- ZIO.service[WorkspaceStore]
       authzService         <- ZIO.service[AuthorizationService]
       userCtx              <- ZIO.service[UserContextExtractor]
-    yield WorkspaceTreeController(riskTreeService, workspaceStore, authzService, userCtx)
+    yield WorkspaceTreeController(riskTreeService, scenarioDiffService, workspaceStore, authzService, userCtx)

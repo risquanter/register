@@ -5,7 +5,7 @@ import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 
 import com.risquanter.register.http.requests.RiskTreeUpdateRequest
-import com.risquanter.register.http.responses.SimulationResponse
+import com.risquanter.register.http.responses.{SimulationResponse, ScenarioDiffResponse}
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, ScenarioName}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
@@ -45,6 +45,24 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .get
       .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
       .out(jsonBody[Option[RiskTree]])
+
+  /** Content-hash diff (UC5, milestone-2b Phase C) between two branches —
+    * no value-level comparison (DD-6). `X-Active-Branch` carries the first
+    * branch (`branchA`, same interpretation as every other endpoint here);
+    * `compareBranch` is a second, explicit query parameter carrying
+    * `branchB` — a GET request has no body to carry it in instead, and
+    * reusing `X-Active-Branch` for both would be ambiguous.
+    */
+  val getScenarioDiffEndpoint =
+    authedBaseEndpoint
+      .tag("workspaces")
+      .name("getScenarioDiff")
+      .description("Content-hash diff of a tree between two branches (UC5) — no value-level comparison")
+      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "diff")
+      .get
+      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(query[Option[ScenarioName.ScenarioName]]("compareBranch"))
+      .out(jsonBody[ScenarioDiffResponse])
 
   val updateWorkspaceTreeEndpoint =
     authedBaseEndpoint

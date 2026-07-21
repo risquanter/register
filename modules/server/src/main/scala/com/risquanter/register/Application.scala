@@ -15,6 +15,7 @@ import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.persistence.{FlywayService, FlywayServiceLive, Repository}
 import com.risquanter.register.services.RiskTreeServiceLive
+import com.risquanter.register.services.ScenarioDiffServiceLive
 import com.risquanter.register.services.{ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
@@ -246,6 +247,7 @@ object Application extends ZIOAppDefault {
       SSEHub.live,
       InvalidationHandler.live,     // SSE-only mutation notifications (requires SSEHub)
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + SimulationConfig + Tracing + SimulationSemaphore + Meter
+      ScenarioDiffServiceLive.layer, // UC5 hash-diff (milestone-2b Phase C) — requires RiskTreeService
       QueryServiceLive.layer,       // Requires RiskTreeRepository + RiskResultResolver + Tracing
       chooseWorkspaceStore,
       chooseFlywayService,

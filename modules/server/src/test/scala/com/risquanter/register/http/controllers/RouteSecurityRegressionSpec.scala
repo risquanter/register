@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
+import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, ScenarioDiffServiceLive}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.WorkspaceStoreLive
 import com.risquanter.register.services.cache.{CacheScope, RiskResultResolverLive}
@@ -54,6 +54,7 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
     TestConfigs.telemetryLayer >>> MetricsLive.console,
     SimulationSemaphore.layer,
     RiskTreeServiceLive.layer,
+    ScenarioDiffServiceLive.layer,
     CacheScope.layer,
     RiskResultResolverLive.layer,
     SSEHub.live,
