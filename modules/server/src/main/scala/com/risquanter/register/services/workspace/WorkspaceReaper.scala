@@ -3,7 +3,7 @@ package com.risquanter.register.services.workspace
 import zio.*
 import com.risquanter.register.auth.{BootstrapProvisioner, Checked, Permission}
 import com.risquanter.register.configs.WorkspaceConfig
-import com.risquanter.register.services.RiskTreeService
+import com.risquanter.register.services.{RiskTreeService, ScenarioService}
 
 /** Background daemon that periodically evicts expired workspaces.
   *
@@ -29,6 +29,15 @@ import com.risquanter.register.services.RiskTreeService
   * This mirrors `WorkspaceLifecycleController.deleteWorkspace`'s cascade pattern. Tree deletion
   * failures are ignored (best-effort) — a tree may already have been manually deleted.
   *
+  * Scenario branches (`scenarios.<wsId>.*`, milestone-2b Phase B) are cascade-deleted
+  * the same way via `ScenarioService.cascadeDeleteScenarios` (best-effort, same
+  * single source of truth reused by `WorkspaceLifecycleController.deleteWorkspace`
+  * and `evictExpired`). Without this, an expired workspace's scenario branches
+  * would never be reclaimed — they'd survive in Irmin forever, unreachable by any
+  * workspace key. On the in-memory backend, listing scenarios fails with
+  * `ScenariosNotSupported`; that failure is swallowed the same as any other
+  * best-effort cascade failure (nothing to clean up).
+  *
   * == Enterprise no-op ==
   * When both `ttl` and `idleTimeout` are zero or negative, `Workspace.isExpired`
   * can never return `true`, so the reaper loop would be pure waste. The layer
@@ -38,14 +47,15 @@ trait WorkspaceReaper
 
 object WorkspaceReaper:
 
-  val layer: ZLayer[WorkspaceStore & WorkspaceConfig & RiskTreeService & BootstrapProvisioner, Nothing, WorkspaceReaper] =
+  val layer: ZLayer[WorkspaceStore & WorkspaceConfig & RiskTreeService & ScenarioService & BootstrapProvisioner, Nothing, WorkspaceReaper] =
     ZLayer.scoped {
       for
-        config      <- ZIO.service[WorkspaceConfig]
-        store       <- ZIO.service[WorkspaceStore]
-        treeService <- ZIO.service[RiskTreeService]
-        provisioner <- ZIO.service[BootstrapProvisioner]
-        _           <- reapLoop(store, treeService, provisioner, config.reaperInterval)
+        config          <- ZIO.service[WorkspaceConfig]
+        store           <- ZIO.service[WorkspaceStore]
+        treeService     <- ZIO.service[RiskTreeService]
+        scenarioService <- ZIO.service[ScenarioService]
+        provisioner     <- ZIO.service[BootstrapProvisioner]
+        _           <- reapLoop(store, treeService, scenarioService, provisioner, config.reaperInterval)
                          .forkScoped
                          .when(!isNoOp(config))
         _           <- ZIO.logInfo(
@@ -65,14 +75,17 @@ object WorkspaceReaper:
     (config.ttl.isZero || config.ttl.isNegative) &&
       (config.idleTimeout.isZero || config.idleTimeout.isNegative)
 
-  /** Reap loop: evict expired workspaces, then cascade-delete their trees.
+  /** Reap loop: evict expired workspaces, then cascade-delete their trees and
+    * scenario branches.
     *
-    * Best-effort cascade: each `treeService.delete(id).ignore` swallows failures
-    * (the tree may already be gone). This matches `WorkspaceLifecycleController.deleteWorkspace`.
+    * Best-effort cascade: each `treeService.delete(id).ignore` and each
+    * `scenarioService.delete(...).ignore` swallows failures (the tree/scenario
+    * may already be gone). This matches `WorkspaceLifecycleController.deleteWorkspace`.
     */
   private def reapLoop(
     store: WorkspaceStore,
     treeService: RiskTreeService,
+    scenarioService: ScenarioService,
     provisioner: BootstrapProvisioner,
     interval: java.time.Duration
   ): UIO[Nothing] =
@@ -82,6 +95,7 @@ object WorkspaceReaper:
         // exempt: system maintenance — no user context; WorkspaceReaper is a background orchestrator
         given Checked[Permission.SystemMaintenance.type] <- provisioner.systemMaintenanceToken()
         _       <- ZIO.foreachDiscard(evicted)(ws =>
-                     treeService.cascadeDeleteTrees(ws.id, ws.trees))
+                     treeService.cascadeDeleteTrees(ws.id, ws.trees) *>
+                     scenarioService.cascadeDeleteScenarios(ws.id))
       yield ()
     (ZIO.sleep(zio.Duration.fromJava(interval)) *> cycle).forever

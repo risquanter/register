@@ -1266,4 +1266,73 @@ found. Also worth deciding whether `ScenarioService`'s own use of `BranchRef`
 (item 3/4, milestone-2b Phase B) should be designed against the new type from
 the start or added as a plain consumer now and migrated later.
 
+---
+
+## 23. No periodic reconciliation for orphaned Irmin resources (trees, scenario branches) — verify need before designing
+
+**Origin (2026-07-21):** surfaced during milestone-2b Phase B work extending
+`WorkspaceReaper`'s cascade-delete to scenario branches, and while auditing
+`WorkspaceLifecycleController.evictExpired`/`deleteWorkspace` for the same
+cascade coverage. All cascade-delete paths in the codebase — the reaper's
+TTL loop, the explicit `DELETE /w/{key}` endpoint, and the admin
+`POST /admin/workspaces/expired` sweep — are purely reactive: each cleans up
+a resource only when *that resource's own workspace* hits a specific
+lifecycle event (expiry or explicit delete). None of them ever list actual
+storage (Irmin branches under `scenarios.*`, tree paths under
+`workspaces/*/risk-trees/*`) and reconcile it against live `WorkspaceStore`
+records independent of any particular workspace's own lifecycle firing.
+
+**Observed:** the only two "orphan" mentions in `IMPLEMENTATION-PLAN.md`
+("Worst case (crash mid-delete): orphaned trees — reaper cascade-deletes on
+next cycle"; "Reaper cascade-deletes trees from evicted workspaces (orphan
+bug fix)") both describe the *reactive* mechanism catching a crash mid-delete
+because the workspace record itself survives to be reaped normally later —
+not an independent scan. If a workspace record is ever lost or removed
+without its resources being fully cascaded first (a bug, a crash at exactly
+the wrong instant, direct DB/Irmin intervention), nothing today would ever
+find or clean up whatever it left behind. The only genuine periodic-sweep
+concept anywhere in the codebase, `EvictionStrategy.sweep`
+(`services/cache/EvictionStrategy.scala`), is unrelated: it targets the
+ephemeral in-memory `ContentCache` (simulation results), not Irmin-persisted
+trees or branches, and is currently wired only to `NoOpEvictionStrategy`
+(always returns empty — no sweep actually runs).
+
+**Concrete failure mode identified (2026-07-21):** `ScenarioService.cascadeDeleteScenarios`
+treats a failed `list` call as best-effort (`.ignore`) — and in both
+`WorkspaceLifecycleController.deleteWorkspace` and `.evictExpired`, the
+workspace *record* is removed regardless of whether that cascade succeeded.
+If Irmin is transiently unreachable at the exact moment cascade runs during
+a workspace delete/eviction, that workspace's scenario branches are left
+behind, and — because the workspace record is now gone — nothing will ever
+retry cleaning them up; there is no future lifecycle event left to trigger
+it. This is exactly the failure mode TODO item 23 exists to check for via
+property-based testing, not a new problem.
+
+**Step 1 — verify the behaviour is actually needed (user direction,
+2026-07-21):** before designing anything, determine whether the reactive-only
+design leaves real orphans in practice. Proposed approach: randomized,
+property-based testing that simulates a long usage cycle — many workspaces
+created / expired / explicitly deleted, scenarios created / deleted,
+interleaved with simulated crashes and restarts at random points in the
+sequence — then asserts an invariant such as "every Irmin branch or tree path
+whose embedded workspace ID has no live `WorkspaceStore` record has already
+been cleaned up (or is in-flight) — none are permanently unreachable." A
+property test capable of generating long random operation sequences and
+checking this invariant would give a concrete, evidence-based answer on
+whether leftovers accumulate, and under exactly which conditions, rather than
+reasoning about it from worst-case scenarios in the abstract.
+
+**Step 2 — only if step 1 finds real leftovers:** design the reconciliation
+solution from first principles, scoped to whatever failure modes the
+property tests actually demonstrate (e.g., a specific crash window, a
+specific operation ordering) — not a speculative general "scan everything,
+delete anything unmatched" sweep built ahead of evidence that it's needed.
+
+**Why not implement immediately:** this would be a new architectural
+capability (a background reconciliation job scanning live storage), not a
+bug fix to the existing reactive cascade paths — those are being brought to
+full, consistent coverage (trees + scenarios, across all three call sites)
+as a separate, already-scoped fix. Whether this item is needed at all, and
+what shape it should take, depends entirely on step 1's findings.
+
 **Status:** investigation only, no decision made, no code changed.

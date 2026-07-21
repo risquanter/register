@@ -130,12 +130,22 @@ class WorkspaceLifecycleController private (
       given Checked[Permission] <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       ids    <- workspaceStore.listTrees(key)
       _      <- riskTreeService.cascadeDeleteTrees(ws.id, ids)
+      _      <- scenarioService.cascadeDeleteScenarios(ws.id)
       _      <- workspaceStore.delete(key)
     yield ()).either
   }
 
   val evictExpired: ServerEndpoint[Any, Task] = evictExpiredEndpoint.serverLogicSuccess { _ =>
-    workspaceStore.evictExpired.map(evicted => Map("evicted" -> evicted.size))
+    for
+      // exempt: system maintenance — no user context (ADR-030 §2; same token
+      // WorkspaceReaper uses for the identical TTL-driven cascade — this
+      // endpoint is the admin-triggered, on-demand equivalent of that sweep)
+      given Checked[Permission.SystemMaintenance.type] <- bootstrapProvisioner.systemMaintenanceToken()
+      evicted <- workspaceStore.evictExpired
+      _       <- ZIO.foreachDiscard(evicted)(ws =>
+                   riskTreeService.cascadeDeleteTrees(ws.id, ws.trees) *>
+                   scenarioService.cascadeDeleteScenarios(ws.id))
+    yield Map("evicted" -> evicted.size)
   }
 
   override val routes: List[ServerEndpoint[Any, Task]] =

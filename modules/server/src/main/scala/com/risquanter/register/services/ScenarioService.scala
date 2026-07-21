@@ -3,6 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
+import com.risquanter.register.domain.errors.ScenariosNotSupported
 
 /** What a new scenario forks from (DD-5, amended 2026-07-20). A create always
   * forks from exactly one source — main, or another scenario's current head —
@@ -77,3 +78,32 @@ object ScenarioService:
   def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)
     (using Checked[Permission]): ZIO[ScenarioService, Throwable, Unit] =
     ZIO.serviceWithZIO[ScenarioService](_.delete(wsId, name, expectedHead))
+
+  /** Best-effort cascade deletion — lists a workspace's scenarios, then deletes
+    * each one via its own CAS precondition (the head observed from this same
+    * `list` call), swallowing individual failures (a stale head race, or a
+    * backend that doesn't support scenarios at all).
+    *
+    * `list` failing with `ScenariosNotSupported` is routine (the in-memory
+    * backend has no scenario support) and is not logged. Any other `list`
+    * failure, and any individual `delete` failure, is logged as a warning
+    * before being swallowed, so a genuinely orphaned scenario branch is
+    * observable instead of silent.
+    *
+    * Used by `WorkspaceLifecycleController.deleteWorkspace` (explicit delete),
+    * `WorkspaceLifecycleController.evictExpired` (admin sweep), and
+    * `WorkspaceReaper` (TTL expiry). Single source of truth for the scenario
+    * cascade-delete semantic, mirroring `RiskTreeService.cascadeDeleteTrees`.
+    */
+  extension (self: ScenarioService)
+    def cascadeDeleteScenarios(wsId: WorkspaceId)(using Checked[Permission]): UIO[Unit] =
+      self.list(wsId)
+        .tapError {
+          case _: ScenariosNotSupported => ZIO.unit
+          case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${e.getMessage}")
+        }
+        .flatMap(scenarios => ZIO.foreachDiscard(scenarios)(s =>
+          self.delete(wsId, s.name, s.head)
+            .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.getMessage}"))
+            .ignore))
+        .ignore

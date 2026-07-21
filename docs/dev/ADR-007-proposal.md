@@ -155,15 +155,14 @@ by construction (the slug is the canonical lowercase form).
 
 ### Orphan Branch Cleanup
 
-**Issue:** If user creates many scenarios and abandons them, branches accumulate.
-
-**Options:**
-1. Manual cleanup only
-2. Soft-delete with grace period
-3. Auto-archive after inactivity (e.g., 90 days)
-4. Quota per user
-
-**Action required:** Define branch lifecycle policy.
+**Resolved by DD-23 (2026-07-21).** Option 1 — manual cleanup only.
+Scenario creation and deletion are both explicit user actions; no
+soft-delete grace period, no auto-archive after inactivity, no per-user
+quota. A scenario left untouched inside a still-live workspace is not
+cleaned up automatically — it persists until the user explicitly deletes
+it, or the whole workspace is torn down (expiry or explicit delete cascades
+every scenario branch via `ScenarioService.cascadeDeleteScenarios`).
+See `docs/scratch/milestone-2b-cache-and-decisions.md` DD-23.
 
 ---
 

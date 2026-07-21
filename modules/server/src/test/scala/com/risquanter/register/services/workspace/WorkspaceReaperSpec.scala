@@ -7,35 +7,30 @@ import zio.test.TestClock
 import java.time.Duration
 
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
-import com.risquanter.register.services.RiskTreeService
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef}
-import com.risquanter.register.domain.data.{RiskTree, LECPoint, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.NodeId
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest}
+import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, ScenarioService, ScenarioServiceNotSupported, ScenarioSummary}
+import com.risquanter.register.domain.data.iron.{TreeId, ScenarioName, CommitHash}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{BootstrapProvisionerNoOp, Checked, Permission, TestChecked}
 
 object WorkspaceReaperSpec extends ZIOSpecDefault:
-  // Service-level test: WorkspaceReaper calls protected service methods as a background orchestrator.
-  // TestChecked provides the Checked[Permission] proof for direct stub invocations.
+  // Service-level test: store.addTree() below requires Checked[Permission] in scope.
+  // TestChecked provides the proof for this direct stub invocation (never in src/main).
   private given Checked[Permission] = TestChecked.value
 
   // ── Test helpers ────────────────────────────────────────────────────
-
-  /** Build a RiskTreeService stub where only `delete` is customizable.
-    * All other methods die immediately to catch unintended calls.
-    */
-  private def makeStub(onDelete: (WorkspaceId, TreeId) => Task[RiskTree]): RiskTreeService = new RiskTreeService:
-    def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: Option[BranchRef])(using Checked[Permission]): Task[RiskTree]               = ZIO.die(new UnsupportedOperationException)
-    def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: Option[BranchRef])(using Checked[Permission]): Task[RiskTree]       = ZIO.die(new UnsupportedOperationException)
-    def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef])(using Checked[Permission]): Task[RiskTree]                                   = onDelete(wsId, id)
-    def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef])(using Checked[Permission]): Task[Option[RiskTree]]                          = ZIO.die(new UnsupportedOperationException)
-    def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: Option[BranchRef]): Task[Double] = ZIO.die(new UnsupportedOperationException)
-    def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, branch: Option[BranchRef]): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
+  // Tree/Scenario service test doubles are shared with WorkspaceLifecycleControllerCascadeSpec
+  // via CascadeTestStubs — single source of truth for the stub shape.
 
   /** No-op stub: `delete` always fails (simulates already-deleted tree). */
   private val noOpTreeServiceLayer: ULayer[RiskTreeService] =
-    ZLayer.succeed(makeStub((_, _) => ZIO.fail(new NoSuchElementException("Tree not found"))))
+    ZLayer.succeed(CascadeTestStubs.noOpRiskTreeService)
+
+  /** No-op stub: matches the in-memory-backend deployment shape (`list`/`delete`
+    * both fail with `ScenariosNotSupported`) — the reaper swallows this the same
+    * as any other best-effort cascade failure. Used by every test that isn't
+    * specifically exercising scenario cascade-delete.
+    */
+  private val noOpScenarioServiceLayer: ULayer[ScenarioService] = ScenarioServiceNotSupported.layer
 
   /** Shared config for all fiber/cascade tests: short TTL, short reaper interval. */
   private val reaperTestConfig = WorkspaceConfig(
@@ -101,6 +96,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
             ZLayer.succeed(config),
             WorkspaceStoreLive.layer,
             noOpTreeServiceLayer,
+            noOpScenarioServiceLayer,
             ZLayer.succeed(BootstrapProvisionerNoOp),
                         ZLayer.succeed(Scope.global)
           )
@@ -119,6 +115,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
             ZLayer.succeed(config),
             WorkspaceStoreLive.layer,
             noOpTreeServiceLayer,
+            noOpScenarioServiceLayer,
             ZLayer.succeed(BootstrapProvisionerNoOp),
                         ZLayer.succeed(Scope.global)
           )
@@ -138,6 +135,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                        ZLayer.succeed(reaperTestConfig),
                        ZLayer.succeed(store: WorkspaceStore),
                        noOpTreeServiceLayer,
+                       noOpScenarioServiceLayer,
                        ZLayer.succeed(BootstrapProvisionerNoOp),
                         ZLayer.succeed(Scope.global)
                      )
@@ -160,7 +158,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
           store            <- WorkspaceStoreLive.make(reaperTestConfig)
           deleted          <- Promise.make[Nothing, Unit]
           deletedRef       <- Ref.make(List.empty[TreeId])
-          svc               = makeStub((_, id) =>
+          svc               = CascadeTestStubs.riskTreeService((_, id) =>
                                deletedRef.update(_ :+ id) *>
                                deleted.succeed(()).unit *>
                                ZIO.fail(new NoSuchElementException(s"Tree $id not found")))
@@ -172,6 +170,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                                  ZLayer.succeed(reaperTestConfig),
                                  ZLayer.succeed(store: WorkspaceStore),
                                  ZLayer.succeed(svc: RiskTreeService),
+                                 noOpScenarioServiceLayer,
                                  ZLayer.succeed(BootstrapProvisionerNoOp),
                         ZLayer.succeed(Scope.global)
                                )
@@ -192,7 +191,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
           // always called after the reaper fiber has finished its cycle.
           allDeleted       <- Promise.make[Nothing, Unit]
           deletedRef       <- Ref.make(List.empty[TreeId])
-          svc               = makeStub((_, id) =>
+          svc               = CascadeTestStubs.riskTreeService((_, id) =>
                                deletedRef.updateAndGet(_ :+ id).flatMap { updated =>
                                  allDeleted.succeed(()).when(updated.size >= 3).unit
                                } *> ZIO.fail(new NoSuchElementException(s"Tree $id not found")))
@@ -209,6 +208,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                                  ZLayer.succeed(reaperTestConfig),
                                  ZLayer.succeed(store: WorkspaceStore),
                                  ZLayer.succeed(svc: RiskTreeService),
+                                 noOpScenarioServiceLayer,
                                  ZLayer.succeed(BootstrapProvisionerNoOp),
                         ZLayer.succeed(Scope.global)
                                )
@@ -238,6 +238,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
                         ZLayer.succeed(reaperTestConfig),
                         ZLayer.succeed(store: WorkspaceStore),
                         noOpTreeServiceLayer,  // delete always fails
+                        noOpScenarioServiceLayer,
                         ZLayer.succeed(BootstrapProvisionerNoOp),
                         ZLayer.succeed(Scope.global)
                       )
@@ -246,5 +247,36 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
           exit   <- store.resolve(key).exit
         yield assert(exit)(fails(anything))
       }
-    }
+    },
+
+    test("reaper cascade-deletes scenario branches when workspace expires") {
+      ZIO.scoped {
+        for
+          store        <- WorkspaceStoreLive.make(reaperTestConfig)
+          deleted      <- Promise.make[Nothing, Unit]
+          deletedRef   <- Ref.make(List.empty[ScenarioName.ScenarioName])
+          head          = CommitHash.fromString("a" * 40).toOption.get
+          scenarioName  = ScenarioName.fromString("stress-2026").toOption.get
+          scenarioSvc   = CascadeTestStubs.scenarioService(
+                            onList = _ => ZIO.succeed(List(ScenarioSummary(scenarioName, head))),
+                            onDelete = (_, name) =>
+                              deletedRef.update(_ :+ name) *> deleted.succeed(()).unit
+                          )
+          key          <- store.create()
+          _            <- WorkspaceReaper.layer.build
+                            .provide(
+                              ZLayer.succeed(reaperTestConfig),
+                              ZLayer.succeed(store: WorkspaceStore),
+                              noOpTreeServiceLayer,
+                              ZLayer.succeed(scenarioSvc: ScenarioService),
+                              ZLayer.succeed(BootstrapProvisionerNoOp),
+                              ZLayer.succeed(Scope.global)
+                            )
+          _            <- ZIO.yieldNow
+          _            <- TestClock.adjust(4.minutes)
+          _            <- deleted.await
+          result       <- deletedRef.get
+        yield assertTrue(result.contains(scenarioName))
+      }
+    } @@ TestAspect.withLiveRandom
   )
