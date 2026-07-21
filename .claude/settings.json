@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sbt 'commonJVM/test; server/test; app/test')"
+    ]
+  }
+}

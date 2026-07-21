@@ -443,9 +443,28 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
     ),
 
-    suite("selection state")(
+    suite("activeForm")(
 
-      test("updateLeaf: selectedLeafName cleared on success") {
+      test("addLeaf: activeForm becomes Locked(Leaf(name)) on success") {
+        val state = new TreeBuilderState()
+        val shape = Distribution(IronConstants.Lognormal, Some(1000L), Some(5000L), None, None, None)
+        val added = state.addLeaf("Fraud Risk", None, shape, 0.2)
+        assertTrue(
+          added.isSuccess,
+          state.activeForm.now() == FormMode.Locked(FormTarget.Leaf(state.leavesVar.now().head.name))
+        )
+      },
+
+      test("addPortfolio: activeForm becomes Locked(Portfolio(name)) on success") {
+        val state = new TreeBuilderState()
+        val added = state.addPortfolio(SafeName.fromString("Operational Risk").toOption.get, None)
+        assertTrue(
+          added.isSuccess,
+          state.activeForm.now() == FormMode.Locked(FormTarget.Portfolio(state.portfoliosVar.now().head.name))
+        )
+      },
+
+      test("updateLeaf: activeForm becomes Locked(Leaf(newName)) on success, replacing whatever mode was active") {
         val leafUnderRoot = RiskLeaf.unsafeApply(
           id               = leafUlid,
           name             = "Cyber Risk",
@@ -460,13 +479,30 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         val originalName = state.leavesVar.now().head.name
-        state.selectedLeafName.set(Some(originalName))
+        state.activeForm.set(FormMode.Editing(FormTarget.Leaf(originalName)))
         val newShape = Distribution(IronConstants.Lognormal, Some(2000L), Some(8000L), None, None, None)
-        state.updateLeaf(originalName, "Renamed", Some("Operational Risk"), newShape, 0.3)
-        assertTrue(state.selectedLeafName.now().isEmpty)
+        val result = state.updateLeaf(originalName, "Renamed", Some("Operational Risk"), newShape, 0.3)
+        assertTrue(
+          result.isSuccess,
+          state.activeForm.now() == FormMode.Locked(FormTarget.Leaf(SafeName.fromString("Renamed").toOption.get))
+        )
       },
 
-      test("removeNode: clears selectedLeafName when the removed leaf was selected") {
+      test("updatePortfolio: activeForm becomes Locked(Portfolio(newName)) on success") {
+        val state = new TreeBuilderState()
+        val added = state.addPortfolio(SafeName.fromString("Operational Risk").toOption.get, None)
+        val originalName = state.portfoliosVar.now().head.name
+        state.activeForm.set(FormMode.Editing(FormTarget.Portfolio(originalName)))
+        val newName = SafeName.fromString("Renamed Portfolio").toOption.get
+        val result = state.updatePortfolio(originalName, newName, None)
+        assertTrue(
+          added.isSuccess,
+          result.isSuccess,
+          state.activeForm.now() == FormMode.Locked(FormTarget.Portfolio(newName))
+        )
+      },
+
+      test("removeNode: clears activeForm to Blank when the removed leaf was the active target") {
         val leafUnderRoot = RiskLeaf.unsafeApply(
           id               = leafUlid,
           name             = "Cyber Risk",
@@ -481,12 +517,12 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
         val leafName = state.leavesVar.now().head.name
-        state.selectedLeafName.set(Some(leafName))
+        state.activeForm.set(FormMode.Locked(FormTarget.Leaf(leafName)))
         state.removeNode(leafName.value.toString)
-        assertTrue(state.selectedLeafName.now().isEmpty)
+        assertTrue(state.activeForm.now() == FormMode.Blank)
       },
 
-      test("removeNode: does not clear selectedLeafName when a different leaf is removed") {
+      test("removeNode: leaves activeForm untouched when a different leaf is removed") {
         val leaf1 = RiskLeaf.unsafeApply(
           id               = leafUlid,
           name             = "Cyber Risk",
@@ -513,37 +549,36 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.loadFromTree(tree)
         val cyberName  = state.leavesVar.now().find(_.name.value == "Cyber Risk").get.name
         val marketName = state.leavesVar.now().find(_.name.value == "Market Risk").get.name
-        state.selectedLeafName.set(Some(cyberName))
+        state.activeForm.set(FormMode.Locked(FormTarget.Leaf(cyberName)))
         state.removeNode(marketName.value.toString)
-        assertTrue(state.selectedLeafName.now().contains(cyberName))
+        assertTrue(state.activeForm.now() == FormMode.Locked(FormTarget.Leaf(cyberName)))
       },
 
-      test("selecting a leaf clears selectedPortfolioName (mutual exclusivity)") {
-        val state = new TreeBuilderState()
-        val portName = SafeName.fromString("MyPortfolio").toOption.get
-        val leafName = SafeName.fromString("MyLeaf").toOption.get
-        state.selectedPortfolioName.set(Some(portName))
-        state.selectedLeafName.set(Some(leafName))
-        // the click handler in TreePreview clears the other Var first
-        state.selectedPortfolioName.set(None)
-        assertTrue(
-          state.selectedLeafName.now().contains(leafName),
-          state.selectedPortfolioName.now().isEmpty
+      test("loadFromTree resets activeForm to Blank even if a node was selected beforehand (bug fix: stale form after scenario/branch switch)") {
+        val leafUnderRoot = RiskLeaf.unsafeApply(
+          id               = leafUlid,
+          name             = "Cyber Risk",
+          distributionType = "lognormal",
+          probability      = 0.3,
+          minLoss          = Some(1000L),
+          maxLoss          = Some(50000L),
+          parentId         = Some(rootId),
+          seedVarId = 19L
         )
+        val tree  = mkTree(treeUlid, "ResetOnLoad", Seq(rootPortfolio, leafUnderRoot), rootId)
+        val state = new TreeBuilderState()
+        state.activeForm.set(FormMode.Editing(FormTarget.Leaf(SafeName.fromString("Stale Leaf").toOption.get)))
+        state.loadFromTree(tree)
+        assertTrue(state.activeForm.now() == FormMode.Blank)
       },
 
-      test("selecting a portfolio clears selectedLeafName (mutual exclusivity)") {
+      test("startNewTree resets activeForm to Blank") {
+        val tree  = mkTree(treeUlid, "My Tree", Seq(lognormalLeaf), leafId)
         val state = new TreeBuilderState()
-        val portName = SafeName.fromString("MyPortfolio").toOption.get
-        val leafName = SafeName.fromString("MyLeaf").toOption.get
-        state.selectedLeafName.set(Some(leafName))
-        state.selectedPortfolioName.set(Some(portName))
-        // the click handler in TreePreview clears the other Var first
-        state.selectedLeafName.set(None)
-        assertTrue(
-          state.selectedPortfolioName.now().contains(portName),
-          state.selectedLeafName.now().isEmpty
-        )
+        state.loadFromTree(tree)
+        state.activeForm.set(FormMode.Locked(FormTarget.Leaf(state.leavesVar.now().head.name)))
+        state.startNewTree()
+        assertTrue(state.activeForm.now() == FormMode.Blank)
       }
 
     ),
