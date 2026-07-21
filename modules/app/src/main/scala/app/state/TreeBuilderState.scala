@@ -280,9 +280,41 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
         )
     }
 
-  /** True if the builder contains any unsaved content. */
+  /** Snapshot of (name, portfolios, leaves) taken right after `loadFromTree` —
+    * the baseline `isDirty` compares against. `None` in create-mode (no tree
+    * loaded yet), where "dirty" simply means "has any content".
+    */
+  private val loadedSnapshotVar: Var[Option[(String, List[PortfolioDraft], List[LeafDraft])]] = Var(None)
+
+  /** True if the builder differs from what's actually saved.
+    *
+    * In create-mode (`loadedSnapshotVar` empty, no tree loaded yet), any
+    * content at all counts as dirty. Once a tree is loaded, dirty means the
+    * fields have changed *since that load* — merely having loaded a
+    * non-empty tree does not count, otherwise every switch away from any
+    * loaded tree would look "dirty" even with zero edits.
+    */
   def isDirty: Boolean =
-    treeNameVar.now().trim.nonEmpty || portfoliosVar.now().nonEmpty || leavesVar.now().nonEmpty
+    val current = (treeNameVar.now(), portfoliosVar.now(), leavesVar.now())
+    loadedSnapshotVar.now() match
+      case Some(baseline) => current != baseline
+      case None           => current._1.trim.nonEmpty || current._2.nonEmpty || current._3.nonEmpty
+
+  /** Reset the builder to a blank, create-mode draft. The only way to leave
+    * update mode — `editingTreeId` is otherwise only ever set, never cleared,
+    * so without this a session that has loaded or created one tree can never
+    * start a second one.
+    */
+  def startNewTree(): Unit =
+    treeNameVar.set("")
+    portfoliosVar.set(Nil)
+    leavesVar.set(Nil)
+    editingTreeId.set(None)
+    selectedLeafName.set(None)
+    selectedPortfolioName.set(None)
+    currentDraftVar.set(None)
+    loadedSnapshotVar.set(None)
+    resetTouched()
 
   /** Populate builder vars from a server-loaded tree.
     *
@@ -325,6 +357,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     portfoliosVar.set(portfolios)
     leavesVar.set(leaves)
     editingTreeId.set(Some(tree.id))
+    loadedSnapshotVar.set(Some((tree.name.value, portfolios, leaves)))
     resetTouched()
 
   // ------------------------------------------------------------

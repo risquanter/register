@@ -7,7 +7,7 @@ import scala.scalajs.js
 import app.chart.{ColorAssigner, LECSpecBuilder}
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
@@ -33,13 +33,15 @@ import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
   * @param selectedTree   Signal for the currently loaded tree structure.
   * @param globalError    App-wide error Var for the 13-cap validation error.
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
+  * @param branchAccessor Returns this tab's active branch (None = main, DD-8) — BranchBar.
   */
 final class LECChartState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
   selectedTree: StrictSignal[LoadState[RiskTree]],
   globalError: Var[Option[GlobalError]],
-  userIdAccessor: () => Option[UserId.Authenticated] = () => None
+  userIdAccessor: () => Option[UserId.Authenticated] = () => None,
+  branchAccessor: () => Option[ScenarioName.ScenarioName] = () => None
 ) extends WorkspaceAnalysisEndpoints:
 
   // ── User selection state ──────────────────────────────────────
@@ -178,7 +180,7 @@ final class LECChartState(
     (keySignal.now(), selectedTreeId.now()) match
       case (Some(key), Some(treeId)) =>
         getWorkspaceLECCurvesMultiEndpoint(
-          (userIdAccessor(), key, treeId, false, nodeIds, None)
+          (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor())
         ).loadInto(curveCache)
       case _ => () // No workspace or tree selected — nothing to do
 

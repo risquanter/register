@@ -484,6 +484,108 @@ body {
   font-family: var(--font-mono);
 }
 
+/* ── Branch chip (topbar indicator, milestone-2b Phase B) ── */
+.branch-chip {
+  font-family: var(--font-mono);
+}
+
+/* ── Scenario toolbar (Design view, atop TreeBuilderView) ── */
+.scenario-toolbar {
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.scenario-toolbar-label {
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+}
+
+.scenario-dropdown {
+  position: relative;
+}
+
+.scenario-dropdown-trigger {
+  padding: var(--sp-1) var(--sp-3);
+  background-color: var(--surface-overlay);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.scenario-dropdown-trigger:hover {
+  background-color: var(--surface-overlay-hover);
+}
+
+.scenario-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  margin-top: var(--sp-1);
+  min-width: 220px;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.scenario-menu-item {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.scenario-menu-item:hover {
+  background-color: var(--surface-overlay-hover);
+}
+
+.scenario-menu-item--active {
+  color: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+.scenario-menu-item--destructive {
+  color: var(--error);
+}
+
+.scenario-menu-divider {
+  height: 1px;
+  margin: var(--sp-1) 0;
+  background-color: var(--border);
+}
+
+.scenario-create-form {
+  padding: var(--sp-2) var(--sp-3);
+}
+
+.scenario-create-actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.scenario-create-actions button {
+  padding: var(--sp-1) var(--sp-3);
+  background-color: var(--surface-overlay);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.scenario-create-actions button:hover {
+  background-color: var(--surface-overlay-hover);
+}
+
 /* ── View containers (Design / Analyze) ── */
 .view-container {
   flex: 1;
@@ -1308,6 +1410,17 @@ select.form-input option {
 }
 
 /* =============================================
+   Design Left Panel (scenario toolbar + TreeBuilderView)
+   ============================================= */
+.design-left-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  height: 100%;
+  min-height: 0;
+}
+
+/* =============================================
    Design Preview Panel
    ============================================= */
 .design-preview-panel {
@@ -1471,12 +1584,36 @@ select.form-input option {
   border-radius: var(--radius-lg);
 }
 
+.tree-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
 .tree-list-view h3 {
   font-family: var(--font-mono);
   font-size: var(--text-lg);
   font-weight: var(--font-weight-medium);
   color: var(--foreground);
-  margin-bottom: var(--sp-3);
+  margin-bottom: 0;
+}
+
+.new-tree-btn {
+  background: var(--surface-overlay);
+  border: 1px solid var(--border);
+  color: var(--foreground-muted);
+  border-radius: var(--radius-md);
+  padding: var(--sp-2) var(--sp-3);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.new-tree-btn:hover {
+  background: var(--surface-overlay-hover);
+  color: var(--foreground);
 }
 
 .tree-list-selector {

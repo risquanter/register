@@ -177,6 +177,56 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
     ),
 
+    // isDirty used to mean "has any content" — true for every loaded tree,
+    // not just edited ones (loadFromTree populates the fields). Fixed
+    // 2026-07-21: dirty now means "differs from the loaded snapshot".
+    suite("isDirty")(
+
+      test("false immediately after loadFromTree — loading a tree is not, by itself, an edit") {
+        val tree  = mkTree(treeUlid, "My Tree", Seq(lognormalLeaf), leafId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        assertTrue(!state.isDirty)
+      },
+
+      test("true after editing the tree name post-load") {
+        val tree  = mkTree(treeUlid, "My Tree", Seq(lognormalLeaf), leafId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        state.treeNameVar.set("Renamed Tree")
+        assertTrue(state.isDirty)
+      },
+
+      test("true after the leaf set changes post-load") {
+        val tree  = mkTree(treeUlid, "My Tree", Seq(lognormalLeaf), leafId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        val extra = state.leavesVar.now().head.copy(name = SafeName.fromString("Duplicate").toOption.get, id = None)
+        state.leavesVar.update(_ :+ extra)
+        assertTrue(state.isDirty)
+      },
+
+      test("false in create-mode with no content — matches pre-fix semantics for the unloaded case") {
+        val state = new TreeBuilderState()
+        assertTrue(!state.isDirty)
+      },
+
+      test("true in create-mode once any content is entered") {
+        val state = new TreeBuilderState()
+        state.treeNameVar.set("Draft")
+        assertTrue(state.isDirty)
+      },
+
+      test("false again after startNewTree resets the snapshot") {
+        val tree  = mkTree(treeUlid, "My Tree", Seq(lognormalLeaf), leafId)
+        val state = new TreeBuilderState()
+        state.loadFromTree(tree)
+        state.treeNameVar.set("Renamed Tree")
+        state.startNewTree()
+        assertTrue(!state.isDirty)
+      }
+    ),
+
     suite("toUpdateRequest — node identity preservation")(
 
       test("loaded nodes route to the existing buckets carrying their original ids; new buckets empty") {

@@ -8,7 +8,7 @@ import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode, ValidationFailed}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
-import com.risquanter.register.services.{RiskTreeService, ScenarioService}
+import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
 import com.risquanter.register.services.workspace.{RateLimiter, WorkspaceStore}
 
 /** Workspace lifecycle controller.
@@ -67,13 +67,14 @@ class WorkspaceLifecycleController private (
   }
 
   val listWorkspaceTrees: ServerEndpoint[Any, Task] = listWorkspaceTreesEndpoint.serverLogic {
-    case (maybeUserId, key) =>
+    case (maybeUserId, key, activeBranch) =>
       (for
         userId   <- userCtx.requireAuthenticated(maybeUserId)
         ws       <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
+        branch   <- ActiveBranch.resolve(ws.id, activeBranch)
         ids      <- workspaceStore.listTrees(key)
-        trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id))
+        trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id, branch))
         existing  = trees.collect { case Some(t) => SimulationResponse.fromRiskTree(t) }
       yield existing).either
   }
@@ -129,8 +130,7 @@ class WorkspaceLifecycleController private (
       ws     <- workspaceStore.resolve(key)
       given Checked[Permission] <- authzService.check(userId, Permission.AdminWorkspace, ws.id.asResource)
       ids    <- workspaceStore.listTrees(key)
-      _      <- riskTreeService.cascadeDeleteTrees(ws.id, ids)
-      _      <- scenarioService.cascadeDeleteScenarios(ws.id)
+      _      <- CascadeDelete.workspace(ws.id, ids, riskTreeService, scenarioService)
       _      <- workspaceStore.delete(key)
     yield ()).either
   }
@@ -142,9 +142,10 @@ class WorkspaceLifecycleController private (
       // endpoint is the admin-triggered, on-demand equivalent of that sweep)
       given Checked[Permission.SystemMaintenance.type] <- bootstrapProvisioner.systemMaintenanceToken()
       evicted <- workspaceStore.evictExpired
-      _       <- ZIO.foreachDiscard(evicted)(ws =>
-                   riskTreeService.cascadeDeleteTrees(ws.id, ws.trees) *>
-                   scenarioService.cascadeDeleteScenarios(ws.id))
+      _       <- ZIO.withParallelism(8) {
+                   ZIO.foreachParDiscard(evicted)(ws =>
+                     CascadeDelete.workspace(ws.id, ws.trees, riskTreeService, scenarioService))
+                 }
     yield Map("evicted" -> evicted.size)
   }
 

@@ -32,7 +32,7 @@ These are built automatically by `docker compose up` in local development.
 is absent or out of date:
 
 ```bash
-sed -n 's/ThisBuild \/ version := "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
+sed -n 's/ThisBuild \/ version[[:space:]]*:= "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
 source .env    # makes APP_VERSION available to the commands below
 ```
 
@@ -81,7 +81,7 @@ use those images without triggering another build:
 
 ```bash
 # 1. Sync version from build.sbt
-APP_VERSION=$(sed -n 's/ThisBuild \/ version := "\(.*\)"/\1/p' build.sbt)
+APP_VERSION=$(sed -n 's/ThisBuild \/ version[[:space:]]*:= "\(.*\)"/\1/p' build.sbt)
 echo "APP_VERSION=${APP_VERSION}" > .env
 
 # 2. Build builder base (use CI cache)

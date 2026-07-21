@@ -259,7 +259,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
           scenarioName  = ScenarioName.fromString("stress-2026").toOption.get
           scenarioSvc   = CascadeTestStubs.scenarioService(
                             onList = _ => ZIO.succeed(List(ScenarioSummary(scenarioName, head))),
-                            onDelete = (_, name) =>
+                            onDelete = (_, name, _) =>
                               deletedRef.update(_ :+ name) *> deleted.succeed(()).unit
                           )
           key          <- store.create()

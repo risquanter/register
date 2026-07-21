@@ -19,7 +19,7 @@ final class FlywayServiceLive(config: FlywayConfig) extends FlywayService:
       Flyway
         .configure()
         .dataSource(config.url, config.user, password)
-        .locations("classpath:db/migration")
+        .locations(config.migrationsLocation)
         .load()
         .migrate()
     }.unit

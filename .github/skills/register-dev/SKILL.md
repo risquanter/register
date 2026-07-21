@@ -140,6 +140,57 @@ Build production frontend bundle (used by Docker):
 cd modules/app && npm run build
 ```
 
+### npm dependencies — hard rules (ADR-020)
+
+**Never run `npm install`/`npm update` without explicit prior authorization
+from the user** — this applies even to repair a broken `node_modules`
+(missing binary, corrupted install). Ask first; do not install to unblock
+yourself.
+
+**npm silently auto-installs required peerDependencies (v7+ default
+behaviour) — this bit the project once.** `geist` declares `next` as a
+required peer; a plain `npm install` pulled in `next@16.2.2` and its `sharp`
+dependency — ~46 packages, two of them with real high-severity CVEs — none
+of it declared in `package.json`, none of it used by the app. Fixed via
+`legacy-peer-deps=true` in `.npmrc` (ADR-020 §7). If a future `npm install`
+in this project ever reports a large, unexpected package count change, this
+is the first thing to suspect — check for a new/changed dependency with a
+peerDependency the tree doesn't already satisfy.
+
+**When install/update work is explicitly authorized, follow ADR-020 §8,
+not a plain `npm install`:**
+```bash
+cd modules/app
+npm install --package-lock-only   # resolve only — no node_modules writes, no scripts
+npm audit                         # check the resolved lockfile before installing anything
+# only if clean (or after fixing via version bump / package.json "overrides"):
+npm install                       # or `npm ci` in CI/Docker — syncs node_modules
+npm audit                         # confirm again post-install
+npm audit signatures              # registry signature + Sigstore provenance check
+```
+
+**Tool version is pinned and enforced, not just the packages.**
+`package.json`'s `"engines"` field (`npm >=10.9.8`, `node >=20.5.0`) +
+`engine-strict=true` in `.npmrc` make `npm install`/`npm ci` refuse to run
+on an older npm/Node — verified 2026-07-21 by deliberately setting an
+unsatisfiable `engines.npm` and confirming `EBADENGINE` fires. `npm audit
+signatures` requires npm ≥9.5.0 for Sigstore provenance; this machine's
+system npm was upgraded (`sudo npm install -g npm@10.9.8`) specifically to
+clear that floor — confirmed working: 98/98 packages verified registry
+signatures, 10 packages verified Sigstore attestations.
+
+**Global npm config mirrors the same hardening** (`~/.npmrc`, not just this
+project's) — `ignore-scripts`, `save-exact`, `legacy-peer-deps` apply by
+default to every npm project on this machine, not only `register`.
+`engine-strict` is project-scoped only (it depends on each project's own
+`engines` field, which most other projects won't declare).
+
+Full incident writeup, the `npm ci` vs `npm install` distinction for
+`Dockerfile.frontend-prod`, and Sigstore/`npm audit signatures` status:
+`docs/dev/ADR-020-supply-chain-security.md` §7–§9. Prerequisites and the
+same command sequence for new contributors:
+`docs/user/DEVELOPMENT-SETUP.md`.
+
 ---
 
 ## Docker Compose — Dev Use Cases
@@ -230,7 +281,7 @@ flag it — do not bump autonomously.
 # 1. Edit build.sbt — change ThisBuild / version := "x.y.z"
 
 # 2. Sync .env
-sed -n 's/ThisBuild \/ version := "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
+sed -n 's/ThisBuild \/ version[[:space:]]*:= "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
 
 # 3. Verify
 cat .env   # should print APP_VERSION=x.y.z

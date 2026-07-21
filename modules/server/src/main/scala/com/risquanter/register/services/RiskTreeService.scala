@@ -98,16 +98,20 @@ object RiskTreeService:
   /** Best-effort cascade deletion — deletes each tree, swallowing individual failures.
     * Each failure is logged as a warning before being swallowed, so an orphaned
     * tree (delete failed, not just "already gone") is observable instead of silent.
+    * Deletes are independent (no shared CAS target, no ordering requirement), so
+    * they run with bounded concurrency rather than one at a time.
     *
-    * Used by `WorkspaceLifecycleController.deleteWorkspace` (explicit delete),
-    * `WorkspaceLifecycleController.evictExpired` (admin sweep), and `WorkspaceReaper`
-    * (TTL expiry). Extracted here as the single source of truth for the
+    * Used via `CascadeDelete.workspace` by `WorkspaceLifecycleController.deleteWorkspace`
+    * (explicit delete), `WorkspaceLifecycleController.evictExpired` (admin sweep), and
+    * `WorkspaceReaper` (TTL expiry). Extracted here as the single source of truth for the
     * cascade-delete semantic. Mirrored by `ScenarioService.cascadeDeleteScenarios`
-    * for scenario branches — every one of these three call sites composes both.
+    * for scenario branches.
     */
   extension (self: RiskTreeService)
     def cascadeDeleteTrees(wsId: WorkspaceId, ids: Iterable[TreeId])(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): UIO[Unit] =
-      ZIO.foreachDiscard(ids)(id =>
-        self.delete(wsId, id)
-          .tapError(e => ZIO.logWarning(s"cascadeDeleteTrees: failed to delete tree ${id.value} in workspace ${wsId.value}: ${e.getMessage}"))
-          .ignore)
+      ZIO.withParallelism(8) {
+        ZIO.foreachParDiscard(ids)(id =>
+          self.delete(wsId, id)
+            .tapError(e => ZIO.logWarning(s"cascadeDeleteTrees: failed to delete tree ${id.value} in workspace ${wsId.value}: ${e.getMessage}"))
+            .ignore)
+      }

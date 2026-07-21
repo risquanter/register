@@ -22,7 +22,8 @@ object SecretConfigSpec extends ZIOSpecDefault {
       withConfig(
         "register.flyway.url" -> "jdbc:postgresql://localhost:5432/register",
         "register.flyway.user" -> "register",
-        "register.flyway.password" -> "super-secret"
+        "register.flyway.password" -> "super-secret",
+        "register.flyway.migrationsLocation" -> "classpath:db/migration"
       ) {
         ZIO.config(flywayConfig).map { config =>
           assertTrue(

@@ -8,7 +8,8 @@ import zio.config.magnolia.*
 final case class FlywayConfig(
   url: String,
   user: String,
-  password: Config.Secret
+  password: Config.Secret,
+  migrationsLocation: String
 )
 
 object FlywayConfig:

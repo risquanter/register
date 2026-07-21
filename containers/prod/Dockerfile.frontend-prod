@@ -77,14 +77,18 @@ COPY register/project/ project/
 RUN sbt "app/update; commonJS/update"
 
 # --------------------------------------------------------------------------
-# npm dependency layer (cached unless package.json changes)
-# .npmrc enforces ignore-scripts=true and save-exact=true (ADR-020).
-# No package-lock.json in repo → npm install; --ignore-scripts is belt-
-# and-suspenders in addition to the .npmrc setting.
+# npm dependency layer (cached unless package.json/package-lock.json changes)
+# .npmrc enforces ignore-scripts=true, save-exact=true, legacy-peer-deps=true
+# (ADR-020). `npm ci` — not `npm install` — installs exactly what's in
+# package-lock.json and fails if it and package.json disagree; `npm install`
+# re-resolves from the registry on every build and had silently drifted from
+# the committed lockfile (2026-07-21 incident, ADR-020 §7). --ignore-scripts
+# is belt-and-suspenders in addition to the .npmrc setting.
 # --------------------------------------------------------------------------
-COPY register/modules/app/package.json modules/app/package.json
-COPY register/modules/app/.npmrc       modules/app/.npmrc
-RUN cd modules/app && npm install --ignore-scripts
+COPY register/modules/app/package.json      modules/app/package.json
+COPY register/modules/app/package-lock.json modules/app/package-lock.json
+COPY register/modules/app/.npmrc            modules/app/.npmrc
+RUN cd modules/app && npm ci --ignore-scripts
 
 # --------------------------------------------------------------------------
 # Source layer — compile and bundle

@@ -217,6 +217,122 @@ opam list --installed                 # record current pins
 # Update FROM tags and, if digest-pinning, update digests too
 ```
 
+### 7. Incident: npm auto-installed a required peerDependency (2026-07-21)
+
+**What happened:** `geist@1.7.0` (a direct dependency, used only for its
+static font files/CSS — see §5) declares `next: >=13.2.0` as a **required**
+(non-optional) peerDependency. Since npm v7, a plain `npm install` silently
+auto-installs a satisfying version of any unmet required peer. This pulled
+in `next@16.2.2` — which itself has multiple disclosed high-severity CVEs
+(SSRF via WebSocket upgrades, middleware/proxy auth bypass, cache poisoning
+— see the [GitHub Advisory Database](https://github.com/advisories) entries
+for `next`) — and `next`'s own dependency on `sharp` (image optimization),
+pulling in ~35 platform-specific native binary packages. None of this is
+imported or executed anywhere in `modules/app/src`; it was dead code sitting
+in `node_modules`, but it was real attack surface and inflated the dependency
+count from ~99 to 194 packages.
+
+Separately, `vite@6.4.1` (a real, used, direct dependency) had two
+independently disclosed high-severity CVEs of its own (arbitrary file read
+via the dev server WebSocket; a Windows `server.fs.deny` bypass), and
+`vite`'s own transitive `postcss` dependency resolved to a version with a
+disclosed moderate XSS CVE.
+
+**Fixed 2026-07-21:**
+- `legacy-peer-deps=true` added to `.npmrc` — npm no longer auto-installs
+  required peers; it only reports them. This is the one npm setting in this
+  file that is *not* purely restrictive: it changes resolution behaviour for
+  every future `npm install`, so any future package that *legitimately*
+  needs a peer auto-installed will need that peer added explicitly to
+  `package.json` instead.
+- `vite` bumped `6.4.1` → `6.4.3` (patches both CVEs, non-major).
+- `postcss` pinned via `package.json`'s `"overrides"` field to `8.5.21`
+  (patches the XSS CVE; `postcss` is not a direct dependency, so `overrides`
+  — npm's mechanism for forcing a transitive dependency's resolved version —
+  is required here rather than a normal version bump).
+- `npm audit` confirmed 0 vulnerabilities (moderate/high/critical) after
+  the fix, verified via `npm install --package-lock-only` (resolves and
+  updates the lockfile only, without writing `node_modules` or running any
+  scripts) *before* the real install — see §8's mandatory workflow.
+- `containers/prod/Dockerfile.frontend-prod` was not copying
+  `package-lock.json` into its build context at all and ran `npm install`,
+  which re-resolves from the registry on every build — meaning the
+  committed lockfile was never actually enforced in production. Changed to
+  `COPY` the lockfile and run `npm ci` (fails if `package.json` and
+  `package-lock.json` disagree; installs exactly what's locked, nothing
+  re-resolved).
+
+**Cross-reference:** §5 already recommends vendoring `geist`'s static font
+files instead of depending on the npm package, which would have prevented
+this class of incident entirely (no npm dependency → no peerDependency → no
+transitive pull). That remains the stronger long-term fix; `geist` was kept
+as a dependency for now — this section's fix is scoped to the mechanism, not
+the underlying dependency choice.
+
+### 8. Mandatory Pre-Install/Update Workflow
+
+Before running `npm install`/`npm update` for any reason (fixing a broken
+environment, adding a dependency, bumping a version) — not just before
+*adding* a new dependency (§4 already covered that case):
+
+1. `npm install --package-lock-only` — resolves the full dependency tree and
+   updates `package-lock.json` *without* writing `node_modules` or running
+   any install scripts. This is the inspection point.
+2. `npm audit` against the resulting lockfile. Zero tolerance for
+   high/critical (§4 point 5); moderate should be fixed if a non-major fix
+   is available (`overrides` if the vulnerable package is transitive).
+3. Only once the resolved lockfile audits clean: run the real `npm install`
+   (or `npm ci` in CI/Docker) to sync `node_modules`.
+4. Re-run `npm audit` after the real install as a final confirmation
+   (`node_modules` state should match the already-audited lockfile, but this
+   catches any drift).
+
+This is the exact sequence used in the §7 fix and should be the standing
+procedure, not a one-off.
+
+### 9. Sigstore-Based Package Verification — Adopted 2026-07-21
+
+npm supports Sigstore-based verification via `npm audit signatures`, which
+checks two independent things against every package in the tree: the
+registry's own signature (npm's long-standing PGP-style signing) and, for
+packages published with `--provenance` (common for packages built in public
+CI, e.g. GitHub Actions), a Sigstore attestation linking the published
+artifact back to the exact source commit and build workflow that produced
+it — verified against the public Sigstore transparency log, not a key this
+project has to manage.
+
+**Required npm ≥9.5.0 for provenance verification.** This machine's system
+npm was `9.2.0` — too old, and `npm audit signatures` failed outright with
+`EEXPIREDSIGNATUREKEY` (the locally cached registry public key had expired
+2025-01-29, predating that npm version's key rotation). Upgraded via
+`sudo npm install -g npm@10.9.8` (npm's own registry, engine-checked against
+this machine's Node `v20.19.2`; `12.0.1`/latest was rejected as a target —
+it requires Node ≥22.22.2, which would have forced an unrelated Node
+upgrade). Verified working: `npm audit signatures` now reports **98/98
+packages with verified registry signatures, 10 packages with verified
+Sigstore attestations**, 0 failures.
+
+**Tool version is now pinned, matching §1's "pin everything exactly"
+principle applied to npm/Node themselves, not just packages:**
+`package.json`: `"engines": { "npm": ">=10.9.8", "node": ">=20.5.0" }`;
+`.npmrc`: `engine-strict=true`. Verified enforced (not just declared) by
+deliberately setting an unsatisfiable `engines.npm` and confirming
+`npm install` fails with `EBADENGINE`, then reverting.
+
+**Adopted into §8's workflow** as the final step after the post-install
+`npm audit` (not yet gating — no CI pipeline runs this yet, so "adopted"
+means "run manually every time," not "blocks a merge automatically"). No
+packages in this project's tree currently fail the registry-signature check;
+the un-attested 88/98 packages are pre-provenance packages (the norm for
+most of npm's registry, not a finding) rather than failures.
+
+**`ignore-scripts`, `save-exact`, `legacy-peer-deps` are now also set at the
+npm user-config level** (`~/.npmrc`, this user account, no root needed) —
+every npm project this user touches gets the same hardened defaults, not
+just `register`. `engine-strict` stays project-scoped only: it depends on
+each project's own `engines` field, which most unrelated projects won't
+declare, so there's nothing to gain from forcing it user-wide.
+
 ---
 
 ## Code Smells
@@ -265,15 +381,18 @@ npm install some-fancy-package   # scripts run, no vulnerability check
 
 | Location / Pattern | Ecosystem | Directive |
 |---|---|---|
-| `modules/app/.npmrc` | npm | `ignore-scripts=true`, `save-exact=true` |
-| `modules/app/package.json` | npm | Exact version pins (no `^` or `~`) |
+| `modules/app/.npmrc` | npm | `ignore-scripts=true`, `save-exact=true`, `legacy-peer-deps=true` (§7) |
+| `modules/app/package.json` | npm | Exact version pins (no `^` or `~`); `"overrides"` to force-pin vulnerable transitive deps (§7) |
+| `modules/app/package-lock.json` | npm | Committed; must actually be installed *from* (`npm ci`), not just present (§7) |
 | `containers/builders/Dockerfile.irmin-builder` | opam | `opam install pkg.3.11.0` (version-pinned) |
 | `containers/builders/Dockerfile.graalvm-builder` | wget | `SBT_SHA256` arg + `sha256sum -c` |
-| `containers/prod/Dockerfile.frontend-prod` | wget | `SBT_SHA256` arg + `sha256sum -c` |
+| `containers/prod/Dockerfile.frontend-prod` | wget, npm | `SBT_SHA256` arg + `sha256sum -c`; `npm ci --ignore-scripts` against the copied lockfile (§7) |
 | `project/build.properties` | sbt | `sbt.version=<exact>` |
 | All `FROM` lines | Docker | Pin to specific semver tags; use digest for releases |
 | `zed` CLI (CI runner) | SpiceDB | Pin version + checksum verify (same pattern as `opa`, `conftest`) |
-| Pre-install checklist | All | socket.dev / opam-show / apk audit review |
+| Pre-install checklist | All | socket.dev / opam-show / apk audit review; §8's resolve-then-audit-then-install workflow for npm |
+| `npm audit signatures` | npm | Sigstore provenance + registry signature verification — adopted (§9), manual step in §8's workflow |
+| `~/.npmrc` (user config, this machine) | npm | `ignore-scripts=true`, `save-exact=true`, `legacy-peer-deps=true` — same hardening, all npm projects for this user (§9) |
 
 ---
 

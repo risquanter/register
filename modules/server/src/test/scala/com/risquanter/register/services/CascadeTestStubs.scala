@@ -30,8 +30,8 @@ object CascadeTestStubs:
 
   def scenarioService(
     onList: WorkspaceId => Task[List[ScenarioSummary]],
-    onDelete: (WorkspaceId, ScenarioName.ScenarioName) => Task[Unit]
+    onDelete: (WorkspaceId, ScenarioName.ScenarioName, CommitHash) => Task[Unit]
   ): ScenarioService = new ScenarioService:
     def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)(using Checked[Permission]): Task[BranchRef] = ZIO.die(new UnsupportedOperationException)
     def list(wsId: WorkspaceId)(using Checked[Permission]): Task[List[ScenarioSummary]] = onList(wsId)
-    def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)(using Checked[Permission]): Task[Unit] = onDelete(wsId, name)
+    def delete(wsId: WorkspaceId, name: ScenarioName.ScenarioName, expectedHead: CommitHash)(using Checked[Permission]): Task[Unit] = onDelete(wsId, name, expectedHead)

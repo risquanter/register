@@ -9,10 +9,33 @@ This guide covers the local development workflow for contributors modifying Regi
 | Repository cloned | All three sibling repos (`register/`, `vague-quantifier-logic/`, `hdr-rng/`) must be cloned side-by-side. See [Getting Started](../README.md#getting-started-in-memory-storage) for clone commands. |
 | JDK 21 | Required by `sbt`. |
 | sbt | Scala Build Tool — handles backend compilation, Scala.js, and native-image builds. |
-| Node.js 18+ and npm | Required for the Scala.js / Vite frontend. |
-| Docker 20.10+ and Docker Compose 2.0+ | Backend and persistence services run in containers during development. |
+| Node.js ≥20.5.0 and npm ≥10.9.8 | Required for the Scala.js / Vite frontend. Enforced by `modules/app/package.json`'s `engines` field + `engine-strict=true` in `modules/app/.npmrc` — `npm install`/`npm ci` refuse to run below these versions (ADR-020 §7/§9). |
+| Docker 20.10+ and Docker Compose 2.20+ | Backend and persistence services run in containers during development. (2.20+ needed for `depends_on`'s `required` attribute.) |
 
 For containerized production-equivalent deployment (nginx, full stack, Kubernetes) see [DOCKER-DEVELOPMENT.md](DOCKER-DEVELOPMENT.md).
+
+---
+
+## npm dependency changes — hard rules (ADR-020)
+
+**Never run `npm install`/`npm update` to fix a broken environment or add a
+dependency without explicit authorization first.** npm auto-installs
+required peerDependencies by default (v7+) — this silently pulled ~46 unused
+packages with real CVEs into this project once (ADR-020 §7). Ask before
+installing; don't install to unblock yourself.
+
+When install/update work is authorized, run this sequence, not a plain
+`npm install` (ADR-020 §8):
+
+```bash
+cd modules/app
+npm install --package-lock-only   # resolve only — no node_modules writes, no scripts
+npm audit                         # check the resolved lockfile before installing anything
+# only if clean (or after fixing via a version bump / package.json "overrides"):
+npm install                       # or `npm ci` in CI/Docker — syncs node_modules
+npm audit                         # confirm again post-install
+npm audit signatures              # registry signature + Sigstore provenance check (needs npm ≥9.5.0)
+```
 
 ---
 

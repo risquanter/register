@@ -4,7 +4,7 @@ import zio.ZIO
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.domain.errors.FolQueryFailure.*
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
@@ -24,11 +24,13 @@ import fol.parser.VagueQueryParser
   * @param keySignal      Read-only signal providing the active workspace key.
   * @param selectedTreeId Signal for the currently selected tree ID.
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
+  * @param branchAccessor Returns this tab's active branch (None = main, DD-8) — BranchBar.
   */
 final class AnalyzeQueryState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
-  userIdAccessor: () => Option[UserId.Authenticated] = () => None
+  userIdAccessor: () => Option[UserId.Authenticated] = () => None,
+  branchAccessor: () => Option[ScenarioName.ScenarioName] = () => None
 ) extends WorkspaceQueryEndpoints:
 
   // ── Query input ───────────────────────────────────────────────
@@ -133,7 +135,7 @@ final class AnalyzeQueryState(
             case (Some(key), Some(treeId)) =>
               queryResult.set(LoadState.Loading)
               queryServerError.set(None)
-              queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(queryText), None))
+              queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(queryText), branchAccessor()))
                 .foldZIO(
                   failure = {
                     case e: FolQueryFailure if isQueryDomainError(e) =>

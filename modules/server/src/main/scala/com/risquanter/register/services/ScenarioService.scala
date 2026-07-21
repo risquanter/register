@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash}
-import com.risquanter.register.domain.errors.ScenariosNotSupported
+import com.risquanter.register.domain.errors.{ScenariosNotSupported, ScenarioHeadStale}
 
 /** What a new scenario forks from (DD-5, amended 2026-07-20). A create always
   * forks from exactly one source — main, or another scenario's current head —
@@ -84,11 +84,19 @@ object ScenarioService:
     * `list` call), swallowing individual failures (a stale head race, or a
     * backend that doesn't support scenarios at all).
     *
+    * A `ScenarioHeadStale` failure (the branch moved between `list` and this
+    * `delete` — e.g. a write still in flight when workspace teardown started)
+    * is retried exactly once against a freshly re-resolved head, rather than
+    * being swallowed immediately: cascade-delete exists specifically to avoid
+    * leaving orphaned scenario branches, so silently giving up on the first
+    * stale-head race would reproduce the exact leak it closes. If the
+    * scenario is gone by the retry, there's nothing left to delete.
+    *
     * `list` failing with `ScenariosNotSupported` is routine (the in-memory
     * backend has no scenario support) and is not logged. Any other `list`
-    * failure, and any individual `delete` failure, is logged as a warning
-    * before being swallowed, so a genuinely orphaned scenario branch is
-    * observable instead of silent.
+    * failure, and any individual `delete` failure surviving the retry, is
+    * logged as a warning before being swallowed, so a genuinely orphaned
+    * scenario branch is observable instead of silent.
     *
     * Used by `WorkspaceLifecycleController.deleteWorkspace` (explicit delete),
     * `WorkspaceLifecycleController.evictExpired` (admin sweep), and
@@ -97,13 +105,23 @@ object ScenarioService:
     */
   extension (self: ScenarioService)
     def cascadeDeleteScenarios(wsId: WorkspaceId)(using Checked[Permission]): UIO[Unit] =
+      def deleteWithFreshHeadRetry(s: ScenarioSummary): Task[Unit] =
+        self.delete(wsId, s.name, s.head).catchSome { case _: ScenarioHeadStale =>
+          self.list(wsId).flatMap { fresh =>
+            fresh.find(_.name == s.name) match
+              case Some(refreshed) => self.delete(wsId, refreshed.name, refreshed.head)
+              case None             => ZIO.unit
+          }
+        }
       self.list(wsId)
         .tapError {
           case _: ScenariosNotSupported => ZIO.unit
           case e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to list scenarios for workspace ${wsId.value}: ${e.getMessage}")
         }
-        .flatMap(scenarios => ZIO.foreachDiscard(scenarios)(s =>
-          self.delete(wsId, s.name, s.head)
-            .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.getMessage}"))
-            .ignore))
+        .flatMap(scenarios => ZIO.withParallelism(8) {
+          ZIO.foreachParDiscard(scenarios)(s =>
+            deleteWithFreshHeadRetry(s)
+              .tapError(e => ZIO.logWarning(s"cascadeDeleteScenarios: failed to delete scenario '${s.name.value}' in workspace ${wsId.value}: ${e.getMessage}"))
+              .ignore)
+        })
         .ignore

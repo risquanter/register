@@ -1371,7 +1371,12 @@ Phase B: Scenario CRUD + Minimal UI
     updates to 3 existing controllers; own Signature Echo when
     picked up                                                  [Scala]
   - Invariant test: creation accepts a slug, never a
-    caller-supplied full BranchRef (DD-11)                     [Scala]
+    caller-supplied full BranchRef (DD-11) — **DONE 2026-07-21.**
+    `ScenarioControllerSpec`: POST with a full `scenarios.<ws>.<name>`
+    ref as `name` is rejected 400 by the `ScenarioName` Iron codec at
+    the Tapir boundary, never reaching `ScenarioService.create`
+    (structural guarantee: `CreateScenarioRequest.name` has no
+    `BranchRef`-typed field to begin with)                     [Scala]
   - In-memory backend: execute the A8-item-3 decision
     (recommended: feature-flag off, typed NOT_SUPPORTED) —
     **DONE 2026-07-20.** `ScenarioServiceNotSupported` fails every
@@ -1413,11 +1418,69 @@ Phase B: Scenario CRUD + Minimal UI
     sketch confirmation; DD-9 must consider the disabled
     state as a design input (see DD-9 row)          [Scala + Scala.js]
   - Workspace reaper: delete scenarios.<ws>.* branches on reap  [Scala]
-  - BranchBar UI component + per-tab branch state (DD-9:
-    confirm placement against sketch at phase start; the
-    sketch must show the disabled/feature-off state too —
-    see kill-switch item)                            [Scala.js/Laminar]
-  - End-to-end: create scenario, switch, edit, switch back
+  - BranchBar UI component + per-tab branch state — **DONE 2026-07-21**
+    (PLAN-UI-MILESTONE-2B.md §4). `ScenarioState` (per-tab `activeBranch`
+    Var + scenario list/create/delete against the real endpoints) and
+    `AppConfigState` (fetches `/config.json`, `scenariosEnabled` flag) in
+    `app/state/`; `BranchBar.chip` (topbar indicator, both views) and
+    `BranchBar.toolbar` (Design-only switch/create/duplicate/delete
+    dropdown, atop TreeBuilderView) in `app/components/`. Kill-switch
+    UI half folded in here as originally planned: both surfaces are
+    display:none-gated on `scenariosEnabled` (Variant R — full absence
+    is CSS-only, not a DOM add/remove, since nothing about the surfaces
+    is expensive to keep mounted-but-hidden). `X-Active-Branch` threaded
+    into the 4 call sites DD-8's retrofit added the header to
+    (`TreeViewState`, `LECChartState`, `AnalyzeQueryState`,
+    `TreeBuilderView` — via new `branchAccessor` constructor params,
+    defaulted to `() => None` to preserve old behaviour anywhere
+    unconstructed). Verified: `sbt commonJVM/test server/test app/test`
+    all green; live round-trip against the real server + Irmin container
+    (create/list/duplicate/delete scenario, tree structure fetch with
+    `X-Active-Branch` against a forked branch) confirms the wire format
+    assumptions in `ScenarioState` match the real endpoints, not just
+    the test doubles. Not independently interactive-browser-tested
+    (no browser automation tool available in this environment) — a
+    manual click-through is still worth doing.
+    **Deliberately out of scope, follow-up item:** `listWorkspaceTreesEndpoint`
+    has no `X-Active-Branch` header — the tree list still only shows
+    main's trees, so a tree created directly on a scenario branch is
+    invisible in `TreeListView` until that endpoint is retrofitted too
+    (own signature echo, since it's a Tapir shape change) — same
+    reasoning as DD-8's original item-4 scoped split.
+    [Scala.js/Laminar]
+  - `listWorkspaceTreesEndpoint` branch-aware listing — **DONE 2026-07-21.**
+    Added `.in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))`
+    to the endpoint (`WorkspaceLifecycleEndpoints.scala`), matching the DD-8
+    pattern already used by `getWorkspaceTreeStructureEndpoint`/`getTreeById`/
+    `updateTree`/`deleteTree`. Controller resolves it via `ActiveBranch.resolve`
+    and threads it into `riskTreeService.getById(ws.id, id, branch)` — no
+    service/repository change needed, both already carried
+    `branch: Option[BranchRef] = None`. Frontend: `TreeViewState.loadTreeList`
+    now passes its existing (previously unused) `branchAccessor()`;
+    `WorkspaceState.preValidate` (a startup check that runs before any tab has
+    a selected branch) passes `None` explicitly. New test
+    (`WorkspaceLifecycleControllerSpec`, "listWorkspaceTrees is branch-scoped"):
+    upgraded the spec's stub `RiskTreeRepository` to key by
+    `(workspace, branch, tree)` instead of `(workspace, tree)` — matching real
+    branch-isolation semantics — then asserts a tree created on a scenario
+    branch is invisible on `main` and vice versa. `sbt commonJVM/test
+    server/test app/test`: all green (556/508/12 suites respectively).
+    **Deliberately not done in this pass:** live round-trip against the real
+    server + Irmin container — the running `register-server` container is a 5-day-old
+    image predating this change; a rebuild was judged out of scope for this
+    item versus the end-to-end item below, which needs it anyway.
+    [Scala]
+  - End-to-end: create scenario, switch, edit, switch back —
+    unblocked, **NOT STARTED.** No existing Scala.js test infrastructure
+    stubs the Tapir sttp client the way `WorkspaceLifecycleControllerSpec`
+    stubs it server-side (`SttpBackendStub` + `TapirStubInterpreter`) — every
+    current `app/test` spec is a pure state/logic test, none exercise
+    `ScenarioState`/`TreeViewState` against a fake backend. Building that
+    harness is its own scoped decision, not a size-matched follow-on to the
+    item above. Related: TODO item 24 (browser automation investigation) and
+    the live-round-trip verification already done for BranchBar itself
+    (Phase B, `create/list/duplicate/delete scenario` — see that entry above)
+    are both viable alternative paths to real coverage here.               [Scala.js]
   - DD-7 write-side batching (set_tree, one commit per user
     action) — scheduling decision at Phase B kickoff: doing it
     early limits legacy multi-commit history and fixes the

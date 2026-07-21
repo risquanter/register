@@ -6,7 +6,7 @@ import scala.scalajs.js
 
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
 import com.risquanter.register.http.responses.SimulationResponse
@@ -24,17 +24,42 @@ import com.risquanter.register.http.responses.SimulationResponse
   * Extends workspace lifecycle/tree endpoint traits to access workspace-scoped Tapir endpoint
   * definitions for ZJS bridge calls.
   *
-  * @param keySignal      Read-only signal providing the active workspace key.
-  * @param globalError    App-wide error Var (passed through to LECChartState for
-  *                       the 13-cap validation error).
-  * @param userIdAccessor  Returns the current user identity (None in capability-only mode).
+  * @param keySignal          Read-only signal providing the active workspace key.
+  * @param globalError        App-wide error Var (passed through to LECChartState for
+  *                           the 13-cap validation error).
+  * @param userIdAccessor     Returns the current user identity (None in capability-only mode).
+  * @param activeBranchSignal This tab's active branch (None = main, DD-8) — BranchBar.
+  *                           A signal, not just a pull accessor: this class owns the
+  *                           "branch changed, re-fetch the list and whatever tree is
+  *                           selected" reactivity internally (mirrors `LECChartState`'s
+  *                           internal `unsafeWindowOwner` subscription) so every consumer
+  *                           of this state gets current data on a branch switch without
+  *                           having to remember to wire that reload themselves.
   */
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   globalError: Var[Option[GlobalError]],
-  userIdAccessor: () => Option[UserId.Authenticated] = () => None
+  userIdAccessor: () => Option[UserId.Authenticated] = () => None,
+  activeBranchSignal: StrictSignal[Option[ScenarioName.ScenarioName]] = Val(None)
 ) extends WorkspaceLifecycleEndpoints
   with WorkspaceTreeEndpoints:
+
+  private def branchAccessor(): Option[ScenarioName.ScenarioName] = activeBranchSignal.now()
+
+  // Set by a caller (DesignView) immediately before it reverts the active branch
+  // itself (a declined confirm dialog) — suppresses exactly that one echo so the
+  // revert doesn't trigger a redundant reload that could clobber what the caller
+  // just chose to keep. Cleared automatically after being consumed once.
+  private val suppressNextReloadVar: Var[Boolean] = Var(false)
+  def suppressNextReload(): Unit = suppressNextReloadVar.set(true)
+
+  activeBranchSignal.changes.foreach { _ =>
+    if suppressNextReloadVar.now() then
+      suppressNextReloadVar.set(false)
+    else
+      loadTreeList()
+      refreshSelectedTree()
+  }(using unsafeWindowOwner)
 
   // ── Available trees (summary list) ────────────────────────────
   val availableTrees: Var[LoadState[List[SimulationResponse]]] = Var(LoadState.Idle)
@@ -48,7 +73,7 @@ final class TreeViewState(
   val selectedNodeId: Var[Option[NodeId]] = Var(None)
 
   // ── Chart state (delegated) ───────────────────────────────────
-  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor)
+  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor, branchAccessor)
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.
@@ -78,7 +103,7 @@ final class TreeViewState(
   /** Fetch all trees from the backend (summary only). */
   def loadTreeList(): Unit =
     keySignal.now() match
-      case Some(key) => listWorkspaceTreesEndpoint((userIdAccessor(), key)).loadInto(availableTrees)
+      case Some(key) => listWorkspaceTreesEndpoint((userIdAccessor(), key, branchAccessor())).loadInto(availableTrees)
       case None      => () // No workspace yet — nothing to load
 
   /** Fetch the full tree structure for the given id. */
@@ -88,7 +113,7 @@ final class TreeViewState(
     chartState.reset()
     keySignal.now() match
       case Some(key) =>
-        getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, None)).loadOptionInto(selectedTree, "Tree not found")
+        getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor())).loadOptionInto(selectedTree, "Tree not found")
       case None => ()
 
   /** Select a tree by id — sets `selectedTreeId` and triggers structure fetch. */

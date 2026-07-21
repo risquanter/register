@@ -81,7 +81,7 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
                               ZIO.fail(new NoSuchElementException("gone")))
         scenarioSvc      = CascadeTestStubs.scenarioService(
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
-                              onDelete = (_, n) => scenarioDeleted.update(_ :+ n)
+                              onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)
                             )
         key             <- store.create()
         treeId          <- IdGenerators.nextTreeId
@@ -108,7 +108,7 @@ object WorkspaceLifecycleControllerCascadeSpec extends ZIOSpecDefault:
                               ZIO.fail(new NoSuchElementException("gone")))
         scenarioSvc      = CascadeTestStubs.scenarioService(
                               onList = _ => ZIO.succeed(List(ScenarioSummary(name, scenarioHead))),
-                              onDelete = (_, n) => scenarioDeleted.update(_ :+ n)
+                              onDelete = (_, n, _) => scenarioDeleted.update(_ :+ n)
                             )
         key             <- store.create()
         treeId          <- IdGenerators.nextTreeId

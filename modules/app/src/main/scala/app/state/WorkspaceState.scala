@@ -91,7 +91,7 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
     currentKey match
       case None => () // Scenario 1 — nothing to validate
       case Some(key) =>
-        listWorkspaceTreesEndpoint((currentUserId, key))
+        listWorkspaceTreesEndpoint((currentUserId, key, None))
           .tap(trees => zio.ZIO.succeed(onTreesLoaded(trees)))
           .tapError { _ =>
             zio.ZIO.succeed {

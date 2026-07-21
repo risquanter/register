@@ -28,7 +28,7 @@ current source.
 tag application images. After a version bump in `build.sbt`, sync `.env`:
 
 ```bash
-sed -n 's/ThisBuild \/ version := "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
+sed -n 's/ThisBuild \/ version[[:space:]]*:= "\(.*\)"/APP_VERSION=\1/p' build.sbt > .env
 ```
 
 For local development, `.env` is optional — compose falls back to the `dev` tag when absent.

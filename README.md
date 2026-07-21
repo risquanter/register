@@ -69,7 +69,7 @@ Register runs in two modes: in-memory storage for quick local trials, and a pers
 
 ### Prerequisites
 
-- Docker 20.10+ and Docker Compose 2.0+
+- Docker 20.10+ and Docker Compose 2.20+ (needed for `depends_on`'s `required` attribute)
 - Git
 
 ### 1. Check out the sources

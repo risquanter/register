@@ -3,8 +3,8 @@ package app
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
-import app.components.AppShell
-import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState, DistributionChartState}
+import app.components.{AppShell, BranchBar}
+import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, AppConfigState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -19,12 +19,20 @@ object Main:
     // Global error state — safety net for errors with no per-view handler
     val globalError: Var[Option[GlobalError]] = Var(None)
 
+    // Scenario (branch) state — BranchBar, milestone-2b Phase B.
+    val scenarioState = new ScenarioState(wsState.keySignal, () => wsState.currentUserId)
+    val appConfigState = new AppConfigState
+    appConfigState.refresh()
+
     val builderState = new TreeBuilderState
-    val treeViewState = new TreeViewState(wsState.keySignal, globalError, () => wsState.currentUserId)
+    val treeViewState = new TreeViewState(
+      wsState.keySignal, globalError, () => wsState.currentUserId, scenarioState.activeBranch.signal
+    )
     val analyzeQueryState = new AnalyzeQueryState(
       keySignal = wsState.keySignal,
       selectedTreeId = treeViewState.selectedTreeId.signal,
-      userIdAccessor = () => wsState.currentUserId
+      userIdAccessor = () => wsState.currentUserId,
+      branchAccessor = () => scenarioState.activeBranch.now()
     )
 
     // Register the global error observer at the ZJS chokepoint.
@@ -67,6 +75,7 @@ object Main:
       onDismissError = () => globalError.set(None),
       healthStatus = healthState.status.signal,
       workspaceBadge = workspaceBadge,
+      branchChip = BranchBar.chip(scenarioState, appConfigState.scenariosEnabled.signal),
       designView = DesignView(
         builderState,
         treeViewState,
@@ -75,7 +84,9 @@ object Main:
           draftSignal    = builderState.draftSignal,
           keySignal      = wsState.keySignal,
           userIdAccessor = () => wsState.currentUserId
-        )
+        ),
+        scenarioState,
+        appConfigState
       ),
       analyzeView = AnalyzeView(treeViewState, analyzeQueryState)
     )

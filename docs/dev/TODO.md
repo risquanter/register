@@ -1336,3 +1336,52 @@ as a separate, already-scoped fix. Whether this item is needed at all, and
 what shape it should take, depends entirely on step 1's findings.
 
 **Status:** investigation only, no decision made, no code changed.
+
+## 24. Examine browser automation options for testing and development
+
+**Origin (2026-07-21):** surfaced while implementing BranchBar (milestone-2b
+Phase B). The working agent had no way to interactively exercise the new
+Laminar UI (open the scenario dropdown, click switch/create/delete, confirm
+visual state) — verification stopped at compile, unit tests, and direct
+`curl` round-trips against the live backend, which confirm the wire format
+but not the actual click-through UX. The frontend has no automated
+end-to-end coverage of interactive behaviour at all today (`sbt app/test`
+only exercises pure state/logic classes, e.g. `TreeBuilderStateSpec`,
+`TreePreviewSpec` — nothing renders and clicks through real DOM).
+
+**To examine:** what browser automation is available or worth adding —
+a Playwright/Puppeteer-based E2E suite runnable in CI and locally, an MCP
+server exposing browser control to the assistant during development
+sessions, or both (the two solve different problems: repeatable CI
+regression coverage vs. an agent's ability to visually verify a change
+before reporting it done). Questions to resolve before choosing:
+- Does the assistant's own tool environment support adding an MCP browser
+  tool, and what would setup/maintenance cost look like?
+- For CI: Playwright vs. Puppeteer vs. something lighter — matched against
+  what's already used for BATS smoke tests (Suite C could plausibly gain a
+  browser-driven check alongside the existing curl-based ones).
+- Where would UI test specs live (`modules/app/src/test`? a new top-level
+  `tests/e2e/`?) and what's the minimum useful first spec — likely the
+  create-switch-edit-switch-back scenario flow (TODO item, milestone-2b
+  Phase B), once its blocking gap (branch-aware tree listing) is closed.
+
+**Status:** investigation only, no tooling chosen, no code changed.
+
+## 25. Scala.js test harness for network-stubbed frontend specs — deprioritized, prior attempt failed
+
+**Origin (2026-07-21):** surfaced as one of three options for covering
+milestone-2b Phase B's "create scenario, switch, edit, switch back"
+end-to-end item (the other two: item 24's browser automation, or a live
+manual round-trip — see `docs/scratch/milestone-2b-cache-and-decisions.md`,
+Phase Outline, Phase B). Every current `app/test` spec is a pure state/logic
+test (`TreeBuilderStateSpec`, `TreePreviewSpec`, etc.) — none exercise
+`ScenarioState`/`TreeViewState` against a fake backend. The server module has
+a working pattern for this (`SttpBackendStub` + `TapirStubInterpreter`, used
+throughout `modules/server/src/test`), but nothing equivalent exists for the
+Scala.js/sttp client side.
+
+**Status: deprioritized.** A prior attempt at this failed (per the user,
+2026-07-21) — no further detail captured here. Not worth re-investing in
+right now. Revisit only if a concrete need for automated frontend network-flow
+coverage comes up again; if picked up, check what actually failed last time
+before repeating the same approach.

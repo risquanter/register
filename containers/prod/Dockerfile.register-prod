@@ -30,6 +30,18 @@ WORKDIR /app
 # Copy config files (provides defaults and documents available configs)
 COPY --from=builder --chown=nonroot:nonroot /app/modules/server/src/main/resources/application.conf /app/application.conf
 
+# Copy Flyway migrations as real files — GraalVM native-image can embed individual
+# resource bytes via resource-config.json, but Flyway's classpath scan needs to
+# *list* the directory contents at runtime, which native-image does not support.
+# FlywayServiceLive is pointed at this filesystem path (REGISTER_FLYWAY_MIGRATIONS_LOCATION).
+COPY --from=builder --chown=nonroot:nonroot /app/modules/server/src/main/resources/db/migration /app/db/migration
+
+# Baked in here (not just docker-compose.yml) so this image is correct by
+# default no matter how it's launched — bare `docker run`, a different compose
+# file, or a Kubernetes Deployment/Helm chart — not only under this repo's
+# docker-compose.yml. Still overridable via the same env var if ever needed.
+ENV REGISTER_FLYWAY_MIGRATIONS_LOCATION=filesystem:/app/db/migration
+
 EXPOSE 8090
 # Dedicated health-probe port for kubelet liveness/readiness probes.
 # Separated from API port to allow per-port mTLS policy (STRICT on 8090, PERMISSIVE on 8091).

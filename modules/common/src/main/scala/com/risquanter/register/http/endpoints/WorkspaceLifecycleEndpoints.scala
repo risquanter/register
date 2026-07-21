@@ -38,6 +38,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .description("List trees in workspace")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
       .get
+      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
       .out(jsonBody[List[SimulationResponse]])
 
   val createWorkspaceTreeEndpoint =

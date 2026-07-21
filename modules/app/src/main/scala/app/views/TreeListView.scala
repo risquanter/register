@@ -17,10 +17,24 @@ import com.risquanter.register.http.responses.SimulationResponse
   */
 object TreeListView:
 
-  def apply(state: TreeViewState): HtmlElement =
+  /** @param onNewTree Design-view-only "start a fresh, blank tree" action —
+    *                  absent in Analyze view, which has no builder to reset.
+    */
+  def apply(state: TreeViewState, onNewTree: Option[() => Unit] = None): HtmlElement =
     div(
       cls := "tree-list-view",
-      h3("Saved Trees"),
+      div(
+        cls := "tree-list-header",
+        h3("Saved Trees"),
+        onNewTree.map(action =>
+          button(
+            cls := "new-tree-btn",
+            tpe := "button",
+            "+ New Tree",
+            onClick --> { _ => action() }
+          )
+        ).getOrElse(emptyNode)
+      ),
       onMountCallback(_ => state.loadTreeList()),
       child <-- state.availableTrees.signal.map {
         case LoadState.Idle    => renderPlaceholder("Waiting to load…")

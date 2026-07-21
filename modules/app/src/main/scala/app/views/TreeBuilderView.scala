@@ -3,7 +3,7 @@ package app.views
 import com.raquo.laminar.api.L.{*, given}
 import zio.*
 import zio.prelude.Validation
-import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState, DistributionChartState}
+import app.state.{TreeBuilderState, TreeBuilderField, TreeViewState, SubmitState, WorkspaceState, DistributionChartState, ScenarioState}
 import app.components.FormInputs
 import app.core.ZJS.*
 import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
@@ -19,7 +19,7 @@ import com.risquanter.register.http.responses.SimulationResponse
  */
 object TreeBuilderView extends WorkspaceLifecycleEndpoints
   with WorkspaceTreeEndpoints:
-  def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState, chartState: DistributionChartState): HtmlElement =
+  def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState, chartState: DistributionChartState, scenarioState: ScenarioState): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
     def onSuccess(response: SimulationResponse): Unit =
@@ -42,7 +42,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
             case Some(key) =>
               state.toUpdateRequest() match
                 case Validation.Success(_, request) =>
-                  updateWorkspaceTreeEndpoint((wsState.currentUserId, key, treeId, request, None)).submitInto(submitState)(onSuccess)
+                  updateWorkspaceTreeEndpoint((wsState.currentUserId, key, treeId, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess)
                 case Validation.Failure(_, errors) => validationFailed(errors)
 
         // ── Create mode ──
@@ -51,7 +51,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
             case Validation.Success(_, request) =>
               wsState.currentKey match
                 case Some(key) =>
-                  createWorkspaceTreeEndpoint((wsState.currentUserId, key, request, None)).submitInto(submitState)(onSuccess)
+                  createWorkspaceTreeEndpoint((wsState.currentUserId, key, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess)
                 case None =>
                   submitState.set(SubmitState.Submitting)
                   wsState.bootstrap(request, onSuccess, msg => submitState.set(SubmitState.Failed(msg)))

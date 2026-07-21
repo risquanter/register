@@ -192,6 +192,22 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       yield assertTrue(resp.code.code == 400)
     },
 
+    test("create with a full branch-ref-style name (containing dots): 400 — DD-11 invariant, only a slug is ever accepted") {
+      for
+        (backend, key) <- buildBackend()
+        // The `scenarios.<workspaceId>.<name>` composed ref (DD-5) is a server-side
+        // derivation, never caller input — this posts exactly that shape as `name`
+        // to confirm the Iron `ScenarioName` codec at the Tapir boundary rejects it
+        // (dots aren't in `^[a-zA-Z0-9 _-]+$`) rather than passing it through to
+        // `ScenarioService.create`, which would let a caller dictate the branch ref.
+        resp <- basicRequest
+          .post(uri"http://localhost/w/${key.reveal}/scenarios")
+          .body("""{"name":"scenarios.01j8zq3fkwp2x9m4v7rtbnd6ea.high-cyber","forkOf":null}""")
+          .contentType("application/json")
+          .send(backend)
+      yield assertTrue(resp.code.code == 400)
+    },
+
     test("identity mode: absent x-user-id is rejected with 403") {
       for
         (backend, key) <- buildBackend(extractor = UserContextExtractor.requirePresent)

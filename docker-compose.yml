@@ -106,6 +106,17 @@ services:
       REGISTER_DB_USER: "${REGISTER_DB_USER:-register_app}"
       REGISTER_DB_PASSWORD: "${REGISTER_DB_PASSWORD:-dev-only-password}"
       REGISTER_FLYWAY_URL: "${REGISTER_FLYWAY_URL:-jdbc:postgresql://postgres:5432/register}"
+      # Deliberately NOT listed here. The image's own Dockerfile ENV already
+      # defaults REGISTER_FLYWAY_MIGRATIONS_LOCATION correctly
+      # (Dockerfile.register-prod). Declaring this key at all in this
+      # `environment:` block — even with no value, as a "pass through if set
+      # in the shell" entry — makes Compose send Docker Engine an explicit
+      # unset for it, which *removes* the image's ENV default instead of
+      # deferring to it (verified via /proc/1/environ inside the running
+      # container: the var was completely absent, not merely empty). To
+      # override this value, edit the Dockerfile's ENV line, or pass an
+      # explicit non-empty value via `docker compose run -e
+      # REGISTER_FLYWAY_MIGRATIONS_LOCATION=... register-server` for a one-off.
 
       # Workspace expiry — defaults match application.conf (72h absolute / 1h idle).
       # Plumbed here so an --env-file (e.g. .env.irmin) can extend them for a
@@ -137,6 +148,16 @@ services:
     # probes in k8s. For local docker-compose, use external monitoring:
     #   curl http://localhost:8090/health  (API port, always available)
     #   curl http://localhost:8091/health  (probe port, same response)
+    # postgres is only actually needed when REGISTER_WORKSPACE_STORE_BACKEND=postgres
+    # (the persistence profile), but depends_on doesn't read env vars — gated by
+    # `profiles:` below the same way postgres itself is, so this is a no-op unless
+    # the persistence profile is active. Without this, register-server previously
+    # raced postgres on cold start (Flyway got "connection refused" once, then
+    # succeeded on Docker's automatic restart) — see docs/dev/TODO.md.
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
     restart: unless-stopped
     networks:
       - register-network
