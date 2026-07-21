@@ -38,6 +38,23 @@ object LECSpecBuilder:
     width: Int = 950,
     height: Int = 400
   ): js.Dynamic =
+    buildFromSeries(curves.map { case (nc, color) => (nc, color, nc.id.value) }, interpolation, width, height)
+
+  /** Same as `build`, but the chart's series identity (`curveId` — the data
+    * points, colour-scale domain, and legend match) is given explicitly per
+    * curve instead of always being `nc.id.value`. Needed when two curves
+    * share the same `NodeId` (e.g. the same node's curve fetched from two
+    * different branches for an Overlay comparison) — `NodeId` alone can't
+    * disambiguate them, and it can't be faked with a synthetic string since
+    * it's Iron-refined to a real ULID. `build` delegates here with today's
+    * default so every existing call site is unchanged.
+    */
+  def buildFromSeries(
+    curves: Vector[(LECNodeCurve, HexColor, String)],
+    interpolation: String = "monotone",
+    width: Int = 950,
+    height: Int = 400
+  ): js.Dynamic =
     val allPoints = curves.flatMap(_._1.curve)
     if curves.isEmpty || allPoints.isEmpty then emptySpec(width, height)
     else buildSpec(curves, interpolation, width, height)
@@ -45,13 +62,13 @@ object LECSpecBuilder:
   // ── Private builders ──────────────────────────────────────────
 
   private def buildSpec(
-    curves: Vector[(LECNodeCurve, HexColor)],
+    curves: Vector[(LECNodeCurve, HexColor, String)],
     interpolation: String,
     width: Int,
     height: Int
   ): js.Dynamic =
     // Stable ordering: sort by curveId for deterministic domain/range
-    val ordered = curves.sortBy(_._1.id.value)
+    val ordered = curves.sortBy(_._3)
 
     val allPoints = ordered.flatMap(_._1.curve)
     val minLoss = allPoints.map(_.loss).min.toDouble
@@ -64,8 +81,8 @@ object LECSpecBuilder:
     )
 
     // Legend labelExpr: map curveId → display name (immutable String, safe to share)
-    val labelParts = ordered.map { case (nc, _) =>
-      s"datum.value == '${nc.id.value}' ? '${nc.name.replace("'", "\\'")}'"
+    val labelParts = ordered.map { case (nc, _, curveId) =>
+      s"datum.value == '${curveId}' ? '${nc.name.replace("'", "\\'")}'"
     }
     val legendLabelExpr = (labelParts :+ "datum.value").mkString(" : ")
 
@@ -81,10 +98,10 @@ object LECSpecBuilder:
     // Fresh data values array — called per layer to avoid shared mutable state (F2)
     def makeDataValues(): js.Array[js.Any] =
       val arr = js.Array[js.Any]()
-      ordered.foreach { case (nc, _) =>
+      ordered.foreach { case (nc, _, curveId) =>
         nc.curve.foreach { pt =>
           arr.push(js.Dynamic.literal(
-            "curveId"    -> nc.id.value,
+            "curveId"    -> curveId,
             "risk"       -> nc.name,
             "loss"       -> pt.loss.toDouble,
             "exceedance" -> pt.exceedanceProbability
@@ -97,8 +114,8 @@ object LECSpecBuilder:
     def makeColorEncoding(): js.Dynamic =
       val domain = js.Array[js.Any]()
       val range = js.Array[js.Any]()
-      ordered.foreach { case (nc, hexColor) =>
-        domain.push(nc.id.value)
+      ordered.foreach { case (_, hexColor, curveId) =>
+        domain.push(curveId)
         range.push(hexColor.value: String) // .value at the Vega edge
       }
       js.Dynamic.literal(

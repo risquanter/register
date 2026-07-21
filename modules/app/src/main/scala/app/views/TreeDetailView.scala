@@ -89,7 +89,8 @@ object TreeDetailView:
   def apply(
     state: TreeViewState,
     queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
-    hoverBridge: ChartHoverBridge = new ChartHoverBridge()
+    hoverBridge: ChartHoverBridge = new ChartHoverBridge(),
+    changedNodeIds: Signal[Set[NodeId]] = Signal.fromValue(Set.empty)
   ): HtmlElement =
     // Local state: which node's picker popover is open (if any)
     val pickerOpenFor: Var[Option[NodeId]] = Var(None)
@@ -106,7 +107,7 @@ object TreeDetailView:
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
         case LoadState.Failed(msg) => renderError(msg)
-        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor)
+        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds)
       }
     )
 
@@ -117,7 +118,7 @@ object TreeDetailView:
     div(cls := "tree-detail-error", p(cls := "error-message", s"Failed: $message"))
 
   /** Render the full tree from a RiskTree domain object. */
-  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge, pickerOpenFor: Var[Option[NodeId]]): HtmlElement =
+  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge, pickerOpenFor: Var[Option[NodeId]], changedNodeIds: Signal[Set[NodeId]]): HtmlElement =
     // Build children lookup: parentId → child nodes
     val childrenOf: Map[Option[NodeId], Seq[RiskNode]] =
       tree.nodes.groupBy(_.parentId)
@@ -135,7 +136,7 @@ object TreeDetailView:
         case Some(root) =>
           div(
             cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, depth = 0)
+            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, depth = 0)
           )
         case None =>
           div(cls := "tree-detail-error", p("Root node not found"))
@@ -149,6 +150,7 @@ object TreeDetailView:
     queryMatchedNodes: Signal[Set[NodeId]],
     hoverBridge:       ChartHoverBridge,
     pickerOpenFor:     Var[Option[NodeId]],
+    changedNodeIds:    Signal[Set[NodeId]],
     depth:             Int
   ): HtmlElement =
     val nodeId      = node.id
@@ -185,6 +187,7 @@ object TreeDetailView:
     val isCharted: Signal[Boolean]             = state.nodeColorMap.map(_.contains(nodeId))
     val currentColor: Signal[Option[HexColor]] = state.nodeColorMap.map(_.get(nodeId))
     val pickerOpen: Signal[Boolean]            = pickerOpenFor.signal.map(_.contains(nodeId))
+    val isChanged: Signal[Boolean]             = changedNodeIds.map(_.contains(nodeId))
 
     val nodeKind = node match
       case _: RiskPortfolio => TreeNodeRow.NodeKind.Portfolio
@@ -213,6 +216,7 @@ object TreeDetailView:
       isSelected    = isSelected,
       prefixContent = List(toggleSpan),
       suffixContent = List(
+        child.maybe <-- isChanged.map(renderChangedMarker),
         child.maybe <-- isCharted.combineWith(currentColor).map(renderSwatchTrigger(nodeId, pickerOpenFor, _, _)),
         child.maybe <-- pickerOpen.combineWith(currentColor).map(renderPickerPopover(nodeId, state, pickerOpenFor, _, _))
       )
@@ -232,7 +236,7 @@ object TreeDetailView:
           cls := "node-children",
           display <-- isExpanded.map(if _ then "block" else "none"),
           children.toList.map { c =>
-            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, depth + 1)
+            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, depth + 1)
           }
         )
       else
@@ -240,6 +244,13 @@ object TreeDetailView:
     )
 
   // ── Extracted view helpers (F3a: named functions for inline lambdas) ──
+
+  /** ✎ marker for a node the active Compare diff reports as changed
+    * (milestone-2b Phase C) — Identical/unchanged nodes render nothing. */
+  private def renderChangedMarker(changed: Boolean): Option[HtmlElement] =
+    if changed then
+      Some(span(cls := "node-changed-marker", title := "Changed vs. compared branch", "✎"))
+    else None
 
   /** Render the colour-swatch trigger icon for charted nodes (PD1(b)). */
   private def renderSwatchTrigger(

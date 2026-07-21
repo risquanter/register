@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, AppConfigState}
+import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, AppConfigState, CompareState, ScenarioDiffState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -88,7 +88,13 @@ object Main:
         scenarioState,
         appConfigState
       ),
-      analyzeView = AnalyzeView(treeViewState, analyzeQueryState)
+      analyzeView = AnalyzeView(
+        treeViewState,
+        analyzeQueryState,
+        scenarioState,
+        new CompareState,
+        new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId)
+      )
     )
 
     render(container, appElement)

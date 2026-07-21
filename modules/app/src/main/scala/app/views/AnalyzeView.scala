@@ -2,10 +2,13 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 
+import scala.scalajs.js
+
 import app.components.SplitPane
-import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge}
+import app.chart.{LECSpecBuilder, CompareColorAssigner}
+import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, CompareState, CompareTarget, ScenarioDiffState, toBranchOption}
 import com.risquanter.register.domain.data.{RiskNode, RiskTree}
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.iron.{NodeId, ScenarioName}
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
   *
@@ -27,7 +30,13 @@ import com.risquanter.register.domain.data.iron.NodeId
   */
 object AnalyzeView:
 
-  def apply(treeViewState: TreeViewState, queryState: AnalyzeQueryState): HtmlElement =
+  def apply(
+    treeViewState: TreeViewState,
+    queryState: AnalyzeQueryState,
+    scenarioState: ScenarioState,
+    compareState: CompareState,
+    diffState: ScenarioDiffState
+  ): HtmlElement =
 
     /** Fire query against selected tree. No-op if no tree is selected. */
     def runQuery(): Unit = queryState.executeQuery()
@@ -46,6 +55,39 @@ object AnalyzeView:
           val allNodes = querySet ++ userSet
           if allNodes.isEmpty then None
           else Some(allNodes.toList)
+        }
+
+    // ── Compare mode (milestone-2b Phase C, Overlay-only, 2 branches) ──
+    val visibleNodeIds: Signal[Set[NodeId]] = chartNodeIds.map(_.map(_.toSet).getOrElse(Set.empty))
+
+    /** ✎ markers gate to empty immediately when Compare is off, even if a
+      * stale diff result from a previous session lingers in `diffState`. */
+    val gatedChangedNodeIds: Signal[Set[NodeId]] =
+      compareState.enabled.signal.combineWith(diffState.changedNodeIds).map { (enabled, ids) =>
+        if enabled then ids else Set.empty
+      }
+
+    /** Off → the tab's own single-branch spec, untouched (regression guard —
+      * nothing about today's chart changes unless Compare is on). Overlay →
+      * paired curves from both branches via `CompareColorAssigner`, once both
+      * sides have loaded. */
+    val combinedSpecSignal: Signal[LoadState[js.Dynamic]] =
+      compareState.enabled.signal
+        .combineWith(treeViewState.chartState.specSignal, treeViewState.curveCache, diffState.compareCurves.signal)
+        .combineWith(visibleNodeIds, compareState.compareBranch.signal)
+        .map { case (enabled, singleSpec, thisCurves, compareCurves, visible, target) =>
+          if !enabled then singleSpec
+          else (thisCurves, compareCurves) match
+            case (LoadState.Loaded(thisMap), LoadState.Loaded(compareMap)) =>
+              val compareLabel = target match
+                case CompareTarget.Main           => "main"
+                case CompareTarget.Scenario(name)  => name.value.toString
+                case CompareTarget.NotChosen       => "compare"
+              val paired = CompareColorAssigner.pairForOverlay(thisMap, compareMap, visible, "this", compareLabel)
+              LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired))
+            case (LoadState.Failed(msg), _) => LoadState.Failed(msg)
+            case (_, LoadState.Failed(msg)) => LoadState.Failed(msg)
+            case _ => LoadState.Loading
         }
 
     // ── Node lookup for name resolution in QueryResultCard (A1) ──
@@ -79,10 +121,52 @@ object AnalyzeView:
         .collect { case None => () } --> { _ =>
           treeViewState.chartState.curveCache.set(LoadState.Idle)
         },
+      // Compare mode: reload the diff whenever the selected tree, the tab's
+      // own active branch, the compare toggle, or the chosen compare branch
+      // changes. Off, or no compare branch chosen yet → reset to Idle.
+      treeViewState.selectedTreeId.signal
+        .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, scenarioState.activeBranch.signal)
+        .changes --> {
+          case (Some(treeId), true, target, activeBranch) =>
+            target.toBranchOption match
+              case Some(compareBranch) => diffState.loadDiff(treeId, activeBranch, compareBranch)
+              case None                 => diffState.reset()
+          case _ =>
+            diffState.reset()
+        },
+      // Compare mode: fetch the compare branch's own curves for whatever
+      // node set is currently visible on the tab's own chart.
+      visibleNodeIds
+        .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, treeViewState.selectedTreeId.signal)
+        .changes.debounce(100) --> {
+          case (visible, true, target, Some(treeId)) if visible.nonEmpty =>
+            target.toBranchOption match
+              case Some(compareBranch) => diffState.loadCompareCurves(treeId, visible.toList, compareBranch)
+              case None                 => diffState.compareCurves.set(LoadState.Idle)
+          case _ =>
+            diffState.compareCurves.set(LoadState.Idle)
+        },
       // ── Query input panel ───────────────────────────────────────
       div(
         cls := "analyze-query-panel",
-        h3("Query"),
+        div(
+          cls := "analyze-query-header",
+          h3("Query"),
+          label(
+            cls := "form-label-inline compare-toggle",
+            input(
+              typ := "checkbox",
+              controlled(
+                checked <-- compareState.enabled.signal,
+                onInput.mapToChecked --> compareState.enabled
+              )
+            ),
+            span(" Compare")
+          ),
+          child.maybe <-- compareState.enabled.signal.map { enabled =>
+            if enabled then Some(renderBranchPicker(scenarioState, compareState)) else None
+          }
+        ),
         div(
           cls := "form-field",
           label(cls := "form-label", "Query Expression"),
@@ -150,14 +234,14 @@ object AnalyzeView:
       // ── LEC chart panel ─────────────────────────────────────────
       div(
         cls := "analyze-lec-panel",
-        LECChartView(treeViewState.chartState.specSignal, hoverBridge)
+        LECChartView(combinedSpecSignal, hoverBridge)
       )
     )
 
     val savedTreePanel = div(
       cls := "saved-tree-panel",
       TreeListView(treeViewState),
-      TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
+      TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge, gatedChangedNodeIds)
     )
 
     div(
@@ -166,5 +250,42 @@ object AnalyzeView:
         left = analyzeLeftPanel,
         right = savedTreePanel,
         leftPercent = 75
+      )
+    )
+
+  /** Branch picker for Compare mode — options are `scenarioState.scenarios`
+    * plus `main`, excluding the tab's own active branch (comparing a branch
+    * to itself is a no-op — `ScenarioDiffService.diff` would just report
+    * every node `Identical`). `""` in the DOM `<select>` means "nothing
+    * chosen yet"; `"__main__"` is the sentinel for main (a `ScenarioName`
+    * can never collide with it — see `ScenarioName`'s charset).
+    */
+  private def renderBranchPicker(scenarioState: ScenarioState, compareState: CompareState): HtmlElement =
+    val mainSentinel = "__main__"
+
+    def parseSelection(raw: String): CompareTarget =
+      if raw.isEmpty then CompareTarget.NotChosen
+      else if raw == mainSentinel then CompareTarget.Main
+      else ScenarioName.fromString(raw).toOption.map(CompareTarget.Scenario(_)).getOrElse(CompareTarget.NotChosen)
+
+    select(
+      cls := "compare-branch-select",
+      onMountCallback(_ => scenarioState.refresh()),
+      option(value := "", "— compare against —"),
+      children <-- scenarioState.scenarios.signal.combineWith(scenarioState.activeBranch.signal).map {
+        case (listState, active) =>
+          val names = listState match
+            case LoadState.Loaded(list) => list.map(_.name)
+            case _                      => Nil
+          val mainOpt = if active.isDefined then List(option(value := mainSentinel, "main")) else Nil
+          mainOpt ++ names.filterNot(active.contains).map(n => option(value := n.value.toString, n.value.toString))
+      },
+      controlled(
+        value <-- compareState.compareBranch.signal.map {
+          case CompareTarget.NotChosen      => ""
+          case CompareTarget.Main           => mainSentinel
+          case CompareTarget.Scenario(name) => name.value.toString
+        },
+        onInput.mapToValue --> { raw => compareState.compareBranch.set(parseSelection(raw)) }
       )
     )
