@@ -78,6 +78,14 @@ object ValidationUtilSpec extends ZIOSpecDefault {
         )
       },
 
+      test("folds a contiguous run of spaces to a single hyphen, not one hyphen per space") {
+        val result = ValidationUtil.refineScenarioName("New   Vendor    Risk")
+        assertTrue(
+          result.isRight &&
+          result.map(_.value).contains("new-vendor-risk")
+        )
+      },
+
       test("accepts underscores and digits") {
         val result = ValidationUtil.refineScenarioName("vendor_risk_1")
         assertTrue(

@@ -26,7 +26,7 @@ object WorkspaceReaperSpec extends ZIOSpecDefault:
     * All other methods die immediately to catch unintended calls.
     */
   private def makeStub(onDelete: (WorkspaceId, TreeId) => Task[RiskTree]): RiskTreeService = new RiskTreeService:
-    def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest)(using Checked[Permission]): Task[RiskTree]                                          = ZIO.die(new UnsupportedOperationException)
+    def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: Option[BranchRef])(using Checked[Permission]): Task[RiskTree]               = ZIO.die(new UnsupportedOperationException)
     def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: Option[BranchRef])(using Checked[Permission]): Task[RiskTree]       = ZIO.die(new UnsupportedOperationException)
     def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef])(using Checked[Permission]): Task[RiskTree]                                   = onDelete(wsId, id)
     def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef])(using Checked[Permission]): Task[Option[RiskTree]]                          = ZIO.die(new UnsupportedOperationException)

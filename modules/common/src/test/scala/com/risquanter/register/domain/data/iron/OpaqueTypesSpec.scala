@@ -262,6 +262,35 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
           result.map(_.value).contains("01ARZ3NDEKTSV4RRFFQ69G5FAV")
         )
       }
+    ),
+
+    suite("BranchRef.scenario composer")(
+      test("composes a fully lowercase branch even though WorkspaceId's canonical ULID is uppercase") {
+        val wsId = WorkspaceId(SafeId.fromString("01arz3ndektsv4rrffq69g5fav").toOption.get)
+        val name = ScenarioName.fromString("stress-2026").toOption.get
+        val result = BranchRef.scenario(wsId, name)
+        assertTrue(
+          result.isRight &&
+          result.map(_.toBranchRef).contains("scenarios.01arz3ndektsv4rrffq69g5fav.stress-2026")
+        )
+      },
+
+      test("produces a value that itself satisfies BranchRefConstraint (round-trips through fromString)") {
+        val wsId = WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
+        val name = ScenarioName.fromString("New Vendor Risk").toOption.get
+        val composed = BranchRef.scenario(wsId, name).toOption.get
+        val reparsed = BranchRef.fromString(composed.toBranchRef)
+        assertTrue(reparsed.contains(composed))
+      },
+
+      test("uppercase- and lowercase-input WorkspaceIds normalize to the identical composed branch") {
+        val wsIdUpper = WorkspaceId(SafeId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get)
+        val wsIdLower = WorkspaceId(SafeId.fromString("01arz3ndektsv4rrffq69g5fav").toOption.get)
+        val name = ScenarioName.fromString("draft-v1").toOption.get
+        assertTrue(
+          BranchRef.scenario(wsIdUpper, name) == BranchRef.scenario(wsIdLower, name)
+        )
+      }
     )
   )
 }

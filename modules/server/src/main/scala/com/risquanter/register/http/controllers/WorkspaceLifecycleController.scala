@@ -5,9 +5,10 @@ import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Checked, Permission, UserContextExtractor }
 import com.risquanter.register.auth.ResourceRef.asResource
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode, ValidationFailed}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
-import com.risquanter.register.services.RiskTreeService
+import com.risquanter.register.services.{RiskTreeService, ScenarioService}
 import com.risquanter.register.services.workspace.{RateLimiter, WorkspaceStore}
 
 /** Workspace lifecycle controller.
@@ -36,7 +37,8 @@ class WorkspaceLifecycleController private (
   rateLimiter:          RateLimiter,
   userCtx:              UserContextExtractor,
   authzService:         AuthorizationService,
-  bootstrapProvisioner: BootstrapProvisioner
+  bootstrapProvisioner: BootstrapProvisioner,
+  scenarioService:      ScenarioService
 ) extends BaseController
     with WorkspaceLifecycleEndpoints:
 
@@ -77,12 +79,36 @@ class WorkspaceLifecycleController private (
   }
 
   val createWorkspaceTree: ServerEndpoint[Any, Task] = createWorkspaceTreeEndpoint.serverLogic {
-    case (maybeUserId, key, req) =>
+    case (maybeUserId, key, req, activeBranch) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
-        tree   <- riskTreeService.create(ws.id, req)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
+        // A tree-creating write (unlike update/delete/getById) has no read step
+        // that would naturally fail on a nonexistent branch — Irmin's set_tree
+        // has no CAS precondition and silently vivifies a brand-new, un-forked
+        // branch on first write. That would let a scenario-shaped branch come
+        // into existence outside ScenarioService.create, bypassing the "creation
+        // always forks at a commit" invariant (DD-5/A9 fact 3) other scenario
+        // code relies on. So: require the named scenario to already exist before
+        // writing to it. `main` (activeBranch = None) never needs this check.
+        _      <- ZIO.foreachDiscard(activeBranch) { name =>
+                    scenarioService.list(ws.id).flatMap { scenarios =>
+                      ZIO.unless(scenarios.exists(_.name == name))(
+                        ZIO.fail(ValidationFailed(List(ValidationError(
+                          field = "X-Active-Branch",
+                          code = ValidationErrorCode.NOT_FOUND,
+                          message = s"Scenario '${name.value}' not found — create it via POST /scenarios before creating a tree on it"
+                        ))))
+                      )
+                    }
+                  }
+        tree   <- riskTreeService.create(ws.id, req, branch)
+        // addTree always fires regardless of branch — the reaper needs to know a
+        // tree exists somewhere in the workspace to cascade-delete it on expiry,
+        // which is correct no matter which branch it lives on. Unlike deleteTree's
+        // removeTree (main-only), there is no asymmetric bookkeeping risk here.
         _      <- workspaceStore.addTree(key, tree.id)
       yield SimulationResponse.fromRiskTree(tree)).either
   }
@@ -123,7 +149,7 @@ class WorkspaceLifecycleController private (
     )
 
 object WorkspaceLifecycleController:
-  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & RateLimiter & UserContextExtractor & AuthorizationService & BootstrapProvisioner, Nothing, WorkspaceLifecycleController] =
+  val makeZIO: ZIO[RiskTreeService & WorkspaceStore & RateLimiter & UserContextExtractor & AuthorizationService & BootstrapProvisioner & ScenarioService, Nothing, WorkspaceLifecycleController] =
     for
       riskTreeService      <- ZIO.service[RiskTreeService]
       workspaceStore       <- ZIO.service[WorkspaceStore]
@@ -131,4 +157,5 @@ object WorkspaceLifecycleController:
       userCtx              <- ZIO.service[UserContextExtractor]
       authzService         <- ZIO.service[AuthorizationService]
       bootstrapProvisioner <- ZIO.service[BootstrapProvisioner]
-    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, rateLimiter, userCtx, authzService, bootstrapProvisioner)
+      scenarioService      <- ZIO.service[ScenarioService]
+    yield WorkspaceLifecycleController(riskTreeService, workspaceStore, rateLimiter, userCtx, authzService, bootstrapProvisioner, scenarioService)

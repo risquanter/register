@@ -45,7 +45,7 @@ class QueryController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
         parsed <- ZIO.fromEither(QueryRequest.resolve(req))
                     .mapError(e => FolQueryFailure.fromQueryError(e))
         result <- queryService.evaluate(ws.id, treeId, parsed, ws.seedEntityId, branch)

@@ -40,7 +40,7 @@ class WorkspaceAnalysisController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.probOfExceedance(ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance, branch)
       yield result).either
   }
@@ -51,7 +51,7 @@ class WorkspaceAnalysisController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance, branch)
       yield result).either
   }

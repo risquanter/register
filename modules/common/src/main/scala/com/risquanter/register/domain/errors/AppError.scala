@@ -99,17 +99,6 @@ case class TreeNotInWorkspace(key: WorkspaceKeySecret, treeId: TreeId) extends S
   override def getMessage: String = s"Tree ${treeId.value} not found in workspace"
 }
 
-/** `X-Active-Branch` header names a branch this workspace does not own — maps
-  * to the same opaque 404 as every other workspace-scoping failure (A13).
-  * Deliberately indistinguishable from "branch doesn't exist" — see
-  * `BranchRef.belongsTo` scaladoc and the 2026-07-20 security review — so
-  * this header cannot be used to enumerate another workspace's scenario
-  * names. ADR-022: getMessage omits the raw key.
-  */
-case class BranchNotInWorkspace(key: WorkspaceKeySecret, branch: BranchRef) extends SimError {
-  override def getMessage: String = s"Branch ${branch.toBranchRef} not found in workspace"
-}
-
 // ============================================================================
 // Infrastructure Errors (ADR-008: Error Handling & Resilience)
 // ============================================================================

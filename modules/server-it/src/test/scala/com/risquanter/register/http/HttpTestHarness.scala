@@ -11,13 +11,13 @@ import sttp.tapir.server.ziohttp.ZioHttpInterpreter
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.configs.*
-import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
+import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.http.support.TestSafeUrls
 import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
-import com.risquanter.register.services.{RiskTreeServiceLive, SimulationSemaphore}
+import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioServiceNotSupported, SimulationSemaphore}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
@@ -114,9 +114,9 @@ object HttpTestHarness:
       port: Int,
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       cfg: HarnessConfig
-  ): ZLayer[Any, Throwable, Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController] =
+  ): ZLayer[Any, Throwable, Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController] =
     ZLayer.make[
-      Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController
+      Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController
     ](
       ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port, healthPort = port + 1)),
       ZLayer.succeed(cfg.simulation),
@@ -140,10 +140,16 @@ object HttpTestHarness:
       AuthorizationServiceNoOp.layer,
       BootstrapProvisionerNoOp.layer,
       ZLayer.succeed(UserContextExtractor.noOp),
+      // Stub only — this harness doesn't wire ScenarioController/IrminClient,
+      // so a test exercising X-Active-Branch against an Irmin-backed repoLayer
+      // would get 501 here rather than a working scenario. Fine for today's
+      // suites (none exercise that path); revisit if/when one does.
+      ScenarioServiceNotSupported.layer,
       ZLayer.fromZIO(SystemController.makeZIO),
       ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
       ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
       ZLayer.fromZIO(WorkspaceAnalysisController.makeZIO),
+      ZLayer.fromZIO(ScenarioController.makeZIO),
       SSEController.layer,
       QueryServiceLive.layer,
       ZLayer.fromZIO(QueryController.makeZIO),

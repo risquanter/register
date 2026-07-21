@@ -28,9 +28,12 @@ trait RiskTreeService {
   /** Create risk tree definition - persists tree structure only
     * @param wsId Workspace that owns the tree
     * @param req Request containing tree definition
+    * @param branch Target branch (milestone-2b Phase B); `None` targets `main`.
+    *   Caller (controller) must have already verified `branch` belongs to `wsId`
+    *   — see `ActiveBranch.resolve`; this method trusts it.
     * @return Persisted risk tree metadata (no LEC data)
     */
-  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
+  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
   
   /** Update risk tree definition - modifies tree structure only
     * @param wsId Workspace that owns the tree

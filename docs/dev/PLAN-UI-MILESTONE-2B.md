@@ -192,6 +192,13 @@ Scenario dropdown (opened):
   source head) and is hidden there rather than shown twice.
 - Switching with a dirty draft reuses the existing dirty-draft confirm flow in
   `DesignView` (same guard as switching trees).
+- **Backend note (2026-07-21):** `POST /w/{key}/risk-trees` already accepts
+  `X-Active-Branch`, so a tree can be created directly on a scenario branch.
+  `listWorkspaceTreesEndpoint` (and therefore `TreeListView`) still reads
+  trees from `main` only — a tree created this way is invisible in the tree
+  list until this BranchBar item wires branch-aware listing through.
+  Workspace-level bookkeeping (reaper cascade-delete) already covers it
+  regardless of branch; only the UI-facing listing is the current gap.
 
 ### 4.3 Analyze view in Phase B
 

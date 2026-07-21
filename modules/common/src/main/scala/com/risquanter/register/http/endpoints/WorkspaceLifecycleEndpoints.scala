@@ -7,7 +7,7 @@ import sttp.model.StatusCode
 
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{WorkspaceBootstrapResponse, WorkspaceRotateResponse, SimulationResponse}
-import com.risquanter.register.domain.data.iron.{SeedEntityId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{SeedEntityId, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Workspace lifecycle API endpoints.
@@ -48,6 +48,8 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
       .post
       .in(jsonBody[RiskTreeDefinitionRequest])
+      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch")
+        .description("Create the tree directly on a scenario branch (milestone-2b Phase B) — absent header creates on main (DD-4 default)."))
       .out(jsonBody[SimulationResponse])
 
   val rotateWorkspaceKeySecretEndpoint =

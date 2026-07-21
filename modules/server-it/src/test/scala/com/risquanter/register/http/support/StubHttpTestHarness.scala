@@ -10,10 +10,10 @@ import sttp.tapir.ztapir.RIOMonadError
 import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.Url
 import com.risquanter.register.http.HttpApi
-import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController}
+import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
-import com.risquanter.register.services.RiskTreeServiceLive
+import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioServiceNotSupported}
 import com.risquanter.register.services.SimulationSemaphore
 import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
@@ -54,8 +54,8 @@ object StubHttpTestHarness {
       repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
       simConfig: SimulationConfig = defaultSimulationConfig
   ): ZIO[Any, Throwable, SttpBackend[Task, Any]] =
-    val controllersLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController] =
-      ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController](
+    val controllersLayer: ZLayer[Any, Throwable, SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController] =
+      ZLayer.make[SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController](
         ZLayer.succeed(simConfig),
         ZLayer.succeed(defaultTelemetryConfig),
         ZLayer.succeed(WorkspaceConfig()),
@@ -73,10 +73,16 @@ object StubHttpTestHarness {
         AuthorizationServiceNoOp.layer,
         ZLayer.succeed(UserContextExtractor.noOp),
         ZLayer.succeed(BootstrapProvisionerNoOp),
+        // Stub only — this harness doesn't wire ScenarioController/IrminClient,
+        // so a test exercising X-Active-Branch against an Irmin-backed repoLayer
+        // would get 501 here rather than a working scenario. Fine for today's
+        // suites (none exercise that path); revisit if/when one does.
+        ScenarioServiceNotSupported.layer,
         ZLayer.fromZIO(SystemController.makeZIO),
         ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
         ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
         ZLayer.fromZIO(WorkspaceAnalysisController.makeZIO),
+        ZLayer.fromZIO(ScenarioController.makeZIO),
         SSEController.layer,
           QueryServiceLive.layer,
         ZLayer.fromZIO(QueryController.makeZIO),

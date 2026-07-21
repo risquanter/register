@@ -48,10 +48,11 @@ object ValidationUtil {
   }
 
   // Refinement for scenario names (DD-5): input whitelist letters/digits/space/
-  // hyphen/underscore (max 64), then fold letters to lowercase and map space ->
-  // '-' to produce the BranchRef segment slug (scenarios.<ws>.<name-slug>).
-  // Invalid characters are rejected outright (400) — never silently stripped
-  // ("no lossy slugification").
+  // hyphen/underscore (max 64), then fold letters to lowercase and map each
+  // contiguous run of spaces -> a single '-' to produce the BranchRef segment
+  // slug (scenarios.<ws>.<name-slug>) — "a  b" and "a b" both fold to "a-b",
+  // not "a--b". Invalid characters are rejected outright (400) — never
+  // silently stripped ("no lossy slugification").
   def refineScenarioName(value: String, fieldPath: String = "name"): Either[List[ValidationError], ScenarioName.ScenarioName] = {
     val sanitized = nonEmpty(value)
     sanitized
@@ -65,7 +66,7 @@ object ValidationUtil {
         List(ValidationError(field = fieldPath, code = code, message = message))
       }
       .flatMap { validInput =>
-        val slug = validInput.toLowerCase.replace(' ', '-')
+        val slug = validInput.toLowerCase.replaceAll(" +", "-")
         slug
           .refineEither[ScenarioNameConstraint]
           .map(ScenarioName.ScenarioName(_))

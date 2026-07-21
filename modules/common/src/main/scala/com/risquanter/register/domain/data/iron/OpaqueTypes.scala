@@ -351,20 +351,18 @@ case class BranchRef(toBranchRef: BranchRefStr)
 object BranchRef:
   val Main: BranchRef = BranchRef("main")
 
-  /** Whether `branch` is a value `wsId` is entitled to request via
-    * `X-Active-Branch` (milestone-2b Phase B item 4b) — either the shared
-    * `main` branch (dev/irmin-schema.graphql:149 — a single store-wide
-    * branch, not workspace-local) or a scenario branch namespaced under this
-    * workspace's own segment (`scenarios.<wsId>.<name>`, the naming
-    * `ScenarioServiceLive` always constructs). Any other value — in
-    * particular another workspace's scenario branch — must be rejected by
-    * the caller (2026-07-20 security review, Option B): never resolved as
-    * if it were owned, and never distinguished from "branch does not exist"
-    * in the response, so probing this header cannot be used to enumerate
-    * other workspaces' scenario names.
+  /** Compose a scenario branch reference from an already-validated `WorkspaceId`
+    * and `ScenarioName` (DD-5 naming: `scenarios.<workspaceId-lowercased-ulid>.<name-slug>`).
+    * Both inputs are Iron-refined at their own boundaries (validate once, at the
+    * boundary), so this composition can never fail refinement in practice — callers
+    * treat a `Left` here as an unreachable invariant violation, not a domain error,
+    * mirroring the pattern this replaces in `ScenarioServiceLive`. The client never
+    * supplies a `WorkspaceId`, so a branch composed this way always belongs to the
+    * caller's own workspace by construction (2026-07-20/21 security review) — there
+    * is no separate ownership check to perform.
     */
-  def belongsTo(branch: BranchRef, wsId: WorkspaceId): Boolean =
-    branch == Main || branch.toBranchRef.startsWith(s"scenarios.${wsId.value.toLowerCase}.")
+  def scenario(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Either[List[ValidationError], BranchRef] =
+    fromString(s"scenarios.${wsId.value.toLowerCase}.${name.value}")
 
   def fromString(s: String, fieldPath: String = "branch"): Either[List[ValidationError], BranchRef] =
     val sanitized = if s == null then "" else s.trim

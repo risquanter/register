@@ -160,7 +160,6 @@ object ErrorResponse {
     case _: WorkspaceExpired                       => makeWorkspaceOpaqueNotFoundResponse()
     case _: WorkspaceExpiredById                   => makeWorkspaceOpaqueNotFoundResponse()
     case _: TreeNotInWorkspace                     => makeWorkspaceOpaqueNotFoundResponse()
-    case _: BranchNotInWorkspace                   => makeWorkspaceOpaqueNotFoundResponse()
     case RepositoryFailure(reason)                 => makeRepositoryFailureResponse(reason)
     case SimulationFailure(id, cause)              => makeSimulationFailureResponse(id)
     case DataConflict(reason)                      => makeDataConflictResponse(reason)

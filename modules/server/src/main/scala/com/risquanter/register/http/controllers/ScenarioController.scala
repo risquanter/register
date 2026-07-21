@@ -36,8 +36,8 @@ class ScenarioController private (
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
         source  = req.forkOf.fold(ScenarioSource.Main)(ScenarioSource.ForkOf(_))
-        branch <- scenarioService.create(ws.id, req.name, source)
-      yield ScenarioResponse(req.name, branch)).either
+        _      <- scenarioService.create(ws.id, req.name, source)
+      yield ScenarioResponse(req.name)).either
   }
 
   val listScenarios: ServerEndpoint[Any, Task] = listScenariosEndpoint.serverLogic {

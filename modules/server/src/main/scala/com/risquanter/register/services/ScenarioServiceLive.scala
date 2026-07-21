@@ -109,12 +109,11 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     s"scenarios.${wsId.value.toLowerCase}."
 
   private def scenarioBranch(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Task[BranchRef] =
-    val raw = s"${scenarioPrefix(wsId)}${name.value}"
-    BranchRef.fromString(raw) match
+    BranchRef.scenario(wsId, name) match
       case Right(branch) => ZIO.succeed(branch)
       case Left(errors) =>
         ZIO.die(new IllegalStateException(
-          s"composed branch name '$raw' failed BranchRef validation: $errors — " +
+          s"composed branch for workspace ${wsId.value} + scenario '${name.value}' failed BranchRef validation: $errors — " +
           "unreachable given a valid WorkspaceId + ScenarioName"
         ))
 

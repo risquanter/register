@@ -1,10 +1,18 @@
 package com.risquanter.register.http.responses
 
 import zio.json.{DeriveJsonCodec, JsonCodec}
-import com.risquanter.register.domain.data.iron.{ScenarioName, BranchRef, CommitHash}
+import com.risquanter.register.domain.data.iron.{ScenarioName, CommitHash}
 
-/** Response DTO for `POST /w/{key}/scenarios`. */
-final case class ScenarioResponse(name: ScenarioName.ScenarioName, branch: BranchRef)
+/** Response DTO for `POST /w/{key}/scenarios`.
+  *
+  * Deliberately carries only `name`, not the composed Irmin branch
+  * reference — the branch string embeds the workspace's own ID
+  * (`scenarios.<workspaceId>.<name>`, DD-5), so returning it to the client
+  * would put a `WorkspaceId` in wire text (2026-07-20/21 security review).
+  * `X-Active-Branch` and this response both use `ScenarioName`; the server
+  * composes the actual branch internally and never exposes it.
+  */
+final case class ScenarioResponse(name: ScenarioName.ScenarioName)
 
 object ScenarioResponse:
   given codec: JsonCodec[ScenarioResponse] = DeriveJsonCodec.gen[ScenarioResponse]

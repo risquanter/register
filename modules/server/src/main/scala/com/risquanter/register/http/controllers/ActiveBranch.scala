@@ -1,27 +1,31 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
-import com.risquanter.register.domain.data.iron.{BranchRef, WorkspaceId, WorkspaceKeySecret}
-import com.risquanter.register.domain.errors.{AppError, BranchNotInWorkspace}
+import com.risquanter.register.domain.data.iron.{BranchRef, ScenarioName, WorkspaceId}
 
-/** Ownership check for the `X-Active-Branch` header (milestone-2b Phase B item 4b).
+/** Resolves the `X-Active-Branch` header (milestone-2b Phase B item 4b) into
+  * the branch to operate on.
   *
-  * `main` is a single, store-wide Irmin branch (`dev/irmin-schema.graphql:149`)
-  * shared across every workspace, not workspace-local (2026-07-20 security
-  * review). A caller-supplied branch is therefore scoping input, not a bare
-  * lookup key — the same enumeration-oracle discipline that governs
-  * `WorkspaceId` (security.instructions.md) applies here: a branch not owned
-  * by the resolved workspace is rejected with the same opaque not-found
-  * shape used everywhere else (A13), never a distinguishable "forbidden"
-  * response, so probing another workspace's scenario names through this
-  * header behaves identically to probing a nonexistent one.
+  * The header carries a `ScenarioName`, never a raw branch string — the
+  * server composes the actual Irmin branch reference from the caller's own
+  * server-resolved `WorkspaceId` and the supplied name (`BranchRef.scenario`).
+  * The client never supplies, and this method never reads, any
+  * workspace-identifying value, so the composed branch always belongs to the
+  * caller's own workspace by construction: there is nothing here to reject
+  * as "wrong workspace" (2026-07-20/21 security review) — that failure mode
+  * is structurally inexpressible, not just checked and rejected. A named
+  * scenario that doesn't exist is a distinct, ordinary not-found condition,
+  * already handled by the underlying branch lookup returning `None`.
   */
 object ActiveBranch:
-  def resolve(key: WorkspaceKeySecret, wsId: WorkspaceId, requested: Option[BranchRef]): IO[AppError, Option[BranchRef]] =
+  def resolve(wsId: WorkspaceId, requested: Option[ScenarioName.ScenarioName]): UIO[Option[BranchRef]] =
     requested match
-      case None =>
-        ZIO.succeed(None)
-      case Some(branch) if BranchRef.belongsTo(branch, wsId) =>
-        ZIO.succeed(Some(branch))
-      case Some(branch) =>
-        ZIO.fail(BranchNotInWorkspace(key, branch))
+      case None => ZIO.succeed(None)
+      case Some(name) =>
+        BranchRef.scenario(wsId, name) match
+          case Right(branch) => ZIO.succeed(Some(branch))
+          case Left(errors) =>
+            ZIO.die(new IllegalStateException(
+              s"composed branch for workspace ${wsId.value} + scenario '${name.value}' failed BranchRef validation: $errors — " +
+              "unreachable given a valid WorkspaceId + ScenarioName"
+            ))

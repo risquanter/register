@@ -20,7 +20,7 @@ import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef}
 import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive}
+import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, ScenarioService, ScenarioServiceNotSupported}
 import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
@@ -85,7 +85,10 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         RateLimiterLive.layer,
         AuthorizationServiceNoOp.layer,
         ZLayer.succeed(extractor),
-        ZLayer.succeed(provisioner)
+        ZLayer.succeed(provisioner),
+        // Bootstrap never sets X-Active-Branch — the not-supported stub is
+        // adequate here, this suite doesn't exercise scenario branches.
+        ScenarioServiceNotSupported.layer
       )
       .orDie
       .map { ctrl =>

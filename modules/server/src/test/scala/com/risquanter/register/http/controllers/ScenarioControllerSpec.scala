@@ -105,7 +105,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
 
   override def spec = suite("ScenarioController")(
 
-    test("create from main: 200, response echoes name and a branch ref") {
+    test("create from main: 200, response echoes name only — no branch reference (2026-07-21 redesign)") {
       for
         (backend, key) <- buildBackend()
         resp <- basicRequest
@@ -118,7 +118,10 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       yield assertTrue(
         resp.code.code == 200,
         decoded.map(_.name) == Right(scenarioName("draft-v1")),
-        decoded.toOption.exists(_.branch.toBranchRef.endsWith(".draft-v1"))
+        // The composed branch string embeds the workspace's own ID
+        // (scenarios.<workspaceId>.<name>, DD-5) — asserting its total
+        // absence from the wire body verifies the leak this redesign closes.
+        !body.contains("branch")
       )
     },
 

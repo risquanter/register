@@ -43,7 +43,7 @@ class WorkspaceTreeController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.getById(ws.id, treeId, branch).map(_.map(SimulationResponse.fromRiskTree))
       yield result).either
   }
@@ -54,7 +54,7 @@ class WorkspaceTreeController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.getById(ws.id, treeId, branch)
       yield result).either
   }
@@ -65,7 +65,7 @@ class WorkspaceTreeController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.update(ws.id, treeId, req, branch).map(SimulationResponse.fromRiskTree)
       yield result).either
   }
@@ -76,7 +76,7 @@ class WorkspaceTreeController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        branch <- ActiveBranch.resolve(key, ws.id, activeBranch)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
         // removeTree disassociates the tree from the workspace as a whole
         // (WorkspaceRecord.trees spans every branch — reaper cascade-delete,
         // listTrees) — only correct when the delete targets `main`. Deleting

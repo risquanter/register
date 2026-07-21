@@ -304,7 +304,7 @@ class RiskTreeServiceLive private (
   }
   
   // Config CRUD - only persist, no execution
-  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
     val operation = for {
       treeId <- IdGenerators.nextTreeId
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
@@ -321,7 +321,7 @@ class RiskTreeServiceLive private (
         rootId = rootId,
         seedVarHighWater = Some(seedVarHighWater)
       ).toZIOValidation
-      persisted <- repo.create(wsId, riskTree)
+      persisted <- repo.create(wsId, riskTree, branch)
     } yield persisted
 
     operation.tapBoth(

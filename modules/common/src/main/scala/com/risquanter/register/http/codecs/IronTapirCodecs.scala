@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, BranchRef, ScenarioName, CommitHash}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -166,11 +166,6 @@ object IronTapirCodecs {
       )
     )(_.value)
 
-  /** Schema for BranchRef for JSON body derivation (e.g. scenario create response). */
-  given Schema[BranchRef] = Schema.string.map[BranchRef](
-    (s: String) => BranchRef.fromString(s).toOption
-  )(_.toBranchRef)
-
   /** Schema for CommitHash for JSON body derivation (e.g. scenario list response). */
   given Schema[CommitHash] = Schema.string.map[CommitHash](
     (s: String) => CommitHash.fromString(s).toOption
@@ -192,18 +187,6 @@ object IronTapirCodecs {
         DecodeResult.Value(_)
       )
     )(hash => s"\"${hash.value}\"")
-
-  /** Codec for BranchRef as the `X-Active-Branch` header value (milestone-2b
-    * Phase B item 4b). Plain header, not a structured-syntax one like
-    * `If-Match` (RFC 7232) — no quoting on either side.
-    */
-  given Codec[String, BranchRef, CodecFormat.TextPlain] =
-    Codec.string.mapDecode[BranchRef](raw =>
-      BranchRef.fromString(raw.strip).fold(
-        errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
-        DecodeResult.Value(_)
-      )
-    )(_.toBranchRef)
 
   /** Schema for SafeName.SafeName for JSON body derivation. */
   given Schema[SafeName.SafeName] = Schema.string.map[SafeName.SafeName](
