@@ -1,7 +1,7 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormTarget, FieldSnapshot, ParentSelection, forPortfolio}
+import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forPortfolio}
 import app.components.FormInputs
 import app.components.ConfirmGuard.proceedOrConfirm
 import zio.prelude.Validation
@@ -14,8 +14,9 @@ import com.risquanter.register.domain.errors.ValidationError
  * TreeBuilderState.addPortfolio / updatePortfolio.
  *
  * Mode is derived from `builderState.activeForm.signal`, filtered to the
- * `Portfolio` target — a `Leaf` target (or no target) is irrelevant to this
- * form and collapses to `Blank`, mirroring [[RiskLeafFormView]].
+ * `Portfolio` target via `forPortfolio` — a `Leaf` target collapses to
+ * `Inactive` (fields shown empty and disabled, no lock icon); no target at
+ * all collapses to `Blank`. Mirrors [[RiskLeafFormView]].
  */
 object PortfolioFormView:
 
@@ -23,14 +24,27 @@ object PortfolioFormView:
     val form = new PortfolioFormState
     val submitError: Var[Option[String]] = Var(None)
 
-    // `.distinct` — collapsing an irrelevant (other-form) target always yields
-    // the same `Blank` value, so hand-offs between two non-portfolio states
-    // (e.g. the leaf form moving Templating → Locked) don't re-fire the
-    // populate/reset subscription below and wipe this form's own unrelated
-    // draft. A same-target `Templating` → `Locked` transition (this form's
-    // own "Clear Form" revert) still fires, since those are different values.
+    // `.distinct` — a leaf occupying `activeForm` always collapses to the
+    // same `Inactive` value regardless of which of its own states it's in,
+    // so hand-offs between two non-portfolio states (e.g. the leaf form
+    // moving Templating → Locked) don't re-fire the populate/reset
+    // subscription below and wipe this form's own unrelated draft. A
+    // same-target `Templating` → `Locked` transition (this form's own "Clear
+    // Form" revert) still fires, since those are different values — and so
+    // does the transition into `Inactive` from `Blank`, or from this form's
+    // own target, since those are different values too (this is what fixed
+    // the "dirty after submitting the other form" bug: `Blank` and
+    // `Inactive` no longer collapse into the same value the way `Blank` and
+    // the old undifferentiated "not mine" case used to).
     val portfolioMode: Signal[FormMode] = builderState.activeForm.signal.map(_.forPortfolio).distinct
-    val isLocked: Signal[Boolean] = portfolioMode.map { case FormMode.Locked(_) => true; case _ => false }
+    // Fields are disabled while genuinely Locked (viewing a saved portfolio),
+    // while Inactive (a saved leaf is selected instead), and while the
+    // *leaf* is being freshly drafted (`Drafting(Leaf)` — passed through
+    // unchanged by `forPortfolio` rather than folded away, see its doc
+    // comment) — but the lock glyph next to each label means something more
+    // specific ("this is a saved value"), so it's kept to Locked only.
+    val isDisabled: Signal[Boolean] = portfolioMode.map { case FormMode.Locked(_) | FormMode.Inactive | FormMode.Drafting(_) => true; case _ => false }
+    val showLockIcon: Signal[Boolean] = portfolioMode.map { case FormMode.Locked(_) => true; case _ => false }
 
     /** The portfolio whose own occupancy of root must not count against
       * itself in `parentOptions` (see `TreeBuilderState.parentOptions`) —
@@ -69,6 +83,8 @@ object PortfolioFormView:
     val addSubmitDisabled: Signal[Boolean] = portfolioMode.combineWith(form.hasErrors).map {
       case (FormMode.Editing(_), _) => true
       case (FormMode.Locked(_), _)  => false
+      case (FormMode.Inactive, _)   => false // just wakes the form into Blank, nothing to validate yet
+      case (FormMode.Drafting(_), _) => true // a leaf draft is in progress elsewhere; don't invite discarding it
       case (_, hasErrors)           => hasErrors
     }
     val editSaveLabel: Signal[String] = portfolioMode.map {
@@ -78,12 +94,14 @@ object PortfolioFormView:
     val editSaveDisabled: Signal[Boolean] = portfolioMode.combineWith(form.hasErrors).map {
       case (FormMode.Blank, _)         => true
       case (FormMode.Templating(_), _) => true
+      case (FormMode.Inactive, _)      => true // no portfolio is selected — nothing to edit
+      case (FormMode.Drafting(_), _)   => true // no portfolio is selected — nothing to edit
       case (FormMode.Locked(_), _)     => false
       case (_, hasErrors)              => hasErrors
     }
     val clearFormDisabled: Signal[Boolean] = portfolioMode.map {
-      case FormMode.Locked(_) => true
-      case _                  => false
+      case FormMode.Locked(_) | FormMode.Inactive | FormMode.Drafting(_) => true
+      case _                                                              => false
     }
 
     def onAddSubmitClick(): Unit =
@@ -102,6 +120,16 @@ object PortfolioFormView:
           proceedOrConfirm(isDiscardingLeafDraft, "This will discard the leaf you're currently editing. Continue?") { () =>
             handleSubmit(form, builderState, submitError)
           }
+        // A leaf is currently selected instead — this click means "start a
+        // fresh portfolio draft," which first has to reclaim `activeForm`
+        // from the leaf (there is only one shared target at a time). Goes to
+        // `Drafting(Portfolio)`, not straight to submitting (the form was
+        // empty/disabled a moment ago, there's nothing valid to submit yet)
+        // and not to plain `Blank` either — `Drafting` is what tells the leaf
+        // form "a fresh, unsaved portfolio draft is now in progress," so it
+        // locks its own Add/Edit buttons instead of quietly offering to
+        // discard this the moment it's clicked.
+        case FormMode.Inactive => builderState.activeForm.set(FormMode.Drafting(FormKind.Portfolio))
         case FormMode.Locked(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Templating(t))
         case FormMode.Templating(_: FormTarget.Portfolio) => handleSubmit(form, builderState, submitError)
         case _ => ()
@@ -129,6 +157,8 @@ object PortfolioFormView:
       cls := "portfolio-form",
       h2(child.text <-- portfolioMode.map {
         case FormMode.Blank         => "Add Portfolio"
+        case FormMode.Inactive      => "Add Portfolio"
+        case FormMode.Drafting(_)   => "Add Portfolio"
         case FormMode.Locked(_)     => "Portfolio Details"
         case FormMode.Editing(_)    => "Edit Portfolio"
         case FormMode.Templating(_) => "Add Portfolio"
@@ -188,9 +218,10 @@ object PortfolioFormView:
         onBlurCallback = () => form.markTouched(PortfolioField.Name),
         placeholderText = "e.g., Operations",
         filter = _ => true,
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       ),
-      FormInputs.parentSelect(form.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isLocked, form.parentError),
+      FormInputs.parentSelect(form.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isDisabled, form.parentError, showLockIcon),
 
       // Add/Submit, Clear Form, Edit/Save — right-aligned as a group, Clear Form
       // immediately right of Add/Submit.

@@ -7,6 +7,13 @@ enum FormTarget:
   case Leaf(name: SafeName.SafeName)
   case Portfolio(name: SafeName.SafeName)
 
+/** Which of the two node-editing forms — used by [[FormMode.Drafting]] to say
+  * which one is actively being drafted, without reusing [[FormTarget]] (which
+  * always names a *saved* node; a fresh draft has none yet).
+  */
+enum FormKind:
+  case Leaf, Portfolio
+
 /** The node-editing form's state machine. Replaces the independently-mutated
   * `selectedLeafName`/`selectedPortfolioName` pair in [[TreeBuilderState]] —
   * folding target + mode into one sum type makes "only one target selected,
@@ -15,6 +22,35 @@ enum FormTarget:
   */
 enum FormMode:
   case Blank
+  /** The *other* node type currently occupies `activeForm` (any of
+    * `Locked`/`Editing`/`Templating` on the other type) — as opposed to
+    * `Blank`, where nothing at all is selected anywhere. Distinct from
+    * `Blank` specifically so `forPortfolio`/`forLeaf` stop conflating the two:
+    * before this case existed, both collapsed to the same `Blank` value, so a
+    * plain submit that moved the *other* form from nothing-selected straight
+    * to its own freshly-`Locked` node was invisible to `.distinct` (`Blank ->
+    * Blank`, no change) — the reset/populate subscription keyed on that
+    * collapsed value never fired, leaving this form's fields (notably
+    * `parentVar`) holding whatever they held before, undetected because the
+    * dropdown's own display falls back to its placeholder for any value no
+    * longer among the current options (see `FormInputs.parentSelect`'s
+    * `correctedDisplay`) — so the stale value looked cleared even though
+    * `isFormDirty` correctly read it as dirty. See docs/dev/TODO.md.
+    */
+  case Inactive
+  /** `kind`'s form is actively being drafted — fresh and unsaved, woken up
+    * from `Inactive` by clicking its Add button (see both FormViews'
+    * `onAddSubmitClick`). From `kind`'s own form's perspective this is
+    * identical to `Blank` (freely editable) — `forPortfolio`/`forLeaf` fold
+    * it there directly. From the *other* form's perspective it is passed
+    * through unchanged (not folded to `Inactive`): unlike `Inactive` (where
+    * the other side is a *saved* node, so starting a fresh draft here too is
+    * harmless), the other side right now is unsaved and would be silently
+    * discarded by any action here — so that other form disables its own
+    * Add/Edit buttons too, not just its fields (see the `Drafting` match arm
+    * in both FormViews' derived signals).
+    */
+  case Drafting(kind: FormKind)
   case Locked(target: FormTarget)
   case Editing(target: FormTarget)
   case Templating(source: FormTarget)
@@ -23,15 +59,22 @@ extension (mode: FormMode)
   /** The node this mode is pointing at, if any — the shared extraction every
     * caller that needs "what's currently selected" (highlighting, cleanup on
     * delete, per-view lock/disabled derivation) would otherwise repeat as its
-    * own 4-way match on `FormMode`.
+    * own match on `FormMode`.
     */
   def currentTarget: Option[FormTarget] = mode match
     case FormMode.Blank         => None
+    case FormMode.Inactive      => None
+    case FormMode.Drafting(_)   => None
     case FormMode.Locked(t)     => Some(t)
     case FormMode.Editing(t)    => Some(t)
     case FormMode.Templating(t) => Some(t)
 
-  /** This mode collapsed to `Blank` unless its target is a `Portfolio` —
+  /** This mode viewed from the portfolio form's perspective: unchanged if its
+    * target is a `Portfolio`; `Blank` stays `Blank` (nothing selected
+    * anywhere); anything else (a `Leaf` occupies `activeForm`) becomes
+    * `Inactive` — see `Inactive`'s own doc comment for why that's a distinct
+    * case rather than also collapsing to `Blank`.
+    *
     * `PortfolioFormView`'s single view of `activeForm`, used both for its
     * reactive display signal and for reading the current mode inside click
     * handlers (`builderState.activeForm.now().forPortfolio`), so the two can
@@ -46,14 +89,20 @@ extension (mode: FormMode)
     case m @ FormMode.Locked(_: FormTarget.Portfolio)     => m
     case m @ FormMode.Editing(_: FormTarget.Portfolio)    => m
     case m @ FormMode.Templating(_: FormTarget.Portfolio) => m
-    case _                                                 => FormMode.Blank
+    case FormMode.Blank                                    => FormMode.Blank
+    case FormMode.Drafting(FormKind.Portfolio)             => FormMode.Blank
+    case m @ FormMode.Drafting(FormKind.Leaf)              => m
+    case _                                                  => FormMode.Inactive
 
   /** Mirror of `forPortfolio` for `RiskLeafFormView`. */
   def forLeaf: FormMode = mode match
     case m @ FormMode.Locked(_: FormTarget.Leaf)     => m
     case m @ FormMode.Editing(_: FormTarget.Leaf)    => m
     case m @ FormMode.Templating(_: FormTarget.Leaf) => m
-    case _                                            => FormMode.Blank
+    case FormMode.Blank                               => FormMode.Blank
+    case FormMode.Drafting(FormKind.Leaf)             => FormMode.Blank
+    case m @ FormMode.Drafting(FormKind.Portfolio)    => m
+    case _                                             => FormMode.Inactive
 
 extension (target: FormTarget)
   def name: SafeName.SafeName = target match
@@ -134,6 +183,16 @@ object FormMode:
               percentiles.nonEmpty || quantiles.nonEmpty || terms.nonEmpty || minLoss.nonEmpty || maxLoss.nonEmpty
           case FieldSnapshot.PortfolioFields(name, parent) =>
             name.nonEmpty || parent != ParentSelection.Unset
+      case FormMode.Inactive =>
+        // Fields are forced disabled while Inactive (see the two FormViews) —
+        // nothing the user can type into, so nothing to ever call dirty.
+        false
+      case FormMode.Drafting(_) =>
+        // Only ever reached here as the *other* form's mode (the owning
+        // form's own view folds this to `Blank` — see `forPortfolio`/
+        // `forLeaf`) — that other form's fields are forced disabled/blank
+        // too, same reasoning as `Inactive`.
+        false
       case FormMode.Locked(_) =>
         false
       case FormMode.Editing(target) => differsFromSaved(target, current, leaves, portfolios)

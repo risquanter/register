@@ -32,11 +32,17 @@ object FormInputs:
     onBlurCallback: () => Unit = () => (),
     placeholderText: String = "",
     inputModeAttr: String = "text",
-    disabledSignal: Signal[Boolean] = Val(false)
+    disabledSignal: Signal[Boolean] = Val(false),
+    // Separate from `disabledSignal`: a field can be disabled without being
+    // "locked" (e.g. FormMode.Inactive — the other node type is selected,
+    // this field is irrelevant, but nothing here is a saved value being
+    // protected from edits). Defaults to false (no caller currently disables
+    // a field without also being able to say whether it's genuinely locked).
+    lockedSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
     div(
       cls := "form-field",
-      label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, labelText),
+      label(cls := "form-label", cls("form-label--locked") <-- lockedSignal, labelText),
       input(
         typ := "text",
         inputMode := inputModeAttr,
@@ -98,11 +104,13 @@ object FormInputs:
     labelText: String,
     options: List[(T, String)],  // (value, displayLabel)
     selectedVar: Var[T],
-    disabledSignal: Signal[Boolean] = Val(false)
+    disabledSignal: Signal[Boolean] = Val(false),
+    // See `textInput`'s matching parameter doc.
+    lockedSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
     div(
       cls := "form-field",
-      label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, labelText),
+      label(cls := "form-label", cls("form-label--locked") <-- lockedSignal, labelText),
       div(
         cls := "radio-group",
         options.map { case (optValue, optLabel) =>
@@ -223,6 +231,8 @@ object FormInputs:
    * @param errorSignal Submit-time "Parent is required" / topology error, if any.
    * @param existingNames Every portfolio name currently in the tree,
    *   unfiltered by self-exclusion — see `TreeBuilderState.allPortfolioNames`.
+   * @param lockedSignal See `textInput`'s matching parameter doc. Defaults to
+   *   mirroring `disabledSignal`.
    */
   def parentSelect(
     parentVar: Var[ParentSelection],
@@ -230,7 +240,8 @@ object FormInputs:
     rootLabel: String,
     existingNames: Signal[Set[String]],
     disabledSignal: Signal[Boolean] = Val(false),
-    errorSignal: Signal[Option[String]] = Val(None)
+    errorSignal: Signal[Option[String]] = Val(None),
+    lockedSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
     val unsetValue = ""
 
@@ -250,7 +261,7 @@ object FormInputs:
 
     div(
       cls := "form-field",
-      label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, "Parent Portfolio"),
+      label(cls := "form-label", cls("form-label--locked") <-- lockedSignal, "Parent Portfolio"),
       select(
         cls := "form-input",
         cls("error") <-- errorSignal.map(_.isDefined),

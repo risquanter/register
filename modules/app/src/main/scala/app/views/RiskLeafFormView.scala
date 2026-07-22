@@ -2,7 +2,7 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.Validation
-import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormTarget, FieldSnapshot, ParentSelection, forLeaf}
+import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forLeaf}
 import app.components.FormInputs.*
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.iron.SafeName
@@ -18,15 +18,24 @@ object RiskLeafFormView:
     val state = new RiskLeafFormState
     val submitError: Var[Option[String]] = Var(None)
 
-    // This form's view of `activeForm`: a Portfolio target (or no target at all)
-    // is irrelevant to the leaf form, and collapses to Blank — matching how
-    // `selectedLeafName` was implicitly None whenever a portfolio was selected.
+    // This form's view of `activeForm`, via `forLeaf`: a Portfolio target
+    // collapses to `Inactive` (fields shown empty and disabled, no lock
+    // icon); no target at all collapses to `Blank`.
     // `.distinct` — see the matching comment in `PortfolioFormView`: without
     // it, the portfolio form moving between two of its own non-Blank states
     // re-fires this form's populate/reset subscription and wipes an unrelated,
-    // unsaved leaf draft.
+    // unsaved leaf draft. `Blank` and `Inactive` being distinct values (not
+    // both collapsing to `Blank`) is what fixed the "dirty after submitting
+    // the other form" bug — see `FormMode.Inactive`'s own doc comment.
     val leafMode: Signal[FormMode] = builderState.activeForm.signal.map(_.forLeaf).distinct
-    val isLocked: Signal[Boolean] = leafMode.map { case FormMode.Locked(_) => true; case _ => false }
+    // Fields are disabled while genuinely Locked (viewing a saved leaf),
+    // while Inactive (a saved portfolio is selected instead), and while the
+    // *portfolio* is being freshly drafted (`Drafting(Portfolio)` — passed
+    // through unchanged by `forLeaf` rather than folded away, see its doc
+    // comment) — but the lock glyph next to each label means something more
+    // specific ("this is a saved value"), so it's kept to Locked only.
+    val isDisabled: Signal[Boolean] = leafMode.map { case FormMode.Locked(_) | FormMode.Inactive | FormMode.Drafting(_) => true; case _ => false }
+    val showLockIcon: Signal[Boolean] = leafMode.map { case FormMode.Locked(_) => true; case _ => false }
 
     /** The leaf whose own occupancy of root must not count against itself in
       * `parentOptions` — Locked/Editing only (mirrors
@@ -74,6 +83,8 @@ object RiskLeafFormView:
     val addSubmitDisabled: Signal[Boolean] = leafMode.combineWith(state.hasErrors).map {
       case (FormMode.Editing(_), _)  => true  // mid-edit of an existing leaf; finish or Clear Form first
       case (FormMode.Locked(_), _)   => false // just unlocks a template copy, nothing to validate yet
+      case (FormMode.Inactive, _)    => false // just wakes the form into Blank, nothing to validate yet
+      case (FormMode.Drafting(_), _) => true  // a portfolio draft is in progress elsewhere; don't invite discarding it
       case (_, hasErrors)            => hasErrors
     }
     val editSaveLabel: Signal[String] = leafMode.map {
@@ -83,12 +94,14 @@ object RiskLeafFormView:
     val editSaveDisabled: Signal[Boolean] = leafMode.combineWith(state.hasErrors).map {
       case (FormMode.Blank, _)         => true
       case (FormMode.Templating(_), _) => true
+      case (FormMode.Inactive, _)      => true // no leaf is selected — nothing to edit
+      case (FormMode.Drafting(_), _)   => true // no leaf is selected — nothing to edit
       case (FormMode.Locked(_), _)     => false // just unlocks in place, nothing to validate yet
       case (_, hasErrors)              => hasErrors
     }
     val clearFormDisabled: Signal[Boolean] = leafMode.map {
-      case FormMode.Locked(_) => true
-      case _                  => false
+      case FormMode.Locked(_) | FormMode.Inactive | FormMode.Drafting(_) => true
+      case _                                                              => false
     }
 
     def onAddSubmitClick(): Unit =
@@ -104,6 +117,16 @@ object RiskLeafFormView:
           proceedOrConfirm(isDiscardingPortfolioDraft, "This will discard the portfolio you're currently editing. Continue?") { () =>
             handleSubmit(state, builderState, submitError)
           }
+        // A portfolio is currently selected instead — this click means "start
+        // a fresh leaf draft," which first has to reclaim `activeForm` from
+        // the portfolio (there is only one shared target at a time). Goes to
+        // `Drafting(Leaf)`, not straight to submitting (the form was
+        // empty/disabled a moment ago, there's nothing valid to submit yet)
+        // and not to plain `Blank` either — `Drafting` is what tells the
+        // portfolio form "a fresh, unsaved leaf draft is now in progress,"
+        // so it locks its own Add/Edit buttons instead of quietly offering
+        // to discard this the moment it's clicked.
+        case FormMode.Inactive => builderState.activeForm.set(FormMode.Drafting(FormKind.Leaf))
         case FormMode.Locked(t: FormTarget.Leaf) => builderState.activeForm.set(FormMode.Templating(t))
         case FormMode.Templating(_: FormTarget.Leaf) => handleSubmit(state, builderState, submitError)
         case _ => ()
@@ -131,6 +154,8 @@ object RiskLeafFormView:
       cls := "risk-leaf-form",
       h2(child.text <-- leafMode.map {
         case FormMode.Blank         => "Add Risk Leaf"
+        case FormMode.Inactive      => "Add Risk Leaf"
+        case FormMode.Drafting(_)   => "Add Risk Leaf"
         case FormMode.Locked(_)     => "Risk Leaf Details"
         case FormMode.Editing(_)    => "Edit Risk Leaf"
         case FormMode.Templating(_) => "Add Risk Leaf"
@@ -229,7 +254,8 @@ object RiskLeafFormView:
         filter = state.nameFilter,
         onBlurCallback = () => state.markTouched(RiskLeafField.Name),
         placeholderText = "e.g., Cyber Attack Risk",
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       ),
 
       textInput(
@@ -240,7 +266,8 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched(RiskLeafField.Probability),
         placeholderText = "e.g., 40 (= 40%)",
         inputModeAttr = "decimal",
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       ),
 
       // Distribution Mode Toggle
@@ -251,19 +278,20 @@ object RiskLeafFormView:
           (DistributionMode.Lognormal, "Lognormal (BCG)")
         ),
         selectedVar = state.distributionModeVar,
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       ),
 
       // Parent selection
-      parentSelect(state.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isLocked, state.parentError),
+      parentSelect(state.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isDisabled, state.parentError, showLockIcon),
 
       // Conditional Fields based on mode. Only `distributionModeVar` triggers a
-      // subtree rebuild here — `isLocked` is threaded through as a Signal so
-      // locking/unlocking toggles the `disabled` attribute on the already-mounted
-      // inputs instead of rebuilding them (Signal granularity, ADR-019).
+      // subtree rebuild here — `isDisabled`/`showLockIcon` are threaded through
+      // as Signals so locking/unlocking toggles the `disabled` attribute on the
+      // already-mounted inputs instead of rebuilding them (Signal granularity, ADR-019).
       child <-- state.distributionModeVar.signal.map {
-        case DistributionMode.Expert    => expertFields(state, isLocked)
-        case DistributionMode.Lognormal => lognormalFields(state, isLocked)
+        case DistributionMode.Expert    => expertFields(state, isDisabled, showLockIcon)
+        case DistributionMode.Lognormal => lognormalFields(state, isDisabled, showLockIcon)
       },
 
       // Add/Submit, Edit/Save, Clear Form — right-aligned as a group, Clear Form
@@ -302,7 +330,7 @@ object RiskLeafFormView:
     )
   
   /** Expert mode specific fields */
-  private def expertFields(state: RiskLeafFormState, isLocked: Signal[Boolean]): HtmlElement =
+  private def expertFields(state: RiskLeafFormState, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement =
     div(
       cls := "mode-fields",
       div(cls := "mode-fields-title", "Expert Opinion Parameters"),
@@ -315,7 +343,8 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched(RiskLeafField.Percentiles),
         placeholderText = "e.g., 10, 50, 90",
         inputModeAttr = "decimal",
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       ),
 
       textInput(
@@ -326,7 +355,8 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched(RiskLeafField.Quantiles),
         placeholderText = "e.g., 50, 200, 1000 ($50M, $200M, $1B)",
         inputModeAttr = "decimal",
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       ),
 
       // Implied ratio warning: shown when P90/P10 ratio exceeds 100×
@@ -342,12 +372,13 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched(RiskLeafField.Terms),
         placeholderText = "e.g. 3",
         inputModeAttr = "numeric",
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       )
     )
 
   /** Lognormal mode specific fields */
-  private def lognormalFields(state: RiskLeafFormState, isLocked: Signal[Boolean]): HtmlElement =
+  private def lognormalFields(state: RiskLeafFormState, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement =
     div(
       cls := "mode-fields",
       div(cls := "mode-fields-title", "Lognormal Parameters (80% CI)"),
@@ -360,7 +391,8 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched(RiskLeafField.MinLoss),
         placeholderText = "e.g., 1000",
         inputModeAttr = "numeric",
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       ),
 
       textInput(
@@ -371,7 +403,8 @@ object RiskLeafFormView:
         onBlurCallback = () => state.markTouched(RiskLeafField.MaxLoss),
         placeholderText = "e.g., 50000",
         inputModeAttr = "numeric",
-        disabledSignal = isLocked
+        disabledSignal = isDisabled,
+        lockedSignal = showLockIcon
       )
     )
   
