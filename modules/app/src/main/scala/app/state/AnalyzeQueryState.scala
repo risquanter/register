@@ -1,6 +1,5 @@
 package app.state
 
-import zio.ZIO
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
@@ -80,6 +79,27 @@ final class AnalyzeQueryState(
     }
 
   // ── Server-side evaluation result ─────────────────────────────
+  //
+  // `queryResult`/`queryServerError` stay public `Var`s — every existing
+  // reader (`AnalyzeView`'s `.signal` bindings) is unaffected — but neither
+  // is written directly by `executeQuery`/`resetResult` any more. Both are
+  // driven from one place: `outcome`, an `EventStream[QueryOutcome]` built
+  // with `flatMapSwitch` over `triggerBus`. Each new trigger (a fresh
+  // `executeQuery()` call, or a `resetResult()`) makes `flatMapSwitch` drop
+  // its subscription to whatever the *previous* trigger's request stream was
+  // still doing — a response for a superseded query can therefore never
+  // land after a newer one has already started, regardless of which
+  // request's server round trip happens to finish first. This replaces an
+  // earlier hand-rolled "is this response still relevant" guard: Airstream
+  // already has a combinator for exactly this ("supersede stale in-flight
+  // work when a new trigger fires"), so there's no bespoke bookkeeping left
+  // to keep correct by hand.
+  //
+  // One known, deliberate gap: `flatMapSwitch` stops *observing* the
+  // superseded request's stream, it does not cancel the underlying ZIO
+  // fiber (`forkProvided`, see `ZJS.scala`, discards the fiber handle) — the
+  // abandoned network call still runs to completion server-side, its result
+  // just goes nowhere. Tracked separately (TODO.md).
   val queryResult: Var[LoadState[QueryResponse]] = Var(LoadState.Idle)
 
   /** Server-side domain error (400 query failures) for inline display.
@@ -109,6 +129,66 @@ final class AnalyzeQueryState(
       case _                 => false
     }
 
+  // ── Trigger → outcome pipeline ─────────────────────────────────
+
+  /** One request for the `outcome` stream to (re)switch to. `Reset` is a
+    * trigger like any other — modelling "clear the result" as a value this
+    * pipeline emits, not as a side-channel `Var.set` outside it, is what
+    * lets `flatMapSwitch` also supersede an in-flight query the moment the
+    * tree changes (today's separate `resetResult()` caller in `AnalyzeView`
+    * still exists, it just enqueues a trigger now instead of writing state
+    * directly).
+    */
+  private enum Trigger:
+    case Reset
+    case Run(key: WorkspaceKeySecret, treeId: TreeId, text: String, branch: Option[ScenarioName.ScenarioName])
+
+  /** Outcome of one trigger, folding `queryResult`/`queryServerError` into a
+    * single value so both stay in lockstep as one thing switches to the
+    * next — there is no window where one has caught up to a new trigger and
+    * the other hasn't.
+    */
+  private enum Outcome:
+    case Idle
+    case Loading
+    case Loaded(resp: QueryResponse)
+    case DomainError(message: String)
+
+  private val triggerBus: EventBus[Trigger] = new EventBus[Trigger]
+
+  private def outcomeStream(trigger: Trigger): EventStream[Outcome] = trigger match
+    case Trigger.Reset => EventStream.fromValue(Outcome.Idle, emitOnce = true)
+    case Trigger.Run(key, treeId, text, branch) =>
+      val loading = EventStream.fromValue(Outcome.Loading, emitOnce = true)
+      val settled = queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(text), branch))
+        .toOutcomeEventStream
+        .map {
+          case Right(resp) => Outcome.Loaded(resp)
+          case Left(e: FolQueryFailure) if isQueryDomainError(e) => Outcome.DomainError(e.getMessage)
+          // Infra failure: ZJS.toOutcomeEventStream already notified the
+          // global ErrorObserver via forkProvided's own hook (unchanged) —
+          // this stream only needs to resolve back out of Loading.
+          case Left(_) => Outcome.Idle
+        }
+      loading.mergeWith(settled)
+
+  // App-lifetime subscription (AnalyzeQueryState lives for the app lifetime,
+  // like TreeBuilderState's isEditDirtyVar wiring) — the one and only writer
+  // of queryResult/queryServerError.
+  triggerBus.events.flatMapSwitch(outcomeStream).foreach {
+    case Outcome.Idle =>
+      queryResult.set(LoadState.Idle)
+      queryServerError.set(None)
+    case Outcome.Loading =>
+      queryResult.set(LoadState.Loading)
+      queryServerError.set(None)
+    case Outcome.Loaded(resp) =>
+      queryResult.set(LoadState.Loaded(resp))
+    case Outcome.DomainError(message) =>
+      queryResult.set(LoadState.Idle)
+      queryServerError.set(Some(message))
+  }(using unsafeWindowOwner)
+
   // ── Actions ───────────────────────────────────────────────────
 
   /** Clear the last query's server result (and any inline server error)
@@ -119,11 +199,11 @@ final class AnalyzeQueryState(
     * the chart's node selection — without this reset, a previous tree's
     * matched node IDs would keep flowing into the newly selected tree's
     * chart (and, for Compare mode, into curve fetches against the new tree
-    * using node IDs that may not even exist there).
+    * using node IDs that may not even exist there). Also supersedes an
+    * in-flight query for the *previous* tree, if one was still running.
     */
   def resetResult(): Unit =
-    queryResult.set(LoadState.Idle)
-    queryServerError.set(None)
+    triggerBus.emit(Trigger.Reset)
 
   /** Fire a query against the backend.
     *
@@ -147,22 +227,7 @@ final class AnalyzeQueryState(
         case Right(_) =>
           (keySignal.now(), selectedTreeId.now()) match
             case (Some(key), Some(treeId)) =>
-              queryResult.set(LoadState.Loading)
-              queryServerError.set(None)
-              queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(queryText), branchAccessor()))
-                .foldZIO(
-                  failure = {
-                    case e: FolQueryFailure if isQueryDomainError(e) =>
-                      ZIO.succeed {
-                        queryServerError.set(Some(e.getMessage))
-                        queryResult.set(LoadState.Idle)
-                      }
-                    case e =>
-                      ZIO.succeed(queryResult.set(LoadState.Idle)) *> ZIO.fail(e)
-                  },
-                  success = resp => ZIO.succeed(queryResult.set(LoadState.Loaded(resp)))
-                )
-                .runJs
+              triggerBus.emit(Trigger.Run(key, treeId, queryText, branchAccessor()))
             case _ => () // No workspace or tree selected
 
   /** True for `FolQueryFailure` subtypes that represent user-facing query

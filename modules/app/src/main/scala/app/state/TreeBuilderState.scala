@@ -144,6 +144,21 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       if rootTaken then base else rootLabel :: base
     }
 
+  /** Every portfolio name currently in the tree, unfiltered by `excludeSelf` —
+    * deliberately NOT the same list `parentOptions` renders as selectable
+    * `<option>`s. `parentOptions` shrinks (loses `rootLabel`, loses the
+    * viewed/edited node's own name) purely because *which node is asking*
+    * changed, on every Locked/Editing/Templating target switch — that's not
+    * evidence the CURRENTLY HELD selection stopped being real. This list
+    * only changes when a portfolio is actually added, renamed, or removed,
+    * so `FormInputs.parentSelect`'s auto-correct can use it to catch a
+    * genuinely stale selection (the parent it pointed at got renamed/deleted
+    * by the other sub-form) without also firing — and clobbering a
+    * still-good selection — on a plain target switch. See `parentSelect`'s
+    * own doc comment for the bug this replaced.
+    */
+  val allPortfolioNames: Signal[Set[String]] = portfoliosVar.signal.map(_.map(_.name.value).toSet)
+
   def addPortfolio(name: SafeName.SafeName, parent: Option[SafeName.SafeName]): Validation[ValidationError, PortfolioDraft] =
     val draft = PortfolioDraft(name, parent)
     val result = TreeBuilderLogic.preValidateTopology(

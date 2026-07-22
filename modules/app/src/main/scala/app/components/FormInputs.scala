@@ -184,32 +184,51 @@ object FormInputs:
    * is no computed fallback value for this component or its callers to
    * silently pick on the user's behalf (see `ParentSelection`'s own doc).
    *
-   * `parentVar` is corrected in exactly one situation: the option list
-   * itself changes (a portfolio is added/renamed/removed elsewhere) and the
-   * currently-held value is no longer among the valid choices — corrected to
-   * `Unset`, not to an arbitrary substitute. That correction is driven off
-   * `options` alone, deliberately *not* off `parentVar` itself — the earlier
-   * version watched both together, which meant setting `parentVar` (from
-   * here, or from a caller's own reset) re-triggered this same subscription.
-   * Nested inside whatever the caller's own multi-step reset/populate
-   * sequence was doing at the time, that self-triggering was the mechanism
-   * behind two confirmed bugs (a locked node's own parent field silently
-   * overwritten to point at itself; a leaf form reading as dirty after tree
-   * creation even with every visible field genuinely empty). Watching
-   * `options` only means this subscription never fires as a side effect of a
-   * caller clearing or populating its own form — only when the world outside
-   * this form actually changes — so it can't race with, or get raced by, a
-   * caller's own reset sequence.
+   * `parentVar` is corrected in exactly one situation: a NAMED portfolio it
+   * currently points at has genuinely stopped existing (renamed or removed,
+   * by the *other* sub-form, while this one sits on some other target) —
+   * corrected to `Unset`, not to an arbitrary substitute. This check is
+   * driven off `existingNames` (every portfolio name in the tree, unfiltered
+   * — see `TreeBuilderState.allPortfolioNames`), deliberately NOT off
+   * `options` (the self-exclusion-adjusted list actually rendered as
+   * `<option>`s): `options` also shrinks on every plain target switch —
+   * viewing/editing a DIFFERENT node excludes that node's own name and,
+   * often, `rootLabel` — for reasons that have nothing to do with whether
+   * the value already sitting in `parentVar` (still holding the *previous*
+   * target's parent, an instant before that target's own populate step
+   * overwrites it) stopped existing. `Root` is likewise never auto-corrected
+   * by this check — its exclusion from `options` is *always* a self/target
+   * relative judgement (who's asking), never "root was deleted", so there is
+   * nothing here for it to legitimately go stale against.
+   *
+   * Confirmed bug this replaced: switching the active target from node A
+   * (parent = B) straight to node B itself made `options` recompute to
+   * exclude B (self-exclusion) before B's own populate step (deferred one
+   * Airstream transaction later, since it fires from within another
+   * signal's observer) had actually written B's real parent into
+   * `parentVar` — this subscription, reading `parentVar.now()` in between,
+   * saw the *stale* "B" (A's old parent) missing from B's own options and
+   * "corrected" it to `Unset`, in an Airstream transaction that ran *after*
+   * populate's own write, clobbering it. The same thing reproduced for the
+   * root case: editing the node that legitimately holds root showed the
+   * dropdown stuck on "— none selected —", unselectable, because the exact
+   * same stale read fired for `Root` too. Keying this check off
+   * `existingNames` instead removes the coupling: that signal only changes
+   * on a real add/rename/remove, never on a target switch, so it can no
+   * longer race populate.
    *
    * @param parentVar Var holding the current selection.
    * @param options Signal of available parent names (may include rootLabel)
    * @param rootLabel Sentinel string representing the root (e.g., "(root)")
    * @param errorSignal Submit-time "Parent is required" / topology error, if any.
+   * @param existingNames Every portfolio name currently in the tree,
+   *   unfiltered by self-exclusion — see `TreeBuilderState.allPortfolioNames`.
    */
   def parentSelect(
     parentVar: Var[ParentSelection],
     options: Signal[List[String]],
     rootLabel: String,
+    existingNames: Signal[Set[String]],
     disabledSignal: Signal[Boolean] = Val(false),
     errorSignal: Signal[Option[String]] = Val(None)
   ): HtmlElement =
@@ -242,14 +261,16 @@ object FormInputs:
           value <-- parentVar.signal.combineWith(options).map(correctedDisplay(_, _)),
           onChange.mapToValue.map(fromValue) --> parentVar
         ),
-        // See the doc comment above: triggered by `options` alone, reading
-        // `parentVar` only via `.now()` — never combined with it — so this
-        // cannot re-fire itself and cannot fire as a side effect of a
-        // caller's own reset/populate sequence touching `parentVar`.
-        options --> { opts =>
-          val current = toValue(parentVar.now())
-          if current != unsetValue && !opts.contains(current) then
-            parentVar.set(ParentSelection.Unset)
+        // See the doc comment above: triggered by `existingNames` alone
+        // (never by a target switch), reading `parentVar` only via `.now()`
+        // — never combined with it — so this cannot re-fire itself and
+        // cannot fire as a side effect of a caller's own reset/populate
+        // sequence touching `parentVar`.
+        existingNames --> { names =>
+          parentVar.now() match
+            case ParentSelection.Portfolio(name) if !names.contains(name) =>
+              parentVar.set(ParentSelection.Unset)
+            case _ => ()
         }
       ),
       child.maybe <-- errorSignal.map(_.map(msg => span(cls := "form-error", msg)))

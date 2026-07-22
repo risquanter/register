@@ -1424,7 +1424,7 @@ copy-pasting the `.split` call at both sites — both `renderBranchPicker` and
 
 **Status:** fixed, both call sites.
 
-## 27. `AnalyzeQueryState` stale-result reset — imperative patch in place, more robust alternative available
+## ✅ 27. `AnalyzeQueryState` stale-result reset — imperative patch in place, more robust alternative available — RESOLVED 2026-07-22
 
 **Origin:** milestone-2b Phase C Comparison-view review (2026-07-16 session).
 A stale query result from the previously-selected tree could leak into the
@@ -1436,19 +1436,41 @@ call `resetResult()` — the same category of fragility as item 26 and the
 dirty-tracking races fixed this session (state kept correct by convention at
 each call site, not by construction).
 
-**More robust alternative (not yet built):** tag each query result with the
+~~**More robust alternative (not yet built):** tag each query result with the
 `TreeId` it was computed for, and derive the "current" result as a pure
 filter against `selectedTreeId` (stale results for a different tree simply
 never display) instead of relying on an imperative reset call wired into one
-particular transition path.
+particular transition path.~~
 
-**Decided (2026-07-22):** tentatively Option B (tagged/derived approach).
+~~**Decided (2026-07-22):** tentatively Option B (tagged/derived approach).
 **Scheduled after milestone-2b's implementation is complete** — the current
 imperative fix is live and correct, so this is a deferred re-engineering
-pass, not a live bug.
+pass, not a live bug.~~
 
-**Status:** current imperative fix stays in place until then; not yet
-re-engineered.
+**Resolution (2026-07-22):** built sooner than scheduled above, using a
+different mechanism than the tagged/derived approach originally sketched —
+Airstream's own `flatMapSwitch` combinator, which is the framework's
+established tool for "supersede whatever the previous trigger's in-flight
+work was still doing," rather than a hand-rolled staleness guard or a
+tag-and-filter scheme. `executeQuery()`/`resetResult()` now emit onto a
+private `EventBus[Trigger]`; `triggerBus.events.flatMapSwitch(outcomeStream)`
+drives `queryResult`/`queryServerError` as the one and only writer. A new
+trigger makes Airstream drop the subscription to the previous trigger's
+request stream outright, so a stale response can never land after a newer
+query has started — not merely "arrive but get filtered," an actual
+unsubscribe. Same mechanism applied to `ScenarioDiffState.loadDiff` /
+`loadCompareCurves` (item 28's sibling races). New `ZJS.toOutcomeEventStream`
+(additive, `toEventStream` itself unchanged) supports this by also emitting
+on failure, which plain `toEventStream` doesn't.
+
+**Known gap, tracked separately:** `flatMapSwitch` stops *observing* a
+superseded request, it does not cancel the underlying ZIO fiber —
+`forkProvided` (`ZJS.scala`) discards the fiber handle it gets back from
+`Runtime.default.unsafe.fork`, so the abandoned network call still runs to
+completion server-side. See item 29.
+
+**Status:** resolved — `AnalyzeQueryState.scala`, `ScenarioDiffState.scala`,
+`ZJS.scala`.
 
 ## 28. VQL queries spanning multiple trees / multiple scenarios — investigation only
 
@@ -1468,3 +1490,50 @@ no query-language grammar changes, no backend service changes, no UI
 changes proposed yet.
 
 **Status:** investigation only, no design started, no code changed.
+
+## 29. `flatMapSwitch` supersedes stale UI state, not the underlying ZIO fiber — investigate whether that gap is worth closing
+
+**Origin (2026-07-22):** surfaced while resolving item 27 with
+`flatMapSwitch` (`AnalyzeQueryState`/`ScenarioDiffState`). `flatMapSwitch`
+correctly stops a stale request's result from ever being displayed — it
+unsubscribes from the previous trigger's inner stream the moment a new
+trigger fires. It does **not** cancel the ZIO fiber running the actual
+network call: `ZJS.forkProvided` calls `Runtime.default.unsafe.fork(...)`
+and discards the returned `Fiber` handle, so a superseded request's HTTP
+call still runs to completion server-side (and the response, once it
+arrives, is simply never observed) — wasted backend work, not a correctness
+problem.
+
+**Scope of the investigation:** whether this is worth closing at all (how
+often does a user actually re-trigger fast enough for it to matter?), and if
+so, what closing it would take — `forkProvided` would need to retain the
+`Fiber` handle per in-flight request and interrupt it when Airstream drops
+the corresponding subscription (e.g. wiring `Fiber#interrupt` into an
+`onStop` hook of a custom `EventStream`, rather than the current bare
+`emitTo`/`toEventStream`/`toOutcomeEventStream` helpers). Not started — no
+design proposed, no `ZJS.scala` changes.
+
+**Status:** investigation only, no code changed.
+
+## 30. LEC chart: per-branch curve colour + P50/P95 percentile line naming
+
+**Origin (2026-07-22):** two related, previously-planned chart items,
+recorded here so they aren't lost while other Analyze/Compare work lands
+first:
+
+1. **Per-branch curve colour, not per-risk.** Planned earlier: each curve on
+   the LEC chart should carry its own colour (not colour-by-risk), with the
+   percentile lines (currently solid) rendered dotted, and a toggle to
+   show/hide them. Not started — no `LECSpecBuilder`/`LECChartView` changes
+   proposed yet.
+2. **"P50" is very likely a naming mistake, not a deliberate choice.** The
+   leaf-creation panel's own preview already labels its percentile line
+   "P05" (not "P50") — wherever the LEC chart or its legend currently says
+   "P50"/"P95", it should very likely read "P05"/"P95" to match, unless
+   something backend-side genuinely computes a 50th-percentile line
+   specifically for that spot (not yet checked). Needs a check across
+   `LECSpecBuilder`/chart legend text before renaming, in case "P50" is
+   intentional somewhere and only the naming *looks* inconsistent.
+
+**Status:** not started — investigation + design needed before either change
+is made.

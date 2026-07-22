@@ -255,7 +255,7 @@ object RiskLeafFormView:
       ),
 
       // Parent selection
-      parentSelect(state.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, isLocked, state.parentError),
+      parentSelect(state.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isLocked, state.parentError),
 
       // Conditional Fields based on mode. Only `distributionModeVar` triggers a
       // subtree rebuild here — `isLocked` is threaded through as a Signal so

@@ -190,7 +190,7 @@ object PortfolioFormView:
         filter = _ => true,
         disabledSignal = isLocked
       ),
-      FormInputs.parentSelect(form.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, isLocked, form.parentError),
+      FormInputs.parentSelect(form.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, builderState.allPortfolioNames, isLocked, form.parentError),
 
       // Add/Submit, Clear Form, Edit/Save — right-aligned as a group, Clear Form
       // immediately right of Add/Submit.

@@ -100,6 +100,30 @@ object ZJS:
       emitTo(eventBus)
       eventBus.events
 
+    /** Like `toEventStream`, but also emits on failure instead of staying
+      * silent — needed by any caller that wants to `flatMapSwitch` a
+      * sequence of requests into a single derived result: `flatMapSwitch`
+      * only supersedes a stale request when the newer one's inner stream
+      * actually emits *something*; a failed request that never emits would
+      * leave the derived signal stuck showing the last state the stale
+      * request reached before being superseded (e.g. "Loading" forever).
+      *
+      * `.tapError`/`.tap` here only observe the outcome — they don't alter
+      * the success/failure channel — so `forkProvided`'s own error-observer
+      * hook (global banner) still sees the exact same success/failure this
+      * ZIO would have produced via plain `toEventStream`. This is additive:
+      * `toEventStream` itself is unchanged, and every existing caller keeps
+      * today's silent-on-failure behavior.
+      */
+    def toOutcomeEventStream: EventStream[Either[E, A]] =
+      val eventBus = EventBus[Either[E, A]]()
+      forkProvided {
+        zio
+          .tapError(e => Console.printLineError(e.safeMessage) *> ZIO.attempt(eventBus.emit(Left(e))))
+          .tap(a => ZIO.attempt(eventBus.emit(Right(a))))
+      }
+      eventBus.events
+
   // ---------------------------------------------------------------------------
   // Extensions on ZIO + LoadState — DRY the tap/tapError/runJs lifecycle
   // ---------------------------------------------------------------------------
