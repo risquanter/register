@@ -10,8 +10,18 @@ import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.CreateScenarioRequest
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
-/** Scenario (branch) lifecycle + the active-branch selection for this tab
-  * (milestone-2b Phase B — BranchBar, DD-5/DD-8/DD-9).
+/** Per-view active-branch selection (milestone-2b Phase B — BranchBar,
+  * DD-5/DD-8/DD-9). Design and Analyze each construct their own instance —
+  * "which branch is this view's own context" is exactly the part that must
+  * differ between them.
+  *
+  * The workspace's actual scenario *list* is not this class's own state —
+  * it lives in `listState: ScenarioListState`, a single instance shared by
+  * every `ScenarioState` (see that class's doc for why the list isn't
+  * per-view the way `activeBranch` is). `create`/`delete` here still perform
+  * the mutation (they need this instance's own `keySignal`/`activeBranch`),
+  * but hand the resulting refresh to `listState` — the shared list is never
+  * written to directly by more than one code path.
   *
   * `activeBranch` is per-tab, in-memory only — `None` means main (mirrors
   * the server default, DD-8) and is never persisted to the URL or storage,
@@ -20,30 +30,48 @@ import com.risquanter.register.http.responses.ScenarioSummaryResponse
   * safe default, not data loss (nothing server-side depends on this value).
   *
   * @param keySignal      Read-only signal providing the active workspace key.
+  * @param listState      Shared scenario list — see `ScenarioListState`.
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   */
 final class ScenarioState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  listState: ScenarioListState,
   userIdAccessor: () => Option[UserId.Authenticated] = () => None
 ) extends ScenarioEndpoints:
 
   /** `None` = main. */
   val activeBranch: Var[Option[ScenarioName.ScenarioName]] = Var(None)
 
-  val scenarios: Var[LoadState[List[ScenarioSummaryResponse]]] = Var(LoadState.Idle)
+  /** Read-only view of the shared scenario list — see `ScenarioListState`. */
+  def scenarios: StrictSignal[LoadState[List[ScenarioSummaryResponse]]] = listState.scenarios
 
   /** Fetch the workspace's scenario list. No-op if no workspace is active. */
-  def refresh(): Unit =
-    keySignal.now() match
-      case Some(key) => listScenariosEndpoint((userIdAccessor(), key)).loadInto(scenarios)
-      case None      => ()
+  def refresh(): Unit = listState.refresh()
 
-  /** Switch this tab's active branch. `None` switches back to main. */
+  /** Switch this view's active branch. `None` switches back to main. */
   def switchTo(name: Option[ScenarioName.ScenarioName]): Unit =
     activeBranch.set(name)
 
+  // Falls back to main if this view's active branch disappears from the
+  // shared list — whether deleted through this view or any other. Reacts
+  // only to `listState.scenarios`, the external signal that actually
+  // invalidates the value, never to `activeBranch`'s own changes — so this
+  // can't race a caller's own `switchTo` (ADR-019 Pattern 6 and the
+  // "Self-Correcting Reactive Var" code smell it documents). `Loaded` only:
+  // Idle/Loading/Failed aren't confirmation the branch is actually gone.
+  listState.scenarios.changes.foreach {
+    case LoadState.Loaded(list) =>
+      val names = list.map(_.name).toSet
+      activeBranch.now().foreach { current =>
+        if !names.contains(current) then activeBranch.set(None)
+      }
+    case _ => ()
+  }(using unsafeWindowOwner)
+
   /** Create a scenario, forked from `forkOf` (`None` = main's current head).
-    * On success: refreshes the list and switches this tab to the new branch.
+    * On success: refreshes the shared list and switches this view to the
+    * new branch. Every other `ScenarioState` instance sees the new scenario
+    * via the same shared list, independent of this switch.
     */
   def create(
     name: ScenarioName.ScenarioName,
@@ -58,22 +86,23 @@ final class ScenarioState(
         createScenarioEndpoint((userIdAccessor(), key, CreateScenarioRequest(name, forkOf)))
           .tap(response => ZIO.succeed {
             submitState.set(ScenarioSubmitState.Success(response))
-            refresh()
+            listState.refresh()
             switchTo(Some(response.name))
           })
           .tapError(e => ZIO.succeed(submitState.set(ScenarioSubmitState.Failed(e.safeMessage))))
           .runJs
 
   /** Delete a scenario via its CAS precondition (DD-5 Option A). Fetches the
-    * head fresh right before deleting — rather than trusting `scenarios.now()`
-    * — so a delete clicked immediately after `create()` (before that create's
-    * own `refresh()` has resolved) still finds the just-created scenario and
-    * its real head, instead of silently no-op'ing against a stale or
-    * still-loading list. No-op if the scenario is already gone by the time
-    * the fresh fetch resolves. Switches this tab back to main first if it
-    * was on the branch being deleted. Errors surface via the global error
-    * banner (`forkProvided`'s default observer), matching other destructive
-    * actions.
+    * head fresh right before deleting — rather than trusting the shared
+    * list's last loaded value — so a delete clicked immediately after
+    * `create()` (before that create's own refresh has resolved) still finds
+    * the just-created scenario and its real head, instead of silently
+    * no-op'ing against a stale or still-loading list. No-op if the scenario
+    * is already gone by the time the fresh fetch resolves. Refreshes the
+    * shared list on success — every `ScenarioState` instance's own
+    * `activeBranch` self-heals above if it was pointing at the branch just
+    * deleted, this one included. Errors surface via the global error banner
+    * (`forkProvided`'s default observer), matching other destructive actions.
     */
   def delete(name: ScenarioName.ScenarioName): Unit =
     keySignal.now() match
@@ -84,10 +113,7 @@ final class ScenarioState(
             fresh.find(_.name == name) match
               case Some(s) =>
                 deleteScenarioEndpoint((userIdAccessor(), key, name, s.head))
-                  .tap(_ => ZIO.succeed {
-                    if activeBranch.now().contains(name) then activeBranch.set(None)
-                    refresh()
-                  })
+                  .tap(_ => ZIO.succeed(listState.refresh()))
               case None => ZIO.unit
           }
           .runJs

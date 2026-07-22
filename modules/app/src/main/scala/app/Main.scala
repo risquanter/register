@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, AppConfigState, CompareState, ScenarioDiffState}
+import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, CompareState, ScenarioDiffState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -19,20 +19,39 @@ object Main:
     // Global error state — safety net for errors with no per-view handler
     val globalError: Var[Option[GlobalError]] = Var(None)
 
-    // Scenario (branch) state — BranchBar, milestone-2b Phase B.
-    val scenarioState = new ScenarioState(wsState.keySignal, () => wsState.currentUserId)
+    // Scenario (branch) + tree-selection state — BranchBar, milestone-2b Phase B.
+    // Design and Analyze each own an independent ScenarioState instance
+    // (milestone-2b Phase C follow-up) for `activeBranch` — a single shared
+    // instance meant Design-only actions (switching branches, handling "tree
+    // not found on this branch") silently reset what Analyze was showing,
+    // with no feedback on the Analyze side. `wsState` stays shared: it's the
+    // actual server-side session, both views legitimately look at the same
+    // one. The workspace's actual scenario list is likewise genuinely shared
+    // server state, not per-view — a single ScenarioListState passed to both
+    // instances (its list is read-only from ScenarioState's side — every
+    // write goes through create/delete/refresh, never a raw Var), so
+    // creating a scenario through Design's toolbar is immediately visible in
+    // Analyze's own picker too, and deleting one resets any view's
+    // `activeBranch` that was pointing at it (see ScenarioState's own
+    // self-heal subscription).
+    val scenarioListState = new ScenarioListState(wsState.keySignal, () => wsState.currentUserId)
+    val designScenarioState = new ScenarioState(wsState.keySignal, scenarioListState, () => wsState.currentUserId)
+    val analyzeScenarioState = new ScenarioState(wsState.keySignal, scenarioListState, () => wsState.currentUserId)
     val appConfigState = new AppConfigState
     appConfigState.refresh()
 
     val builderState = new TreeBuilderState
-    val treeViewState = new TreeViewState(
-      wsState.keySignal, globalError, () => wsState.currentUserId, scenarioState.activeBranch.signal
+    val designTreeViewState = new TreeViewState(
+      wsState.keySignal, globalError, () => wsState.currentUserId, designScenarioState.activeBranch.signal
+    )
+    val analyzeTreeViewState = new TreeViewState(
+      wsState.keySignal, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal
     )
     val analyzeQueryState = new AnalyzeQueryState(
       keySignal = wsState.keySignal,
-      selectedTreeId = treeViewState.selectedTreeId.signal,
+      selectedTreeId = analyzeTreeViewState.selectedTreeId.signal,
       userIdAccessor = () => wsState.currentUserId,
-      branchAccessor = () => scenarioState.activeBranch.now()
+      branchAccessor = () => analyzeScenarioState.activeBranch.now()
     )
 
     // Register the global error observer at the ZJS chokepoint.
@@ -49,7 +68,13 @@ object Main:
     // ── Pre-validate workspace key from URL (Scenarios 2 & 3) ────
     wsState.preValidate(
       onTreesLoaded = trees =>
-        treeViewState.availableTrees.set(LoadState.Loaded(trees)),
+        // Seeds both instances — each would otherwise redundantly re-fetch
+        // the same list on its own first mount (Design's and Analyze's
+        // TreeListView both call loadTreeList() on mount; both mount at
+        // startup, only hidden via CSS — see AppShell.routableView).
+        val loaded = LoadState.Loaded(trees)
+        designTreeViewState.availableTrees.set(loaded)
+        analyzeTreeViewState.availableTrees.set(loaded),
       onExpired = () =>
         globalError.set(Some(GlobalError.WorkspaceExpired(
           "Your previous workspace has expired and its data is no longer available. " +
@@ -75,23 +100,26 @@ object Main:
       onDismissError = () => globalError.set(None),
       healthStatus = healthState.status.signal,
       workspaceBadge = workspaceBadge,
-      branchChip = BranchBar.chip(scenarioState, appConfigState.scenariosEnabled.signal),
+      branchChip = BranchBar.chipForSection(
+        navState.activeSection.signal, designScenarioState, analyzeScenarioState, appConfigState.scenariosEnabled.signal
+      ),
       designView = DesignView(
         builderState,
-        treeViewState,
+        designTreeViewState,
         wsState,
         new DistributionChartState(
           draftSignal    = builderState.draftSignal,
           keySignal      = wsState.keySignal,
           userIdAccessor = () => wsState.currentUserId
         ),
-        scenarioState,
+        designScenarioState,
         appConfigState
       ),
       analyzeView = AnalyzeView(
-        treeViewState,
+        analyzeTreeViewState,
         analyzeQueryState,
-        scenarioState,
+        analyzeScenarioState,
+        appConfigState,
         new CompareState,
         new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId)
       )

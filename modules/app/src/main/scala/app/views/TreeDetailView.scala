@@ -106,6 +106,12 @@ object TreeDetailView:
       child <-- state.selectedTree.signal.map {
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
+        // The previously selected tree doesn't exist on the newly chosen branch
+        // (e.g. it only exists on a sibling scenario) — not a real error, just
+        // nothing valid to show. Same placeholder as "nothing selected yet"
+        // rather than an error banner (mirrors DesignView's own pattern-match
+        // on this literal message for the same event).
+        case LoadState.Failed("Tree not found") => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Failed(msg) => renderError(msg)
         case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds)
       }
@@ -115,7 +121,7 @@ object TreeDetailView:
     div(cls := "tree-detail-placeholder", p(message))
 
   private def renderError(message: String): HtmlElement =
-    div(cls := "tree-detail-error", p(cls := "error-message", s"Failed: $message"))
+    div(cls := "tree-detail-error", p(cls := "error-message", message))
 
   /** Render the full tree from a RiskTree domain object. */
   private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge, pickerOpenFor: Var[Option[NodeId]], changedNodeIds: Signal[Set[NodeId]]): HtmlElement =

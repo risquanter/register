@@ -13,6 +13,7 @@
 - Laminar's model is **signals down, events up** — parent components own state, children receive signals and emit callbacks
 - UI validation reuses the same `ValidationUtil` (Iron-based) as the backend — single source of truth for field constraints
 - Laminar's direct DOM binding (no virtual DOM) means component updates must be managed via **Signal granularity** — coarse signals cause unnecessary DOM updates
+- Named, mutually exclusive phases with real transitions between them are a different kind of state than a value that is purely a projection of other state — collapsing both into ad-hoc `Var` correction invites feedback loops indistinguishable, at the call site, from a genuine external change
 
 ---
 
@@ -103,6 +104,35 @@ They never create their own `Var`s or perform validation logic:
 // FormInputs.crossFieldError — conditional error display
 ```
 
+### 6. State Machines for Named Phases, Derived Signals for Projections
+
+A value with a small set of named phases and real transitions between them is
+modeled as a sealed enum/ADT plus a pure transition or decision function —
+never as a reactive subscription that corrects a raw `Var` based on its own
+changes. Pattern 4 (Derived Signals) stays the tool for the other case: a
+value with no phases of its own, purely computed from other state.
+
+```scala
+// GOOD: named phases, explicit transitions
+enum FormMode:
+  case Blank
+  case Locked(target: FormTarget)
+  case Editing(target: FormTarget)
+  case Templating(source: FormTarget)
+
+// GOOD: a load event resolved to a named outcome, then applied imperatively
+enum TreeLoadDecision:
+  case SameContext, ReloadClean, NeedsConfirm
+
+def decide(previousId: Option[TreeId], loadedBranch: Option[ScenarioName], ...): TreeLoadDecision = ...
+```
+
+A value qualifies for a state machine, not a derived signal, when: (a) it has
+a small, named set of possible phases: not just `Boolean`/`Option`; (b) at
+least one transition is triggered by something other than "this value's own
+inputs changed" — a submit, a load, a user action; (c) different phases
+enable or disable different behavior, rather than just displaying differently.
+
 ---
 
 ## Code Smells
@@ -176,6 +206,26 @@ val parentOptions: Signal[List[String]] =
   portfolios.signal.map(ps => "(root)" :: ps.map(_.name))
 ```
 
+### ❌ Self-Correcting Reactive Var
+
+```scala
+// BAD: subscription reacts to the same Var it corrects — races with any
+// caller's own multi-step reset/populate sequence, since Airstream gives
+// no guarantee about propagation order between the two
+parentVar.signal.combineWith(options) --> { (sel, opts) =>
+  if !opts.contains(sel) then parentVar.set(opts.head)
+}
+```
+
+```scala
+// GOOD: correction triggers only off the external signal that actually
+// invalidates the value, never off the value's own changes — cannot
+// self-trigger, cannot race a caller's own write to the same Var
+options --> { opts =>
+  if !opts.contains(parentVar.now()) then parentVar.set(opts.head)
+}
+```
+
 ---
 
 ## Implementation
@@ -191,6 +241,8 @@ val parentOptions: Signal[List[String]] =
 | `TreePreview` | Pure derived view: Signal → HtmlElement (Pattern 4) |
 | `SplitPane` | Stateless layout — inline flex-weight bridge, no state (Pattern 5) |
 | `AppShell` | Pure structural shell — receives all state as signals, owns no effects (Pattern 1/2) |
+| `FormMode` | Sealed enum + pure transition/dirty-check functions (Pattern 6) |
+| `TreeLoadPolicy.decide` | Pure decision function producing a named outcome type (Pattern 6) |
 | `HealthState` + `Main` | Health probe state extracted from view; `Main` orchestrates one-shot startup probe |
 | `DistributionChartPlaceholder` | Stateless placeholder in Design view for future modelling chart (Pattern 5) |
 

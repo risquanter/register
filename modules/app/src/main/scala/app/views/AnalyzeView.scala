@@ -4,9 +4,9 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
-import app.components.{SplitPane, FormInputs}
+import app.components.{SplitPane, FormInputs, BranchBar}
 import app.chart.{LECSpecBuilder, CompareColorAssigner}
-import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, CompareState, CompareTarget, ScenarioDiffState, toBranchOption}
+import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, AppConfigState, CompareState, CompareTarget, ScenarioDiffState, toBranchOption}
 import com.risquanter.register.domain.data.{RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.{NodeId, ScenarioName}
 
@@ -34,6 +34,7 @@ object AnalyzeView:
     treeViewState: TreeViewState,
     queryState: AnalyzeQueryState,
     scenarioState: ScenarioState,
+    appConfigState: AppConfigState,
     compareState: CompareState,
     diffState: ScenarioDiffState
   ): HtmlElement =
@@ -72,7 +73,14 @@ object AnalyzeView:
     /** Off → the tab's own single-branch spec, untouched (regression guard —
       * nothing about today's chart changes unless Compare is on). Overlay →
       * paired curves from both branches via `CompareColorAssigner`, once both
-      * sides have loaded. */
+      * sides have loaded.
+      *
+      * Falls back to `singleSpec` — not `Idle`/`Loading` — whenever the
+      * compare side isn't ready yet (no branch chosen, or its curves still
+      * in flight). There is already a chart worth looking at (the baseline
+      * curve, already loaded before Compare was ever touched); blanking it
+      * to an empty state and then redrawing once the compare side lands is
+      * a flash with no informational value, not a real loading state. */
     val combinedSpecSignal: Signal[LoadState[js.Dynamic]] =
       compareState.enabled.signal
         .combineWith(treeViewState.chartState.specSignal, treeViewState.curveCache, diffState.compareCurves.signal)
@@ -87,15 +95,9 @@ object AnalyzeView:
                 case CompareTarget.NotChosen       => "compare"
               val paired = CompareColorAssigner.pairForOverlay(thisMap, compareMap, visible, "this", compareLabel)
               LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired))
-            case (LoadState.Failed(msg), _)   => LoadState.Failed(msg)
-            case (_, LoadState.Failed(msg))   => LoadState.Failed(msg)
-            case (LoadState.Loading, _)       => LoadState.Loading
-            case (_, LoadState.Loading)       => LoadState.Loading
-            // Both sides idle — e.g. Compare just turned on and no branch
-            // chosen yet, or nothing visible to fetch. Nothing is in flight,
-            // so Idle (not Loading) is correct — LECChartView already knows
-            // how to render it ("Select a node…").
-            case _ => LoadState.Idle
+            case (LoadState.Failed(msg), _) => LoadState.Failed(msg)
+            case (_, LoadState.Failed(msg)) => LoadState.Failed(msg)
+            case _                          => singleSpec
         }
 
     // ── Node lookup for name resolution in QueryResultCard (A1) ──
@@ -123,6 +125,17 @@ object AnalyzeView:
       // so a stale query's matched nodes can't leak into the newly
       // selected tree's chart / Compare curve fetch.
       treeViewState.selectedTreeId.signal.changes --> { _ => queryState.resetResult() },
+      // The previously selected tree doesn't exist on the newly chosen branch —
+      // nothing valid left to point at. Clears the tree picker back to "nothing
+      // selected" so it matches TreeDetailView's own placeholder for this event,
+      // giving a genuine "back to the initial state" result rather than a picker
+      // still showing a tree that no longer resolves to anything. Unlike
+      // DesignView's handling of the same event, this never needs to confirm
+      // first — Analyze has no in-progress draft that this could discard.
+      treeViewState.selectedTree.signal.changes
+        .collect { case LoadState.Failed("Tree not found") => () } --> { _ =>
+          treeViewState.selectedTreeId.set(None)
+        },
       // Auto-LEC: fire curve fetch on any change to either node set
       chartNodeIds.changes
         .collect { case Some(ids) => ids }
@@ -253,7 +266,10 @@ object AnalyzeView:
 
     val savedTreePanel = div(
       cls := "saved-tree-panel",
-      TreeListView(treeViewState),
+      TreeListView(
+        treeViewState,
+        leadingControl = Some(BranchBar.picker(scenarioState, appConfigState.scenariosEnabled.signal))
+      ),
       TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge, gatedChangedNodeIds)
     )
 
@@ -281,37 +297,23 @@ object AnalyzeView:
     * plus `main`, excluding the tab's own active branch (comparing a branch
     * to itself is a no-op — `ScenarioDiffService.diff` would just report
     * every node `Identical`). `""` in the DOM `<select>` means "nothing
-    * chosen yet"; `"__main__"` is the sentinel for main (a `ScenarioName`
-    * can never collide with it — see `ScenarioName`'s charset).
-    *
-    * The option list is rendered via `FormInputs.splitOptions` (keyed by
-    * each option's own value string) rather than a plain `children <--` of
-    * freshly-built `option(...)` elements. `children <--` would replace
-    * every `<option>` DOM node on each emission (e.g. every
-    * `scenarioState.refresh()`); removing the currently-selected node
-    * resets the browser's own `<select>` selection independently of
-    * `compareState.compareBranch`, which still holds the real choice — a
-    * visible desync between what the picker shows and what the app
-    * believes is selected (TODO.md item 26). `splitOptions` is shared with
-    * `FormInputs.parentSelect`, which has the identical mechanism.
+    * chosen yet" — a third state `BranchBar`'s own picker doesn't need to
+    * represent, so the option list and sentinel come from `BranchBar`
+    * (shared with `BranchBar.picker`, Analyze's baseline-branch selector —
+    * TODO.md item 26 / milestone-2b Phase C follow-up item 5) but the
+    * `CompareTarget` parsing stays local to Compare.
     */
   private def renderBranchPicker(scenarioState: ScenarioState, compareState: CompareState): HtmlElement =
-    val mainSentinel = "__main__"
-
     def parseSelection(raw: String): CompareTarget =
       if raw.isEmpty then CompareTarget.NotChosen
-      else if raw == mainSentinel then CompareTarget.Main
+      else if raw == BranchBar.mainSentinel then CompareTarget.Main
       else ScenarioName.fromString(raw).toOption.map(CompareTarget.Scenario(_)).getOrElse(CompareTarget.NotChosen)
 
     val optionEntries: Signal[List[(String, String)]] =
-      scenarioState.scenarios.signal.combineWith(scenarioState.activeBranch.signal).map {
-        case (listState, active) =>
-          val names = listState match
-            case LoadState.Loaded(list) => list.map(_.name)
-            case _                      => Nil
-          val mainOpt = if active.isDefined then List(mainSentinel -> "main") else Nil
-          mainOpt ++ names.filterNot(active.contains).map(n => n.value.toString -> n.value.toString)
-      }
+      BranchBar.branchOptionEntries(
+        scenarioState.scenarios,
+        excludeValue = scenarioState.activeBranch.signal.map(a => Some(BranchBar.branchOptionValue(a)))
+      )
 
     select(
       cls := "compare-branch-select",
@@ -321,7 +323,7 @@ object AnalyzeView:
       controlled(
         value <-- compareState.compareBranch.signal.map {
           case CompareTarget.NotChosen      => ""
-          case CompareTarget.Main           => mainSentinel
+          case CompareTarget.Main           => BranchBar.mainSentinel
           case CompareTarget.Scenario(name) => name.value.toString
         },
         onInput.mapToValue --> { raw => compareState.compareBranch.set(parseSelection(raw)) }

@@ -100,9 +100,10 @@ object DesignView:
       // ── Load subscription: propagate selected tree → builder state ──
       // Bound to element lifetime (ADR-019: side effects in callbacks, not in .map).
 
-      // Fetch the scenario list once a workspace exists (mirrors TreeViewState's
-      // own load-on-key-available pattern; a fresh session has no key yet).
-      wsState.keySignal.changes.collect { case Some(_) => () } --> { _ => scenarioState.refresh() },
+      // Note: refreshing the scenario list and the tree list/selected tree once a
+      // workspace key appears is owned by ScenarioState/TreeViewState themselves
+      // (each self-refreshes on `keySignal.changes` internally) — not wired here,
+      // so every consumer of either state gets it, not just this view.
 
       // Note: re-fetching the tree list/selected tree on a branch switch is owned
       // by TreeViewState itself (constructed with scenarioState.activeBranch.signal

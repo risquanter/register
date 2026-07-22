@@ -4,20 +4,24 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.FormInputs
-import app.state.{ScenarioState, ScenarioSubmitState, LoadState}
+import app.state.{ScenarioState, ScenarioSubmitState, LoadState, Section}
 import com.risquanter.register.domain.data.iron.ScenarioName
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
 /** Branch indicator + scenario management surfaces (milestone-2b Phase B,
-  * DD-9, PLAN-UI-MILESTONE-2B.md §4). Two independent pieces:
+  * DD-9, PLAN-UI-MILESTONE-2B.md §4). Independent pieces:
   *
-  *   - `chip`    — read-only topbar indicator, always visible in both
-  *                 Design and Analyze (§0: neutral chrome, no role colour;
-  *                 §4.3: inert in Analyze).
-  *   - `toolbar` — the interactive "Scenarios ▾" menu (switch/create/
-  *                 duplicate/delete), Design-only, sits atop TreeBuilderView.
+  *   - `chipForSection` — read-only topbar indicator, always visible in both
+  *                        Design and Analyze (§0: neutral chrome, no role
+  *                        colour; §4.3: inert in Analyze) — shows whichever
+  *                        section's own branch is on screen.
+  *   - `toolbar`         — the interactive "Scenarios ▾" menu (switch/create/
+  *                        duplicate/delete), Design-only, sits atop TreeBuilderView.
+  *   - `picker`          — plain "pick a branch" `<select>` with no management
+  *                        actions, for Analyze's own baseline-branch selector
+  *                        (milestone-2b Phase C follow-up).
   *
-  * Both are entirely absent from the DOM when scenarios are unavailable
+  * All are entirely absent from the DOM when scenarios are unavailable
   * (Variant R, §5 — decided 2026-07-19: full removal, not graying out).
   */
 object BranchBar:
@@ -40,12 +44,96 @@ object BranchBar:
   private def branchLabel(name: Option[ScenarioName.ScenarioName]): String =
     s"⎇ ${name.map(_.value.toString).getOrElse("main")}"
 
-  /** Topbar branch indicator. Inert — no click handler (§4.1/§4.3). */
-  def chip(scenarioState: ScenarioState, scenariosEnabled: Signal[Boolean]): HtmlElement =
+  /** Topbar branch indicator. Inert — no click handler (§4.1/§4.3).
+    *
+    * Design and Analyze each own an independent `ScenarioState` (milestone-2b
+    * Phase C follow-up: splitting shared Design/Analyze state to remove the
+    * cross-view interdependence a shared instance caused). The topbar chip is
+    * shared chrome above both views, so it shows whichever section's own
+    * branch is presently on screen rather than always Design's — otherwise
+    * it would silently reintroduce the same "Analyze shows Design's context"
+    * confusion the split was meant to remove.
+    */
+  def chipForSection(
+    activeSection: Signal[Section],
+    designScenarioState: ScenarioState,
+    analyzeScenarioState: ScenarioState,
+    scenariosEnabled: Signal[Boolean]
+  ): HtmlElement =
     span(
       cls := "topbar-badge branch-chip",
       display <-- scenariosEnabled.map(if _ then "inline-flex" else "none"),
-      child.text <-- scenarioState.activeBranch.signal.map(branchLabel)
+      child.text <-- activeSection
+        .combineWith(designScenarioState.activeBranch.signal, analyzeScenarioState.activeBranch.signal)
+        .map { case (section, designBranch, analyzeBranch) =>
+          branchLabel(if section == Section.Design then designBranch else analyzeBranch)
+        }
+    )
+
+  /** Sentinel for "main" in a branch-picker `<select>`'s raw value protocol.
+    * A `ScenarioName` can never collide with it (see `ScenarioName`'s
+    * charset). Shared by every branch-picking `<select>` in the app
+    * (`picker` below, AnalyzeView's Compare-mode "compare against" picker)
+    * so the string and its parsing live in one place instead of being
+    * copy-pasted per picker.
+    */
+  val mainSentinel = "__main__"
+
+  def branchOptionValue(branch: Option[ScenarioName.ScenarioName]): String =
+    branch.map(_.value.toString).getOrElse(mainSentinel)
+
+  /** `None` only means "not a real scenario name" — callers that also need
+    * to distinguish "nothing chosen yet" (e.g. Compare's placeholder option)
+    * check for the empty string themselves before calling this.
+    */
+  def parseBranchOptionValue(raw: String): Option[ScenarioName.ScenarioName] =
+    if raw == mainSentinel then None else ScenarioName.fromString(raw).toOption
+
+  /** Shared option list for every branch-picking `<select>`: main + every
+    * scenario, rendered via `FormInputs.splitOptions` (keyed by each option's
+    * own value) so recreating the currently-selected `<option>` doesn't reset
+    * the browser's native `<select>` selection out from under the tracked Var
+    * (TODO.md item 26).
+    *
+    * @param excludeValue Raw option value to omit, if any — e.g. Compare
+    *                     mode hides whichever branch is already this tab's
+    *                     own baseline, since comparing a branch to itself is
+    *                     a no-op. `Val(None)` (the default) omits nothing —
+    *                     every branch, including main, is always offered.
+    */
+  def branchOptionEntries(
+    scenarios: Signal[LoadState[List[ScenarioSummaryResponse]]],
+    excludeValue: Signal[Option[String]] = Val(None)
+  ): Signal[List[(String, String)]] =
+    scenarios.combineWith(excludeValue).map { (listState, excl) =>
+      val names = listState match
+        case LoadState.Loaded(list) => list.map(_.name)
+        case _                      => Nil
+      val all = (mainSentinel -> "main") :: names.map(n => n.value.toString -> n.value.toString)
+      all.filterNot { case (v, _) => excl.contains(v) }
+    }
+
+  /** Plain "pick a branch" `<select>` — no switch/create/duplicate/delete
+    * menu, unlike `toolbar`. Used for Analyze's own baseline-branch selector
+    * (milestone-2b Phase C follow-up, item 5): every branch including main
+    * is always a valid choice, since — unlike the Compare-mode picker —
+    * this one isn't comparing against anything, just choosing what Analyze
+    * itself is looking at.
+    */
+  def picker(
+    scenarioState: ScenarioState,
+    scenariosEnabled: Signal[Boolean],
+    domCls: String = "baseline-branch-select"
+  ): HtmlElement =
+    select(
+      cls := domCls,
+      display <-- scenariosEnabled.map(if _ then "inline-block" else "none"),
+      onMountCallback(_ => scenarioState.refresh()),
+      FormInputs.splitOptions(branchOptionEntries(scenarioState.scenarios)),
+      controlled(
+        value <-- scenarioState.activeBranch.signal.map(branchOptionValue),
+        onInput.mapToValue --> { raw => scenarioState.switchTo(parseBranchOptionValue(raw)) }
+      )
     )
 
   /** Design-view "Scenarios" toolbar row: switch / create / duplicate / delete.
@@ -91,7 +179,7 @@ object BranchBar:
           cls := "scenario-menu",
           display <-- menuOpen.signal.map(if _ then "block" else "none"),
           onClick.stopPropagation --> { _ => () },
-          child <-- scenarioState.scenarios.signal.combineWith(scenarioState.activeBranch.signal).map {
+          child <-- scenarioState.scenarios.combineWith(scenarioState.activeBranch.signal).map {
             (listState, current) =>
               renderMenuBody(scenarioState, listState, current, createTrigger, createState, createNameInput, closeCreate, closeAll)
           }

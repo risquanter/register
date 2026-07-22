@@ -61,6 +61,18 @@ final class TreeViewState(
       refreshSelectedTree()
   }(using unsafeWindowOwner)
 
+  // A workspace key appearing for the first time (bootstrap via Create, or a
+  // returning session's URL key) means this instance's own tree list needs
+  // its first real fetch — a caller's own onMountCallback-driven
+  // `loadTreeList()` (e.g. TreeListView) races the key not existing yet at
+  // that mount and silently no-ops (the `None` case in `loadTreeList` below).
+  // Without this, an instance that never independently changes branch (as
+  // Analyze's own instance may not) never gets a second chance to fetch.
+  keySignal.changes.collect { case Some(_) => () }.foreach { _ =>
+    loadTreeList()
+    refreshSelectedTree()
+  }(using unsafeWindowOwner)
+
   // ── Available trees (summary list) ────────────────────────────
   val availableTrees: Var[LoadState[List[SimulationResponse]]] = Var(LoadState.Idle)
 

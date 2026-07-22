@@ -56,11 +56,12 @@ object PortfolioFormView:
     // Mode-dependent, per the state machine: Blank and Templating are both
     // "unlocked, click submits what's typed" states, so they share one
     // label. Locked is different in kind — clicking there doesn't submit
-    // anything, it unlocks a copy — which is the actual "add a new one"
-    // action, so that's where "New" belongs.
+    // anything, it unlocks a copy for editing — a new, uncommitted draft —
+    // which is the actual "start a new one" action, so that's where "Draft
+    // New" belongs.
     val addSubmitLabel: Signal[String] = portfolioMode.map {
       case FormMode.Blank | FormMode.Templating(_) => "Submit Portfolio"
-      case _                                        => "Add New Portfolio"
+      case _                                        => "Draft New Portfolio"
     }
     val addSubmitDisabled: Signal[Boolean] = portfolioMode.combineWith(form.hasErrors).map {
       case (FormMode.Editing(_), _) => true

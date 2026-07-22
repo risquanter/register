@@ -53,11 +53,11 @@ object RiskLeafFormView:
 
     // Mode-dependent, per the state machine — see the matching comment in
     // PortfolioFormView: Blank and Templating both submit on click and share
-    // a label; Locked unlocks a copy (the actual "add new" action) and gets
-    // the "New" label instead.
+    // a label; Locked unlocks a copy for editing — a new, uncommitted draft —
+    // and gets the "Draft New" label instead.
     val addSubmitLabel: Signal[String] = leafMode.map {
       case FormMode.Blank | FormMode.Templating(_) => "Submit Leaf"
-      case _                                        => "Add New Leaf"
+      case _                                        => "Draft New Leaf"
     }
     val addSubmitDisabled: Signal[Boolean] = leafMode.combineWith(state.hasErrors).map {
       case (FormMode.Editing(_), _)  => true  // mid-edit of an existing leaf; finish or Clear Form first

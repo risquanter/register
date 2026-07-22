@@ -1683,6 +1683,46 @@ select.form-input option {
   color: var(--foreground);
 }
 
+/* Row pairing Analyze's baseline-branch picker with the tree <select>
+   (milestone-2b Phase C follow-up, item 5) — each slot takes half the
+   width so the two "what am I looking at" pickers read as one visually
+   aligned control. Design passes no leadingControl, so its branch-slot
+   is simply absent and this row holds only the tree-slot. */
+.tree-list-controls-row {
+  display: flex;
+  gap: var(--sp-4);
+  align-items: flex-start;
+}
+
+.tree-list-branch-slot,
+.tree-list-tree-slot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.tree-list-slot-label {
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+}
+
+/* Matches .tree-select's box model exactly (padding/font/cursor) so the two
+   pickers read as one aligned pair, not two mismatched controls. */
+.baseline-branch-select {
+  width: 100%;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  background-color: var(--surface);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
 .tree-list-selector {
   display: flex;
   gap: var(--sp-2);
