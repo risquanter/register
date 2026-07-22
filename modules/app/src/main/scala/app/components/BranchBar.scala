@@ -203,7 +203,7 @@ object BranchBar:
 
     div(
       menuItem("⎇ main", current.isEmpty, () => { scenarioState.switchTo(None); closeAll() }),
-      names.map(name => menuItem(s"⎇ ${name.value}", current.contains(name), () => { scenarioState.switchTo(Some(name)); closeAll() })),
+      names.map(name => scenarioRow(scenarioState, name, current.contains(name), closeAll)),
       div(cls := "scenario-menu-divider"),
       child.maybe <-- createTrigger.signal.map {
         case None => Some(actionItem("+ Create from main…", () => createTrigger.set(Some(forkTarget(CreateSource.Main, current)))))
@@ -218,12 +218,7 @@ object BranchBar:
       child.maybe <-- createTrigger.signal.map {
         case Some(forkOf) => Some(renderCreateForm(scenarioState, forkOf, createState, createNameInput, closeCreate))
         case None         => None
-      },
-      current.map(name => destructiveItem("✕ Delete current…", () => {
-        if dom.window.confirm(s"Delete scenario '${name.value}'? This cannot be undone.") then
-          scenarioState.delete(name)
-        closeAll()
-      })).getOrElse(emptyNode)
+      }
     )
 
   private def menuItem(label: String, active: Boolean, onSelect: () => Unit): HtmlElement =
@@ -234,11 +229,40 @@ object BranchBar:
       onClick --> { _ => onSelect() }
     )
 
+  /** Named-scenario row: switching (click the label) and deleting (click the
+    * ✕) are both reachable from the same row, instead of delete being buried
+    * as a separate "Delete current" item that only ever applied to whichever
+    * branch you already happened to be on. `stopPropagation` on the ✕ keeps
+    * a delete click from also firing the row's own switch-to action.
+    */
+  private def scenarioRow(
+    scenarioState: ScenarioState,
+    name: ScenarioName.ScenarioName,
+    active: Boolean,
+    closeAll: () => Unit
+  ): HtmlElement =
+    div(
+      cls := "scenario-menu-item-row",
+      span(
+        cls := "scenario-menu-item-label",
+        cls("scenario-menu-item--active") := active,
+        s"⎇ ${name.value}",
+        onClick --> { _ => scenarioState.switchTo(Some(name)); closeAll() }
+      ),
+      span(
+        cls := "scenario-menu-item-delete",
+        title := s"Delete scenario '${name.value}'",
+        "✕",
+        onClick.stopPropagation --> { _ =>
+          if dom.window.confirm(s"Delete scenario '${name.value}'? This cannot be undone.") then
+            scenarioState.delete(name)
+          closeAll()
+        }
+      )
+    )
+
   private def actionItem(label: String, onSelect: () => Unit): HtmlElement =
     div(cls := "scenario-menu-item", label, onClick --> { _ => onSelect() })
-
-  private def destructiveItem(label: String, onSelect: () => Unit): HtmlElement =
-    div(cls := "scenario-menu-item scenario-menu-item--destructive", label, onClick --> { _ => onSelect() })
 
   private def renderCreateForm(
     scenarioState: ScenarioState,

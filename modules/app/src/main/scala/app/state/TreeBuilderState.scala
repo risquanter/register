@@ -125,29 +125,24 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * names, excluding `excludeSelf` — a node can never be its own parent, and
     * its own occupancy of root must not count as "taken" when it's the node
     * currently being viewed. Without this, viewing/editing/templating the
-    * one portfolio that already holds root sees root missing from its own
-    * option list (taken — by itself).
+    * one node (portfolio OR leaf) that already holds root sees root missing
+    * from its own option list (taken — by itself); a lone leaf at root is a
+    * valid topology (`TreeBuilderLogic.validateRoot`), so leaves need the
+    * same self-exclusion portfolios do, not just a portfolio-only check.
     *
-    * Callers pass the name of the portfolio currently Locked/Editing/
-    * Templating (its true identity, or the identity it was templated from)
-    * — `None` for a Blank draft, which has no identity of its own and
-    * correctly cannot claim root while another portfolio already holds it.
+    * Callers pass the name of the node currently Locked/Editing/Templating
+    * (its true identity, or the identity it was templated from) — `None` for
+    * a Blank draft, which has no identity of its own and correctly cannot
+    * claim root while another node already holds it.
     */
   def parentOptions(excludeSelf: Signal[Option[String]] = Val(None)): Signal[List[String]] =
     portfoliosVar.signal.combineWith(leavesVar.signal, excludeSelf).map { (ps, ls, excl) =>
       val others = ps.filterNot(p => excl.contains(p.name.value))
-      val rootTaken = others.exists(_.parent.isEmpty) || ls.exists(_.parent.isEmpty)
+      val otherLeaves = ls.filterNot(l => excl.contains(l.name.value))
+      val rootTaken = others.exists(_.parent.isEmpty) || otherLeaves.exists(_.parent.isEmpty)
       val base = others.map(_.name.value)   // .value at UI-string boundary: parentSelect takes Signal[List[String]]
       if rootTaken then base else rootLabel :: base
     }
-
-  /** What a freshly-cleared parent field should be explicitly set to — the
-    * one place views call `FormMode.defaultParent` so "compute the current
-    * default" isn't repeated at every clear/reset call site. Read via `.now()`
-    * because it's used inside imperative reset actions (`onClick`, mode-change
-    * subscriptions), not itself a live binding.
-    */
-  def defaultParentNow: Option[String] = FormMode.defaultParent(portfoliosVar.now(), leavesVar.now())
 
   def addPortfolio(name: SafeName.SafeName, parent: Option[SafeName.SafeName]): Validation[ValidationError, PortfolioDraft] =
     val draft = PortfolioDraft(name, parent)

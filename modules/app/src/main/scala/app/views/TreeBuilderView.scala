@@ -25,17 +25,26 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
 
     // A successful Create has nothing left to keep editing — matches
     // "+ New Tree"'s own reset (DesignView.onNewTree): blank builder, ready
-    // for the next tree. Checked before this callback's own `editingTreeId`
-    // write below, so it reflects what was true when the submit was made
-    // (Create vs. Update), not the post-success state.
+    // for the next tree.
     //
-    // Deliberately skips `treeViewState.selectTree(response.id)` — that
-    // call is what makes DesignView's own reload subscription re-populate
-    // the builder from the server (`TreeLoadPolicy`'s `SameContext` case,
-    // needed after Update to pick up anything the server round-trip
-    // changed) — running it here would immediately undo the blank reset.
-    def onSuccess(response: SimulationResponse): Unit =
-      val wasCreate = state.editingTreeId.now().isEmpty
+    // `wasCreate` is passed in by each call site below, fixed at the moment
+    // the request is fired (each site already statically knows which case
+    // it's in — `handleSubmit` branched on `editingTreeId` to get here) —
+    // not re-derived from `state.editingTreeId.now()` inside this callback.
+    // Reading it live here would race: this callback only runs after the
+    // async round trip completes, and if the user navigates to a different
+    // tree while a Create is still in flight, `editingTreeId` would already
+    // reflect that other tree by the time the response lands, misclassifying
+    // a genuine Create as an Update and yanking the builder back to the
+    // just-created tree instead of leaving the user where they navigated to.
+    //
+    // Deliberately skips `treeViewState.selectTree(response.id)` on the
+    // Create path — that call is what makes DesignView's own reload
+    // subscription re-populate the builder from the server (`TreeLoadPolicy`'s
+    // `SameContext` case, needed after Update to pick up anything the server
+    // round-trip changed) — running it here would immediately undo the
+    // blank reset.
+    def onSuccess(wasCreate: Boolean)(response: SimulationResponse): Unit =
       submitState.set(SubmitState.Success(response))
       if wasCreate then
         state.startNewTree()
@@ -72,7 +81,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
               case Some(key) =>
                 state.toUpdateRequest() match
                   case Validation.Success(_, request) =>
-                    updateWorkspaceTreeEndpoint((wsState.currentUserId, key, treeId, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess)
+                    updateWorkspaceTreeEndpoint((wsState.currentUserId, key, treeId, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess(wasCreate = false))
                   case Validation.Failure(_, errors) => validationFailed(errors)
 
           // ── Create mode ──
@@ -81,10 +90,10 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
               case Validation.Success(_, request) =>
                 wsState.currentKey match
                   case Some(key) =>
-                    createWorkspaceTreeEndpoint((wsState.currentUserId, key, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess)
+                    createWorkspaceTreeEndpoint((wsState.currentUserId, key, request, scenarioState.activeBranch.now())).submitInto(submitState)(onSuccess(wasCreate = true))
                   case None =>
                     submitState.set(SubmitState.Submitting)
-                    wsState.bootstrap(request, onSuccess, msg => submitState.set(SubmitState.Failed(msg)))
+                    wsState.bootstrap(request, onSuccess(wasCreate = true), msg => submitState.set(SubmitState.Failed(msg)))
               case Validation.Failure(_, errors) => validationFailed(errors)
       }
 

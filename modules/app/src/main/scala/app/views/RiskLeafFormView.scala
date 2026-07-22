@@ -1,10 +1,10 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import org.scalajs.dom
 import zio.prelude.Validation
-import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormTarget, FieldSnapshot, forLeaf}
+import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormTarget, FieldSnapshot, ParentSelection, forLeaf}
 import app.components.FormInputs.*
+import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.errors.ValidationError
 
@@ -27,6 +27,18 @@ object RiskLeafFormView:
     // unsaved leaf draft.
     val leafMode: Signal[FormMode] = builderState.activeForm.signal.map(_.forLeaf).distinct
     val isLocked: Signal[Boolean] = leafMode.map { case FormMode.Locked(_) => true; case _ => false }
+
+    /** The leaf whose own occupancy of root must not count against itself in
+      * `parentOptions` — Locked/Editing only (mirrors
+      * `PortfolioFormView.selfExcludeName`; needed for leaves too, since a
+      * lone leaf at root is a valid topology). Templating is deliberately
+      * excluded from this — see that same doc comment for why.
+      */
+    val selfExcludeName: Signal[Option[String]] = leafMode.map {
+      case FormMode.Locked(FormTarget.Leaf(n))  => Some(n.value)
+      case FormMode.Editing(FormTarget.Leaf(n)) => Some(n.value)
+      case _                                     => None
+    }
 
     // Same combine-as-trigger, read-via-.now()-inside-map idiom as `draftSignal`
     // above: the combined signals only decide *when* to recompute, the actual
@@ -86,11 +98,12 @@ object RiskLeafFormView:
         // form is mid-Editing/Templating an unsaved draft — see the matching
         // comment in PortfolioFormView.
         case FormMode.Blank =>
-          val proceed = raw match
-            case FormMode.Editing(_) | FormMode.Templating(_) =>
-              dom.window.confirm("This will discard the portfolio you're currently editing. Continue?")
-            case _ => true
-          if proceed then handleSubmit(state, builderState, submitError)
+          val isDiscardingPortfolioDraft = raw match
+            case FormMode.Editing(_) | FormMode.Templating(_) => true
+            case _                                            => false
+          proceedOrConfirm(isDiscardingPortfolioDraft, "This will discard the portfolio you're currently editing. Continue?") { () =>
+            handleSubmit(state, builderState, submitError)
+          }
         case FormMode.Locked(t: FormTarget.Leaf) => builderState.activeForm.set(FormMode.Templating(t))
         case FormMode.Templating(_: FormTarget.Leaf) => handleSubmit(state, builderState, submitError)
         case _ => ()
@@ -108,7 +121,7 @@ object RiskLeafFormView:
       builderState.activeForm.now().forLeaf match
         case FormMode.Blank =>
           state.resetFields()
-          state.parentVar.set(builderState.defaultParentNow)
+          state.parentVar.set(ParentSelection.Unset)
         case FormMode.Editing(t: FormTarget.Leaf)     => builderState.activeForm.set(FormMode.Locked(t))
         case FormMode.Templating(t: FormTarget.Leaf)  => builderState.activeForm.set(FormMode.Locked(t))
         case _ => ()
@@ -130,29 +143,35 @@ object RiskLeafFormView:
       // When the active target is this leaf, populate the form from its saved
       // draft (covers viewing, editing, and templating alike — all three show
       // the target's values, just with different lock/edit semantics on top).
-      // Any other target (Blank, or a portfolio) clears the fields.
-      leafMode.changes --> { mode =>
-        val leafName = mode match
-          case FormMode.Locked(FormTarget.Leaf(n))     => Some(n)
-          case FormMode.Editing(FormTarget.Leaf(n))    => Some(n)
-          case FormMode.Templating(FormTarget.Leaf(n)) => Some(n)
-          case _                                       => None
-        leafName match
-          case Some(name) => builderState.leavesVar.now().find(_.name == name).foreach(builderState.populateLeafForm(state, _))
-          case None       =>
-            // parentVar reset here too, not just resetFields() — otherwise a
-            // stale parent left over from a previously-locked leaf survives
-            // (resetFields() never touches it). Set explicitly to the current
-            // default (not a bare `None`) — see `TreeBuilderState.defaultParentNow`.
-            state.resetFields()
-            state.parentVar.set(builderState.defaultParentNow)
+      // Any other target (Blank, or a portfolio) clears the fields. Templating
+      // gets the same extra step as PortfolioFormView: if the source it's
+      // copied from holds root, root is still genuinely taken (by the
+      // untouched source) — reset the copy to Unset instead of silently
+      // carrying over a "(root)" selection guaranteed to fail on submit.
+      leafMode.changes --> {
+        case FormMode.Locked(FormTarget.Leaf(n)) =>
+          builderState.leavesVar.now().find(_.name == n).foreach(builderState.populateLeafForm(state, _))
+        case FormMode.Editing(FormTarget.Leaf(n)) =>
+          builderState.leavesVar.now().find(_.name == n).foreach(builderState.populateLeafForm(state, _))
+        case FormMode.Templating(FormTarget.Leaf(n)) =>
+          builderState.leavesVar.now().find(_.name == n).foreach { source =>
+            builderState.populateLeafForm(state, source)
+            if source.parent.isEmpty then state.parentVar.set(ParentSelection.Unset)
+          }
+        case _ =>
+          // parentVar reset here too, not just resetFields() — otherwise a
+          // stale parent left over from a previously-locked leaf survives
+          // (resetFields() never touches it). Set explicitly to Unset, not a
+          // computed guess — see `ParentSelection`'s own doc.
+          state.resetFields()
+          state.parentVar.set(ParentSelection.Unset)
       },
       // Explicit "clear regardless of mode" signal from startNewTree/loadFromTree
       // — see the matching comment in PortfolioFormView / resetFormFieldsBus's
       // own doc comment.
       builderState.resetFormFieldsBus.events --> { _ =>
         state.resetFields()
-        state.parentVar.set(builderState.defaultParentNow)
+        state.parentVar.set(ParentSelection.Unset)
       },
 
       // Clear stale submit + per-field errors whenever the user edits a field
@@ -181,7 +200,10 @@ object RiskLeafFormView:
         state.clearSubmitFieldError(RiskLeafField.MaxLoss)
       },
       state.distributionModeVar.signal.changes --> { _ => submitError.set(None) },
-      state.parentVar.signal.changes --> { _ => submitError.set(None) },
+      state.parentVar.signal.changes --> { _ =>
+        submitError.set(None)
+        state.clearSubmitFieldError(RiskLeafField.Parent)
+      },
 
       // Push reactive draft up to TreeBuilderState for DistributionChartState to observe.
       // draftSignal already returns None when distribution fields are invalid (via
@@ -233,7 +255,7 @@ object RiskLeafFormView:
       ),
 
       // Parent selection
-      parentSelect(state.parentVar, builderState.parentOptions(), builderState.rootLabel, isLocked),
+      parentSelect(state.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, isLocked, state.parentError),
 
       // Conditional Fields based on mode. Only `distributionModeVar` triggers a
       // subtree rebuild here — `isLocked` is threaded through as a Signal so
@@ -360,9 +382,9 @@ object RiskLeafFormView:
     submitError: Var[Option[String]]
   ): Unit =
     state.triggerValidation()
-    (state.currentShapeValidation(), state.refinedProbability) match
-      case (Validation.Success(_, shape), Some(prob)) =>
-        builderState.addLeaf(state.nameVar.now(), state.parentVar.now(), shape, prob) match
+    (state.currentShapeValidation(), state.refinedProbability, state.parentDraft) match
+      case (Validation.Success(_, shape), Some(prob), Some(parent)) =>
+        builderState.addLeaf(state.nameVar.now(), parent, shape, prob) match
           case Validation.Success(_, _) =>
             // Fields are left as-is — TreeBuilderState.addLeaf already moved
             // `activeForm` to `Locked(newTarget)`, which locks these same,
@@ -373,12 +395,14 @@ object RiskLeafFormView:
           case Validation.Failure(_, errs) =>
             FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError, {
               case "name"   => Some(RiskLeafField.Name)
-              case "parent" => None  // leaf form has no parent text input to highlight
+              case "parent" => Some(RiskLeafField.Parent)
               case _        => None
             })
-      case (shapeV, _) =>
-        // Shape/probability invalid. Surface the SPECIFIC, field-routed reasons
-        // inline below each field (probability is already covered reactively).
+      case (shapeV, _, parentOpt) =>
+        // Shape/probability invalid, and/or parent still Unset. Surface the
+        // SPECIFIC, field-routed reasons inline below each field (probability
+        // is already covered reactively).
+        if parentOpt.isEmpty then state.setSubmitFieldError(RiskLeafField.Parent, "Parent is required")
         routeLeafShapeErrors(state, shapeErrorsOf(shapeV), submitError)
 
   /** Handle update-leaf submission (edit mode). */
@@ -389,9 +413,9 @@ object RiskLeafFormView:
     submitError: Var[Option[String]]
   ): Unit =
     state.triggerValidation()
-    (state.currentShapeValidation(), state.refinedProbability) match
-      case (Validation.Success(_, shape), Some(prob)) =>
-        builderState.updateLeaf(originalName, state.nameVar.now(), state.parentVar.now(), shape, prob) match
+    (state.currentShapeValidation(), state.refinedProbability, state.parentDraft) match
+      case (Validation.Success(_, shape), Some(prob), Some(parent)) =>
+        builderState.updateLeaf(originalName, state.nameVar.now(), parent, shape, prob) match
           case Validation.Success(_, _) =>
             // TreeBuilderState.updateLeaf already moved `activeForm` back to
             // `Locked(t)`, locking these same, just-saved values for viewing.
@@ -399,10 +423,11 @@ object RiskLeafFormView:
           case Validation.Failure(_, errs) =>
             FormSubmitUtil.routeTopologyErrors(state, errs.toList, submitError, {
               case "name"   => Some(RiskLeafField.Name)
-              case "parent" => None
+              case "parent" => Some(RiskLeafField.Parent)
               case _        => None
             })
-      case (shapeV, _) =>
+      case (shapeV, _, parentOpt) =>
+        if parentOpt.isEmpty then state.setSubmitFieldError(RiskLeafField.Parent, "Parent is required")
         routeLeafShapeErrors(state, shapeErrorsOf(shapeV), submitError)
 
   /** Extract the validation errors from a shape result (empty when it succeeded). */

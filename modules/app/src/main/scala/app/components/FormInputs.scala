@@ -1,6 +1,7 @@
 package app.components
 
 import com.raquo.laminar.api.L.{*, given}
+import app.state.ParentSelection
 
 /**
  * Reusable form input components with:
@@ -176,63 +177,80 @@ object FormInputs:
   /**
    * Dropdown for selecting a parent node.
    *
+   * Three-state (`ParentSelection`): `Unset` — a real, disabled "— none
+   * selected —" placeholder option, never itself submittable — `Root`, or a
+   * named `Portfolio`. Callers set `parentVar` to `Unset` at every explicit
+   * clear/populate call site (`PortfolioFormView`/`RiskLeafFormView`); there
+   * is no computed fallback value for this component or its callers to
+   * silently pick on the user's behalf (see `ParentSelection`'s own doc).
+   *
    * `parentVar` is corrected in exactly one situation: the option list
    * itself changes (a portfolio is added/renamed/removed elsewhere) and the
-   * currently-held value is no longer among the valid choices. That
-   * correction is driven off `options` alone, deliberately *not* off
-   * `parentVar` itself — the earlier version watched both together, which
-   * meant setting `parentVar` (from here, or from a caller's own reset)
-   * re-triggered this same subscription. Nested inside whatever the
-   * caller's own multi-step reset/populate sequence was doing at the time,
-   * that self-triggering was the mechanism behind two confirmed bugs (a
-   * locked node's own parent field silently overwritten to point at
-   * itself; a leaf form reading as dirty after tree creation even with
-   * every visible field genuinely empty). Watching `options` only means
-   * this subscription never fires as a side effect of a caller clearing or
-   * populating its own form — only when the world outside this form
-   * actually changes — so it can't race with, or get raced by, a caller's
-   * own reset sequence. Callers still set `parentVar` explicitly at
-   * clear/populate time (`TreeBuilderState.defaultParentNow`,
-   * `populatePortfolioForm`/`populateLeafForm`) — this subscription only
-   * covers the gap where the option list moves while a form just sits
-   * there untouched (e.g. the leaf form is open before any portfolio
-   * exists, then one gets added elsewhere).
+   * currently-held value is no longer among the valid choices — corrected to
+   * `Unset`, not to an arbitrary substitute. That correction is driven off
+   * `options` alone, deliberately *not* off `parentVar` itself — the earlier
+   * version watched both together, which meant setting `parentVar` (from
+   * here, or from a caller's own reset) re-triggered this same subscription.
+   * Nested inside whatever the caller's own multi-step reset/populate
+   * sequence was doing at the time, that self-triggering was the mechanism
+   * behind two confirmed bugs (a locked node's own parent field silently
+   * overwritten to point at itself; a leaf form reading as dirty after tree
+   * creation even with every visible field genuinely empty). Watching
+   * `options` only means this subscription never fires as a side effect of a
+   * caller clearing or populating its own form — only when the world outside
+   * this form actually changes — so it can't race with, or get raced by, a
+   * caller's own reset sequence.
    *
-   * @param parentVar Var holding None (root) or Some(portfolioName)
+   * @param parentVar Var holding the current selection.
    * @param options Signal of available parent names (may include rootLabel)
    * @param rootLabel Sentinel string representing the root (e.g., "(root)")
+   * @param errorSignal Submit-time "Parent is required" / topology error, if any.
    */
   def parentSelect(
-    parentVar: Var[Option[String]],
+    parentVar: Var[ParentSelection],
     options: Signal[List[String]],
     rootLabel: String,
-    disabledSignal: Signal[Boolean] = Val(false)
+    disabledSignal: Signal[Boolean] = Val(false),
+    errorSignal: Signal[Option[String]] = Val(None)
   ): HtmlElement =
-    def correctedDisplay(sel: Option[String], opts: List[String]): String =
-      val display = sel.getOrElse(rootLabel)
-      if opts.contains(display) then display else opts.headOption.getOrElse(rootLabel)
+    val unsetValue = ""
+
+    def toValue(sel: ParentSelection): String = sel match
+      case ParentSelection.Root         => rootLabel
+      case ParentSelection.Portfolio(n) => n
+      case ParentSelection.Unset        => unsetValue
+
+    def fromValue(raw: String): ParentSelection =
+      if raw == unsetValue then ParentSelection.Unset
+      else if raw == rootLabel then ParentSelection.Root
+      else ParentSelection.Portfolio(raw)
+
+    def correctedDisplay(sel: ParentSelection, opts: List[String]): String =
+      val display = toValue(sel)
+      if display == unsetValue || opts.contains(display) then display else unsetValue
 
     div(
       cls := "form-field",
       label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, "Parent Portfolio"),
       select(
         cls := "form-input",
+        cls("error") <-- errorSignal.map(_.isDefined),
         disabled <-- disabledSignal,
+        option(value := unsetValue, disabled := true, "— none selected —"),
+        splitOptions(options.map(_.map(opt => opt -> opt))),
         controlled(
           value <-- parentVar.signal.combineWith(options).map(correctedDisplay(_, _)),
-          onChange.mapToValue.map { v => if v == rootLabel then None else Some(v) } --> parentVar
+          onChange.mapToValue.map(fromValue) --> parentVar
         ),
         // See the doc comment above: triggered by `options` alone, reading
         // `parentVar` only via `.now()` — never combined with it — so this
         // cannot re-fire itself and cannot fire as a side effect of a
         // caller's own reset/populate sequence touching `parentVar`.
         options --> { opts =>
-          val current = parentVar.now().getOrElse(rootLabel)
-          if !opts.contains(current) then
-            opts.headOption.foreach { v =>
-              parentVar.set(if v == rootLabel then None else Some(v))
-            }
-        },
-        splitOptions(options.map(_.map(opt => opt -> opt)))
-      )
+          val current = toValue(parentVar.now())
+          if current != unsetValue && !opts.contains(current) then
+            parentVar.set(ParentSelection.Unset)
+        }
+      ),
+      child.maybe <-- errorSignal.map(_.map(msg => span(cls := "form-error", msg)))
     )

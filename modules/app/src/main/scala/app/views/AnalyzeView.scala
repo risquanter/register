@@ -189,9 +189,13 @@ object AnalyzeView:
             ),
             span(" Compare")
           ),
-          child.maybe <-- compareState.enabled.signal.map { enabled =>
-            if enabled then Some(renderBranchPicker(scenarioState, compareState)) else None
-          }
+          // Always mounted, not conditionally shown/hidden — toggling Compare
+          // used to mount/unmount this <select> outright, which shifted the
+          // surrounding panel's size every time and needed a moment to
+          // rebuild its option list on remount. Disabled instead: same size,
+          // same position, always ready, with a visual cue (dimmed + inert)
+          // for "not applicable right now" instead of vanishing entirely.
+          renderBranchPicker(scenarioState, compareState, disabledSignal = compareState.enabled.signal.map(!_))
         ),
         div(
           cls := "form-field",
@@ -302,8 +306,17 @@ object AnalyzeView:
     * (shared with `BranchBar.picker`, Analyze's baseline-branch selector —
     * TODO.md item 26 / milestone-2b Phase C follow-up item 5) but the
     * `CompareTarget` parsing stays local to Compare.
+    *
+    * Always mounted regardless of `disabledSignal` — see the call site's
+    * comment. `disabled` alone gives the browser's own dimmed/inert styling;
+    * `compare-branch-select--disabled` layers a slightly stronger visual cue
+    * (app.css) so "not applicable right now" reads clearly at a glance.
     */
-  private def renderBranchPicker(scenarioState: ScenarioState, compareState: CompareState): HtmlElement =
+  private def renderBranchPicker(
+    scenarioState: ScenarioState,
+    compareState: CompareState,
+    disabledSignal: Signal[Boolean]
+  ): HtmlElement =
     def parseSelection(raw: String): CompareTarget =
       if raw.isEmpty then CompareTarget.NotChosen
       else if raw == BranchBar.mainSentinel then CompareTarget.Main
@@ -317,6 +330,8 @@ object AnalyzeView:
 
     select(
       cls := "compare-branch-select",
+      cls("compare-branch-select--disabled") <-- disabledSignal,
+      disabled <-- disabledSignal,
       onMountCallback(_ => scenarioState.refresh()),
       option(value := "", "— compare against —"),
       FormInputs.splitOptions(optionEntries),

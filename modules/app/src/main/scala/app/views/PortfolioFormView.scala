@@ -1,9 +1,9 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import org.scalajs.dom
-import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormTarget, FieldSnapshot, forPortfolio}
+import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormTarget, FieldSnapshot, ParentSelection, forPortfolio}
 import app.components.FormInputs
+import app.components.ConfirmGuard.proceedOrConfirm
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.errors.ValidationError
@@ -32,17 +32,20 @@ object PortfolioFormView:
     val portfolioMode: Signal[FormMode] = builderState.activeForm.signal.map(_.forPortfolio).distinct
     val isLocked: Signal[Boolean] = portfolioMode.map { case FormMode.Locked(_) => true; case _ => false }
 
-    /** The portfolio this form's current mode is displaying (Locked/Editing),
-      * or was templated from (Templating) — passed to `parentOptions` so
-      * that portfolio's own occupancy of root doesn't count against itself
-      * (see `TreeBuilderState.parentOptions`). `None` for Blank, which has
-      * no identity of its own.
+    /** The portfolio whose own occupancy of root must not count against
+      * itself in `parentOptions` (see `TreeBuilderState.parentOptions`) —
+      * Locked/Editing only, since those are the SAME node being viewed or
+      * edited in place. Templating's new draft is a genuinely different,
+      * not-yet-existing entity: the source it was templated from is
+      * untouched and still really holds whatever it holds, so excluding it
+      * here would offer "(root)" as if the source no longer held root — a
+      * choice guaranteed to fail validation the moment it's submitted. Blank
+      * has no identity of its own either way.
       */
-    val currentTargetName: Signal[Option[String]] = portfolioMode.map {
-      case FormMode.Locked(FormTarget.Portfolio(n))     => Some(n.value)
-      case FormMode.Editing(FormTarget.Portfolio(n))    => Some(n.value)
-      case FormMode.Templating(FormTarget.Portfolio(n)) => Some(n.value)
-      case _                                            => None
+    val selfExcludeName: Signal[Option[String]] = portfolioMode.map {
+      case FormMode.Locked(FormTarget.Portfolio(n))  => Some(n.value)
+      case FormMode.Editing(FormTarget.Portfolio(n)) => Some(n.value)
+      case _                                          => None
     }
 
     val currentSnapshot: Signal[FieldSnapshot.PortfolioFields] =
@@ -93,11 +96,12 @@ object PortfolioFormView:
         // draft — confirm first, matching how discarding unsaved work is
         // gated everywhere else in this builder.
         case FormMode.Blank =>
-          val proceed = raw match
-            case FormMode.Editing(_) | FormMode.Templating(_) =>
-              dom.window.confirm("This will discard the leaf you're currently editing. Continue?")
-            case _ => true
-          if proceed then handleSubmit(form, builderState, submitError)
+          val isDiscardingLeafDraft = raw match
+            case FormMode.Editing(_) | FormMode.Templating(_) => true
+            case _                                            => false
+          proceedOrConfirm(isDiscardingLeafDraft, "This will discard the leaf you're currently editing. Continue?") { () =>
+            handleSubmit(form, builderState, submitError)
+          }
         case FormMode.Locked(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Templating(t))
         case FormMode.Templating(_: FormTarget.Portfolio) => handleSubmit(form, builderState, submitError)
         case _ => ()
@@ -115,7 +119,7 @@ object PortfolioFormView:
       builderState.activeForm.now().forPortfolio match
         case FormMode.Blank =>
           form.reset()
-          form.parentVar.set(builderState.defaultParentNow)
+          form.parentVar.set(ParentSelection.Unset)
         case FormMode.Editing(t: FormTarget.Portfolio)    => builderState.activeForm.set(FormMode.Locked(t))
         case FormMode.Templating(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Locked(t))
         case _ => ()
@@ -132,9 +136,24 @@ object PortfolioFormView:
 
       // When the active target is this portfolio, populate the form from its
       // saved draft. Any other target (Blank, or a leaf) clears the fields.
-      currentTargetName.changes --> {
-        case Some(name) => builderState.portfoliosVar.now().find(_.name.value == name).foreach(builderState.populatePortfolioForm(form, _))
-        case None       => form.reset(); form.parentVar.set(builderState.defaultParentNow)
+      // Templating gets one extra step after the normal populate: a template
+      // is a new, not-yet-existing draft, so if the source it's copied from
+      // holds root, root is still genuinely taken (by the untouched source)
+      // — reset the copy to Unset instead of silently carrying over a
+      // "(root)" selection that's guaranteed to fail validation on submit.
+      portfolioMode.changes --> {
+        case FormMode.Locked(FormTarget.Portfolio(n)) =>
+          builderState.portfoliosVar.now().find(_.name == n).foreach(builderState.populatePortfolioForm(form, _))
+        case FormMode.Editing(FormTarget.Portfolio(n)) =>
+          builderState.portfoliosVar.now().find(_.name == n).foreach(builderState.populatePortfolioForm(form, _))
+        case FormMode.Templating(FormTarget.Portfolio(n)) =>
+          builderState.portfoliosVar.now().find(_.name == n).foreach { source =>
+            builderState.populatePortfolioForm(form, source)
+            if source.parent.isEmpty then form.parentVar.set(ParentSelection.Unset)
+          }
+        case _ =>
+          form.reset()
+          form.parentVar.set(ParentSelection.Unset)
       },
       // Explicit "clear regardless of mode" signal from startNewTree/loadFromTree
       // — see resetFormFieldsBus's doc comment. Needed because a same-to-same
@@ -142,7 +161,7 @@ object PortfolioFormView:
       // produces no emission on the .distinct-filtered portfolioMode above.
       builderState.resetFormFieldsBus.events --> { _ =>
         form.reset()
-        form.parentVar.set(builderState.defaultParentNow)
+        form.parentVar.set(ParentSelection.Unset)
       },
 
       // Clear stale submit error whenever the user edits a field
@@ -171,7 +190,7 @@ object PortfolioFormView:
         filter = _ => true,
         disabledSignal = isLocked
       ),
-      FormInputs.parentSelect(form.parentVar, builderState.parentOptions(currentTargetName), builderState.rootLabel, isLocked),
+      FormInputs.parentSelect(form.parentVar, builderState.parentOptions(selfExcludeName), builderState.rootLabel, isLocked, form.parentError),
 
       // Add/Submit, Clear Form, Edit/Save — right-aligned as a group, Clear Form
       // immediately right of Add/Submit.

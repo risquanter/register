@@ -98,10 +98,17 @@ final class ScenarioState(
     * `create()` (before that create's own refresh has resolved) still finds
     * the just-created scenario and its real head, instead of silently
     * no-op'ing against a stale or still-loading list. No-op if the scenario
-    * is already gone by the time the fresh fetch resolves. Refreshes the
-    * shared list on success — every `ScenarioState` instance's own
-    * `activeBranch` self-heals above if it was pointing at the branch just
-    * deleted, this one included. Errors surface via the global error banner
+    * is already gone by the time the fresh fetch resolves.
+    *
+    * Resets this instance's own `activeBranch` synchronously, in the same
+    * success callback, if it was pointing at the branch just deleted — this
+    * instance knows for certain the branch is gone; it doesn't need to wait
+    * on the separate list refresh below to find out. The `listState.refresh()`
+    * call is still what lets *every other* `ScenarioState` instance's own
+    * self-heal subscription (above) notice the deletion — that path is
+    * necessarily async (another instance only learns about it by observing
+    * the shared list), but this instance's own knowledge shouldn't depend on
+    * that refresh succeeding. Errors surface via the global error banner
     * (`forkProvided`'s default observer), matching other destructive actions.
     */
   def delete(name: ScenarioName.ScenarioName): Unit =
@@ -113,7 +120,10 @@ final class ScenarioState(
             fresh.find(_.name == name) match
               case Some(s) =>
                 deleteScenarioEndpoint((userIdAccessor(), key, name, s.head))
-                  .tap(_ => ZIO.succeed(listState.refresh()))
+                  .tap(_ => ZIO.succeed {
+                    if activeBranch.now().contains(name) then activeBranch.set(None)
+                    listState.refresh()
+                  })
               case None => ZIO.unit
           }
           .runJs

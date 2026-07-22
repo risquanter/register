@@ -31,7 +31,7 @@ object FormModeSpec extends ZIOSpecDefault:
 
   private val emptyLeafSnapshot: FieldSnapshot.LeafFields = FieldSnapshot.LeafFields(
     name        = "",
-    parent      = None,
+    parent      = ParentSelection.Unset,
     probability = "",
     mode        = DistributionMode.Lognormal,
     percentiles = "",
@@ -40,7 +40,7 @@ object FormModeSpec extends ZIOSpecDefault:
     minLoss     = "",
     maxLoss     = ""
   )
-  private val emptyPortfolioSnapshot: FieldSnapshot.PortfolioFields = FieldSnapshot.PortfolioFields("", None)
+  private val emptyPortfolioSnapshot: FieldSnapshot.PortfolioFields = FieldSnapshot.PortfolioFields("", ParentSelection.Unset)
 
   def spec = suite("FormModeSpec")(
 
@@ -82,7 +82,7 @@ object FormModeSpec extends ZIOSpecDefault:
       test("round-trips a saved portfolio's raw display values") {
         assertTrue(
           savedPortfolioSnapshot.name == "Operational Risk",
-          savedPortfolioSnapshot.parent.isEmpty
+          savedPortfolioSnapshot.parent == ParentSelection.Root
         )
       }
     ),
@@ -97,17 +97,17 @@ object FormModeSpec extends ZIOSpecDefault:
       test("true once the portfolio name is non-empty") {
         assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(name = "x"), Nil, Nil))
       },
-      test("false when parent matches the auto-selected dropdown default and every other field is empty") {
-        // portfolios = [savedPortfolio] means root is already taken, so
-        // FormInputs.parentSelect's own auto-correct would force parent to
-        // savedPortfolio's name ("Operational Risk") — matching that forced
-        // default alone must not count as user content.
-        assertTrue(!FormMode.isFormDirty(FormMode.Blank, emptyLeafSnapshot.copy(parent = Some("Operational Risk")), Nil, List(savedPortfolio))) &&
-        assertTrue(!FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(parent = Some("Operational Risk")), Nil, List(savedPortfolio)))
+      test("false when parent is still Unset and every other field is empty") {
+        // A freshly-cleared Blank form's parent starts at Unset (see
+        // PortfolioFormView/RiskLeafFormView's clear/reset call sites) —
+        // Unset alone must not count as user content, regardless of whether
+        // root is already taken elsewhere.
+        assertTrue(!FormMode.isFormDirty(FormMode.Blank, emptyLeafSnapshot, Nil, List(savedPortfolio))) &&
+        assertTrue(!FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot, Nil, List(savedPortfolio)))
       },
-      test("true when parent is deliberately set to something other than the auto-selected default") {
-        assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyLeafSnapshot.copy(parent = Some("Some Other Portfolio")), Nil, List(savedPortfolio))) &&
-        assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(parent = Some("Some Other Portfolio")), Nil, List(savedPortfolio)))
+      test("true once parent moves away from Unset, to root or to a named portfolio") {
+        assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyLeafSnapshot.copy(parent = ParentSelection.Root), Nil, List(savedPortfolio))) &&
+        assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(parent = ParentSelection.Portfolio("Some Other Portfolio")), Nil, List(savedPortfolio)))
       }
     ),
 
@@ -134,7 +134,7 @@ object FormModeSpec extends ZIOSpecDefault:
       },
       test("true when the portfolio's parent has been changed") {
         val target = FormTarget.Portfolio(portName)
-        val edited = savedPortfolioSnapshot.copy(parent = Some("Other Root"))
+        val edited = savedPortfolioSnapshot.copy(parent = ParentSelection.Portfolio("Other Root"))
         assertTrue(FormMode.isFormDirty(FormMode.Editing(target), edited, Nil, List(savedPortfolio)))
       },
       test("false when the target no longer exists in the saved list (defensive default)") {
@@ -153,19 +153,21 @@ object FormModeSpec extends ZIOSpecDefault:
         val edited = savedLeafSnapshot.copy(name = "Cyber Risk 2")
         assertTrue(FormMode.isFormDirty(FormMode.Templating(source), edited, List(savedLeaf), Nil))
       },
-      test("false when templating a root portfolio and the parent field is only the forced auto-correction, not a real edit") {
-        // savedPortfolio is the tree's only (root) portfolio. Templating it
-        // copies its own parent (None), but FormInputs.parentSelect then
-        // forces the dropdown to the only available option — the source's
-        // own name — since a clone can't also be root. That forced value
-        // alone must not register as dirty before the user types anything.
+      test("true when templating a root portfolio and the copied parent was corrected to Unset") {
+        // savedPortfolio is the tree's only (root) portfolio, so templating
+        // it — a new, not-yet-existing draft — can't also claim root: the
+        // untouched source still holds it. PortfolioFormView's populate step
+        // resets the copy to Unset in this case (see its own doc comment),
+        // which genuinely differs from the source's own saved parent (Root)
+        // — correctly flagged dirty, since the draft now needs the user to
+        // pick a real parent before it can be saved, not a false alarm.
         val source = FormTarget.Portfolio(portName)
-        val autoCorrected = savedPortfolioSnapshot.copy(parent = Some(portName.value))
-        assertTrue(!FormMode.isFormDirty(FormMode.Templating(source), autoCorrected, Nil, List(savedPortfolio)))
+        val corrected = savedPortfolioSnapshot.copy(parent = ParentSelection.Unset)
+        assertTrue(FormMode.isFormDirty(FormMode.Templating(source), corrected, Nil, List(savedPortfolio)))
       },
       test("true when templating a root portfolio and the parent is deliberately changed to something else") {
         val source = FormTarget.Portfolio(portName)
-        val edited = savedPortfolioSnapshot.copy(parent = Some("Some Other Portfolio"))
+        val edited = savedPortfolioSnapshot.copy(parent = ParentSelection.Portfolio("Some Other Portfolio"))
         assertTrue(FormMode.isFormDirty(FormMode.Templating(source), edited, Nil, List(savedPortfolio)))
       }
     ),

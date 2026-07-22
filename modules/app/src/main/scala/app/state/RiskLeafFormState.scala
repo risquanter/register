@@ -8,7 +8,7 @@ import zio.prelude.Validation
 
 /** Type-safe field identifiers for the risk leaf form. */
 enum RiskLeafField:
-  case Name, Probability, Percentiles, Quantiles, MinLoss, MaxLoss, Terms
+  case Name, Parent, Probability, Percentiles, Quantiles, MinLoss, MaxLoss, Terms
 
 /**
  * Reactive form state for creating a RiskLeaf.
@@ -38,10 +38,13 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   val nameVar: Var[String] = Var("")
   val probabilityVar: Var[String] = Var("")
 
-  /** Parent selection — None means root. Not reset by [[resetFields]]; auto-synced by
-    * [[app.components.FormInputs.parentSelect]] based on available options.
+  /** Parent selection. Not reset by [[resetFields]] — callers explicitly set
+    * it to `ParentSelection.Unset` at clear/reset call sites (see
+    * [[app.views.RiskLeafFormView]]); also auto-corrected to `Unset` by
+    * [[app.components.FormInputs.parentSelect]] if the option list moves out
+    * from under an already-chosen value.
     */
-  val parentVar: Var[Option[String]] = Var(None)
+  val parentVar: Var[ParentSelection] = Var(ParentSelection.Unset)
   
   // Expert mode fields
   val percentilesVar: Var[String] = Var("")  // Placeholder text "e.g., 10, 50, 90" is on the input element
@@ -233,6 +236,11 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
   // ============================================================
   
   val nameError: Signal[Option[String]] = withSubmitErrors(Name, nameErrorRaw)
+
+  /** Parent has no continuous reactive validation of its own (unlike name) —
+    * only submit-time errors (`parentDraft` returning `None`, or a topology
+    * error from the server) ever populate this, via `setSubmitFieldError`. */
+  val parentError: Signal[Option[String]] = withSubmitErrors(Parent, Val(None))
   val probabilityError: Signal[Option[String]] = withSubmitErrors(Probability, probabilityErrorRaw)
 
   // Cross-field errors use a content-presence gate, NOT the per-field touch gate.
@@ -411,6 +419,15 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       // Field is entered on the 0–100 (percent) scale; convert to 0–1 before refining.
       ValidationUtil.refineOccurrenceProbability(RiskLeafFormState.pctToDomain(pct)).toOption
     }
+
+  /** The current parent selection resolved to the domain shape, or `None` if
+    * still `ParentSelection.Unset` — mirrors `refinedProbability`'s
+    * Option-based shape (this form's fields are checked as a tuple of
+    * Options at submit time, not composed via `Validation`, see
+    * `RiskLeafFormView.handleSubmit`). `Unset` blocks submission exactly like
+    * an unrefined probability does, via `ParentSelection.toSaved`.
+    */
+  def parentDraft: Option[Option[String]] = ParentSelection.toSaved(parentVar.now())
 
   /** Reactive signal of the current shape-only distribution draft.
     *
