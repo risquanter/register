@@ -33,6 +33,17 @@ object TreeListView:
     onNewTree: Option[() => Unit] = None,
     leadingControl: Option[HtmlElement] = None
   ): HtmlElement =
+    // Remembers the last successfully loaded list so a refetch (branch switch,
+    // refresh click) doesn't blank the selector while in flight — every
+    // subsequent load re-enters `Loading` the same way the first one did, and
+    // without this, the whole selector + refresh button would tear down and
+    // rebuild on every one of those, not just the first. Same principle as
+    // AnalyzeView's combinedSpecSignal: don't discard a perfectly good display
+    // just because a new fetch started; only replace it once the new data
+    // actually lands. `None` only means "never loaded successfully yet" — the
+    // one case that should still show "Loading trees…", not a stale selector.
+    val lastKnownTrees: Var[Option[List[SimulationResponse]]] = Var(None)
+
     div(
       cls := "tree-list-view",
       div(
@@ -48,6 +59,9 @@ object TreeListView:
         ).getOrElse(emptyNode)
       ),
       onMountCallback(_ => state.loadTreeList()),
+      state.availableTrees.signal.changes.collect { case LoadState.Loaded(trees) => trees } --> { trees =>
+        lastKnownTrees.set(Some(trees))
+      },
       div(
         cls := "tree-list-controls-row",
         // Labeled explicitly — otherwise two adjacent selects with no caption
@@ -60,13 +74,15 @@ object TreeListView:
         div(
           cls := "tree-list-tree-slot",
           span(cls := "tree-list-slot-label", "Tree"),
-          child <-- state.availableTrees.signal.map {
-            case LoadState.Idle    => renderPlaceholder("Waiting to load…")
-            case LoadState.Loading => renderPlaceholder("Loading trees…")
-            case LoadState.Failed(msg) => renderError(msg, state)
-            case LoadState.Loaded(trees) =>
+          child <-- state.availableTrees.signal.combineWith(lastKnownTrees.signal).map {
+            case (LoadState.Loaded(trees), _) =>
               if trees.isEmpty then renderPlaceholder("No saved trees yet.")
               else renderSelector(trees, state)
+            case (LoadState.Loading, Some(prev)) if prev.nonEmpty =>
+              renderSelector(prev, state)
+            case (LoadState.Loading, _) => renderPlaceholder("Loading trees…")
+            case (LoadState.Failed(msg), _) => renderError(msg, state)
+            case (LoadState.Idle, _) => renderPlaceholder("Waiting to load…")
           }
         )
       )
