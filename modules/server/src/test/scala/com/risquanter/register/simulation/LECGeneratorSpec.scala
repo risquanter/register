@@ -187,6 +187,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       test("returns expected quantile keys") {
         val quantiles = LECGenerator.calculateQuantiles(cyberResult)
         assertTrue(
+          quantiles.contains("p05"),
           quantiles.contains("p50"),
           quantiles.contains("p90"),
           quantiles.contains("p95"),
@@ -196,6 +197,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       test("quantiles are monotonically increasing") {
         val quantiles = LECGenerator.calculateQuantiles(cyberResult)
         assertTrue(
+          quantiles("p05") <= quantiles("p50"),
           quantiles("p50") <= quantiles("p90"),
           quantiles("p90") <= quantiles("p95"),
           quantiles("p95") <= quantiles("p99")

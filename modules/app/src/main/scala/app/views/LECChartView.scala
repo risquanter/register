@@ -105,7 +105,13 @@ object LECChartView:
       onMountCallback { ctx =>
         val options = js.Dynamic.literal(
           "actions"    -> false,
-          "renderer"   -> "canvas",
+          // Canvas text uses grayscale-only anti-aliasing (no subpixel
+          // smoothing), which reads as blurrier/lower-contrast than the rest
+          // of the app's native-rendered text — svg uses the browser's own
+          // text engine instead, matching DistributionChartView (which
+          // already renders via svg). Vega's hover/nearest-point interaction
+          // works identically under both renderers.
+          "renderer"   -> "svg",
           "hover"      -> true
         )
         vegaEmbed(ctx.thisNode.ref, spec, options)

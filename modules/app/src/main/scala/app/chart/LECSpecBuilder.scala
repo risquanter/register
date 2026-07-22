@@ -15,11 +15,13 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   *   - Opacity condition: hovered curve = 1.0, others = 0.3
   *   - Data values shape: `{curveId, risk, loss, exceedance}`
   *   - Colour encoding: `scale.domain` (curveIds) + `scale.range` (hex colours)
-  *   - Quantile annotations: dashed vertical rules + labels for P50/P95
+  *   - Quantile annotations: dashed vertical rules + labels for P05/P50/P95,
+  *     one set per curve, each coloured to match that curve's own line
   *   - Axes: B/M formatting on X, percentage on Y
   *   - Dark theme config (transparent background, light-on-dark text)
   *   - Legend with `labelExpr` mapping curveId → node name
   *   - Interpolation toggle param (monotone/basis/linear/step-after)
+  *   - Percentile-line show/hide toggle param (`showPercentiles`)
   *   - Y-axis adaptive ceiling (capped at 1.0)
   */
 object LECSpecBuilder:
@@ -95,12 +97,18 @@ object LECSpecBuilder:
     }
     val legendLabelExpr = (labelParts :+ "datum.value").mkString(" : ")
 
-    // Quantile annotations (from first curve)
-    val rootCurve = ordered.head._1
+    // Quantile annotations: every curve gets its own P05/P50/P95 vertical
+    // lines, coloured to match that curve's own assigned line colour (not a
+    // single shared colour taken from just one curve) — so when several
+    // curves are shown together (Compare/Overlay, or a multi-select on one
+    // tree), each curve's percentile markers are told apart by the same
+    // colour as its line, the same way the line itself is.
     val quantileLayers = js.Array[js.Any]()
-    List("p50" -> "P50", "p95" -> "P95").foreach { case (key, label) =>
-      rootCurve.quantiles.get(key).foreach { value =>
-        quantileAnnotation(value, label).foreach(quantileLayers.push(_))
+    ordered.foreach { case (nc, hexColor, _) =>
+      List("p05" -> "P05", "p50" -> "P50", "p95" -> "P95").foreach { case (key, label) =>
+        nc.quantiles.get(key).foreach { value =>
+          quantileAnnotation(value, label, hexColor.value).foreach(quantileLayers.push(_))
+        }
       }
     }
 
@@ -256,6 +264,14 @@ object LECSpecBuilder:
             "options" -> js.Array("monotone", "basis", "linear", "step-after"),
             "name"    -> "Interpolation: "
           )
+        ),
+        js.Dynamic.literal(
+          "name"  -> "showPercentiles",
+          "value" -> true,
+          "bind"  -> js.Dynamic.literal(
+            "input" -> "checkbox",
+            "name"  -> "Show percentile lines: "
+          )
         )
       ),
       "layer" -> allLayers
@@ -263,19 +279,24 @@ object LECSpecBuilder:
 
   // ── Quantile annotation helpers ───────────────────────────────
 
-  private def quantileAnnotation(value: Double, label: String): Seq[js.Dynamic] =
+  private def quantileAnnotation(value: Double, label: String, color: String): Seq[js.Dynamic] =
     val data = js.Dynamic.literal(
       "values" -> js.Array(js.Dynamic.literal("x" -> value))
     )
     val xEnc = js.Dynamic.literal("field" -> "x", "type" -> "quantitative")
+    // Tied to the `showPercentiles` checkbox param (declared top-level,
+    // visible to every layer) the same way the interpolation dropdown drives
+    // the line layer's `interpolate` mark property — a bound param's value
+    // referenced directly via `expr`, no extra Scala-side state needed.
+    val toggleOpacity = js.Dynamic.literal("expr" -> "showPercentiles ? 1 : 0")
     Seq(
       js.Dynamic.literal(
-        "mark"     -> js.Dynamic.literal("type" -> "rule", "strokeDash" -> js.Array(4, 4), "color" -> "#6a8a8e"),
+        "mark"     -> js.Dynamic.literal("type" -> "rule", "strokeDash" -> js.Array(4, 4), "color" -> color, "opacity" -> toggleOpacity),
         "data"     -> data,
         "encoding" -> js.Dynamic.literal("x" -> xEnc)
       ),
       js.Dynamic.literal(
-        "mark"     -> js.Dynamic.literal("type" -> "text", "align" -> "left", "dx" -> 4, "dy" -> -6, "fontSize" -> 11, "color" -> "#a0b0b0"),
+        "mark"     -> js.Dynamic.literal("type" -> "text", "align" -> "left", "dx" -> 4, "dy" -> -6, "fontSize" -> 11, "color" -> color, "opacity" -> toggleOpacity),
         "data"     -> js.Dynamic.literal("values" -> js.Array(js.Dynamic.literal("x" -> value, "label" -> label))),
         "encoding" -> js.Dynamic.literal("x" -> xEnc, "text" -> js.Dynamic.literal("field" -> "label"))
       )

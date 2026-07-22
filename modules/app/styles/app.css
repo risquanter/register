@@ -1331,6 +1331,26 @@ select.form-input option {
   color: var(--foreground);
 }
 
+/* The "— none selected —" placeholder option (FormInputs.parentSelect) is a
+   real, disabled <option> — style it like the app's other placeholder text
+   (.form-input::placeholder above), not like a normal selectable option, so
+   a selected-but-disabled placeholder doesn't read as an active choice.
+   This only affects the *open* dropdown list — browsers render the *closed*
+   select box using the <select>'s own colour, not the individual <option>'s,
+   so it's not enough by itself; see the :has() rule below for that. */
+select.form-input option:disabled {
+  color: var(--foreground-muted);
+  opacity: 0.6;
+}
+
+/* The closed select box shows the <select>'s own text colour, not the
+   selected <option>'s — so muting the option above only fixes the open
+   dropdown list. This rule covers the closed box: when the placeholder is
+   the current selection, mute the select's own colour to match. */
+select.form-input:has(option[value=""]:checked) {
+  color: var(--foreground-muted);
+}
+
 .form-textarea {
   resize: vertical;
   min-height: 60px;

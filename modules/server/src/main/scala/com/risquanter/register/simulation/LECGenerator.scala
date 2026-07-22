@@ -55,11 +55,12 @@ object LECGenerator {
     *
     * @param result Risk simulation result with outcome counts
     * @return Map of quantile names to loss values
-    *         Keys: "p50" (median), "p90", "p95", "p99"
+    *         Keys: "p05", "p50" (median), "p90", "p95", "p99"
     */
   def calculateQuantiles(result: LossDistribution): Map[String, Double] =
     if result.outcomeCount.isEmpty || result.nTrials == 0 then Map.empty
     else Map(
+      "p05" -> unconditionalQuantile(result, 0.05).toDouble,
       "p50" -> unconditionalQuantile(result, 0.50).toDouble,
       "p90" -> unconditionalQuantile(result, 0.90).toDouble,
       "p95" -> unconditionalQuantile(result, 0.95).toDouble,

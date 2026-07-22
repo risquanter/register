@@ -1515,25 +1515,46 @@ design proposed, no `ZJS.scala` changes.
 
 **Status:** investigation only, no code changed.
 
-## 30. LEC chart: per-branch curve colour + P50/P95 percentile line naming
+## ✅ 30. LEC chart: per-curve percentile lines (P05/P50/P95) + toggle — RESOLVED 2026-07-22
 
-**Origin (2026-07-22):** two related, previously-planned chart items,
-recorded here so they aren't lost while other Analyze/Compare work lands
-first:
+**Origin (2026-07-22):** two related, previously-planned chart items.
 
-1. **Per-branch curve colour, not per-risk.** Planned earlier: each curve on
-   the LEC chart should carry its own colour (not colour-by-risk), with the
-   percentile lines (currently solid) rendered dotted, and a toggle to
-   show/hide them. Not started — no `LECSpecBuilder`/`LECChartView` changes
-   proposed yet.
-2. **"P50" is very likely a naming mistake, not a deliberate choice.** The
-   leaf-creation panel's own preview already labels its percentile line
-   "P05" (not "P50") — wherever the LEC chart or its legend currently says
-   "P50"/"P95", it should very likely read "P05"/"P95" to match, unless
-   something backend-side genuinely computes a 50th-percentile line
-   specifically for that spot (not yet checked). Needs a check across
-   `LECSpecBuilder`/chart legend text before renaming, in case "P50" is
-   intentional somewhere and only the naming *looks* inconsistent.
+1. **Percentile lines: dotted, toggle, per-curve colour, plus P05 — DONE.**
+   Clarified with the user: "per-branch, not per-risk" did **not** mean the
+   existing `ColorAssigner`/`CompareColorAssigner` node-colour scheme (left
+   untouched, as instructed — including the sequential palette-reuse and the
+   manual colour-picker override). It meant: when multiple curves are shown
+   together (Compare/Overlay's two branches, or several nodes picked from one
+   tree), each curve's own P05/P50/P95 vertical marker lines should be
+   coloured to match *that curve's own already-assigned line colour*, not one
+   shared colour taken from a single curve as before.
+   - `LECGenerator.calculateQuantiles` (server) now also computes `"p05"`
+     (`unconditionalQuantile(result, 0.05)`), alongside the existing p50/p90/
+     p95/p99 — additive, `Map[String, Double]` needs no schema change, flows
+     through `LECNodeCurve.quantiles` automatically.
+   - `LECSpecBuilder.buildSpec` (frontend) now builds P05/P50/P95 annotation
+     layers **per curve** (was: only the first curve's P50/P95, one shared
+     colour) — each layer's `color` is that curve's own `HexColor`.
+   - The lines were already dashed (`strokeDash: [4,4]`, pre-existing). Added
+     a `showPercentiles` checkbox param (same mechanism the existing
+     interpolation dropdown already uses — a top-level Vega-Lite param
+     referenced via `expr` in the annotation marks' `opacity`) — no new Scala
+     state needed.
+   - Test coverage: `LECGeneratorSpec` extended to assert `p05` is present
+     and `p05 <= p50` alongside the existing monotonicity checks.
 
-**Status:** not started — investigation + design needed before either change
-is made.
+2. **"P50" naming — checked, NOT a mistake, no rename.** The LEC chart's
+   "P50"/"P95" come from `LECGenerator.scala` (`unconditionalQuantile(result,
+   0.50)` / `0.95`) — a genuine, deliberately-computed median and 95th
+   percentile of the *simulated loss-exceedance output*. The leaf-creation
+   preview's "P05" (`DistributionSpecBuilder.scala`, `LognormalHelper.scala`)
+   is the 5th percentile *input* bound (`minLoss`) used to parameterize the
+   lognormal distribution before simulation — a completely different
+   statistic from a completely different (pre- vs. post-simulation) dataset.
+   The resemblance between the two labels was coincidental; renaming P50→P05
+   in the LEC chart would have mislabeled a true median as a 5th percentile.
+   No rename made — instead, P05 was *added* to the LEC chart as its own,
+   correctly-computed line (see item 1).
+
+**Status:** both items done. `sbt clean "commonJVM/test; server/test; app/test"`
+green (509 + 567 + 30, 0 failures).
