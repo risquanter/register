@@ -320,6 +320,19 @@ single branch (Ctrl+click in the tree). Proposed design:
   tiles layout tolerates larger selections since each panel only shows
   its own branch's curves.
 
+**Addendum (2026-07-22, user input — not yet decided):** the above right-panel
+design stacks all branches' trees as collapsible sections within **one**
+panel (an accordion). Raised as an alternative while discussing the
+Overlay slice (which is built; Side by side and this node-selection design
+are not): rather than multiple trees listed one below another inside the
+same panel/window, give each compared branch its **own separate,
+self-contained visual element** — its own bordered/rounded container, each
+acting as an independent tree view and independent Ctrl+click input
+surface, not entries in a shared stack. Not evaluated against the
+accordion design above yet (open questions: how N>2 branches would tile,
+whether Mirror-select still works the same way across separate elements) —
+recorded here so it isn't lost before this phase is picked up.
+
 ```
 ┌──────────┬──────────────────────────────────────────────────────────┐
 │ Sidebar  │ Analyze                    (●) [⎇ main] [WS badge]       │

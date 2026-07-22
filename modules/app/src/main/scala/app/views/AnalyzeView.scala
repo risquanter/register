@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
-import app.components.SplitPane
+import app.components.{SplitPane, FormInputs}
 import app.chart.{LECSpecBuilder, CompareColorAssigner}
 import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, CompareState, CompareTarget, ScenarioDiffState, toBranchOption}
 import com.risquanter.register.domain.data.{RiskNode, RiskTree}
@@ -283,6 +283,17 @@ object AnalyzeView:
     * every node `Identical`). `""` in the DOM `<select>` means "nothing
     * chosen yet"; `"__main__"` is the sentinel for main (a `ScenarioName`
     * can never collide with it — see `ScenarioName`'s charset).
+    *
+    * The option list is rendered via `FormInputs.splitOptions` (keyed by
+    * each option's own value string) rather than a plain `children <--` of
+    * freshly-built `option(...)` elements. `children <--` would replace
+    * every `<option>` DOM node on each emission (e.g. every
+    * `scenarioState.refresh()`); removing the currently-selected node
+    * resets the browser's own `<select>` selection independently of
+    * `compareState.compareBranch`, which still holds the real choice — a
+    * visible desync between what the picker shows and what the app
+    * believes is selected (TODO.md item 26). `splitOptions` is shared with
+    * `FormInputs.parentSelect`, which has the identical mechanism.
     */
   private def renderBranchPicker(scenarioState: ScenarioState, compareState: CompareState): HtmlElement =
     val mainSentinel = "__main__"
@@ -292,18 +303,21 @@ object AnalyzeView:
       else if raw == mainSentinel then CompareTarget.Main
       else ScenarioName.fromString(raw).toOption.map(CompareTarget.Scenario(_)).getOrElse(CompareTarget.NotChosen)
 
-    select(
-      cls := "compare-branch-select",
-      onMountCallback(_ => scenarioState.refresh()),
-      option(value := "", "— compare against —"),
-      children <-- scenarioState.scenarios.signal.combineWith(scenarioState.activeBranch.signal).map {
+    val optionEntries: Signal[List[(String, String)]] =
+      scenarioState.scenarios.signal.combineWith(scenarioState.activeBranch.signal).map {
         case (listState, active) =>
           val names = listState match
             case LoadState.Loaded(list) => list.map(_.name)
             case _                      => Nil
-          val mainOpt = if active.isDefined then List(option(value := mainSentinel, "main")) else Nil
-          mainOpt ++ names.filterNot(active.contains).map(n => option(value := n.value.toString, n.value.toString))
-      },
+          val mainOpt = if active.isDefined then List(mainSentinel -> "main") else Nil
+          mainOpt ++ names.filterNot(active.contains).map(n => n.value.toString -> n.value.toString)
+      }
+
+    select(
+      cls := "compare-branch-select",
+      onMountCallback(_ => scenarioState.refresh()),
+      option(value := "", "— compare against —"),
+      FormInputs.splitOptions(optionEntries),
       controlled(
         value <-- compareState.compareBranch.signal.map {
           case CompareTarget.NotChosen      => ""

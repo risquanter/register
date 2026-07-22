@@ -121,13 +121,33 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   /** Raw errors for hasErrors check — tree-name is the only builder-level field. */
   override def errorSignals: List[Signal[Option[String]]] = List(treeNameErrorRaw)
 
-  /** Parent dropdown options: root sentinel (if unclaimed) + current portfolio names. */
-  val parentOptions: Signal[List[String]] =
-    portfoliosVar.signal.combineWith(leavesVar.signal).map { (ps, ls) =>
-      val rootTaken = ps.exists(_.parent.isEmpty) || ls.exists(_.parent.isEmpty)
-      val base = ps.map(_.name.value)   // .value at UI-string boundary: parentSelect takes Signal[List[String]]
+  /** Parent dropdown options: root sentinel (if unclaimed) + current portfolio
+    * names, excluding `excludeSelf` — a node can never be its own parent, and
+    * its own occupancy of root must not count as "taken" when it's the node
+    * currently being viewed. Without this, viewing/editing/templating the
+    * one portfolio that already holds root sees root missing from its own
+    * option list (taken — by itself).
+    *
+    * Callers pass the name of the portfolio currently Locked/Editing/
+    * Templating (its true identity, or the identity it was templated from)
+    * — `None` for a Blank draft, which has no identity of its own and
+    * correctly cannot claim root while another portfolio already holds it.
+    */
+  def parentOptions(excludeSelf: Signal[Option[String]] = Val(None)): Signal[List[String]] =
+    portfoliosVar.signal.combineWith(leavesVar.signal, excludeSelf).map { (ps, ls, excl) =>
+      val others = ps.filterNot(p => excl.contains(p.name.value))
+      val rootTaken = others.exists(_.parent.isEmpty) || ls.exists(_.parent.isEmpty)
+      val base = others.map(_.name.value)   // .value at UI-string boundary: parentSelect takes Signal[List[String]]
       if rootTaken then base else rootLabel :: base
     }
+
+  /** What a freshly-cleared parent field should be explicitly set to — the
+    * one place views call `FormMode.defaultParent` so "compute the current
+    * default" isn't repeated at every clear/reset call site. Read via `.now()`
+    * because it's used inside imperative reset actions (`onClick`, mode-change
+    * subscriptions), not itself a live binding.
+    */
+  def defaultParentNow: Option[String] = FormMode.defaultParent(portfoliosVar.now(), leavesVar.now())
 
   def addPortfolio(name: SafeName.SafeName, parent: Option[SafeName.SafeName]): Validation[ValidationError, PortfolioDraft] =
     val draft = PortfolioDraft(name, parent)
@@ -337,6 +357,17 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     loadedSnapshotVar.now() match
       case Some(baseline) => current != baseline
       case None           => current._1.trim.nonEmpty || current._2.nonEmpty || current._3.nonEmpty
+
+  /** Reactive mirror of `isDirty`, for live debugging (`TreeBuilderView`'s
+    * debug bar) — recomputes on any change to the tracked fields *or*
+    * `loadedSnapshotVar` itself (e.g. after `markJustSaved`), which the
+    * plain `isDirty` def above can't reflect on its own since it's
+    * pull-based (read via `.now()` on demand) rather than push-based.
+    * Existing callers of `isDirty` are unaffected — this is an addition.
+    */
+  val isDirtySignal: Signal[Boolean] =
+    treeNameVar.signal.combineWith(portfoliosVar.signal, leavesVar.signal, loadedSnapshotVar.signal)
+      .map { _ => isDirty }
 
   /** Mark the current draft as matching what the server just confirmed
     * saving — call this right after a create/update submission succeeds.

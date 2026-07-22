@@ -1408,8 +1408,21 @@ reconciliation of the `<option>` list (Airstream's `Signal[Seq[A]].split` by
 scenario name) so `<option>` DOM nodes are reused instead of torn down and
 recreated, removing the root cause rather than re-syncing after the fact.
 
-**Status:** confirmed bug, fix not yet applied — awaiting the user's decision
-between the two options above.
+**Decided (2026-07-22): Option 2.** Implemented in
+`AnalyzeView.renderBranchPicker`, and the same mechanism was confirmed
+present (traced, not separately reproduced) in `FormInputs.parentSelect`'s
+"Parent Portfolio" dropdown (used on both the Portfolio and Leaf forms in
+Design) — its own Option-1-style band-aid (`selectionAndOptions --> {...}`)
+only corrects an *invalid* selection, not a still-valid one whose `<option>`
+DOM node was torn down and recreated for an unrelated reason (e.g. another
+portfolio being added while this form's parent field is already set).
+
+Extracted the fix into a shared `FormInputs.splitOptions(options: Signal[List[(String, String)]])`
+helper (keyed `.split` rendering of the `<option>` list) instead of
+copy-pasting the `.split` call at both sites — both `renderBranchPicker` and
+`parentSelect` now call it.
+
+**Status:** fixed, both call sites.
 
 ## 27. `AnalyzeQueryState` stale-result reset — imperative patch in place, more robust alternative available
 
@@ -1429,5 +1442,29 @@ filter against `selectedTreeId` (stale results for a different tree simply
 never display) instead of relying on an imperative reset call wired into one
 particular transition path.
 
-**Status:** current imperative fix is live and correct; re-engineering to the
-tagged/derived approach is a value judgment for the user, not yet decided.
+**Decided (2026-07-22):** tentatively Option B (tagged/derived approach).
+**Scheduled after milestone-2b's implementation is complete** — the current
+imperative fix is live and correct, so this is a deferred re-engineering
+pass, not a live bug.
+
+**Status:** current imperative fix stays in place until then; not yet
+re-engineered.
+
+## 28. VQL queries spanning multiple trees / multiple scenarios — investigation only
+
+**Origin (2026-07-22):** surfaced while discussing the Analyze Overlay
+comparison view (milestone-2b Phase C). Today's vql-engine queries
+(`AnalyzeQueryState.executeQuery`) run against exactly one tree on exactly
+one branch — the tab's own selected tree and active branch. There is no
+mechanism, and no design yet, for a query expression to draw nodes from more
+than one tree, or from the same tree across more than one scenario branch
+(e.g. "find leaves whose loss changed by more than X between main and
+scenario Y").
+
+**Scope:** this is a whole investigation/design task on its own, separate
+from the Overlay comparison view's node-selection mechanism (which stays
+scoped to one node id shared across exactly two branches). Not started —
+no query-language grammar changes, no backend service changes, no UI
+changes proposed yet.
+
+**Status:** investigation only, no design started, no code changed.

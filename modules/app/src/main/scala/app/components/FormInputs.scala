@@ -144,6 +144,25 @@ object FormInputs:
     )
 
   /**
+   * Renders the reactive portion of a `<select>`'s option list, keyed by
+   * each entry's own value string via `.split` — an option already present
+   * keeps its same DOM node across list-signal emissions instead of being
+   * torn down and recreated.
+   *
+   * Recreating the currently-selected `<option>` resets the browser's
+   * native `<select>` selection independently of whatever Var/Signal the
+   * app uses to track the choice — confirmed in `AnalyzeView`'s
+   * compare-branch picker and shared by the same mechanism in
+   * `parentSelect` below (TODO.md item 26). Extracted here so every
+   * dynamic-option `<select>` in the app gets this by construction instead
+   * of copy-pasting the fix (or missing it) per call site.
+   *
+   * @param options Signal of (value, label) pairs, in display order.
+   */
+  def splitOptions(options: Signal[List[(String, String)]]): Modifier[HtmlElement] =
+    children <-- options.split(_._1) { (key, initial, _) => option(value := key, initial._2) }
+
+  /**
    * Cross-field error display (for errors not tied to a specific field).
    */
   def crossFieldError(errorSignal: Signal[Option[String]]): HtmlElement =
@@ -156,7 +175,28 @@ object FormInputs:
 
   /**
    * Dropdown for selecting a parent node.
-   * Auto-syncs parentVar when available options change (e.g., root slot claimed).
+   *
+   * `parentVar` is corrected in exactly one situation: the option list
+   * itself changes (a portfolio is added/renamed/removed elsewhere) and the
+   * currently-held value is no longer among the valid choices. That
+   * correction is driven off `options` alone, deliberately *not* off
+   * `parentVar` itself — the earlier version watched both together, which
+   * meant setting `parentVar` (from here, or from a caller's own reset)
+   * re-triggered this same subscription. Nested inside whatever the
+   * caller's own multi-step reset/populate sequence was doing at the time,
+   * that self-triggering was the mechanism behind two confirmed bugs (a
+   * locked node's own parent field silently overwritten to point at
+   * itself; a leaf form reading as dirty after tree creation even with
+   * every visible field genuinely empty). Watching `options` only means
+   * this subscription never fires as a side effect of a caller clearing or
+   * populating its own form — only when the world outside this form
+   * actually changes — so it can't race with, or get raced by, a caller's
+   * own reset sequence. Callers still set `parentVar` explicitly at
+   * clear/populate time (`TreeBuilderState.defaultParentNow`,
+   * `populatePortfolioForm`/`populateLeafForm`) — this subscription only
+   * covers the gap where the option list moves while a form just sits
+   * there untouched (e.g. the leaf form is open before any portfolio
+   * exists, then one gets added elsewhere).
    *
    * @param parentVar Var holding None (root) or Some(portfolioName)
    * @param options Signal of available parent names (may include rootLabel)
@@ -168,16 +208,9 @@ object FormInputs:
     rootLabel: String,
     disabledSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
-    // Both the displayed <select> value and the auto-correct subscription
-    // below need the same "is the current selection still valid, what's the
-    // fallback" rule — one shared computation, so a future change to that
-    // rule can't update one without the other and silently reintroduce a
-    // display/data mismatch.
     def correctedDisplay(sel: Option[String], opts: List[String]): String =
       val display = sel.getOrElse(rootLabel)
       if opts.contains(display) then display else opts.headOption.getOrElse(rootLabel)
-
-    val selectionAndOptions = parentVar.signal.combineWith(options)
 
     div(
       cls := "form-field",
@@ -186,37 +219,20 @@ object FormInputs:
         cls := "form-input",
         disabled <-- disabledSignal,
         controlled(
-          value <-- selectionAndOptions.map(correctedDisplay(_, _)),
+          value <-- parentVar.signal.combineWith(options).map(correctedDisplay(_, _)),
           onChange.mapToValue.map { v => if v == rootLabel then None else Some(v) } --> parentVar
         ),
-        // Auto-correct parentVar itself — not just the <select>'s displayed
-        // value above — whenever either it or the option list changes and
-        // the current selection is no longer valid. E.g. a Templating draft
-        // copies its source node's `None` (root) parent, but root may
-        // already be taken by a real committed portfolio, making `None`
-        // invalid for a *new* node. Subscribing only to `options` (as before)
-        // misses this: `parentVar` changing (not `options`) is what makes
-        // the selection invalid here, so the correction never ran — the
-        // dropdown displayed the corrected option (via the `value <--`
-        // binder above) while the Var actually used at submit time silently
-        // kept the stale, invalid selection.
-        selectionAndOptions --> { (sel, opts) =>
-          val current = sel.getOrElse(rootLabel)
+        // See the doc comment above: triggered by `options` alone, reading
+        // `parentVar` only via `.now()` — never combined with it — so this
+        // cannot re-fire itself and cannot fire as a side effect of a
+        // caller's own reset/populate sequence touching `parentVar`.
+        options --> { opts =>
+          val current = parentVar.now().getOrElse(rootLabel)
           if !opts.contains(current) then
-            // No correction possible when opts is empty (nothing valid to
-            // fall back to yet) — leave parentVar as-is rather than forcing
-            // it to root, which would itself be an invalid, unlisted choice.
             opts.headOption.foreach { v =>
               parentVar.set(if v == rootLabel then None else Some(v))
             }
         },
-        children <-- options.map { opts =>
-          opts.map { opt =>
-            option(
-              value := opt,
-              opt
-            )
-          }
-        }
+        splitOptions(options.map(_.map(opt => opt -> opt)))
       )
     )

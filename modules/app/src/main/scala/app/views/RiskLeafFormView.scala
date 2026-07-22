@@ -108,7 +108,7 @@ object RiskLeafFormView:
       builderState.activeForm.now().forLeaf match
         case FormMode.Blank =>
           state.resetFields()
-          state.parentVar.set(None)
+          state.parentVar.set(builderState.defaultParentNow)
         case FormMode.Editing(t: FormTarget.Leaf)     => builderState.activeForm.set(FormMode.Locked(t))
         case FormMode.Templating(t: FormTarget.Leaf)  => builderState.activeForm.set(FormMode.Locked(t))
         case _ => ()
@@ -142,19 +142,17 @@ object RiskLeafFormView:
           case None       =>
             // parentVar reset here too, not just resetFields() — otherwise a
             // stale parent left over from a previously-locked leaf survives
-            // (resetFields() never touches it), and can mismatch the
-            // *current* auto-selected default enough to make isFormDirty
-            // read this Blank form as dirty even with every visible field
-            // empty — spuriously warning "unsaved draft" on submit.
+            // (resetFields() never touches it). Set explicitly to the current
+            // default (not a bare `None`) — see `TreeBuilderState.defaultParentNow`.
             state.resetFields()
-            state.parentVar.set(None)
+            state.parentVar.set(builderState.defaultParentNow)
       },
       // Explicit "clear regardless of mode" signal from startNewTree/loadFromTree
       // — see the matching comment in PortfolioFormView / resetFormFieldsBus's
       // own doc comment.
       builderState.resetFormFieldsBus.events --> { _ =>
         state.resetFields()
-        state.parentVar.set(None)
+        state.parentVar.set(builderState.defaultParentNow)
       },
 
       // Clear stale submit + per-field errors whenever the user edits a field
@@ -235,7 +233,7 @@ object RiskLeafFormView:
       ),
 
       // Parent selection
-      parentSelect(state.parentVar, builderState.parentOptions, builderState.rootLabel, isLocked),
+      parentSelect(state.parentVar, builderState.parentOptions(), builderState.rootLabel, isLocked),
 
       // Conditional Fields based on mode. Only `distributionModeVar` triggers a
       // subtree rebuild here — `isLocked` is threaded through as a Signal so

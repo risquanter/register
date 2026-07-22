@@ -80,9 +80,18 @@ object LECSpecBuilder:
       ordered.flatMap(_._1.curve.headOption).map(_.exceedanceProbability).max * yBuffer
     )
 
-    // Legend labelExpr: map curveId → display name (immutable String, safe to share)
+    // Legend labelExpr: map curveId → display name (immutable String, safe to share).
+    // `buildFromSeries` callers that disambiguate two branches' curves for the
+    // same node (Analyze Overlay compare) encode the branch as a "@branch"
+    // suffix on curveId (see CompareColorAssigner) — surfaced here as "(branch)"
+    // so the legend can tell the two apart instead of showing the same node
+    // name twice. `build`'s default curveId (`nc.id.value`) never contains
+    // '@', so every non-Compare call site's legend is unchanged.
     val labelParts = ordered.map { case (nc, _, curveId) =>
-      s"datum.value == '${curveId}' ? '${nc.name.replace("'", "\\'")}'"
+      val branchSuffix = curveId.lastIndexOf('@') match
+        case -1 => ""
+        case i  => s" (${curveId.substring(i + 1)})"
+      s"datum.value == '${curveId}' ? '${(nc.name + branchSuffix).replace("'", "\\'")}'"
     }
     val legendLabelExpr = (labelParts :+ "datum.value").mkString(" : ")
 

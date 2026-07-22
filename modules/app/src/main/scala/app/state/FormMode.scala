@@ -143,13 +143,16 @@ object FormMode:
       case FormMode.Editing(target) => differsFromSaved(target, current, leaves, portfolios)
       case FormMode.Templating(source) => differsFromSaved(source, current, leaves, portfolios)
 
-  /** The parent value `FormInputs.parentSelect`'s own auto-correct would force
-    * a form into, mirroring its exact fallback rule (`TreeBuilderState.parentOptions`
-    * + `opts.headOption`): `None` (root) while root is unclaimed, otherwise the
-    * first existing portfolio. Shared by the Blank check above and
-    * `differsFromSaved` below, so both agree on what "not a real change" means.
+  /** The parent value a freshly-cleared Blank form is explicitly initialized
+    * to (see `PortfolioFormView`/`RiskLeafFormView`'s clear/reset call
+    * sites) — mirroring `TreeBuilderState.parentOptions`' own fallback rule
+    * (excluding whichever node, if any, the caller is currently viewing):
+    * `None` (root) while root is unclaimed, otherwise the first existing
+    * portfolio. Public so both the views (to compute what to set) and the
+    * checks below (to compute what "unchanged" means) share one
+    * authoritative rule instead of two that have to be kept in sync by hand.
     */
-  private def defaultParent(portfolios: List[PortfolioDraft], leaves: List[LeafDraft]): Option[String] =
+  def defaultParent(portfolios: List[PortfolioDraft], leaves: List[LeafDraft]): Option[String] =
     val rootTaken = portfolios.exists(_.parent.isEmpty) || leaves.exists(_.parent.isEmpty)
     if rootTaken then portfolios.headOption.map(_.name.value) else None
 
@@ -160,10 +163,11 @@ object FormMode:
     portfolios: List[PortfolioDraft]
   ): Boolean =
     // Parent counts as changed only if it differs from BOTH the saved node's
-    // own parent AND the auto-corrected default — Templating a root node
-    // forces its parent away from the source's own (a root can't have a
-    // second root as a sibling clone), and that forced adjustment alone must
-    // not read as a deliberate edit (see `defaultParent`).
+    // own parent AND the current default — normally redundant (a populated
+    // Locked/Editing/Templating form's parent already equals the saved
+    // node's own, so the first clause alone decides it), but kept as a
+    // fallback for the same reason `defaultParent` exists at all: an
+    // unmodified field should never read as a deliberate edit.
     def parentChanged(currentParent: Option[String], savedParent: Option[String]): Boolean =
       currentParent != savedParent && currentParent != defaultParent(portfolios, leaves)
 

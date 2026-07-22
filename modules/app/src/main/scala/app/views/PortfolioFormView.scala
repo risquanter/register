@@ -32,6 +32,19 @@ object PortfolioFormView:
     val portfolioMode: Signal[FormMode] = builderState.activeForm.signal.map(_.forPortfolio).distinct
     val isLocked: Signal[Boolean] = portfolioMode.map { case FormMode.Locked(_) => true; case _ => false }
 
+    /** The portfolio this form's current mode is displaying (Locked/Editing),
+      * or was templated from (Templating) — passed to `parentOptions` so
+      * that portfolio's own occupancy of root doesn't count against itself
+      * (see `TreeBuilderState.parentOptions`). `None` for Blank, which has
+      * no identity of its own.
+      */
+    val currentTargetName: Signal[Option[String]] = portfolioMode.map {
+      case FormMode.Locked(FormTarget.Portfolio(n))     => Some(n.value)
+      case FormMode.Editing(FormTarget.Portfolio(n))    => Some(n.value)
+      case FormMode.Templating(FormTarget.Portfolio(n)) => Some(n.value)
+      case _                                            => None
+    }
+
     val currentSnapshot: Signal[FieldSnapshot.PortfolioFields] =
       form.nameVar.signal.combineWith(form.parentVar.signal).map { (name, parent) =>
         FieldSnapshot.PortfolioFields(name, parent)
@@ -101,7 +114,7 @@ object PortfolioFormView:
       builderState.activeForm.now().forPortfolio match
         case FormMode.Blank =>
           form.reset()
-          form.parentVar.set(None)
+          form.parentVar.set(builderState.defaultParentNow)
         case FormMode.Editing(t: FormTarget.Portfolio)    => builderState.activeForm.set(FormMode.Locked(t))
         case FormMode.Templating(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Locked(t))
         case _ => ()
@@ -118,15 +131,9 @@ object PortfolioFormView:
 
       // When the active target is this portfolio, populate the form from its
       // saved draft. Any other target (Blank, or a leaf) clears the fields.
-      portfolioMode.changes --> { mode =>
-        val portfolioName = mode match
-          case FormMode.Locked(FormTarget.Portfolio(n))     => Some(n)
-          case FormMode.Editing(FormTarget.Portfolio(n))    => Some(n)
-          case FormMode.Templating(FormTarget.Portfolio(n)) => Some(n)
-          case _                                            => None
-        portfolioName match
-          case Some(name) => builderState.portfoliosVar.now().find(_.name == name).foreach(builderState.populatePortfolioForm(form, _))
-          case None       => form.reset(); form.parentVar.set(None)
+      currentTargetName.changes --> {
+        case Some(name) => builderState.portfoliosVar.now().find(_.name.value == name).foreach(builderState.populatePortfolioForm(form, _))
+        case None       => form.reset(); form.parentVar.set(builderState.defaultParentNow)
       },
       // Explicit "clear regardless of mode" signal from startNewTree/loadFromTree
       // — see resetFormFieldsBus's doc comment. Needed because a same-to-same
@@ -134,7 +141,7 @@ object PortfolioFormView:
       // produces no emission on the .distinct-filtered portfolioMode above.
       builderState.resetFormFieldsBus.events --> { _ =>
         form.reset()
-        form.parentVar.set(None)
+        form.parentVar.set(builderState.defaultParentNow)
       },
 
       // Clear stale submit error whenever the user edits a field
@@ -163,7 +170,7 @@ object PortfolioFormView:
         filter = _ => true,
         disabledSignal = isLocked
       ),
-      FormInputs.parentSelect(form.parentVar, builderState.parentOptions, builderState.rootLabel, isLocked),
+      FormInputs.parentSelect(form.parentVar, builderState.parentOptions(currentTargetName), builderState.rootLabel, isLocked),
 
       // Add/Submit, Clear Form, Edit/Save — right-aligned as a group, Clear Form
       // immediately right of Add/Submit.

@@ -1256,6 +1256,24 @@ input[type="radio"]:focus-visible {
   opacity: 0.6;
 }
 
+/* Debug-only dirty-tracking indicator (TreeBuilderView) — remove alongside
+   its markup once the dirty-tracking mechanism is trusted again. */
+.dirty-debug-bar {
+  font-family: monospace;
+  font-size: 12px;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+  border: 1px solid #4a5a5e;
+  background: #1c2225;
+  color: #b0b8b8;
+}
+
+.dirty-debug-bar--active {
+  border-color: #a06a2a;
+  background: #3a2a12;
+  color: #e6c896;
+}
+
 select.form-input {
   cursor: pointer;
   appearance: none;

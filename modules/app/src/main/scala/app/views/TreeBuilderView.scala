@@ -23,12 +23,29 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
   def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState, chartState: DistributionChartState, scenarioState: ScenarioState): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
+    // A successful Create has nothing left to keep editing — matches
+    // "+ New Tree"'s own reset (DesignView.onNewTree): blank builder, ready
+    // for the next tree. Checked before this callback's own `editingTreeId`
+    // write below, so it reflects what was true when the submit was made
+    // (Create vs. Update), not the post-success state.
+    //
+    // Deliberately skips `treeViewState.selectTree(response.id)` — that
+    // call is what makes DesignView's own reload subscription re-populate
+    // the builder from the server (`TreeLoadPolicy`'s `SameContext` case,
+    // needed after Update to pick up anything the server round-trip
+    // changed) — running it here would immediately undo the blank reset.
     def onSuccess(response: SimulationResponse): Unit =
+      val wasCreate = state.editingTreeId.now().isEmpty
       submitState.set(SubmitState.Success(response))
-      state.editingTreeId.set(Some(response.id))
-      state.markJustSaved()
-      treeViewState.loadTreeList()
-      treeViewState.selectTree(response.id)
+      if wasCreate then
+        state.startNewTree()
+        treeViewState.selectedTreeId.set(None)
+        treeViewState.loadTreeList()
+      else
+        state.editingTreeId.set(Some(response.id))
+        state.markJustSaved()
+        treeViewState.loadTreeList()
+        treeViewState.selectTree(response.id)
 
     def validationFailed(errors: zio.NonEmptyChunk[com.risquanter.register.domain.errors.ValidationError]): Unit =
       submitState.set(SubmitState.Failed(errors.map(_.message).toList.mkString("; ")))
@@ -74,6 +91,20 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
     div(
       cls := "tree-builder",
       h1("Risk Tree Builder"),
+
+      // Debug-only: makes the dirty-tracking flags that gate the unsaved-work
+      // confirm dialogs directly visible, instead of having to infer their
+      // state from behavior. Reads existing signals only — does not affect
+      // any dirty-tracking logic. Remove once the mechanism is trusted again.
+      div(
+        cls := "dirty-debug-bar",
+        cls("dirty-debug-bar--active") <-- state.isDirtySignal.combineWith(state.isEditDirtyVar.signal).map(_ || _),
+        child.text <-- state.isDirtySignal
+          .combineWith(state.isEditDirtyVar.signal, state.portfolioFormDirtyVar.signal, state.leafFormDirtyVar.signal)
+          .map { case (treeDirty, editDirty, pDirty, lDirty) =>
+            s"[debug] tree-dirty=$treeDirty  edit-dirty=$editDirty  (portfolio=$pDirty, leaf=$lDirty)"
+          }
+      ),
 
       // Clear stale submit feedback when the user edits the tree name.
       // Does NOT clear a Success notification — Success transitions to Idle only via
