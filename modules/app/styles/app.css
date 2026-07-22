@@ -1213,7 +1213,17 @@ body {
   opacity: 0.6;
 }
 
-.form-input:focus {
+/* Keyboard-focus ring — same neutral halo for text inputs (:focus, since a
+   mouse click focusing a text field is still worth highlighting) and for
+   buttons/checkboxes/radios (:focus-visible, so a mouse click doesn't paint
+   a ring that's only meaningful for keyboard navigation there), replacing
+   the browser's default (often bright blue) ring. One rule, not two, so a
+   future tweak to the ring's appearance can't update one selector and miss
+   the other. */
+.form-input:focus,
+button:focus-visible,
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
   outline: none;
   border-color: var(--border-focus);
   box-shadow: 0 0 0 2px rgba(184, 187, 188, 0.15);
@@ -1226,6 +1236,24 @@ body {
 
 .form-input.error:focus {
   box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
+}
+
+/* Locked field (viewing a saved node's own values, not currently editable) —
+   a lock glyph next to the label, no dimming of the field's own content:
+   opacity on the input text read as broken/washed-out rather than "locked",
+   and made Expert/Lognormal parameter fields look inconsistent with
+   Name/Probability above them. */
+.form-input:disabled {
+  cursor: not-allowed;
+}
+
+.form-label--locked {
+  position: relative;
+}
+
+.form-label--locked::after {
+  content: " 🔒";
+  opacity: 0.6;
 }
 
 select.form-input {
@@ -1298,7 +1326,6 @@ select.form-input option {
 .mode-fields {
   margin-top: var(--sp-4);
   padding: var(--sp-4);
-  background-color: var(--surface-overlay);
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
 }

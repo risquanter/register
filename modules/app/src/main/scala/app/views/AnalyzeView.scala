@@ -58,7 +58,9 @@ object AnalyzeView:
         }
 
     // ── Compare mode (milestone-2b Phase C, Overlay-only, 2 branches) ──
-    val visibleNodeIds: Signal[Set[NodeId]] = chartNodeIds.map(_.map(_.toSet).getOrElse(Set.empty))
+    // Same node set as `chartNodeIds` above (query ∪ user selection) — reuse
+    // `chartState`'s own derivation instead of recomputing it from scratch.
+    val visibleNodeIds: Signal[Set[NodeId]] = treeViewState.chartState.visibleCurves
 
     /** ✎ markers gate to empty immediately when Compare is off, even if a
       * stale diff result from a previous session lingers in `diffState`. */
@@ -85,9 +87,15 @@ object AnalyzeView:
                 case CompareTarget.NotChosen       => "compare"
               val paired = CompareColorAssigner.pairForOverlay(thisMap, compareMap, visible, "this", compareLabel)
               LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired))
-            case (LoadState.Failed(msg), _) => LoadState.Failed(msg)
-            case (_, LoadState.Failed(msg)) => LoadState.Failed(msg)
-            case _ => LoadState.Loading
+            case (LoadState.Failed(msg), _)   => LoadState.Failed(msg)
+            case (_, LoadState.Failed(msg))   => LoadState.Failed(msg)
+            case (LoadState.Loading, _)       => LoadState.Loading
+            case (_, LoadState.Loading)       => LoadState.Loading
+            // Both sides idle — e.g. Compare just turned on and no branch
+            // chosen yet, or nothing visible to fetch. Nothing is in flight,
+            // so Idle (not Loading) is correct — LECChartView already knows
+            // how to render it ("Select a node…").
+            case _ => LoadState.Idle
         }
 
     // ── Node lookup for name resolution in QueryResultCard (A1) ──
@@ -110,6 +118,11 @@ object AnalyzeView:
       queryState.satisfyingNodeIds.changes --> { ids =>
         treeViewState.chartState.satisfyingNodeIds.set(ids)
       },
+      // Clear the previous tree's query result on tree switch — mirrors
+      // chartState.reset() (called from TreeViewState.loadTreeStructure)
+      // so a stale query's matched nodes can't leak into the newly
+      // selected tree's chart / Compare curve fetch.
+      treeViewState.selectedTreeId.signal.changes --> { _ => queryState.resetResult() },
       // Auto-LEC: fire curve fetch on any change to either node set
       chartNodeIds.changes
         .collect { case Some(ids) => ids }
@@ -124,13 +137,15 @@ object AnalyzeView:
       // Compare mode: reload the diff whenever the selected tree, the tab's
       // own active branch, the compare toggle, or the chosen compare branch
       // changes. Off, or no compare branch chosen yet → reset to Idle.
+      // Debounced in step with the curve-fetch subscription below — both
+      // read `compareState.compareBranch`, so an undebounced diff fetch
+      // racing ahead of the (still-debounced) curve fetch would briefly
+      // label stale curve data with the newly-chosen branch's name.
       treeViewState.selectedTreeId.signal
         .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, scenarioState.activeBranch.signal)
-        .changes --> {
+        .changes.debounce(100) --> {
           case (Some(treeId), true, target, activeBranch) =>
-            target.toBranchOption match
-              case Some(compareBranch) => diffState.loadDiff(treeId, activeBranch, compareBranch)
-              case None                 => diffState.reset()
+            dispatchOnBranch(target, cb => diffState.loadDiff(treeId, activeBranch, cb), () => diffState.reset())
           case _ =>
             diffState.reset()
         },
@@ -140,11 +155,9 @@ object AnalyzeView:
         .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, treeViewState.selectedTreeId.signal)
         .changes.debounce(100) --> {
           case (visible, true, target, Some(treeId)) if visible.nonEmpty =>
-            target.toBranchOption match
-              case Some(compareBranch) => diffState.loadCompareCurves(treeId, visible.toList, compareBranch)
-              case None                 => diffState.compareCurves.set(LoadState.Idle)
+            dispatchOnBranch(target, cb => diffState.loadCompareCurves(treeId, visible.toList, cb), () => diffState.clearCompareCurves())
           case _ =>
-            diffState.compareCurves.set(LoadState.Idle)
+            diffState.clearCompareCurves()
         },
       // ── Query input panel ───────────────────────────────────────
       div(
@@ -252,6 +265,17 @@ object AnalyzeView:
         leftPercent = 75
       )
     )
+
+  /** Shared shape behind both Compare-mode fetch subscriptions: a chosen
+    * compare branch dispatches the fetch, no branch chosen yet clears it. */
+  private def dispatchOnBranch(
+    target: CompareTarget,
+    onChosen: Option[ScenarioName.ScenarioName] => Unit,
+    onIdle: () => Unit
+  ): Unit =
+    target.toBranchOption match
+      case Some(compareBranch) => onChosen(compareBranch)
+      case None                 => onIdle()
 
   /** Branch picker for Compare mode — options are `scenarioState.scenarios`
     * plus `main`, excluding the tab's own active branch (comparing a branch

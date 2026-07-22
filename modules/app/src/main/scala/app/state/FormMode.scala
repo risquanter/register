@@ -31,6 +31,30 @@ extension (mode: FormMode)
     case FormMode.Editing(t)    => Some(t)
     case FormMode.Templating(t) => Some(t)
 
+  /** This mode collapsed to `Blank` unless its target is a `Portfolio` —
+    * `PortfolioFormView`'s single view of `activeForm`, used both for its
+    * reactive display signal and for reading the current mode inside click
+    * handlers (`builderState.activeForm.now().forPortfolio`), so the two can
+    * never disagree about what "my form's current mode" means. Before this,
+    * a click handler that matched on the raw, unfiltered `activeForm` would
+    * silently no-op whenever the *other* form's target was active — e.g. a
+    * portfolio submission left stuck in `Templating` made the leaf form's
+    * "Add Leaf" button (enabled, since leaf's own filtered view read `Blank`)
+    * do nothing when clicked.
+    */
+  def forPortfolio: FormMode = mode match
+    case m @ FormMode.Locked(_: FormTarget.Portfolio)     => m
+    case m @ FormMode.Editing(_: FormTarget.Portfolio)    => m
+    case m @ FormMode.Templating(_: FormTarget.Portfolio) => m
+    case _                                                 => FormMode.Blank
+
+  /** Mirror of `forPortfolio` for `RiskLeafFormView`. */
+  def forLeaf: FormMode = mode match
+    case m @ FormMode.Locked(_: FormTarget.Leaf)     => m
+    case m @ FormMode.Editing(_: FormTarget.Leaf)    => m
+    case m @ FormMode.Templating(_: FormTarget.Leaf) => m
+    case _                                            => FormMode.Blank
+
 extension (target: FormTarget)
   def name: SafeName.SafeName = target match
     case FormTarget.Leaf(n)      => n
@@ -98,16 +122,36 @@ object FormMode:
   ): Boolean =
     mode match
       case FormMode.Blank =>
+        // `parent` is checked against `defaultParent`, not excluded outright:
+        // once any portfolio already exists, the parent dropdown has no
+        // blank/unset state to offer — `FormInputs.parentSelect` auto-selects
+        // the first available portfolio the moment the form mounts, before
+        // the user has touched anything. Counting that forced default as "the
+        // user entered something" made a genuinely untouched form register as
+        // dirty on every tree switch / new tree. But a *deliberate* parent
+        // change (to something other than that forced default) must still
+        // count — dropping the check entirely would silently discard it.
+        val default = defaultParent(portfolios, leaves)
         current match
           case FieldSnapshot.LeafFields(name, parent, probability, _, percentiles, quantiles, terms, minLoss, maxLoss) =>
-            name.nonEmpty || parent.exists(_.nonEmpty) || probability.nonEmpty ||
+            name.nonEmpty || (parent != default) || probability.nonEmpty ||
               percentiles.nonEmpty || quantiles.nonEmpty || terms.nonEmpty || minLoss.nonEmpty || maxLoss.nonEmpty
           case FieldSnapshot.PortfolioFields(name, parent) =>
-            name.nonEmpty || parent.exists(_.nonEmpty)
+            name.nonEmpty || (parent != default)
       case FormMode.Locked(_) =>
         false
       case FormMode.Editing(target) => differsFromSaved(target, current, leaves, portfolios)
       case FormMode.Templating(source) => differsFromSaved(source, current, leaves, portfolios)
+
+  /** The parent value `FormInputs.parentSelect`'s own auto-correct would force
+    * a form into, mirroring its exact fallback rule (`TreeBuilderState.parentOptions`
+    * + `opts.headOption`): `None` (root) while root is unclaimed, otherwise the
+    * first existing portfolio. Shared by the Blank check above and
+    * `differsFromSaved` below, so both agree on what "not a real change" means.
+    */
+  private def defaultParent(portfolios: List[PortfolioDraft], leaves: List[LeafDraft]): Option[String] =
+    val rootTaken = portfolios.exists(_.parent.isEmpty) || leaves.exists(_.parent.isEmpty)
+    if rootTaken then portfolios.headOption.map(_.name.value) else None
 
   private def differsFromSaved(
     target:     FormTarget,
@@ -115,9 +159,23 @@ object FormMode:
     leaves:     List[LeafDraft],
     portfolios: List[PortfolioDraft]
   ): Boolean =
+    // Parent counts as changed only if it differs from BOTH the saved node's
+    // own parent AND the auto-corrected default — Templating a root node
+    // forces its parent away from the source's own (a root can't have a
+    // second root as a sibling clone), and that forced adjustment alone must
+    // not read as a deliberate edit (see `defaultParent`).
+    def parentChanged(currentParent: Option[String], savedParent: Option[String]): Boolean =
+      currentParent != savedParent && currentParent != defaultParent(portfolios, leaves)
+
     (target, current) match
       case (FormTarget.Leaf(name), leafCurrent: FieldSnapshot.LeafFields) =>
-        leaves.find(_.name == name).exists(leafDraftToFieldSnapshot(_) != leafCurrent)
+        leaves.find(_.name == name).exists { l =>
+          val saved = leafDraftToFieldSnapshot(l)
+          saved.copy(parent = leafCurrent.parent) != leafCurrent || parentChanged(leafCurrent.parent, saved.parent)
+        }
       case (FormTarget.Portfolio(name), portfolioCurrent: FieldSnapshot.PortfolioFields) =>
-        portfolios.find(_.name == name).exists(portfolioDraftToFieldSnapshot(_) != portfolioCurrent)
+        portfolios.find(_.name == name).exists { p =>
+          val saved = portfolioDraftToFieldSnapshot(p)
+          saved.copy(parent = portfolioCurrent.parent) != portfolioCurrent || parentChanged(portfolioCurrent.parent, saved.parent)
+        }
       case _ => false

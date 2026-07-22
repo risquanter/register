@@ -1,7 +1,8 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormTarget, FieldSnapshot}
+import org.scalajs.dom
+import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormTarget, FieldSnapshot, forPortfolio}
 import app.components.FormInputs
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.SafeName
@@ -22,12 +23,13 @@ object PortfolioFormView:
     val form = new PortfolioFormState
     val submitError: Var[Option[String]] = Var(None)
 
-    val portfolioMode: Signal[FormMode] = builderState.activeForm.signal.map {
-      case m @ FormMode.Locked(_: FormTarget.Portfolio)     => m
-      case m @ FormMode.Editing(_: FormTarget.Portfolio)    => m
-      case m @ FormMode.Templating(_: FormTarget.Portfolio) => m
-      case _                                                => FormMode.Blank
-    }
+    // `.distinct` — collapsing an irrelevant (other-form) target always yields
+    // the same `Blank` value, so hand-offs between two non-portfolio states
+    // (e.g. the leaf form moving Templating → Locked) don't re-fire the
+    // populate/reset subscription below and wipe this form's own unrelated
+    // draft. A same-target `Templating` → `Locked` transition (this form's
+    // own "Clear Form" revert) still fires, since those are different values.
+    val portfolioMode: Signal[FormMode] = builderState.activeForm.signal.map(_.forPortfolio).distinct
     val isLocked: Signal[Boolean] = portfolioMode.map { case FormMode.Locked(_) => true; case _ => false }
 
     val currentSnapshot: Signal[FieldSnapshot.PortfolioFields] =
@@ -38,9 +40,14 @@ object PortfolioFormView:
       FormMode.isFormDirty(mode, snapshot, builderState.leavesVar.now(), builderState.portfoliosVar.now())
     }
 
+    // Mode-dependent, per the state machine: Blank and Templating are both
+    // "unlocked, click submits what's typed" states, so they share one
+    // label. Locked is different in kind — clicking there doesn't submit
+    // anything, it unlocks a copy — which is the actual "add a new one"
+    // action, so that's where "New" belongs.
     val addSubmitLabel: Signal[String] = portfolioMode.map {
-      case FormMode.Templating(_) => "Submit"
-      case _                      => "Add Portfolio"
+      case FormMode.Blank | FormMode.Templating(_) => "Submit Portfolio"
+      case _                                        => "Add New Portfolio"
     }
     val addSubmitDisabled: Signal[Boolean] = portfolioMode.combineWith(form.hasErrors).map {
       case (FormMode.Editing(_), _) => true
@@ -63,14 +70,26 @@ object PortfolioFormView:
     }
 
     def onAddSubmitClick(): Unit =
-      builderState.activeForm.now() match
-        case FormMode.Blank                          => handleSubmit(form, builderState, submitError)
+      val raw = builderState.activeForm.now()
+      raw.forPortfolio match
+        // Blank here can mean genuinely nothing selected, OR the leaf form
+        // is mid-Editing/Templating an unsaved draft (raw activeForm holds a
+        // Leaf target, which forPortfolio collapses to Blank). Submitting
+        // would overwrite the shared activeForm and silently discard that
+        // draft — confirm first, matching how discarding unsaved work is
+        // gated everywhere else in this builder.
+        case FormMode.Blank =>
+          val proceed = raw match
+            case FormMode.Editing(_) | FormMode.Templating(_) =>
+              dom.window.confirm("This will discard the leaf you're currently editing. Continue?")
+            case _ => true
+          if proceed then handleSubmit(form, builderState, submitError)
         case FormMode.Locked(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Templating(t))
         case FormMode.Templating(_: FormTarget.Portfolio) => handleSubmit(form, builderState, submitError)
         case _ => ()
 
     def onEditSaveClick(): Unit =
-      builderState.activeForm.now() match
+      builderState.activeForm.now().forPortfolio match
         case FormMode.Locked(t: FormTarget.Portfolio)      => builderState.activeForm.set(FormMode.Editing(t))
         case FormMode.Editing(FormTarget.Portfolio(name))  => handleUpdate(form, name, builderState, submitError)
         case _ => ()
@@ -79,7 +98,7 @@ object PortfolioFormView:
     // from it already does — the reactive populate subscription below fires
     // again as soon as `activeForm` moves back to `Locked(t)`.
     def onClearFormClick(): Unit =
-      builderState.activeForm.now() match
+      builderState.activeForm.now().forPortfolio match
         case FormMode.Blank =>
           form.reset()
           form.parentVar.set(None)
@@ -99,7 +118,7 @@ object PortfolioFormView:
 
       // When the active target is this portfolio, populate the form from its
       // saved draft. Any other target (Blank, or a leaf) clears the fields.
-      builderState.activeForm.signal.changes --> { mode =>
+      portfolioMode.changes --> { mode =>
         val portfolioName = mode match
           case FormMode.Locked(FormTarget.Portfolio(n))     => Some(n)
           case FormMode.Editing(FormTarget.Portfolio(n))    => Some(n)
@@ -108,6 +127,14 @@ object PortfolioFormView:
         portfolioName match
           case Some(name) => builderState.portfoliosVar.now().find(_.name == name).foreach(builderState.populatePortfolioForm(form, _))
           case None       => form.reset(); form.parentVar.set(None)
+      },
+      // Explicit "clear regardless of mode" signal from startNewTree/loadFromTree
+      // — see resetFormFieldsBus's doc comment. Needed because a same-to-same
+      // Blank transition (this form was already Blank, with typed content)
+      // produces no emission on the .distinct-filtered portfolioMode above.
+      builderState.resetFormFieldsBus.events --> { _ =>
+        form.reset()
+        form.parentVar.set(None)
       },
 
       // Clear stale submit error whenever the user edits a field
@@ -120,10 +147,12 @@ object PortfolioFormView:
         form.clearSubmitFieldError(PortfolioField.Parent)
       },
 
-      // Keep the shared dirty flag in sync — harmless when this form isn't the
-      // active target, since `portfolioMode` collapses to `Blank` and `isDirty`
-      // is pinned to false in that case (see RiskLeafFormView for the mirror).
-      isDirty --> builderState.isEditDirtyVar.writer,
+      // Written to this form's own dirty flag, not the shared isEditDirtyVar
+      // directly — writing there directly let this form's "not dirty" (when
+      // portfolioMode collapses to Blank while the leaf form is active)
+      // clobber a genuinely dirty leaf draft. isEditDirtyVar itself is the OR
+      // of both forms' flags (see TreeBuilderState).
+      isDirty --> builderState.portfolioFormDirtyVar.writer,
 
       FormInputs.textInput(
         labelText = "Portfolio Name",

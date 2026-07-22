@@ -111,6 +111,20 @@ final class AnalyzeQueryState(
 
   // ── Actions ───────────────────────────────────────────────────
 
+  /** Clear the last query's server result (and any inline server error)
+    * without touching the input text or client-side parse state.
+    *
+    * Call this when the selected tree changes: `satisfyingNodeIds` derives
+    * from `queryResult`, and `AnalyzeView.chartNodeIds` folds that set into
+    * the chart's node selection — without this reset, a previous tree's
+    * matched node IDs would keep flowing into the newly selected tree's
+    * chart (and, for Compare mode, into curve fetches against the new tree
+    * using node IDs that may not even exist there).
+    */
+  def resetResult(): Unit =
+    queryResult.set(LoadState.Idle)
+    queryServerError.set(None)
+
   /** Fire a query against the backend.
     *
     * Sends `POST /w/{key}/risk-trees/{treeId}/query` with the current

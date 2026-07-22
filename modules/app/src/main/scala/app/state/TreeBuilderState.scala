@@ -55,17 +55,34 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
   val currentDraftVar: Var[Option[Distribution]] = Var(None)
   val draftSignal: StrictSignal[Option[Distribution]] = currentDraftVar.signal
 
-  /** Whether the currently-active node-editing form (leaf or portfolio) has
-    * unsaved content — i.e. whether `FormMode.isFormDirty` is currently true.
-    *
-    * Written by whichever of [[app.views.RiskLeafFormView]] /
-    * [[app.views.PortfolioFormView]] currently owns `activeForm`'s target
-    * (the other one's own dirty check is pinned to `activeForm`'s target not
-    * matching its kind, so it always writes `false`); the inactive form never
-    * clobbers the active one's value. Read by [[app.views.TreePreview]]'s
-    * navigate-away confirm gate and by `DesignView`'s branch/tree-switch guard.
+  /** Each form's own dirty flag, written ONLY by that form's own
+    * `isDirty --> ...writer` binding — see [[app.views.PortfolioFormView]] /
+    * [[app.views.RiskLeafFormView]]. Kept separate (not both writing into
+    * `isEditDirtyVar` directly) because a form's own dirty check goes false
+    * the moment its target is Locked (nothing to save), which used to
+    * overwrite whatever the *other*, untouched form had legitimately set —
+    * e.g. typing into a blank portfolio form, then merely clicking to view
+    * an unrelated leaf, silently cleared the portfolio draft's dirty flag.
+    */
+  val portfolioFormDirtyVar: Var[Boolean] = Var(false)
+  val leafFormDirtyVar: Var[Boolean] = Var(false)
+
+  /** Whether EITHER node-editing form (leaf or portfolio) has unsaved
+    * content — i.e. whether `FormMode.isFormDirty` is currently true for
+    * that form. Derived from `portfolioFormDirtyVar`/`leafFormDirtyVar` (see
+    * above), never written directly by either view. Read by
+    * [[app.views.TreePreview]]'s navigate-away confirm gate, `DesignView`'s
+    * branch/tree-switch guard, and `TreeBuilderView`'s submit guard.
     */
   val isEditDirtyVar: Var[Boolean] = Var(false)
+
+  // App-lifetime subscription (TreeBuilderState lives for the app lifetime,
+  // like LECChartState's userSelectionBus) — keeps isEditDirtyVar as the OR
+  // of both forms' own flags, so neither form's "not dirty" can clobber the
+  // other's "dirty".
+  portfolioFormDirtyVar.signal.combineWith(leafFormDirtyVar.signal).foreach { (p, l) =>
+    isEditDirtyVar.set(p || l)
+  }(using unsafeWindowOwner)
 
   val rootLabel = "(root)"
 
@@ -78,6 +95,18 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     * so mutual exclusivity is structural rather than hand-maintained.
     */
   val activeForm: Var[FormMode] = Var(FormMode.Blank)
+
+  /** Fired by `startNewTree`/`loadFromTree` alongside `activeForm.set(Blank)`,
+    * telling both node-editing forms to clear their own fields regardless of
+    * mode. `activeForm.set(Blank)` alone isn't enough when a form was
+    * *already* Blank with untouched typed content: `portfolioMode`/`leafMode`
+    * are `.distinct`-filtered (so an irrelevant transition elsewhere doesn't
+    * spuriously reset an unrelated draft — see `forPortfolio`/`forLeaf`), so
+    * a same-to-same Blank transition produces no emission there for the
+    * populate/reset subscription to react to. This bus is the explicit
+    * "clear regardless" signal that path can't provide.
+    */
+  val resetFormFieldsBus: EventBus[Unit] = new EventBus[Unit]
 
   // ── Tree-name validation ──────────────────────────────────────
   private val treeNameErrorRaw: Signal[Option[String]] = treeNameVar.signal.map { v =>
@@ -309,6 +338,25 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
       case Some(baseline) => current != baseline
       case None           => current._1.trim.nonEmpty || current._2.nonEmpty || current._3.nonEmpty
 
+  /** Mark the current draft as matching what the server just confirmed
+    * saving — call this right after a create/update submission succeeds.
+    *
+    * A successful submit doesn't, by itself, update `loadedSnapshotVar` —
+    * only `loadFromTree`'s own follow-up reload does, once its separate GET
+    * request completes. `editingTreeId` is set to the new tree's id
+    * immediately on success (before that GET even starts), so there's a real
+    * window — one full round trip — where the tree is already safely
+    * persisted server-side but `isDirty` still falls through to the
+    * create-mode ("no tree loaded yet") case and reports dirty for any
+    * non-empty draft. Anyone reading `isDirty` in that window (e.g.
+    * switching scenario branches right after creating a tree) would then see
+    * a spurious "unsaved changes" confirm for data that was already saved a
+    * moment earlier. `loadFromTree`'s own snapshot, once the reload lands,
+    * naturally supersedes this one — same tree, same branch, no discrepancy.
+    */
+  def markJustSaved(): Unit =
+    loadedSnapshotVar.set(Some((treeNameVar.now(), portfoliosVar.now(), leavesVar.now())))
+
   /** Reset the builder to a blank, create-mode draft. The only way to leave
     * update mode — `editingTreeId` is otherwise only ever set, never cleared,
     * so without this a session that has loaded or created one tree can never
@@ -320,6 +368,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     leavesVar.set(Nil)
     editingTreeId.set(None)
     activeForm.set(FormMode.Blank)
+    resetFormFieldsBus.emit(())
     currentDraftVar.set(None)
     loadedSnapshotVar.set(None)
     resetTouched()
@@ -367,6 +416,7 @@ final class TreeBuilderState extends FormState[TreeBuilderField]:
     editingTreeId.set(Some(tree.id))
     loadedSnapshotVar.set(Some((tree.name.value, portfolios, leaves)))
     activeForm.set(FormMode.Blank)
+    resetFormFieldsBus.emit(())
     resetTouched()
 
   // ------------------------------------------------------------

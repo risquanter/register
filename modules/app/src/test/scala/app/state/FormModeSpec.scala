@@ -96,6 +96,18 @@ object FormModeSpec extends ZIOSpecDefault:
       },
       test("true once the portfolio name is non-empty") {
         assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(name = "x"), Nil, Nil))
+      },
+      test("false when parent matches the auto-selected dropdown default and every other field is empty") {
+        // portfolios = [savedPortfolio] means root is already taken, so
+        // FormInputs.parentSelect's own auto-correct would force parent to
+        // savedPortfolio's name ("Operational Risk") — matching that forced
+        // default alone must not count as user content.
+        assertTrue(!FormMode.isFormDirty(FormMode.Blank, emptyLeafSnapshot.copy(parent = Some("Operational Risk")), Nil, List(savedPortfolio))) &&
+        assertTrue(!FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(parent = Some("Operational Risk")), Nil, List(savedPortfolio)))
+      },
+      test("true when parent is deliberately set to something other than the auto-selected default") {
+        assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyLeafSnapshot.copy(parent = Some("Some Other Portfolio")), Nil, List(savedPortfolio))) &&
+        assertTrue(FormMode.isFormDirty(FormMode.Blank, emptyPortfolioSnapshot.copy(parent = Some("Some Other Portfolio")), Nil, List(savedPortfolio)))
       }
     ),
 
@@ -140,6 +152,21 @@ object FormModeSpec extends ZIOSpecDefault:
         val source = FormTarget.Leaf(leafName)
         val edited = savedLeafSnapshot.copy(name = "Cyber Risk 2")
         assertTrue(FormMode.isFormDirty(FormMode.Templating(source), edited, List(savedLeaf), Nil))
+      },
+      test("false when templating a root portfolio and the parent field is only the forced auto-correction, not a real edit") {
+        // savedPortfolio is the tree's only (root) portfolio. Templating it
+        // copies its own parent (None), but FormInputs.parentSelect then
+        // forces the dropdown to the only available option — the source's
+        // own name — since a clone can't also be root. That forced value
+        // alone must not register as dirty before the user types anything.
+        val source = FormTarget.Portfolio(portName)
+        val autoCorrected = savedPortfolioSnapshot.copy(parent = Some(portName.value))
+        assertTrue(!FormMode.isFormDirty(FormMode.Templating(source), autoCorrected, Nil, List(savedPortfolio)))
+      },
+      test("true when templating a root portfolio and the parent is deliberately changed to something else") {
+        val source = FormTarget.Portfolio(portName)
+        val edited = savedPortfolioSnapshot.copy(parent = Some("Some Other Portfolio"))
+        assertTrue(FormMode.isFormDirty(FormMode.Templating(source), edited, Nil, List(savedPortfolio)))
       }
     ),
 

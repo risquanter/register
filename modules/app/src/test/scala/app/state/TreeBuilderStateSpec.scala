@@ -224,6 +224,21 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
         state.treeNameVar.set("Renamed Tree")
         state.startNewTree()
         assertTrue(!state.isDirty)
+      },
+
+      test("markJustSaved closes the window between a successful create and the follow-up reload landing") {
+        // Reproduces: create a tree, then immediately (before the auto-reload
+        // finishes) do something that reads isDirty (e.g. switch scenario
+        // branch) — without markJustSaved, loadedSnapshotVar is still None,
+        // so isDirty falls through to "create-mode, any content is dirty"
+        // and spuriously reports true for a tree the server already saved.
+        val state = new TreeBuilderState()
+        state.treeNameVar.set("New Tree")
+        state.addPortfolio(SafeName.fromString("Root").toOption.get, None)
+        val dirtyBeforeSave = state.isDirty
+        state.markJustSaved()
+        val dirtyAfterSave = state.isDirty
+        assertTrue(dirtyBeforeSave, !dirtyAfterSave)
       }
     ),
 

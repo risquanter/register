@@ -1385,3 +1385,49 @@ Scala.js/sttp client side.
 right now. Revisit only if a concrete need for automated frontend network-flow
 coverage comes up again; if picked up, check what actually failed last time
 before repeating the same approach.
+
+## 26. Compare branch picker (`AnalyzeView.renderBranchPicker`) — `<select>` desync between DOM and `compareState.compareBranch`
+
+**Origin (2026-07-16 session, confirmed by user 2026-07-22):** the Compare
+branch `<select>` (`AnalyzeView.scala`, `renderBranchPicker`) rebuilds its
+`<option>` list via `children <-- scenarioState.scenarios.signal.combineWith(...)`,
+constructing brand-new `option(...)` element instances on every emission.
+`controlled(value <-- compareState.compareBranch.signal, onInput.mapToValue --> ...)`
+only re-asserts the DOM's selected value when `compareBranch` itself changes —
+not when the option list is rebuilt. Removing and recreating the currently
+selected `<option>` node resets the browser's `<select>` selection state
+(back to the first/blank option) independently of the `compareBranch` Var,
+which still holds the user's actual choice — a visible desync between what
+the picker displays and what the app believes is selected.
+
+**User confirmed reproducing this 2026-07-22; needs fixing.** Decision
+presented (see conversation, decision-guide format): (1) a corrective
+re-assert subscription mirroring the existing band-aid already in
+`FormInputs.parentSelect` (`selectionAndOptions --> {...}`), vs. (2) keyed
+reconciliation of the `<option>` list (Airstream's `Signal[Seq[A]].split` by
+scenario name) so `<option>` DOM nodes are reused instead of torn down and
+recreated, removing the root cause rather than re-syncing after the fact.
+
+**Status:** confirmed bug, fix not yet applied — awaiting the user's decision
+between the two options above.
+
+## 27. `AnalyzeQueryState` stale-result reset — imperative patch in place, more robust alternative available
+
+**Origin:** milestone-2b Phase C Comparison-view review (2026-07-16 session).
+A stale query result from the previously-selected tree could leak into the
+newly-selected tree's chart/Compare curve fetch. Fixed with
+`AnalyzeQueryState.resetResult()`, called from an explicit subscription on
+`treeViewState.selectedTreeId.signal.changes` in `AnalyzeView.scala`. This
+works today, but depends on every future tree-switch path remembering to
+call `resetResult()` — the same category of fragility as item 26 and the
+dirty-tracking races fixed this session (state kept correct by convention at
+each call site, not by construction).
+
+**More robust alternative (not yet built):** tag each query result with the
+`TreeId` it was computed for, and derive the "current" result as a pure
+filter against `selectedTreeId` (stale results for a different tree simply
+never display) instead of relying on an imperative reset call wired into one
+particular transition path.
+
+**Status:** current imperative fix is live and correct; re-engineering to the
+tagged/derived approach is a value judgment for the user, not yet decided.

@@ -57,7 +57,11 @@ object TreeBuilderLogic:
         case Nil => Validation.fail(ValidationError("tree", ValidationErrorCode.REQUIRED_FIELD, "Tree requires a root"))
         case _ => Validation.fail(ValidationError("tree.leaves", ValidationErrorCode.INVALID_COMBINATION, "Leaves require a portfolio parent unless lone-leaf tree"))
     else
-      val roots = portfolios.filter(_._2.isEmpty)
+      // Distinct by name: a duplicate-name resubmission of the same root
+      // (already flagged separately by the `tree.names` check above) must
+      // not also read as "a second root" just because the candidate list
+      // temporarily holds two entries with the same name.
+      val roots = portfolios.filter(_._2.isEmpty).map(_._1).distinct
       roots match
         case Nil => Validation.fail(ValidationError("tree.portfolios", ValidationErrorCode.REQUIRED_FIELD, "Exactly one root portfolio required"))
         case _ :: Nil => Validation.succeed(())

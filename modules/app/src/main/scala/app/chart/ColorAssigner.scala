@@ -29,6 +29,14 @@ object ColorAssigner:
     * @param purplePalette Shades for overlap nodes
     * @return Map from node ID to HexColor for every node in queryNodes ∪ userNodes
     */
+  /** Deterministic hash-rotation shade pick — same node always gets the same
+    * shade within a palette. Shared with `CompareColorAssigner`, which keys
+    * by branch identity instead of query/user/overlap classification but
+    * uses the same per-node rotation mechanism.
+    */
+  def shade(palette: Vector[HexColor], nodeId: NodeId): HexColor =
+    palette((nodeId.value.hashCode & 0x7fffffff) % palette.size)
+
   def assign(
     queryNodes: Set[NodeId],
     userNodes: Set[NodeId],
@@ -40,9 +48,6 @@ object ColorAssigner:
     val overlap   = queryNodes intersect userNodes
     val queryOnly = queryNodes -- overlap
     val userOnly  = userNodes -- overlap
-
-    def shade(palette: Vector[HexColor], nodeId: NodeId): HexColor =
-      palette((nodeId.value.hashCode & 0x7fffffff) % palette.size)
 
     val automatic: Map[NodeId, HexColor] =
       overlap.iterator.map(nid   => nid -> shade(purplePalette, nid)).toMap ++

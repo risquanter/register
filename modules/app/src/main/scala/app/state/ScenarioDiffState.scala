@@ -48,11 +48,22 @@ final class ScenarioDiffState(
       case Some(key) if nodeIds.nonEmpty =>
         getWorkspaceLECCurvesMultiEndpoint((userIdAccessor(), key, treeId, false, nodeIds, compareBranch)).loadInto(compareCurves)
       case _ =>
-        compareCurves.set(LoadState.Idle)
+        clearCompareCurves()
 
+  /** Idempotent — a no-op when already `Idle`, so callers that fire on every
+    * signal tick (not just on a real transition) don't force a spurious
+    * re-emission (`Var.set` doesn't dedupe by value). Downstream, that
+    * re-emission would propagate into `AnalyzeView`'s combined chart spec
+    * signal and force `LECChartView` to tear down and rebuild the Vega
+    * chart even though nothing actually changed. */
   def reset(): Unit =
-    diffResult.set(LoadState.Idle)
-    compareCurves.set(LoadState.Idle)
+    if diffResult.now() != LoadState.Idle then diffResult.set(LoadState.Idle)
+    clearCompareCurves()
+
+  /** See `reset()` — same idempotency rationale, exposed separately since
+    * `AnalyzeView`'s curve-fetch subscription clears only this half. */
+  def clearCompareCurves(): Unit =
+    if compareCurves.now() != LoadState.Idle then compareCurves.set(LoadState.Idle)
 
   /** Nodes with a non-`"identical"` status — empty (not an error) for any
     * non-`"ok"` `status`, mirroring the service's own missing-tree semantics

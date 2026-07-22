@@ -1,10 +1,10 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import org.scalajs.dom
 import org.scalajs.dom.MouseEvent
 import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, FormMode, FormTarget, currentTarget}
 import app.components.{Icons, TreeNodeRow}
+import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, NonNegativeLong, DistributionType}
 
@@ -128,9 +128,6 @@ object TreePreview:
       proceedOrConfirm(builderState.isEditDirtyVar.now(), "Discard unsaved changes?") { () =>
         builderState.activeForm.set(FormMode.Locked(target))
       }
-
-  private def proceedOrConfirm(isDirty: Boolean, message: String)(action: () => Unit): Unit =
-    if !isDirty || dom.window.confirm(message) then action()
 
   /** Recursively render children as individual DOM rows. */
   private def renderChildren(

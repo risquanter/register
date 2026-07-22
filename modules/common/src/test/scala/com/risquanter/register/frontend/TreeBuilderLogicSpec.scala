@@ -19,6 +19,14 @@ object TreeBuilderLogicSpec extends ZIOSpecDefault:
       val res = TreeBuilderLogic.preValidateTopology(List("R1" -> None, "R2" -> None), Nil)
       assertTrue(res.isFailure)
     },
+    test("a duplicate-name resubmission of the same root reports only Duplicate names, not Multiple root portfolios") {
+      // Candidate list temporarily holds two entries both named "Ops", both root —
+      // this must read as one duplicate-name error, not also as two distinct roots.
+      val res = TreeBuilderLogic.preValidateTopology(List("Ops" -> None, "Ops" -> None), Nil)
+      assertTrue(res.isFailure) &&
+      assertTrue(res.fold(es => es.exists(_.message.contains("Duplicate names")), _ => false)) &&
+      assertTrue(res.fold(es => !es.exists(_.message.contains("Multiple root portfolios")), _ => false))
+    },
     test("rejects duplicate names across portfolios and leaves") {
       val res = TreeBuilderLogic.preValidateTopology(List("P" -> None), List("P" -> Some("P")))
       assertTrue(res.isFailure)

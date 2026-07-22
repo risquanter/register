@@ -12,9 +12,6 @@ import com.risquanter.register.domain.data.LECNodeCurve
   */
 object CompareColorAssigner:
 
-  private def shade(palette: Vector[HexColor], nodeId: NodeId): HexColor =
-    palette((nodeId.value.hashCode & 0x7fffffff) % palette.size)
-
   /** For each visible node present in a branch's curve map, emit one entry
     * carrying that branch's palette shade and a series id distinct from the
     * same node's entry on the other branch (`NodeId` alone can't disambiguate
@@ -29,10 +26,11 @@ object CompareColorAssigner:
     thisBranchLabel:     String,
     compareBranchLabel:  String
   ): Vector[(LECNodeCurve, HexColor, String)] =
-    val thisSide = visible.toVector.sortBy(_.value).flatMap { nid =>
-      thisBranchCurves.get(nid).map(curve => (curve, shade(PaletteData.Aqua, nid), s"${nid.value}@$thisBranchLabel"))
+    val sortedVisible = visible.toVector.sortBy(_.value)
+    val thisSide = sortedVisible.flatMap { nid =>
+      thisBranchCurves.get(nid).map(curve => (curve, ColorAssigner.shade(PaletteData.Aqua, nid), s"${nid.value}@$thisBranchLabel"))
     }
-    val compareSide = visible.toVector.sortBy(_.value).flatMap { nid =>
-      compareBranchCurves.get(nid).map(curve => (curve, shade(PaletteData.Purple, nid), s"${nid.value}@$compareBranchLabel"))
+    val compareSide = sortedVisible.flatMap { nid =>
+      compareBranchCurves.get(nid).map(curve => (curve, ColorAssigner.shade(PaletteData.Purple, nid), s"${nid.value}@$compareBranchLabel"))
     }
     thisSide ++ compareSide

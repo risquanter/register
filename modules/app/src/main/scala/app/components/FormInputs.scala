@@ -35,7 +35,7 @@ object FormInputs:
   ): HtmlElement =
     div(
       cls := "form-field",
-      label(cls := "form-label", labelText),
+      label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, labelText),
       input(
         typ := "text",
         inputMode := inputModeAttr,
@@ -72,7 +72,7 @@ object FormInputs:
   ): HtmlElement =
     div(
       cls := "form-field",
-      label(cls := "form-label", labelText),
+      label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, labelText),
       textArea(
         inputMode := inputModeAttr,
         cls <-- errorSignal.map(err => if err.isDefined then "form-input form-textarea error" else "form-input form-textarea"),
@@ -101,7 +101,7 @@ object FormInputs:
   ): HtmlElement =
     div(
       cls := "form-field",
-      label(cls := "form-label", labelText),
+      label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, labelText),
       div(
         cls := "radio-group",
         options.map { case (optValue, optLabel) =>
@@ -168,27 +168,47 @@ object FormInputs:
     rootLabel: String,
     disabledSignal: Signal[Boolean] = Val(false)
   ): HtmlElement =
+    // Both the displayed <select> value and the auto-correct subscription
+    // below need the same "is the current selection still valid, what's the
+    // fallback" rule — one shared computation, so a future change to that
+    // rule can't update one without the other and silently reintroduce a
+    // display/data mismatch.
+    def correctedDisplay(sel: Option[String], opts: List[String]): String =
+      val display = sel.getOrElse(rootLabel)
+      if opts.contains(display) then display else opts.headOption.getOrElse(rootLabel)
+
+    val selectionAndOptions = parentVar.signal.combineWith(options)
+
     div(
       cls := "form-field",
-      label(cls := "form-label", "Parent Portfolio"),
+      label(cls := "form-label", cls("form-label--locked") <-- disabledSignal, "Parent Portfolio"),
       select(
         cls := "form-input",
         disabled <-- disabledSignal,
         controlled(
-          value <-- parentVar.signal.combineWith(options).map { (sel, opts) =>
-            val display = sel.getOrElse(rootLabel)
-            if opts.contains(display) then display else opts.headOption.getOrElse(rootLabel)
-          },
+          value <-- selectionAndOptions.map(correctedDisplay(_, _)),
           onChange.mapToValue.map { v => if v == rootLabel then None else Some(v) } --> parentVar
         ),
-        // Auto-sync parentVar when options change and current selection becomes invalid
-        options --> { opts =>
-          val current = parentVar.now().getOrElse(rootLabel)
+        // Auto-correct parentVar itself — not just the <select>'s displayed
+        // value above — whenever either it or the option list changes and
+        // the current selection is no longer valid. E.g. a Templating draft
+        // copies its source node's `None` (root) parent, but root may
+        // already be taken by a real committed portfolio, making `None`
+        // invalid for a *new* node. Subscribing only to `options` (as before)
+        // misses this: `parentVar` changing (not `options`) is what makes
+        // the selection invalid here, so the correction never ran — the
+        // dropdown displayed the corrected option (via the `value <--`
+        // binder above) while the Var actually used at submit time silently
+        // kept the stale, invalid selection.
+        selectionAndOptions --> { (sel, opts) =>
+          val current = sel.getOrElse(rootLabel)
           if !opts.contains(current) then
-            opts.headOption match
-              case Some(v) if v == rootLabel => parentVar.set(None)
-              case Some(v) => parentVar.set(Some(v))
-              case None => ()
+            // No correction possible when opts is empty (nothing valid to
+            // fall back to yet) — leave parentVar as-is rather than forcing
+            // it to root, which would itself be an invalid, unlisted choice.
+            opts.headOption.foreach { v =>
+              parentVar.set(if v == rootLabel then None else Some(v))
+            }
         },
         children <-- options.map { opts =>
           opts.map { opt =>
