@@ -174,6 +174,59 @@ object ZJS:
       }
 
   // ---------------------------------------------------------------------------
+  // Trigger → outcome request pipelines (supersede stale in-flight requests)
+  // ---------------------------------------------------------------------------
+
+  /** `flatMapSwitch` over a stream of "what should I be loading right now"
+    * triggers — `None` resets to `idle`, `Some(request)` emits `loading` and
+    * then `settle` applied to the request's result. Whenever the trigger
+    * stream emits again (a new request, or a reset), Airstream drops the
+    * subscription to whatever the previous trigger's request stream was
+    * still doing, so a stale response can never overwrite a newer one.
+    *
+    * Known, deliberate gap shared by every user: superseding stops
+    * *observing* the old request's stream, it does not cancel the underlying
+    * ZIO fiber (`forkProvided` discards the fiber handle) — the abandoned
+    * network call still completes server-side, its result just goes nowhere.
+    * Tracked in TODO.md.
+    *
+    * @param settle Maps one emission of the request's stream (typically the
+    *   `Either` from `toOutcomeEventStream`) to the outcome value.
+    */
+  def requestPipeline[A, O](
+    triggers: EventStream[Option[() => EventStream[A]]],
+    idle: O,
+    loading: O,
+    settle: A => O
+  ): EventStream[O] =
+    triggers.flatMapSwitch[O, EventStream, EventStream] {
+      case None => EventStream.fromValue(idle, emitOnce = true)
+      case Some(request) =>
+        EventStream.fromValue(loading, emitOnce = true).mergeWith(request().map(settle))
+    }
+
+  /** `requestPipeline` specialized to the `LoadState` lifecycle with the
+    * standard error routing (mirrors `loadInto`): a workspace-sentinel
+    * failure resolves to `Idle` (the global banner's own domain), any other
+    * failure to `Failed(message)`. The request streams are expected to come
+    * from `toOutcomeEventStream`, which already notified the global
+    * `ErrorObserver` — this pipeline only decides what the target displays.
+    */
+  def loadStatePipeline[A](
+    triggers: EventStream[Option[() => EventStream[Either[Throwable, A]]]]
+  ): EventStream[LoadState[A]] =
+    requestPipeline[Either[Throwable, A], LoadState[A]](
+      triggers,
+      idle    = LoadState.Idle,
+      loading = LoadState.Loading,
+      settle  = {
+        case Right(a)                                            => LoadState.Loaded(a)
+        case Left(e) if RepositoryFailure.isWorkspaceSentinel(e) => LoadState.Idle
+        case Left(e)                                             => LoadState.Failed(e.safeMessage)
+      }
+    )
+
+  // ---------------------------------------------------------------------------
   // Extensions on ZIO + SubmitState — DRY the submit lifecycle
   // ---------------------------------------------------------------------------
 

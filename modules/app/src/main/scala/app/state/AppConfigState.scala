@@ -31,6 +31,13 @@ final class AppConfigState:
     */
   val appVersion: Var[String] = Var("dev")
 
+  /** Whether developer-facing debug UI (e.g. the Design view's dirty-state
+    * bar) is shown. Defaults to `false`; production deployments enable it via
+    * `REGISTER_DEBUG_UI=true` (templated into `/config.json` by the frontend
+    * entrypoint), the Vite dev server via `public/config.json`.
+    */
+  val debugUi: Var[Boolean] = Var(false)
+
   def refresh(): Unit =
     dom.fetch("/config.json").toFuture
       .flatMap(_.text().toFuture)
@@ -40,11 +47,16 @@ final class AppConfigState:
             case Right(cfg) =>
               scenariosEnabled.set(cfg.scenariosEnabled)
               cfg.appVersion.foreach(appVersion.set)
+              cfg.debugUi.foreach(debugUi.set)
             case Left(_) => ()
         case Failure(_) => ()
       }
 
 object AppConfigState:
-  private final case class ConfigPayload(scenariosEnabled: Boolean, appVersion: Option[String] = None)
+  private final case class ConfigPayload(
+    scenariosEnabled: Boolean,
+    appVersion: Option[String] = None,
+    debugUi: Option[Boolean] = None
+  )
   private object ConfigPayload:
     given JsonDecoder[ConfigPayload] = DeriveJsonDecoder.gen[ConfigPayload]

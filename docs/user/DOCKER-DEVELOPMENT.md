@@ -256,6 +256,8 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `IRMIN_HEALTHCHECK_ATTEMPT_TIMEOUT` | `5s` | Startup readiness: per-attempt probe timeout (ADR-031) |
 | `IRMIN_HEALTHCHECK_BUDGET` | `45s` | Startup readiness: total bounded wait before failing closed (ADR-031) |
 | `BACKEND_URL` | `http://register-server:8090` | **Frontend (nginx) only** — register-server URL for proxy_pass |
+| `APP_VERSION` | `dev` | **Frontend (nginx) only** — app version shown in the SPA sidebar footer (via `/config.json`); also tags the local images |
+| `REGISTER_DEBUG_UI` | `false` | **Frontend (nginx) only** — set to `true` to show developer debug UI (Design view dirty-state bar) via `/config.json`. Example: `REGISTER_DEBUG_UI=true docker compose --profile frontend up -d` |
 
 ### `/config.json` — frontend capability discovery
 

@@ -310,8 +310,16 @@ fi
 # containing either would make the whole file invalid JSON, and the SPA's
 # decode failure would silently drop scenariosEnabled too.
 SAFE_APP_VERSION=$(printf '%s' "${APP_VERSION:-dev}" | tr -d '"\\')
-printf '{"scenariosEnabled": %s, "appVersion": "%s"}' \
-    "${SCENARIOS_ENABLED}" "${SAFE_APP_VERSION}" > /tmp/config.json
+
+# debugUi — developer-facing debug UI (e.g. the Design view's dirty-state
+# bar). Off unless REGISTER_DEBUG_UI is exactly "true".
+if [ "${REGISTER_DEBUG_UI:-false}" = "true" ]; then
+    DEBUG_UI=true
+else
+    DEBUG_UI=false
+fi
+printf '{"scenariosEnabled": %s, "appVersion": "%s", "debugUi": %s}' \
+    "${SCENARIOS_ENABLED}" "${SAFE_APP_VERSION}" "${DEBUG_UI}" > /tmp/config.json
 
 exec nginx -c /tmp/nginx.conf -g "daemon off;"
 EOF

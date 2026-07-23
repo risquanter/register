@@ -34,11 +34,30 @@ final class ScenarioListState(
 
   val scenarios: StrictSignal[LoadState[List[ScenarioSummaryResponse]]] = scenariosVar.signal
 
-  /** Fetch the workspace's scenario list. No-op if no workspace is active. */
+  // Refreshes route through `ZJS.loadStatePipeline` rather than a direct
+  // `loadInto`: `create()`/`delete()` both call `refresh()`, so two fetches
+  // can be in flight at once, and with `loadInto` the older response could
+  // resolve last and overwrite the newer list — a stale list that predates a
+  // just-created scenario would then trip every `ScenarioState`'s
+  // branch-fallback subscription and silently kick the creating view off the
+  // branch it just switched to. The pipeline's `flatMapSwitch` drops the
+  // superseded request instead. The `now() != v` guard mirrors
+  // `ScenarioDiffState`: `Var.set` doesn't dedupe by value, and downstream
+  // subscriptions (the branch fallbacks) react to `.changes`.
+  private val refreshTrigger =
+    new EventBus[Option[() => EventStream[Either[Throwable, List[ScenarioSummaryResponse]]]]]
+
+  loadStatePipeline(refreshTrigger.events).foreach { v =>
+    if scenariosVar.now() != v then scenariosVar.set(v)
+  }(using unsafeWindowOwner)
+
+  /** Fetch the workspace's scenario list. No-op if no workspace is active.
+    * A newer refresh supersedes any still-running one. */
   def refresh(): Unit =
     keySignal.now() match
-      case Some(key) => listScenariosEndpoint((userIdAccessor(), key)).loadInto(scenariosVar)
-      case None      => ()
+      case Some(key) =>
+        refreshTrigger.emit(Some(() => listScenariosEndpoint((userIdAccessor(), key)).toOutcomeEventStream))
+      case None => ()
 
   // A workspace key appearing for the first time (bootstrap via Create, or a
   // returning session's URL key) means `scenarios` needs its first real

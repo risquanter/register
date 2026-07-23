@@ -80,7 +80,7 @@ object DistributionChartView:
             case (None, _) =>
               chartState.reset()
             case _ => ()
-          }(ctx.owner)
+          }(using ctx.owner)
 
         // Stream 2: React immediately when the preview toggle itself is flipped.
         // Handles the case where the draft is already valid and stable but preview
@@ -94,7 +94,7 @@ object DistributionChartView:
             case (false, _) =>
               chartState.reset()
             case _ => ()
-          }(ctx.owner)
+          }(using ctx.owner)
 
         // Eager load on mount: neither .changes stream fires for values already set
         // before this element mounted. If preview is enabled and a valid draft exists
@@ -110,8 +110,12 @@ object DistributionChartView:
       chartState.specSignal.changes --> { _ => renderError$.set(None) },
 
       // Spec → DOM: dispose previous chart then render next state.
+      // renderError$ is deduplicated: the clearing subscription above writes
+      // None on every spec emission, and an Airstream Var.set emits even when
+      // the value is unchanged — without .distinct every spec change rendered
+      // twice, embedding two Vega views of which one leaked un-finalized.
       child <-- chartState.specSignal
-        .combineWith(renderError$.signal, chartState.previewEnabledVar.signal)
+        .combineWith(renderError$.signal.distinct, chartState.previewEnabledVar.signal)
         .map { (specState, renderErr, previewEnabled) =>
           disposeChart()
           resolveChartContent(specState, renderErr, previewEnabled,
@@ -191,7 +195,11 @@ object DistributionChartView:
         )
         vegaEmbed(ctx.thisNode.ref, spec, options)
           .`then`[Unit] { (result: EmbedResult) =>
-            onResult(result)
+            // The embed resolves asynchronously: if a newer spec emission has
+            // already replaced this container, storing the result would leak
+            // the previous one — release this late arrival instead.
+            if ctx.thisNode.ref.isConnected then onResult(result)
+            else result.finalize()
             ()
           }
           .`catch`[Unit] { (err: Any) =>

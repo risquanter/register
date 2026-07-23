@@ -92,7 +92,7 @@ object DesignView:
       onClick --> { _ => scenarioMenuOpen.set(false) },
       onKeyDown --> { ev => if ev.key == "Escape" then scenarioMenuOpen.set(false) },
       BranchBar.toolbar(scenarioState, appConfigState.scenariosEnabled.signal, scenarioMenuOpen),
-      TreeBuilderView(builderState, treeViewState, wsState, distributionChartState, scenarioState)
+      TreeBuilderView(builderState, treeViewState, wsState, distributionChartState, scenarioState, appConfigState.debugUi.signal)
     )
 
     div(

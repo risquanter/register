@@ -48,7 +48,12 @@ object LECChartView:
             hoverBridge.pushToView(result.view, maybeId)
           }
         },
-        child <-- specSignal.combineWith(renderError$.signal).map { (state, renderErr) =>
+        // renderError$ is deduplicated: the clearing subscription below writes
+        // None on every spec emission, and an Airstream Var.set emits even
+        // when the value is unchanged — without .distinct every spec change
+        // rendered twice, embedding two Vega views of which one leaked
+        // un-finalized (its embed resolved after its container was replaced).
+        child <-- specSignal.combineWith(renderError$.signal.distinct).map { (state, renderErr) =>
           disposeChart()
           renderErr match
             case Some(msg) => renderError(msg)
@@ -116,7 +121,12 @@ object LECChartView:
         )
         vegaEmbed(ctx.thisNode.ref, spec, options)
           .`then`[Unit] { (result: EmbedResult) =>
-            onResult(result)
+            // The embed resolves asynchronously: if a newer spec emission has
+            // already replaced this container, storing the result would leak
+            // the previous one and attach hover to a detached view — release
+            // this late arrival instead.
+            if ctx.thisNode.ref.isConnected then onResult(result)
+            else result.finalize()
             ()
           }
           .`catch`[Unit] { (err: Any) =>

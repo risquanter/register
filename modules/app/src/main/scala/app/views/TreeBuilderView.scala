@@ -20,7 +20,7 @@ import com.risquanter.register.http.responses.SimulationResponse
  */
 object TreeBuilderView extends WorkspaceLifecycleEndpoints
   with WorkspaceTreeEndpoints:
-  def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState, chartState: DistributionChartState, scenarioState: ScenarioState): HtmlElement =
+  def apply(state: TreeBuilderState, treeViewState: TreeViewState, wsState: WorkspaceState, chartState: DistributionChartState, scenarioState: ScenarioState, debugUi: Signal[Boolean]): HtmlElement =
     val submitState: Var[SubmitState] = Var(SubmitState.Idle)
 
     // A successful Create has nothing left to keep editing — matches
@@ -104,16 +104,22 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
       // Debug-only: makes the dirty-tracking flags that gate the unsaved-work
       // confirm dialogs directly visible, instead of having to infer their
       // state from behavior. Reads existing signals only — does not affect
-      // any dirty-tracking logic. Remove once the mechanism is trusted again.
-      div(
-        cls := "dirty-debug-bar",
-        cls("dirty-debug-bar--active") <-- state.isDirtySignal.combineWith(state.isEditDirtyVar.signal).map(_ || _),
-        child.text <-- state.isDirtySignal
-          .combineWith(state.isEditDirtyVar.signal, state.portfolioFormDirtyVar.signal, state.leafFormDirtyVar.signal)
-          .map { case (treeDirty, editDirty, pDirty, lDirty) =>
-            s"[debug] tree-dirty=$treeDirty  edit-dirty=$editDirty  (portfolio=$pDirty, leaf=$lDirty)"
-          }
-      ),
+      // any dirty-tracking logic. Gated behind the `debugUi` config flag
+      // (`REGISTER_DEBUG_UI` / config.json) via `child.maybe`, so when the
+      // flag is off the bar is absent from the DOM and its per-keystroke
+      // dirty recomputation never subscribes at all.
+      child.maybe <-- debugUi.map {
+        case false => None
+        case true => Some(div(
+          cls := "dirty-debug-bar",
+          cls("dirty-debug-bar--active") <-- state.isDirtySignal.combineWith(state.isEditDirtyVar.signal).map(_ || _),
+          child.text <-- state.isDirtySignal
+            .combineWith(state.isEditDirtyVar.signal, state.portfolioFormDirtyVar.signal, state.leafFormDirtyVar.signal)
+            .map { case (treeDirty, editDirty, pDirty, lDirty) =>
+              s"[debug] tree-dirty=$treeDirty  edit-dirty=$editDirty  (portfolio=$pDirty, leaf=$lDirty)"
+            }
+        ))
+      },
 
       // Clear stale submit feedback when the user edits the tree name.
       // Does NOT clear a Success notification — Success transitions to Idle only via

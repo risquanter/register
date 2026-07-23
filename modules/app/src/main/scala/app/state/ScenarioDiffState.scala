@@ -6,7 +6,6 @@ import app.core.ZJS.*
 import app.core.*
 import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret, ScenarioName}
-import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.http.endpoints.{WorkspaceTreeEndpoints, WorkspaceAnalysisEndpoints}
 import com.risquanter.register.http.responses.ScenarioDiffResponse
 
@@ -30,7 +29,7 @@ final class ScenarioDiffState(
   // — every existing reader is unaffected. Neither is written directly by
   // `loadDiff`/`loadCompareCurves`/`reset`/`clearCompareCurves` any more:
   // each is driven from its own `EventBus`-fed `flatMapSwitch` pipeline
-  // (`ScenarioDiffState.loadStatePipeline`, shared since both fetches have
+  // (`ZJS.loadStatePipeline`, shared since both fetches have
   // the exact same "one request, or reset, supersedes whatever the previous
   // one was still doing" shape). A new call to either method makes
   // `flatMapSwitch` drop the subscription to whatever the *previous*
@@ -50,10 +49,10 @@ final class ScenarioDiffState(
   // `Var.set` doesn't dedupe by value — an unguarded write here would still
   // force `AnalyzeView`'s combined chart-spec signal to recompute, tearing
   // down and rebuilding the Vega chart for a "change" that never happened.
-  ScenarioDiffState.loadStatePipeline(diffTrigger.events).foreach { v =>
+  ZJS.loadStatePipeline(diffTrigger.events).foreach { v =>
     if diffResult.now() != v then diffResult.set(v)
   }(using unsafeWindowOwner)
-  ScenarioDiffState.loadStatePipeline(curvesTrigger.events).foreach { v =>
+  ZJS.loadStatePipeline(curvesTrigger.events).foreach { v =>
     if compareCurves.now() != v then compareCurves.set(v)
   }(using unsafeWindowOwner)
 
@@ -108,33 +107,3 @@ object ScenarioDiffState:
       resp.entries.filter(_.status != "identical").flatMap(e => NodeId.fromString(e.nodeId).toOption).toSet
     case _ => Set.empty
 
-  /** `flatMapSwitch` over a stream of "what should I be loading right now"
-    * triggers — `None` resets to `Idle`, `Some(request)` runs `request()`
-    * and tracks its `Loading`/`Loaded`/`Failed` lifecycle. Whenever the
-    * trigger stream emits again (a new request, or a reset), Airstream drops
-    * the subscription to whatever the *previous* trigger's request stream
-    * was still doing, so a stale response can never overwrite a newer one —
-    * shared by `loadDiff`/`diffResult` and `loadCompareCurves`/`compareCurves`,
-    * which otherwise differ only in the endpoint and payload type.
-    *
-    * Mirrors `ZJS.loadInto`'s error routing exactly: a workspace-sentinel
-    * failure (A13 — the global banner's own domain) resolves to `Idle`,
-    * any other failure resolves to `Failed(message)`. `toOutcomeEventStream`
-    * (unlike `loadInto`'s plain `forkProvided`) already notified the global
-    * `ErrorObserver` for either case before this pipeline ever sees the
-    * outcome — this only decides what `diffResult`/`compareCurves` display.
-    */
-  private def loadStatePipeline[A](
-    triggers: EventStream[Option[() => EventStream[Either[Throwable, A]]]]
-  ): EventStream[LoadState[A]] =
-    triggers.flatMapSwitch[LoadState[A], EventStream, EventStream] {
-      case None => EventStream.fromValue(LoadState.Idle, emitOnce = true)
-      case Some(request) =>
-        val loading = EventStream.fromValue(LoadState.Loading, emitOnce = true)
-        val settled = request().map {
-          case Right(a) => LoadState.Loaded(a)
-          case Left(e) if RepositoryFailure.isWorkspaceSentinel(e) => LoadState.Idle
-          case Left(e) => LoadState.Failed(e.safeMessage)
-        }
-        loading.mergeWith(settled)
-    }

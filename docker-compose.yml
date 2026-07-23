@@ -210,6 +210,10 @@ services:
       # Same variable that tags the images above — the entrypoint templates it
       # into /config.json so the SPA's sidebar footer shows the running version.
       APP_VERSION: "${APP_VERSION:-dev}"
+      # Developer-facing debug UI (Design view dirty-state bar). Off by
+      # default; enable per invocation (REGISTER_DEBUG_UI=true docker compose
+      # ... up -d) or via a local env file.
+      REGISTER_DEBUG_UI: "${REGISTER_DEBUG_UI:-false}"
     read_only: true
     security_opt:
       - no-new-privileges:true

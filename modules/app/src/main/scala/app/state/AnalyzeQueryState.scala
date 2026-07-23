@@ -156,26 +156,35 @@ final class AnalyzeQueryState(
 
   private val triggerBus: EventBus[Trigger] = new EventBus[Trigger]
 
-  private def outcomeStream(trigger: Trigger): EventStream[Outcome] = trigger match
-    case Trigger.Reset => EventStream.fromValue(Outcome.Idle, emitOnce = true)
-    case Trigger.Run(key, treeId, text, branch) =>
-      val loading = EventStream.fromValue(Outcome.Loading, emitOnce = true)
-      val settled = queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(text), branch))
-        .toOutcomeEventStream
-        .map {
-          case Right(resp) => Outcome.Loaded(resp)
-          case Left(e: FolQueryFailure) if isQueryDomainError(e) => Outcome.DomainError(e.getMessage)
-          // Infra failure: ZJS.toOutcomeEventStream already notified the
-          // global ErrorObserver via forkProvided's own hook (unchanged) —
-          // this stream only needs to resolve back out of Loading.
-          case Left(_) => Outcome.Idle
-        }
-      loading.mergeWith(settled)
+  // Built on the shared `requestPipeline` (see ZJS) — the same
+  // "one request, or reset, supersedes whatever the previous one was still
+  // doing" skeleton `ScenarioDiffState` and `ScenarioListState` use via
+  // `loadStatePipeline`. Only the settle mapping is local: it needs the
+  // `DomainError` case (inline 400-level query failures), which the plain
+  // `LoadState` specialization can't carry.
+  private val outcome: EventStream[Outcome] =
+    requestPipeline[Either[Throwable, QueryResponse], Outcome](
+      triggerBus.events.map {
+        case Trigger.Reset => None
+        case Trigger.Run(key, treeId, text, branch) =>
+          Some(() => queryWorkspaceTreeEndpoint((userIdAccessor(), key, treeId, QueryRequest(text), branch)).toOutcomeEventStream)
+      },
+      idle    = Outcome.Idle,
+      loading = Outcome.Loading,
+      settle  = {
+        case Right(resp) => Outcome.Loaded(resp)
+        case Left(e: FolQueryFailure) if isQueryDomainError(e) => Outcome.DomainError(e.getMessage)
+        // Infra failure: ZJS.toOutcomeEventStream already notified the
+        // global ErrorObserver via forkProvided's own hook (unchanged) —
+        // this stream only needs to resolve back out of Loading.
+        case Left(_) => Outcome.Idle
+      }
+    )
 
   // App-lifetime subscription (AnalyzeQueryState lives for the app lifetime,
   // like TreeBuilderState's isEditDirtyVar wiring) — the one and only writer
   // of queryResult/queryServerError.
-  triggerBus.events.flatMapSwitch(outcomeStream).foreach {
+  outcome.foreach {
     case Outcome.Idle =>
       queryResult.set(LoadState.Idle)
       queryServerError.set(None)
