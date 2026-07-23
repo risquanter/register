@@ -16,10 +16,12 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   *   - Data values shape: `{curveId, risk, loss, exceedance}`
   *   - Colour encoding: `scale.domain` (curveIds) + `scale.range` (hex colours)
   *   - Per-curve annotations, each coloured to match that curve's own line,
-  *     each with its own show/hide toggle and a value in its label
-  *     (e.g. "P95: $131M"):
+  *     each with its own show/hide toggle and a value in its label, stacked
+  *     as two lines ("P95" over "$131M") so adjacent rules' labels overlap
+  *     less:
   *     - Tail quantile lines (dashed), each independently toggleable:
-  *       P90 (`showP90`), P95 (`showP95`), P99 (`showP99`), P99.5 (`showP995`)
+  *       P90 (`showP90`), P95 (`showP95`), P99 (`showP99`), P99.5 (`showP995`);
+  *       only P95 starts checked, the others are opt-in
   *     - AAL — Average Annual Loss (solid, to read as "central value" rather
   *       than a threshold): (`showAAL`)
   *     - Probability of no loss: plain text, fixed at a pixel position (not
@@ -119,13 +121,11 @@ object LECSpecBuilder:
     ordered.foreach { case (nc, hexColor, _) =>
       quantileToggles.foreach { case (key, (rawLabel, toggleParam)) =>
         nc.quantiles.get(key).foreach { value =>
-          val label = s"$rawLabel: ${formatLossValue(value)}"
-          verticalAnnotation(value, label, hexColor.value, dashed = true, toggleParam = toggleParam)
+          verticalAnnotation(value, Seq(rawLabel, formatLossValue(value)), hexColor.value, dashed = true, toggleParam = toggleParam)
             .foreach(annotationLayers.push(_))
         }
       }
-      val aalLabel = s"AAL: ${formatLossValue(nc.averageAnnualLoss)}"
-      verticalAnnotation(nc.averageAnnualLoss, aalLabel, hexColor.value, dashed = false, toggleParam = "showAAL")
+      verticalAnnotation(nc.averageAnnualLoss, Seq("AAL", formatLossValue(nc.averageAnnualLoss)), hexColor.value, dashed = false, toggleParam = "showAAL")
         .foreach(annotationLayers.push(_))
     }
 
@@ -310,9 +310,11 @@ object LECSpecBuilder:
             "name"    -> "Interpolation: "
           )
         ),
+        // Only P95 starts checked among the percentile toggles — one
+        // uncluttered default line; the rest are opt-in.
         js.Dynamic.literal(
           "name"  -> "showP90",
-          "value" -> true,
+          "value" -> false,
           "bind"  -> js.Dynamic.literal(
             "input" -> "checkbox",
             "name"  -> "Show P90: "
@@ -328,7 +330,7 @@ object LECSpecBuilder:
         ),
         js.Dynamic.literal(
           "name"  -> "showP99",
-          "value" -> true,
+          "value" -> false,
           "bind"  -> js.Dynamic.literal(
             "input" -> "checkbox",
             "name"  -> "Show P99: "
@@ -336,7 +338,7 @@ object LECSpecBuilder:
         ),
         js.Dynamic.literal(
           "name"  -> "showP995",
-          "value" -> true,
+          "value" -> false,
           "bind"  -> js.Dynamic.literal(
             "input" -> "checkbox",
             "name"  -> "Show P99.5: "
@@ -382,6 +384,11 @@ object LECSpecBuilder:
     * "a threshold", the same solid/dashed distinction cat-modeling exhibits
     * commonly use to tell a mean apart from a percentile at a glance).
     *
+    * @param labelLines Label rendered as stacked lines (Vega text marks
+    *   treat an array datum as one line per element) — the name over its
+    *   value ("P95" / "$131M") so a narrow column of text hugs the rule,
+    *   overlapping far less than the previous single-line "P95: $131M"
+    *   when several quantile rules sit close together.
     * @param toggleParam Name of the top-level checkbox param (declared in
     *   `buildSpec`) gating this layer's visibility — referenced via `expr`
     *   the same way the interpolation dropdown drives the line layer's
@@ -389,7 +396,7 @@ object LECSpecBuilder:
     */
   private def verticalAnnotation(
     value: Double,
-    label: String,
+    labelLines: Seq[String],
     color: String,
     dashed: Boolean,
     toggleParam: String,
@@ -410,8 +417,18 @@ object LECSpecBuilder:
         "encoding" -> js.Dynamic.literal("x" -> xEnc)
       ),
       js.Dynamic.literal(
-        "mark"     -> js.Dynamic.literal("type" -> "text", "align" -> "left", "dx" -> 4, "dy" -> -6, "fontSize" -> fontSize, "color" -> color, "opacity" -> toggleOpacity),
-        "data"     -> js.Dynamic.literal("values" -> js.Array(js.Dynamic.literal("x" -> value, "label" -> label))),
+        "mark"     -> js.Dynamic.literal(
+          "type"       -> "text",
+          "align"      -> "left",
+          "baseline"   -> "top",
+          "dx"         -> 4,
+          "dy"         -> 4,
+          "fontSize"   -> fontSize,
+          "lineHeight" -> (fontSize + 3),
+          "color"      -> color,
+          "opacity"    -> toggleOpacity
+        ),
+        "data"     -> js.Dynamic.literal("values" -> js.Array(js.Dynamic.literal("x" -> value, "label" -> js.Array(labelLines*)))),
         "encoding" -> js.Dynamic.literal("x" -> xEnc, "text" -> js.Dynamic.literal("field" -> "label"))
       )
     )

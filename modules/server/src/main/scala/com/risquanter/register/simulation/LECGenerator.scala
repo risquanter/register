@@ -216,8 +216,7 @@ object LECGenerator {
     val maxTick = if (maxLoss < Long.MaxValue / 11) (maxLoss * 11) / 10 else maxLoss
     val minTick = minLoss.max(1L)  // Use actual min, but avoid 0 for log-scale compatibility
     
-    val step = (maxTick - minTick) / (nEntries - 1)
-    if (step == 0) return Vector(minTick)
+    val step = math.max(1L, (maxTick - minTick) / (nEntries - 1))
     
     val range = minTick to maxTick by step
     range.toVector
@@ -234,14 +233,28 @@ object LECGenerator {
     else {
       val minLoss = result.minLoss
       val maxLoss = findQuantileLoss(result, 0.995).getOrElse(result.maxLoss)
-      val ticks = getTicks(minLoss, maxLoss, nEntries)
-      
+      val ticks = (0L +: getTicks(minLoss, maxLoss, nEntries)).distinct
+
       ticks.map { loss =>
-        val exceedanceProb = result.probOfExceedance(loss).toDouble
-        (loss, exceedanceProb)
+        (loss, exceedanceAt(result, loss))
       }
     }
   }
+
+  /** Exceedance probability at a tick, with the y-intercept convention.
+    *
+    * At loss = 0 the "at least x" reading is trivially 1.0 for every
+    * distribution, so the curve instead starts at the strict
+    * "more than x" value: 1 - probabilityOfNoLoss — the probability of
+    * losing anything at all. This makes the curve meet the y-axis at the
+    * occurrence-probability plateau (the standard LEC presentation) and
+    * agrees with the chart's own no-loss statistic. Every tick above 0
+    * is the raw simulated probOfExceedance, where the two readings are
+    * identical on integer losses.
+    */
+  private def exceedanceAt(result: LossDistribution, loss: Long): Double =
+    if (loss == 0L) 1.0 - probabilityOfNoLoss(result)
+    else result.probOfExceedance(loss).toDouble
   
   /** Visual-only exceedance threshold for chart tail trimming.
     *
@@ -287,13 +300,15 @@ object LECGenerator {
     val combinedMin = nonEmpty.values.map(_.minLoss).min
     val combinedMax = nonEmpty.values.map(r => findQuantileLoss(r, 0.995).getOrElse(r.maxLoss)).max
     
-    // Generate shared tick domain
-    val sharedTicks = getTicks(combinedMin, combinedMax, nEntries)
-    
+    // Generate shared tick domain. Tick 0 is always included so every
+    // curve starts on the y-axis at its occurrence-probability plateau
+    // (see exceedanceAt for the y-intercept convention).
+    val sharedTicks = (0L +: getTicks(combinedMin, combinedMax, nEntries)).distinct
+
     // Evaluate all curves at every tick
     val evaluated: Map[K, Vector[(Long, Double)]] = results.map { case (nodeId, result) =>
       if (result.outcomeCount.isEmpty) nodeId -> Vector.empty
-      else nodeId -> sharedTicks.map(loss => (loss, result.probOfExceedance(loss).toDouble))
+      else nodeId -> sharedTicks.map(loss => (loss, exceedanceAt(result, loss)))
     }
 
     trimTail(evaluated, sharedTicks)

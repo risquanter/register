@@ -70,8 +70,14 @@ object LECGeneratorSpec extends ZIOSpecDefault {
     
     suite("generateCurvePoints")(
       test("returns correct number of points") {
+        // nEntries ticks (+ buffer slack) plus the always-prepended 0 tick
         val points = LECGenerator.generateCurvePoints(cyberResult, 10)
-        assertTrue(points.nonEmpty && points.size <= 11)
+        assertTrue(points.nonEmpty && points.size <= 12)
+      },
+      test("curve starts at loss 0 with the strict y-intercept (1 - probabilityOfNoLoss)") {
+        // cyberResult: 2 explicit zeros out of 5 trials → noLoss = 0.4 → intercept 0.6
+        val points = LECGenerator.generateCurvePoints(cyberResult, 10)
+        assertTrue(points.head == (0L, 0.6))
       },
       test("exceedance probabilities are in [0, 1]") {
         val points = LECGenerator.generateCurvePoints(cyberResult, 20)
@@ -176,10 +182,19 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       test("trimmed curves still share the same tick domain") {
         val results = Map("cyber" -> cyberResult, "hardware" -> hardwareResult)
         val curves = LECGenerator.generateCurvePointsMulti(results, 10)
-        
+
         val cyberLosses = curves("cyber").map(_._1)
         val hardwareLosses = curves("hardware").map(_._1)
         assertTrue(cyberLosses == hardwareLosses)
+      },
+      test("every curve starts at loss 0 with its own strict y-intercept") {
+        // cyber: 2 explicit zeros / 5 trials → 0.6; hardware: 2 / 5 → 0.6
+        val results = Map("cyber" -> cyberResult, "hardware" -> hardwareResult)
+        val curves = LECGenerator.generateCurvePointsMulti(results, 10)
+        assertTrue(
+          curves("cyber").head == (0L, 0.6),
+          curves("hardware").head == (0L, 0.6)
+        )
       }
     ),
     
