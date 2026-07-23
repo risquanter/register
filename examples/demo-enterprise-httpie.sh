@@ -586,5 +586,9 @@ run_query \
   "Q-Db: Do about half of non-Cyber leaves have P95 above \$1M? (around-quantifier contrast)" \
   'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))'
 
-header "Done"
-info "Re-run anytime — the workspace key above remains valid until expiry."
+header "Done — workspace info"
+ok "Workspace key : $WS_KEY"
+ok "Tree ID       : $TREE_ID"
+ok "Expires at    : $EXPIRES"
+ok "Open in app   : $BASE/w/$WS_KEY"
+info "Re-run anytime — the workspace key remains valid until expiry."

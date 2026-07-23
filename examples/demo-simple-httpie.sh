@@ -195,5 +195,9 @@ run_query \
   "Q-S3: Do at least half of direct children of IT Risk have P99 above \$5M?" \
   'Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x), 5000000))'
 
-header "Done"
-info "Re-run anytime — the workspace key above remains valid until expiry."
+header "Done — workspace info"
+ok "Workspace key : $WS_KEY"
+ok "Tree ID       : $TREE_ID"
+ok "Expires at    : $EXPIRES"
+ok "Open in app   : $BASE/w/$WS_KEY"
+info "Re-run anytime — the workspace key remains valid until expiry."

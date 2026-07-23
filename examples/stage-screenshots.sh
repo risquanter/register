@@ -81,3 +81,9 @@ SHOT LIST — open $WURL, then per shot:
 Reuse this same workspace later without a new create:
    WS_KEY=$WS_KEY TREE_ID=$TREE_ID ./stage-screenshots.sh
 EOF
+
+echo "════════════════════════════════════════════════════════════════════"
+echo "Workspace info"
+echo "  Workspace key : $WS_KEY"
+echo "  Tree ID       : $TREE_ID"
+echo "  Open in app   : $WURL"
