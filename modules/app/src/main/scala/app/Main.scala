@@ -5,7 +5,7 @@ import org.scalajs.dom
 
 import app.chart.PaletteData
 import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, CompareState, ScenarioDiffState}
+import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, CompareState, CompareSlot, ScenarioDiffState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -55,16 +55,29 @@ object Main:
     val analyzeTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal
     )
-    // Compare card: the compared branch gets its own full TreeViewState —
-    // an independent tree view, Ctrl+click surface, and curve cache on
-    // `compareState.chosenBranch`. Purple is the compare side's palette
-    // family in the Overlay chart; passing it here makes the card's tree
+    // Compare cards: each compared-branch slot gets its own full
+    // TreeViewState — an independent tree view, Ctrl+click surface, and
+    // curve cache on the slot's chosen branch — plus its own hash-diff
+    // state. The palette family is the slot's branch identity in the
+    // Overlay chart; passing it to the TreeViewState makes the card's tree
     // highlights match its curves.
     val analyzeCompareState = new CompareState
-    val analyzeCompareTreeViewState = new TreeViewState(
-      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId,
-      analyzeCompareState.chosenBranch.signal, userPalette = PaletteData.Purple
+    val compareSlotPalettes = Vector(PaletteData.Purple, PaletteData.Orange)
+    require(
+      compareSlotPalettes.length == CompareState.ComparedSlotCount,
+      "every compare slot needs its own palette family"
     )
+    val analyzeCompareSlots = analyzeCompareState.slots.zip(compareSlotPalettes).map { (slotState, palette) =>
+      new CompareSlot(
+        state = slotState,
+        treeViewState = new TreeViewState(
+          wsState.keySignal, treeListState, globalError, () => wsState.currentUserId,
+          slotState.chosenBranch.signal, userPalette = palette
+        ),
+        diffState = new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId),
+        palette = palette
+      )
+    }
     val analyzeQueryState = new AnalyzeQueryState(
       keySignal = wsState.keySignal,
       selectedTreeId = analyzeTreeViewState.selectedTreeId.signal,
@@ -138,8 +151,7 @@ object Main:
         analyzeScenarioState,
         appConfigState,
         analyzeCompareState,
-        new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId),
-        analyzeCompareTreeViewState
+        analyzeCompareSlots
       )
     )
 

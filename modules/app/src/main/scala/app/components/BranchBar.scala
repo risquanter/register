@@ -95,17 +95,19 @@ object BranchBar:
     * own value) so recreating the currently-selected `<option>` doesn't reset
     * the browser's native `<select>` selection out from under the tracked Var.
     *
-    * @param excludeValue Raw option value to omit, if any — e.g. Compare
-    *                     mode hides whichever branch is already this tab's
-    *                     own baseline, since comparing a branch to itself is
-    *                     a no-op. `Val(None)` (the default) omits nothing —
-    *                     every branch, including main, is always offered.
+    * @param excludeValues Raw option values to omit — e.g. each Compare-mode
+    *                      picker hides the tab's own baseline branch
+    *                      (comparing a branch to itself is a no-op) and the
+    *                      other pickers' current choices (comparing a branch
+    *                      to itself twice over is the same no-op). The
+    *                      default omits nothing — every branch, including
+    *                      main, is always offered.
     */
   def branchOptionEntries(
     scenarios: Signal[LoadState[List[ScenarioSummaryResponse]]],
-    excludeValue: Signal[Option[String]] = Val(None)
+    excludeValues: Signal[Set[String]] = Val(Set.empty)
   ): Signal[List[(String, String)]] =
-    scenarios.combineWith(excludeValue).map { (listState, excl) =>
+    scenarios.combineWith(excludeValues).map { (listState, excl) =>
       val names = listState match
         case LoadState.Loaded(list) => list.map(_.name)
         case _                      => Nil

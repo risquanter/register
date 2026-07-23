@@ -12,34 +12,32 @@ import com.risquanter.register.domain.data.LECNodeCurve
   */
 object CompareColorAssigner:
 
-  /** For each of a branch's own visible nodes present in that branch's curve
-    * map, emit one entry carrying the branch's palette shade and a series id
-    * distinct from the same node's entry on the other branch (`NodeId` alone
-    * can't disambiguate two branches' curves for the same node — see
+  /** One branch's contribution to the Overlay chart: its curve cache, its
+    * card's own visible selection, its palette family, and its display
+    * label. Each branch carries its own visible set — each branch card is an
+    * independent Ctrl+click surface, so the sides' selections need not
+    * agree.
+    */
+  final case class OverlaySide(
+    curves:      Map[NodeId, LECNodeCurve],
+    visible:     Set[NodeId],
+    palette:     Vector[HexColor],
+    branchLabel: String
+  )
+
+  /** For each side's visible nodes present in that side's curve map, emit
+    * one entry carrying the side's palette shade and a series id distinct
+    * from the same node's entry on any other branch (`NodeId` alone can't
+    * disambiguate several branches' curves for the same node — see
     * `LECSpecBuilder.buildFromSeries`).
     *
-    * Each branch carries its own visible set — each branch card is an
-    * independent Ctrl+click surface, so the two sides' selections need not
-    * agree. A node selected on a branch but missing from that branch's
-    * curve map (fetch not landed yet, or the node doesn't exist there)
-    * contributes nothing for that side.
+    * A node selected on a branch but missing from that branch's curve map
+    * (fetch not landed yet, or the node doesn't exist there) contributes
+    * nothing for that side.
     */
-  def pairForOverlay(
-    thisBranchCurves:    Map[NodeId, LECNodeCurve],
-    thisVisible:         Set[NodeId],
-    compareBranchCurves: Map[NodeId, LECNodeCurve],
-    compareVisible:      Set[NodeId],
-    thisBranchLabel:     String,
-    compareBranchLabel:  String
-  ): Vector[(LECNodeCurve, HexColor, String)] =
-    def side(
-      curves:  Map[NodeId, LECNodeCurve],
-      visible: Set[NodeId],
-      palette: Vector[HexColor],
-      label:   String
-    ): Vector[(LECNodeCurve, HexColor, String)] =
-      visible.toVector.sortBy(_.value).flatMap { nid =>
-        curves.get(nid).map(curve => (curve, ColorAssigner.shade(palette, nid), s"${nid.value}@$label"))
+  def pairForOverlay(sides: Vector[OverlaySide]): Vector[(LECNodeCurve, HexColor, String)] =
+    sides.flatMap { s =>
+      s.visible.toVector.sortBy(_.value).flatMap { nid =>
+        s.curves.get(nid).map(curve => (curve, ColorAssigner.shade(s.palette, nid), s"${nid.value}@${s.branchLabel}"))
       }
-    side(thisBranchCurves, thisVisible, PaletteData.Aqua, thisBranchLabel) ++
-      side(compareBranchCurves, compareVisible, PaletteData.Purple, compareBranchLabel)
+    }

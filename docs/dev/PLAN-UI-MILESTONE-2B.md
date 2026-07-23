@@ -342,8 +342,12 @@ acting as an independent tree view and independent Ctrl+click input
 surface backed by its own `TreeViewState` instance. Selection identity is
 the pair (branch, node); the ✎ markers sit on each compared branch's card,
 diffed against the tab's active branch (see above). Built for 2 branches
-in the branch-cards slice; N-way (≤3) and Mirror-select remain follow-on
-items.
+in the branch-cards slice; N-way built 2026-07-24 as stable picker slots
+(active branch + 2 compared slots, cap = one constant
+`CompareState.MaxBranches`; per-slot `TreeViewState`/diff/palette —
+Purple, Orange; the multi-select renders as one always-mounted `<select>`
+per slot with mutual exclusion of the active branch and the other slot's
+choice). Mirror-select remains a follow-on item.
 
 ```
 ┌──────────┬──────────────────────────────────────────────────────────┐

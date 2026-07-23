@@ -24,12 +24,18 @@ final class ChartParamStore:
 
   private var saved: Map[String, js.Any] = Map.empty
 
-  /** Read the current param values off a live Vega view. */
+  /** Read the current param values off a live Vega view. A view with none of
+    * the params readable (the "No data available" empty spec declares no
+    * params at all) leaves the previously captured values in place — with
+    * one store shared across several chart surfaces, letting an empty-spec
+    * surface's teardown blank the store would reset every other surface's
+    * toggles. */
   def capture(view: js.Dynamic): Unit =
-    saved = LECSpecBuilder.preservedParams.flatMap { name =>
+    val read = LECSpecBuilder.preservedParams.flatMap { name =>
       try Some(name -> (view.signal(name): js.Any))
       catch case _: Throwable => None
     }.toMap
+    if read.nonEmpty then saved = read
 
   /** Apply the captured values to a freshly embedded Vega view. No-op when
     * nothing has been captured yet. */
