@@ -26,7 +26,7 @@ trait IrminClient:
     * Get a value at the specified path.
     *
     * @param path Path to the value (e.g., "risks/cyber")
-    * @param branch Branch to read from (None = main)
+    * @param branch Branch to read from (defaults to main)
     * @return Some(value) if exists, None if path not found
     */
   def get(path: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError, Option[String]]
@@ -39,7 +39,7 @@ trait IrminClient:
     * @param path Path to store the value
     * @param value JSON string value to store
     * @param message Commit message describing the change
-    * @param branch Branch to write to (None = main; first write creates the branch)
+    * @param branch Branch to write to (defaults to main; first write creates the branch)
     * @return Commit metadata from the write operation
     */
   def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit]
@@ -54,7 +54,7 @@ trait IrminClient:
     * @param path Subtree root to replace
     * @param entries Full desired content of the subtree (relative paths)
     * @param message Commit message describing the change
-    * @param branch Branch to write to (None = main; first write creates the branch)
+    * @param branch Branch to write to (defaults to main; first write creates the branch)
     * @return Commit metadata from the write operation
     */
   def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit]
@@ -64,7 +64,7 @@ trait IrminClient:
     *
     * @param path Path to remove
     * @param message Commit message describing the removal
-    * @param branch Branch to write to (None = main)
+    * @param branch Branch to write to (defaults to main)
     * @return Commit metadata from the remove operation
     */
   def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit]
@@ -96,7 +96,7 @@ trait IrminClient:
     * scenario-merge service maps them to the domain `MergeConflict` (DD-10).
     *
     * @param from Source branch
-    * @param into Target branch (None = main)
+    * @param into Target branch
     * @param message Commit message for the merge commit
     * @return The merge commit
     */
@@ -106,7 +106,7 @@ trait IrminClient:
     * Revert a branch to a previous commit (Phase E groundwork).
     *
     * @param commit Target commit hash
-    * @param branch Branch to revert (None = main)
+    * @param branch Branch to revert
     * @return The new head commit
     */
   def revert(commit: CommitHash, branch: BranchRef): IO[IrminError, IrminCommit]
@@ -150,7 +150,7 @@ trait IrminClient:
     *
     * @param path Path whose history to read
     * @param n Maximum number of commits to return
-    * @param branch Branch to read from (None = main)
+    * @param branch Branch to read from (defaults to main)
     * @return Commits, most recent first
     */
   def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminCommit]]
@@ -159,7 +159,7 @@ trait IrminClient:
     * Lowest common ancestor(s) of a branch head and a commit — the merge
     * base (Phase D groundwork).
     *
-    * @param branch Branch whose head is one side (None = main)
+    * @param branch Branch whose head is one side
     * @param commit The other side's commit hash
     */
   def lca(branch: BranchRef, commit: CommitHash): IO[IrminError, List[IrminCommit]]
@@ -177,7 +177,7 @@ trait IrminClient:
     * List immediate child paths under the given prefix.
     *
     * @param prefix Path prefix to list (e.g., "risk-trees" or "risk-trees/1/nodes")
-    * @param branch Branch to read from (None = main)
+    * @param branch Branch to read from (defaults to main)
     * @return Child paths relative to the prefix
     */
   def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminPath]]

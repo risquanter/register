@@ -29,7 +29,7 @@ trait QueryService:
     * @param wsId   Workspace that owns the target risk tree
     * @param treeId  Target risk tree identifier
     * @param parsed  Pre-parsed query (from `QueryRequest.resolve()`)
-    * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
+    * @param branch Target branch (milestone-2b Phase B item 4b); defaults to `main`.
     *   Caller (controller) must have already verified `branch` belongs to `wsId`
     *   — see `ActiveBranch.resolve`; this method trusts it.
     * @return Query response with satisfaction result and matching node IDs

@@ -28,7 +28,7 @@ import com.risquanter.register.http.responses.SimulationResponse
   * @param globalError        App-wide error Var (passed through to LECChartState for
   *                           the 13-cap validation error).
   * @param userIdAccessor     Returns the current user identity (None in capability-only mode).
-  * @param activeBranchSignal This tab's active branch (None = main, DD-8) — BranchBar.
+  * @param activeBranchSignal This tab's active branch (BranchChoice) — BranchBar.
   *                           A signal, not just a pull accessor: this class owns the
   *                           "branch changed, re-fetch the list and whatever tree is
   *                           selected" reactivity internally (mirrors `LECChartState`'s

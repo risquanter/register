@@ -28,7 +28,7 @@ trait RiskTreeService {
   /** Create risk tree definition - persists tree structure only
     * @param wsId Workspace that owns the tree
     * @param req Request containing tree definition
-    * @param branch Target branch (milestone-2b Phase B); `None` targets `main`.
+    * @param branch Target branch (milestone-2b Phase B); defaults to `main`.
     *   Caller (controller) must have already verified `branch` belongs to `wsId`
     *   — see `ActiveBranch.resolve`; this method trusts it.
     * @return Persisted risk tree metadata (no LEC data)
@@ -39,7 +39,7 @@ trait RiskTreeService {
     * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
     * @param req Updated tree definition
-    * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
+    * @param branch Target branch (milestone-2b Phase B item 4b); defaults to `main`.
     *   Caller (controller) must have already verified `branch` belongs to `wsId`
     *   — see `ActiveBranch.resolve`; this method trusts it.
     * @return Updated risk tree metadata
@@ -49,7 +49,7 @@ trait RiskTreeService {
   /** Delete risk tree configuration
     * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
-    * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
+    * @param branch Target branch (milestone-2b Phase B item 4b); defaults to `main`.
     * @return Deleted risk tree metadata
     */
   def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
@@ -57,7 +57,7 @@ trait RiskTreeService {
   /** Retrieve single risk tree configuration by ID (no LEC data)
     * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
-    * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
+    * @param branch Target branch (milestone-2b Phase B item 4b); defaults to `main`.
     * @return Optional risk tree metadata
     */
   def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]]
@@ -73,7 +73,7 @@ trait RiskTreeService {
     * @param threshold Loss threshold to compute P(Loss >= threshold)
     * @param seedEntityId Owning workspace's stochastic identity (from the controller's resolved workspace)
     * @param includeProvenance Whether to include provenance metadata (currently unused for this endpoint)
-    * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
+    * @param branch Target branch (milestone-2b Phase B item 4b); defaults to `main`.
     * @return Probability as Double (empirical frequency ratio: exceedingCount / nTrials)
     */
   def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: BranchRef = BranchRef.Main): Task[Double]
@@ -87,7 +87,7 @@ trait RiskTreeService {
     * @param wsId Workspace that owns the tree
     * @param nodeIds Set of node identifiers
     * @param includeProvenance Whether to include provenance metadata for reproducibility
-    * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
+    * @param branch Target branch (milestone-2b Phase B item 4b); defaults to `main`.
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
   def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: BranchRef = BranchRef.Main): Task[Map[NodeId, LECNodeCurve]]
