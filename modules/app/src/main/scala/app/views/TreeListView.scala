@@ -21,19 +21,23 @@ object TreeListView:
 
   /** @param onNewTree      Design-view-only "start a fresh, blank tree" action —
     *                       absent in Analyze view, which has no builder to reset.
-    * @param leadingControl Analyze-only baseline-branch picker (milestone-2b
-    *                       Phase C follow-up, item 5), rendered beside the tree
-    *                       `<select>` in the same row, each taking half the
-    *                       width — visually paired, since choosing a branch and
-    *                       choosing a tree are the same kind of "what am I
+    * @param leadingControl Analyze-only baseline-branch picker, rendered beside
+    *                       the tree `<select>` in the same row, each taking half
+    *                       the width — visually paired, since choosing a branch
+    *                       and choosing a tree are the same kind of "what am I
     *                       looking at" decision. Absent in Design, which already
     *                       has its own branch control (`BranchBar.toolbar`)
     *                       above this component instead.
+    * @param onRefreshExtra Called on the refresh button alongside the panel's
+    *                       own list + selected-tree refresh — Analyze passes the
+    *                       compare card's refresh so a failed fetch there is
+    *                       recoverable from the same control.
     */
   def apply(
     state: TreeViewState,
     onNewTree: Option[() => Unit] = None,
-    leadingControl: Option[HtmlElement] = None
+    leadingControl: Option[HtmlElement] = None,
+    onRefreshExtra: () => Unit = () => ()
   ): HtmlElement =
     // Remembers the last successfully loaded list so a refetch (branch switch,
     // refresh click) doesn't blank the selector while in flight — every
@@ -82,9 +86,9 @@ object TreeListView:
           child <-- state.availableTrees.combineWith(lastKnownTrees.signal).map {
             case (LoadState.Loaded(trees), _) =>
               if trees.isEmpty then renderPlaceholder("No saved trees yet.")
-              else renderSelector(trees, state)
+              else renderSelector(trees, state, onRefreshExtra)
             case (LoadState.Loading, Some(prev)) if prev.nonEmpty =>
-              renderSelector(prev, state)
+              renderSelector(prev, state, onRefreshExtra)
             case (LoadState.Loading, _) => renderPlaceholder("Loading trees…")
             case (LoadState.Failed(msg), _) => renderError(msg, state)
             case (LoadState.Idle, _) => renderPlaceholder("Waiting to load…")
@@ -107,7 +111,7 @@ object TreeListView:
       )
     )
 
-  private def renderSelector(trees: List[SimulationResponse], state: TreeViewState): HtmlElement =
+  private def renderSelector(trees: List[SimulationResponse], state: TreeViewState, onRefreshExtra: () => Unit): HtmlElement =
     val selectedValue: Signal[String] = state.selectedTreeId.signal.map {
       case Some(id) => id.value
       case None     => ""
@@ -134,6 +138,7 @@ object TreeListView:
         onClick --> { _ =>
           state.loadTreeList()
           state.refreshSelectedTree()
+          onRefreshExtra()
         }
       )
     )

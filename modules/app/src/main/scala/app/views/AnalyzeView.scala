@@ -117,6 +117,13 @@ object AnalyzeView:
           if !enabled then singleSpec
           else target.toChoice match
             case None => singleSpec
+            // Guards the one transaction where the tab's branch was just
+            // switched onto the compare target: the invalidation subscription
+            // resets the target in the NEXT transaction, but this signal sees
+            // (target == activeBranch) first — pairing then would give both
+            // sides identical series ids, which Vega merges into one garbled
+            // series for a frame.
+            case Some(compareChoice) if compareChoice == activeBranch => singleSpec
             case Some(compareChoice) =>
               (thisCurves, compareCurves) match
                 case (LoadState.Failed(msg), _) => LoadState.Failed(msg)
@@ -178,7 +185,7 @@ object AnalyzeView:
       // Reset curve cache to idle when both sets become empty
       chartNodeIds.changes
         .collect { case None => () } --> { _ =>
-          treeViewState.chartState.curveCache.set(LoadState.Idle)
+          treeViewState.chartState.clearCurves()
         },
       // Compare mode: reload the diff whenever the selected tree, the tab's
       // own active branch, the compare toggle, or the chosen compare branch
@@ -221,8 +228,11 @@ object AnalyzeView:
             case CompareTarget.NotChosen => ()
         },
       // Compare card: keep its tree selection in step with the tab's own
-      // selected tree while Compare is fully on; clear the card's state
-      // entirely when Compare stops (toggle off, no target, or no tree).
+      // selected tree while Compare is fully on; drop its state when the
+      // compared branch leaves the comparison (target cleared, or no tree).
+      // A plain toggle-off PRESERVES the card's selection so toggling back
+      // on with the same target and tree restores exactly what the user had,
+      // deliberate removals included — nothing is re-seeded or forced back.
       // The `chosen == synced` guard exists because the two Vars sync across
       // an Airstream transaction boundary: on the emission where a target was
       // just picked, `chosenBranch` (which the compare instance's fetches
@@ -239,11 +249,32 @@ object AnalyzeView:
             // follow-up emission (same tuple, synced) does the selectTree.
             if chosen == synced && !compareTreeViewState.selectedTreeId.now().contains(treeId) then
               compareTreeViewState.selectTree(treeId)
+          case (Some(_), false, CompareTarget.Target(_), _) =>
+            () // toggled off, target still chosen: preserve the card's state
           case _ =>
-            if compareTreeViewState.selectedTreeId.now().isDefined then
-              compareTreeViewState.selectedTreeId.set(None)
-              compareTreeViewState.selectedTree.set(LoadState.Idle)
-              compareTreeViewState.chartState.reset()
+            compareTreeViewState.deselectTree()
+        },
+      // Compare card seeding: a branch ENTERS the comparison exactly when the
+      // card's tree finishes (re)loading with an empty selection — choosing
+      // or changing the target, switching the selected tree, and the refresh
+      // button all reset the card's selection before their fetch, while a
+      // toggle off/on with unchanged target+tree reloads nothing, so a
+      // preserved selection is never re-seeded. The seed is the baseline's
+      // counterparts on the compared branch (same node id present in its
+      // tree); an empty baseline falls back to the active tree's root, which
+      // becomes a real, persistent selection on the active card. The active
+      // tree's own Loaded transition triggers the same check for the case
+      // where its (re)load settles after the compare card's.
+      compareTreeViewState.selectedTree.signal.changes
+        .collect { case LoadState.Loaded(compareTree) => compareTree } --> { compareTree =>
+          seedCompareCard(treeViewState, compareTreeViewState, compareState, compareTree)
+        },
+      treeViewState.selectedTree.signal.changes
+        .collect { case LoadState.Loaded(_) => () } --> { _ =>
+          compareTreeViewState.selectedTree.now() match
+            case LoadState.Loaded(compareTree) =>
+              seedCompareCard(treeViewState, compareTreeViewState, compareState, compareTree)
+            case _ => ()
         },
       // Compare card: fetch its branch's curves for its own selection —
       // the mirror of the tab's own Auto-LEC subscription above, driven by
@@ -255,7 +286,7 @@ object AnalyzeView:
         },
       compareVisibleNodeIds.changes
         .collect { case visible if visible.isEmpty => () } --> { _ =>
-          compareTreeViewState.chartState.curveCache.set(LoadState.Idle)
+          compareTreeViewState.chartState.clearCurves()
         },
       // ── Query input panel ───────────────────────────────────────
       div(
@@ -357,7 +388,10 @@ object AnalyzeView:
       cls := "saved-tree-panel",
       TreeListView(
         treeViewState,
-        leadingControl = Some(BranchBar.picker(scenarioState, appConfigState.scenariosEnabled.signal))
+        leadingControl = Some(BranchBar.picker(scenarioState, appConfigState.scenariosEnabled.signal)),
+        // No-op unless the compare card holds a tree (its selectedTreeId is
+        // cleared whenever Compare is off), so it's safe to pass ungated.
+        onRefreshExtra = () => compareTreeViewState.refreshSelectedTree()
       ),
       // Compare off (or no target chosen yet) → today's single tree view,
       // untouched. Fully on → one bordered, collapsible card per compared
@@ -371,13 +405,13 @@ object AnalyzeView:
           div(
             cls := "branch-card-stack",
             BranchCard(
-              swatchColor = PaletteData.Aqua(3),
+              swatchColor = PaletteData.familySwatch(PaletteData.Aqua),
               branchName  = scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
               body        = TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
                               .amend(cls := "tree-detail-view--in-card")
             ),
             BranchCard(
-              swatchColor = PaletteData.Purple(3),
+              swatchColor = PaletteData.familySwatch(PaletteData.Purple),
               branchName  = Val(BranchBar.branchDisplayName(compareChoice)),
               body        = TreeDetailView(compareTreeViewState, hoverBridge = hoverBridge, changedNodeIds = gatedChangedNodeIds)
                               .amend(cls := "tree-detail-view--in-card")
@@ -396,6 +430,53 @@ object AnalyzeView:
         leftPercent = 75
       )
     )
+
+  /** Pure seeding rule for a branch entering the comparison.
+    *
+    * Baseline nonempty → its counterparts on the compared branch (same node
+    * id present in that branch's tree), in deterministic id order, capped.
+    * Baseline empty → the active tree's root: it is returned as the node to
+    * select on the ACTIVE card (a real, persistent selection), and seeds the
+    * compare side only where its counterpart exists.
+    *
+    * @return (node to select on the active card, nodes to seed into the
+    *         compare card)
+    */
+  def computeSeed(
+    baseline: Set[NodeId],
+    activeRoot: Option[NodeId],
+    compareTreeNodeIds: Set[NodeId],
+    cap: Int = 13
+  ): (Option[NodeId], List[NodeId]) =
+    if baseline.nonEmpty then
+      (None, baseline.toList.filter(compareTreeNodeIds.contains).sortBy(_.value).take(cap))
+    else
+      (activeRoot, activeRoot.filter(compareTreeNodeIds.contains).toList)
+
+  /** One entry-time seeding pass for the compare card. No-op unless Compare
+    * is fully on and the card's selection is empty — an entry event always
+    * resets it first, and a preserved or deliberately emptied selection is
+    * respected. Emits through the selection buses so the normal toggle and
+    * cap handling applies; the baseline read includes the active card's
+    * current selection, so a root selected by an earlier pass is a nonempty
+    * baseline on the next one, never a second (deselecting) toggle emission.
+    */
+  private def seedCompareCard(
+    treeViewState: TreeViewState,
+    compareTreeViewState: TreeViewState,
+    compareState: CompareState,
+    compareTree: RiskTree
+  ): Unit =
+    val fullyOn = compareState.enabled.now() && compareState.compareBranch.now() != CompareTarget.NotChosen
+    if fullyOn && compareTreeViewState.chartState.userSelectedNodeIds.now().isEmpty then
+      val active = treeViewState.chartState
+      val baseline = active.satisfyingNodeIds.now() ++ active.userSelectedNodeIds.now()
+      val activeRoot = treeViewState.selectedTree.now() match
+        case LoadState.Loaded(activeTree) => Some(activeTree.rootId)
+        case _                            => None
+      val (rootToSelect, seeds) = computeSeed(baseline, activeRoot, compareTree.nodes.map(_.id).toSet)
+      rootToSelect.foreach(active.userSelectionToggle.onNext)
+      seeds.foreach(compareTreeViewState.chartState.userSelectionToggle.onNext)
 
   /** Branch picker for Compare mode — options are `scenarioState.scenarios`
     * plus `main`, excluding the tab's own active branch (comparing a branch

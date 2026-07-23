@@ -69,3 +69,8 @@ object PaletteData:
   val allFamilies: Vector[Vector[HexColor]] = Vector(
     Green, Aqua, Purple, Yellow, Orange, Red, Pink, Emerald
   )
+
+  /** The shade that stands for a whole family where one colour is needed
+    * (branch-card header swatches): the mid stop, saturated enough to read
+    * as the family on both light and dark surfaces. */
+  def familySwatch(family: Vector[HexColor]): HexColor = family(3)

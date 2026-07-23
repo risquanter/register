@@ -158,6 +158,14 @@ final class TreeViewState(
   def refreshSelectedTree(): Unit =
     selectedTreeId.now().foreach(loadTreeStructure)
 
+  /** Clear the tree selection entirely — id, loaded structure, and chart
+    * state, which must be cleared together. No-op when nothing is selected. */
+  def deselectTree(): Unit =
+    if selectedTreeId.now().isDefined then
+      selectedTreeId.set(None)
+      selectedTree.set(LoadState.Idle)
+      chartState.reset()
+
   def toggleExpanded(nodeId: NodeId): Unit =
     expandedNodes.update { nodes =>
       if nodes.contains(nodeId) then nodes - nodeId else nodes + nodeId

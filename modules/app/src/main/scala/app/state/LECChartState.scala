@@ -59,8 +59,23 @@ final class LECChartState(
 
   /** Structured curve data fetched via `lec-multi` endpoint.
     * Keyed by `NodeId`, matching the domain type end-to-end (ADR-001 §4).
+    *
+    * Written only by the trigger pipeline below — `loadCurves`/`clearCurves`/
+    * `reset` emit triggers instead of setting this Var, so a new request or a
+    * reset supersedes whatever the previous request was still doing and a
+    * stale response can never overwrite a newer one. Same mechanism as
+    * `ScenarioDiffState.diffResult` and `TreeListState`.
     */
   val curveCache: Var[LoadState[Map[NodeId, LECNodeCurve]]] = Var(LoadState.Idle)
+
+  private val curvesTrigger = new EventBus[Option[() => EventStream[Either[Throwable, Map[NodeId, LECNodeCurve]]]]]
+
+  // Write-guarded: callers fire on signal ticks, not only on real
+  // transitions, and Var.set emits even when the value is unchanged — an
+  // unguarded write would rebuild the chart spec for a no-op.
+  loadStatePipeline(curvesTrigger.events).foreach { v =>
+    if curveCache.now() != v then curveCache.set(v)
+  }(using unsafeWindowOwner)
 
   /** Manual colour overrides per node (mutated via `setColorOverride`/`clearColorOverride`). */
   private val colorOverrides: Var[Map[NodeId, HexColor]] = Var(Map.empty)
@@ -185,13 +200,18 @@ final class LECChartState(
   def clearPreview(): Unit =
     if previewOverride.now().isDefined then previewOverride.set(None)
 
-  /** Reset chart state (called when tree selection changes). */
+  /** Reset chart state (called when tree selection changes). Also supersedes
+    * an in-flight curve fetch, if one was still running. */
   def reset(): Unit =
     userSelectedNodeIds.set(Set.empty)
     satisfyingNodeIds.set(Set.empty)
-    curveCache.set(LoadState.Idle)
+    clearCurves()
     colorOverrides.set(Map.empty)
     previewOverride.set(None)
+
+  /** Reset the curve cache to Idle, superseding an in-flight fetch. */
+  def clearCurves(): Unit =
+    curvesTrigger.emit(None)
 
   /** Fetch LEC curves from the backend for the given node IDs.
     *
@@ -204,8 +224,10 @@ final class LECChartState(
   def loadCurves(nodeIds: List[NodeId]): Unit =
     (keySignal.now(), selectedTreeId.now()) match
       case (Some(key), Some(treeId)) =>
-        getWorkspaceLECCurvesMultiEndpoint(
-          (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor())
-        ).loadInto(curveCache)
+        curvesTrigger.emit(Some(() =>
+          getWorkspaceLECCurvesMultiEndpoint(
+            (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor())
+          ).toOutcomeEventStream
+        ))
       case _ => () // No workspace or tree selected — nothing to do
 

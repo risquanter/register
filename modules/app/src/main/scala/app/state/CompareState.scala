@@ -27,14 +27,16 @@ final class CompareState:
   val enabled: Var[Boolean] = Var(false)
   val compareBranch: Var[CompareTarget] = Var(CompareTarget.NotChosen)
 
-  /** The last genuinely chosen compare branch, as a plain `BranchChoice` —
-    * the branch signal the compare card's `TreeViewState` is constructed
-    * with, which needs a definite branch before any choice exists. Holds
-    * `Main` until the first real choice and retains the previous choice
-    * while `compareBranch` is `NotChosen`; harmless, because the card and
-    * its fetches are only active while a target is chosen. Synced here so
-    * views write `compareBranch` only. */
+  /** The chosen compare branch as a plain `BranchChoice` — the branch signal
+    * the compare card's `TreeViewState` is constructed with, which needs a
+    * definite branch before any choice exists. Falls back to `Main` while
+    * `compareBranch` is `NotChosen`, so no state tied to it (branch-keyed
+    * list fetches, the key-change reload in `TreeViewState`) can act on a
+    * branch that may no longer exist. Synced here so views write
+    * `compareBranch` only. */
   val chosenBranch: Var[BranchChoice] = Var(BranchChoice.Main)
 
-  compareBranch.signal.changes.collect { case CompareTarget.Target(choice) => choice }
-    .foreach(chosenBranch.set)(using unsafeWindowOwner)
+  compareBranch.signal.changes.foreach {
+    case CompareTarget.Target(choice) => chosenBranch.set(choice)
+    case CompareTarget.NotChosen      => chosenBranch.set(BranchChoice.Main)
+  }(using unsafeWindowOwner)

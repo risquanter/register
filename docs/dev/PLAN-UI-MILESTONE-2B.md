@@ -303,8 +303,18 @@ single branch (Ctrl+click in the tree). Proposed design:
   Trees collapse independently; branches may structurally diverge (added/
   removed nodes), which stacked trees represent honestly and a combined
   node×branch matrix would not.
-- **Default selection: each branch's top aggregate (root)** — compare mode
-  opens with one meaningful curve per branch and no empty chart.
+- **Entry seeding (decided 2026-07-23, supersedes the earlier "default
+  root selection" bullet; built):** when a branch enters the comparison
+  (target chosen or changed, tree switched, refresh), its card is seeded
+  with the counterparts of the **baseline** — the active card's charted
+  set (query ∪ manual); an empty baseline falls back to the active tree's
+  root, which becomes a real, persistent selection on the active card.
+  Seeding is one-shot: after entry both cards are fully manual, later
+  baseline changes do not propagate, and a plain Compare off/on toggle
+  preserves the card's selection (deliberate removals included — nothing
+  is forced back, and compare mode still never opens empty). Compare-card
+  picks deliberately do not migrate when the target switches; a branch
+  leaving the comparison drops all its curves.
 - Selection identity is the pair **(branch, node)** — the same node ULID
   exists on several branches, so chart legends and tooltips always name
   both ("stress-2026 · cyber-outage"), and a node's curve renders in a
