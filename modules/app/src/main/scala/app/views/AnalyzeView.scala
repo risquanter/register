@@ -5,10 +5,11 @@ import com.raquo.laminar.api.L.{*, given}
 import scala.scalajs.js
 
 import app.components.{SplitPane, FormInputs, BranchBar, BranchCard}
-import app.chart.{LECSpecBuilder, CompareColorAssigner, PaletteData}
-import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, AppConfigState, CompareState, CompareTarget, ScenarioDiffState, toChoice}
+import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, PaletteData, PinnedAxes}
+import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, AppConfigState, CompareMode, CompareState, CompareTarget, ScenarioDiffState, toChoice}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, ScenarioName}
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
   *
@@ -52,8 +53,13 @@ object AnalyzeView:
     /** Fire query against selected tree. No-op if no tree is selected. */
     def runQuery(): Unit = queryState.executeQuery()
 
-    // Shared hover bridge — wired to both chart and tree views
+    // Hover bridges — one per chart surface. The active branch's chart and
+    // tree card share `hoverBridge`; the compare card and its side-by-side
+    // panel share `compareHoverBridge`, so hovering a row highlights only
+    // its own card, and in side-by-side each panel's chart↔tree hover works
+    // with plain node-id curve ids.
     val hoverBridge = new ChartHoverBridge()
+    val compareHoverBridge = new ChartHoverBridge()
 
     // ── Reactive chart node list ───────────────────────────────────
     // Merges query-matched nodes with user Ctrl+click selections.
@@ -76,8 +82,8 @@ object AnalyzeView:
     /** ✎ markers gate to empty immediately when Compare is off, even if a
       * stale diff result from a previous session lingers in `diffState`. */
     val gatedChangedNodeIds: Signal[Set[NodeId]] =
-      compareState.enabled.signal.combineWith(diffState.changedNodeIds).map { (enabled, ids) =>
-        if enabled then ids else Set.empty
+      compareState.comparisonOn.combineWith(diffState.changedNodeIds).map { (on, ids) =>
+        if on then ids else Set.empty
       }
 
     /** The compare card's own selection — independent of the tab's own
@@ -87,12 +93,12 @@ object AnalyzeView:
     val compareVisibleNodeIds: Signal[Set[NodeId]] =
       compareTreeViewState.chartState.visibleCurves
 
-    /** Off, or no compare branch chosen → the tab's own single-branch spec,
-      * untouched (regression guard — nothing about today's chart changes
-      * unless Compare is fully on). Otherwise → Overlay: each branch card
-      * contributes its own selection's curves, coloured by branch family
-      * (`CompareColorAssigner`), labelled with the branch names the cards
-      * show.
+    /** Not in Overlay mode, or no compare branch chosen → the tab's own
+      * single-branch spec, untouched (in Side-by-side the chart area renders
+      * the panel grid instead of this signal). Overlay with a target → each
+      * branch card contributes its own selection's curves, coloured by
+      * branch family (`CompareColorAssigner`), labelled with the branch
+      * names the cards show.
       *
       * A side whose curves haven't landed yet simply contributes nothing on
       * this emission and fills in when its fetch settles — an already-drawn
@@ -104,17 +110,14 @@ object AnalyzeView:
       // builds a NEW js.Dynamic in compare mode, and LECChartView re-embeds
       // per emission. The other inputs are already dedup-safe: specSignal,
       // visibleNodeIds and compareVisibleNodeIds are distinct at their
-      // producers; enabled/compareBranch/activeBranch only change on genuine
+      // producers; mode/compareBranch/activeBranch only change on genuine
       // user action.
-      compareState.enabled.signal
+      compareState.mode.signal
         .combineWith(treeViewState.chartState.specSignal, treeViewState.curveCache.distinct, visibleNodeIds)
         .combineWith(compareTreeViewState.curveCache.distinct, compareVisibleNodeIds)
         .combineWith(compareState.compareBranch.signal, scenarioState.activeBranch.signal)
-        .map { case (enabled, singleSpec, thisCurves, thisVisible, compareCurves, compareVisible, target, activeBranch) =>
-          def loadedOrEmpty(s: LoadState[Map[NodeId, LECNodeCurve]]): Map[NodeId, LECNodeCurve] = s match
-            case LoadState.Loaded(m) => m
-            case _                   => Map.empty
-          if !enabled then singleSpec
+        .map { case (mode, singleSpec, thisCurves, thisVisible, compareCurves, compareVisible, target, activeBranch) =>
+          if mode != CompareMode.Overlay then singleSpec
           else target.toChoice match
             case None => singleSpec
             // Guards the one transaction where the tab's branch was just
@@ -138,6 +141,23 @@ object AnalyzeView:
                   if paired.nonEmpty then LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired))
                   else if thisVisible.isEmpty && compareVisible.isEmpty then LoadState.Idle
                   else LoadState.Loading
+        }
+
+    /** Side-by-side panel specs — each branch's own curves in its own
+      * normal single-branch node colours, both panels pinned to the shared
+      * extents of all visible curves (per-panel autoscaling would silently
+      * defeat the comparison). Emitted as a pair so both panels always
+      * share one `PinnedAxes` computation. */
+    val sideBySideSpecs: Signal[(LoadState[js.Dynamic], LoadState[js.Dynamic])] =
+      treeViewState.curveCache.distinct
+        .combineWith(visibleNodeIds, treeViewState.nodeColorMap)
+        .combineWith(compareTreeViewState.curveCache.distinct, compareVisibleNodeIds, compareTreeViewState.nodeColorMap)
+        .map { case (thisCurves, thisVisible, thisColors, compareCurves, compareVisible, compareColors) =>
+          val thisPairs    = ColorAssigner.pairWithColors(loadedOrEmpty(thisCurves), thisVisible, thisColors)
+          val comparePairs = ColorAssigner.pairWithColors(loadedOrEmpty(compareCurves), compareVisible, compareColors)
+          val pinned = PinnedAxes.fromCurves((thisPairs ++ comparePairs).map(_._1))
+          (panelSpec(thisCurves, thisVisible, thisPairs, pinned),
+           panelSpec(compareCurves, compareVisible, comparePairs, pinned))
         }
 
     // ── Node lookup for name resolution in QueryResultCard ───────
@@ -195,7 +215,7 @@ object AnalyzeView:
       // racing ahead of the (still-debounced) curve fetch would briefly
       // label stale curve data with the newly-chosen branch's name.
       treeViewState.selectedTreeId.signal
-        .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, scenarioState.activeBranch.signal)
+        .combineWith(compareState.comparisonOn, compareState.compareBranch.signal, scenarioState.activeBranch.signal)
         .changes.debounce(100) --> {
           case (Some(treeId), true, CompareTarget.Target(compareBranch), activeBranch) =>
             diffState.loadDiff(treeId, activeBranch, compareBranch)
@@ -242,7 +262,7 @@ object AnalyzeView:
       // A target change with the tree already selected needs nothing here:
       // the compare instance's own branch subscription refetches it.
       treeViewState.selectedTreeId.signal
-        .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, compareState.chosenBranch.signal)
+        .combineWith(compareState.comparisonOn, compareState.compareBranch.signal, compareState.chosenBranch.signal)
         .changes --> {
           case (Some(treeId), true, CompareTarget.Target(chosen), synced) =>
             // chosen != synced: waiting for chosenBranch to catch up — the
@@ -294,24 +314,14 @@ object AnalyzeView:
         div(
           cls := "analyze-query-header",
           h3("Query"),
-          label(
-            cls := "form-label-inline compare-toggle",
-            input(
-              typ := "checkbox",
-              controlled(
-                checked <-- compareState.enabled.signal,
-                onInput.mapToChecked --> compareState.enabled
-              )
-            ),
-            span(" Compare")
-          ),
+          renderModeControl(compareState),
           // Always mounted, not conditionally shown/hidden — toggling Compare
           // used to mount/unmount this <select> outright, which shifted the
           // surrounding panel's size every time and needed a moment to
           // rebuild its option list on remount. Disabled instead: same size,
           // same position, always ready, with a visual cue (dimmed + inert)
           // for "not applicable right now" instead of vanishing entirely.
-          renderBranchPicker(scenarioState, compareState, disabledSignal = compareState.enabled.signal.map(!_))
+          renderBranchPicker(scenarioState, compareState, disabledSignal = compareState.comparisonOn.map(!_))
         ),
         div(
           cls := "form-field",
@@ -378,9 +388,31 @@ object AnalyzeView:
       // ── Query result card ───────────────────────────────────────
       QueryResultCard(queryState.queryResult.signal, nodeLookup),
       // ── LEC chart panel ─────────────────────────────────────────
+      // Side-by-side with a chosen target → one chart per branch on shared
+      // pinned axes; every other state (Off, Overlay, side-by-side without
+      // a target yet) → the single chart driven by `combinedSpecSignal`.
       div(
         cls := "analyze-lec-panel",
-        LECChartView(combinedSpecSignal, hoverBridge)
+        child <-- compareState.mode.signal.combineWith(compareState.compareBranch.signal).map {
+          case (CompareMode.SideBySide, CompareTarget.Target(compareChoice)) =>
+            div(
+              cls := "lec-panel-grid",
+              chartPanel(
+                scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
+                PaletteData.familySwatch(PaletteData.Aqua),
+                sideBySideSpecs.map(_._1),
+                hoverBridge
+              ),
+              chartPanel(
+                Val(BranchBar.branchDisplayName(compareChoice)),
+                PaletteData.familySwatch(PaletteData.Purple),
+                sideBySideSpecs.map(_._2),
+                compareHoverBridge
+              )
+            )
+          case _ =>
+            LECChartView(combinedSpecSignal, hoverBridge)
+        }
       )
     )
 
@@ -400,7 +432,7 @@ object AnalyzeView:
       // nodes are the ones diffed against the tab's active branch. Swatches
       // are the branch palette families the Overlay chart colours by
       // (Aqua = the tab's own branch, Purple = the compared one).
-      child <-- compareState.enabled.signal.combineWith(compareState.compareBranch.signal).map {
+      child <-- compareState.comparisonOn.combineWith(compareState.compareBranch.signal).map {
         case (true, CompareTarget.Target(compareChoice)) =>
           div(
             cls := "branch-card-stack",
@@ -413,7 +445,7 @@ object AnalyzeView:
             BranchCard(
               swatchColor = PaletteData.familySwatch(PaletteData.Purple),
               branchName  = Val(BranchBar.branchDisplayName(compareChoice)),
-              body        = TreeDetailView(compareTreeViewState, hoverBridge = hoverBridge, changedNodeIds = gatedChangedNodeIds)
+              body        = TreeDetailView(compareTreeViewState, hoverBridge = compareHoverBridge, changedNodeIds = gatedChangedNodeIds)
                               .amend(cls := "tree-detail-view--in-card")
             )
           )
@@ -428,6 +460,79 @@ object AnalyzeView:
         left = analyzeLeftPanel,
         right = savedTreePanel,
         leftPercent = 75
+      )
+    )
+
+  private def loadedOrEmpty(s: LoadState[Map[NodeId, LECNodeCurve]]): Map[NodeId, LECNodeCurve] = s match
+    case LoadState.Loaded(m) => m
+    case _                   => Map.empty
+
+  /** One side-by-side panel's spec lifecycle — mirrors `LECChartState
+    * .specSignal`'s shape (empty selection → Idle; otherwise the cache's
+    * own lifecycle carried over the built spec), plus the shared pinned
+    * axes both panels agree on. */
+  private def panelSpec(
+    cacheState: LoadState[Map[NodeId, LECNodeCurve]],
+    visible: Set[NodeId],
+    pairs: Vector[(LECNodeCurve, HexColor)],
+    pinned: Option[PinnedAxes]
+  ): LoadState[js.Dynamic] =
+    if visible.isEmpty then LoadState.Idle
+    else cacheState.map(_ => LECSpecBuilder.build(pairs, width = 460, height = 340, pinned = pinned))
+
+  /** One tile of the side-by-side grid: swatch + branch name header over
+    * that branch's own chart. */
+  private def chartPanel(
+    branchName: Signal[String],
+    swatchColor: HexColor,
+    spec: Signal[LoadState[js.Dynamic]],
+    bridge: ChartHoverBridge
+  ): HtmlElement =
+    div(
+      cls := "lec-panel",
+      div(
+        cls := "lec-panel-header",
+        span(cls := "branch-card-swatch", styleAttr := s"background-color: ${swatchColor.value};"),
+        span(cls := "lec-panel-name", child.text <-- branchName)
+      ),
+      LECChartView(spec, bridge)
+    )
+
+  /** Three-position slider selecting the comparison display mode, with
+    * plain-text state labels below the track; the labels are clickable and
+    * set the mode directly. */
+  private def renderModeControl(compareState: CompareState): HtmlElement =
+    def modeIndex(m: CompareMode): Int = m match
+      case CompareMode.Off        => 0
+      case CompareMode.Overlay    => 1
+      case CompareMode.SideBySide => 2
+    def modeAt(i: Int): CompareMode = i match
+      case 1 => CompareMode.Overlay
+      case 2 => CompareMode.SideBySide
+      case _ => CompareMode.Off
+    div(
+      cls := "compare-mode-control",
+      input(
+        typ := "range",
+        cls := "compare-mode-slider",
+        minAttr := "0",
+        maxAttr := "2",
+        stepAttr := "1",
+        controlled(
+          value <-- compareState.mode.signal.map(m => modeIndex(m).toString),
+          onInput.mapToValue --> { raw => compareState.mode.set(modeAt(raw.toIntOption.getOrElse(0))) }
+        )
+      ),
+      div(
+        cls := "compare-mode-labels",
+        List("Off" -> CompareMode.Off, "Overlay" -> CompareMode.Overlay, "Side by side" -> CompareMode.SideBySide).map { (text, m) =>
+          span(
+            cls := "compare-mode-label",
+            cls("compare-mode-label--active") <-- compareState.mode.signal.map(_ == m),
+            text,
+            onClick --> { _ => compareState.mode.set(m) }
+          )
+        }
       )
     )
 
@@ -467,7 +572,7 @@ object AnalyzeView:
     compareState: CompareState,
     compareTree: RiskTree
   ): Unit =
-    val fullyOn = compareState.enabled.now() && compareState.compareBranch.now() != CompareTarget.NotChosen
+    val fullyOn = compareState.comparisonOnNow && compareState.compareBranch.now() != CompareTarget.NotChosen
     if fullyOn && compareTreeViewState.chartState.userSelectedNodeIds.now().isEmpty then
       val active = treeViewState.chartState
       val baseline = active.satisfyingNodeIds.now() ++ active.userSelectedNodeIds.now()

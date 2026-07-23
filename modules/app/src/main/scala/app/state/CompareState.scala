@@ -19,13 +19,29 @@ extension (target: CompareTarget)
     case CompareTarget.NotChosen      => None
     case CompareTarget.Target(choice) => Some(choice)
 
-/** Per-tab UI state for the Analyze comparison mode — whether Compare is on,
-  * and which second branch (if any) to compare the tab's active branch
-  * against. Not fetched from the server.
+/** How the comparison is displayed. `Overlay` draws both branches' curves on
+  * one chart, coloured by branch family; `SideBySide` tiles one chart per
+  * branch on shared pinned axes, keeping normal single-branch node colours
+  * inside each panel.
+  */
+enum CompareMode:
+  case Off, Overlay, SideBySide
+
+/** Per-tab UI state for the Analyze comparison mode — how the comparison is
+  * displayed (off / overlay / side-by-side), and which second branch (if
+  * any) to compare the tab's active branch against. Not fetched from the
+  * server.
   */
 final class CompareState:
-  val enabled: Var[Boolean] = Var(false)
+  val mode: Var[CompareMode] = Var(CompareMode.Off)
   val compareBranch: Var[CompareTarget] = Var(CompareTarget.NotChosen)
+
+  /** True in either comparison mode — everything shared by Overlay and
+    * Side-by-side (branch cards, ✎ diff markers, entry seeding, the compare
+    * card's fetches) keys off this rather than the specific mode. */
+  val comparisonOn: Signal[Boolean] = mode.signal.map(_ != CompareMode.Off)
+
+  def comparisonOnNow: Boolean = mode.now() != CompareMode.Off
 
   /** The chosen compare branch as a plain `BranchChoice` — the branch signal
     * the compare card's `TreeViewState` is constructed with, which needs a

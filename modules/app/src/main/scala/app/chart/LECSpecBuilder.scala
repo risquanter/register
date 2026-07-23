@@ -39,6 +39,39 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   *   - Interpolation toggle param (monotone/basis/linear/step-after)
   *   - Y-axis adaptive ceiling (capped at 1.0)
   */
+/** Explicit axis extents for a spec, overriding the per-spec automatic ones.
+  * Used by the side-by-side comparison layout: each branch's panel is pinned
+  * to the extents of BOTH branches' visible curves, because per-panel
+  * autoscaling would silently defeat the visual comparison.
+  *
+  * @param lossMax        Upper end of the x (loss) domain; lower end stays 0.
+  * @param probabilityMax Upper end of the y (exceedance) domain, ≤ 1.0.
+  */
+final case class PinnedAxes(lossMax: Double, probabilityMax: Double)
+
+object PinnedAxes:
+  /** Shared extents over every given curve — the same headroom rule the
+    * unpinned spec applies to its own curves (10% above the largest starting
+    * exceedance, capped at 1.0). `None` when no curve has any points.
+    *
+    * The loss extent covers the annotation values (quantiles, AAL) as well
+    * as the curve points: an unpinned spec gets that for free because
+    * Vega-Lite unions the x domain across layers, but an explicit domain
+    * overrides the union — without this, a P99.5 rule beyond the last curve
+    * tick would draw outside the pinned plot area. */
+  def fromCurves(curves: Iterable[LECNodeCurve]): Option[PinnedAxes] =
+    val withData = curves.filter(_.curve.nonEmpty)
+    val points = withData.flatMap(_.curve)
+    if points.isEmpty then None
+    else
+      val annotationValues = withData.flatMap(nc => nc.quantiles.values ++ Seq(nc.averageAnnualLoss))
+      val lossMax = (points.map(_.loss.toDouble) ++ annotationValues).max
+      val probabilityMax = math.min(
+        1.0,
+        withData.flatMap(_.curve.headOption).map(_.exceedanceProbability).maxOption.getOrElse(1.0) * 1.1
+      )
+      Some(PinnedAxes(lossMax, probabilityMax))
+
 object LECSpecBuilder:
 
   /** The user-facing input params declared in the spec's `params` array
@@ -58,15 +91,18 @@ object LECSpecBuilder:
     * @param interpolation Initial interpolation mode
     * @param width         Chart width in pixels
     * @param height        Chart height in pixels
+    * @param pinned        Explicit axis extents; `None` (the default) keeps
+    *                      the automatic per-spec extents
     * @return Vega-Lite spec as `js.Dynamic`, ready for `vegaEmbed`
     */
   def build(
     curves: Vector[(LECNodeCurve, HexColor)],
     interpolation: String = "monotone",
     width: Int = 950,
-    height: Int = 400
+    height: Int = 400,
+    pinned: Option[PinnedAxes] = None
   ): js.Dynamic =
-    buildFromSeries(curves.map { case (nc, color) => (nc, color, nc.id.value) }, interpolation, width, height)
+    buildFromSeries(curves.map { case (nc, color) => (nc, color, nc.id.value) }, interpolation, width, height, pinned)
 
   /** Same as `build`, but the chart's series identity (`curveId` — the data
     * points, colour-scale domain, and legend match) is given explicitly per
@@ -81,11 +117,12 @@ object LECSpecBuilder:
     curves: Vector[(LECNodeCurve, HexColor, String)],
     interpolation: String = "monotone",
     width: Int = 950,
-    height: Int = 400
+    height: Int = 400,
+    pinned: Option[PinnedAxes] = None
   ): js.Dynamic =
     val allPoints = curves.flatMap(_._1.curve)
     if curves.isEmpty || allPoints.isEmpty then emptySpec(width, height)
-    else buildSpec(curves, interpolation, width, height)
+    else buildSpec(curves, interpolation, width, height, pinned)
 
   // ── Private builders ──────────────────────────────────────────
 
@@ -93,17 +130,18 @@ object LECSpecBuilder:
     curves: Vector[(LECNodeCurve, HexColor, String)],
     interpolation: String,
     width: Int,
-    height: Int
+    height: Int,
+    pinned: Option[PinnedAxes]
   ): js.Dynamic =
     // Stable ordering: sort by curveId for deterministic domain/range
     val ordered = curves.sortBy(_._3)
 
-    // Y-axis adaptive ceiling (capped at 1.0)
+    // Y-axis ceiling: pinned extent if given, else adaptive (capped at 1.0)
     val yBuffer = 1.1
-    val yCeiling = math.min(
+    val yCeiling = pinned.map(_.probabilityMax).getOrElse(math.min(
       1.0,
       ordered.flatMap(_._1.curve.headOption).map(_.exceedanceProbability).max * yBuffer
-    )
+    ))
 
     // Legend labelExpr: map curveId → display name (immutable String, safe to share).
     // `buildFromSeries` callers that disambiguate two branches' curves for the
@@ -212,13 +250,15 @@ object LECSpecBuilder:
             "labelAngle" -> 0,
             "labelExpr"  -> "if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')"
           ),
-          "scale" -> js.Dynamic.literal(
-            // Deliberately 0, not the curve's own smallest loss tick: a risk's
-            // true likely outcome is often "no loss", which must stay
-            // representable on the axis, not be clamped away — see
-            // `probabilityOfNoLoss`'s doc comment (LECGenerator) for why.
-            "domainMin" -> 0.0
-          )
+          // Lower end is deliberately 0, not the curve's own smallest loss
+          // tick: a risk's true likely outcome is often "no loss", which must
+          // stay representable on the axis, not be clamped away — see
+          // `probabilityOfNoLoss`'s doc comment (LECGenerator) for why.
+          // A pinned upper end fixes the domain outright (shared axes across
+          // side-by-side panels); otherwise it stays automatic.
+          "scale" -> pinned.fold(
+            js.Dynamic.literal("domainMin" -> 0.0)
+          )(p => js.Dynamic.literal("domain" -> js.Array(0.0, p.lossMax)))
         ),
         "y" -> js.Dynamic.literal(
           "field" -> "exceedance",

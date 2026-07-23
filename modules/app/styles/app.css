@@ -669,9 +669,34 @@ body {
 .analyze-query-header h3 {
   margin-bottom: 0;
 }
-.compare-toggle {
-  font-size: var(--text-sm);
-  color: var(--foreground-variant);
+/* Three-position mode slider (Off / Overlay / Side by side), labels below
+   the track. */
+.compare-mode-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-0-5);
+  width: 170px;
+  flex-shrink: 0;
+}
+.compare-mode-slider {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+}
+.compare-mode-labels {
+  display: flex;
+  justify-content: space-between;
+}
+.compare-mode-label {
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.compare-mode-label--active {
+  color: var(--foreground);
+  font-weight: var(--font-weight-medium);
 }
 .compare-branch-select {
   font-size: var(--text-sm);
@@ -735,8 +760,40 @@ body {
   height: auto !important;
 }
 
+/* ── Side-by-side comparison panels ──
+   Auto-fit grid: panels keep a minimum readable width and overflow to
+   further rows automatically. */
+.lec-panel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: var(--sp-4);
+}
+
+.lec-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.lec-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.lec-panel-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* =============================================
-   Query Pane (ADR-028 — TG-3)
+   Query Pane (ADR-028)
    ============================================= */
 
 /* Monospace textarea for query input */
