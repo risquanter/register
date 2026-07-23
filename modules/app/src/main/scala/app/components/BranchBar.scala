@@ -8,31 +8,26 @@ import app.state.{ScenarioState, ScenarioSubmitState, LoadState, Section}
 import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName}
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
-/** Branch indicator + scenario management surfaces (milestone-2b Phase B,
-  * DD-9, PLAN-UI-MILESTONE-2B.md §4). Independent pieces:
+/** Branch indicator + scenario management surfaces. Independent pieces:
   *
   *   - `chipForSection` — read-only topbar indicator, always visible in both
-  *                        Design and Analyze (§0: neutral chrome, no role
-  *                        colour; §4.3: inert in Analyze) — shows whichever
-  *                        section's own branch is on screen.
+  *                        Design and Analyze — shows whichever section's own
+  *                        branch is on screen.
   *   - `toolbar`         — the interactive "Scenarios ▾" menu (switch/create/
   *                        duplicate/delete), Design-only, sits atop TreeBuilderView.
   *   - `picker`          — plain "pick a branch" `<select>` with no management
-  *                        actions, for Analyze's own baseline-branch selector
-  *                        (milestone-2b Phase C follow-up).
+  *                        actions, for Analyze's own baseline-branch selector.
   *
-  * All are entirely absent from the DOM when scenarios are unavailable
-  * (Variant R, §5 — decided 2026-07-19: full removal, not graying out).
+  * All are entirely absent from the DOM when scenarios are unavailable —
+  * removed outright, not grayed out.
   */
 object BranchBar:
 
   /** Source branch a new scenario forks from, as the `forkOf` request field
     * (a genuine wire `Option`: `None` = main's current head — main is not a
-    * scenario, DD-11). `Main` always forks main; `Current` forks whatever
-    * branch is active, which on main issues the identical `forkOf`.
-    * Extracted as a pure function (not inlined in the click handlers) so the
-    * equivalence is directly unit-testable without a Laminar/DOM harness —
-    * see [[forkTarget]] and `BranchBarSpec`.
+    * scenario). `Main` always forks main; `Current` forks whatever branch is
+    * active, which on main issues the identical `forkOf`. [[forkTarget]] is a
+    * pure function so the equivalence is unit-testable without a DOM harness.
     */
   enum CreateSource:
     case Main, Current
@@ -42,19 +37,21 @@ object BranchBar:
       case CreateSource.Main    => None
       case CreateSource.Current => current.toWire
 
-  private def branchLabel(choice: BranchChoice): String = choice match
-    case BranchChoice.Main           => "⎇ main"
-    case BranchChoice.Scenario(name) => s"⎇ ${name.value}"
+  /** Plain display name for a branch — `"main"` or the scenario's own name.
+    * Shared by the Compare branch cards and the chart legend's branch
+    * suffixes; the topbar chip's own label adds the ⎇ glyph on top. */
+  def branchDisplayName(choice: BranchChoice): String = choice match
+    case BranchChoice.Main           => "main"
+    case BranchChoice.Scenario(name) => name.value.toString
 
-  /** Topbar branch indicator. Inert — no click handler (§4.1/§4.3).
+  private def branchLabel(choice: BranchChoice): String =
+    s"⎇ ${branchDisplayName(choice)}"
+
+  /** Topbar branch indicator. Inert — no click handler.
     *
-    * Design and Analyze each own an independent `ScenarioState` (milestone-2b
-    * Phase C follow-up: splitting shared Design/Analyze state to remove the
-    * cross-view interdependence a shared instance caused). The topbar chip is
-    * shared chrome above both views, so it shows whichever section's own
-    * branch is presently on screen rather than always Design's — otherwise
-    * it would silently reintroduce the same "Analyze shows Design's context"
-    * confusion the split was meant to remove.
+    * Design and Analyze each own an independent `ScenarioState`. The topbar
+    * chip is shared chrome above both views, so it shows whichever section's
+    * own branch is presently on screen rather than always Design's.
     */
   def chipForSection(
     activeSection: Signal[Section],
@@ -96,8 +93,7 @@ object BranchBar:
   /** Shared option list for every branch-picking `<select>`: main + every
     * scenario, rendered via `FormInputs.splitOptions` (keyed by each option's
     * own value) so recreating the currently-selected `<option>` doesn't reset
-    * the browser's native `<select>` selection out from under the tracked Var
-    * (TODO.md item 26).
+    * the browser's native `<select>` selection out from under the tracked Var.
     *
     * @param excludeValue Raw option value to omit, if any — e.g. Compare
     *                     mode hides whichever branch is already this tab's
@@ -118,11 +114,10 @@ object BranchBar:
     }
 
   /** Plain "pick a branch" `<select>` — no switch/create/duplicate/delete
-    * menu, unlike `toolbar`. Used for Analyze's own baseline-branch selector
-    * (milestone-2b Phase C follow-up, item 5): every branch including main
-    * is always a valid choice, since — unlike the Compare-mode picker —
-    * this one isn't comparing against anything, just choosing what Analyze
-    * itself is looking at.
+    * menu, unlike `toolbar`. Used for Analyze's own baseline-branch selector:
+    * every branch including main is always a valid choice, since — unlike
+    * the Compare-mode picker — this one isn't comparing against anything,
+    * just choosing what Analyze itself is looking at.
     */
   def picker(
     scenarioState: ScenarioState,

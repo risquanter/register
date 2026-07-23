@@ -6,10 +6,7 @@ import com.risquanter.register.domain.data.iron.BranchChoice
 
 /** What the Compare branch picker currently holds. Built on `BranchChoice`
   * (the single internal spelling of "main vs. a named scenario") — this enum
-  * only adds the picker-specific "nothing chosen yet" case, which a bare
-  * `Option[BranchChoice]` could not distinguish from an unset form value in
-  * match ergonomics and which historically collided with main under the old
-  * `Option[ScenarioName]` encoding.
+  * only adds the picker-specific "nothing chosen yet" case.
   */
 enum CompareTarget:
   case NotChosen
@@ -22,10 +19,22 @@ extension (target: CompareTarget)
     case CompareTarget.NotChosen      => None
     case CompareTarget.Target(choice) => Some(choice)
 
-/** Per-tab UI toggle for the Analyze Overlay comparison mode (milestone-2b
-  * Phase C) — not fetched from the server, just which second branch (if any)
-  * the user has chosen to compare the tab's active branch against.
+/** Per-tab UI state for the Analyze comparison mode — whether Compare is on,
+  * and which second branch (if any) to compare the tab's active branch
+  * against. Not fetched from the server.
   */
 final class CompareState:
   val enabled: Var[Boolean] = Var(false)
   val compareBranch: Var[CompareTarget] = Var(CompareTarget.NotChosen)
+
+  /** The last genuinely chosen compare branch, as a plain `BranchChoice` —
+    * the branch signal the compare card's `TreeViewState` is constructed
+    * with, which needs a definite branch before any choice exists. Holds
+    * `Main` until the first real choice and retains the previous choice
+    * while `compareBranch` is `NotChosen`; harmless, because the card and
+    * its fetches are only active while a target is chosen. Synced here so
+    * views write `compareBranch` only. */
+  val chosenBranch: Var[BranchChoice] = Var(BranchChoice.Main)
+
+  compareBranch.signal.changes.collect { case CompareTarget.Target(choice) => choice }
+    .foreach(chosenBranch.set)(using unsafeWindowOwner)

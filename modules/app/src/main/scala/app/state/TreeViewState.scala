@@ -4,6 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
+import app.chart.PaletteData
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
@@ -16,8 +17,7 @@ import com.risquanter.register.http.responses.SimulationResponse
   * Owns the data lifecycle for the tree-list and selected tree structure,
   * plus UI navigation state (expand/collapse/select).
   *
-  * Chart selection and LEC spec concerns are delegated to `LECChartState`
-  * (SRP split — see Phase F code review, Phase W.11).
+  * Chart selection and LEC spec concerns are delegated to `LECChartState`.
   *
   * Views receive this as a constructor argument (ADR-019 Pattern 2).
   *
@@ -40,13 +40,18 @@ import com.risquanter.register.http.responses.SimulationResponse
   *                           internal `unsafeWindowOwner` subscription) so every consumer
   *                           of this state gets current data on a branch switch without
   *                           having to remember to wire that reload themselves.
+  * @param userPalette        Palette family for user-selected (Ctrl+click) nodes,
+  *                           passed through to `LECChartState`. The Compare card's
+  *                           instance passes Purple so its tree highlights match
+  *                           its branch's curve family.
   */
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   treeListState: TreeListState,
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
-  activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main)
+  activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
+  userPalette: Vector[HexColor] = PaletteData.Aqua
 ) extends WorkspaceTreeEndpoints:
 
   private def branchAccessor(): BranchChoice = activeBranchSignal.now()
@@ -96,7 +101,7 @@ final class TreeViewState(
   val selectedNodeId: Var[Option[NodeId]] = Var(None)
 
   // ── Chart state (delegated) ───────────────────────────────────
-  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor, branchAccessor)
+  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor, branchAccessor, userPalette)
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.
@@ -161,10 +166,10 @@ final class TreeViewState(
   def selectNode(nodeId: NodeId): Unit =
     selectedNodeId.set(Some(nodeId))
 
-  /** Expand the tree to reveal all given nodes (Feature 3: auto-expand).
+  /** Expand the tree to reveal all given nodes.
     *
     * For each node, adds its entire ancestor path to `expandedNodes`.
-    * Additive — preserves existing expand/collapse state (§5.1 D3).
+    * Additive — preserves existing expand/collapse state.
     */
   def expandToRevealNodes(nodeIds: Set[NodeId]): Unit =
     selectedTree.now() match

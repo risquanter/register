@@ -484,7 +484,7 @@ body {
   font-family: var(--font-mono);
 }
 
-/* ── Branch chip (topbar indicator, milestone-2b Phase B) ── */
+/* ── Branch chip (topbar indicator) ── */
 .branch-chip {
   font-family: var(--font-mono);
 }
@@ -660,7 +660,7 @@ body {
   margin-bottom: var(--sp-4);
 }
 
-/* ── Compare mode (milestone-2b Phase C, Overlay-only) ── */
+/* ── Compare mode ── */
 .analyze-query-header {
   display: flex;
   align-items: center;
@@ -754,7 +754,7 @@ body {
   margin-bottom: var(--sp-2);
 }
 
-/* Server-side domain error (Plan v2 §2.4) */
+/* Server-side domain error */
 .query-server-error {
   margin-top: calc(-1 * var(--sp-1));
   margin-bottom: var(--sp-2);
@@ -949,7 +949,7 @@ body {
 }
 
 /* =============================================
-   Error Banner (global safety net — Phase I.a)
+   Error Banner (global safety net)
    ============================================= */
 .error-banner-container {
   width: 100%;
@@ -1015,7 +1015,7 @@ body {
 }
 
 /* =============================================
-   Split Pane Layout (Phase C)
+   Split Pane Layout
    ============================================= */
 .split-pane {
   display: flex;
@@ -1604,7 +1604,7 @@ select.form-input:has(option[value=""]:checked) {
   min-width: 0;
 }
 
-/* ── Structural row classes (Phase B) ───────────────────────────────── */
+/* ── Structural row classes ───────────────────────────────── */
 
 /* One row per node. depth variant applied dynamically by Scala. */
 .tree-node-row {
@@ -1615,7 +1615,7 @@ select.form-input:has(option[value=""]:checked) {
 }
 
 /* Indent spacer. Width = --_depth × indent-unit.
-   Vertical connector rails via repeating-linear-gradient (Phase D).
+   Vertical connector rails via repeating-linear-gradient.
    Depth-0 indent has width 0, so no rail renders for root-level nodes. */
 .tree-node-indent {
   display: inline-block;
@@ -1693,7 +1693,7 @@ select.form-input:has(option[value=""]:checked) {
 }
 
 /* =============================================
-   Saved Tree Panel (Phase D)
+   Saved Tree Panel
    ============================================= */
 .saved-tree-panel {
   display: flex;
@@ -1747,7 +1747,7 @@ select.form-input:has(option[value=""]:checked) {
 }
 
 /* Row pairing Analyze's baseline-branch picker with the tree <select>
-   (milestone-2b Phase C follow-up, item 5) — each slot takes half the
+   — each slot takes half the
    width so the two "what am I looking at" pickers read as one visually
    aligned control. Design passes no leadingControl, so its branch-slot
    is simply absent and this row holds only the tree-slot. */
@@ -1950,7 +1950,89 @@ select.form-input:has(option[value=""]:checked) {
   color: var(--foreground);
 }
 
-/* ── Changed-node marker (milestone-2b Phase C, Compare mode) ── */
+/* ── Branch cards (Compare mode) ──
+   One bordered, collapsible card per compared branch in the saved-tree
+   panel. Open cards share the panel's remaining height equally; a
+   collapsed card shrinks to its header row. */
+.branch-card-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  flex: 1;
+  min-height: 0;
+}
+
+.branch-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.branch-card--collapsed {
+  flex: 0 0 auto;
+}
+
+.branch-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  background-color: var(--surface-overlay);
+  user-select: none;
+}
+
+.branch-card--collapsed .branch-card-header {
+  border-bottom: none;
+}
+
+.branch-card-chevron {
+  width: 12px;
+  height: 12px;
+  color: var(--foreground-muted);
+  flex-shrink: 0;
+}
+
+.branch-card-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.branch-card-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.branch-card-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Inside a card the card itself provides border/background — strip the
+   standalone panel chrome from the embedded tree view. */
+.tree-detail-view--in-card {
+  border: none;
+  border-radius: 0;
+  background-color: transparent;
+}
+
+/* ── Changed-node marker (Compare mode) ── */
 .node-changed-marker {
   margin-left: var(--sp-1);
   font-size: var(--text-sm);
@@ -1958,7 +2040,7 @@ select.form-input:has(option[value=""]:checked) {
   flex-shrink: 0;
 }
 
-/* ── Colour-swatch trigger icon (P5 §5.3) ── */
+/* ── Colour-swatch trigger icon ── */
 .node-swatch-trigger {
   width: 14px;
   height: 14px;
@@ -1974,7 +2056,7 @@ select.form-input:has(option[value=""]:checked) {
   opacity: 1;
 }
 
-/* ── Colour Swatch Picker popover (P5 §5.2) ── */
+/* ── Colour Swatch Picker popover ── */
 .color-swatch-picker {
   position: absolute;
   z-index: 100;

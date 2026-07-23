@@ -3,6 +3,7 @@ package app
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
+import app.chart.PaletteData
 import app.components.{AppShell, BranchBar}
 import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, CompareState, ScenarioDiffState}
 import app.views.{DesignView, AnalyzeView}
@@ -19,12 +20,12 @@ object Main:
     // Global error state — safety net for errors with no per-view handler
     val globalError: Var[Option[GlobalError]] = Var(None)
 
-    // Scenario (branch) + tree-selection state — BranchBar, milestone-2b Phase B.
-    // Design and Analyze each own an independent ScenarioState instance
-    // (milestone-2b Phase C follow-up) for `activeBranch` — a single shared
-    // instance meant Design-only actions (switching branches, handling "tree
-    // not found on this branch") silently reset what Analyze was showing,
-    // with no feedback on the Analyze side. `wsState` stays shared: it's the
+    // Scenario (branch) + tree-selection state (BranchBar).
+    // Design and Analyze each own an independent ScenarioState instance for
+    // `activeBranch` — a single shared instance meant Design-only actions
+    // (switching branches, handling "tree not found on this branch")
+    // silently reset what Analyze was showing, with no feedback on the
+    // Analyze side. `wsState` stays shared: it's the
     // actual server-side session, both views legitimately look at the same
     // one. The workspace's actual scenario list is likewise genuinely shared
     // server state, not per-view — a single ScenarioListState passed to both
@@ -54,6 +55,16 @@ object Main:
     val analyzeTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal
     )
+    // Compare card: the compared branch gets its own full TreeViewState —
+    // an independent tree view, Ctrl+click surface, and curve cache on
+    // `compareState.chosenBranch`. Purple is the compare side's palette
+    // family in the Overlay chart; passing it here makes the card's tree
+    // highlights match its curves.
+    val analyzeCompareState = new CompareState
+    val analyzeCompareTreeViewState = new TreeViewState(
+      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId,
+      analyzeCompareState.chosenBranch.signal, userPalette = PaletteData.Purple
+    )
     val analyzeQueryState = new AnalyzeQueryState(
       keySignal = wsState.keySignal,
       selectedTreeId = analyzeTreeViewState.selectedTreeId.signal,
@@ -72,7 +83,7 @@ object Main:
         globalError.set(None)
     )
 
-    // ── Pre-validate workspace key from URL (Scenarios 2 & 3) ────
+    // ── Pre-validate workspace key from URL ──────────────────────
     wsState.preValidate(
       onTreesLoaded = trees =>
         // Seeds the shared list's main entry — both views' TreeListView
@@ -126,8 +137,9 @@ object Main:
         analyzeQueryState,
         analyzeScenarioState,
         appConfigState,
-        new CompareState,
-        new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId)
+        analyzeCompareState,
+        new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId),
+        analyzeCompareTreeViewState
       )
     )
 

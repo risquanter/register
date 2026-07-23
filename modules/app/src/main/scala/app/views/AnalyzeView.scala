@@ -4,10 +4,10 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
-import app.components.{SplitPane, FormInputs, BranchBar}
-import app.chart.{LECSpecBuilder, CompareColorAssigner}
+import app.components.{SplitPane, FormInputs, BranchBar, BranchCard}
+import app.chart.{LECSpecBuilder, CompareColorAssigner, PaletteData}
 import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, AppConfigState, CompareState, CompareTarget, ScenarioDiffState, toChoice}
-import com.risquanter.register.domain.data.{RiskNode, RiskTree}
+import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, ScenarioName}
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
@@ -21,31 +21,41 @@ import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, ScenarioN
   *   │   └── LECChartView in an adaptive panel (page-level scroll)
   *   └── RIGHT: saved-tree-panel
   *       ├── TreeListView  (dropdown selector)
-  *       └── TreeDetailView (expandable hierarchy, query highlighting)
+  *       └── TreeDetailView (expandable hierarchy, query highlighting) —
+  *           or, with Compare fully on, one collapsible BranchCard per
+  *           compared branch, each wrapping its own TreeDetailView
   *
   * Owns reactive subscriptions for:
-  *   - Auto-expand: expands tree to reveal query-matched nodes (§5, D3/D4)
+  *   - Auto-expand: expands tree to reveal query-matched nodes
   *   - Auto-LEC: builds and fires chart requests when either the query set
-  *     or manual user set changes (§3.10, §6)
+  *     or manual user set changes
   */
 object AnalyzeView:
 
+  /** @param compareTreeViewState The compare card's own tree/selection/chart
+    *                             state — a second `TreeViewState` whose branch
+    *                             signal is `compareState.chosenBranch`, giving
+    *                             the compared branch an independent tree view
+    *                             and Ctrl+click surface. Selection identity in
+    *                             compare mode is the pair (branch, node).
+    */
   def apply(
     treeViewState: TreeViewState,
     queryState: AnalyzeQueryState,
     scenarioState: ScenarioState,
     appConfigState: AppConfigState,
     compareState: CompareState,
-    diffState: ScenarioDiffState
+    diffState: ScenarioDiffState,
+    compareTreeViewState: TreeViewState
   ): HtmlElement =
 
     /** Fire query against selected tree. No-op if no tree is selected. */
     def runQuery(): Unit = queryState.executeQuery()
 
-    // Shared hover bridge — wired to both chart and tree views (§3B.1)
+    // Shared hover bridge — wired to both chart and tree views
     val hoverBridge = new ChartHoverBridge()
 
-    // ── Reactive chart node list (§3.10) ───────────────────────────
+    // ── Reactive chart node list ───────────────────────────────────
     // Merges query-matched nodes with user Ctrl+click selections.
     // Fires POST to /lec-multi on any change to either set (debounced 100ms).
     // Also keeps chartState.satisfyingNodeIds in sync for visibleCurves.
@@ -58,7 +68,7 @@ object AnalyzeView:
           else Some(allNodes.toList)
         }
 
-    // ── Compare mode (milestone-2b Phase C, Overlay-only, 2 branches) ──
+    // ── Compare mode ───────────────────────────────────────────────
     // Same node set as `chartNodeIds` above (query ∪ user selection) — reuse
     // `chartState`'s own derivation instead of recomputing it from scratch.
     val visibleNodeIds: Signal[Set[NodeId]] = treeViewState.chartState.visibleCurves
@@ -70,44 +80,60 @@ object AnalyzeView:
         if enabled then ids else Set.empty
       }
 
-    /** Off → the tab's own single-branch spec, untouched (regression guard —
-      * nothing about today's chart changes unless Compare is on). Overlay →
-      * paired curves from both branches via `CompareColorAssigner`, once both
-      * sides have loaded.
+    /** The compare card's own selection — independent of the tab's own
+      * (selection identity is the pair (branch, node)). User Ctrl+clicks
+      * only; the query pane runs against the tab's active branch, so the
+      * compare instance's query set stays empty. */
+    val compareVisibleNodeIds: Signal[Set[NodeId]] =
+      compareTreeViewState.chartState.visibleCurves
+
+    /** Off, or no compare branch chosen → the tab's own single-branch spec,
+      * untouched (regression guard — nothing about today's chart changes
+      * unless Compare is fully on). Otherwise → Overlay: each branch card
+      * contributes its own selection's curves, coloured by branch family
+      * (`CompareColorAssigner`), labelled with the branch names the cards
+      * show.
       *
-      * Falls back to `singleSpec` — not `Idle`/`Loading` — whenever the
-      * compare side isn't ready yet (no branch chosen, or its curves still
-      * in flight). There is already a chart worth looking at (the baseline
-      * curve, already loaded before Compare was ever touched); blanking it
-      * to an empty state and then redrawing once the compare side lands is
-      * a flash with no informational value, not a real loading state. */
+      * A side whose curves haven't landed yet simply contributes nothing on
+      * this emission and fills in when its fetch settles — an already-drawn
+      * partial chart is worth more than blanking to a loading state. Only a
+      * selection with no curves at all shows Loading. */
     val combinedSpecSignal: Signal[LoadState[js.Dynamic]] =
-      // curveCache is deduplicated here for the same reason specSignal
-      // dedupes it internally (LECChartState): each map run below builds a
-      // NEW js.Dynamic in compare mode, and LECChartView re-embeds per
-      // emission. The other inputs are already dedup-safe: specSignal and
-      // visibleNodeIds are distinct at their producers, compareCurves is
-      // write-guarded in ScenarioDiffState, enabled/compareBranch only
-      // change on genuine user action.
+      // curveCache (both instances) is deduplicated here for the same reason
+      // specSignal dedupes it internally (LECChartState): each map run below
+      // builds a NEW js.Dynamic in compare mode, and LECChartView re-embeds
+      // per emission. The other inputs are already dedup-safe: specSignal,
+      // visibleNodeIds and compareVisibleNodeIds are distinct at their
+      // producers; enabled/compareBranch/activeBranch only change on genuine
+      // user action.
       compareState.enabled.signal
-        .combineWith(treeViewState.chartState.specSignal, treeViewState.curveCache.distinct, diffState.compareCurves.signal)
-        .combineWith(visibleNodeIds, compareState.compareBranch.signal)
-        .map { case (enabled, singleSpec, thisCurves, compareCurves, visible, target) =>
+        .combineWith(treeViewState.chartState.specSignal, treeViewState.curveCache.distinct, visibleNodeIds)
+        .combineWith(compareTreeViewState.curveCache.distinct, compareVisibleNodeIds)
+        .combineWith(compareState.compareBranch.signal, scenarioState.activeBranch.signal)
+        .map { case (enabled, singleSpec, thisCurves, thisVisible, compareCurves, compareVisible, target, activeBranch) =>
+          def loadedOrEmpty(s: LoadState[Map[NodeId, LECNodeCurve]]): Map[NodeId, LECNodeCurve] = s match
+            case LoadState.Loaded(m) => m
+            case _                   => Map.empty
           if !enabled then singleSpec
-          else (thisCurves, compareCurves) match
-            case (LoadState.Loaded(thisMap), LoadState.Loaded(compareMap)) =>
-              val compareLabel = target match
-                case CompareTarget.Target(BranchChoice.Main)           => "main"
-                case CompareTarget.Target(BranchChoice.Scenario(name)) => name.value.toString
-                case CompareTarget.NotChosen                            => "compare"
-              val paired = CompareColorAssigner.pairForOverlay(thisMap, compareMap, visible, "this", compareLabel)
-              LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired))
-            case (LoadState.Failed(msg), _) => LoadState.Failed(msg)
-            case (_, LoadState.Failed(msg)) => LoadState.Failed(msg)
-            case _                          => singleSpec
+          else target.toChoice match
+            case None => singleSpec
+            case Some(compareChoice) =>
+              (thisCurves, compareCurves) match
+                case (LoadState.Failed(msg), _) => LoadState.Failed(msg)
+                case (_, LoadState.Failed(msg)) => LoadState.Failed(msg)
+                case _ =>
+                  val paired = CompareColorAssigner.pairForOverlay(
+                    loadedOrEmpty(thisCurves), thisVisible,
+                    loadedOrEmpty(compareCurves), compareVisible,
+                    BranchBar.branchDisplayName(activeBranch),
+                    BranchBar.branchDisplayName(compareChoice)
+                  )
+                  if paired.nonEmpty then LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired))
+                  else if thisVisible.isEmpty && compareVisible.isEmpty then LoadState.Idle
+                  else LoadState.Loading
         }
 
-    // ── Node lookup for name resolution in QueryResultCard (A1) ──
+    // ── Node lookup for name resolution in QueryResultCard ───────
     val nodeLookup: Signal[Map[NodeId, RiskNode]] =
       treeViewState.selectedTree.signal.map {
         case LoadState.Loaded(tree) => tree.nodes.map(n => n.id -> n).toMap
@@ -117,7 +143,7 @@ object AnalyzeView:
     val analyzeLeftPanel = div(
       cls := "analyze-left-panel",
       // ── Reactive subscriptions (bound to element lifecycle) ────
-      // Auto-expand: reveal query-matched nodes in tree (§5.1, §5.2)
+      // Auto-expand: reveal query-matched nodes in tree
       queryState.queryResult.signal.changes --> {
         case LoadState.Loaded(resp) if resp.satisfied && resp.satisfyingNodeIds.nonEmpty =>
           treeViewState.expandToRevealNodes(resp.satisfyingNodeIds.toSet)
@@ -164,8 +190,8 @@ object AnalyzeView:
       treeViewState.selectedTreeId.signal
         .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, scenarioState.activeBranch.signal)
         .changes.debounce(100) --> {
-          case (Some(treeId), true, target, activeBranch) =>
-            dispatchOnBranch(target, cb => diffState.loadDiff(treeId, activeBranch, cb), () => diffState.reset())
+          case (Some(treeId), true, CompareTarget.Target(compareBranch), activeBranch) =>
+            diffState.loadDiff(treeId, activeBranch, compareBranch)
           case _ =>
             diffState.reset()
         },
@@ -194,15 +220,42 @@ object AnalyzeView:
               if nowActive || deleted then compareState.compareBranch.set(CompareTarget.NotChosen)
             case CompareTarget.NotChosen => ()
         },
-      // Compare mode: fetch the compare branch's own curves for whatever
-      // node set is currently visible on the tab's own chart.
-      visibleNodeIds
-        .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, treeViewState.selectedTreeId.signal)
-        .changes.debounce(100) --> {
-          case (visible, true, target, Some(treeId)) if visible.nonEmpty =>
-            dispatchOnBranch(target, cb => diffState.loadCompareCurves(treeId, visible.toList, cb), () => diffState.clearCompareCurves())
+      // Compare card: keep its tree selection in step with the tab's own
+      // selected tree while Compare is fully on; clear the card's state
+      // entirely when Compare stops (toggle off, no target, or no tree).
+      // The `chosen == synced` guard exists because the two Vars sync across
+      // an Airstream transaction boundary: on the emission where a target was
+      // just picked, `chosenBranch` (which the compare instance's fetches
+      // read) still holds the previous value — a `selectTree` fired then
+      // would fetch the tree on the wrong branch and race the corrective
+      // refetch (`loadOptionInto` does not supersede in-flight requests).
+      // A target change with the tree already selected needs nothing here:
+      // the compare instance's own branch subscription refetches it.
+      treeViewState.selectedTreeId.signal
+        .combineWith(compareState.enabled.signal, compareState.compareBranch.signal, compareState.chosenBranch.signal)
+        .changes --> {
+          case (Some(treeId), true, CompareTarget.Target(chosen), synced) =>
+            // chosen != synced: waiting for chosenBranch to catch up — the
+            // follow-up emission (same tuple, synced) does the selectTree.
+            if chosen == synced && !compareTreeViewState.selectedTreeId.now().contains(treeId) then
+              compareTreeViewState.selectTree(treeId)
           case _ =>
-            diffState.clearCompareCurves()
+            if compareTreeViewState.selectedTreeId.now().isDefined then
+              compareTreeViewState.selectedTreeId.set(None)
+              compareTreeViewState.selectedTree.set(LoadState.Idle)
+              compareTreeViewState.chartState.reset()
+        },
+      // Compare card: fetch its branch's curves for its own selection —
+      // the mirror of the tab's own Auto-LEC subscription above, driven by
+      // the card's independent Ctrl+click surface.
+      compareVisibleNodeIds.changes
+        .collect { case visible if visible.nonEmpty => visible.toList }
+        .debounce(100) --> { nodeIds =>
+          compareTreeViewState.chartState.loadCurves(nodeIds)
+        },
+      compareVisibleNodeIds.changes
+        .collect { case visible if visible.isEmpty => () } --> { _ =>
+          compareTreeViewState.chartState.curveCache.set(LoadState.Idle)
         },
       // ── Query input panel ───────────────────────────────────────
       div(
@@ -267,11 +320,11 @@ object AnalyzeView:
             span(" Instant validation")
           )
         ),
-        // Inline parse error (client-side validation, T3.1b)
+        // Inline parse error (client-side validation)
         child.maybe <-- queryState.parseError.map(_.map { msg =>
           div(cls := "query-parse-error", span(cls := "form-error", msg))
         }),
-        // Inline server domain error (400 query failures, Plan v2 §2.4)
+        // Inline server domain error (400 query failures)
         child.maybe <-- queryState.queryServerError.signal.map(_.map { msg =>
           div(cls := "query-server-error", span(cls := "form-error", msg))
         }),
@@ -306,7 +359,33 @@ object AnalyzeView:
         treeViewState,
         leadingControl = Some(BranchBar.picker(scenarioState, appConfigState.scenariosEnabled.signal))
       ),
-      TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge, gatedChangedNodeIds)
+      // Compare off (or no target chosen yet) → today's single tree view,
+      // untouched. Fully on → one bordered, collapsible card per compared
+      // branch, each an independent tree view and Ctrl+click surface. The
+      // ✎ markers sit on the compare card — its
+      // nodes are the ones diffed against the tab's active branch. Swatches
+      // are the branch palette families the Overlay chart colours by
+      // (Aqua = the tab's own branch, Purple = the compared one).
+      child <-- compareState.enabled.signal.combineWith(compareState.compareBranch.signal).map {
+        case (true, CompareTarget.Target(compareChoice)) =>
+          div(
+            cls := "branch-card-stack",
+            BranchCard(
+              swatchColor = PaletteData.Aqua(3),
+              branchName  = scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
+              body        = TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
+                              .amend(cls := "tree-detail-view--in-card")
+            ),
+            BranchCard(
+              swatchColor = PaletteData.Purple(3),
+              branchName  = Val(BranchBar.branchDisplayName(compareChoice)),
+              body        = TreeDetailView(compareTreeViewState, hoverBridge = hoverBridge, changedNodeIds = gatedChangedNodeIds)
+                              .amend(cls := "tree-detail-view--in-card")
+            )
+          )
+        case _ =>
+          TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
+      }
     )
 
     div(
@@ -318,26 +397,14 @@ object AnalyzeView:
       )
     )
 
-  /** Shared shape behind both Compare-mode fetch subscriptions: a chosen
-    * compare branch dispatches the fetch, no branch chosen yet clears it. */
-  private def dispatchOnBranch(
-    target: CompareTarget,
-    onChosen: BranchChoice => Unit,
-    onIdle: () => Unit
-  ): Unit =
-    target.toChoice match
-      case Some(compareBranch) => onChosen(compareBranch)
-      case None                => onIdle()
-
   /** Branch picker for Compare mode — options are `scenarioState.scenarios`
     * plus `main`, excluding the tab's own active branch (comparing a branch
     * to itself is a no-op — `ScenarioDiffService.diff` would just report
     * every node `Identical`). `""` in the DOM `<select>` means "nothing
     * chosen yet" — a third state `BranchBar`'s own picker doesn't need to
     * represent, so the option list and sentinel come from `BranchBar`
-    * (shared with `BranchBar.picker`, Analyze's baseline-branch selector —
-    * TODO.md item 26 / milestone-2b Phase C follow-up item 5) but the
-    * `CompareTarget` parsing stays local to Compare.
+    * (shared with `BranchBar.picker`, Analyze's baseline-branch selector)
+    * but the `CompareTarget` parsing stays local to Compare.
     *
     * Always mounted regardless of `disabledSignal` — see the call site's
     * comment. `disabled` alone gives the browser's own dimmed/inert styling;

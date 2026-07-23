@@ -1495,7 +1495,10 @@ trigger makes Airstream drop the subscription to the previous trigger's
 request stream outright, so a stale response can never land after a newer
 query has started — not merely "arrive but get filtered," an actual
 unsubscribe. Same mechanism applied to `ScenarioDiffState.loadDiff` /
-`loadCompareCurves` (item 28's sibling races). New `ZJS.toOutcomeEventStream`
+`loadCompareCurves` (item 28's sibling races; `loadCompareCurves` itself was
+removed 2026-07-23 in the Phase C branch-cards slice — the compare card's own
+`TreeViewState`/`LECChartState` instance fetches its branch's curves now, and
+`loadDiff` keeps the pipeline). New `ZJS.toOutcomeEventStream`
 (additive, `toEventStream` itself unchanged) supports this by also emitting
 on failure, which plain `toEventStream` doesn't.
 

@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
-import app.chart.{ColorAssigner, LECSpecBuilder}
+import app.chart.{ColorAssigner, LECSpecBuilder, PaletteData}
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
@@ -34,6 +34,11 @@ import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
   * @param globalError    App-wide error Var for the 13-cap validation error.
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   * @param branchAccessor Returns this tab's active branch (BranchChoice) — BranchBar.
+  * @param userPalette    Palette family for user-selected (Ctrl+click) nodes.
+  *                       Default Aqua matches the chart's single-branch colour
+  *                       system; the Compare card's instance passes Purple so
+  *                       its tree highlights match its branch's curve family
+  *                       in the Overlay chart.
   */
 final class LECChartState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
@@ -41,7 +46,8 @@ final class LECChartState(
   selectedTree: StrictSignal[LoadState[RiskTree]],
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
-  branchAccessor: () => BranchChoice = () => BranchChoice.Main
+  branchAccessor: () => BranchChoice = () => BranchChoice.Main,
+  userPalette: Vector[HexColor] = PaletteData.Aqua
 ) extends WorkspaceAnalysisEndpoints:
 
   // ── User selection state ──────────────────────────────────────
@@ -59,7 +65,7 @@ final class LECChartState(
   /** Manual colour overrides per node (mutated via `setColorOverride`/`clearColorOverride`). */
   private val colorOverrides: Var[Map[NodeId, HexColor]] = Var(Map.empty)
 
-  /** Transient preview override for live swatch hover (P5 §5.6).
+  /** Transient preview override for live swatch hover.
     * When `Some`, this temporarily replaces the colour for one node
     * in `nodeColorMap` without committing to `colorOverrides`.
     * Mutated via `setPreview`/`clearPreview`.
@@ -92,7 +98,7 @@ final class LECChartState(
     satisfyingNodeIds.signal
       .combineWith(userSelectedNodeIds.signal, colorOverrides.signal, previewOverride.signal)
       .map { (query, user, overrides, preview) =>
-        val base = ColorAssigner.assign(query, user, overrides)
+        val base = ColorAssigner.assign(query, user, overrides, aquaPalette = userPalette)
         preview match
           case Some((nid, hex)) if base.contains(nid) => base.updated(nid, hex)
           case _                                      => base
