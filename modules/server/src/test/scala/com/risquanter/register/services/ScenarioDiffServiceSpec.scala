@@ -61,10 +61,10 @@ object ScenarioDiffServiceSpec extends ZIOSpecDefault:
     * hook) rather than a fresh hand-written `RiskTreeService` double, so the
     * dying-boilerplate for the other five methods lives in one place.
     */
-  private def stubRiskTreeService(byBranch: PartialFunction[Option[BranchRef], Option[RiskTree]]): RiskTreeService =
+  private def stubRiskTreeService(byBranch: PartialFunction[BranchRef, Option[RiskTree]]): RiskTreeService =
     CascadeTestStubs.riskTreeService(
       onDelete = (_, _) => ZIO.die(new UnsupportedOperationException),
-      onGetById = (_, _, branch) => ZIO.succeed(byBranch.applyOrElse(branch, (_: Option[BranchRef]) => None))
+      onGetById = (_, _, branch) => ZIO.succeed(byBranch.applyOrElse(branch, (_: BranchRef) => None))
     )
 
   /** Unwraps the happy-path `Diff` case; fails loudly (not silently) if a
@@ -79,11 +79,11 @@ object ScenarioDiffServiceSpec extends ZIOSpecDefault:
       val treeA = tree(Seq(leaf(leaf1Id, 0.1), leaf(leaf2Id, 0.2)))
       val treeB = tree(Seq(leaf(leaf1Id, 0.1), leaf(leaf2Id, 0.3))) // leaf2 changed
       val service = ScenarioDiffServiceLive(stubRiskTreeService {
-        case Some(`branchA`) => Some(treeA)
-        case Some(`branchB`) => Some(treeB)
+        case `branchA` => Some(treeA)
+        case `branchB` => Some(treeB)
       })
       for
-        result <- service.diff(wsId, treeIdF, Some(branchA), Some(branchB))
+        result <- service.diff(wsId, treeIdF, branchA, branchB)
       yield
         val entries = entriesOf(result).map(d => d.nodeId -> d.status).toMap
         assertTrue(
@@ -97,11 +97,11 @@ object ScenarioDiffServiceSpec extends ZIOSpecDefault:
       val treeA = tree(Seq(leaf(leaf1Id, 0.1)))
       val treeB = tree(Seq(leaf(leaf1Id, 0.1), leaf(leaf2Id, 0.2))) // leaf2 added on B
       val service = ScenarioDiffServiceLive(stubRiskTreeService {
-        case Some(`branchA`) => Some(treeA)
-        case Some(`branchB`) => Some(treeB)
+        case `branchA` => Some(treeA)
+        case `branchB` => Some(treeB)
       })
       for
-        result <- service.diff(wsId, treeIdF, Some(branchA), Some(branchB))
+        result <- service.diff(wsId, treeIdF, branchA, branchB)
       yield
         val entries = entriesOf(result).map(d => d.nodeId -> d.status).toMap
         assertTrue(entries(leaf2Id) == NodeDiffStatus.Added)
@@ -111,11 +111,11 @@ object ScenarioDiffServiceSpec extends ZIOSpecDefault:
       val treeA = tree(Seq(leaf(leaf1Id, 0.1), leaf(leaf2Id, 0.2)))
       val treeB = tree(Seq(leaf(leaf1Id, 0.1))) // leaf2 missing on B relative to A
       val service = ScenarioDiffServiceLive(stubRiskTreeService {
-        case Some(`branchA`) => Some(treeA)
-        case Some(`branchB`) => Some(treeB)
+        case `branchA` => Some(treeA)
+        case `branchB` => Some(treeB)
       })
       for
-        result <- service.diff(wsId, treeIdF, Some(branchA), Some(branchB))
+        result <- service.diff(wsId, treeIdF, branchA, branchB)
       yield
         val entries = entriesOf(result).map(d => d.nodeId -> d.status).toMap
         assertTrue(entries(leaf2Id) == NodeDiffStatus.Removed)
@@ -125,12 +125,12 @@ object ScenarioDiffServiceSpec extends ZIOSpecDefault:
       val treeWithExtra = tree(Seq(leaf(leaf1Id, 0.1), leaf(leaf2Id, 0.2)))
       val treeWithout   = tree(Seq(leaf(leaf1Id, 0.1)))
       val service = ScenarioDiffServiceLive(stubRiskTreeService {
-        case Some(`branchA`) => Some(treeWithExtra)
-        case Some(`branchB`) => Some(treeWithout)
+        case `branchA` => Some(treeWithExtra)
+        case `branchB` => Some(treeWithout)
       })
       for
-        forward  <- service.diff(wsId, treeIdF, Some(branchA), Some(branchB))
-        backward <- service.diff(wsId, treeIdF, Some(branchB), Some(branchA))
+        forward  <- service.diff(wsId, treeIdF, branchA, branchB)
+        backward <- service.diff(wsId, treeIdF, branchB, branchA)
       yield
         val forwardStatus  = entriesOf(forward).map(d => d.nodeId -> d.status).toMap
         val backwardStatus = entriesOf(backward).map(d => d.nodeId -> d.status).toMap
@@ -143,10 +143,10 @@ object ScenarioDiffServiceSpec extends ZIOSpecDefault:
     test("same branch on both sides → every node Identical") {
       val treeA = tree(Seq(leaf(leaf1Id, 0.1), leaf(leaf2Id, 0.2)))
       val service = ScenarioDiffServiceLive(stubRiskTreeService {
-        case Some(`branchA`) => Some(treeA)
+        case `branchA` => Some(treeA)
       })
       for
-        result <- service.diff(wsId, treeIdF, Some(branchA), Some(branchA))
+        result <- service.diff(wsId, treeIdF, branchA, branchA)
       yield
         assertTrue(entriesOf(result).forall(_.status == NodeDiffStatus.Identical))
     },
@@ -154,22 +154,22 @@ object ScenarioDiffServiceSpec extends ZIOSpecDefault:
     test("tree missing on branchB only → MissingOnB (mirrors RiskTreeService.getById's own Option, not an error)") {
       val treeA = tree(Seq(leaf(leaf1Id, 0.1)))
       val service = ScenarioDiffServiceLive(stubRiskTreeService {
-        case Some(`branchA`) => Some(treeA)
-        case Some(`branchB`) => None
+        case `branchA` => Some(treeA)
+        case `branchB` => None
       })
       for
-        result <- service.diff(wsId, treeIdF, Some(branchA), Some(branchB))
+        result <- service.diff(wsId, treeIdF, branchA, branchB)
       yield assertTrue(result == ScenarioDiffResult.MissingOnB)
     },
 
     test("tree missing on branchA only → MissingOnA") {
       val treeB = tree(Seq(leaf(leaf1Id, 0.1)))
       val service = ScenarioDiffServiceLive(stubRiskTreeService {
-        case Some(`branchA`) => None
-        case Some(`branchB`) => Some(treeB)
+        case `branchA` => None
+        case `branchB` => Some(treeB)
       })
       for
-        result <- service.diff(wsId, treeIdF, Some(branchA), Some(branchB))
+        result <- service.diff(wsId, treeIdF, branchA, branchB)
       yield assertTrue(result == ScenarioDiffResult.MissingOnA)
     },
 
@@ -178,17 +178,17 @@ object ScenarioDiffServiceSpec extends ZIOSpecDefault:
         case _ => None
       })
       for
-        result <- service.diff(wsId, treeIdF, Some(branchA), Some(branchB))
+        result <- service.diff(wsId, treeIdF, branchA, branchB)
       yield assertTrue(result == ScenarioDiffResult.MissingOnBoth)
     },
 
     test("entries are returned in a stable order (sorted by NodeId), not raw Set iteration order") {
       val treeA = tree(Seq(leaf(leaf1Id, 0.1), leaf(leaf2Id, 0.2)))
       val service = ScenarioDiffServiceLive(stubRiskTreeService {
-        case Some(`branchA`) => Some(treeA)
+        case `branchA` => Some(treeA)
       })
       for
-        result <- service.diff(wsId, treeIdF, Some(branchA), Some(branchA))
+        result <- service.diff(wsId, treeIdF, branchA, branchA)
       yield
         val ids = entriesOf(result).map(_.nodeId.value)
         assertTrue(ids == ids.sorted)

@@ -33,7 +33,7 @@ trait RiskTreeService {
     *   — see `ActiveBranch.resolve`; this method trusts it.
     * @return Persisted risk tree metadata (no LEC data)
     */
-  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
+  def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
   
   /** Update risk tree definition - modifies tree structure only
     * @param wsId Workspace that owns the tree
@@ -44,7 +44,7 @@ trait RiskTreeService {
     *   — see `ActiveBranch.resolve`; this method trusts it.
     * @return Updated risk tree metadata
     */
-  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
+  def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
 
   /** Delete risk tree configuration
     * @param wsId Workspace that owns the tree
@@ -52,7 +52,7 @@ trait RiskTreeService {
     * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
     * @return Deleted risk tree metadata
     */
-  def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
+  def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
 
   /** Retrieve single risk tree configuration by ID (no LEC data)
     * @param wsId Workspace that owns the tree
@@ -60,7 +60,7 @@ trait RiskTreeService {
     * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
     * @return Optional risk tree metadata
     */
-  def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]]
+  def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]]
   
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)
@@ -76,7 +76,7 @@ trait RiskTreeService {
     * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
     * @return Probability as Double (empirical frequency ratio: exceedingCount / nTrials)
     */
-  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: Option[BranchRef] = None): Task[Double]
+  def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: BranchRef = BranchRef.Main): Task[Double]
 
   /** Get LEC curves for multiple nodes with shared tick domain.
     *
@@ -90,7 +90,7 @@ trait RiskTreeService {
     * @param branch Target branch (milestone-2b Phase B item 4b); `None` targets `main`.
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
-  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: Option[BranchRef] = None): Task[Map[NodeId, LECNodeCurve]]
+  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: BranchRef = BranchRef.Main): Task[Map[NodeId, LECNodeCurve]]
 }
 
 object RiskTreeService:

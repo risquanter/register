@@ -1203,7 +1203,36 @@ query/command builder.
 
 ---
 
-## 22. `Option[BranchRef]` lets "main" be spelled two different ways — investigate a dedicated type
+## ✅ 22. `Option[BranchRef]` lets "main" be spelled two different ways — RESOLVED 2026-07-23 (BranchChoice consolidation)
+
+**Resolution:** implemented in full, both halves, as the opening task of
+Phase C (user decision 2026-07-23, "Option A"):
+
+- New shared selector `BranchChoice { Main; Scenario(name) }` in
+  `OpaqueTypes.scala` (cross-compiled; carries no workspace identity, so it
+  is legal on the client — unlike `BranchRef`, which embeds `WorkspaceId`).
+- The wire keeps DD-8's encoding (`X-Active-Branch` absent = main), decoded
+  exactly once by the shared `activeBranchHeader` / `compareBranchQuery`
+  inputs in `BaseEndpoint` — every endpoint tuple now carries `BranchChoice`,
+  and the ten per-endpoint header definitions collapsed into one.
+- `ActiveBranch.resolve` is total: `BranchChoice` in, definite `BranchRef`
+  out. `RiskTreeRepository`, `IrminClient`, `RiskTreeService`,
+  `QueryService`, `ScenarioDiffService` all take a definite
+  `branch: BranchRef` — `Some(BranchRef.Main)`-vs-`None` is no longer
+  expressible; `requireMain` is a single equality. `IrminClientLive` still
+  omits the GraphQL branch argument for main at the lowest boundary (one
+  place), preserving the previous wire behavior against Irmin.
+- Frontend: `ScenarioState.activeBranch`, all `branchAccessor` chains,
+  `TreeLoadPolicy`, and `BranchBar`'s helpers use `BranchChoice`;
+  `CompareTarget` rebased to `{ NotChosen; Target(BranchChoice) }`. The one
+  deliberately remaining internal `Option[ScenarioName]` is the scenario
+  `forkOf` request field, where `None` = "fork main's head" is genuine (main
+  is not a scenario, DD-11 — the case this item's origin already called fine).
+
+Verified: commonJVM + server + app unit suites and the Irmin integration
+suite all pass. Original investigation kept below for the record.
+
+*(As originally written:)*
 
 **Origin (2026-07-20):** surfaced while reviewing the signature chosen for the
 new `ScenarioService.create`'s source parameter (`Option[ScenarioName]`,

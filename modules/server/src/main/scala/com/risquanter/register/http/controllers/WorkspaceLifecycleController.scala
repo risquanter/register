@@ -6,6 +6,7 @@ import sttp.tapir.server.ServerEndpoint
 import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Checked, Permission, UserContextExtractor }
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode, ValidationFailed}
+import com.risquanter.register.domain.data.iron.BranchChoice
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
@@ -93,18 +94,19 @@ class WorkspaceLifecycleController private (
         // into existence outside ScenarioService.create, bypassing the "creation
         // always forks at a commit" invariant (DD-5/A9 fact 3) other scenario
         // code relies on. So: require the named scenario to already exist before
-        // writing to it. `main` (activeBranch = None) never needs this check.
-        _      <- ZIO.foreachDiscard(activeBranch) { name =>
-                    scenarioService.list(ws.id).flatMap { scenarios =>
-                      ZIO.unless(scenarios.exists(_.name == name))(
-                        ZIO.fail(ValidationFailed(List(ValidationError(
-                          field = "X-Active-Branch",
-                          code = ValidationErrorCode.NOT_FOUND,
-                          message = s"Scenario '${name.value}' not found — create it via POST /scenarios before creating a tree on it"
-                        ))))
-                      )
-                    }
-                  }
+        // writing to it. Main never needs this check.
+        _      <- activeBranch match
+                    case BranchChoice.Main => ZIO.unit
+                    case BranchChoice.Scenario(name) =>
+                      scenarioService.list(ws.id).flatMap { scenarios =>
+                        ZIO.unless(scenarios.exists(_.name == name))(
+                          ZIO.fail(ValidationFailed(List(ValidationError(
+                            field = "X-Active-Branch",
+                            code = ValidationErrorCode.NOT_FOUND,
+                            message = s"Scenario '${name.value}' not found — create it via POST /scenarios before creating a tree on it"
+                          ))))
+                        )
+                      }.unit
         tree   <- riskTreeService.create(ws.id, req, branch)
         // addTree always fires regardless of branch — the reaper needs to know a
         // tree exists somewhere in the workspace to cascade-delete it on expiry,

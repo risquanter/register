@@ -34,9 +34,9 @@ trait QueryService:
     *   — see `ActiveBranch.resolve`; this method trusts it.
     * @return Query response with satisfaction result and matching node IDs
     */
-  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: Option[BranchRef] = None): Task[QueryResponse]
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef = BranchRef.Main): Task[QueryResponse]
 
 object QueryService:
 
-  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: Option[BranchRef] = None): ZIO[QueryService, Throwable, QueryResponse] =
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef = BranchRef.Main): ZIO[QueryService, Throwable, QueryResponse] =
     ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed, seedEntityId, branch))

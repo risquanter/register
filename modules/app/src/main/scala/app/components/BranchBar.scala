@@ -5,7 +5,7 @@ import org.scalajs.dom
 
 import app.components.FormInputs
 import app.state.{ScenarioState, ScenarioSubmitState, LoadState, Section}
-import com.risquanter.register.domain.data.iron.ScenarioName
+import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName}
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
 /** Branch indicator + scenario management surfaces (milestone-2b Phase B,
@@ -26,23 +26,25 @@ import com.risquanter.register.http.responses.ScenarioSummaryResponse
   */
 object BranchBar:
 
-  /** Source branch a new scenario forks from. `Main` is always `None` (main's
-    * current head); `Current` is whatever branch is active — which is itself
-    * `None` while on main, making the two menu actions issue an identical
-    * `forkOf` in that case. Extracted as a pure function (not inlined in the
-    * click handlers) so the equivalence is directly unit-testable without a
-    * Laminar/DOM harness — see [[forkTarget]] and `BranchBarSpec`.
+  /** Source branch a new scenario forks from, as the `forkOf` request field
+    * (a genuine wire `Option`: `None` = main's current head — main is not a
+    * scenario, DD-11). `Main` always forks main; `Current` forks whatever
+    * branch is active, which on main issues the identical `forkOf`.
+    * Extracted as a pure function (not inlined in the click handlers) so the
+    * equivalence is directly unit-testable without a Laminar/DOM harness —
+    * see [[forkTarget]] and `BranchBarSpec`.
     */
   enum CreateSource:
     case Main, Current
 
-  def forkTarget(source: CreateSource, current: Option[ScenarioName.ScenarioName]): Option[ScenarioName.ScenarioName] =
+  def forkTarget(source: CreateSource, current: BranchChoice): Option[ScenarioName.ScenarioName] =
     source match
       case CreateSource.Main    => None
-      case CreateSource.Current => current
+      case CreateSource.Current => current.toWire
 
-  private def branchLabel(name: Option[ScenarioName.ScenarioName]): String =
-    s"⎇ ${name.map(_.value.toString).getOrElse("main")}"
+  private def branchLabel(choice: BranchChoice): String = choice match
+    case BranchChoice.Main           => "⎇ main"
+    case BranchChoice.Scenario(name) => s"⎇ ${name.value}"
 
   /** Topbar branch indicator. Inert — no click handler (§4.1/§4.3).
     *
@@ -79,15 +81,17 @@ object BranchBar:
     */
   val mainSentinel = "__main__"
 
-  def branchOptionValue(branch: Option[ScenarioName.ScenarioName]): String =
-    branch.map(_.value.toString).getOrElse(mainSentinel)
+  def branchOptionValue(choice: BranchChoice): String = choice match
+    case BranchChoice.Main           => mainSentinel
+    case BranchChoice.Scenario(name) => name.value.toString
 
-  /** `None` only means "not a real scenario name" — callers that also need
-    * to distinguish "nothing chosen yet" (e.g. Compare's placeholder option)
+  /** An unparseable value falls back to `Main` — callers that also need to
+    * distinguish "nothing chosen yet" (e.g. Compare's placeholder option)
     * check for the empty string themselves before calling this.
     */
-  def parseBranchOptionValue(raw: String): Option[ScenarioName.ScenarioName] =
-    if raw == mainSentinel then None else ScenarioName.fromString(raw).toOption
+  def parseBranchOptionValue(raw: String): BranchChoice =
+    if raw == mainSentinel then BranchChoice.Main
+    else ScenarioName.fromString(raw).toOption.fold(BranchChoice.Main)(BranchChoice.Scenario(_))
 
   /** Shared option list for every branch-picking `<select>`: main + every
     * scenario, rendered via `FormInputs.splitOptions` (keyed by each option's
@@ -190,7 +194,7 @@ object BranchBar:
   private def renderMenuBody(
     scenarioState: ScenarioState,
     listState: LoadState[List[ScenarioSummaryResponse]],
-    current: Option[ScenarioName.ScenarioName],
+    current: BranchChoice,
     createTrigger: Var[Option[Option[ScenarioName.ScenarioName]]],
     createState: Var[ScenarioSubmitState],
     createNameInput: Var[String],
@@ -202,14 +206,14 @@ object BranchBar:
       case _                       => Nil
 
     div(
-      menuItem("⎇ main", current.isEmpty, () => { scenarioState.switchTo(None); closeAll() }),
-      names.map(name => scenarioRow(scenarioState, name, current.contains(name), closeAll)),
+      menuItem("⎇ main", current == BranchChoice.Main, () => { scenarioState.switchTo(BranchChoice.Main); closeAll() }),
+      names.map(name => scenarioRow(scenarioState, name, current == BranchChoice.Scenario(name), closeAll)),
       div(cls := "scenario-menu-divider"),
       child.maybe <-- createTrigger.signal.map {
         case None => Some(actionItem("+ Create from main…", () => createTrigger.set(Some(forkTarget(CreateSource.Main, current)))))
         case Some(_) => None
       },
-      if current.isDefined then
+      if current != BranchChoice.Main then
         child.maybe <-- createTrigger.signal.map {
           case None => Some(actionItem("⧉ Create from current…", () => createTrigger.set(Some(forkTarget(CreateSource.Current, current)))))
           case Some(_) => None
@@ -247,7 +251,7 @@ object BranchBar:
         cls := "scenario-menu-item-label",
         cls("scenario-menu-item--active") := active,
         s"⎇ ${name.value}",
-        onClick --> { _ => scenarioState.switchTo(Some(name)); closeAll() }
+        onClick --> { _ => scenarioState.switchTo(BranchChoice.Scenario(name)); closeAll() }
       ),
       span(
         cls := "scenario-menu-item-delete",

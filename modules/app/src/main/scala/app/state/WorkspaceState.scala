@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
-import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.requests.RiskTreeDefinitionRequest
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
@@ -91,7 +91,7 @@ final class WorkspaceState extends WorkspaceLifecycleEndpoints:
     currentKey match
       case None => () // Scenario 1 — nothing to validate
       case Some(key) =>
-        listWorkspaceTreesEndpoint((currentUserId, key, None))
+        listWorkspaceTreesEndpoint((currentUserId, key, BranchChoice.Main))
           .tap(trees => zio.ZIO.succeed(onTreesLoaded(trees)))
           .tapError { _ =>
             zio.ZIO.succeed {

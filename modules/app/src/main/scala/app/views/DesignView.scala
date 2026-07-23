@@ -5,7 +5,7 @@ import org.scalajs.dom
 import app.components.{BranchBar, SplitPane}
 import app.state.{AppConfigState, DistributionChartState, LoadState, ScenarioState, TreeBuilderState, TreeLoadDecision, TreeLoadPolicy, TreeViewState, WorkspaceState}
 import com.risquanter.register.domain.data.{RiskNode, RiskTree}
-import com.risquanter.register.domain.data.iron.{NodeId, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId}
 
 /** Design view — tree creation and editing workflow.
   *
@@ -35,7 +35,7 @@ object DesignView:
     // Branch of the tree content currently reflected in `builderState` — distinct
     // from `scenarioState.activeBranch`, which can move ahead of it while a confirm
     // dialog is pending or a fetch is in flight. See TreeLoadPolicy.
-    val loadedBranch: Var[Option[ScenarioName.ScenarioName]] = Var(None)
+    val loadedBranch: Var[BranchChoice] = Var(BranchChoice.Main)
 
     // Reverting `scenarioState.activeBranch` (declining a confirm dialog) would
     // otherwise re-fire TreeViewState's own branch-change reload and trigger a

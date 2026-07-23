@@ -29,28 +29,28 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private def makeStubRepo = new RiskTreeRepository {
     private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
     
-    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] = ZIO.succeed {
+    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] = ZIO.succeed {
       db += ((wsId, riskTree.id) -> riskTree)
       riskTree
     }
     
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] = ZIO.attempt {
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       val updated = op(riskTree)
       db += ((wsId, id) -> updated)
       updated
     }
     
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[RiskTree] = ZIO.attempt {
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       db -= ((wsId, id))
       riskTree
     }
     
-    override def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[Option[RiskTree]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
       ZIO.succeed(db.get((wsId, id)))
     
-    override def getAllForWorkspace(wsId: WorkspaceId, branch: Option[BranchRef] = None): Task[List[Either[RepositoryFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
       ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
   }
   

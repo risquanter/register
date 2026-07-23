@@ -1,6 +1,6 @@
 package app.state
 
-import com.risquanter.register.domain.data.iron.{TreeId, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId}
 
 /** Decides whether loading a fetched tree into [[TreeBuilderState]] should
   * proceed silently, ask for confirmation, or proceed and clear the draft
@@ -33,9 +33,9 @@ enum TreeLoadDecision:
 object TreeLoadPolicy:
   def decide(
     previousTreeId: Option[TreeId],
-    previousBranch: Option[ScenarioName.ScenarioName],
+    previousBranch: BranchChoice,
     newTreeId:      TreeId,
-    newBranch:      Option[ScenarioName.ScenarioName],
+    newBranch:      BranchChoice,
     isDirty:        Boolean
   ): TreeLoadDecision =
     if previousTreeId.contains(newTreeId) && previousBranch == newBranch then

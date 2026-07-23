@@ -385,6 +385,35 @@ object BranchRef:
   given JsonDecoder[BranchRef] = JsonDecoder[String].mapOrFail(s =>
     BranchRef.fromString(s).left.map(_.mkString(", ")))
 
+/** Which branch a request or view targets — the single internal spelling of
+  * "main vs. a named scenario" on both sides of the wire (closes TODO item
+  * 22's duplicate-spelling gap: internally, main has exactly one
+  * representation).
+  *
+  * The wire keeps DD-8's encoding (`X-Active-Branch` header, absent = main):
+  * `fromWire`/`toWire` convert exactly once at the Tapir boundary (see
+  * `ActiveBranchHeader`), so no state past the boundary carries a bare
+  * `Option` whose `None` could mean either "main" or "nothing chosen".
+  *
+  * Deliberately carries no workspace identity: composing the Irmin branch
+  * reference (`BranchRef`, which embeds the `WorkspaceId` and therefore never
+  * crosses the client boundary) requires the server-resolved workspace — see
+  * `ActiveBranch.resolve` on the server.
+  */
+enum BranchChoice:
+  case Main
+  case Scenario(name: ScenarioName.ScenarioName)
+
+  /** DD-8 wire shape: absent = main. Use only at wire/codec boundaries. */
+  def toWire: Option[ScenarioName.ScenarioName] = this match
+    case Main           => None
+    case Scenario(name) => Some(name)
+
+object BranchChoice:
+  /** DD-8 wire shape: absent = main. Use only at wire/codec boundaries. */
+  def fromWire(wire: Option[ScenarioName.ScenarioName]): BranchChoice =
+    wire.fold(Main)(Scenario(_))
+
 // ScenarioName: user-supplied scenario name (DD-5, closed 2026-07-18). Two
 // stages: an input whitelist (letters/digits/space/hyphen/underscore only —
 // anything else is a 400 at the boundary, never silently stripped: "no lossy

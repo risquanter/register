@@ -5,6 +5,7 @@ import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
+import com.risquanter.register.domain.data.iron.BranchRef
 import com.risquanter.register.http.responses.{SimulationResponse, ScenarioDiffResponse, NodeDiffEntry}
 import com.risquanter.register.services.{RiskTreeService, ScenarioDiffService, ScenarioDiffResult}
 import com.risquanter.register.services.workspace.WorkspaceStore
@@ -103,7 +104,7 @@ class WorkspaceTreeController private (
         // still exists on `main` and any other scenario, so the workspace
         // must keep tracking it.
         result <- riskTreeService.delete(ws.id, treeId, branch)
-                      .tap(_ => ZIO.when(branch.isEmpty)(workspaceStore.removeTree(key, treeId)))
+                      .tap(_ => ZIO.when(branch == BranchRef.Main)(workspaceStore.removeTree(key, treeId)))
                       .map(SimulationResponse.fromRiskTree)
       yield result).either
   }

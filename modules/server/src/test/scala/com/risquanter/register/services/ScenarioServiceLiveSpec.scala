@@ -52,17 +52,17 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
         else (false, m)
       }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, currentHead)))
 
-    override def get(path: IrminPath, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def set(path: IrminPath, value: String, message: String, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def remove(path: IrminPath, message: String, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def mergeBranch(from: BranchRef, into: Option[BranchRef], message: String) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def revert(commit: CommitHash, branch: Option[BranchRef]) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def mergeBranch(from: BranchRef, into: BranchRef, message: String) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def getHistory(path: IrminPath, n: PositiveInt, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def lca(branch: Option[BranchRef], commit: CommitHash) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def healthCheck = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def list(prefix: IrminPath, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
 
   /** `initial` maps raw branch names (e.g. "main", "scenarios.<ws>.draft-v1") to heads. */
   private def makeService(initial: Map[String, CommitHash] = Map.empty): UIO[ScenarioService] =

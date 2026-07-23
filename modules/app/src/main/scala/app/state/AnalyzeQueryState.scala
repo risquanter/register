@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.domain.errors.FolQueryFailure.*
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
@@ -23,13 +23,13 @@ import fol.parser.VagueQueryParser
   * @param keySignal      Read-only signal providing the active workspace key.
   * @param selectedTreeId Signal for the currently selected tree ID.
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
-  * @param branchAccessor Returns this tab's active branch (None = main, DD-8) — BranchBar.
+  * @param branchAccessor Returns this tab's active branch (BranchChoice) — BranchBar.
   */
 final class AnalyzeQueryState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   selectedTreeId: StrictSignal[Option[TreeId]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
-  branchAccessor: () => Option[ScenarioName.ScenarioName] = () => None
+  branchAccessor: () => BranchChoice = () => BranchChoice.Main
 ) extends WorkspaceQueryEndpoints:
 
   // ── Query input ───────────────────────────────────────────────
@@ -141,7 +141,7 @@ final class AnalyzeQueryState(
     */
   private enum Trigger:
     case Reset
-    case Run(key: WorkspaceKeySecret, treeId: TreeId, text: String, branch: Option[ScenarioName.ScenarioName])
+    case Run(key: WorkspaceKeySecret, treeId: TreeId, text: String, branch: BranchChoice)
 
   /** Outcome of one trigger, folding `queryResult`/`queryServerError` into a
     * single value so both stay in lockstep as one thing switches to the

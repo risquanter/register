@@ -34,7 +34,7 @@ class QueryServiceLive private (
   private def traced[A](name: String)(body: Task[A]): Task[A] =
     tracing.span(s"QueryService.$name", SpanKind.INTERNAL)(body)
 
-  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: Option[BranchRef] = None): Task[QueryResponse] =
+  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef = BranchRef.Main): Task[QueryResponse] =
     traced("evaluate") {
       for
         _ <- tracing.setAttribute("query.tree_id", treeId.value)

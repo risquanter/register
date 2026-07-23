@@ -18,16 +18,16 @@ import com.risquanter.register.domain.errors.RepositoryFailure
 class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
   private val db = collection.concurrent.TrieMap[(WorkspaceId, TreeId), RiskTree]()
 
-  private def requireMain(branch: Option[BranchRef]): Task[Unit] =
-    branch match {
-      case None | Some(BranchRef.Main) => ZIO.unit
-      case Some(other) =>
-        ZIO.fail(RepositoryFailure(
-          s"In-memory repository has no branches: requested '${other.toBranchRef}' (use the Irmin backend for scenario branches)"
-        ))
-    }
+  // Single-spelling check since the BranchChoice consolidation (TODO item
+  // 22): main has exactly one representation, so this is a plain equality —
+  // the old None-or-Some(BranchRef.Main) double match is gone by construction.
+  private def requireMain(branch: BranchRef): Task[Unit] =
+    if branch == BranchRef.Main then ZIO.unit
+    else ZIO.fail(RepositoryFailure(
+      s"In-memory repository has no branches: requested '${branch.toBranchRef}' (use the Irmin backend for scenario branches)"
+    ))
 
-  override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
+  override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
     requireMain(branch) *> ZIO.attempt {
       val key = (wsId, riskTree.id)
       if db.contains(key) then throw new IllegalStateException(s"RiskTree with id ${riskTree.id} already exists in workspace $wsId")
@@ -35,7 +35,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       riskTree
     }
 
-  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
+  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
     requireMain(branch) *> ZIO.attempt {
       val key = (wsId, id)
       val riskTree = db.getOrElse(key, throw new NoSuchElementException(s"RiskTree with id $id not found in workspace $wsId"))
@@ -44,7 +44,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       updated
     }
 
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
     requireMain(branch) *> ZIO.attempt {
       val key = (wsId, id)
       val riskTree = db.getOrElse(key, throw new NoSuchElementException(s"RiskTree with id $id not found in workspace $wsId"))
@@ -52,10 +52,10 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       riskTree
     }
 
-  override def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[Option[RiskTree]] =
+  override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
     requireMain(branch) *> ZIO.succeed(db.get((wsId, id)))
 
-  override def getAllForWorkspace(wsId: WorkspaceId, branch: Option[BranchRef] = None): Task[List[Either[RepositoryFailure, RiskTree]]] =
+  override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
     requireMain(branch) *> ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
 }
 

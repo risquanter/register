@@ -118,8 +118,9 @@ irmin.set(path, value, message)                        // branch defaults to mai
 irmin.set(path, value, message, branch = scenarioRef)  // explicit branch
 ```
 
-The `branch: Option[BranchRef] = None` parameter (DD-1) controls the
-destination. `None` means `main`; `Some(ref)` means the named scenario
+The `branch: BranchRef = BranchRef.Main` parameter (DD-1; made definite by
+the BranchChoice consolidation, 2026-07-23) controls the destination.
+`BranchRef.Main` means `main`; any other ref means the named scenario
 branch. The repository logic, serialisation, and commit message format are
 all unchanged.
 

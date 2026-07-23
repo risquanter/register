@@ -69,10 +69,13 @@ connection_status   connect / heartbeat lifecycle
 ```
 
 SSE is a **notification** channel, not a data channel: clients re-fetch over
-HTTP, which carries auth and `X-Active-Branch`. Events carry
-`branch: Option[BranchRef]` in the payload (absent = main); subscription stays
-tree-scoped — one stream hears all branches, as the compare view requires, and
-`EventSource` cannot set headers **[Refined → DD-22]**.
+HTTP, which carries auth and `X-Active-Branch`. Events will carry a branch tag
+in the payload using the wire encoding — `Option[ScenarioName]`, absent = main
+(DD-8 symmetry) — not `BranchRef`, which embeds `WorkspaceId` and never
+crosses the client boundary; subscription stays tree-scoped — one stream hears
+all branches, as the compare view requires, and `EventSource` cannot set
+headers **[Refined → DD-22; decided 2026-07-19, payload tag not yet
+implemented as of 2026-07-23]**.
 
 ### 4. Content-Addressed ZIO-Side Result Cache
 

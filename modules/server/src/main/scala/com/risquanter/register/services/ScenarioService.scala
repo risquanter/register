@@ -9,6 +9,14 @@ import com.risquanter.register.domain.errors.{ScenariosNotSupported, ScenarioHea
   * forks from exactly one source — main, or another scenario's current head —
   * never from nothing, so this is a mandatory two-case selector, not an
   * `Option[ScenarioName]`: `None` would have no distinct meaning from `Main`.
+  *
+  * Deliberately NOT `BranchChoice`, despite the identical structure:
+  * `BranchChoice` answers "which branch does this request operate on",
+  * this answers "what does a new scenario fork from". Reusing one type for
+  * two distinct meanings would be the reverse of the ADR-018 principle
+  * (semantically distinct concepts sharing an encoding get distinct nominal
+  * types). Kept separate by decision, 2026-07-23 (BranchChoice consolidation
+  * sweep).
   */
 enum ScenarioSource:
   case Main

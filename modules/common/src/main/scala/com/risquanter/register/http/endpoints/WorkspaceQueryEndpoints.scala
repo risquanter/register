@@ -30,5 +30,5 @@ trait WorkspaceQueryEndpoints extends BaseEndpoint:
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "query")
       .post
       .in(jsonBody[QueryRequest])
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(activeBranchHeader)
       .out(jsonBody[QueryResponse])

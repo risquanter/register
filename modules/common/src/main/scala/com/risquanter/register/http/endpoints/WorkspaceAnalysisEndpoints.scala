@@ -33,7 +33,7 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .get
       .in(query[Long]("threshold"))
       .in(query[Boolean]("includeProvenance").default(false))
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(activeBranchHeader)
       .out(jsonBody[Double])
 
   val getWorkspaceLECCurvesMultiEndpoint =
@@ -45,5 +45,5 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .post
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[List[NodeId]].description("Array of node IDs"))
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(activeBranchHeader)
       .out(jsonBody[Map[NodeId, LECNodeCurve]])

@@ -5,7 +5,7 @@ import com.raquo.laminar.api.L.{*, given}
 import app.core.ZJS.*
 import app.core.*
 import com.risquanter.register.domain.data.LECNodeCurve
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.http.endpoints.{WorkspaceTreeEndpoints, WorkspaceAnalysisEndpoints}
 import com.risquanter.register.http.responses.ScenarioDiffResponse
 
@@ -59,8 +59,8 @@ final class ScenarioDiffState(
   /** Fetch the diff for `treeId` between `activeBranch` and `compareBranch`. */
   def loadDiff(
     treeId: TreeId,
-    activeBranch: Option[ScenarioName.ScenarioName],
-    compareBranch: Option[ScenarioName.ScenarioName]
+    activeBranch: BranchChoice,
+    compareBranch: BranchChoice
   ): Unit =
     keySignal.now() match
       case Some(key) =>
@@ -74,7 +74,7 @@ final class ScenarioDiffState(
   def loadCompareCurves(
     treeId: TreeId,
     nodeIds: List[NodeId],
-    compareBranch: Option[ScenarioName.ScenarioName]
+    compareBranch: BranchChoice
   ): Unit =
     keySignal.now() match
       case Some(key) if nodeIds.nonEmpty =>

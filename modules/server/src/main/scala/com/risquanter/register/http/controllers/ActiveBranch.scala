@@ -1,7 +1,7 @@
 package com.risquanter.register.http.controllers
 
 import zio.*
-import com.risquanter.register.domain.data.iron.{BranchRef, ScenarioName, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, WorkspaceId}
 
 /** Resolves the `X-Active-Branch` header (milestone-2b Phase B item 4b) into
   * the branch to operate on.
@@ -18,12 +18,18 @@ import com.risquanter.register.domain.data.iron.{BranchRef, ScenarioName, Worksp
   * already handled by the underlying branch lookup returning `None`.
   */
 object ActiveBranch:
-  def resolve(wsId: WorkspaceId, requested: Option[ScenarioName.ScenarioName]): UIO[Option[BranchRef]] =
+  /** Total since the BranchChoice consolidation (TODO item 22): the boundary
+    * already normalized the header into the single internal spelling, and
+    * every request targets a definite branch — main included — so the result
+    * is a definite `BranchRef`, never an `Option` whose absence could be
+    * confused with "main".
+    */
+  def resolve(wsId: WorkspaceId, requested: BranchChoice): UIO[BranchRef] =
     requested match
-      case None => ZIO.succeed(None)
-      case Some(name) =>
+      case BranchChoice.Main => ZIO.succeed(BranchRef.Main)
+      case BranchChoice.Scenario(name) =>
         BranchRef.scenario(wsId, name) match
-          case Right(branch) => ZIO.succeed(Some(branch))
+          case Right(branch) => ZIO.succeed(branch)
           case Left(errors) =>
             ZIO.die(new IllegalStateException(
               s"composed branch for workspace ${wsId.value} + scenario '${name.value}' failed BranchRef validation: $errors — " +

@@ -67,17 +67,17 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         else (false, m)
       }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, currentHead)))
 
-    override def get(path: IrminPath, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused"))
-    override def set(path: IrminPath, value: String, message: String, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused"))
-    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused"))
-    override def remove(path: IrminPath, message: String, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused"))
-    override def mergeBranch(from: BranchRef, into: Option[BranchRef], message: String) = ZIO.die(new NotImplementedError("unused"))
-    override def revert(commit: CommitHash, branch: Option[BranchRef]) = ZIO.die(new NotImplementedError("unused"))
+    override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
+    override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
+    override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
+    override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
+    override def mergeBranch(from: BranchRef, into: BranchRef, message: String) = ZIO.die(new NotImplementedError("unused"))
+    override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused"))
-    override def getHistory(path: IrminPath, n: PositiveInt, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused"))
-    override def lca(branch: Option[BranchRef], commit: CommitHash) = ZIO.die(new NotImplementedError("unused"))
+    override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
+    override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(new NotImplementedError("unused"))
     override def healthCheck = ZIO.die(new NotImplementedError("unused"))
-    override def list(prefix: IrminPath, branch: Option[BranchRef] = None) = ZIO.die(new NotImplementedError("unused"))
+    override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
 
   private def buildBackend(
     initial:   Map[String, CommitHash] = Map("main" -> hash('a')),

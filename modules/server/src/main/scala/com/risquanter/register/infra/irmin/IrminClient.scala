@@ -29,7 +29,7 @@ trait IrminClient:
     * @param branch Branch to read from (None = main)
     * @return Some(value) if exists, None if path not found
     */
-  def get(path: IrminPath, branch: Option[BranchRef] = None): IO[IrminError, Option[String]]
+  def get(path: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError, Option[String]]
 
   /**
     * Set a value at the specified path.
@@ -42,7 +42,7 @@ trait IrminClient:
     * @param branch Branch to write to (None = main; first write creates the branch)
     * @return Commit metadata from the write operation
     */
-  def set(path: IrminPath, value: String, message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit]
+  def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit]
 
   /**
     * Replace an entire subtree in ONE commit (DD-7).
@@ -57,7 +57,7 @@ trait IrminClient:
     * @param branch Branch to write to (None = main; first write creates the branch)
     * @return Commit metadata from the write operation
     */
-  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit]
+  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit]
 
   /**
     * Remove a value at the specified path.
@@ -67,7 +67,7 @@ trait IrminClient:
     * @param branch Branch to write to (None = main)
     * @return Commit metadata from the remove operation
     */
-  def remove(path: IrminPath, message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit]
+  def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit]
 
   /**
     * List all branches in the store.
@@ -100,7 +100,7 @@ trait IrminClient:
     * @param message Commit message for the merge commit
     * @return The merge commit
     */
-  def mergeBranch(from: BranchRef, into: Option[BranchRef], message: String): IO[IrminError, IrminCommit]
+  def mergeBranch(from: BranchRef, into: BranchRef, message: String): IO[IrminError, IrminCommit]
 
   /**
     * Revert a branch to a previous commit (Phase E groundwork).
@@ -109,7 +109,7 @@ trait IrminClient:
     * @param branch Branch to revert (None = main)
     * @return The new head commit
     */
-  def revert(commit: CommitHash, branch: Option[BranchRef]): IO[IrminError, IrminCommit]
+  def revert(commit: CommitHash, branch: BranchRef): IO[IrminError, IrminCommit]
 
   /**
     * Create a branch at a specific commit via CAS (Phase B, DD-5, A9 fact
@@ -153,7 +153,7 @@ trait IrminClient:
     * @param branch Branch to read from (None = main)
     * @return Commits, most recent first
     */
-  def getHistory(path: IrminPath, n: PositiveInt, branch: Option[BranchRef] = None): IO[IrminError, List[IrminCommit]]
+  def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminCommit]]
 
   /**
     * Lowest common ancestor(s) of a branch head and a commit — the merge
@@ -162,7 +162,7 @@ trait IrminClient:
     * @param branch Branch whose head is one side (None = main)
     * @param commit The other side's commit hash
     */
-  def lca(branch: Option[BranchRef], commit: CommitHash): IO[IrminError, List[IrminCommit]]
+  def lca(branch: BranchRef, commit: CommitHash): IO[IrminError, List[IrminCommit]]
 
   /**
     * Startup readiness probe: succeeds iff the Irmin service is reachable and
@@ -180,21 +180,21 @@ trait IrminClient:
     * @param branch Branch to read from (None = main)
     * @return Child paths relative to the prefix
     */
-  def list(prefix: IrminPath, branch: Option[BranchRef] = None): IO[IrminError, List[IrminPath]]
+  def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminPath]]
 
 object IrminClient:
   // Accessor methods for ZIO service pattern
 
-  def get(path: IrminPath, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, Option[String]] =
+  def get(path: IrminPath, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError, Option[String]] =
     ZIO.serviceWithZIO[IrminClient](_.get(path, branch))
 
-  def set(path: IrminPath, value: String, message: String, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, IrminCommit] =
+  def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.set(path, value, message, branch))
 
-  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, IrminCommit] =
+  def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.setTree(path, entries, message, branch))
 
-  def remove(path: IrminPath, message: String, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, IrminCommit] =
+  def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.remove(path, message, branch))
 
   def branches: ZIO[IrminClient, IrminError, List[String]] =
@@ -206,10 +206,10 @@ object IrminClient:
   def getBranch(branch: BranchRef): ZIO[IrminClient, IrminError, Option[IrminBranch]] =
     ZIO.serviceWithZIO[IrminClient](_.getBranch(branch))
 
-  def mergeBranch(from: BranchRef, into: Option[BranchRef], message: String): ZIO[IrminClient, IrminError, IrminCommit] =
+  def mergeBranch(from: BranchRef, into: BranchRef, message: String): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.mergeBranch(from, into, message))
 
-  def revert(commit: CommitHash, branch: Option[BranchRef]): ZIO[IrminClient, IrminError, IrminCommit] =
+  def revert(commit: CommitHash, branch: BranchRef): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.revert(commit, branch))
 
   def createBranchAt(branch: BranchRef, at: CommitHash): ZIO[IrminClient, IrminError, Unit] =
@@ -221,14 +221,14 @@ object IrminClient:
   def getCommit(hash: CommitHash): ZIO[IrminClient, IrminError, Option[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.getCommit(hash))
 
-  def getHistory(path: IrminPath, n: PositiveInt, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, List[IrminCommit]] =
+  def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError, List[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.getHistory(path, n, branch))
 
-  def lca(branch: Option[BranchRef], commit: CommitHash): ZIO[IrminClient, IrminError, List[IrminCommit]] =
+  def lca(branch: BranchRef, commit: CommitHash): ZIO[IrminClient, IrminError, List[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.lca(branch, commit))
 
   def healthCheck: ZIO[IrminClient, IrminError, Unit] =
     ZIO.serviceWithZIO[IrminClient](_.healthCheck)
 
-  def list(prefix: IrminPath, branch: Option[BranchRef] = None): ZIO[IrminClient, IrminError, List[IrminPath]] =
+  def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError, List[IrminPath]] =
     ZIO.serviceWithZIO[IrminClient](_.list(prefix, branch))

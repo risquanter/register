@@ -33,7 +33,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .description("Get tree summary (workspace-scoped)")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
       .get
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(activeBranchHeader)
       .out(jsonBody[Option[SimulationResponse]])
 
   val getWorkspaceTreeStructureEndpoint =
@@ -43,7 +43,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .description("Get full tree structure (workspace-scoped)")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "structure")
       .get
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(activeBranchHeader)
       .out(jsonBody[Option[RiskTree]])
 
   /** Content-hash diff (UC5, milestone-2b Phase C) between two branches —
@@ -60,8 +60,8 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .description("Content-hash diff of a tree between two branches (UC5) — no value-level comparison")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "diff")
       .get
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
-      .in(query[Option[ScenarioName.ScenarioName]]("compareBranch"))
+      .in(activeBranchHeader)
+      .in(compareBranchQuery)
       .out(jsonBody[ScenarioDiffResponse])
 
   val updateWorkspaceTreeEndpoint =
@@ -72,7 +72,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
       .put
       .in(jsonBody[RiskTreeUpdateRequest])
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(activeBranchHeader)
       .out(jsonBody[SimulationResponse])
 
   val deleteWorkspaceTreeEndpoint =
@@ -82,5 +82,5 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
       .description("Delete a single tree from workspace")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId"))
       .delete
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(activeBranchHeader)
       .out(jsonBody[SimulationResponse])

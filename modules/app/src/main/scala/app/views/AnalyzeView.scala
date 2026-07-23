@@ -6,9 +6,9 @@ import scala.scalajs.js
 
 import app.components.{SplitPane, FormInputs, BranchBar}
 import app.chart.{LECSpecBuilder, CompareColorAssigner}
-import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, AppConfigState, CompareState, CompareTarget, ScenarioDiffState, toBranchOption}
+import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, AppConfigState, CompareState, CompareTarget, ScenarioDiffState, toChoice}
 import com.risquanter.register.domain.data.{RiskNode, RiskTree}
-import com.risquanter.register.domain.data.iron.{NodeId, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, ScenarioName}
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
   *
@@ -90,9 +90,9 @@ object AnalyzeView:
           else (thisCurves, compareCurves) match
             case (LoadState.Loaded(thisMap), LoadState.Loaded(compareMap)) =>
               val compareLabel = target match
-                case CompareTarget.Main           => "main"
-                case CompareTarget.Scenario(name)  => name.value.toString
-                case CompareTarget.NotChosen       => "compare"
+                case CompareTarget.Target(BranchChoice.Main)           => "main"
+                case CompareTarget.Target(BranchChoice.Scenario(name)) => name.value.toString
+                case CompareTarget.NotChosen                            => "compare"
               val paired = CompareColorAssigner.pairForOverlay(thisMap, compareMap, visible, "this", compareLabel)
               LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired))
             case (LoadState.Failed(msg), _) => LoadState.Failed(msg)
@@ -176,15 +176,16 @@ object AnalyzeView:
         .combineWith(scenarioState.scenarios)
         .changes --> { (active, list) =>
           compareState.compareBranch.now() match
-            case CompareTarget.Main if active.isEmpty =>
-              compareState.compareBranch.set(CompareTarget.NotChosen)
-            case CompareTarget.Scenario(name) =>
-              val nowActive = active.contains(name)
-              val deleted = list match
-                case LoadState.Loaded(l) => !l.exists(_.name == name)
-                case _                   => false
+            case CompareTarget.Target(choice) =>
+              val nowActive = choice == active
+              val deleted = choice match
+                case BranchChoice.Scenario(name) =>
+                  list match
+                    case LoadState.Loaded(l) => !l.exists(_.name == name)
+                    case _                   => false
+                case BranchChoice.Main => false
               if nowActive || deleted then compareState.compareBranch.set(CompareTarget.NotChosen)
-            case _ => ()
+            case CompareTarget.NotChosen => ()
         },
       // Compare mode: fetch the compare branch's own curves for whatever
       // node set is currently visible on the tab's own chart.
@@ -314,12 +315,12 @@ object AnalyzeView:
     * compare branch dispatches the fetch, no branch chosen yet clears it. */
   private def dispatchOnBranch(
     target: CompareTarget,
-    onChosen: Option[ScenarioName.ScenarioName] => Unit,
+    onChosen: BranchChoice => Unit,
     onIdle: () => Unit
   ): Unit =
-    target.toBranchOption match
+    target.toChoice match
       case Some(compareBranch) => onChosen(compareBranch)
-      case None                 => onIdle()
+      case None                => onIdle()
 
   /** Branch picker for Compare mode — options are `scenarioState.scenarios`
     * plus `main`, excluding the tab's own active branch (comparing a branch
@@ -343,8 +344,8 @@ object AnalyzeView:
   ): HtmlElement =
     def parseSelection(raw: String): CompareTarget =
       if raw.isEmpty then CompareTarget.NotChosen
-      else if raw == BranchBar.mainSentinel then CompareTarget.Main
-      else ScenarioName.fromString(raw).toOption.map(CompareTarget.Scenario(_)).getOrElse(CompareTarget.NotChosen)
+      else if raw == BranchBar.mainSentinel then CompareTarget.Target(BranchChoice.Main)
+      else ScenarioName.fromString(raw).toOption.map(n => CompareTarget.Target(BranchChoice.Scenario(n))).getOrElse(CompareTarget.NotChosen)
 
     val optionEntries: Signal[List[(String, String)]] =
       BranchBar.branchOptionEntries(
@@ -362,8 +363,7 @@ object AnalyzeView:
       controlled(
         value <-- compareState.compareBranch.signal.map {
           case CompareTarget.NotChosen      => ""
-          case CompareTarget.Main           => BranchBar.mainSentinel
-          case CompareTarget.Scenario(name) => name.value.toString
+          case CompareTarget.Target(choice) => BranchBar.branchOptionValue(choice)
         },
         onInput.mapToValue --> { raw => compareState.compareBranch.set(parseSelection(raw)) }
       )

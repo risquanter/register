@@ -38,7 +38,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .description("List trees in workspace")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
       .get
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch"))
+      .in(activeBranchHeader)
       .out(jsonBody[List[SimulationResponse]])
 
   val createWorkspaceTreeEndpoint =
@@ -49,8 +49,7 @@ trait WorkspaceLifecycleEndpoints extends BaseEndpoint:
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees")
       .post
       .in(jsonBody[RiskTreeDefinitionRequest])
-      .in(header[Option[ScenarioName.ScenarioName]]("X-Active-Branch")
-        .description("Create the tree directly on a scenario branch (milestone-2b Phase B) — absent header creates on main (DD-4 default)."))
+      .in(activeBranchHeaderDescribed("Create the tree directly on a scenario branch (milestone-2b Phase B) — absent header creates on main (DD-4 default)."))
       .out(jsonBody[SimulationResponse])
 
   val rotateWorkspaceKeySecretEndpoint =

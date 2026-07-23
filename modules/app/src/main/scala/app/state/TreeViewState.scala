@@ -6,7 +6,7 @@ import scala.scalajs.js
 
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{NodeId, TreeId, UserId, WorkspaceKeySecret, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
 import com.risquanter.register.http.responses.SimulationResponse
@@ -40,11 +40,11 @@ final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
-  activeBranchSignal: StrictSignal[Option[ScenarioName.ScenarioName]] = Val(None)
+  activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main)
 ) extends WorkspaceLifecycleEndpoints
   with WorkspaceTreeEndpoints:
 
-  private def branchAccessor(): Option[ScenarioName.ScenarioName] = activeBranchSignal.now()
+  private def branchAccessor(): BranchChoice = activeBranchSignal.now()
 
   // Set by a caller (DesignView) immediately before it reverts the active branch
   // itself (a declined confirm dialog) — suppresses exactly that one echo so the

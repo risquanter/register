@@ -54,18 +54,18 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
   // forked). Branch-blind keying would silently pass any branch-aware
   // controller test regardless of whether the branch was actually threaded.
   private def stubRepo: RiskTreeRepository = new RiskTreeRepository:
-    private val db = collection.mutable.Map[(WorkspaceId, Option[BranchRef], TreeId), RiskTree]()
-    override def create(wsId: WorkspaceId, t: RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
+    private val db = collection.mutable.Map[(WorkspaceId, BranchRef, TreeId), RiskTree]()
+    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
       com.risquanter.register.util.IdGenerators.nextTreeId.map { id =>
         val tree = t.copy(id = id); db += ((wsId, branch, id) -> tree); tree
       }
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: Option[BranchRef] = None): Task[RiskTree] =
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
       ZIO.attempt { val t = db((wsId, branch, id)); val u = op(t); db += ((wsId, branch, id) -> u); u }
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[RiskTree] =
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
       ZIO.attempt { val t = db((wsId, branch, id)); db -= ((wsId, branch, id)); t }
-    override def getById(wsId: WorkspaceId, id: TreeId, branch: Option[BranchRef] = None): Task[Option[RiskTree]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
       ZIO.succeed(db.get((wsId, branch, id)))
-    override def getAllForWorkspace(wsId: WorkspaceId, branch: Option[BranchRef] = None): Task[List[Either[RepositoryFailure, RiskTree]]] =
+    override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
       ZIO.succeed(db.collect { case ((wid, b, _), t) if wid == wsId && b == branch => Right(t) }.toList)
 
   // ── Controller factory ───────────────────────────────────────────────────────

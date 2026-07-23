@@ -31,14 +31,16 @@ final class IrminClientLive private (
 
   private val defaultAuthor = "zio-client"
 
-  // Log suffix + query argument for branch-parameterized ops (None = main)
-  private def branchName(branch: Option[BranchRef]): Option[String] =
-    branch.map(_.toBranchRef)
+  // GraphQL branch argument: omitted for main (Irmin's default branch) —
+  // the one place the definite BranchRef maps back onto Irmin's optional
+  // wire argument. Callers above this line always pass a definite branch.
+  private def branchName(branch: BranchRef): Option[String] =
+    if branch == BranchRef.Main then None else Some(branch.toBranchRef)
 
-  private def branchLog(branch: Option[BranchRef]): String =
-    branch.fold("")(b => s" [branch=${b.toBranchRef}]")
+  private def branchLog(branch: BranchRef): String =
+    if branch == BranchRef.Main then "" else s" [branch=${branch.toBranchRef}]"
 
-  override def get(path: IrminPath, branch: Option[BranchRef] = None): IO[IrminError, Option[String]] =
+  override def get(path: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError, Option[String]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET: ${path.value}${branchLog(branch)}")
       response <- executeQuery[GetValueResponse](IrminQueries.getValue(path, branchName(branch)))
@@ -46,7 +48,7 @@ final class IrminClientLive private (
       _        <- ZIO.logDebug(s"Irmin GET result: ${value.map(_.take(50))}")
     yield value
 
-  override def set(path: IrminPath, value: String, message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit] =
+  override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin SET: ${path.value} (${value.length} bytes)${branchLog(branch)}")
       query     = IrminQueries.setValue(path, value, message, defaultAuthor, branchName(branch))
@@ -55,7 +57,7 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin SET committed: ${commit.hash.take(12)}")
     yield commit
 
-  override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit] =
+  override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin SET_TREE: ${path.value} (${entries.size} entries)${branchLog(branch)}")
       query     = IrminQueries.setTree(path, entries, message, defaultAuthor, branchName(branch))
@@ -66,7 +68,7 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin SET_TREE committed: ${commit.hash.take(12)}")
     yield commit
 
-  override def remove(path: IrminPath, message: String, branch: Option[BranchRef] = None): IO[IrminError, IrminCommit] =
+  override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main): IO[IrminError, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin REMOVE: ${path.value}${branchLog(branch)}")
       query     = IrminQueries.removeValue(path, message, defaultAuthor, branchName(branch))
@@ -84,12 +86,12 @@ final class IrminClientLive private (
     yield names
 
   override def mainBranch: IO[IrminError, Option[IrminBranch]] =
-    branchInfo(None)
+    branchInfo(BranchRef.Main)
 
   override def getBranch(branch: BranchRef): IO[IrminError, Option[IrminBranch]] =
-    branchInfo(Some(branch))
+    branchInfo(branch)
 
-  private def branchInfo(branch: Option[BranchRef]): IO[IrminError, Option[IrminBranch]] =
+  private def branchInfo(branch: BranchRef): IO[IrminError, Option[IrminBranch]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET BRANCH${branchLog(branch)}")
       response <- executeQuery[MainBranchResponse](IrminQueries.getBranchInfo(branchName(branch)))
@@ -112,9 +114,9 @@ final class IrminClientLive private (
                   )
     yield info
 
-  override def mergeBranch(from: BranchRef, into: Option[BranchRef], message: String): IO[IrminError, IrminCommit] =
+  override def mergeBranch(from: BranchRef, into: BranchRef, message: String): IO[IrminError, IrminCommit] =
     for
-      _        <- ZIO.logInfo(s"Irmin MERGE: ${from.toBranchRef} → ${into.fold("main")(_.toBranchRef)}")
+      _        <- ZIO.logInfo(s"Irmin MERGE: ${from.toBranchRef} → ${into.toBranchRef}")
       query     = IrminQueries.mergeWithBranch(from.toBranchRef, branchName(into), message, defaultAuthor)
       response <- executeQuery[MergeBranchResponse](query)
       commit   <- response.data.flatMap(_.merge_with_branch) match
@@ -123,7 +125,7 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin MERGE committed: ${commit.hash.take(12)}")
     yield commit
 
-  override def revert(commit: CommitHash, branch: Option[BranchRef]): IO[IrminError, IrminCommit] =
+  override def revert(commit: CommitHash, branch: BranchRef): IO[IrminError, IrminCommit] =
     for
       _        <- ZIO.logInfo(s"Irmin REVERT to ${commit.value.take(12)}${branchLog(branch)}")
       response <- executeQuery[RevertResponse](IrminQueries.revert(commit.value, branchName(branch)))
@@ -160,14 +162,14 @@ final class IrminClientLive private (
       commit   <- ZIO.foreach(response.data.flatMap(_.commit))(commitFromData)
     yield commit
 
-  override def getHistory(path: IrminPath, n: PositiveInt, branch: Option[BranchRef] = None): IO[IrminError, List[IrminCommit]] =
+  override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin HISTORY: ${path.value} (n=$n)${branchLog(branch)}")
       response <- executeQuery[HistoryResponse](IrminQueries.getHistory(path, n, branchName(branch)))
       commits  <- ZIO.foreach(response.data.flatMap(_.main).map(_.last_modified).getOrElse(Nil))(commitFromData)
     yield commits
 
-  override def lca(branch: Option[BranchRef], commit: CommitHash): IO[IrminError, List[IrminCommit]] =
+  override def lca(branch: BranchRef, commit: CommitHash): IO[IrminError, List[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin LCA: ${commit.value.take(12)}${branchLog(branch)}")
       response <- executeQuery[LcaResponse](IrminQueries.lca(branchName(branch), commit.value))
@@ -179,7 +181,7 @@ final class IrminClientLive private (
     // failure) through the readiness gate's retries to the final failure (ADR-031).
     executeQuery[BranchesResponse](IrminQueries.listBranches).unit
 
-  override def list(prefix: IrminPath, branch: Option[BranchRef] = None): IO[IrminError, List[IrminPath]] =
+  override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminPath]] =
     for
       _        <- ZIO.logDebug(s"Irmin LIST: ${prefix.value}${branchLog(branch)}")
       response <- executeQuery[ListTreeResponse](IrminQueries.listTree(prefix, branchName(branch)))

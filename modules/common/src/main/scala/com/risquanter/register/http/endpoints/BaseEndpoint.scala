@@ -4,7 +4,7 @@ import sttp.tapir.*
 import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import com.risquanter.register.domain.errors.{JsonHttpError, ErrorResponse}
-import com.risquanter.register.domain.data.iron.UserId
+import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName, UserId}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
 /** Base endpoint with standardized error handling
@@ -31,4 +31,29 @@ trait BaseEndpoint {
     * @see ADR-012: Claim Header Injection
     */
   val authedBaseEndpoint = baseEndpoint.in(header[Option[UserId.Authenticated]]("x-user-id"))
+
+  /** Shared `X-Active-Branch` input. The wire keeps DD-8's encoding (header
+    * absent = main); it is decoded here, exactly once, into the single
+    * internal `BranchChoice` spelling — nothing past the Tapir boundary
+    * carries the wire's bare `Option` (TODO item 22).
+    */
+  val activeBranchHeader: EndpointInput[BranchChoice] =
+    header[Option[ScenarioName.ScenarioName]]("X-Active-Branch")
+      .description("Target branch for this request — absent = main (DD-8).")
+      .map(BranchChoice.fromWire)(_.toWire)
+
+  /** `activeBranchHeader` with a site-specific wire description. */
+  def activeBranchHeaderDescribed(desc: String): EndpointInput[BranchChoice] =
+    header[Option[ScenarioName.ScenarioName]]("X-Active-Branch")
+      .description(desc)
+      .map(BranchChoice.fromWire)(_.toWire)
+
+  /** Second branch of a pairwise operation (e.g. the scenario diff) as a
+    * query parameter — a GET has no body to carry it, and reusing the header
+    * for both sides would be ambiguous. Same wire encoding: absent = main.
+    */
+  val compareBranchQuery: EndpointInput[BranchChoice] =
+    query[Option[ScenarioName.ScenarioName]]("compareBranch")
+      .description("Second branch of the comparison — absent = main.")
+      .map(BranchChoice.fromWire)(_.toWire)
 }

@@ -26,14 +26,14 @@ object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
       for {
         repo  <- ZIO.service[RiskTreeRepository]
         rNone <- repo.getById(wsId, someTree)
-        rMain <- repo.getById(wsId, someTree, Some(BranchRef.Main))
+        rMain <- repo.getById(wsId, someTree, BranchRef.Main)
       } yield assertTrue(rNone.isEmpty, rMain.isEmpty)
     },
 
     test("a non-main branch request fails with a typed RepositoryFailure") {
       for {
         repo <- ZIO.service[RiskTreeRepository]
-        exit <- repo.getById(wsId, someTree, Some(scenarioBranch)).exit
+        exit <- repo.getById(wsId, someTree, scenarioBranch).exit
       } yield assertTrue(
         exit.causeOption.flatMap(_.failureOption).exists(_.isInstanceOf[RepositoryFailure])
       )

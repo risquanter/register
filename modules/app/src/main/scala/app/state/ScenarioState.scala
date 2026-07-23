@@ -5,7 +5,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import app.core.ZJS.*
 import app.core.safeMessage
-import com.risquanter.register.domain.data.iron.{UserId, WorkspaceKeySecret, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
 import com.risquanter.register.http.requests.CreateScenarioRequest
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
@@ -23,8 +23,8 @@ import com.risquanter.register.http.responses.ScenarioSummaryResponse
   * but hand the resulting refresh to `listState` — the shared list is never
   * written to directly by more than one code path.
   *
-  * `activeBranch` is per-tab, in-memory only — `None` means main (mirrors
-  * the server default, DD-8) and is never persisted to the URL or storage,
+  * `activeBranch` is per-tab, in-memory only — `BranchChoice.Main` is the
+  * default — and is never persisted to the URL or storage,
   * the same choice already made for `TreeViewState.selectedTreeId`: a page
   * refresh or a link opened in a new tab starts back on main, which is the
   * safe default, not data loss (nothing server-side depends on this value).
@@ -39,8 +39,8 @@ final class ScenarioState(
   userIdAccessor: () => Option[UserId.Authenticated] = () => None
 ) extends ScenarioEndpoints:
 
-  /** `None` = main. */
-  val activeBranch: Var[Option[ScenarioName.ScenarioName]] = Var(None)
+  /** This view's branch context — one internal spelling, no bare Option. */
+  val activeBranch: Var[BranchChoice] = Var(BranchChoice.Main)
 
   /** Read-only view of the shared scenario list — see `ScenarioListState`. */
   def scenarios: StrictSignal[LoadState[List[ScenarioSummaryResponse]]] = listState.scenarios
@@ -48,9 +48,9 @@ final class ScenarioState(
   /** Fetch the workspace's scenario list. No-op if no workspace is active. */
   def refresh(): Unit = listState.refresh()
 
-  /** Switch this view's active branch. `None` switches back to main. */
-  def switchTo(name: Option[ScenarioName.ScenarioName]): Unit =
-    activeBranch.set(name)
+  /** Switch this view's active branch. */
+  def switchTo(choice: BranchChoice): Unit =
+    activeBranch.set(choice)
 
   // Falls back to main if this view's active branch disappears from the
   // shared list — whether deleted through this view or any other. Reacts
@@ -62,9 +62,10 @@ final class ScenarioState(
   listState.scenarios.changes.foreach {
     case LoadState.Loaded(list) =>
       val names = list.map(_.name).toSet
-      activeBranch.now().foreach { current =>
-        if !names.contains(current) then activeBranch.set(None)
-      }
+      activeBranch.now() match
+        case BranchChoice.Scenario(current) if !names.contains(current) =>
+          activeBranch.set(BranchChoice.Main)
+        case _ => ()
     case _ => ()
   }(using unsafeWindowOwner)
 
@@ -87,7 +88,7 @@ final class ScenarioState(
           .tap(response => ZIO.succeed {
             submitState.set(ScenarioSubmitState.Success(response))
             listState.refresh()
-            switchTo(Some(response.name))
+            switchTo(BranchChoice.Scenario(response.name))
           })
           .tapError(e => ZIO.succeed(submitState.set(ScenarioSubmitState.Failed(e.safeMessage))))
           .runJs
@@ -121,7 +122,7 @@ final class ScenarioState(
               case Some(s) =>
                 deleteScenarioEndpoint((userIdAccessor(), key, name, s.head))
                   .tap(_ => ZIO.succeed {
-                    if activeBranch.now().contains(name) then activeBranch.set(None)
+                    if activeBranch.now() == BranchChoice.Scenario(name) then activeBranch.set(BranchChoice.Main)
                     listState.refresh()
                   })
               case None => ZIO.unit

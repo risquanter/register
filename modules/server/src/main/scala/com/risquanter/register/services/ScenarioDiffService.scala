@@ -57,8 +57,8 @@ trait ScenarioDiffService:
   def diff(
     wsId:    WorkspaceId,
     treeId:  TreeId,
-    branchA: Option[BranchRef],
-    branchB: Option[BranchRef]
+    branchA: BranchRef,
+    branchB: BranchRef
   )(using Checked[Permission]): Task[ScenarioDiffResult]
 
 final case class ScenarioDiffServiceLive(riskTreeService: RiskTreeService) extends ScenarioDiffService:
@@ -66,8 +66,8 @@ final case class ScenarioDiffServiceLive(riskTreeService: RiskTreeService) exten
   override def diff(
     wsId:    WorkspaceId,
     treeId:  TreeId,
-    branchA: Option[BranchRef],
-    branchB: Option[BranchRef]
+    branchA: BranchRef,
+    branchB: BranchRef
   )(using Checked[Permission]): Task[ScenarioDiffResult] =
     // The two branches' trees are independent fetches (no shared state) —
     // zipPar avoids paying getById's Irmin round-trip cost twice, sequentially.
