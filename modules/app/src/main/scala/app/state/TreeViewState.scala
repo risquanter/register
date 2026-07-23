@@ -8,7 +8,7 @@ import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
-import com.risquanter.register.http.endpoints.{WorkspaceLifecycleEndpoints, WorkspaceTreeEndpoints}
+import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
 import com.risquanter.register.http.responses.SimulationResponse
 
 /** Reactive state for viewing server-persisted risk trees.
@@ -25,6 +25,11 @@ import com.risquanter.register.http.responses.SimulationResponse
   * definitions for ZJS bridge calls.
   *
   * @param keySignal          Read-only signal providing the active workspace key.
+  * @param treeListState      The shared, branch-keyed tree-list owner (one per
+  *                           app, `Main`). This class no longer owns the list —
+  *                           it reads its own branch's slice and forwards
+  *                           refresh requests, so a mutation seen through any
+  *                           view refreshes the one list every view reads.
   * @param globalError        App-wide error Var (passed through to LECChartState for
   *                           the 13-cap validation error).
   * @param userIdAccessor     Returns the current user identity (None in capability-only mode).
@@ -38,11 +43,11 @@ import com.risquanter.register.http.responses.SimulationResponse
   */
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  treeListState: TreeListState,
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main)
-) extends WorkspaceLifecycleEndpoints
-  with WorkspaceTreeEndpoints:
+) extends WorkspaceTreeEndpoints:
 
   private def branchAccessor(): BranchChoice = activeBranchSignal.now()
 
@@ -53,28 +58,34 @@ final class TreeViewState(
   private val suppressNextReloadVar: Var[Boolean] = Var(false)
   def suppressNextReload(): Unit = suppressNextReloadVar.set(true)
 
-  activeBranchSignal.changes.foreach { _ =>
+  activeBranchSignal.changes.foreach { branch =>
     if suppressNextReloadVar.now() then
       suppressNextReloadVar.set(false)
     else
-      loadTreeList()
+      // ensureLoaded, not refresh: switching back to an already-fetched
+      // branch shows its cached list instantly; only a never-fetched branch
+      // costs a request. Mutations keep the cache honest via
+      // `TreeListState.refresh` (see loadTreeList / TreeBuilderView).
+      treeListState.ensureLoaded(branch)
       refreshSelectedTree()
   }(using unsafeWindowOwner)
 
   // A workspace key appearing for the first time (bootstrap via Create, or a
-  // returning session's URL key) means this instance's own tree list needs
-  // its first real fetch — a caller's own onMountCallback-driven
-  // `loadTreeList()` (e.g. TreeListView) races the key not existing yet at
-  // that mount and silently no-ops (the `None` case in `loadTreeList` below).
-  // Without this, an instance that never independently changes branch (as
-  // Analyze's own instance may not) never gets a second chance to fetch.
+  // returning session's URL key) means this instance's branch needs its first
+  // real fetch — a caller's own onMountCallback-driven `ensureTreeListLoaded()`
+  // (e.g. TreeListView) races the key not existing yet at that mount and
+  // silently no-ops. TreeListState's own key subscription already re-fetches
+  // main; this covers an instance sitting on a scenario branch at that moment.
   keySignal.changes.collect { case Some(_) => () }.foreach { _ =>
-    loadTreeList()
+    treeListState.ensureLoaded(branchAccessor())
     refreshSelectedTree()
   }(using unsafeWindowOwner)
 
   // ── Available trees (summary list) ────────────────────────────
-  val availableTrees: Var[LoadState[List[SimulationResponse]]] = Var(LoadState.Idle)
+  // This branch's slice of the shared, branch-keyed list — read-only; writes
+  // go through TreeListState (`loadTreeList`/`ensureTreeListLoaded` below).
+  val availableTrees: Signal[LoadState[List[SimulationResponse]]] =
+    treeListState.listFor(activeBranchSignal)
 
   // ── Selected tree (full structure with nodes) ─────────────────
   val selectedTreeId: Var[Option[TreeId]] = Var(None)
@@ -112,11 +123,16 @@ final class TreeViewState(
 
   // ── Actions ───────────────────────────────────────────────────
 
-  /** Fetch all trees from the backend (summary only). */
+  /** Force-refresh this branch's tree list (mutation just landed, or the
+    * user clicked refresh/retry). Supersedes an in-flight fetch for the
+    * same branch; other branches are untouched. */
   def loadTreeList(): Unit =
-    keySignal.now() match
-      case Some(key) => listWorkspaceTreesEndpoint((userIdAccessor(), key, branchAccessor())).loadInto(availableTrees)
-      case None      => () // No workspace yet — nothing to load
+    treeListState.refresh(branchAccessor())
+
+  /** Fetch this branch's tree list only if it isn't already loaded or in
+    * flight — the mount-time entry point (TreeListView). */
+  def ensureTreeListLoaded(): Unit =
+    treeListState.ensureLoaded(branchAccessor())
 
   /** Fetch the full tree structure for the given id. */
   def loadTreeStructure(id: TreeId): Unit =

@@ -9,7 +9,9 @@ import com.risquanter.register.http.responses.SimulationResponse
 
 /** Dropdown selector for server-persisted risk trees.
   *
-  * Loads the tree list on mount via `TreeViewState.loadTreeList()`.
+  * Ensures the tree list is loaded on mount via
+  * `TreeViewState.ensureTreeListLoaded()` (skips when the shared
+  * `TreeListState` already has this branch's list or a fetch in flight).
   * When the user selects a tree, triggers structure fetch via `selectTree()`.
   *
   * Pure view function — owns no state (ADR-019 Pattern 1 + 4).
@@ -58,8 +60,11 @@ object TreeListView:
           )
         ).getOrElse(emptyNode)
       ),
-      onMountCallback(_ => state.loadTreeList()),
-      state.availableTrees.signal.changes.collect { case LoadState.Loaded(trees) => trees } --> { trees =>
+      // ensureTreeListLoaded, not loadTreeList: both views' instances mount at
+      // startup (only hidden via CSS), and the shared TreeListState collapses
+      // their concurrent asks for the same branch into one request.
+      onMountCallback(_ => state.ensureTreeListLoaded()),
+      state.availableTrees.changes.collect { case LoadState.Loaded(trees) => trees } --> { trees =>
         lastKnownTrees.set(Some(trees))
       },
       div(
@@ -74,7 +79,7 @@ object TreeListView:
         div(
           cls := "tree-list-tree-slot",
           span(cls := "tree-list-slot-label", "Tree"),
-          child <-- state.availableTrees.signal.combineWith(lastKnownTrees.signal).map {
+          child <-- state.availableTrees.combineWith(lastKnownTrees.signal).map {
             case (LoadState.Loaded(trees), _) =>
               if trees.isEmpty then renderPlaceholder("No saved trees yet.")
               else renderSelector(trees, state)

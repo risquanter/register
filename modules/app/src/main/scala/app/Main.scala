@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
 import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeViewState, WorkspaceState, GlobalError, LoadState, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, CompareState, ScenarioDiffState}
+import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, CompareState, ScenarioDiffState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -40,12 +40,19 @@ object Main:
     val appConfigState = new AppConfigState
     appConfigState.refresh()
 
+    // The workspace's tree lists, keyed by branch — shared for the same
+    // reason as scenarioListState: one list per branch on the server, so one
+    // owner here. A mutation through Design refreshes the entry Analyze reads.
+    val treeListState = new TreeListState(
+      wsState.keySignal, scenarioListState.scenarios, () => wsState.currentUserId
+    )
+
     val builderState = new TreeBuilderState
     val designTreeViewState = new TreeViewState(
-      wsState.keySignal, globalError, () => wsState.currentUserId, designScenarioState.activeBranch.signal
+      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, designScenarioState.activeBranch.signal
     )
     val analyzeTreeViewState = new TreeViewState(
-      wsState.keySignal, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal
+      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal
     )
     val analyzeQueryState = new AnalyzeQueryState(
       keySignal = wsState.keySignal,
@@ -68,13 +75,11 @@ object Main:
     // ── Pre-validate workspace key from URL (Scenarios 2 & 3) ────
     wsState.preValidate(
       onTreesLoaded = trees =>
-        // Seeds both instances — each would otherwise redundantly re-fetch
-        // the same list on its own first mount (Design's and Analyze's
-        // TreeListView both call loadTreeList() on mount; both mount at
-        // startup, only hidden via CSS — see AppShell.routableView).
-        val loaded = LoadState.Loaded(trees)
-        designTreeViewState.availableTrees.set(loaded)
-        analyzeTreeViewState.availableTrees.set(loaded),
+        // Seeds the shared list's main entry — both views' TreeListView
+        // mounts then find it Loaded and skip their own fetch
+        // (ensureTreeListLoaded), instead of re-requesting what this
+        // startup call just returned.
+        treeListState.seedMain(trees),
       onExpired = () =>
         globalError.set(Some(GlobalError.WorkspaceExpired(
           "Your previous workspace has expired and its data is no longer available. " +
