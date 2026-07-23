@@ -1488,9 +1488,16 @@ Phase B: Scenario CRUD + Minimal UI
     Phase E                                                    [Scala]
 
 Phase C: Comparison
-  - ScenarioDiff service (hash-based diff, UC5)           [Scala]
-  - Comparison view in Analyze section                     [Scala.js/Laminar]
-  - Cross-branch cache reuse (UC6, implicit)
+  - ✅ ScenarioDiff service (hash-based diff, UC5) — DONE   [Scala]
+  - Comparison view in Analyze section — first slice DONE
+    (Off/Overlay, 2 branches, ✎ changed-node markers,
+    dual-branch curve overlay; commit 73f8c86). Remaining:
+    Side-by-side layout, N-way (3+) branches, per-branch
+    node selection (accordion vs. separate-containers design
+    open, see PLAN-UI-MILESTONE-2B §6 addendum 2026-07-22),
+    Ctrl+Alt+click mirror-select, per-branch colour picker   [Scala.js/Laminar]
+  - ✅ Cross-branch cache reuse (UC6, implicit) — confirmed
+    working in RiskResultResolverLive, no work needed
 
 Phase D: Merge
   - ScenarioMerger (Irmin merge_with_branch)              [Scala→Irmin]

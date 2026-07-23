@@ -25,18 +25,26 @@ final class AppConfigState:
     */
   val scenariosEnabled: Var[Boolean] = Var(false)
 
+  /** Deployed app version (APP_VERSION env, templated into `/config.json`
+    * by the frontend container entrypoint). "dev" while the fetch is in
+    * flight, if it fails, or when the field is absent (Vite dev server).
+    */
+  val appVersion: Var[String] = Var("dev")
+
   def refresh(): Unit =
     dom.fetch("/config.json").toFuture
       .flatMap(_.text().toFuture)
       .onComplete {
         case Success(body) =>
           body.fromJson[AppConfigState.ConfigPayload] match
-            case Right(cfg) => scenariosEnabled.set(cfg.scenariosEnabled)
-            case Left(_)    => ()
+            case Right(cfg) =>
+              scenariosEnabled.set(cfg.scenariosEnabled)
+              cfg.appVersion.foreach(appVersion.set)
+            case Left(_) => ()
         case Failure(_) => ()
       }
 
 object AppConfigState:
-  private final case class ConfigPayload(scenariosEnabled: Boolean)
+  private final case class ConfigPayload(scenariosEnabled: Boolean, appVersion: Option[String] = None)
   private object ConfigPayload:
     given JsonDecoder[ConfigPayload] = DeriveJsonDecoder.gen[ConfigPayload]

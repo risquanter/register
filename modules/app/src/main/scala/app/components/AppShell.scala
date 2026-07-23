@@ -20,6 +20,7 @@ object AppShell:
     onDismissError: () => Unit,
     healthStatus: Signal[Option[Boolean]],
     workspaceBadge: Signal[String],
+    appVersion: Signal[String],
     branchChip: HtmlElement,
     designView: HtmlElement,
     analyzeView: HtmlElement
@@ -27,7 +28,7 @@ object AppShell:
     div(
       cls := "app-shell",
       // ── Left sidebar ──
-      Sidebar(navState),
+      Sidebar(navState, appVersion),
       // ── Main area (topbar + error banner + routed content) ──
       div(
         cls := "app-main",

@@ -303,7 +303,11 @@ if [ "${REGISTER_REPOSITORY_TYPE:-in-memory}" = "irmin" ]; then
 else
     SCENARIOS_ENABLED=false
 fi
-printf '{"scenariosEnabled": %s}' "${SCENARIOS_ENABLED}" > /tmp/config.json
+# appVersion — the running app version, shown in the SPA's sidebar footer.
+# Comes from the same APP_VERSION variable that tags the images
+# (docker-compose.yml, mirrored from build.sbt via the env file).
+printf '{"scenariosEnabled": %s, "appVersion": "%s"}' \
+    "${SCENARIOS_ENABLED}" "${APP_VERSION:-dev}" > /tmp/config.json
 
 exec nginx -c /tmp/nginx.conf -g "daemon off;"
 EOF

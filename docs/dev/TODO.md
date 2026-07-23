@@ -353,7 +353,14 @@ test case.
 
 ---
 
-## 9. Design view tree dropdown does not load existing tree structure
+## ✅ 9. Design view tree dropdown does not load existing tree structure — RESOLVED (verified 2026-07-23)
+
+**Resolution:** fixed as part of the tree-builder rework (edit-in-place /
+FormMode sessions, 2026-07-2x). `DesignView.scala` wires the dropdown
+selection to `TreeBuilderState.loadFromTree(tree)`, which populates the
+editable working copy (name, portfolios, leaves) and takes the dirty-tracking
+snapshot — Design and Analyze dropdowns now both load existing structure, and
+Design keeps edit-existing-tree capability. Original report kept below.
 
 **Observed:** With the cluster running under
 `docker compose --profile persistence --profile frontend up -d` and a
@@ -1386,7 +1393,7 @@ right now. Revisit only if a concrete need for automated frontend network-flow
 coverage comes up again; if picked up, check what actually failed last time
 before repeating the same approach.
 
-## 26. Compare branch picker (`AnalyzeView.renderBranchPicker`) — `<select>` desync between DOM and `compareState.compareBranch`
+## ✅ 26. Compare branch picker (`AnalyzeView.renderBranchPicker`) — `<select>` desync between DOM and `compareState.compareBranch` — RESOLVED 2026-07-22
 
 **Origin (2026-07-16 session, confirmed by user 2026-07-22):** the Compare
 branch `<select>` (`AnalyzeView.scala`, `renderBranchPicker`) rebuilds its
@@ -1556,5 +1563,21 @@ design proposed, no `ZJS.scala` changes.
    No rename made — instead, P05 was *added* to the LEC chart as its own,
    correctly-computed line (see item 1).
 
-**Status:** both items done. `sbt clean "commonJVM/test; server/test; app/test"`
-green (509 + 567 + 30, 0 failures).
+**Status:** both items done, full test run green.
+
+**Addendum (2026-07-23) — design superseded by the locked chart UI.** The
+resolution text above describes the first implementation (P05/P50/P95 lines
+behind one shared `showPercentiles` checkbox). The chart has since moved to
+its final form (commits 53a575f, ca82acc, 8e03e00):
+
+- The annotation lines are the **tail quantiles P90 / P95 / P99 / P99.5**
+  plus **AAL** — P05/P50 are no longer drawn on the LEC chart.
+- Each line has its **own independent toggle** (`showP90`/`showP95`/`showP99`/
+  `showP995`/`showAAL`); the shared `showPercentiles` switch is gone. Default:
+  only **P95** (and AAL) start checked.
+- Labels render as **two stacked lines** ("P95" over the formatted value) to
+  reduce collisions when several quantile rules sit close together.
+- Server side (`LECGenerator`): curves now always include the x=0 tick with
+  the strict y-intercept `1 − P(no loss)`, and `getTicks` clamps its step to
+  ≥ 1 so narrow loss ranges (span < nEntries) no longer collapse to a
+  single-point (invisible) curve.

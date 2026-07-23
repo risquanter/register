@@ -13,7 +13,7 @@ import app.state.{NavigationState, Section}
   */
 object Sidebar:
 
-  def apply(navState: NavigationState): HtmlElement =
+  def apply(navState: NavigationState, appVersion: Signal[String]): HtmlElement =
     asideTag(
       cls := "sidebar",
       // ── Brand ──
@@ -33,7 +33,8 @@ object Sidebar:
         navItem(Section.Analyze, Icons.analyze(), "Analyze", navState)
       ),
       // ── Footer ──
-      div(cls := "sidebar-footer", "v0.3")
+      // "v0.6.1" for a real version, bare "dev" for the Vite/fallback value.
+      div(cls := "sidebar-footer", child.text <-- appVersion.map(v => if v == "dev" then v else "v" + v))
     )
 
   /** A single navigation item with reactive active state. */

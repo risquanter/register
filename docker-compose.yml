@@ -207,6 +207,9 @@ services:
       # the backend's own ScenarioServiceNotSupported stub is what actually
       # enforces this (milestone-2b Phase B item 6).
       REGISTER_REPOSITORY_TYPE: "${REGISTER_REPOSITORY_TYPE:-in-memory}"
+      # Same variable that tags the images above — the entrypoint templates it
+      # into /config.json so the SPA's sidebar footer shows the running version.
+      APP_VERSION: "${APP_VERSION:-dev}"
     read_only: true
     security_opt:
       - no-new-privileges:true

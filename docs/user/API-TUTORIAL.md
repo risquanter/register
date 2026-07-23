@@ -6,8 +6,8 @@ This guide walks through the HTTP API step by step: parameterising leaf risks, b
 
 | Requirement | Detail |
 |---|---|
-| Running Register instance | The examples target **in-memory mode** (`localhost:8090`). See [Getting Started (in-memory storage)](../README.md#getting-started-in-memory-storage) in the README for how to start one. No persistence backend is required. |
-| API endpoint | `http://localhost:8090` throughout. |
+| Running Register instance | The examples target the **docker-compose stack** started with `docker compose --profile frontend up -d` — the nginx frontend on `localhost:18080` proxies all API paths through to the backend. In-memory mode is the default; no persistence backend is required. See [Getting Started (in-memory storage)](../README.md#getting-started-in-memory-storage) in the README. |
+| API endpoint | `http://localhost:18080` throughout (the frontend container). If you run the bare backend instead (`docker compose up -d register-server`, or Vite dev mode), substitute `localhost:8090`. |
 | HTTP client | Examples use [httpie](https://httpie.io/) (`http` command) and [curl](https://curl.se/). Install either one — both produce the same results. |
 | `jq` | Used in curl examples for pretty-printing JSON responses. Install via your OS package manager (`brew install jq`, `apt install jq`, etc.). |
 | `workspaceKey` | The 128-bit capability token returned by the bootstrap step. It is embedded in every subsequent URL. **Treat it like a shared secret** — anyone who holds it can read and modify that workspace. |
@@ -96,7 +96,7 @@ The system fits a flexible distribution that passes exactly through every stated
 Create a workspace with a two-level risk tree: one portfolio ("Operations") containing four leaf risks — a cyber breach (lognormal), ransomware (expert quantiles), a supply chain disruption (lognormal), and a regulatory fine (lognormal):
 
 ```bash
-http POST localhost:8090/workspaces \
+http POST localhost:18080/workspaces \
   name="Operational Risk Model" \
   portfolios:='[
     {
@@ -199,12 +199,12 @@ export TREE_ID=01J...
 
 **httpie:**
 ```bash
-http GET "localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID"
+http GET "localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID"
 ```
 
 **curl:**
 ```bash
-curl -s "http://localhost:8090/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
+curl -s "http://localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
 ```
 
 Returns the simulation summary for every node in the tree, including P95/P99 quantile statistics and LEC curve points.
@@ -286,7 +286,7 @@ Enterprise Risk  (root)
 ### Bootstrap (httpie)
 
 ```bash
-http POST localhost:8090/workspaces \
+http POST localhost:18080/workspaces \
   name="Financial Services Enterprise Risk" \
   portfolios:='[
     {
@@ -678,7 +678,7 @@ http POST localhost:8090/workspaces \
 ### Bootstrap (curl)
 
 ```bash
-curl -s -X POST http://localhost:8090/workspaces \
+curl -s -X POST http://localhost:18080/workspaces \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "Financial Services Enterprise Risk",

@@ -6,7 +6,7 @@ The **Vague Query Language (VQL)** is Register's proportional first-order logic 
 
 | Requirement | Detail |
 |---|---|
-| Running Register instance | The examples assume **in-memory mode** (`localhost:8090` API, `localhost:18080` UI). See [Getting Started (in-memory storage)](../README.md#getting-started-in-memory-storage) in the README. |
+| Running Register instance | The examples assume the **docker-compose stack** (`docker compose --profile frontend up -d`): `localhost:18080` serves the UI and proxies all API calls (the demo scripts default to it). In-memory mode is the default; no persistence backend needed. See [Getting Started (in-memory storage)](../README.md#getting-started-in-memory-storage) in the README. |
 | Bootstrapped workspace & tree | You need a `workspaceKey` and `treeId`. Quickest path: `chmod +x examples/*.sh && ./examples/demo-simple-httpie.sh` — the script prints both values. Alternatively follow [API-TUTORIAL.md](API-TUTORIAL.md) step 1. |
 | Exported variables | `export WS_KEY=<workspaceKey>` and `export TREE_ID=<treeId>`. |
 | Running queries via UI | Navigate to `http://localhost:18080/w/<workspaceKey>`, open the **Analyze** view, select the tree from the dropdown, and type queries in the query pane. |

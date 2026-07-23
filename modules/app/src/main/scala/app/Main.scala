@@ -100,6 +100,7 @@ object Main:
       onDismissError = () => globalError.set(None),
       healthStatus = healthState.status.signal,
       workspaceBadge = workspaceBadge,
+      appVersion = appConfigState.appVersion.signal,
       branchChip = BranchBar.chipForSection(
         navState.activeSection.signal, designScenarioState, analyzeScenarioState, appConfigState.scenariosEnabled.signal
       ),
