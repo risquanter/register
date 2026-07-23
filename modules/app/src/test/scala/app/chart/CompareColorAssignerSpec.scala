@@ -13,7 +13,8 @@ object CompareColorAssignerSpec extends ZIOSpecDefault:
   private val leaf1 = NodeId.fromString("01HX9ABCDE0000000000000001").toOption.get
   private val leaf2 = NodeId.fromString("01HX9ABCDE0000000000000002").toOption.get
 
-  private def curve(id: NodeId): LECNodeCurve = LECNodeCurve(id, name = s"Leaf ${id.value}", curve = Vector.empty, quantiles = Map.empty)
+  private def curve(id: NodeId): LECNodeCurve =
+    LECNodeCurve(id, name = s"Leaf ${id.value}", curve = Vector.empty, quantiles = Map.empty, averageAnnualLoss = 0.0, probabilityOfNoLoss = 1.0)
 
   def spec = suite("CompareColorAssigner.pairForOverlay")(
 

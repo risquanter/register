@@ -433,12 +433,14 @@ class RiskTreeServiceLive private (
         // Generate curves with shared tick domain (ADR-014 render-time strategy)
         curvesData = LECGenerator.generateCurvePointsMulti(results)
         
-        // Enrich with id + name + quantiles to produce LECNodeCurve per node
+        // Enrich with id + name + quantiles + AAL + no-loss probability to produce LECNodeCurve per node
         enriched = curvesData.map { case (nodeId, points) =>
           val name = nodesMap.get(nodeId).map(_.name.value.toString).getOrElse(nodeId.value)
           val curvePoints = points.map { case (loss, prob) => LECPoint(loss, prob) }
           val quantiles = results.get(nodeId).map(LECGenerator.calculateQuantiles).getOrElse(Map.empty)
-          nodeId -> LECNodeCurve(nodeId, name, curvePoints, quantiles)
+          val aal = results.get(nodeId).map(LECGenerator.averageAnnualLoss).getOrElse(0.0)
+          val noLossProb = results.get(nodeId).map(LECGenerator.probabilityOfNoLoss).getOrElse(1.0)
+          nodeId -> LECNodeCurve(nodeId, name, curvePoints, quantiles, aal, noLossProb)
         }
         
         _ <- tracing.setAttribute("curves_generated", enriched.size.toLong)

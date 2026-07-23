@@ -8,7 +8,7 @@
 # Requires: curl, jq
 #
 # Usage:  ./examples/demo-simple-curl.sh [base_url]
-#         default base_url: http://localhost:8090
+#         default base_url: http://localhost:18080 (docker-compose --profile frontend; nginx proxies API calls through to register-server)
 #
 # Tree structure:
 #   Operations (portfolio)
@@ -21,7 +21,7 @@
 # =============================================================================
 set -euo pipefail
 
-BASE=${1:-http://localhost:8090}
+BASE=${1:-http://localhost:18080}
 
 RED='\033[0;31m'; GRN='\033[0;32m'; CYN='\033[0;36m'; YEL='\033[1;33m'; RST='\033[0m'
 header() { echo -e "\n${CYN}══════════════════════════════════════════════════${RST}"; echo -e "${CYN}  $*${RST}"; echo -e "${CYN}══════════════════════════════════════════════════${RST}"; }

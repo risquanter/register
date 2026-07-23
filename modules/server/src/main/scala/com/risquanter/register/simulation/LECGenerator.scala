@@ -53,19 +53,63 @@ object LECGenerator {
 
   /** Calculate unconditional VaR quantiles from simulation outcomes.
     *
+    * Deliberately tail-only (P90 and up), not P05/P50: for a risk whose
+    * occurrence probability is below 50% (the common case for an
+    * individually-named risk in a register), the unconditional median — and
+    * often lower percentiles too — collapses to 0, which isn't a useful
+    * annotation on its own (the chart's "probability of no loss" statistic
+    * covers that information directly and correctly instead; see
+    * `probabilityOfNoLoss`). P05 remains meaningful only as an *input*
+    * elicitation anchor for the severity distribution (see
+    * `LognormalHelper`/the leaf-creation preview) — a different statistical
+    * question from a quantile of this *output* aggregate distribution.
+    *
     * @param result Risk simulation result with outcome counts
     * @return Map of quantile names to loss values
-    *         Keys: "p05", "p50" (median), "p90", "p95", "p99"
+    *         Keys: "p90", "p95", "p99", "p99.5" (1-in-200, Solvency II SCR)
     */
   def calculateQuantiles(result: LossDistribution): Map[String, Double] =
     if result.outcomeCount.isEmpty || result.nTrials == 0 then Map.empty
     else Map(
-      "p05" -> unconditionalQuantile(result, 0.05).toDouble,
-      "p50" -> unconditionalQuantile(result, 0.50).toDouble,
-      "p90" -> unconditionalQuantile(result, 0.90).toDouble,
-      "p95" -> unconditionalQuantile(result, 0.95).toDouble,
-      "p99" -> unconditionalQuantile(result, 0.99).toDouble
+      "p90"   -> unconditionalQuantile(result, 0.90).toDouble,
+      "p95"   -> unconditionalQuantile(result, 0.95).toDouble,
+      "p99"   -> unconditionalQuantile(result, 0.99).toDouble,
+      "p99.5" -> unconditionalQuantile(result, 0.995).toDouble
     )
+
+  /** Average Annual Loss (AAL) — the mean of the unconditional loss
+    * distribution across all trials, including the implicit zero-loss ones
+    * (trials where the risk didn't occur). The standard actuarial/cat
+    * modeling companion statistic to the tail percentiles above: a
+    * percentile answers "how bad can it get," AAL answers "what should be
+    * budgeted for on average" — a different question, not a quantile.
+    *
+    * @param result LossDistribution carrying nTrials and sparse outcomeCount
+    * @return Mean loss (in millions), or 0.0 if there's no simulation data
+    */
+  def averageAnnualLoss(result: LossDistribution): Double =
+    if result.nTrials == 0 then 0.0
+    else
+      val totalLoss = result.outcomeCount.iterator.map { case (loss, count) => loss.toDouble * count }.sum
+      totalLoss / result.nTrials.toDouble
+
+  /** Probability that this risk causes no loss at all in a given trial.
+    * Counts both implicit zeros (trials absent from the sparse `outcomes`
+    * map — the risk simply didn't occur) and any *explicit* zero-valued
+    * outcomes present in `outcomeCount` — the same two sources
+    * `unconditionalQuantile`'s own cumulative walk already treats as "at or
+    * below zero," so this stays consistent with how the tail percentiles
+    * above are computed.
+    *
+    * @param result LossDistribution carrying nTrials and sparse outcomeCount
+    * @return Fraction in [0.0, 1.0], or 1.0 if there's no simulation data
+    */
+  def probabilityOfNoLoss(result: LossDistribution): Double =
+    if result.nTrials == 0 then 1.0
+    else
+      val implicitZeros = result.nTrials.toLong - result.outcomeCount.values.sum.toLong
+      val explicitZeros = result.outcomeCount.getOrElse(0L, 0).toLong
+      (implicitZeros + explicitZeros).toDouble / result.nTrials.toDouble
 
   /** Find the unconditional VaR at a given percentile.
     *

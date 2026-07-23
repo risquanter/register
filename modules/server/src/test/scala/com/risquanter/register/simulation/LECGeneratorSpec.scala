@@ -187,20 +187,22 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       test("returns expected quantile keys") {
         val quantiles = LECGenerator.calculateQuantiles(cyberResult)
         assertTrue(
-          quantiles.contains("p05"),
-          quantiles.contains("p50"),
           quantiles.contains("p90"),
           quantiles.contains("p95"),
-          quantiles.contains("p99")
+          quantiles.contains("p99"),
+          quantiles.contains("p99.5")
         )
+      },
+      test("does not include p05 or p50 — see calculateQuantiles' doc comment") {
+        val quantiles = LECGenerator.calculateQuantiles(cyberResult)
+        assertTrue(!quantiles.contains("p05"), !quantiles.contains("p50"))
       },
       test("quantiles are monotonically increasing") {
         val quantiles = LECGenerator.calculateQuantiles(cyberResult)
         assertTrue(
-          quantiles("p05") <= quantiles("p50"),
-          quantiles("p50") <= quantiles("p90"),
           quantiles("p90") <= quantiles("p95"),
-          quantiles("p95") <= quantiles("p99")
+          quantiles("p95") <= quantiles("p99"),
+          quantiles("p99") <= quantiles("p99.5")
         )
       },
       test("empty result returns empty map") {
@@ -209,29 +211,65 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       }
     ),
 
+    suite("averageAnnualLoss")(
+      test("weights losses by frequency across all trials, including implicit zeros") {
+        // nTrials=10, implicitZeros=7, outcomeCount: {5000→1, 20000→1, 50000→1}
+        // AAL = (5000 + 20000 + 50000) / 10 = 7500.0
+        val sparse = withCfg(10) {
+          RiskResult(nodeId = nodeId("sparse"), outcomes = Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), provenances = Nil)
+        }
+        assertTrue(LECGenerator.averageAnnualLoss(sparse) == 7500.0)
+      },
+      test("empty result returns 0.0") {
+        assertTrue(LECGenerator.averageAnnualLoss(emptyResult) == 0.0)
+      }
+    ),
+
+    suite("probabilityOfNoLoss")(
+      test("counts both implicit zeros and explicit zero-valued outcomes") {
+        // nTrials=5, outcomes: {10000, 25000, 0, 15000, 0} — trials 3 and 5
+        // are explicit zero-valued outcomes, not implicit (outcomes.size == nTrials)
+        // probabilityOfNoLoss = 2 / 5 = 0.4
+        assertTrue(LECGenerator.probabilityOfNoLoss(cyberResult) == 0.4)
+      },
+      test("sparse result — implicit zeros only") {
+        // nTrials=10, 3 recorded outcomes → implicitZeros=7, no explicit zero outcomes
+        val sparse = withCfg(10) {
+          RiskResult(nodeId = nodeId("sparse"), outcomes = Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), provenances = Nil)
+        }
+        assertTrue(LECGenerator.probabilityOfNoLoss(sparse) == 0.7)
+      },
+      test("empty result returns 1.0") {
+        assertTrue(LECGenerator.probabilityOfNoLoss(emptyResult) == 1.0)
+      }
+    ),
+
     suite("unconditional VaR (sparse results)")(
       test("calculateQuantiles with sparse results includes implicit zeros") {
         // nTrials=10, 3 outcomes → implicitZeros=7
         // outcomeCount: {5000→1, 20000→1, 50000→1}
         // Cumulative (with 7 zeros prepended): 7, 8, 9, 10
-        // p50: target=5.0, 7 >= 5.0 → 0.0
         // p90: target=9.0, cum at 5000→8, 20000→9 → 20000.0
         // p95: target=9.5, cum at 50000→10 → 50000.0
         // p99: target=9.9, cum at 50000→10 → 50000.0
+        // p99.5: target=9.95, cum at 50000→10 → 50000.0
         val sparse = withCfg(10) {
           RiskResult(nodeId = nodeId("sparse"), outcomes = Map(1 -> 5000L, 2 -> 20000L, 3 -> 50000L), provenances = Nil)
         }
         val quantiles = LECGenerator.calculateQuantiles(sparse)
         assertTrue(
-          quantiles("p50") == 0.0,
           quantiles("p90") == 20000.0,
           quantiles("p95") == 50000.0,
-          quantiles("p99") == 50000.0
+          quantiles("p99") == 50000.0,
+          quantiles("p99.5") == 50000.0
         )
       },
-      test("exact boundary — implicitZeros equals target (p50 with half-sparse)") {
+      test("exact boundary — implicitZeros equals target (p50 via findQuantileLoss, half-sparse)") {
         // nTrials=10, 5 outcomes → implicitZeros=5
         // outcomeCount: {1000→1, 2000→1, 3000→1, 4000→1, 5000→1}
+        // p50 isn't in calculateQuantiles' output anymore (see its doc comment),
+        // but the boundary behavior it was demonstrating is a property of
+        // unconditionalQuantile/findQuantileLoss itself, still worth covering directly.
         // p50: target=5.0, implicitZeros=5, 5.0 >= 5.0 → 0.0 (AT boundary)
         // p90: target=9.0, cum: 5, 6, 7, 8, 9, 10 → 4000 at cum=9 → 4000.0
         // p95: target=9.5, cum at 5000→10, 10 >= 9.5 → 5000.0
@@ -240,7 +278,7 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         }
         val quantiles = LECGenerator.calculateQuantiles(halfSparse)
         assertTrue(
-          quantiles("p50") == 0.0,
+          LECGenerator.findQuantileLoss(halfSparse, 0.50) == Some(0L),
           quantiles("p90") == 4000.0,
           quantiles("p95") == 5000.0
         )
@@ -272,36 +310,36 @@ object LECGeneratorSpec extends ZIOSpecDefault {
       },
       test("single outcome with many implicit zeros") {
         // nTrials=100, 1 outcome → outcomeCount={42000→1}, implicitZeros=99
-        // p50: target=50, 99 >= 50 → 0.0
         // p90: target=90, 99 >= 90 → 0.0
         // p95: target=95, 99 >= 95 → 0.0
         // p99: target=99, 99 >= 99 → 0.0 (boundary exact)
+        // p99.5: target=99.5, 99 < 99.5 → walk: {42000→1} → cum=100 → 42000.0
         val single = withCfg(100) {
           RiskResult(nodeId = nodeId("single"), outcomes = Map(1 -> 42000L), provenances = Nil)
         }
         val quantiles = LECGenerator.calculateQuantiles(single)
         assertTrue(
-          quantiles("p50") == 0.0,
           quantiles("p90") == 0.0,
           quantiles("p95") == 0.0,
-          quantiles("p99") == 0.0
+          quantiles("p99") == 0.0,
+          quantiles("p99.5") == 42000.0
         )
       },
       test("all outcomes identical — single bin accumulation") {
         // nTrials=10, 5 outcomes all = 7000 → outcomeCount={7000→5}, implicitZeros=5
-        // p50: target=5.0, 5 >= 5 → 0.0 (boundary exact)
         // p90: target=9.0, 5 < 9, walk: {7000→5} → cum=10, 10 >= 9 → 7000.0
         // p95: target=9.5, same → 7000.0
         // p99: target=9.9, same → 7000.0
+        // p99.5: target=9.95, same → 7000.0
         val identical = withCfg(10) {
           RiskResult(nodeId = nodeId("ident"), outcomes = Map(1 -> 7000L, 2 -> 7000L, 3 -> 7000L, 4 -> 7000L, 5 -> 7000L), provenances = Nil)
         }
         val quantiles = LECGenerator.calculateQuantiles(identical)
         assertTrue(
-          quantiles("p50") == 0.0,
           quantiles("p90") == 7000.0,
           quantiles("p95") == 7000.0,
-          quantiles("p99") == 7000.0
+          quantiles("p99") == 7000.0,
+          quantiles("p99.5") == 7000.0
         )
       },
       test("findQuantileLoss at p=0.0 returns 0") {
@@ -350,9 +388,9 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         }
         val quantiles = LECGenerator.calculateQuantiles(sparse)
         assertTrue(
-          quantiles("p50") <= quantiles("p90"),
           quantiles("p90") <= quantiles("p95"),
-          quantiles("p95") <= quantiles("p99")
+          quantiles("p95") <= quantiles("p99"),
+          quantiles("p99") <= quantiles("p99.5")
         )
       }
     )

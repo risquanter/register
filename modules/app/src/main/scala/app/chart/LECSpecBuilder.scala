@@ -15,13 +15,26 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   *   - Opacity condition: hovered curve = 1.0, others = 0.3
   *   - Data values shape: `{curveId, risk, loss, exceedance}`
   *   - Colour encoding: `scale.domain` (curveIds) + `scale.range` (hex colours)
-  *   - Quantile annotations: dashed vertical rules + labels for P05/P50/P95,
-  *     one set per curve, each coloured to match that curve's own line
+  *   - Per-curve annotations, each coloured to match that curve's own line,
+  *     each with its own show/hide toggle and a value in its label
+  *     (e.g. "P95: $131M"):
+  *     - Tail quantile lines (dashed), each independently toggleable:
+  *       P90 (`showP90`), P95 (`showP95`), P99 (`showP99`), P99.5 (`showP995`)
+  *     - AAL — Average Annual Loss (solid, to read as "central value" rather
+  *       than a threshold): (`showAAL`)
+  *     - Probability of no loss: plain text, fixed at a pixel position (not
+  *       a chart line — this number is the *size of the drop* from the
+  *       curve's trivial 100% at x=0 to its occurrence-probability plateau
+  *       for x>0, not a y-coordinate the curve ever occupies, so there's no
+  *       line to anchor it to): (`showNoLossProbability`)
+  *   - X-axis domain starts at 0 (not the smallest actual loss) — a
+  *     risk's true likely outcome (often "no loss") must stay representable
   *   - Axes: B/M formatting on X, percentage on Y
-  *   - Dark theme config (transparent background, light-on-dark text)
+  *   - Dark theme config (transparent background, light-on-dark text,
+  *     app's own font stack, ~20% larger label/title text than Vega's
+  *     defaults for readability)
   *   - Legend with `labelExpr` mapping curveId → node name
   *   - Interpolation toggle param (monotone/basis/linear/step-after)
-  *   - Percentile-line show/hide toggle param (`showPercentiles`)
   *   - Y-axis adaptive ceiling (capped at 1.0)
   */
 object LECSpecBuilder:
@@ -72,9 +85,6 @@ object LECSpecBuilder:
     // Stable ordering: sort by curveId for deterministic domain/range
     val ordered = curves.sortBy(_._3)
 
-    val allPoints = ordered.flatMap(_._1.curve)
-    val minLoss = allPoints.map(_.loss).min.toDouble
-
     // Y-axis adaptive ceiling (capped at 1.0)
     val yBuffer = 1.1
     val yCeiling = math.min(
@@ -97,19 +107,39 @@ object LECSpecBuilder:
     }
     val legendLabelExpr = (labelParts :+ "datum.value").mkString(" : ")
 
-    // Quantile annotations: every curve gets its own P05/P50/P95 vertical
-    // lines, coloured to match that curve's own assigned line colour (not a
-    // single shared colour taken from just one curve) — so when several
-    // curves are shown together (Compare/Overlay, or a multi-select on one
-    // tree), each curve's percentile markers are told apart by the same
-    // colour as its line, the same way the line itself is.
-    val quantileLayers = js.Array[js.Any]()
+    // Per-curve annotations — tail quantiles, AAL, no-loss probability — each
+    // coloured to match that curve's own assigned line colour (not a single
+    // shared colour taken from just one curve), so when several curves are
+    // shown together (Compare/Overlay, or a multi-select on one tree), each
+    // curve's markers are told apart by the same colour as its line.
+    // Each tail quantile gets its own independent toggle (not one shared
+    // "show all percentiles" switch) — showP90/showP95/showP99/showP995.
+    val quantileToggles = List("p90" -> ("P90", "showP90"), "p95" -> ("P95", "showP95"), "p99" -> ("P99", "showP99"), "p99.5" -> ("P99.5", "showP995"))
+    val annotationLayers = js.Array[js.Any]()
     ordered.foreach { case (nc, hexColor, _) =>
-      List("p05" -> "P05", "p50" -> "P50", "p95" -> "P95").foreach { case (key, label) =>
+      quantileToggles.foreach { case (key, (rawLabel, toggleParam)) =>
         nc.quantiles.get(key).foreach { value =>
-          quantileAnnotation(value, label, hexColor.value).foreach(quantileLayers.push(_))
+          val label = s"$rawLabel: ${formatLossValue(value)}"
+          verticalAnnotation(value, label, hexColor.value, dashed = true, toggleParam = toggleParam)
+            .foreach(annotationLayers.push(_))
         }
       }
+      val aalLabel = s"AAL: ${formatLossValue(nc.averageAnnualLoss)}"
+      verticalAnnotation(nc.averageAnnualLoss, aalLabel, hexColor.value, dashed = false, toggleParam = "showAAL")
+        .foreach(annotationLayers.push(_))
+    }
+
+    // "Probability of no loss" as fixed, view-relative text — not a line.
+    // This number doesn't correspond to any y-coordinate the curve's own
+    // P(Loss >= x) scale actually reaches: the curve is trivially 100% at
+    // x=0 exactly, then jumps straight down to the occurrence probability
+    // for any x>0 — there's no "70%" height anywhere on it to anchor a
+    // reference line to (that number is the *size of the drop*, not a
+    // *level*). Positioned via literal pixel values (no "field", so it's
+    // never subject to either data scale), one row per curve.
+    ordered.zipWithIndex.foreach { case ((nc, hexColor, _), idx) =>
+      val label = s"${nc.name} — no loss: ${formatProbability(nc.probabilityOfNoLoss)}"
+      noLossStat(label, hexColor.value, idx).foreach(annotationLayers.push(_))
     }
 
     // Fresh data values array — called per layer to avoid shared mutable state (F2)
@@ -167,7 +197,11 @@ object LECSpecBuilder:
             "labelExpr"  -> "if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')"
           ),
           "scale" -> js.Dynamic.literal(
-            "domainMin" -> minLoss
+            // Deliberately 0, not the curve's own smallest loss tick: a risk's
+            // true likely outcome is often "no loss", which must stay
+            // representable on the axis, not be clamped away — see
+            // `probabilityOfNoLoss`'s doc comment (LECGenerator) for why.
+            "domainMin" -> 0.0
           )
         ),
         "y" -> js.Dynamic.literal(
@@ -228,9 +262,9 @@ object LECSpecBuilder:
       )
     )
 
-    // Assemble layers: quantile annotations + line layer + point layer
+    // Assemble layers: per-curve annotations + line layer + point layer
     val allLayers = js.Array[js.Any]()
-    for i <- 0 until quantileLayers.length do allLayers.push(quantileLayers(i))
+    for i <- 0 until annotationLayers.length do allLayers.push(annotationLayers(i))
     allLayers.push(lineLayer)
     allLayers.push(pointLayer)
 
@@ -240,20 +274,31 @@ object LECSpecBuilder:
       "height"     -> height,
       "background" -> "transparent",
       "config"     -> js.Dynamic.literal(
+        // Matches the app's own font stack — Vega/canvas-free (svg renderer,
+        // see LECChartView) text otherwise falls back to a generic default
+        // that doesn't match the rest of the UI.
+        "font"   -> "'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif",
         "legend" -> js.Dynamic.literal(
-          "disable"    -> false,
-          "labelColor" -> "#e6e8e8",
-          "titleColor" -> "#e6e8e8"
+          "disable"       -> false,
+          "labelColor"    -> "#e6e8e8",
+          "titleColor"    -> "#e6e8e8",
+          // ~20% larger than Vega-Lite's own defaults (~10/11), for readability
+          "labelFontSize" -> 12,
+          "titleFontSize" -> 13
         ),
         "axis" -> js.Dynamic.literal(
-          "grid"        -> true,
-          "gridColor"   -> "#1c2225",
-          "labelColor"  -> "#b0b8b8",
-          "titleColor"  -> "#e6e8e8",
-          "domainColor" -> "#4a5a5e",
-          "tickColor"   -> "#4a5a5e"
+          "grid"          -> true,
+          "gridColor"     -> "#1c2225",
+          // Brighter than before (#b0b8b8) — was too low-contrast against the
+          // dark background for tick labels specifically.
+          "labelColor"    -> "#c8ced0",
+          "titleColor"    -> "#e6e8e8",
+          "domainColor"   -> "#4a5a5e",
+          "tickColor"     -> "#4a5a5e",
+          "labelFontSize" -> 12,
+          "titleFontSize" -> 13
         ),
-        "title" -> js.Dynamic.literal("color" -> "#e6e8e8")
+        "title" -> js.Dynamic.literal("color" -> "#e6e8e8", "fontSize" -> 13)
       ),
       "params" -> js.Array(
         js.Dynamic.literal(
@@ -266,39 +311,127 @@ object LECSpecBuilder:
           )
         ),
         js.Dynamic.literal(
-          "name"  -> "showPercentiles",
+          "name"  -> "showP90",
           "value" -> true,
           "bind"  -> js.Dynamic.literal(
             "input" -> "checkbox",
-            "name"  -> "Show percentile lines: "
+            "name"  -> "Show P90: "
+          )
+        ),
+        js.Dynamic.literal(
+          "name"  -> "showP95",
+          "value" -> true,
+          "bind"  -> js.Dynamic.literal(
+            "input" -> "checkbox",
+            "name"  -> "Show P95: "
+          )
+        ),
+        js.Dynamic.literal(
+          "name"  -> "showP99",
+          "value" -> true,
+          "bind"  -> js.Dynamic.literal(
+            "input" -> "checkbox",
+            "name"  -> "Show P99: "
+          )
+        ),
+        js.Dynamic.literal(
+          "name"  -> "showP995",
+          "value" -> true,
+          "bind"  -> js.Dynamic.literal(
+            "input" -> "checkbox",
+            "name"  -> "Show P99.5: "
+          )
+        ),
+        js.Dynamic.literal(
+          "name"  -> "showAAL",
+          "value" -> true,
+          "bind"  -> js.Dynamic.literal(
+            "input" -> "checkbox",
+            "name"  -> "Show AAL: "
+          )
+        ),
+        js.Dynamic.literal(
+          "name"  -> "showNoLossProbability",
+          "value" -> true,
+          "bind"  -> js.Dynamic.literal(
+            "input" -> "checkbox",
+            "name"  -> "Show no-loss probability: "
           )
         )
       ),
       "layer" -> allLayers
     )
 
-  // ── Quantile annotation helpers ───────────────────────────────
+  // ── Annotation helpers ────────────────────────────────────────
 
-  private def quantileAnnotation(value: Double, label: String, color: String): Seq[js.Dynamic] =
+  /** Format a loss value (already in millions, per `LossDistribution`'s own
+    * convention) for a static annotation label — mirrors the x-axis's own
+    * `labelExpr` B/M formatting so the label and axis never disagree.
+    */
+  private def formatLossValue(value: Double): String =
+    if value >= 1000 then f"$$${value / 1000}%,.1fB"
+    else f"$$${math.round(value)}%,dM"
+
+  /** Format a probability (0.0-1.0) as a whole-number percentage, for the
+    * no-loss annotation label. */
+  private def formatProbability(p: Double): String =
+    s"${math.round(p * 100)}%"
+
+  /** A vertical rule + text label at x = `value` — used for tail quantiles
+    * (dashed) and AAL (solid, so it reads as "a central value" rather than
+    * "a threshold", the same solid/dashed distinction cat-modeling exhibits
+    * commonly use to tell a mean apart from a percentile at a glance).
+    *
+    * @param toggleParam Name of the top-level checkbox param (declared in
+    *   `buildSpec`) gating this layer's visibility — referenced via `expr`
+    *   the same way the interpolation dropdown drives the line layer's
+    *   `interpolate` mark property, so no extra Scala-side state is needed.
+    */
+  private def verticalAnnotation(
+    value: Double,
+    label: String,
+    color: String,
+    dashed: Boolean,
+    toggleParam: String,
+    fontSize: Int = 13
+  ): Seq[js.Dynamic] =
     val data = js.Dynamic.literal(
       "values" -> js.Array(js.Dynamic.literal("x" -> value))
     )
     val xEnc = js.Dynamic.literal("field" -> "x", "type" -> "quantitative")
-    // Tied to the `showPercentiles` checkbox param (declared top-level,
-    // visible to every layer) the same way the interpolation dropdown drives
-    // the line layer's `interpolate` mark property — a bound param's value
-    // referenced directly via `expr`, no extra Scala-side state needed.
-    val toggleOpacity = js.Dynamic.literal("expr" -> "showPercentiles ? 1 : 0")
+    val toggleOpacity = js.Dynamic.literal("expr" -> s"$toggleParam ? 1 : 0")
+    val ruleMark =
+      if dashed then js.Dynamic.literal("type" -> "rule", "strokeDash" -> js.Array(4, 4), "color" -> color, "opacity" -> toggleOpacity)
+      else js.Dynamic.literal("type" -> "rule", "color" -> color, "opacity" -> toggleOpacity)
     Seq(
       js.Dynamic.literal(
-        "mark"     -> js.Dynamic.literal("type" -> "rule", "strokeDash" -> js.Array(4, 4), "color" -> color, "opacity" -> toggleOpacity),
+        "mark"     -> ruleMark,
         "data"     -> data,
         "encoding" -> js.Dynamic.literal("x" -> xEnc)
       ),
       js.Dynamic.literal(
-        "mark"     -> js.Dynamic.literal("type" -> "text", "align" -> "left", "dx" -> 4, "dy" -> -6, "fontSize" -> 11, "color" -> color, "opacity" -> toggleOpacity),
+        "mark"     -> js.Dynamic.literal("type" -> "text", "align" -> "left", "dx" -> 4, "dy" -> -6, "fontSize" -> fontSize, "color" -> color, "opacity" -> toggleOpacity),
         "data"     -> js.Dynamic.literal("values" -> js.Array(js.Dynamic.literal("x" -> value, "label" -> label))),
         "encoding" -> js.Dynamic.literal("x" -> xEnc, "text" -> js.Dynamic.literal("field" -> "label"))
+      )
+    )
+
+  /** "Probability of no loss" as plain text, fixed at a pixel position
+    * within the plot area — no `"field"` on either channel, so it is never
+    * subject to the x or y data scale and can't collide with either domain
+    * the way a data-encoded mark could. `index` stacks one row per curve.
+    */
+  private def noLossStat(label: String, color: String, index: Int, fontSize: Int = 13): Seq[js.Dynamic] =
+    val toggleOpacity = js.Dynamic.literal("expr" -> "showNoLossProbability ? 1 : 0")
+    Seq(
+      js.Dynamic.literal(
+        "data"     -> js.Dynamic.literal("values" -> js.Array(js.Dynamic.literal("label" -> label))),
+        "mark"     -> js.Dynamic.literal("type" -> "text", "align" -> "left", "baseline" -> "top", "color" -> color, "fontSize" -> fontSize, "opacity" -> toggleOpacity),
+        "encoding" -> js.Dynamic.literal(
+          "x"    -> js.Dynamic.literal("value" -> 6),
+          "y"    -> js.Dynamic.literal("value" -> (6 + index * (fontSize + 3))),
+          "text" -> js.Dynamic.literal("field" -> "label")
+        )
       )
     )
 
