@@ -71,10 +71,18 @@ final class LECChartState(
   /** Union of query-matched + user-selected node IDs — the set of nodes
     * whose curves should be rendered in the chart.
     */
+  // .distinct at the producer (here and on nodeColorMap below), not at each
+  // consumer: Var.set emits even when the value is unchanged, and every
+  // consumer of these signals rebuilds something expensive (the Vega spec in
+  // specSignal, AnalyzeView's compare-mode combined spec, per-row tree
+  // styling). Deduplicating once here absorbs any no-op upstream write —
+  // e.g. a query re-run writing an equal satisfyingNodeIds set — for all of
+  // them.
   val visibleCurves: Signal[Set[NodeId]] =
     userSelectedNodeIds.signal
       .combineWith(satisfyingNodeIds.signal)
       .map { (user, query) => user ++ query }
+      .distinct
 
   /** Node → hex colour mapping for chart curves and tree highlights.
     * Derived from current visible nodes classified into query/user/overlap
@@ -89,6 +97,7 @@ final class LECChartState(
           case Some((nid, hex)) if base.contains(nid) => base.updated(nid, hex)
           case _                                      => base
       }
+      .distinct
 
   /** Complete Vega-Lite spec ready for `vegaEmbed`, derived reactively from
     * the curve cache, visible node set, and colour assignments.
@@ -97,7 +106,14 @@ final class LECChartState(
     * inside `LoadState.map`, eliminating manual Idle/Loading/Failed threading.
     */
   val specSignal: Signal[LoadState[js.Dynamic]] =
-    curveCache.signal
+    // All three inputs are deduplicated (structural equality on
+    // LoadState/Set/Map — visibleCurves/nodeColorMap at their definitions
+    // above): every recompute below creates a NEW js.Dynamic, and
+    // LECChartView re-embeds the whole Vega chart on every emission —
+    // resetting the chart's own toggle params. Without the dedup, any no-op
+    // Var write upstream (e.g. TreeDetailView's close-picker-on-any-click
+    // → clearPreview chain) tore the chart down on every plain tree click.
+    curveCache.signal.distinct
       .combineWith(visibleCurves, nodeColorMap)
       .map { (cacheState, visible, colorMap) =>
         // Short-circuit to Idle when no curves are selected.
@@ -156,9 +172,12 @@ final class LECChartState(
   def setPreview(nodeId: NodeId, hex: HexColor): Unit =
     previewOverride.set(Some((nodeId, hex)))
 
-  /** Clear the transient preview (swatch hover ended or picker closed). */
+  /** Clear the transient preview (swatch hover ended or picker closed).
+    * Skips the write when there is nothing to clear — callers fire this on
+    * broad events (any click in the tree), and Var.set emits even when the
+    * value is unchanged. */
   def clearPreview(): Unit =
-    previewOverride.set(None)
+    if previewOverride.now().isDefined then previewOverride.set(None)
 
   /** Reset chart state (called when tree selection changes). */
   def reset(): Unit =

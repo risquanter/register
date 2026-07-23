@@ -97,10 +97,14 @@ object TreeDetailView:
 
     div(
       cls := "tree-detail-view",
-      // Close picker when clicking outside (attached to the container)
-      onClick --> { _ => pickerOpenFor.set(None) },
+      // Close picker when clicking outside (attached to the container).
+      // Guarded: this fires on EVERY click in the tree, and Var.set emits
+      // even when the value is unchanged — an unguarded None-over-None write
+      // here rippled through clearPreview into the chart-spec chain and
+      // re-embedded the Vega chart (resetting its toggles) on every click.
+      onClick --> { _ => if pickerOpenFor.now().isDefined then pickerOpenFor.set(None) },
       // F-GP1: Escape key closes picker
-      onKeyDown --> { ev => if ev.key == "Escape" then pickerOpenFor.set(None) },
+      onKeyDown --> { ev => if ev.key == "Escape" && pickerOpenFor.now().isDefined then pickerOpenFor.set(None) },
       // F-GP2(B): reactively clear preview whenever picker closes
       pickerOpenFor.signal.changes.filter(_.isEmpty) --> { _ => state.clearPreview() },
       child <-- state.selectedTree.signal.map {

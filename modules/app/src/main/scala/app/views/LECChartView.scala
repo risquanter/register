@@ -5,6 +5,7 @@ import org.scalajs.dom
 
 import scala.scalajs.js
 
+import app.chart.LECSpecBuilder
 import app.facades.{vegaEmbed, EmbedResult}
 import app.state.{LoadState, ChartHoverBridge}
 
@@ -30,8 +31,33 @@ object LECChartView:
     // re-triggering the signal (which would dispose the container).
     val renderError$ : Var[Option[String]] = Var(None)
 
+    // Toggle/interpolation param values carried across re-embeds: a spec
+    // change tears the whole Vega view down, and the params (and the user's
+    // checkbox choices with them) live inside that view — without this,
+    // every genuine data change (new selection, compare on/off) silently
+    // reset the toggles to the spec defaults. Captured off the dying view,
+    // re-applied to the next one. Per-signal try-guards: an empty/base spec
+    // may not declare every param, and Vega throws on unknown signal names.
+    var savedParams: Map[String, js.Any] = Map.empty
+
+    def captureParams(view: js.Dynamic): Map[String, js.Any] =
+      LECSpecBuilder.preservedParams.flatMap { name =>
+        try Some(name -> (view.signal(name): js.Any))
+        catch case _: Throwable => None
+      }.toMap
+
+    def restoreParams(view: js.Dynamic): Unit =
+      if savedParams.nonEmpty then
+        savedParams.foreach { (name, value) =>
+          try { view.signal(name, value); () }
+          catch case _: Throwable => ()
+        }
+        try { view.run(); () }
+        catch case _: Throwable => ()
+
     def disposeChart(): Unit =
       currentResult.foreach { result =>
+        savedParams = captureParams(result.view)
         hoverBridge.detachFromView(result.view)
         result.finalize()
         currentResult = js.undefined
@@ -67,6 +93,7 @@ object LECChartView:
                     spec,
                     onResult = result => {
                       currentResult = result
+                      restoreParams(result.view)
                       hoverBridge.attachToView(result.view)
                     },
                     onError = msg => renderError$.set(Some(msg))

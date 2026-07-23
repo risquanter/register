@@ -82,8 +82,15 @@ object AnalyzeView:
       * to an empty state and then redrawing once the compare side lands is
       * a flash with no informational value, not a real loading state. */
     val combinedSpecSignal: Signal[LoadState[js.Dynamic]] =
+      // curveCache is deduplicated here for the same reason specSignal
+      // dedupes it internally (LECChartState): each map run below builds a
+      // NEW js.Dynamic in compare mode, and LECChartView re-embeds per
+      // emission. The other inputs are already dedup-safe: specSignal and
+      // visibleNodeIds are distinct at their producers, compareCurves is
+      // write-guarded in ScenarioDiffState, enabled/compareBranch only
+      // change on genuine user action.
       compareState.enabled.signal
-        .combineWith(treeViewState.chartState.specSignal, treeViewState.curveCache, diffState.compareCurves.signal)
+        .combineWith(treeViewState.chartState.specSignal, treeViewState.curveCache.distinct, diffState.compareCurves.signal)
         .combineWith(visibleNodeIds, compareState.compareBranch.signal)
         .map { case (enabled, singleSpec, thisCurves, compareCurves, visible, target) =>
           if !enabled then singleSpec

@@ -41,6 +41,17 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   */
 object LECSpecBuilder:
 
+  /** The user-facing input params declared in the spec's `params` array
+    * below (interpolation select + the annotation checkboxes).
+    * `LECChartView` reads their live values off the old Vega view before a
+    * re-embed and re-applies them to the new one, so changing the chart's
+    * data (new selection, compare toggled) doesn't silently reset the
+    * user's toggle choices to the spec defaults. Keep in sync with the
+    * `params` array in `buildFromSeries`.
+    */
+  val preservedParams: List[String] =
+    List("interpolate", "showP90", "showP95", "showP99", "showP995", "showAAL", "showNoLossProbability")
+
   /** Build a Vega-Lite spec from paired curve data and colours.
     *
     * @param curves        Ordered pairs of (curve data, assigned colour)
