@@ -38,7 +38,7 @@ enum FormMode:
     * `isFormDirty` correctly read it as dirty. See docs/dev/TODO.md.
     */
   case Inactive
-  /** `kind`'s form is actively being drafted — fresh and unsaved, woken up
+  /** `kind`'s form is actively being drafted — fresh and unsaved, entered
     * from `Inactive` by clicking its Add button (see both FormViews'
     * `onAddSubmitClick`). From `kind`'s own form's perspective this is
     * identical to `Blank` (freely editable) — `forPortfolio`/`forLeaf` fold

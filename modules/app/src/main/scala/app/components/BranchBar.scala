@@ -254,8 +254,9 @@ object BranchBar:
         title := s"Delete scenario '${name.value}'",
         "✕",
         onClick.stopPropagation --> { _ =>
-          if dom.window.confirm(s"Delete scenario '${name.value}'? This cannot be undone.") then
+          ConfirmGuard.proceedOrConfirm(true, s"Delete scenario '${name.value}'? This cannot be undone.") { () =>
             scenarioState.delete(name)
+          }
           closeAll()
         }
       )

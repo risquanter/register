@@ -35,6 +35,17 @@ object LECGeneratorSpec extends ZIOSpecDefault {
     )
   }
   
+  // Occurrence probability 0.2% (< 0.5%): more than 99.5% of trials are
+  // zero-loss, so the unconditional p99.5 quantile is 0 — below minLoss.
+  // Guards the clippedMaxLoss fallback (previously getTicks threw).
+  val rareResult = withCfg(1000) {
+    RiskResult(
+      nodeId = nodeId("rare"),
+      outcomes = Map(1 -> 3000L, 2 -> 5000L),
+      provenances = Nil
+    )
+  }
+
   val emptyResult = withCfg(5) {
     RiskResult(
       nodeId = nodeId("empty"),
@@ -88,6 +99,16 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         val pairs = points.zip(points.tail)
         assertTrue(pairs.forall { case ((_, p1), (_, p2)) => p2 <= p1 })
       },
+      test("rare risk (p <= 0.5%) falls back to the true max loss instead of the zero p99.5 quantile") {
+        // p99.5 = 0 < minLoss 3000 — must not throw, and the curve must span
+        // the actual observed outcomes up to maxLoss 5000.
+        val points = LECGenerator.generateCurvePoints(rareResult, 10)
+        assertTrue(
+          points.nonEmpty,
+          points.head._1 == 0L,
+          points.last._1 >= 5000L
+        )
+      },
       test("empty result returns empty vector") {
         val points = LECGenerator.generateCurvePoints(emptyResult, 10)
         assertTrue(points.isEmpty)
@@ -125,6 +146,10 @@ object LECGeneratorSpec extends ZIOSpecDefault {
         // Verify one specific point
         val cyberCurve = curves("cyber")
         assertTrue(cyberCurve.forall((_, p) => p >= 0.0 && p <= 1.0))
+      },
+      test("a lone rare risk (p <= 0.5%) gets a valid shared tick domain") {
+        val curves = LECGenerator.generateCurvePointsMulti(Map("rare" -> rareResult), 10)
+        assertTrue(curves("rare").nonEmpty, curves("rare").last._1 >= 5000L)
       },
       test("empty results map returns empty map") {
         val curves = LECGenerator.generateCurvePointsMulti(Map.empty[String, RiskResult], 10)

@@ -232,13 +232,27 @@ object LECGenerator {
     if (result.outcomeCount.isEmpty) Vector.empty
     else {
       val minLoss = result.minLoss
-      val maxLoss = findQuantileLoss(result, 0.995).getOrElse(result.maxLoss)
+      val maxLoss = clippedMaxLoss(result)
       val ticks = (0L +: getTicks(minLoss, maxLoss, nEntries)).distinct
 
       ticks.map { loss =>
         (loss, exceedanceAt(result, loss))
       }
     }
+  }
+
+  /** Upper end of the tick range: the unconditional p99.5 quantile, clipped
+    * so extreme outliers don't stretch the x-axis — EXCEPT when that quantile
+    * falls below the smallest observed loss. That happens for any risk whose
+    * occurrence probability is at or below 0.5%: more than 99.5% of trials
+    * are zero-loss, so the unconditional p99.5 is 0, which would put maxLoss
+    * below minLoss and violate getTicks' precondition. For those rare risks
+    * the true maximum observed loss is used instead, so the curve spans the
+    * actual outcomes.
+    */
+  private def clippedMaxLoss(result: LossDistribution): Long = {
+    val q = findQuantileLoss(result, 0.995).getOrElse(result.maxLoss)
+    if (q < result.minLoss) result.maxLoss else q
   }
 
   /** Exceedance probability at a tick, with the y-intercept convention.
@@ -296,9 +310,11 @@ object LECGenerator {
     if (nonEmpty.isEmpty) return results.map((k, _) => k -> Vector.empty)
     
     // Compute combined loss range, clipping max to p99.5 to avoid
-    // extreme outliers stretching the x-axis beyond the informative range
+    // extreme outliers stretching the x-axis beyond the informative range.
+    // clippedMaxLoss guarantees each per-result value is >= that result's
+    // own minLoss, so combinedMax >= combinedMin always holds.
     val combinedMin = nonEmpty.values.map(_.minLoss).min
-    val combinedMax = nonEmpty.values.map(r => findQuantileLoss(r, 0.995).getOrElse(r.maxLoss)).max
+    val combinedMax = nonEmpty.values.map(clippedMaxLoss).max
     
     // Generate shared tick domain. Tick 0 is always included so every
     // curve starts on the y-axis at its occurrence-probability plateau

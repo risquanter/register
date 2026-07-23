@@ -35,7 +35,7 @@ object TreeBuilderView extends WorkspaceLifecycleEndpoints
     // async round trip completes, and if the user navigates to a different
     // tree while a Create is still in flight, `editingTreeId` would already
     // reflect that other tree by the time the response lands, misclassifying
-    // a genuine Create as an Update and yanking the builder back to the
+    // a genuine Create as an Update and re-selecting the
     // just-created tree instead of leaving the user where they navigated to.
     //
     // Deliberately skips `treeViewState.selectTree(response.id)` on the

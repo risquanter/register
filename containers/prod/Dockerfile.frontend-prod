@@ -306,8 +306,12 @@ fi
 # appVersion — the running app version, shown in the SPA's sidebar footer.
 # Comes from the same APP_VERSION variable that tags the images
 # (docker-compose.yml, mirrored from build.sbt via the env file).
+# Double quotes and backslashes are stripped before interpolation: a value
+# containing either would make the whole file invalid JSON, and the SPA's
+# decode failure would silently drop scenariosEnabled too.
+SAFE_APP_VERSION=$(printf '%s' "${APP_VERSION:-dev}" | tr -d '"\\')
 printf '{"scenariosEnabled": %s, "appVersion": "%s"}' \
-    "${SCENARIOS_ENABLED}" "${APP_VERSION:-dev}" > /tmp/config.json
+    "${SCENARIOS_ENABLED}" "${SAFE_APP_VERSION}" > /tmp/config.json
 
 exec nginx -c /tmp/nginx.conf -g "daemon off;"
 EOF

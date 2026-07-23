@@ -1409,7 +1409,7 @@ the picker displays and what the app believes is selected.
 
 **User confirmed reproducing this 2026-07-22; needs fixing.** Decision
 presented (see conversation, decision-guide format): (1) a corrective
-re-assert subscription mirroring the existing band-aid already in
+re-assert subscription mirroring the existing corrective subscription already in
 `FormInputs.parentSelect` (`selectionAndOptions --> {...}`), vs. (2) keyed
 reconciliation of the `<option>` list (Airstream's `Signal[Seq[A]].split` by
 scenario name) so `<option>` DOM nodes are reused instead of torn down and
@@ -1419,7 +1419,7 @@ recreated, removing the root cause rather than re-syncing after the fact.
 `AnalyzeView.renderBranchPicker`, and the same mechanism was confirmed
 present (traced, not separately reproduced) in `FormInputs.parentSelect`'s
 "Parent Portfolio" dropdown (used on both the Portfolio and Leaf forms in
-Design) — its own Option-1-style band-aid (`selectionAndOptions --> {...}`)
+Design) — its own Option-1-style corrective subscription (`selectionAndOptions --> {...}`)
 only corrects an *invalid* selection, not a still-valid one whose `<option>`
 DOM node was torn down and recreated for an unrelated reason (e.g. another
 portfolio being added while this form's parent field is already set).

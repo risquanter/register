@@ -162,6 +162,30 @@ object AnalyzeView:
           case _ =>
             diffState.reset()
         },
+      // Compare mode: reset the compare target when it stops being a valid
+      // choice — the tab's own branch switched onto it (a branch compared
+      // against itself), or the scenario it names was deleted from the shared
+      // list (reachable via any view's per-row delete). Without this the
+      // picker's option disappears (DOM shows the placeholder) while the Var
+      // keeps the stale value, so fetches keep firing against it. Mirrors the
+      // activeBranch fallback in ScenarioState: reacts only to the external
+      // signals that invalidate the value, reads its own value via now()
+      // (ADR-019 Pattern 6). Deletion is only trusted from a Loaded list —
+      // Idle/Loading/Failed are not confirmation the branch is gone.
+      scenarioState.activeBranch.signal
+        .combineWith(scenarioState.scenarios)
+        .changes --> { (active, list) =>
+          compareState.compareBranch.now() match
+            case CompareTarget.Main if active.isEmpty =>
+              compareState.compareBranch.set(CompareTarget.NotChosen)
+            case CompareTarget.Scenario(name) =>
+              val nowActive = active.contains(name)
+              val deleted = list match
+                case LoadState.Loaded(l) => !l.exists(_.name == name)
+                case _                   => false
+              if nowActive || deleted then compareState.compareBranch.set(CompareTarget.NotChosen)
+            case _ => ()
+        },
       // Compare mode: fetch the compare branch's own curves for whatever
       // node set is currently visible on the tab's own chart.
       visibleNodeIds

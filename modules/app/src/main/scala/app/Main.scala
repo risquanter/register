@@ -33,7 +33,7 @@ object Main:
     // creating a scenario through Design's toolbar is immediately visible in
     // Analyze's own picker too, and deleting one resets any view's
     // `activeBranch` that was pointing at it (see ScenarioState's own
-    // self-heal subscription).
+    // branch-fallback subscription).
     val scenarioListState = new ScenarioListState(wsState.keySignal, () => wsState.currentUserId)
     val designScenarioState = new ScenarioState(wsState.keySignal, scenarioListState, () => wsState.currentUserId)
     val analyzeScenarioState = new ScenarioState(wsState.keySignal, scenarioListState, () => wsState.currentUserId)

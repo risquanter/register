@@ -105,7 +105,7 @@ final class ScenarioState(
     * instance knows for certain the branch is gone; it doesn't need to wait
     * on the separate list refresh below to find out. The `listState.refresh()`
     * call is still what lets *every other* `ScenarioState` instance's own
-    * self-heal subscription (above) notice the deletion — that path is
+    * branch-fallback subscription (above) notice the deletion — that path is
     * necessarily async (another instance only learns about it by observing
     * the shared list), but this instance's own knowledge shouldn't depend on
     * that refresh succeeding. Errors surface via the global error banner

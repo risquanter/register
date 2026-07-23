@@ -107,29 +107,27 @@ object PortfolioFormView:
     def onAddSubmitClick(): Unit =
       val raw = builderState.activeForm.now()
       raw.forPortfolio match
-        // Blank here can mean genuinely nothing selected, OR the leaf form
-        // is mid-Editing/Templating an unsaved draft (raw activeForm holds a
-        // Leaf target, which forPortfolio collapses to Blank). Submitting
-        // would overwrite the shared activeForm and silently discard that
-        // draft — confirm first, matching how discarding unsaved work is
-        // gated everywhere else in this builder.
+        // Blank here means raw is Blank or this form's own Drafting — a Leaf
+        // target folds to Inactive, never Blank — so there is no other-form
+        // draft to protect on this branch; submit directly.
         case FormMode.Blank =>
-          val isDiscardingLeafDraft = raw match
-            case FormMode.Editing(_) | FormMode.Templating(_) => true
-            case _                                            => false
-          proceedOrConfirm(isDiscardingLeafDraft, "This will discard the leaf you're currently editing. Continue?") { () =>
-            handleSubmit(form, builderState, submitError)
-          }
+          handleSubmit(form, builderState, submitError)
         // A leaf is currently selected instead — this click means "start a
         // fresh portfolio draft," which first has to reclaim `activeForm`
-        // from the leaf (there is only one shared target at a time). Goes to
+        // from the leaf (there is only one shared target at a time). If the
+        // leaf form holds unsaved changes (mid-Editing/Templating), reclaiming
+        // discards them — confirm first, matching how discarding unsaved work
+        // is gated everywhere else in this builder. Goes to
         // `Drafting(Portfolio)`, not straight to submitting (the form was
         // empty/disabled a moment ago, there's nothing valid to submit yet)
         // and not to plain `Blank` either — `Drafting` is what tells the leaf
         // form "a fresh, unsaved portfolio draft is now in progress," so it
         // locks its own Add/Edit buttons instead of quietly offering to
         // discard this the moment it's clicked.
-        case FormMode.Inactive => builderState.activeForm.set(FormMode.Drafting(FormKind.Portfolio))
+        case FormMode.Inactive =>
+          proceedOrConfirm(builderState.leafFormDirtyVar.now(), "This will discard the leaf you're currently editing. Continue?") { () =>
+            builderState.activeForm.set(FormMode.Drafting(FormKind.Portfolio))
+          }
         case FormMode.Locked(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Templating(t))
         case FormMode.Templating(_: FormTarget.Portfolio) => handleSubmit(form, builderState, submitError)
         case _ => ()
@@ -148,6 +146,11 @@ object PortfolioFormView:
         case FormMode.Blank =>
           form.reset()
           form.parentVar.set(ParentSelection.Unset)
+          // The folded Blank can be this form's own Drafting(Portfolio) —
+          // clearing it must also end the draft, otherwise activeForm stays
+          // Drafting and the leaf form's controls remain disabled with no
+          // draft actually in progress. A raw Blank re-set is a no-op.
+          builderState.activeForm.set(FormMode.Blank)
         case FormMode.Editing(t: FormTarget.Portfolio)    => builderState.activeForm.set(FormMode.Locked(t))
         case FormMode.Templating(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Locked(t))
         case _ => ()

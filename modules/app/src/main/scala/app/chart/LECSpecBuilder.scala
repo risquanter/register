@@ -118,7 +118,12 @@ object LECSpecBuilder:
     // "show all percentiles" switch) — showP90/showP95/showP99/showP995.
     val quantileToggles = List("p90" -> ("P90", "showP90"), "p95" -> ("P95", "showP95"), "p99" -> ("P99", "showP99"), "p99.5" -> ("P99.5", "showP995"))
     val annotationLayers = js.Array[js.Any]()
-    ordered.foreach { case (nc, hexColor, _) =>
+    // Only curves with data get annotations — a node with an empty curve
+    // (no simulation outcomes) carries aal = 0.0 / noLoss = 1.0 fallbacks
+    // that would otherwise draw a solid rule pinned to the y-axis and a
+    // "no loss: 100%" row for a line that isn't on the chart at all.
+    val withData = ordered.filter { case (nc, _, _) => nc.curve.nonEmpty }
+    withData.foreach { case (nc, hexColor, _) =>
       quantileToggles.foreach { case (key, (rawLabel, toggleParam)) =>
         nc.quantiles.get(key).foreach { value =>
           verticalAnnotation(value, Seq(rawLabel, formatLossValue(value)), hexColor.value, dashed = true, toggleParam = toggleParam)
@@ -137,7 +142,7 @@ object LECSpecBuilder:
     // reference line to (that number is the *size of the drop*, not a
     // *level*). Positioned via literal pixel values (no "field", so it's
     // never subject to either data scale), one row per curve.
-    ordered.zipWithIndex.foreach { case ((nc, hexColor, _), idx) =>
+    withData.zipWithIndex.foreach { case ((nc, hexColor, _), idx) =>
       val label = s"${nc.name} — no loss: ${formatProbability(nc.probabilityOfNoLoss)}"
       noLossStat(label, hexColor.value, idx).foreach(annotationLayers.push(_))
     }
@@ -372,7 +377,11 @@ object LECSpecBuilder:
     */
   private def formatLossValue(value: Double): String =
     if value >= 1000 then f"$$${value / 1000}%,.1fB"
-    else f"$$${math.round(value)}%,dM"
+    else if value >= 10 then f"$$${math.round(value)}%,dM"
+    else if value >= 1 then f"$$$value%.1fM"
+    // Below $1M whole-M rounding would print "$0M" for genuinely nonzero
+    // values (an AAL of 0.25 is $250k, not zero) — switch to thousands.
+    else f"$$${math.round(value * 1000)}%,dK"
 
   /** Format a probability (0.0-1.0) as a whole-number percentage, for the
     * no-loss annotation label. */
