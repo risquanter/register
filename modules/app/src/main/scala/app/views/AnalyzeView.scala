@@ -6,7 +6,7 @@ import scala.scalajs.js
 
 import app.components.{SplitPane, FormInputs, BranchBar, BranchCard}
 import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, PaletteData, PinnedAxes}
-import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ScenarioState, AppConfigState, CompareMode, CompareState, CompareTarget, ScenarioDiffState, toChoice}
+import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareMode, CompareState, CompareTarget, ScenarioDiffState, toChoice}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, ScenarioName}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
@@ -60,6 +60,11 @@ object AnalyzeView:
     // with plain node-id curve ids.
     val hoverBridge = new ChartHoverBridge()
     val compareHoverBridge = new ChartHoverBridge()
+
+    // One param store for every chart surface in this view: the annotation
+    // toggles and interpolation choice survive not only re-embeds but also
+    // display-mode switches, which replace the chart component instances.
+    val chartParams = new ChartParamStore
 
     // ── Reactive chart node list ───────────────────────────────────
     // Merges query-matched nodes with user Ctrl+click selections.
@@ -401,17 +406,19 @@ object AnalyzeView:
                 scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
                 PaletteData.familySwatch(PaletteData.Aqua),
                 sideBySideSpecs.map(_._1),
-                hoverBridge
+                hoverBridge,
+                chartParams
               ),
               chartPanel(
                 Val(BranchBar.branchDisplayName(compareChoice)),
                 PaletteData.familySwatch(PaletteData.Purple),
                 sideBySideSpecs.map(_._2),
-                compareHoverBridge
+                compareHoverBridge,
+                chartParams
               )
             )
           case _ =>
-            LECChartView(combinedSpecSignal, hoverBridge)
+            LECChartView(combinedSpecSignal, hoverBridge, chartParams)
         }
       )
     )
@@ -486,7 +493,8 @@ object AnalyzeView:
     branchName: Signal[String],
     swatchColor: HexColor,
     spec: Signal[LoadState[js.Dynamic]],
-    bridge: ChartHoverBridge
+    bridge: ChartHoverBridge,
+    paramStore: ChartParamStore
   ): HtmlElement =
     div(
       cls := "lec-panel",
@@ -495,7 +503,7 @@ object AnalyzeView:
         span(cls := "branch-card-swatch", styleAttr := s"background-color: ${swatchColor.value};"),
         span(cls := "lec-panel-name", child.text <-- branchName)
       ),
-      LECChartView(spec, bridge)
+      LECChartView(spec, bridge, paramStore)
     )
 
   /** Three-position slider selecting the comparison display mode, with
