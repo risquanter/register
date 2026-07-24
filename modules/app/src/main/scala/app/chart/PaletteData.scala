@@ -65,10 +65,27 @@ object PaletteData:
     "#0e8b63", "#0b5b46", "#093f34", "#072e27"
   ).map(hex)
 
-  /** All 8 families in picker grid order (light-to-dark per row). */
-  val allFamilies: Vector[Vector[HexColor]] = Vector(
-    Green, Aqua, Purple, Yellow, Orange, Red, Pink, Emerald
+  /** All 8 families with their stable names, in picker grid order
+    * (light-to-dark per row). The names are the persisted spelling of a
+    * per-branch palette assignment (`BranchPaletteState`), so they must not
+    * change once released — the hex values may. */
+  val namedFamilies: Vector[(String, Vector[HexColor])] = Vector(
+    "green"   -> Green,
+    "aqua"    -> Aqua,
+    "purple"  -> Purple,
+    "yellow"  -> Yellow,
+    "orange"  -> Orange,
+    "red"     -> Red,
+    "pink"    -> Pink,
+    "emerald" -> Emerald
   )
+
+  /** All 8 families in picker grid order (light-to-dark per row). */
+  val allFamilies: Vector[Vector[HexColor]] = namedFamilies.map(_._2)
+
+  /** The family a stored assignment names, if the name is (still) known. */
+  def familyByName(name: String): Option[Vector[HexColor]] =
+    namedFamilies.collectFirst { case (n, family) if n == name => family }
 
   /** The shade that stands for a whole family where one colour is needed
     * (branch-card header swatches): the mid stop, saturated enough to read

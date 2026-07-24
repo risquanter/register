@@ -41,9 +41,10 @@ import com.risquanter.register.http.responses.SimulationResponse
   *                           of this state gets current data on a branch switch without
   *                           having to remember to wire that reload themselves.
   * @param userPalette        Palette family for user-selected (Ctrl+click) nodes,
-  *                           passed through to `LECChartState`. The Compare card's
-  *                           instance passes Purple so its tree highlights match
-  *                           its branch's curve family.
+  *                           passed through to `LECChartState`. A signal so the
+  *                           family can follow the branch's user-assigned
+  *                           palette (`BranchPaletteState`) — the tree
+  *                           highlights match the branch's curve family.
   */
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
@@ -51,7 +52,7 @@ final class TreeViewState(
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
-  userPalette: Vector[HexColor] = PaletteData.Aqua
+  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua)
 ) extends WorkspaceTreeEndpoints:
 
   private def branchAccessor(): BranchChoice = activeBranchSignal.now()

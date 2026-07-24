@@ -487,6 +487,16 @@ body {
 /* ── Branch chip (topbar indicator) ── */
 .branch-chip {
   font-family: var(--font-mono);
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.branch-chip-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 /* ── Scenario toolbar (Design view, atop TreeBuilderView) ── */
@@ -2114,8 +2124,9 @@ select.form-input:has(option[value=""]:checked) {
   opacity: 1;
 }
 
-/* ── Colour Swatch Picker popover ── */
-.color-swatch-picker {
+/* ── Swatch-picker popovers (per-node colour grid, branch palette row) ── */
+.color-swatch-picker,
+.branch-palette-popover {
   position: absolute;
   z-index: 100;
   background-color: var(--surface-raised);
@@ -2165,6 +2176,31 @@ select.form-input:has(option[value=""]:checked) {
 .swatch-reset-btn:hover {
   color: var(--foreground);
   background: var(--surface-overlay-hover);
+}
+
+/* ── Branch palette picker (branch-card header swatch popover) ── */
+.branch-palette-picker {
+  position: relative;
+  display: inline-flex;
+}
+
+.branch-palette-trigger {
+  cursor: pointer;
+}
+.branch-palette-trigger:hover {
+  box-shadow: 0 0 0 1px var(--foreground);
+}
+
+/* Viewport-positioned (top/left set inline from the swatch's bounding box):
+   the branch card's overflow:hidden would clip an absolutely-positioned
+   child — on a collapsed card, entirely. */
+.branch-palette-popover {
+  position: fixed;
+}
+
+.branch-palette-cells {
+  display: flex;
+  gap: 3px;
 }
 
 /* =============================================

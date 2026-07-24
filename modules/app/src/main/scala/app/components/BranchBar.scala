@@ -3,8 +3,9 @@ package app.components
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
+import app.chart.PaletteData
 import app.components.FormInputs
-import app.state.{ScenarioState, ScenarioSubmitState, LoadState, Section}
+import app.state.{BranchPaletteState, ScenarioState, ScenarioSubmitState, LoadState, Section}
 import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName}
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
@@ -47,7 +48,10 @@ object BranchBar:
   private def branchLabel(choice: BranchChoice): String =
     s"⎇ ${branchDisplayName(choice)}"
 
-  /** Topbar branch indicator. Inert — no click handler.
+  /** Topbar branch indicator. Inert — no click handler. Carries the shown
+    * branch's palette swatch: its user-assigned family (`BranchPaletteState`),
+    * Aqua — the single-branch chart's selected-node family — while
+    * unassigned.
     *
     * Design and Analyze each own an independent `ScenarioState`. The topbar
     * chip is shared chrome above both views, so it shows whichever section's
@@ -57,16 +61,23 @@ object BranchBar:
     activeSection: Signal[Section],
     designScenarioState: ScenarioState,
     analyzeScenarioState: ScenarioState,
-    scenariosEnabled: Signal[Boolean]
+    scenariosEnabled: Signal[Boolean],
+    branchPaletteState: BranchPaletteState
   ): HtmlElement =
+    val shownBranch: Signal[BranchChoice] = activeSection
+      .combineWith(designScenarioState.activeBranch.signal, analyzeScenarioState.activeBranch.signal)
+      .map { case (section, designBranch, analyzeBranch) =>
+        if section == Section.Design then designBranch else analyzeBranch
+      }
     span(
       cls := "topbar-badge branch-chip",
       display <-- scenariosEnabled.map(if _ then "inline-flex" else "none"),
-      child.text <-- activeSection
-        .combineWith(designScenarioState.activeBranch.signal, analyzeScenarioState.activeBranch.signal)
-        .map { case (section, designBranch, analyzeBranch) =>
-          branchLabel(if section == Section.Design then designBranch else analyzeBranch)
-        }
+      span(
+        cls := "branch-chip-swatch",
+        styleAttr <-- branchPaletteState.paletteFor(shownBranch, PaletteData.Aqua)
+          .map(family => s"background-color: ${PaletteData.familySwatch(family).value};")
+      ),
+      child.text <-- shownBranch.map(branchLabel)
     )
 
   /** Sentinel for "main" in a branch-picker `<select>`'s raw value protocol.
@@ -95,6 +106,14 @@ object BranchBar:
     * own value) so recreating the currently-selected `<option>` doesn't reset
     * the browser's native `<select>` selection out from under the tracked Var.
     *
+    * @param scenarios The held last-Loaded list
+    *                  (`ScenarioState.lastLoadedScenarios`), NOT the raw
+    *                  `LoadState` — a refresh cycles the raw signal through
+    *                  Loading, and options built from that empty out for the
+    *                  cycle's duration; the removed `<option>` drops the
+    *                  browser's native selection even though the tracked Var
+    *                  is unchanged, leaving the select on its placeholder
+    *                  until the Var next emits.
     * @param excludeValues Raw option values to omit — e.g. each Compare-mode
     *                      picker hides the tab's own baseline branch
     *                      (comparing a branch to itself is a no-op) and the
@@ -104,14 +123,11 @@ object BranchBar:
     *                      main, is always offered.
     */
   def branchOptionEntries(
-    scenarios: Signal[LoadState[List[ScenarioSummaryResponse]]],
+    scenarios: Signal[List[ScenarioSummaryResponse]],
     excludeValues: Signal[Set[String]] = Val(Set.empty)
   ): Signal[List[(String, String)]] =
-    scenarios.combineWith(excludeValues).map { (listState, excl) =>
-      val names = listState match
-        case LoadState.Loaded(list) => list.map(_.name)
-        case _                      => Nil
-      val all = (mainSentinel -> "main") :: names.map(n => n.value.toString -> n.value.toString)
+    scenarios.combineWith(excludeValues).map { (list, excl) =>
+      val all = (mainSentinel -> "main") :: list.map(s => s.name.value.toString -> s.name.value.toString)
       all.filterNot { case (v, _) => excl.contains(v) }
     }
 
@@ -130,7 +146,7 @@ object BranchBar:
       cls := domCls,
       display <-- scenariosEnabled.map(if _ then "inline-block" else "none"),
       onMountCallback(_ => scenarioState.refresh()),
-      FormInputs.splitOptions(branchOptionEntries(scenarioState.scenarios)),
+      FormInputs.splitOptions(branchOptionEntries(scenarioState.lastLoadedScenarios)),
       controlled(
         value <-- scenarioState.activeBranch.signal.map(branchOptionValue),
         onInput.mapToValue --> { raw => scenarioState.switchTo(parseBranchOptionValue(raw)) }

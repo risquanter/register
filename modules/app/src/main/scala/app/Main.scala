@@ -5,7 +5,7 @@ import org.scalajs.dom
 
 import app.chart.PaletteData
 import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, CompareState, CompareSlot, ScenarioDiffState}
+import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, BranchPaletteState, CompareState, CompareSlot, ScenarioDiffState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -48,34 +48,42 @@ object Main:
       wsState.keySignal, scenarioListState.scenarios, () => wsState.currentUserId
     )
 
+    // Per-branch palette assignments — one app-wide store, so every surface
+    // (both sections' charts, the topbar chip, the compare cards) reads the
+    // same colour for the same branch.
+    val branchPaletteState = new BranchPaletteState
+
     val builderState = new TreeBuilderState
     val designTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, designScenarioState.activeBranch.signal
     )
     val analyzeTreeViewState = new TreeViewState(
-      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal
+      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal,
+      userPalette = branchPaletteState.paletteFor(analyzeScenarioState.activeBranch.signal, PaletteData.Aqua)
     )
     // Compare cards: each compared-branch slot gets its own full
     // TreeViewState — an independent tree view, Ctrl+click surface, and
     // curve cache on the slot's chosen branch — plus its own hash-diff
     // state. The palette family is the slot's branch identity in the
-    // Overlay chart; passing it to the TreeViewState makes the card's tree
-    // highlights match its curves.
+    // Overlay chart: the chosen branch's user-assigned family, falling back
+    // to the slot's own default family. Passing it to the TreeViewState
+    // makes the card's tree highlights match its curves.
     val analyzeCompareState = new CompareState
-    val compareSlotPalettes = Vector(PaletteData.Purple, PaletteData.Orange)
+    val compareSlotDefaultPalettes = Vector(PaletteData.Purple, PaletteData.Orange)
     require(
-      compareSlotPalettes.length == CompareState.ComparedSlotCount,
-      "every compare slot needs its own palette family"
+      compareSlotDefaultPalettes.length == CompareState.ComparedSlotCount,
+      "every compare slot needs its own default palette family"
     )
-    val analyzeCompareSlots = analyzeCompareState.slots.zip(compareSlotPalettes).map { (slotState, palette) =>
+    val analyzeCompareSlots = analyzeCompareState.slots.zip(compareSlotDefaultPalettes).map { (slotState, defaultPalette) =>
+      val slotPalette = branchPaletteState.paletteFor(slotState.chosenBranch.signal, defaultPalette)
       new CompareSlot(
         state = slotState,
         treeViewState = new TreeViewState(
           wsState.keySignal, treeListState, globalError, () => wsState.currentUserId,
-          slotState.chosenBranch.signal, userPalette = palette
+          slotState.chosenBranch.signal, userPalette = slotPalette
         ),
         diffState = new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId),
-        palette = palette
+        palette = slotPalette
       )
     }
     val analyzeQueryState = new AnalyzeQueryState(
@@ -131,7 +139,8 @@ object Main:
       workspaceBadge = workspaceBadge,
       appVersion = appConfigState.appVersion.signal,
       branchChip = BranchBar.chipForSection(
-        navState.activeSection.signal, designScenarioState, analyzeScenarioState, appConfigState.scenariosEnabled.signal
+        navState.activeSection.signal, designScenarioState, analyzeScenarioState, appConfigState.scenariosEnabled.signal,
+        branchPaletteState
       ),
       designView = DesignView(
         builderState,
@@ -151,7 +160,8 @@ object Main:
         analyzeScenarioState,
         appConfigState,
         analyzeCompareState,
-        analyzeCompareSlots
+        analyzeCompareSlots,
+        branchPaletteState
       )
     )
 

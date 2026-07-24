@@ -53,13 +53,16 @@ final class CompareSlotState:
   * curve cache on the slot's chosen branch) and the content-hash diff
   * against the tab's active branch — and the palette family that identifies
   * the branch in the Overlay chart, its card swatch, and its tree
-  * highlights. Constructed once at startup (`Main`), one per slot.
+  * highlights. The palette is a signal: the slot's chosen branch's
+  * user-assigned family (`BranchPaletteState`), falling back to the slot's
+  * own default family while the branch has no assignment. Constructed once
+  * at startup (`Main`), one per slot.
   */
 final class CompareSlot(
   val state: CompareSlotState,
   val treeViewState: TreeViewState,
   val diffState: ScenarioDiffState,
-  val palette: Vector[HexColor]
+  val palette: Signal[Vector[HexColor]]
 )
 
 object CompareState:

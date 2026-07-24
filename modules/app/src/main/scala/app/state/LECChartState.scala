@@ -35,10 +35,11 @@ import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   * @param branchAccessor Returns this tab's active branch (BranchChoice) — BranchBar.
   * @param userPalette    Palette family for user-selected (Ctrl+click) nodes.
-  *                       Default Aqua matches the chart's single-branch colour
-  *                       system; the Compare card's instance passes Purple so
-  *                       its tree highlights match its branch's curve family
-  *                       in the Overlay chart.
+  *                       A signal: the family follows the branch's
+  *                       user-assigned palette (`BranchPaletteState`), so the
+  *                       tree highlights and curve colours match the branch's
+  *                       family in the Overlay chart. Default Aqua matches
+  *                       the chart's single-branch colour system.
   */
 final class LECChartState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
@@ -47,7 +48,7 @@ final class LECChartState(
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   branchAccessor: () => BranchChoice = () => BranchChoice.Main,
-  userPalette: Vector[HexColor] = PaletteData.Aqua
+  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua)
 ) extends WorkspaceAnalysisEndpoints:
 
   // ── User selection state ──────────────────────────────────────
@@ -111,9 +112,9 @@ final class LECChartState(
     */
   val nodeColorMap: Signal[Map[NodeId, HexColor]] =
     satisfyingNodeIds.signal
-      .combineWith(userSelectedNodeIds.signal, colorOverrides.signal, previewOverride.signal)
-      .map { (query, user, overrides, preview) =>
-        val base = ColorAssigner.assign(query, user, overrides, aquaPalette = userPalette)
+      .combineWith(userSelectedNodeIds.signal, colorOverrides.signal, previewOverride.signal, userPalette)
+      .map { (query, user, overrides, preview, palette) =>
+        val base = ColorAssigner.assign(query, user, overrides, aquaPalette = palette)
         preview match
           case Some((nid, hex)) if base.contains(nid) => base.updated(nid, hex)
           case _                                      => base

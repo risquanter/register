@@ -2,8 +2,6 @@ package app.components
 
 import com.raquo.laminar.api.L.{*, given}
 
-import com.risquanter.register.domain.data.iron.HexColor.HexColor
-
 /** Bordered, collapsible container for one compared branch's tree view:
   * swatch + branch name in the header, the branch's own tree view as the
   * body. Each card is an independent Ctrl+click surface — selection identity
@@ -14,10 +12,15 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   */
 object BranchCard:
 
+  /** @param swatch The header's swatch element — a `BranchPalettePicker` (a
+    *               clickable swatch opening the branch-colour popover) or any
+    *               plain coloured span carrying the `branch-card-swatch`
+    *               class.
+    */
   def apply(
-    swatchColor: HexColor,
-    branchName:  Signal[String],
-    body:        HtmlElement
+    swatch:     HtmlElement,
+    branchName: Signal[String],
+    body:       HtmlElement
   ): HtmlElement =
     val open: Var[Boolean] = Var(true)
     div(
@@ -30,10 +33,7 @@ object BranchCard:
           case true  => Icons.chevronDown("branch-card-chevron")
           case false => Icons.chevronRight("branch-card-chevron")
         },
-        span(
-          cls := "branch-card-swatch",
-          styleAttr := s"background-color: ${swatchColor.value};"
-        ),
+        swatch,
         span(cls := "branch-card-name", child.text <-- branchName)
       ),
       div(

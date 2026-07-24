@@ -89,6 +89,15 @@ roles:
   JS-consumable tokens. Storage of the assignment is an implementation
   decision for Phase B/C (client-side per workspace is sufficient; nothing
   durable references a scenario server-side, DD-5).
+  **Built 2026-07-24** (`BranchPaletteState` + `BranchPalettePicker`):
+  assignment is at family granularity (the 8 chart families — per-node
+  shades stay hash-rotated within the family), stored in `localStorage`
+  keyed by branch name (not workspace-scoped: the workspace's only
+  client-side identifier is its secret key, which must not be written to
+  storage). The picker opens from the branch-card header swatches in
+  Analyze's compare mode; the topbar chip carries the assigned swatch. An
+  unassigned branch keeps its surface default (Aqua active, Purple/Orange
+  compare slots), so nothing changes until the user assigns.
 - The **branch chip** is neutral chrome (same treatment as other topbar
   badges) carrying the branch's assigned palette swatch and name. The
   earlier `--scenario` role token is **withdrawn** — no new colour role is

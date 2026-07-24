@@ -34,6 +34,24 @@ final class ScenarioListState(
 
   val scenarios: StrictSignal[LoadState[List[ScenarioSummaryResponse]]] = scenariosVar.signal
 
+  /** The most recent Loaded list, held across the Loading (and any Failed)
+    * states a `refresh()` cycles `scenarios` through. Branch-picking
+    * `<select>`s render their option lists from this: options built from
+    * `scenarios` directly empty out during every refresh, and a removed
+    * `<option>` drops the browser's native selection even though the backing
+    * Var still holds the value — the select then shows its placeholder until
+    * the Var itself next emits. Consumers that need *evidence* a scenario is
+    * gone (deletion pruning) must keep reading `scenarios` and trust only
+    * `Loaded`. */
+  val lastLoadedScenarios: StrictSignal[List[ScenarioSummaryResponse]] = {
+    val v: Var[List[ScenarioSummaryResponse]] = Var(Nil)
+    scenariosVar.signal.changes.foreach {
+      case LoadState.Loaded(list) => if v.now() != list then v.set(list)
+      case _                      => ()
+    }(using unsafeWindowOwner)
+    v.signal
+  }
+
   // Refreshes route through `ZJS.loadStatePipeline` rather than a direct
   // `loadInto`: `create()`/`delete()` both call `refresh()`, so two fetches
   // can be in flight at once, and with `loadInto` the older response could

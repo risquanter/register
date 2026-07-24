@@ -4,9 +4,9 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
-import app.components.{SplitPane, FormInputs, BranchBar, BranchCard}
+import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, BranchPalettePicker}
 import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, PaletteData, PinnedAxes}
-import app.state.{TreeViewState, AnalyzeQueryState, LoadState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareMode, CompareState, CompareSlot, CompareSlotState, CompareTarget, toChoice}
+import app.state.{TreeViewState, AnalyzeQueryState, LoadState, BranchPaletteState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareMode, CompareState, CompareSlot, CompareSlotState, CompareTarget, toChoice}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, ScenarioName}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
@@ -47,8 +47,18 @@ object AnalyzeView:
     scenarioState: ScenarioState,
     appConfigState: AppConfigState,
     compareState: CompareState,
-    compareSlots: Vector[CompareSlot]
+    compareSlots: Vector[CompareSlot],
+    branchPaletteState: BranchPaletteState
   ): HtmlElement =
+
+    /** The tab's active branch's palette family — its user-assigned family,
+      * Aqua (the single-branch chart's selected-node family) while
+      * unassigned. Colours the active branch's overlay curves, its
+      * side-by-side panel and card swatches, matching the single chart's
+      * own `nodeColorMap` (whose `TreeViewState` is built on this same
+      * assignment in `Main`). */
+    val activePalette: Signal[Vector[HexColor]] =
+      branchPaletteState.paletteFor(scenarioState.activeBranch.signal, PaletteData.Aqua)
 
     /** Fire query against selected tree. No-op if no tree is selected. */
     def runQuery(): Unit = queryState.executeQuery()
@@ -105,12 +115,13 @@ object AnalyzeView:
     /** Per-slot Overlay inputs: the slot's curve cache (deduplicated for the
       * same reason as below), its card's own selection — independent of the
       * tab's own, user Ctrl+clicks only (the query pane runs against the
-      * tab's active branch, so a slot's query set stays empty) — and its
-      * chosen target. */
-    val slotOverlayInputs: Signal[Vector[(LoadState[Map[NodeId, LECNodeCurve]], Set[NodeId], CompareTarget)]] =
+      * tab's active branch, so a slot's query set stays empty) — its chosen
+      * target, and its palette family (the branch's assignment, or the
+      * slot's default). */
+    val slotOverlayInputs: Signal[Vector[(LoadState[Map[NodeId, LECNodeCurve]], Set[NodeId], CompareTarget, Vector[HexColor])]] =
       Signal.combineSeq(compareSlots.map { slot =>
         slot.treeViewState.curveCache.distinct
-          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.state.target.signal)
+          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.state.target.signal, slot.palette)
       }).map(_.toVector)
 
     /** Not in Overlay mode, or no slot engaged → the tab's own single-branch
@@ -133,16 +144,16 @@ object AnalyzeView:
       // activeBranch only change on genuine user action.
       compareState.mode.signal
         .combineWith(treeViewState.chartState.specSignal, treeViewState.curveCache.distinct, visibleNodeIds)
-        .combineWith(slotOverlayInputs, scenarioState.activeBranch.signal)
-        .map { case (mode, singleSpec, thisCurves, thisVisible, slotInputs, activeBranch) =>
+        .combineWith(slotOverlayInputs, scenarioState.activeBranch.signal, activePalette)
+        .map { case (mode, singleSpec, thisCurves, thisVisible, slotInputs, activeBranch, thisPalette) =>
           if mode != CompareMode.Overlay then singleSpec
           else
             // Same collision guard as `engagedSlots`: a slot whose target the
             // tab's branch was just switched onto contributes nothing this
             // frame — pairing it would give two sides identical series ids,
             // which Vega merges into one garbled series.
-            val engaged = slotInputs.zip(compareSlots).flatMap { case ((curves, visible, target), slot) =>
-              target.toChoice.filter(_ != activeBranch).map(choice => (curves, visible, choice, slot.palette))
+            val engaged = slotInputs.flatMap { case (curves, visible, target, palette) =>
+              target.toChoice.filter(_ != activeBranch).map(choice => (curves, visible, choice, palette))
             }
             if engaged.isEmpty then singleSpec
             else
@@ -151,7 +162,7 @@ object AnalyzeView:
                 case None =>
                   val sides =
                     CompareColorAssigner.OverlaySide(
-                      loadedOrEmpty(thisCurves), thisVisible, PaletteData.Aqua,
+                      loadedOrEmpty(thisCurves), thisVisible, thisPalette,
                       BranchBar.branchDisplayName(activeBranch)
                     ) +: engaged.map { (curves, visible, choice, palette) =>
                       CompareColorAssigner.OverlaySide(
@@ -452,33 +463,39 @@ object AnalyzeView:
       // Side-by-side with at least one engaged slot → one chart per branch
       // on shared pinned axes; every other state (Off, Overlay, side-by-side
       // without a target yet) → the single chart driven by
-      // `combinedSpecSignal`.
+      // `combinedSpecSignal`. Rendered off the derived (mode, engaged) key,
+      // deduplicated — an active-branch switch that leaves the engaged set
+      // unchanged must not tear down and re-embed every panel (the panels'
+      // own spec signals already react to the branch change).
       div(
         cls := "analyze-lec-panel",
-        child <-- compareState.mode.signal.combineWith(compareState.targets, scenarioState.activeBranch.signal).map {
-          case (CompareMode.SideBySide, targets, activeBranch) if engagedSlots(targets, activeBranch).nonEmpty =>
-            div(
-              cls := "lec-panel-grid",
-              chartPanel(
-                scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
-                PaletteData.familySwatch(PaletteData.Aqua),
-                sideBySideSpecs.map(_._1),
-                hoverBridge,
-                chartParams
-              ),
-              engagedSlots(targets, activeBranch).map { (i, choice) =>
+        child <-- compareState.mode.signal.combineWith(compareState.targets, scenarioState.activeBranch.signal)
+          .map { (mode, targets, activeBranch) => (mode, engagedSlots(targets, activeBranch)) }
+          .distinct
+          .map {
+            case (CompareMode.SideBySide, engaged) if engaged.nonEmpty =>
+              div(
+                cls := "lec-panel-grid",
                 chartPanel(
-                  Val(BranchBar.branchDisplayName(choice)),
-                  PaletteData.familySwatch(compareSlots(i).palette),
-                  sideBySideSpecs.map(_._2(i)),
-                  slotHoverBridges(i),
+                  scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
+                  activePalette.map(PaletteData.familySwatch),
+                  sideBySideSpecs.map(_._1),
+                  hoverBridge,
                   chartParams
-                )
-              }
-            )
-          case _ =>
-            LECChartView(combinedSpecSignal, hoverBridge, chartParams)
-        }
+                ),
+                engaged.map { (i, choice) =>
+                  chartPanel(
+                    Val(BranchBar.branchDisplayName(choice)),
+                    compareSlots(i).palette.map(PaletteData.familySwatch),
+                    sideBySideSpecs.map(_._2(i)),
+                    slotHoverBridges(i),
+                    chartParams
+                  )
+                }
+              )
+            case _ =>
+              LECChartView(combinedSpecSignal, hoverBridge, chartParams)
+          }
       )
     )
 
@@ -496,31 +513,37 @@ object AnalyzeView:
       // branch, each an independent tree view and Ctrl+click input surface.
       // The ✎ markers sit on each compared branch's card — its nodes are the
       // ones diffed against the tab's active branch. Swatches are the branch
-      // palette families the Overlay chart colours by (Aqua = the tab's own
-      // branch; each slot has its own family).
-      child <-- compareState.comparisonOn.combineWith(compareState.targets, scenarioState.activeBranch.signal).map {
-        (on, targets, activeBranch) =>
-          val engaged = engagedSlots(targets, activeBranch)
+      // palette families the Overlay chart colours by, and clicking one
+      // opens the branch's colour picker (`BranchPalettePicker`) — assigning
+      // a family there recolours every surface the branch appears on.
+      // Rendered off the derived
+      // (on, engaged) key, deduplicated — an active-branch switch that
+      // leaves the engaged set unchanged must not recreate the cards, which
+      // would reset their collapse state (card contents react on their own).
+      child <-- compareState.comparisonOn.combineWith(compareState.targets, scenarioState.activeBranch.signal)
+        .map { (on, targets, activeBranch) => (on, engagedSlots(targets, activeBranch)) }
+        .distinct
+        .map { (on, engaged) =>
           if on && engaged.nonEmpty then
             div(
               cls := "branch-card-stack",
               BranchCard(
-                swatchColor = PaletteData.familySwatch(PaletteData.Aqua),
-                branchName  = scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
-                body        = TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
-                                .amend(cls := "tree-detail-view--in-card")
+                swatch     = BranchPalettePicker(branchPaletteState, scenarioState.activeBranch.signal, activePalette),
+                branchName = scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
+                body       = TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
+                               .amend(cls := "tree-detail-view--in-card")
               ),
               engaged.map { (i, choice) =>
                 BranchCard(
-                  swatchColor = PaletteData.familySwatch(compareSlots(i).palette),
-                  branchName  = Val(BranchBar.branchDisplayName(choice)),
-                  body        = TreeDetailView(compareSlots(i).treeViewState, hoverBridge = slotHoverBridges(i), changedNodeIds = slotChangedNodeIds(i))
-                                  .amend(cls := "tree-detail-view--in-card")
+                  swatch     = BranchPalettePicker(branchPaletteState, Val(choice), compareSlots(i).palette),
+                  branchName = Val(BranchBar.branchDisplayName(choice)),
+                  body       = TreeDetailView(compareSlots(i).treeViewState, hoverBridge = slotHoverBridges(i), changedNodeIds = slotChangedNodeIds(i))
+                                 .amend(cls := "tree-detail-view--in-card")
                 )
               }
             )
           else TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
-      }
+        }
     )
 
     div(
@@ -553,7 +576,7 @@ object AnalyzeView:
     * that branch's own chart. */
   private def chartPanel(
     branchName: Signal[String],
-    swatchColor: HexColor,
+    swatchColor: Signal[HexColor],
     spec: Signal[LoadState[js.Dynamic]],
     bridge: ChartHoverBridge,
     paramStore: ChartParamStore
@@ -562,7 +585,7 @@ object AnalyzeView:
       cls := "lec-panel",
       div(
         cls := "lec-panel-header",
-        span(cls := "branch-card-swatch", styleAttr := s"background-color: ${swatchColor.value};"),
+        span(cls := "branch-card-swatch", styleAttr <-- swatchColor.map(c => s"background-color: ${c.value};")),
         span(cls := "lec-panel-name", child.text <-- branchName)
       ),
       LECChartView(spec, bridge, paramStore)
@@ -683,7 +706,7 @@ object AnalyzeView:
 
     val optionEntries: Signal[List[(String, String)]] =
       BranchBar.branchOptionEntries(
-        scenarioState.scenarios,
+        scenarioState.lastLoadedScenarios,
         excludeValues = scenarioState.activeBranch.signal
           .combineWith(Signal.combineSeq(otherSlots.map(_.target.signal)))
           .map { (active, otherTargets) =>

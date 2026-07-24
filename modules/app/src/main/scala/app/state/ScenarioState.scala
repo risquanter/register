@@ -45,6 +45,10 @@ final class ScenarioState(
   /** Read-only view of the shared scenario list — see `ScenarioListState`. */
   def scenarios: StrictSignal[LoadState[List[ScenarioSummaryResponse]]] = listState.scenarios
 
+  /** The last Loaded list, held across refresh cycles — what branch-picking
+    * `<select>`s build their options from (see `ScenarioListState`). */
+  def lastLoadedScenarios: StrictSignal[List[ScenarioSummaryResponse]] = listState.lastLoadedScenarios
+
   /** Fetch the workspace's scenario list. No-op if no workspace is active. */
   def refresh(): Unit = listState.refresh()
 
