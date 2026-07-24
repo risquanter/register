@@ -101,8 +101,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   private def decodeMeta(json: String): Task[TreeMetadata] =
     ZIO.fromEither(json.fromJson[TreeMetadata].left.map(err => RepositoryFailure(s"Decode meta failed: $err")))
 
-  private def readNodes(basePath: String, branch: BranchRef): Task[Seq[RiskNode]] =
-    val nodePrefix = IrminPath.unsafeFrom(s"$basePath/nodes")
+  private def readNodes(nodePrefix: IrminPath, branch: BranchRef): Task[Seq[RiskNode]] =
     for
       childNames <- handleIrmin(irmin.list(nodePrefix, branch))
       nodes      <- ZIO.foreach(childNames) { child =>
@@ -136,7 +135,6 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     ZIO.fromEither(TreeId.fromString(raw)).mapError(errs => RepositoryFailure(errs.map(_.message).mkString("; ")))
 
   private def loadTree(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[Option[TreeWithMeta]] =
-    val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
     val metaPath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMeta(wsId, id))
     val nodePrefix = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeNodes(wsId, id))
     for
@@ -152,7 +150,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         case None => ZIO.succeed(None)
         case Some(meta) =>
           for
-            nodes <- readNodes(basePath, branch)
+            nodes <- readNodes(nodePrefix, branch)
             tree  <- rebuildTree(meta, nodes)
           yield Some(TreeWithMeta(meta, tree))
     yield result
