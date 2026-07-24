@@ -13,7 +13,7 @@ import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
-import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioDiffServiceLive, ScenarioServiceNotSupported}
+import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioDiffServiceLive, ScenarioServiceNotSupported, ScenarioMergeServiceNotSupported}
 import com.risquanter.register.services.SimulationSemaphore
 import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
@@ -79,6 +79,7 @@ object StubHttpTestHarness {
         // would get 501 here rather than a working scenario. Fine for today's
         // suites (none exercise that path); revisit if/when one does.
         ScenarioServiceNotSupported.layer,
+        ScenarioMergeServiceNotSupported.layer,
         ZLayer.fromZIO(SystemController.makeZIO),
         ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
         ZLayer.fromZIO(WorkspaceTreeController.makeZIO),

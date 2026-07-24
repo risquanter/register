@@ -16,7 +16,7 @@ import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.persistence.{FlywayService, FlywayServiceLive, Repository}
 import com.risquanter.register.services.RiskTreeServiceLive
 import com.risquanter.register.services.ScenarioDiffServiceLive
-import com.risquanter.register.services.{ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported}
+import com.risquanter.register.services.{ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioMergeServiceNotSupported}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.pipeline.InvalidationHandler
@@ -101,6 +101,26 @@ object Application extends ZIOAppDefault {
           case RepositoryType.InMemory =>
             ZIO.logInfo("repository.type=in-memory; scenarios disabled (ScenarioServiceNotSupported, item 6)") *>
               ZIO.succeed(ScenarioServiceNotSupported: ScenarioService)
+        }
+      } yield svc
+    }
+
+  private val irminScenarioMergeServiceLayer: ZLayer[Any, Throwable, ScenarioMergeService] =
+    ZLayer.make[ScenarioMergeService](
+      IrminConfig.layer,
+      IrminClientLive.layer >>> irminHealthCheck,
+      ScenarioMergeServiceLive.layer
+    )
+
+  private val chooseScenarioMergeService: ZLayer[RepositoryConfig, Throwable, ScenarioMergeService] =
+    ZLayer.fromZIO {
+      for {
+        repoCfg <- ZIO.service[RepositoryConfig]
+        svc <- repoCfg.repositoryType match {
+          case RepositoryType.Irmin =>
+            ZIO.scoped(irminScenarioMergeServiceLayer.build.map(_.get[ScenarioMergeService]))
+          case RepositoryType.InMemory =>
+            ZIO.succeed(ScenarioMergeServiceNotSupported: ScenarioMergeService)
         }
       } yield svc
     }
@@ -241,6 +261,7 @@ object Application extends ZIOAppDefault {
       com.risquanter.register.services.SimulationSemaphore.layer,
       RepositoryConfig.layer >>> chooseRepo,
       RepositoryConfig.layer >>> chooseScenarioService,
+      RepositoryConfig.layer >>> chooseScenarioMergeService,
       // Per-workspace content-addressed cache (milestone 2b Phase A, DD-17)
       CacheScope.layer,
       RiskResultResolverLive.layer,  // ADR-015: ensureCached primitive

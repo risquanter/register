@@ -153,16 +153,22 @@ object BranchBar:
       )
     )
 
-  /** Design-view "Scenarios" toolbar row: switch / create / duplicate / delete.
+  /** Design-view "Scenarios" toolbar row: switch / create / duplicate /
+    * delete / merge.
     *
     * @param menuOpen Owned by the caller (DesignView) so a click anywhere in
     *                 the surrounding panel can dismiss the menu — mirrors the
     *                 `pickerOpenFor` pattern in `TreeDetailView`.
+    * @param onMergeRequest Opens the merge modal for the given scenario —
+    *                 shown only while a scenario branch is active (main has
+    *                 nothing to merge into itself). The modal itself is owned
+    *                 by the caller alongside `ScenarioMergeState`.
     */
   def toolbar(
     scenarioState: ScenarioState,
     scenariosEnabled: Signal[Boolean],
-    menuOpen: Var[Boolean]
+    menuOpen: Var[Boolean],
+    onMergeRequest: ScenarioName.ScenarioName => Unit
   ): HtmlElement =
     // None = create form closed. Some(forkOf) = open, forking from `forkOf`
     // (None = main, Some(name) = duplicating an existing scenario).
@@ -198,7 +204,7 @@ object BranchBar:
           onClick.stopPropagation --> { _ => () },
           child <-- scenarioState.scenarios.combineWith(scenarioState.activeBranch.signal).map {
             (listState, current) =>
-              renderMenuBody(scenarioState, listState, current, createTrigger, createState, createNameInput, closeCreate, closeAll)
+              renderMenuBody(scenarioState, listState, current, createTrigger, createState, createNameInput, closeCreate, closeAll, onMergeRequest)
           }
         )
       )
@@ -212,7 +218,8 @@ object BranchBar:
     createState: Var[ScenarioSubmitState],
     createNameInput: Var[String],
     closeCreate: () => Unit,
-    closeAll: () => Unit
+    closeAll: () => Unit,
+    onMergeRequest: ScenarioName.ScenarioName => Unit
   ): HtmlElement =
     val names: List[ScenarioName.ScenarioName] = listState match
       case LoadState.Loaded(list) => list.map(_.name)
@@ -232,6 +239,10 @@ object BranchBar:
           case Some(_) => None
         }
       else emptyNode,
+      current match
+        case BranchChoice.Scenario(name) =>
+          actionItem("⇄ Merge into main…", () => { onMergeRequest(name); closeAll() })
+        case BranchChoice.Main => emptyNode,
       child.maybe <-- createTrigger.signal.map {
         case Some(forkOf) => Some(renderCreateForm(scenarioState, forkOf, createState, createNameInput, closeCreate))
         case None         => None

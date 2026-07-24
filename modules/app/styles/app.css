@@ -631,6 +631,87 @@ body {
   background-color: var(--surface-overlay-hover);
 }
 
+/* ── Merge modal (Design view: "Merge into main…") ── */
+.merge-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.merge-modal {
+  width: 460px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--sp-4);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.merge-modal-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  margin-bottom: var(--sp-3);
+}
+
+.merge-modal-body {
+  font-size: var(--text-xs);
+  margin-bottom: var(--sp-3);
+}
+
+.merge-modal-status {
+  color: var(--foreground-muted);
+}
+
+.merge-modal-error {
+  color: var(--error);
+  margin-bottom: var(--sp-2);
+}
+
+.merge-modal-hint {
+  color: var(--foreground-muted);
+  margin-bottom: var(--sp-2);
+}
+
+.merge-modal-conflicts {
+  margin: var(--sp-2) 0;
+  padding-left: var(--sp-4);
+  font-family: var(--font-mono);
+}
+
+.merge-modal-actions {
+  display: flex;
+  gap: var(--sp-2);
+  justify-content: flex-end;
+}
+
+.merge-modal-actions button,
+.merge-modal-recheck-btn {
+  padding: var(--sp-1) var(--sp-3);
+  background-color: var(--surface-overlay);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.merge-modal-actions button:hover:not(:disabled),
+.merge-modal-recheck-btn:hover {
+  background-color: var(--surface-overlay-hover);
+}
+
+.merge-modal-merge-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── View containers (Design / Analyze) ── */
 .view-container {
   flex: 1;

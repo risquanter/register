@@ -5,7 +5,7 @@ import org.scalajs.dom
 
 import app.chart.PaletteData
 import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, AppConfigState, BranchPaletteState, CompareState, CompareSlot, ScenarioDiffState}
+import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, BranchPaletteState, CompareState, CompareSlot, ScenarioDiffState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -38,6 +38,7 @@ object Main:
     val scenarioListState = new ScenarioListState(wsState.keySignal, () => wsState.currentUserId)
     val designScenarioState = new ScenarioState(wsState.keySignal, scenarioListState, () => wsState.currentUserId)
     val analyzeScenarioState = new ScenarioState(wsState.keySignal, scenarioListState, () => wsState.currentUserId)
+    val designMergeState = new ScenarioMergeState(wsState.keySignal, () => wsState.currentUserId)
     val appConfigState = new AppConfigState
     appConfigState.refresh()
 
@@ -152,6 +153,7 @@ object Main:
           userIdAccessor = () => wsState.currentUserId
         ),
         designScenarioState,
+        designMergeState,
         appConfigState
       ),
       analyzeView = AnalyzeView(

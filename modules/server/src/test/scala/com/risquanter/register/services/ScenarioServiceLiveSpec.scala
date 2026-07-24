@@ -59,6 +59,7 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
     override def mergeBranch(from: BranchRef, into: BranchRef, message: String) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def getAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def healthCheck = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))

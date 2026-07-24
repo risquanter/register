@@ -222,6 +222,29 @@ object TestAndSetBranchResponse:
   given JsonCodec[TestAndSetBranchResponse] = DeriveJsonCodec.gen[TestAndSetBranchResponse]
 
 /**
+  * Response for `commit(hash) { tree { get(path) } }` query.
+  * `commit` is null for an unknown hash; `tree.get` is null for an absent path.
+  */
+final case class CommitTreeGetResponse(
+    data: Option[CommitTreeGetData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class CommitTreeGetData(
+    commit: Option[CommitTreeData]
+)
+
+final case class CommitTreeData(
+    tree: TreeData
+)
+
+object CommitTreeGetResponse:
+  import GetValueResponse.given  // Reuse TreeData codec
+  given JsonCodec[CommitTreeData] = DeriveJsonCodec.gen[CommitTreeData]
+  given JsonCodec[CommitTreeGetData] = DeriveJsonCodec.gen[CommitTreeGetData]
+  given JsonCodec[CommitTreeGetResponse] = DeriveJsonCodec.gen[CommitTreeGetResponse]
+
+/**
   * Response for `commit(hash)` query.
   */
 final case class CommitQueryResponse(

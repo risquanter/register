@@ -91,14 +91,21 @@ trait IrminClient:
   def getBranch(branch: BranchRef): IO[IrminError, Option[IrminBranch]]
 
   /**
-    * Merge a branch into another (Irmin `merge_with_branch`; Phase D
-    * groundwork). Merge conflicts surface as `IrminGraphQLError`; the
-    * scenario-merge service maps them to the domain `MergeConflict` (DD-10).
+    * Merge a branch into another (Irmin `merge_with_branch`).
+    *
+    * WARNING — a conflicting merge does NOT fail (live-verified,
+    * `IrminMergeSemanticsSpec`): Irmin's GraphQL API swallows the conflict,
+    * returns the target branch's unchanged head, and attaches no error. The
+    * only observable signal is that the head did not advance. Callers that
+    * must detect conflicts (the scenario-merge service, DD-10) run a
+    * byte-level three-way pre-check (ADR-032) and verify head advancement
+    * after the merge; they map a detected conflict to the domain
+    * `MergeConflict`.
     *
     * @param from Source branch
     * @param into Target branch
     * @param message Commit message for the merge commit
-    * @return The merge commit
+    * @return The merge commit, or the unchanged head if nothing was merged
     */
   def mergeBranch(from: BranchRef, into: BranchRef, message: String): IO[IrminError, IrminCommit]
 
@@ -144,6 +151,19 @@ trait IrminClient:
     * @return Commit metadata, or None if unknown
     */
   def getCommit(hash: CommitHash): IO[IrminError, Option[IrminCommit]]
+
+  /**
+    * Get a value at a path as of a specific commit — the store's state at
+    * that commit, independent of any branch head. Used to read merge-base
+    * (LCA) values for the merge-conflict pre-check (ADR-032: storage-level
+    * byte equality against the merge base).
+    *
+    * @param commit Commit whose tree to read
+    * @param path Path to the value
+    * @return Some(value) if the path exists at that commit; None if the path
+    *         is absent there or the commit is unknown
+    */
+  def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, Option[String]]
 
   /**
     * Commit history touching a path (Irmin `last_modified`; Phase E groundwork).
@@ -220,6 +240,9 @@ object IrminClient:
 
   def getCommit(hash: CommitHash): ZIO[IrminClient, IrminError, Option[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.getCommit(hash))
+
+  def getAtCommit(commit: CommitHash, path: IrminPath): ZIO[IrminClient, IrminError, Option[String]] =
+    ZIO.serviceWithZIO[IrminClient](_.getAtCommit(commit, path))
 
   def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError, List[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.getHistory(path, n, branch))

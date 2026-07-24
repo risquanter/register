@@ -19,7 +19,7 @@ import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummary
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.domain.data.iron.PositiveInt
-import com.risquanter.register.services.ScenarioServiceLive
+import com.risquanter.register.services.{ScenarioServiceLive, ScenarioMergeServiceLive}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
 
 /** HTTP-layer tests for [[ScenarioController]] (milestone-2b Phase B, item 4).
@@ -74,6 +74,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
     override def mergeBranch(from: BranchRef, into: BranchRef, message: String) = ZIO.die(new NotImplementedError("unused"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused"))
+    override def getAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused"))
     override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
     override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(new NotImplementedError("unused"))
     override def healthCheck = ZIO.die(new NotImplementedError("unused"))
@@ -93,6 +94,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       ctrl           <- ScenarioController.makeZIO
         .provide(
           ZLayer.succeed(new ScenarioServiceLive(FakeIrminClient(state))),
+          ZLayer.succeed(new ScenarioMergeServiceLive(FakeIrminClient(state))),
           ZLayer.succeed(workspaceStore),
           AuthorizationServiceNoOp.layer,
           ZLayer.succeed(extractor)

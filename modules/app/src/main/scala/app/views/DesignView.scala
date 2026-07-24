@@ -2,8 +2,8 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
-import app.components.{BranchBar, SplitPane}
-import app.state.{AppConfigState, DistributionChartState, LoadState, ScenarioState, TreeBuilderState, TreeLoadDecision, TreeLoadPolicy, TreeViewState, WorkspaceState}
+import app.components.{BranchBar, MergeModal, SplitPane}
+import app.state.{AppConfigState, DistributionChartState, LoadState, ScenarioMergeState, ScenarioState, TreeBuilderState, TreeLoadDecision, TreeLoadPolicy, TreeViewState, WorkspaceState}
 import com.risquanter.register.domain.data.{RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId}
 
@@ -28,6 +28,7 @@ object DesignView:
     wsState: WorkspaceState,
     distributionChartState: DistributionChartState,
     scenarioState: ScenarioState,
+    mergeState: ScenarioMergeState,
     appConfigState: AppConfigState
   ): HtmlElement =
     val scenarioMenuOpen: Var[Boolean] = Var(false)
@@ -91,12 +92,22 @@ object DesignView:
       // mirrors the `pickerOpenFor` click-outside pattern in TreeDetailView.
       onClick --> { _ => scenarioMenuOpen.set(false) },
       onKeyDown --> { ev => if ev.key == "Escape" then scenarioMenuOpen.set(false) },
-      BranchBar.toolbar(scenarioState, appConfigState.scenariosEnabled.signal, scenarioMenuOpen),
+      BranchBar.toolbar(scenarioState, appConfigState.scenariosEnabled.signal, scenarioMenuOpen, mergeState.open),
       TreeBuilderView(builderState, treeViewState, wsState, distributionChartState, scenarioState, appConfigState.debugUi.signal)
     )
 
+    // On a successful merge: close the modal and put the view on main, where
+    // the merged result now lives. The branch switch flows through the same
+    // TreeLoadPolicy subscription below as a manual switch — including its
+    // unsaved-draft confirm, which can only trigger for uncommitted form
+    // edits (committed scenario edits were already saved to the branch).
+    def onMerged(): Unit =
+      mergeState.close()
+      scenarioState.switchTo(BranchChoice.Main)
+
     div(
       cls := "design-view",
+      MergeModal(mergeState, onMerged),
       // ── Load subscription: propagate selected tree → builder state ──
       // Bound to element lifetime (ADR-019: side effects in callbacks, not in .map).
 

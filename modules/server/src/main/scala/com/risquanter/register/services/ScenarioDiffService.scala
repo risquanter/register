@@ -39,6 +39,23 @@ enum ScenarioDiffResult:
 /** Content-hash diff (UC5, milestone-2b Phase C) of a tree between two
   * branches — no value-level comparison (DD-6), only whether each node's
   * content hash matches.
+  *
+  * The hashes compared are the *domain* content hashes (`ContentHashIndex`):
+  * a leaf's hash covers only its simulation-relevant projection
+  * (`LeafSimContent`) — not `name` or `parentId` — so a renamed or moved
+  * node reports `Identical` here even though its persisted JSON, and
+  * therefore its Irmin blob hash, changed. That is the intended semantics
+  * (ADR-032): this diff answers "did the risk content change", not "did the
+  * stored bytes change". Irmin is itself a content-addressed Merkle store,
+  * so this service is not duplicating Irmin's hashing — it hashes a
+  * different projection to answer a different question.
+  *
+  * Consequently this diff must NOT be used to predict Irmin merge outcomes:
+  * Irmin merges per node file on byte equality of the full persisted JSON,
+  * so a node reported `Identical` (or changed on one side only) here can
+  * still merge-conflict — e.g. renamed on one branch while its probability
+  * changed on the other. Merge-conflict prediction needs the storage-level
+  * relation; see ADR-032 for both relations and where each applies.
   */
 trait ScenarioDiffService:
 

@@ -158,3 +158,9 @@ The `merge_with_branch` GraphQL mutation handles this internally by finding
 the lowest common ancestor (LCA) commit and performing a three-way diff per
 path. The `lcas(commit:)` query on `Branch` enables pre-computing the LCA
 for merge previews before the user commits to the merge.
+
+Note: Irmin's conflict detection compares the **full persisted node JSON**
+(byte equality), not the domain content hashes used by the semantic branch
+diff — the two relations diverge on renames and moves. A merge-preview
+conflict check must therefore use storage-level equality; see
+[ADR-032](ADR-032-content-equality-relations.md).

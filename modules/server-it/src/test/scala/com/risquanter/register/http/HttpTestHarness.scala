@@ -17,7 +17,7 @@ import com.risquanter.register.http.support.TestSafeUrls
 import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
-import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioDiffServiceLive, ScenarioServiceNotSupported, SimulationSemaphore}
+import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioDiffServiceLive, ScenarioServiceNotSupported, ScenarioMergeServiceNotSupported, SimulationSemaphore}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
@@ -146,6 +146,7 @@ object HttpTestHarness:
       // would get 501 here rather than a working scenario. Fine for today's
       // suites (none exercise that path); revisit if/when one does.
       ScenarioServiceNotSupported.layer,
+      ScenarioMergeServiceNotSupported.layer,
       ZLayer.fromZIO(SystemController.makeZIO),
       ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
       ZLayer.fromZIO(WorkspaceTreeController.makeZIO),

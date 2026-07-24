@@ -162,6 +162,14 @@ final class IrminClientLive private (
       commit   <- ZIO.foreach(response.data.flatMap(_.commit))(commitFromData)
     yield commit
 
+  override def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, Option[String]] =
+    for
+      _        <- ZIO.logDebug(s"Irmin GET@${commit.value.take(12)}: ${path.value}")
+      response <- executeQuery[CommitTreeGetResponse](IrminQueries.getValueAtCommit(commit.value, path))
+      value     = response.data.flatMap(_.commit).flatMap(_.tree.get)
+      _        <- ZIO.logDebug(s"Irmin GET@commit result: ${value.map(_.take(50))}")
+    yield value
+
   override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin HISTORY: ${path.value} (n=$n)${branchLog(branch)}")

@@ -306,6 +306,26 @@ object IrminQueries:
     """.stripMargin.trim
 
   /**
+    * Query for a value at a path as of a specific commit (Irmin
+    * `commit(hash:).tree`). Reads the store's state at that commit — used to
+    * read merge-base values for the merge-conflict pre-check (ADR-032:
+    * storage-level byte equality against the LCA).
+    *
+    * @param commitHash Commit whose tree to read (40-hex Irmin hash)
+    * @param path Path to query
+    */
+  def getValueAtCommit(commitHash: String, path: IrminPath): String =
+    s"""
+    |{
+    |  commit(hash: "$commitHash") {
+    |    tree {
+    |      get(path: "${path.value}")
+    |    }
+    |  }
+    |}
+    """.stripMargin.trim
+
+  /**
     * Query to find a commit by hash.
     */
   def getCommit(commitHash: String): String =

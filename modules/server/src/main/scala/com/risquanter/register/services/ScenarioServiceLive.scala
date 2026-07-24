@@ -109,13 +109,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
     s"scenarios.${wsId.value.toLowerCase}."
 
   private def scenarioBranch(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Task[BranchRef] =
-    BranchRef.scenario(wsId, name) match
-      case Right(branch) => ZIO.succeed(branch)
-      case Left(errors) =>
-        ZIO.die(new IllegalStateException(
-          s"composed branch for workspace ${wsId.value} + scenario '${name.value}' failed BranchRef validation: $errors — " +
-          "unreachable given a valid WorkspaceId + ScenarioName"
-        ))
+    ScenarioBranchOps.scenarioBranch(wsId, name)
 
   private def parseScenarioName(rawSegment: String): Task[ScenarioName.ScenarioName] =
     rawSegment.refineEither[ScenarioNameConstraint] match
@@ -127,12 +121,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
         ))
 
   private def refineCommitHash(raw: String): Task[CommitHash] =
-    CommitHash.fromString(raw) match
-      case Right(hash) => ZIO.succeed(hash)
-      case Left(errors) =>
-        ZIO.die(new IllegalStateException(
-          s"Irmin returned commit hash '$raw' not matching CommitHash's pinned format: $errors"
-        ))
+    ScenarioBranchOps.refineCommitHash(raw)
 
 object ScenarioServiceLive:
   val layer: ZLayer[IrminClient, Nothing, ScenarioService] =
