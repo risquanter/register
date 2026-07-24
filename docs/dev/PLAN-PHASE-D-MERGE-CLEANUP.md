@@ -315,8 +315,9 @@ Server — commit 2 (F2 extraction, separate final cleanup commit):
 Docs: ADR-020 §12 row note; VERSION-UPGRADE-PROTOCOL status qualifiers.
 
 Not touched: `ScenarioEndpoints`, DTOs, controller routes, all frontend files
-(D1/D10 ratified as-is), `build.sbt` (no dependency changes — the patch is
-container-side).
+(D1/D10 ratified as-is). No `build.sbt` dependency changes — the patch is
+container-side; `build.sbt` is edited only for the commit-2 version bump
+listed in the inventory above.
 
 ## ADR alignment
 

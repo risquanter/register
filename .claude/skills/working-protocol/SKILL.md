@@ -46,9 +46,12 @@ five items are required:
    DTO written out verbatim (copy-pasteable Scala / Tapir definitions), not
    described in prose.
 2. **File inventory** — every file to be created or modified, by **full
-   repo-relative path** (no abbreviations or `…` ellipses). The enforcement
-   hook matches gated edits against this inventory, so a path it cannot
-   find verbatim is a path it will deny.
+   repo-relative path** (no abbreviations or `…` ellipses), as **bullet
+   lines under a `## File inventory` heading**. The enforcement hook
+   matches gated edits against exactly those bullets (and nothing else in
+   the document), so a path it cannot find there is a path it will deny.
+   "Not touched" notes belong in prose or outside the section — never as
+   bullets under that heading.
 3. **ADR alignment** — which ADRs bear on the change, and for each: compliant,
    or a flagged deviation awaiting decision.
 4. **Open decisions** — every unresolved choice listed with its options, or an
@@ -80,13 +83,15 @@ mkdir -p .claude/protocol && echo "docs/dev/PLAN-<name>.md" > .claude/protocol/a
 ```
 
 On every gated edit the hook opens the named plan(s) and allows the edit
-only if the edited file's repo-relative path appears there — this is why
-the Plan Quality Gate requires full paths in the file inventory. A gated
-file the plan does not name is denied even while the plan is approved:
-that denial is the deviation escalation — stop, present why the file is
-needed, wait, and amend the plan's inventory after approval. Consequence
-of the matching rule: name a gated path in a plan only where coverage is
-intended.
+only if the edited file's repo-relative path appears on a **bullet line
+inside the plan's `## File inventory` section** (up to the next `## `
+heading) — this is why the Plan Quality Gate requires full paths, as
+bullets, under that exact heading. Mentions of a path anywhere else in
+the document — prose, rationale, code snippets, "Not touched" notes —
+grant nothing. A gated file the inventory does not list is denied even
+while the plan is approved: that denial is the deviation escalation —
+stop, present why the file is needed, wait, and amend the plan's
+inventory after approval.
 
 One approval therefore covers the entire implementation of the approved
 plan, with no re-approval mid-plan. The agent flags plan completion in the
