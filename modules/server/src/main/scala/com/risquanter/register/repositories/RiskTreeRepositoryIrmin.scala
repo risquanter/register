@@ -7,15 +7,14 @@ import io.github.iltotore.iron.autoCastIron
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef}
 import com.risquanter.register.domain.errors.{RepositoryFailure, AppError, IrminError}
-import com.risquanter.register.infra.irmin.IrminClient
+import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 import com.risquanter.register.repositories.model.TreeMetadata
 
 /** Irmin-backed implementation of RiskTreeRepository using per-node storage.
   *
-  * Path conventions (per ADR-004a, workspace-scoped):
-  * - Nodes: workspaces/{wsId}/risk-trees/{treeId}/nodes/{nodeId}
-  * - Meta:  workspaces/{wsId}/risk-trees/{treeId}/meta
+  * Path conventions (per ADR-004a, workspace-scoped): see
+  * [[WorkspaceStoragePaths]] — the single owner of the storage layout.
   *
   * Write path (DD-7): every mutation is ONE `set_tree` commit replacing the
   * whole tree subtree — atomic saves, one history entry per user action, and
@@ -25,7 +24,7 @@ import com.risquanter.register.repositories.model.TreeMetadata
 final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeRepository:
 
   override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
-    val basePath = s"workspaces/${wsId.value}/risk-trees/${riskTree.id.value}"
+    val basePath = WorkspaceStoragePaths.treeRoot(wsId, riskTree.id)
     for
       _   <- ensureRootPresent(riskTree.rootId, riskTree.nodes)
       now <- Clock.instant
@@ -42,7 +41,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     yield riskTree
 
   override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
-    val basePath = s"workspaces/${wsId.value}/risk-trees/${id.value}"
+    val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
     for
       existing    <- getTreeWithMeta(wsId, id, branch)
       updatedTree  = op(existing.tree)
@@ -59,7 +58,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     yield updatedTree
 
   override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
-    val basePath = s"workspaces/${wsId.value}/risk-trees/${id.value}"
+    val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
     for
       existing <- getTreeWithMeta(wsId, id, branch)
       _        <- handleIrmin(irmin.setTree(IrminPath.unsafeFrom(basePath), Nil, deleteMessage(wsId, id), branch))
@@ -69,7 +68,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     loadTree(wsId, id, branch).map(_.map(_.tree))
 
   override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
-    val root = IrminPath.unsafeFrom(s"workspaces/${wsId.value}/risk-trees")
+    val root = IrminPath.unsafeFrom(WorkspaceStoragePaths.treesRoot(wsId))
     handleIrmin(irmin.list(root, branch)).flatMap { treeIds =>
       ZIO.foreach(treeIds)(treeIdPath =>
         for
@@ -137,9 +136,9 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     ZIO.fromEither(TreeId.fromString(raw)).mapError(errs => RepositoryFailure(errs.map(_.message).mkString("; ")))
 
   private def loadTree(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[Option[TreeWithMeta]] =
-    val basePath = s"workspaces/${wsId.value}/risk-trees/${id.value}"
-    val metaPath = IrminPath.unsafeFrom(s"$basePath/meta")
-    val nodePrefix = IrminPath.unsafeFrom(s"$basePath/nodes")
+    val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
+    val metaPath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMeta(wsId, id))
+    val nodePrefix = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeNodes(wsId, id))
     for
       maybeMetaJson <- handleIrmin(irmin.get(metaPath, branch))
       maybeMeta <- maybeMetaJson match

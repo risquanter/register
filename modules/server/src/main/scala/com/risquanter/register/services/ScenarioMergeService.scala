@@ -4,7 +4,7 @@ import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, TreeId, NodeId}
 import com.risquanter.register.domain.errors.{IrminMergeConflict, MergeConflict, ValidationFailed, ValidationError, ValidationErrorCode}
-import com.risquanter.register.infra.irmin.IrminClient
+import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.IrminPath
 
 /** Byte-level three-way merge rule for one storage path (ADR-032, storage
@@ -71,7 +71,8 @@ enum MergePreviewResult:
   *
   * Scanning is scoped to the workspace's own subtree: scenario branches only
   * ever receive writes through this workspace's endpoints, so any path that
-  * changed on both sides since the fork lies under `workspaces/{wsId}/`.
+  * changed on both sides since the fork lies under the workspace root
+  * ([[com.risquanter.register.infra.irmin.WorkspaceStoragePaths]]).
   */
 trait ScenarioMergeService:
 
@@ -174,7 +175,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient) extends ScenarioMergeSe
       paths     <- candidatePaths(wsId, branch)
       conflicts <- ZIO.withParallelism(8) {
                      ZIO.foreachPar(paths.toList.sorted) { rel =>
-                       val abs = IrminPath.unsafeFrom(s"${workspaceRoot(wsId)}/$rel")
+                       val abs = IrminPath.unsafeFrom(s"${WorkspaceStoragePaths.workspaceRoot(wsId)}/$rel")
                        irmin.get(abs, BranchRef.Main)
                          .zipPar(irmin.get(abs, branch))
                          .zipPar(irmin.getAtCommit(base, abs))
@@ -195,7 +196,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient) extends ScenarioMergeSe
     pathsOn(wsId, BranchRef.Main).zipPar(pathsOn(wsId, branch)).map(_ ++ _)
 
   private def pathsOn(wsId: WorkspaceId, branch: BranchRef): Task[Set[String]] =
-    val treesRoot = IrminPath.unsafeFrom(s"${workspaceRoot(wsId)}/risk-trees")
+    val treesRoot = IrminPath.unsafeFrom(WorkspaceStoragePaths.treesRoot(wsId))
     for
       treeIds <- irmin.list(treesRoot, branch)
       perTree <- ZIO.foreach(treeIds) { treeId =>
@@ -205,9 +206,6 @@ final class ScenarioMergeServiceLive(irmin: IrminClient) extends ScenarioMergeSe
                          nodes.map(n => s"risk-trees/${treeId.value}/nodes/${n.value}"))
                  }
     yield perTree.flatten.toSet
-
-  private def workspaceRoot(wsId: WorkspaceId): String =
-    s"workspaces/${wsId.value}"
 
   private def mergeMessage(wsId: WorkspaceId, name: ScenarioName.ScenarioName): String =
     s"workspace:${wsId.value}:merge-scenario:${name.value}"
