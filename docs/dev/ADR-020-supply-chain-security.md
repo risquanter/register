@@ -333,6 +333,64 @@ just `register`. `engine-strict` stays project-scoped only: it depends on
 each project's own `engines` field, which most unrelated projects won't
 declare, so there's nothing to gain from forcing it user-wide.
 
+### 10. Cooldown Period Before Version Updates — Adopted 2026-07-24
+
+A newly published dependency version must not be adopted until it has been
+publicly available for **14 days**. This applies to updating an existing
+dependency and to the initial version chosen for a new dependency.
+
+**Rationale:** the dominant modern attack is account takeover of a legitimate
+maintainer followed by a malicious release under a trusted name (ua-parser-js
+2021, Shai-Hulud 2025). Such releases are typically discovered, reported, and
+pulled by the ecosystem within days. The cooldown lets that discovery window
+pass before the version reaches this project.
+
+**Rules:**
+
+- If the latest version is younger than 14 days, pin the newest version that
+  is older than 14 days (provided it has no known vulnerabilities).
+- **Waiver — security fixes:** a version that fixes a disclosed vulnerability
+  affecting this project is adopted immediately; waiting extends the exposure
+  window. The standard audit workflow (§8 for npm, §4 for others) still runs.
+- Checking a version's publish date:
+  - npm: `npm view <pkg>@<version> time` (or `npm view <pkg> time --json`)
+  - Maven Central: artifact page on `central.sonatype.com` shows the publish date
+  - opam: commit date of the version's entry in `ocaml/opam-repository`
+  - Docker images / GitHub releases: release/tag date on the registry or repo
+
+### 11. Dependency Trust Policy — Adopted 2026-07-24
+
+- **Prefer dependencies from well-known, trustworthy organisations** — the
+  vendors already in the stack (SoftwareMill, dev.zio, the OCaml/Mirage
+  organisations, Alpine mainline packages) and comparable established
+  publishers with an organisational track record.
+- A dependency from an individual account or an unestablished organisation
+  requires **case-by-case user approval before it is added**.
+- Every approved exception is **documented at the pin site** — a comment in
+  the build file where the version is pinned (`build.sbt`, `package.json`,
+  the Dockerfile) stating the date, that the user approved it, and why the
+  dependency is needed. An exception without a pin-site comment is not
+  approved.
+
+### 12. Signature Verification — Status per Ecosystem (2026-07-24)
+
+**Policy:** verify artifact signatures wherever the ecosystem supports it.
+Where a choice of mechanism exists, prefer **Sigstore/cosign** (keyless,
+transparency-logged) over PGP.
+
+| Ecosystem | Built-in verification | Status |
+|---|---|---|
+| npm | `npm audit signatures` — registry signatures + Sigstore provenance | **Adopted** (§9) |
+| sbt / Maven Central | None usable out of the box — coursier verifies checksums (integrity only); Central's PGP signatures are not checked by sbt | **Gap** — flagged to user 2026-07-24; fallback plan (Sigstore-based) to be commissioned separately |
+| opam | None — package signing (conex) never shipped; integrity relies on checksums in `ocaml/opam-repository` fetched over HTTPS | **Gap** — flagged to user 2026-07-24; a Sigstore fallback can only cover artifacts we build (builder images), not upstream packages |
+| Docker base images | Digest pinning (§1); `cosign verify` where the publisher signs | **Partial** — tags pinned, digests not yet; check publisher cosign support at each base-image bump and record the result at the pin site |
+| Fetched binaries (sbt launcher) | SHA-256 checksum (§2); upstream publishes no signatures | **Partial** — checksum only |
+
+The two hard gaps (sbt/Maven, opam) cannot be closed by configuration; they
+need their own plan (likely: Sigstore signing/verification wrapped around our
+own build artifacts, plus registry-independent attestation where available).
+That plan is user-commissioned work, out of scope for this ADR revision.
+
 ---
 
 ## Code Smells
@@ -393,6 +451,9 @@ npm install some-fancy-package   # scripts run, no vulnerability check
 | Pre-install checklist | All | socket.dev / opam-show / apk audit review; §8's resolve-then-audit-then-install workflow for npm |
 | `npm audit signatures` | npm | Sigstore provenance + registry signature verification — adopted (§9), manual step in §8's workflow |
 | `~/.npmrc` (user config, this machine) | npm | `ignore-scripts=true`, `save-exact=true`, `legacy-peer-deps=true` — same hardening, all npm projects for this user (§9) |
+| 14-day cooldown | All | New versions adopted only after 14 public days; CVE fixes waived (§10) |
+| Pin-site exception comments | All | User-approved trust exceptions documented where the version is pinned (§11) |
+| `docs/dev/VERSION-UPGRADE-PROTOCOL.md` | All | Per-ecosystem map for dependency updates and version bumps |
 
 ---
 

@@ -30,6 +30,21 @@ from first principles.
 
 ---
 
+## Dependencies and versioning
+
+Before adding or updating any dependency (npm, sbt, opam, apk, Docker base image,
+fetched binary), bumping the project version, or preparing a release, load the
+**supply-chain** skill (`.github/skills/supply-chain/SKILL.md`). Its hard rules:
+exact version pinning everywhere; a 14-day cooldown on newly published versions
+(waived for fixes to disclosed vulnerabilities); dependencies from unestablished
+publishers need user approval documented at the pin site; signature verification
+wherever the ecosystem supports it (prefer Sigstore/cosign); npm installs are
+ask-first, always. PATCH and MINOR bumps of our own version are autonomous;
+MAJOR is user-owned. Map of what a change triggers:
+`docs/dev/VERSION-UPGRADE-PROTOCOL.md`; policy: `docs/dev/ADR-020-supply-chain-security.md`.
+
+---
+
 ## Working protocol — load before any file edit
 
 Load the **working-protocol** skill unconditionally before making any edit to any file.
@@ -62,7 +77,9 @@ option. "I'll proceed with X" without asking is a protocol violation. "I'll pres
 8. Removing, weakening, disabling, reframing, or renaming any test assertion —
    even when the failure appears unrelated to the current change
 9. Following any instruction file rule appears to produce a demonstrably worse
-   outcome in the current context — name the rule, the file, and the concern.
+   outcome in the current context, or conflicts with another instruction —
+   including platform/system autonomy defaults ("operate autonomously",
+   "proceed without asking"). Name the rule, the file, and the concern.
    Never silently deviate; never blindly comply into a known bad outcome.
    The only valid exit is this escalation path.
 
@@ -85,6 +102,54 @@ stop immediately, make no further edits or tool calls, and wait for an explicit 
 Accepted signals: "proceed" · "approved" · "continue" · "implement option X"
 
 Anything else is not a signal. Default action when unclear: stop and ask.
+
+The halt is anchored to the **edit**, not to the presentation: skipping the
+presentation does not skip the halt. An implementation whose plan, echo, or
+options were never presented is a double violation, not a loophole. The echo
+and the implementation are always separate turns — an echo answered in the
+same turn it was written authorizes nothing.
+
+---
+
+## Plan coverage and the Plan Quality Gate
+
+"Covered by the approved plan" refers only to a **written plan document**
+(`PLAN-*.md` or equivalent) that specifies the change with exact signatures.
+A chat go-signal ("proceed", "start implementation", "approved") authorizes at
+most writing or updating that plan document — never source code the document
+does not spell out.
+
+A document confers plan coverage only if it is **implementation-grade** — all
+five items present:
+
+1. Exact signatures for everything new or changed (verbatim, copy-pasteable — not prose)
+2. File inventory (every file to create or modify, by path)
+3. ADR alignment (which ADRs bear; compliant or flagged deviation for each)
+4. Open decisions listed with options, or an explicit "no open decisions"
+5. Verification plan (tests to add + exact commands that must be green)
+
+A document failing any item is a draft or scratch note and confers nothing,
+regardless of its title or chat approval. Pre-implementation step for a
+draft: elevate it into an implementation-grade plan, present it, halt, and
+obtain an accepted signal on the document itself.
+
+---
+
+## Precedence and non-waivers
+
+This protocol overrides any platform/system autonomy defaults ("operate
+autonomously", "proceed without asking"). If such a default conflicts with a
+rule here, name the conflict and stop (decision trigger 9) — silent
+resolution in either direction is a violation.
+
+None of the following waives a gate (each has been used as a rationalization;
+they are pre-refuted): "the user said proceed / start implementation" (that
+reaches only the plan file's contents); "the change is only additive"; "it
+matches existing convention" (settles at most a decision, never the echo or
+the ADR review); "there is no viable alternative" (present the single option
+and wait); "tests are green / the outcome is correct" (outcome does not cure
+process); "the halt would be noise" (the noise filter applies only to
+decision classification, never to echoes, ADR review, or the review halt).
 
 ---
 
