@@ -1,7 +1,9 @@
 # PLAN — Phase D merge cleanup (DD-2 patch + slice-one open items, one pass)
 
-**Status:** awaiting user approval (this document is the G3 plan; no source
-edit is covered until it is approved and the open decisions below are ruled).
+**Status:** decisions RULED by the user 2026-07-24 (see the Decisions
+section); document updated to the rulings and awaiting the user's final
+approval of the plan as a whole. No source edit is covered until that
+approval (G3) and the approval token is refreshed (hook).
 **Scope:** one implementation pass that (a) implements the DD-2 decision —
 patch `irmin-graphql` so `merge_with_branch` reports conflicts instead of
 swallowing them, (b) compares the patched behaviour against the unpatched
@@ -21,11 +23,16 @@ Facts this plan builds on (all live-verified 2026-07-24):
   Store.Head.find t >|= Result.ok`).
 - The sibling resolver `merge_with_commit` propagates conflicts as GraphQL
   errors (`data: null`, error message from `Irmin.Merge.conflict_t`), leaves
-  the target head untouched — but in the fast-forward case (main unmoved
-  since fork) it creates a single-parent commit that does NOT record the
-  scenario head as a parent, while `merge_with_branch` fast-forwards
-  correctly. This is why we patch `merge_with_branch` rather than switch
-  mutations.
+  the target head untouched. Its fast-forward-case ancestry proved
+  STATE-DEPENDENT at implementation (2026-07-24): on one store it created a
+  commit dropping the scenario parent, on a fresh store it fast-forwarded
+  correctly — documented in
+  `docs/dev/NOTE-irmin-merge-with-commit-ancestry.md`, deliberately not
+  pinned in tests (decision: option A). The stable reasons for patching
+  `merge_with_branch` rather than switching mutations: the production
+  mutation and its upstream-native semantics stay unchanged, no extra
+  resolve-head round-trip (and its race), and the patch matches
+  `merge_with_commit`'s conflict contract.
 - Irmin's conflict error carries no path information — the byte-level
   pre-check remains the only source of the per-path conflict list shown in
   the UI and the 409 body.
@@ -100,25 +107,57 @@ If OD-3a (recommended): builder/prod tags become `local/irmin-builder:3.11-p1`
 implementation), BATS suites, register-dev skill (both copies),
 `docs/user/IMAGE-BUILD-REFERENCE.md`.
 
-### 1.4 Scala client: conflict becomes a typed failure
+### 1.4 Scala client: conflict becomes a typed failure (RULED 2026-07-24 — user's hybrid)
 
-Current behaviour after the patch, with NO Scala change: the mutation returns
-`merge_with_branch: null` + `errors`, so `IrminClientLive.mergeBranch` already
-fails with `IrminGraphQLError(messages, path)` instead of returning a bogus
-commit. The change needed is discrimination, per OD-2a (recommended):
+The string match happens exactly once, at the lowest level (the wire only
+carries text); everything above it is typed. Verified: the Irmin error
+hierarchy has exactly ONE exhaustive match in the codebase
+(`ErrorResponse.encodeIrminError`), so the new subtype costs one `case` line
+there and the compiler locates it.
+
+New subtype in `modules/common/…/domain/errors/AppError.scala` (sibling style):
+
+```scala
+/** A merge refused by the (patched) Irmin backend — the two branches hold
+  * conflicting values for at least one path. Raised only by
+  * `IrminClient.mergeBranch`.
+  */
+case class IrminMergeConflict(reason: String) extends IrminError {
+  override def getMessage: String = reason
+}
+```
+
+`ErrorResponse.encodeIrminError` gains
+`case IrminMergeConflict(reason) => …409 conflict response…` (exact maker
+mirrors the existing domain `MergeConflict` mapping; confirmed at
+implementation, along with whether `ErrorResponse.decode` needs a
+counterpart — in the normal path the service converts before the wire, so
+this mapping is a fallback).
+
+`IrminClientLive.mergeBranch` — the `None` arm stops going straight to
+`failWithError` and discriminates on our patch's prefix:
+
+```scala
+commit   <- response.data.flatMap(_.merge_with_branch) match
+              case Some(c) => commitFromData(c)
+              case None    =>
+                val (messages, path) = collectGraphQl(response.errors)
+                messages.find(_.startsWith("merge conflict: ")) match
+                  case Some(m) => ZIO.fail(IrminMergeConflict(m.stripPrefix("merge conflict: ")))
+                  case None    => ZIO.fail(IrminGraphQLError(messages, path))
+```
 
 `ScenarioMergeServiceLive.merge` — replace the post-merge ancestry
-verification (lines with `irmin.lca(BranchRef.Main, scenarioHead)…` and the
-`ZIO.unless(merged)` failure) with a catch on the merge call:
+verification (the `irmin.lca(BranchRef.Main, scenarioHead)…` line and the
+`ZIO.unless(merged)` failure) with a typed catch on the merge call:
 
 ```scala
 commit <- irmin.mergeBranch(branch, BranchRef.Main, mergeMessage(wsId, name))
-            .catchSome {
-              case e: IrminGraphQLError if e.messages.exists(_.startsWith("merge conflict: ")) =>
-                ZIO.fail(MergeConflict(
-                  branch,
-                  "merge was refused — main changed concurrently and now conflicts; re-run the preview and retry"
-                ))
+            .catchSome { case IrminMergeConflict(_) =>
+              ZIO.fail(MergeConflict(
+                branch,
+                "merge was refused — main changed concurrently and now conflicts; re-run the preview and retry"
+              ))
             }
 newHead <- ScenarioBranchOps.refineCommitHash(commit.hash)
 ```
@@ -142,9 +181,10 @@ Irmin)".
 `IrminMergeSemanticsSpec` (server-it) — runs against the patched image:
 
 - **INVERT** "a conflicting merge is silently swallowed" →
-  "a conflicting `merge_with_branch` fails with a `merge conflict: ` GraphQL
-  error and main's head is unchanged" (the regression gate for the patch;
-  this test failing = unpatched image or patch drifted).
+  "a conflicting merge fails typed — `IrminClient.mergeBranch` fails with
+  `IrminMergeConflict` and main's head is unchanged" (exercises the patched
+  image AND the client's prefix discrimination in one test; this is the
+  regression gate — it fails against an unpatched image or a drifted patch).
 - **KEEP** unchanged: disjoint diverged merge produces a two-parent commit;
   equal bytes on both sides merges clean; `getAtCommit` reads at a commit;
   `lca` returns the fork point.
@@ -153,18 +193,18 @@ Irmin)".
      head untouched — pins that our patch matches the upstream sibling's
      contract.
   2. fast-forward case (main unmoved since fork): `merge_with_branch`
-     fast-forwards (new main head == scenario head); `merge_with_commit`
-     produces a commit that does NOT carry the scenario head as a parent —
-     pins the reason we patch `merge_with_branch` instead of switching
-     mutations. (Requires a raw-GraphQL escape hatch for `merge_with_commit`
-     in the spec — the spec already speaks GraphQL directly via the harness;
-     no `IrminClient` surface is added for a mutation production code never
-     calls.)
+     fast-forwards (new main head == scenario head). AMENDED at
+     implementation (option A, 2026-07-24): the originally planned
+     counter-assertion on `merge_with_commit` was removed — its
+     fast-forward ancestry is state-dependent (see
+     `docs/dev/NOTE-irmin-merge-with-commit-ancestry.md`) and pinning it
+     makes the suite flaky. (The raw-GraphQL `merge_with_commit` helper
+     lives in the spec — no `IrminClient` surface for a mutation production
+     code never calls.)
 
 New unit spec `modules/server/src/test/…/services/ScenarioMergeServiceSpec.scala`:
-FakeIrminClient whose `mergeBranch` fails with
-`IrminGraphQLError(List("merge conflict: …"), Some(List("merge_with_branch")))`
-→ `merge` fails `MergeConflict`; a non-conflict `IrminGraphQLError` passes
+FakeIrminClient whose `mergeBranch` fails with `IrminMergeConflict("…")`
+→ `merge` fails domain `MergeConflict`; a plain `IrminGraphQLError` passes
 through unmapped.
 
 ---
@@ -207,33 +247,30 @@ through unmapped.
 
 ---
 
-## Open decisions (rule these at plan approval)
+## Decisions — RULED by the user 2026-07-24
 
-- **OD-2 — conflict-error typing.**
-  a) *(recommended)* No new error type: `ScenarioMergeServiceLive` catches
-  `IrminGraphQLError` whose message starts with our patch's
-  `"merge conflict: "` prefix (§1.4). Cost: string-prefix contract between
-  the patch and the service (both ours, pinned by the unit spec).
-  b) New `case class IrminMergeConflict(reason: String) extends IrminError` —
-  fully typed, but a new `AppError` subtype ripples through every exhaustive
-  `IrminError`/`AppError` match in the codebase (compile-error sweep).
-- **OD-3 — patched image tags.**
-  a) *(recommended)* Retag `3.11-p1` (builder + prod): the tag states the
-  content is not pristine upstream; cost: reference sweep (§1.3).
-  b) Keep `3.11`: zero churn; the tag silently means "patched" from now on
-  (recorded only in LABEL + Dockerfile comment).
-- **OD-4 — post-merge ancestry check.**
-  a) *(recommended)* Remove it (§1.4): with conflicts surfaced, a refused
-  merge is a typed failure and a succeeded merge advanced main — the check's
-  only remaining trigger is the race, which the catch now handles at the
-  same point. Cost: none identified; the `lca` round-trip disappears.
-  b) Keep both: redundant second line of defence against an unpatched image
-  being deployed; cost: one extra `lca` call per merge and a misleading
-  implication that the swallow still exists.
-- **OD-6 — F2 timing.**
-  a) *(recommended)* Do the single-owner path extraction in this pass (it
-  touches the same files and the commit is already a cleanup).
-  b) Defer to backlog; slice lands with the duplication.
+- **OD-2 — conflict-error typing: user's hybrid.** String-match exactly once
+  in `IrminClientLive.mergeBranch` on the patch's `"merge conflict: "`
+  prefix, raise the new typed `IrminMergeConflict` there; the service and
+  everything above are compiler-checked (§1.4). The subtype's only
+  exhaustive-match cost is one `case` in `ErrorResponse.encodeIrminError`
+  (verified — the sole exhaustive match over `IrminError`).
+- **OD-3 — image tags: A.** Retag `3.11-p1` (builder + prod), reference
+  sweep per §1.3.
+- **OD-4 — ancestry check: A (remove), with the guard in the test stack.**
+  The protection against accidental patch loss is maximal and automated, not
+  runtime: (1) the Dockerfile `grep -q` build assertion (§1.2) fails the
+  image build if the patch did not apply; (2) the inverted
+  `IrminMergeSemanticsSpec` conflict test (§1.5) fails `serverIt` against
+  any unpatched/drifted image; (3) BATS suite B exercises the built
+  production image. All three run on every Irmin image change.
+- **OD-6 — F2 extraction: A, sequenced LAST as its own commit.** The main
+  pass (patch + tests + service change + F5 + docs) lands first with an
+  explicit commit; the single-owner path extraction follows as a separate
+  review-catch-style cleanup commit. The phase is closed only when this
+  second commit is included.
+- **Versioning: PATCH.** The user classified this pass as patch-alignment
+  work → **0.7.0 → 0.7.1** (autonomous), bumped once, with the final commit.
 
 ### Ratifications (accepted as implemented unless you object here)
 
@@ -257,15 +294,23 @@ Infra/build:
 - OD-3a only: `docker-compose.yml`, server-it compose file, BATS suites,
   register-dev skill (`.github` + `.claude` mirror), `docs/user/IMAGE-BUILD-REFERENCE.md`
 
-Server (hook-gated `modules/**`):
-- `services/ScenarioMergeService.scala` (merge catch per §1.4, ancestry
-  removal per OD-4, scaladoc; paths via `WorkspaceStoragePaths` per OD-6)
-- `infra/irmin/IrminClient.scala` (mergeBranch scaladoc only)
-- NEW `infra/irmin/WorkspaceStoragePaths.scala` (OD-6a)
-- `repositories/RiskTreeRepositoryIrmin.scala` (OD-6a: inline paths → shared object; exact path verified at implementation)
-- Tests: `server-it …/IrminMergeSemanticsSpec.scala` (invert + 2 additions),
-  NEW `server …/services/ScenarioMergeServiceSpec.scala`,
-  `server …/http/controllers/ScenarioControllerSpec.scala` (F5 test)
+Server (hook-gated `modules/**`; full repo-relative paths — the plan-bound
+hook matches edited files against this inventory) — commit 1:
+- `modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala` (`IrminMergeConflict`)
+- `modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorResponse.scala` (one `case` in `encodeIrminError`; decode counterpart checked at implementation)
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala` (mergeBranch prefix discrimination per §1.4)
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala` (mergeBranch scaladoc only)
+- `modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala` (typed catch, ancestry removal, scaladoc)
+- `modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminMergeSemanticsSpec.scala` (invert + 2 additions)
+- NEW `modules/server/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/ScenarioControllerSpec.scala` (F5 test)
+- `modules/server-it/src/test/scala/com/risquanter/register/testcontainers/IrminCompose.scala` (comment: image tag `3.11-p1`)
+
+Server — commit 2 (F2 extraction, separate final cleanup commit):
+- NEW `modules/server/src/main/scala/com/risquanter/register/infra/irmin/WorkspaceStoragePaths.scala`
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala` (inline paths → shared object)
+- `modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala` (workspaceRoot/pathsOn switch to the shared object)
+- `build.sbt` + `.env` + `.env.irmin` (version bump 0.7.1, with commit 2)
 
 Docs: ADR-020 §12 row note; VERSION-UPGRADE-PROTOCOL status qualifiers.
 
@@ -282,8 +327,10 @@ container-side).
 - ADR-026: builder → prod build order preserved; builder rebuild required.
 - ADR-032: byte-level storage relation of the pre-check unchanged.
 - ADR-017/-030: no endpoint or authorization changes.
-- Compile hygiene: OD-2a adds no `AppError` subtype, so no exhaustive-match
-  ripple; OD-2b would require the sweep.
+- Compile hygiene: the new `IrminMergeConflict` subtype triggers the
+  inexhaustive-match compile guard at exactly one site
+  (`ErrorResponse.encodeIrminError`) — the compiler proves the mapping
+  complete.
 - DD-5/DD-16: unchanged.
 
 ## Verification plan (report pass/fail only)
@@ -301,18 +348,22 @@ container-side).
 
 ## Versioning
 
-Landing this pass closes Phase D slice one at feature level → **MINOR bump
-0.7.0 → 0.8.0** (autonomous under the 2026-07-24 policy), mirrored to `.env`
-and `.env.irmin` — unless the user's 0.7.0 close-out sequencing dictates
-otherwise; flagging because 0.7.0 was reserved for the user-owned Phase C
-close-out and this would be the first version past it.
+**RULED: PATCH bump 0.7.0 → 0.7.1** (the user classified this pass as
+patch-alignment work). Autonomous; bumped once with the final commit;
+`APP_VERSION` mirrored to `.env` and `.env.irmin`.
 
-## Implementation order (one shot)
+## Implementation order (one shot, two commits)
 
-1. Patch file + builder Dockerfile + builds (verification 1–2).
-2. Semantics spec inversion + additions; run against the new image (red→green
-   on the patched behaviour).
-3. Service change (catch, ancestry removal), unit spec, F2 extraction,
-   F5 test, scaladocs.
-4. Full verification 3–6, docs/status updates, version bump, memory update,
-   commit (message proposed at landing).
+1. Patch file + builder Dockerfile + image builds with `3.11-p1` tags +
+   reference sweep (verification 1–2).
+2. `IrminMergeConflict` + `ErrorResponse` case + `IrminClientLive`
+   discrimination; semantics spec inversion + the two comparison additions;
+   run against the new image (red→green on the patched behaviour).
+3. Service change (typed catch, ancestry removal), unit spec, F5 test,
+   scaladocs.
+4. Full verification 3–6, docs/status updates, memory update →
+   **commit 1** (message proposed at landing).
+5. F2 single-owner path extraction (`WorkspaceStoragePaths`), grep check
+   ("`workspaces/` prefix built in exactly one server file"), re-run unit +
+   integration tests, version bump 0.7.1 → **commit 2** (separate
+   review-catch-style cleanup; the phase closes only with this included).

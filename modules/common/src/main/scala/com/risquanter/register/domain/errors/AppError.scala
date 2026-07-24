@@ -144,6 +144,17 @@ case class BranchHeadStale(branch: BranchRef, expectedHead: CommitHash) extends 
   override def getMessage: String = s"Branch ${branch.toBranchRef} head is not ${expectedHead.value}"
 }
 
+/** A merge refused by the (patched) Irmin backend: the two branches hold
+  * conflicting values for at least one path, so no merge commit was created
+  * and the target branch's head is unchanged. Raised only by
+  * `IrminClient.mergeBranch`, which recognises the patched resolver's
+  * `"merge conflict: "` error prefix; `reason` is Irmin's conflict
+  * description with that prefix stripped. Not retriable as-is — the
+  * branches must first be brought into byte agreement (ADR-032). */
+case class IrminMergeConflict(reason: String) extends IrminError {
+  override def getMessage: String = s"Irmin merge conflict: $reason"
+}
+
 /** Optimistic locking conflict - client should refresh and retry */
 case class VersionConflict(nodeId: String, expected: String, actual: String) extends SimError {
   override def getMessage: String = s"Version conflict on node $nodeId: expected $expected, found $actual"

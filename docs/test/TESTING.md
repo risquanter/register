@@ -383,9 +383,9 @@ docker build -f containers/prod/Dockerfile.frontend-prod \
 
 # Irmin builder + prod (needed for suites A and B)
 docker build -f containers/prod/Dockerfile.irmin-builder \
-  -t local/irmin-builder:3.11 containers/prod/
+  -t local/irmin-builder:3.11-p1 containers/prod/
 docker build -f containers/prod/Dockerfile.irmin-prod \
-  -t local/irmin-prod:3.11 containers/prod/
+  -t local/irmin-prod:3.11-p1 containers/prod/
 ```
 
 2. **Build the BATS runner image**:

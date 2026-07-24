@@ -194,6 +194,9 @@ object ErrorResponse {
     case IrminGraphQLError(messages, path)   => makeIrminGraphQlErrorResponse(messages, path)
     case BranchAlreadyExists(branch)         => makeBranchAlreadyExistsResponse(branch)
     case BranchHeadStale(branch, expected)   => makeBranchHeadStaleResponse(branch, expected)
+    // Fallback only: ScenarioMergeService converts this to the domain
+    // MergeConflict (with its BranchRef) before the wire in the merge path.
+    case IrminMergeConflict(reason)          => makeDataConflictResponse(s"merge conflict: $reason", domain = "scenarios")
   }
 
   /** Exhaustive match on FolQueryFailure — compiler-enforced coverage (ADR-028). */

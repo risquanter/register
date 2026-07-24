@@ -31,6 +31,12 @@ final class IrminClientLive private (
 
   private val defaultAuthor = "zio-client"
 
+  /** Error-message prefix emitted by the patched irmin-graphql
+    * `merge_with_branch` resolver on a refused merge
+    * (containers/builders/patches/irmin-graphql-3.11.0-merge-conflict.patch).
+    */
+  private val MergeConflictPrefix = "merge conflict: "
+
   // GraphQL branch argument: omitted for main (Irmin's default branch) —
   // the one place the definite BranchRef maps back onto Irmin's optional
   // wire argument. Callers above this line always pass a definite branch.
@@ -121,7 +127,16 @@ final class IrminClientLive private (
       response <- executeQuery[MergeBranchResponse](query)
       commit   <- response.data.flatMap(_.merge_with_branch) match
                     case Some(c) => commitFromData(c)
-                    case None    => failWithError(response.errors)
+                    case None    =>
+                      // The patched irmin-graphql resolver reports a refused
+                      // merge as a GraphQL error prefixed "merge conflict: "
+                      // (containers/builders/patches/); discriminate it from
+                      // other GraphQL failures of the same mutation here so
+                      // callers get a typed conflict.
+                      val (messages, path) = collectGraphQl(response.errors)
+                      messages.find(_.startsWith(MergeConflictPrefix)) match
+                        case Some(m) => ZIO.fail(IrminMergeConflict(m.stripPrefix(MergeConflictPrefix)))
+                        case None    => ZIO.fail(IrminGraphQLError(messages, path))
       _        <- ZIO.logInfo(s"Irmin MERGE committed: ${commit.hash.take(12)}")
     yield commit
 

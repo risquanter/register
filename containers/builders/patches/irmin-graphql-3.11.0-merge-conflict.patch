@@ -1,0 +1,18 @@
+--- a/src/irmin-graphql/server.ml
++++ b/src/irmin-graphql/server.ml
+@@ -811,8 +811,13 @@
+           ~resolve:(fun _ _src into from i max_depth n ->
+             let* t = mk_branch s into in
+             let* info, _, _, _ = txn_args s i in
+-            let* _ = Store.merge_with_branch t from ~info ?max_depth ?n in
+-            Store.Head.find t >|= Result.ok);
++            Store.merge_with_branch t from ~info ?max_depth ?n >>= function
++            | Ok _ -> Store.Head.find t >|= Result.ok
++            | Error e ->
++                Lwt.return
++                  (Error
++                     ("merge conflict: "
++                     ^ Irmin.Type.to_string Irmin.Merge.conflict_t e)));
+         io_field "merge_with_commit"
+           ~doc:"Merge a branch with a specific commit" ~typ:store_schema.commit
+           ~args:

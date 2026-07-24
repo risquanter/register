@@ -23,13 +23,13 @@ Each service follows a builder / prod / dev separation:
 
 | Tier | Purpose | Lifetime | Example |
 |------|---------|----------|---------|
-| **Builder** | Cached toolchain + compiled dependencies | Survives `docker builder prune` | `local/graalvm-builder:21`, `local/irmin-builder:3.11` |
-| **Prod** | Multi-stage: `FROM builder` → minimal runtime | Rebuilt on code/config changes | `local/register-server:<version>`, `local/irmin-prod:3.11` |
+| **Builder** | Cached toolchain + compiled dependencies | Survives `docker builder prune` | `local/graalvm-builder:21`, `local/irmin-builder:3.11-p1` |
+| **Prod** | Multi-stage: `FROM builder` → minimal runtime | Rebuilt on code/config changes | `local/register-server:<version>`, `local/irmin-prod:3.11-p1` |
 | **Dev** | Self-contained, full toolchain, debuggable | Built once locally | `local/irmin-dev:3.11` |
 
 **Purge-and-rebuild workflow:**
 ```bash
-docker rmi local/register-server:<version> local/irmin-prod:3.11   # purge deployed
+docker rmi local/register-server:<version> local/irmin-prod:3.11-p1   # purge deployed
 docker compose build                                      # rebuild in seconds
 # Builder images untouched — no 40-min opam reinstall
 ```
@@ -79,7 +79,7 @@ docker build -f containers/dev/Dockerfile.irmin-dev -t local/irmin-dev:3.11 .
 ```
 
 > **Note:** If rebuild times for the dev image become a concern, it is acceptable
-> to refactor `Dockerfile.irmin-dev` to `FROM local/irmin-builder:3.11` and add
+> to refactor `Dockerfile.irmin-dev` to `FROM local/irmin-builder:3.11-p1` and add
 > `irmin-git` + runtime config on top. This trades build independence for speed.
 > The current self-contained approach is preferred while the dev image is rarely
 > rebuilt.
@@ -106,7 +106,7 @@ ENTRYPOINT ["opam", "exec", "--", "irmin", "graphql"]
 
 ```dockerfile
 # GOOD: only the binary + minimal shared libs (~87 MB)
-FROM local/irmin-builder:3.11 AS builder
+FROM local/irmin-builder:3.11-p1 AS builder
 FROM alpine:3.21
 COPY --from=builder /home/opam/.opam/default/bin/irmin /usr/local/bin/irmin
 ENTRYPOINT ["/usr/local/bin/irmin", "graphql"]
@@ -122,7 +122,7 @@ docker compose build irmin  # 40-minute rebuild
 
 ```bash
 # GOOD: named builder image survives prune
-docker rmi local/irmin-prod:3.11
+docker rmi local/irmin-prod:3.11-p1
 docker compose build irmin  # seconds — builder image intact
 ```
 

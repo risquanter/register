@@ -28,12 +28,12 @@ The Irmin builder compiles the OCaml toolchain from source — allow 15–40 min
 ```bash
 # Irmin builder base — OCaml toolchain + opam packages (~15-40 min, once)
 docker build -f containers/builders/Dockerfile.irmin-builder \
-  -t local/irmin-builder:3.11 \
+  -t local/irmin-builder:3.11-p1 \
   containers/builders/
 
 # Irmin server (~10s, requires builder base above)
 docker build -f containers/prod/Dockerfile.irmin-prod \
-  -t local/irmin-prod:3.11 \
+  -t local/irmin-prod:3.11-p1 \
   containers/prod/
 ```
 

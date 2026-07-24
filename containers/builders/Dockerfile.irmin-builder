@@ -6,11 +6,14 @@
 # Rebuild only when Irmin or OCaml versions change.
 #
 # Build:  docker build -f containers/builders/Dockerfile.irmin-builder \
-#           -t local/irmin-builder:3.11 containers/builders/
+#           -t local/irmin-builder:3.11-p1 containers/builders/
 #         (Takes 15-40 min first run; cached thereafter)
 #
+# Tag suffix -p1: upstream 3.11.0 plus the local irmin-graphql source patch
+# (see patches/ and the pin step below).
+#
 # This image is a named tagged image — it survives `docker builder prune`
-# and `docker image prune`. Only `docker rmi local/irmin-builder:3.11`
+# and `docker image prune`. Only `docker rmi local/irmin-builder:3.11-p1`
 # removes it. This ensures prod image rebuilds are fast (<10s) even after
 # purging deployed images.
 # ============================================================================
@@ -26,9 +29,11 @@ LABEL description="Irmin opam builder base — toolchain + compiled packages"
 USER root
 
 # Install system dependencies required by Irmin/OCaml packages
+# (patch: applies the local irmin-graphql source patch below)
 RUN apk add --no-cache \
     gmp-dev \
-    libffi-dev
+    libffi-dev \
+    patch
 
 USER opam
 WORKDIR /home/opam
@@ -49,6 +54,23 @@ RUN opam update
 #
 # Note: irmin-git is NOT installed here — it's only in the dev image
 # (containers/dev/Dockerfile.irmin-dev) for debugging with git CLI.
+# ADR-020 §11 documented exception: irmin-graphql is compiled from locally
+# patched source — upstream's merge_with_branch resolver discards the merge
+# result, silently swallowing conflicts (present in 3.11.0 and upstream main,
+# checked 2026-07-24). The patch propagates the conflict as a GraphQL error
+# prefixed "merge conflict: ", matching merge_with_commit's handling.
+# User-approved 2026-07-24. Source obtained via `opam source`
+# (checksum-verified against opam-repository, ADR-020 §2). The grep is a
+# build-time assertion that the patch applied — a future version bump where
+# the hunk no longer matches fails here instead of shipping the unpatched
+# resolver (docs/dev/VERSION-UPGRADE-PROTOCOL.md, opam section).
+COPY --chown=opam:opam patches/irmin-graphql-3.11.0-merge-conflict.patch /home/opam/
+RUN opam source irmin-graphql.3.11.0 --dir=/home/opam/irmin-graphql-src && \
+    cd /home/opam/irmin-graphql-src && \
+    patch -p1 < /home/opam/irmin-graphql-3.11.0-merge-conflict.patch && \
+    grep -q '"merge conflict: "' src/irmin-graphql/server.ml && \
+    opam pin add -y -n irmin-graphql.3.11.0 /home/opam/irmin-graphql-src
+
 RUN opam install -y \
     irmin-cli.3.11.0 \
     irmin-graphql.3.11.0 \

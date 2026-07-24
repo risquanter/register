@@ -6,7 +6,7 @@
 # the irmin-builder base image.
 #
 # For production, use containers/prod/Dockerfile.irmin-prod (slim Alpine,
-# no toolchain, FROM local/irmin-builder:3.11).
+# no toolchain, FROM local/irmin-builder:3.11-p1).
 #
 # Build:   docker build -f containers/dev/Dockerfile.irmin-dev -t local/irmin-dev:3.11 .
 #          (Takes 15-40 min first run; cached thereafter)

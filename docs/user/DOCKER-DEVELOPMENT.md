@@ -12,7 +12,7 @@
 
 All images are built locally from source. There are two distinct tiers:
 
-**Builder bases** — `local/graalvm-builder:21` and `local/irmin-builder:3.11` — install
+**Builder bases** — `local/graalvm-builder:21` and `local/irmin-builder:3.11-p1` — install
 heavyweight toolchains (GraalVM/sbt, OCaml/opam) once and are reused across all application
 builds. You build these manually; they rarely change. See
 [ADR-026](../dev/ADR-026-container-image-strategy.md) for the image strategy and
@@ -196,7 +196,7 @@ This does not apply to nginx mode.
 `IrminCompose` auto-starts and stops a scoped Irmin container per test run — no manual
 management needed. Each run uses a unique compose project (`register_it_<uuid>`) for isolation.
 
-**Prerequisite:** `local/irmin-prod:3.11` must exist. Build it with the commands in
+**Prerequisite:** `local/irmin-prod:3.11-p1` must exist. Build it with the commands in
 [Image Build Reference](IMAGE-BUILD-REFERENCE.md) if you have not already.
 
 ```bash

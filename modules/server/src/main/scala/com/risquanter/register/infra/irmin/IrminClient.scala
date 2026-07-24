@@ -93,19 +93,21 @@ trait IrminClient:
   /**
     * Merge a branch into another (Irmin `merge_with_branch`).
     *
-    * WARNING — a conflicting merge does NOT fail (live-verified,
-    * `IrminMergeSemanticsSpec`): Irmin's GraphQL API swallows the conflict,
-    * returns the target branch's unchanged head, and attaches no error. The
-    * only observable signal is that the head did not advance. Callers that
-    * must detect conflicts (the scenario-merge service, DD-10) run a
-    * byte-level three-way pre-check (ADR-032) and verify head advancement
-    * after the merge; they map a detected conflict to the domain
-    * `MergeConflict`.
+    * Requires the PATCHED Irmin image (`local/irmin-prod:3.11-p1`,
+    * containers/builders/patches/): upstream's resolver silently swallows a
+    * conflicting merge — no error, unchanged head (pinned by
+    * `IrminMergeSemanticsSpec`). The patch surfaces the conflict as a
+    * GraphQL error, which this client raises as the typed
+    * `IrminMergeConflict` with the target branch's head untouched. Do not
+    * run this service against an unpatched Irmin — refused merges would
+    * again look like successful no-ops.
     *
     * @param from Source branch
     * @param into Target branch
     * @param message Commit message for the merge commit
-    * @return The merge commit, or the unchanged head if nothing was merged
+    * @return The merge commit (fast-forwarded head when `into` had not moved
+    *         since the fork)
+    * @see IrminMergeConflict — the branches conflict; no commit was created
     */
   def mergeBranch(from: BranchRef, into: BranchRef, message: String): IO[IrminError, IrminCommit]
 

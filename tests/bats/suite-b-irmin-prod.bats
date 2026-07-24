@@ -2,7 +2,7 @@
 # ============================================================================
 # Suite B — Irmin Production Image (Standalone)
 # ============================================================================
-# Container: local/irmin-prod:3.11 (standalone, no compose)
+# Container: local/irmin-prod:3.11-p1 (standalone, no compose)
 # Purpose:   Validate the production Irmin image: health, GraphQL round-trip,
 #            non-root enforcement (UID 65532), read-only root filesystem.
 #
@@ -12,8 +12,8 @@
 # useful for interactive debugging but not representative of production.
 #
 # Run:       bats tests/bats/suite-b-irmin-prod.bats
-# Prereq:    Image built: local/irmin-prod:3.11
-#            (requires local/irmin-builder:3.11 — see Dockerfile.irmin-builder)
+# Prereq:    Image built: local/irmin-prod:3.11-p1
+#            (requires local/irmin-builder:3.11-p1 — see Dockerfile.irmin-builder)
 # ============================================================================
 
 IRMIN_CONTAINER="irmin-prod-bats-test"
@@ -28,7 +28,7 @@ setup_file() {
         --tmpfs /tmp:size=10M \
         -p "${IRMIN_PORT}:8080" \
         -v irmin-bats-data:/data \
-        local/irmin-prod:3.11
+        local/irmin-prod:3.11-p1
 
     # Wait for GraphQL endpoint
     local elapsed=0

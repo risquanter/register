@@ -10,16 +10,16 @@ import sttp.monad.MonadError
 import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
 
-import com.risquanter.register.auth.{AuthorizationServiceNoOp, UserContextExtractor}
+import com.risquanter.register.auth.{AuthorizationServiceNoOp, Checked, Permission, UserContextExtractor}
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, ScenarioName, WorkspaceId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.IrminError
 import com.risquanter.register.http.requests.CreateScenarioRequest
-import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse}
+import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, ScenarioResponse, ScenarioSummaryResponse}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.domain.data.iron.PositiveInt
-import com.risquanter.register.services.{ScenarioServiceLive, ScenarioMergeServiceLive}
+import com.risquanter.register.services.{MergeConflictPath, MergePreviewResult, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioServiceLive}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
 
 /** HTTP-layer tests for [[ScenarioController]] (milestone-2b Phase B, item 4).
@@ -81,8 +81,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
     override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
 
   private def buildBackend(
-    initial:   Map[String, CommitHash] = Map("main" -> hash('a')),
-    extractor: UserContextExtractor    = UserContextExtractor.noOp
+    initial:      Map[String, CommitHash]       = Map("main" -> hash('a')),
+    extractor:    UserContextExtractor          = UserContextExtractor.noOp,
+    mergeService: Option[ScenarioMergeService]  = None
   ): ZIO[Any, Nothing, (SttpBackend[Task, Any], WorkspaceKeySecret)] =
     for
       state          <- Ref.make(initial)
@@ -91,10 +92,11 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       // that never learns about the workspace key `create` returns here.
       workspaceStore <- ZIO.service[WorkspaceStore].provide(TestConfigs.workspaceLayer >>> WorkspaceStoreLive.layer)
       wsKey          <- workspaceStore.create(None).orDie
+      mergeSvc        = mergeService.getOrElse(new ScenarioMergeServiceLive(FakeIrminClient(state)))
       ctrl           <- ScenarioController.makeZIO
         .provide(
           ZLayer.succeed(new ScenarioServiceLive(FakeIrminClient(state))),
-          ZLayer.succeed(new ScenarioMergeServiceLive(FakeIrminClient(state))),
+          ZLayer.succeed[ScenarioMergeService](mergeSvc),
           ZLayer.succeed(workspaceStore),
           AuthorizationServiceNoOp.layer,
           ZLayer.succeed(extractor)
@@ -152,6 +154,27 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         resp <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
                   .body(CreateScenarioRequest(scenarioName("draft-v1"), None).toJson).contentType("application/json").send(backend)
       yield assertTrue(resp.code.code == 409)
+    },
+
+    test("merge-preview conflict wire mapping: status discriminator + per-entry tree/node coordinates") {
+      val treeUlid = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+      val nodeUlid = "01BX5ZZKBKACTAV9WEVGEMMVRZ"
+      val rel      = s"risk-trees/$treeUlid/nodes/$nodeUlid"
+      val stub = new ScenarioMergeService:
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[MergePreviewResult] =
+          ZIO.succeed(MergePreviewResult.Conflicts(List(MergeConflictPath.fromRelativePath(rel))))
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[CommitHash] =
+          ZIO.die(new NotImplementedError("unused by this test"))
+      for
+        (backend, key) <- buildBackend(mergeService = Some(stub))
+        resp <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1/merge-preview").send(backend)
+        body    = orThrow(resp.body.toOption, s"expected success body, got: $resp")
+        decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
+      yield assertTrue(
+        resp.code.code == 200,
+        decoded.status == "conflicts",
+        decoded.conflicts == List(MergeConflictEntry(rel, Some(treeUlid), Some(nodeUlid)))
+      )
     },
 
     test("delete with matching If-Match: 204, then absent from list") {

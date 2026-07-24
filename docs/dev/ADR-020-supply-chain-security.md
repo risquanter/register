@@ -382,7 +382,7 @@ transparency-logged) over PGP.
 |---|---|---|
 | npm | `npm audit signatures` — registry signatures + Sigstore provenance | **Adopted** (§9) |
 | sbt / Maven Central | None usable out of the box — coursier verifies checksums (integrity only); Central's PGP signatures are not checked by sbt | **Gap** — flagged to user 2026-07-24; fallback plan (Sigstore-based) to be commissioned separately |
-| opam | None — package signing (conex) never shipped; integrity relies on checksums in `ocaml/opam-repository` fetched over HTTPS | **Gap** — flagged to user 2026-07-24; a Sigstore fallback can only cover artifacts we build (builder images), not upstream packages |
+| opam | None — package signing (conex) never shipped; integrity relies on checksums in `ocaml/opam-repository` fetched over HTTPS | **Gap** — flagged to user 2026-07-24; a Sigstore fallback can only cover artifacts we build (builder images), not upstream packages. Note: `irmin-graphql` is carried with a local source patch under §11 (pin site: `Dockerfile.irmin-builder`; policy: `VERSION-UPGRADE-PROTOCOL.md`, opam section) |
 | Docker base images | Digest pinning (§1); `cosign verify` where the publisher signs | **Partial** — tags pinned, digests not yet; check publisher cosign support at each base-image bump and record the result at the pin site |
 | Fetched binaries (sbt launcher) | SHA-256 checksum (§2); upstream publishes no signatures | **Partial** — checksum only |
 

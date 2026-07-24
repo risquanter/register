@@ -109,7 +109,7 @@ docker compose --env-file .env.irmin --profile persistence up -d register-server
 ## Running tests
 
 ```bash
-# All tests — unit + integration (requires Docker, local/irmin-prod:3.11 image)
+# All tests — unit + integration (requires Docker, local/irmin-prod:3.11-p1 image)
 sbt 'commonJVM/test; server/test; app/test; serverIt/test'
 
 # Unit tests only (no Docker required)

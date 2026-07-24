@@ -77,7 +77,7 @@ sbt app/test
 
 ## Integration Tests (serverIt)
 
-Requires `local/irmin-prod:3.11` Docker image (built once — see Image Builds).
+Requires `local/irmin-prod:3.11-p1` Docker image (built once — see Image Builds).
 `IrminCompose` starts/stops a scoped Irmin container automatically per run using
 `docker-compose.server-it.yml` (dynamic host port — multiple specs run concurrently
 without port conflicts).
@@ -314,11 +314,11 @@ docker build -f containers/builders/Dockerfile.graalvm-builder \
 
 # Irmin builder base (~15-40 min first run; rebuild only on Irmin/OCaml version change)
 docker build -f containers/builders/Dockerfile.irmin-builder \
-  -t local/irmin-builder:3.11 containers/builders/
+  -t local/irmin-builder:3.11-p1 containers/builders/
 
 # Irmin production image (~10s; requires irmin-builder)
 docker build -f containers/prod/Dockerfile.irmin-prod \
-  -t local/irmin-prod:3.11 containers/prod/
+  -t local/irmin-prod:3.11-p1 containers/prod/
 
 # Frontend SPA (~10-15 min first run; context is parent dir)
 source .env

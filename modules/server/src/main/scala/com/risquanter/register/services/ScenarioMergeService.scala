@@ -3,7 +3,7 @@ package com.risquanter.register.services
 import zio.*
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, TreeId, NodeId}
-import com.risquanter.register.domain.errors.{MergeConflict, ValidationFailed, ValidationError, ValidationErrorCode}
+import com.risquanter.register.domain.errors.{IrminMergeConflict, MergeConflict, ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminPath
 
@@ -54,13 +54,14 @@ enum MergePreviewResult:
 
 /** Scenario → main merge (DD-10).
   *
-  * The conflict pre-check is AUTHORITATIVE, not advisory: Irmin's GraphQL
-  * `merge_with_branch` silently swallows a conflicting merge — no error, the
-  * target head simply does not advance (live-pinned by
-  * `IrminMergeSemanticsSpec`). So `merge` refuses to run when the pre-check
-  * finds conflicts, and verifies after the merge that the scenario head
-  * became an ancestor of main (which also closes the pre-check → merge race
-  * against concurrent main writes).
+  * Conflict handling is two-layered. The byte-level pre-check enumerates the
+  * conflicting paths (Irmin's conflict error names no paths) and lets both
+  * `preview` and `merge` answer with the exact per-node conflict list;
+  * `merge` refuses up front when the pre-check finds conflicts. The patched
+  * Irmin backend (see `IrminClient.mergeBranch`) is the backstop for the
+  * remaining race: a main write that introduces a conflict between the scan
+  * and the merge makes the merge itself fail typed (`IrminMergeConflict`),
+  * which is mapped to the domain `MergeConflict` here.
   *
   * The pre-check compares full persisted node JSON byte-for-byte between
   * main, the scenario, and their lowest common ancestor — the storage
@@ -126,15 +127,13 @@ final class ScenarioMergeServiceLive(irmin: IrminClient) extends ScenarioMergeSe
                         s"${result.conflicts.size} conflicting path(s): ${result.conflicts.map(_.path).mkString(", ")}"
                       )))
       commit       <- irmin.mergeBranch(branch, BranchRef.Main, mergeMessage(wsId, name))
+                        .catchSome { case IrminMergeConflict(_) =>
+                          ZIO.fail(MergeConflict(
+                            branch,
+                            "merge was refused — main changed concurrently and now conflicts; re-run the preview and retry"
+                          ))
+                        }
       newHead      <- ScenarioBranchOps.refineCommitHash(commit.hash)
-      // A swallowed conflict (see trait scaladoc) leaves the scenario head
-      // outside main's ancestry — the merge is only done when the scenario
-      // head is an ancestor of (an LCA with) main's new head.
-      merged       <- irmin.lca(BranchRef.Main, scenarioHead).map(_.map(_.hash).contains(scenarioHead.value))
-      _            <- ZIO.unless(merged)(ZIO.fail(MergeConflict(
-                        branch,
-                        "merge was not applied — main changed concurrently and now conflicts; re-run the preview and retry"
-                      )))
     yield newHead
 
   // ── conflict scan ────────────────────────────────────────────────────────

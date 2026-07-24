@@ -2,7 +2,7 @@
 # ============================================================================
 # Suite A — End-to-End: Frontend → Server → Irmin
 # ============================================================================
-# Compose: local/frontend:dev + register-server:prod + local/irmin-prod:3.11
+# Compose: local/frontend:dev + register-server:prod + local/irmin-prod:3.11-p1
 # Profile: --profile persistence --profile frontend
 # Purpose: True end-to-end validation. The server is configured with
 #          REGISTER_REPOSITORY_TYPE=irmin so workspace data flows through
@@ -12,7 +12,7 @@
 #
 # Run:     bats tests/bats/suite-a-full-prod.bats
 # Prereq:  Images built: register-server:prod, local/frontend:dev,
-#          local/irmin-prod:3.11 (and local/irmin-builder:3.11)
+#          local/irmin-prod:3.11-p1 (and local/irmin-builder:3.11-p1)
 # ============================================================================
 
 # Irmin host port — matches docker-compose.yml: "9080:8080"

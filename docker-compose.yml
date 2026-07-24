@@ -34,7 +34,7 @@ services:
     build:
       context: .
       dockerfile: containers/prod/Dockerfile.irmin-prod
-    image: local/irmin-prod:3.11
+    image: local/irmin-prod:3.11-p1
     pull_policy: build
     # container_name: irmin-graphql  # Removed to allow multiple instances (dev + integration tests)
     ports:
