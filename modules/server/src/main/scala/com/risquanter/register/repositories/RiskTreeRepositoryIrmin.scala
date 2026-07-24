@@ -24,7 +24,7 @@ import com.risquanter.register.repositories.model.TreeMetadata
 final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeRepository:
 
   override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
-    val basePath = WorkspaceStoragePaths.treeRoot(wsId, riskTree.id)
+    val basePath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, riskTree.id))
     for
       _   <- ensureRootPresent(riskTree.rootId, riskTree.nodes)
       now <- Clock.instant
@@ -41,7 +41,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     yield riskTree
 
   override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
-    val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
+    val basePath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, id))
     for
       existing    <- getTreeWithMeta(wsId, id, branch)
       updatedTree  = op(existing.tree)
@@ -58,10 +58,10 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     yield updatedTree
 
   override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
-    val basePath = WorkspaceStoragePaths.treeRoot(wsId, id)
+    val basePath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, id))
     for
       existing <- getTreeWithMeta(wsId, id, branch)
-      _        <- handleIrmin(irmin.setTree(IrminPath.unsafeFrom(basePath), Nil, deleteMessage(wsId, id), branch))
+      _        <- handleIrmin(irmin.setTree(basePath, Nil, deleteMessage(wsId, id), branch))
     yield existing.tree
 
   override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
@@ -88,11 +88,11 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   // ----------------------------------------------------------------------------
 
   /** One atomic commit: meta + every node, replacing the whole subtree (DD-7). */
-  private def writeTree(basePath: String, meta: TreeMetadata, nodes: Seq[RiskNode], message: String, branch: BranchRef): Task[Unit] =
+  private def writeTree(base: IrminPath, meta: TreeMetadata, nodes: Seq[RiskNode], message: String, branch: BranchRef): Task[Unit] =
     val entries =
       IrminTreeEntry(IrminPath.unsafeFrom("meta"), meta.toJson) ::
         nodes.toList.map(node => IrminTreeEntry(IrminPath.unsafeFrom(s"nodes/${node.id.value}"), nodeJson(node)))
-    handleIrmin(irmin.setTree(IrminPath.unsafeFrom(basePath), entries, message, branch)).unit
+    handleIrmin(irmin.setTree(base, entries, message, branch)).unit
 
   private def nodeJson(node: RiskNode): String = node match
     case leaf: RiskLeaf           => leaf.toJson

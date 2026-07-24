@@ -40,9 +40,16 @@ user-invokable: true
 
 ### Types & Validation
 
-❌ NEVER accept raw `String` / `Int` / `Double` as a service or repository method parameter.
-✅ INSTEAD: define or reuse an Iron-refined type; update the smart constructor.
-*ADR-001*
+❌ NEVER accept raw `String` / `Int` / `Double` as a parameter that carries a
+domain value — in ANY function, private helpers and internal plumbing
+included, not only service/repository interface methods.
+✅ INSTEAD: define or reuse an Iron-refined type; pass the already-validated
+value through instead of re-deriving it from a raw primitive.
+Exceptions (raw `String` is correct there): smart-constructor/parser inputs
+(`from(s: String)` — the boundary where the raw value arrives), genuinely
+free text (commit messages, descriptions, log/telemetry keys), and
+serialization/escaping helpers.
+*ADR-001; scope widened 2026-07-24 (user ruling after `readNodes(basePath: String)` passed earlier reviews)*
 
 ❌ NEVER call `DomainObject(rawPrimitive, rawPrimitive)` directly.
 ✅ INSTEAD: call the smart constructor `DomainObject.create(...)` which returns `Validation`.

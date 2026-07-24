@@ -5,19 +5,30 @@ import java.time.Instant
 import com.risquanter.register.domain.errors.RateLimitExceeded
 import com.risquanter.register.configs.WorkspaceConfig
 
+/** Client identity for rate-limiting. Nominal (ADR-018), deliberately NOT
+  * format-refined: X-Forwarded-For values vary (IPv4, IPv6, proxy chains)
+  * and the value is only ever used as a map key — never parsed, never
+  * interpolated into a query.
+  */
+final case class ClientIp(value: String)
+
 /** IP-based rate limiter for workspace bootstrap endpoint (A27).
   *
-  * Fixed-window per IP: max creates per hour.
+  * Fixed-window per IP: max creates per hour. `None` means the source is
+  * unidentifiable (no usable X-Forwarded-For header); all such requests
+  * share ONE window — deliberately, so requests that arrive without the
+  * proxy header cannot bypass the limit.
   */
 trait RateLimiter:
-  def checkCreate(ip: String): IO[RateLimitExceeded, Unit]
+  def checkCreate(ip: Option[ClientIp]): IO[RateLimitExceeded, Unit]
 
 final class RateLimiterLive private (
-  ref: Ref[Map[String, (Int, Instant)]],
+  ref: Ref[Map[Option[ClientIp], (Int, Instant)]],
   maxPerHour: Int
 ) extends RateLimiter:
 
-  override def checkCreate(ip: String): IO[RateLimitExceeded, Unit] =
+  override def checkCreate(ip: Option[ClientIp]): IO[RateLimitExceeded, Unit] =
+    val ipLabel = ip.fold("unknown")(_.value)
     for
       now <- Clock.instant
       result <- ref.modify { state =>
@@ -28,7 +39,7 @@ final class RateLimiterLive private (
 
         if count >= maxPerHour then
           // Reject: do NOT increment counter on rejection (no slot consumed)
-          (Left(RateLimitExceeded(ip, maxPerHour)), state)
+          (Left(RateLimitExceeded(ipLabel, maxPerHour)), state)
         else
           // Accept: increment and persist
           (Right(()), state.updated(ip, (count + 1, windowStart)))
@@ -40,7 +51,7 @@ final class RateLimiterLive private (
       // TODO: revisit if more structured logging sites appear in this file.
       out <- ZIO.fromEither(result).tapError { err =>
                ZIO.logAnnotate("event_type", "rate_limit.exceeded") {
-                 ZIO.logAnnotate("ip", ip) {
+                 ZIO.logAnnotate("ip", ipLabel) {
                    ZIO.logAnnotate("limit", maxPerHour.toString) {
                      ZIO.logWarning("Rate limit exceeded")
                    }
@@ -54,9 +65,9 @@ object RateLimiterLive:
     ZLayer.fromZIO {
       for
         cfg <- ZIO.service[WorkspaceConfig]
-        ref <- Ref.make(Map.empty[String, (Int, Instant)])
+        ref <- Ref.make(Map.empty[Option[ClientIp], (Int, Instant)])
       yield RateLimiterLive(ref, cfg.maxCreatesPerIpPerHour)
     }
 
   def make(maxPerHour: Int): UIO[RateLimiter] =
-    Ref.make(Map.empty[String, (Int, Instant)]).map(ref => RateLimiterLive(ref, maxPerHour))
+    Ref.make(Map.empty[Option[ClientIp], (Int, Instant)]).map(ref => RateLimiterLive(ref, maxPerHour))

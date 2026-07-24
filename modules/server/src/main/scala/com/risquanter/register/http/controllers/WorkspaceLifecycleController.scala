@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.iron.BranchChoice
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
-import com.risquanter.register.services.workspace.{RateLimiter, WorkspaceStore}
+import com.risquanter.register.services.workspace.{ClientIp, RateLimiter, WorkspaceStore}
 
 /** Workspace lifecycle controller.
   *
@@ -43,8 +43,8 @@ class WorkspaceLifecycleController private (
 ) extends BaseController
     with WorkspaceLifecycleEndpoints:
 
-  private def normaliseIp(xff: Option[String]): String =
-    xff.flatMap(_.split(",").headOption).map(_.trim).filter(_.nonEmpty).getOrElse("unknown")
+  private def normaliseIp(xff: Option[String]): Option[ClientIp] =
+    xff.flatMap(_.split(",").headOption).map(_.trim).filter(_.nonEmpty).map(ClientIp.apply)
 
   val bootstrapWorkspace: ServerEndpoint[Any, Task] = bootstrapWorkspaceEndpoint.serverLogic {
     case (xff, maybeUserId, seedEntityId, req) =>
