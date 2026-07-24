@@ -1,6 +1,9 @@
 # PLAN — Raw-String domain-parameter sweep (server internals)
 
-Status: presented 2026-07-24, awaiting approval.
+Status: DONE 2026-07-24. Sweep implemented and landed (OD-1 = B′); all in-scope
+signatures migrated to domain types. The one explored-but-excluded angle
+(vql-engine payload boundary) is a closed design decision in the sibling repo —
+see the note under "Reviewed and excluded" below.
 Commissioned by user ruling 2026-07-24 ("clean up those of the readNodes or
 similar patterns, from() can stay") after the plan-D code review; rule basis
 is the adr-constraints amendment of the same date: no raw `String`/`Int`
@@ -76,7 +79,8 @@ and pass `basePath` (delete passes it to `irmin.setTree` directly). Inside
 
 - All smart constructors / parsers (`from(s: String)`, `fromString`,
   `fromClaim`, `parseInterval`, …): the boundary where the raw value arrives.
-- `RiskTreeKnowledgeBase.lookupResult(assetName: String, ctx: String)`:
+- `RiskTreeKnowledgeBase.lookupResult(assetName: String, ctx: String)`
+  (explored angle — not relevant, closed at the library level):
   vql-engine's typed representation is many-sorted over primitive payloads —
   `Value(sort: TypeId, raw: Any)`, `TypeCatalog.constants: Map[String, TypeId]`
   (verified in the sibling repo) — so the foreign API cannot carry Iron types
@@ -87,8 +91,15 @@ and pass `basePath` (delete passes it to `irmin.setTree` directly). Inside
   uses only `Map.get`/`Set.contains` — no interpolation. Re-refining inside
   the dispatcher would add per-evaluation cost to re-prove a property that
   cannot fail there. The only true elimination is making vql-engine generic
-  in its payload type — a vql-engine API redesign, out of scope; candidate
-  future work in the sibling repo. `ctx` is a log label (free text).
+  in its payload type, and that route is a **closed design decision in the
+  sibling repo, not open future work**: `../vague-quantifier-logic/docs/ADR-015.md`
+  (Symmetric Value Boundaries, Accepted 2026-05-02) requires `Value(sort, raw: Any)`
+  because sorts are runtime values built from query text, not compile-time
+  types — and its "Alternatives Rejected" section rejects both a typed carrier
+  (match-typed `Value[S]`) and a closed-world carrier enum for exactly that
+  reason. ADR-015's chosen discipline (the `LiteralParser[A]` / `Extract[A]`
+  typeclass boundary) is what keeps the `Any` cast safe, and register already
+  uses it. `ctx` is a log label (free text).
 - `WorkspaceStoragePaths` members keep returning `String`: it is the layout
   serializer; inputs are already Iron types, consumers refine to `IrminPath`
   exactly once at the Irmin call.

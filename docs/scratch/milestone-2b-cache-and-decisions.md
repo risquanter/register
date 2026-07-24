@@ -1489,25 +1489,94 @@ Phase B: Scenario CRUD + Minimal UI
 
 Phase C: Comparison
   - ✅ ScenarioDiff service (hash-based diff, UC5) — DONE   [Scala]
-  - Comparison view in Analyze section — first slice DONE
-    (Off/Overlay, 2 branches, ✎ changed-node markers,
-    dual-branch curve overlay; commit 73f8c86). Remaining:
-    Side-by-side layout, N-way (3+) branches, per-branch
-    node selection (accordion vs. separate-containers design
-    open, see PLAN-UI-MILESTONE-2B §6 addendum 2026-07-22),
-    Ctrl+Alt+click mirror-select, per-branch colour picker   [Scala.js/Laminar]
+  - Comparison view in Analyze — DONE (verified against
+    source 2026-07-24): Off / Overlay / Side-by-side (shared
+    pinned axes), N-way capped at 3 (active branch + 2 stable
+    slots), per-branch separate BranchCards (D2 = Option B+),
+    per-branch colour picker (BranchPaletteState/Picker),
+    ✎ changed-node markers, dual/N-branch curve overlay.
+    Remaining: Ctrl+Alt+click mirror-select (not built);
+    overlay chart↔tree hover with @branch-suffixed series ids
+    (backlog — side-by-side per-panel hover already works via
+    per-slot ChartHoverBridges).                             [Scala.js/Laminar]
   - ✅ Cross-branch cache reuse (UC6, implicit) — confirmed
     working in RiskResultResolverLive, no work needed
 
-Phase D: Merge
-  - ScenarioMerger (Irmin merge_with_branch)              [Scala→Irmin]
-  - Merge preview + confirm flow
-  - Conflict handling
+Phase D: Merge — IMPLEMENTED 2026-07-24 (clean-merge path +
+  conflict DETECTION); one-click / semantic conflict RESOLUTION
+  deferred to Phase F (see below).
+  - ✅ ScenarioMerger — Irmin native merge_with_branch, DD-2
+    patched image 3.11-p1 surfaces conflicts — DONE        [Scala→Irmin]
+  - ✅ Merge preview + confirm flow — previewScenarioMerge +
+    mergeScenario endpoints; MergeModal in Design — DONE   [Scala/Scala.js]
+  - Conflict handling — DETECTION done (byte-level three-way
+    check vs LCA, ADR-032, listed read-only in the modal).
+    RESOLUTION shipped as edit-to-agree + re-check: Merge is
+    enabled only on a "clean" preview, and the server re-checks
+    on merge so a stale preview degrades to 409, never a bad
+    merge. One-click take-A/take-B and semantic (param-average)
+    resolution → Phase F.                                   [Scala/Scala.js]
 
 Phase E: History / Time Travel
   - HistoryService (commit log, point-in-time, revert)    [Scala→Irmin]
   - CommitHistoryPanel UI                                  [Scala.js/Laminar]
+
+Phase F: Semantic merge conflict resolution (DEFERRED — final
+  follow-up, after Phase E). Full requirements: "Deferred: Phase D
+  Option-2 conflict resolution" below.
+  - Take-A / take-B per conflicting path (plan §8 sketch) [Scala/Scala.js]
+  - Parameter-average resolution mode (domain-level)      [Scala/Scala.js]
+  - Merge sneak-peek: resolved result as a previewable,
+    simulatable model comparable against source branches  [Scala/Scala.js]
 ```
+
+### Deferred: Phase D Option-2 conflict resolution (target Phase F)
+
+**Decided 2026-07-24 (user).** Phase D shipped Option 1 — conflicts are
+detected byte-level and listed read-only, and the resolution path is
+edit-the-nodes-to-agree then re-check (Merge enabled only on a `"clean"`
+preview). The richer conflict-resolution scope below is deferred to a final
+follow-up phase after Phase E, because it needs a **domain-level** merge
+(resolving `RiskLeaf` parameters), not the byte-level Irmin three-way merge
+Phase D uses. Captured now as to-be-planned requirements, not yet designed.
+
+**Motivating workflows (user, 2026-07-24):**
+
+- Fork `A@main` into `A@scen-1` and `A@scen-2`; each applies a mitigation.
+  Until mitigation is a first-class representation it is modelled as a
+  direct edit — e.g. `A'@scen-1` dampens likelihood, `A''@scen-2` narrows
+  the loss min-max range for lower impact. Merge `scen-1` back on its own
+  merit, then `scen-2` (defence in depth). Sequential, independent, usually
+  non-conflicting merges — **already covered by the Phase D clean-merge
+  path.**
+- Two modellers build scenarios over overlapping node sets with differing
+  loss ranges / likelihood estimates → genuine conflicts needing
+  resolution.
+
+**Requirements to plan for Option 2:**
+
+1. **Take-A / take-B** per conflicting path — the plan §8 sketch
+   (`[keep main]` / `[keep scenario]`). At byte-path granularity a conflict
+   is a tree's `meta` or a single `nodes/<id>`; the UI must map those ULIDs
+   to tree/node names (slice one shows raw paths). Mechanically this is an
+   ordinary save of the chosen side via the branch-aware endpoints
+   (`X-Active-Branch`); `MergeConflictEntry` already carries
+   `treeId`/`nodeId`.
+2. **Parameter averaging** as a resolution mode, applied at the model/design
+   level, case-by-case and user-driven: conflicting numeric parameters are
+   resolved by averaging the two estimates (e.g. likelihood 5% and 9% → 7%;
+   loss min-max range midpoints). This is a domain-level merge of
+   `RiskLeaf` fields, not a blob choice.
+3. **Merge sneak-peek**: the resolved result (side-picked or averaged) is
+   materialised as a previewable model that simulates, so the user can
+   compare it in the existing comparison view against the source branches
+   (`scen-1`, `scen-2`, `main`) before committing the merge. Semi-automated
+   creation of this merge-preview model for comparison.
+
+**Note:** requirements 2 and 3 are the reason this is a distinct phase —
+byte-level Irmin merge cannot average parameters or produce a
+simulate-and-compare preview; it needs domain-level merge logic over the
+risk model.
 
 ### Follow-up improvements (post-launch)
 

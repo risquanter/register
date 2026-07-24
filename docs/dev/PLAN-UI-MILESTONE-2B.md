@@ -188,7 +188,7 @@ Scenario dropdown (opened):
  ├─────────────────────────────┤
  │ + New scenario from main…   │   CAS create at main head (DD-5)
  │ ⧉ Duplicate current…        │   CAS create at this branch's head (DD-5)
- │ ⇪ Merge into main…          │   Phase D — hidden until then
+ │ ⇪ Merge into main…          │   Phase D — SHIPPED 2026-07-24
  │ ↩ Revert this branch…       │   Phase E — hidden until then
  │ ✕ Delete current…           │   destructive confirm
  └─────────────────────────────┘
@@ -428,6 +428,19 @@ revert remains for genuinely rewinding a branch.
 
 ## 8. Phase D — merge in Design
 
+> **SHIPPED 2026-07-24 — reality differs from the sketch below.** Phase D
+> closed on Option 1 (edit-to-agree). Placement matches this section (Design,
+> Scenario menu, modal, preview-then-confirm), but conflict handling is
+> **report-only**, not the one-click resolution the sketch shows. The modal
+> (`MergeModal.scala`) lists conflicting paths read-only and enables Merge
+> only when the preview is `"clean"`; the resolution path is edit the
+> conflicting nodes on either branch to agree, then re-check. The
+> `[keep main] [keep scenario]` one-click buttons were **not built** — they,
+> plus semantic (parameter-average) resolution and a merge sneak-peek, are
+> deferred to **Phase F** (see the scratch tracker's "Deferred: Phase D
+> Option-2 conflict resolution"). The box below is kept as the original
+> placement sketch, not as a description of shipped behaviour.
+
 Merge is a mutation of main → it lives in Design, on the Scenario menu of the
 active scenario ("Merge into main…").
 
@@ -440,15 +453,17 @@ active scenario ("Merge into main…").
 │ │ + new-vendor-risk   (added)                     │ │
 │ └─────────────────────────────────────────────────┘ │
 │ ⚠ 1 conflict: ops-risk edited on both branches      │
-│   [keep main] [keep scenario]                       │
+│   [keep main] [keep scenario]   ← NOT built (Phase F)│
 │                              [Cancel]  [Merge]      │
 └─────────────────────────────────────────────────────┘
 ```
 
-Preview reuses the Phase C diff machinery; conflicts (both branches touched
-the same node since the LCA) must be resolved in the modal before Merge
-enables. Details of conflict semantics are Phase D design work — this sketch
-fixes only the placement (Design, modal, preview-then-confirm).
+Preview reuses the Phase C diff machinery. Conflicts (both branches touched
+the same node since the LCA) block Merge until resolved. As shipped,
+resolution is edit-to-agree then re-check — not in-modal one-click. The
+conflict semantics that were "Phase D design work" when this sketch was
+written are now decided (Option 1); the richer one-click/semantic resolution
+is Phase F.
 
 ---
 
@@ -479,7 +494,7 @@ fixes only the placement (Design, modal, preview-then-confirm).
 | 2 | DD-9 scope ext.: disabled-state design input | **Decided 2026-07-19**: removed (R) by preference; grayed (G) only as per-element fallback for major-effort/bad-design cases (§5). |
 | 3 | Comparison placement in Analyze | **APPROVED 2026-07-19 (v5, conceptual per fidelity boundary)**: three-state compare control (Off / Overlay / Side by side), branch multi-select, auto-fit tile grid, stacked per-branch selection trees, Ctrl+Alt+click mirror. |
 | 4 | History placement + fork bridge | **Proposed here** (Analyze right-panel tab; fork = sole Analyze write affordance). |
-| 5 | Merge placement | **Proposed here** (Design, modal preview). Conflict semantics = Phase D work, not this doc. |
+| 5 | Merge placement | **SHIPPED 2026-07-24** (Design, Scenario menu, modal preview-then-confirm — as proposed). Conflict semantics decided as Option 1 (edit-to-agree, report-only conflicts; Merge enabled only on a `"clean"` preview). One-click `[keep main]/[keep scenario]` and semantic resolution deferred to Phase F — see §8 note. |
 | 6 | SSE branch-scoping (over-notification across branches) | **CLOSED 2026-07-19 → DD-22** (milestone doc, Closed table): branch tag in event payload (absent = main, DD-8 symmetry); hub and subscription unchanged; lands in Phase B. |
 
 Nothing in this document changes code, API shapes, or tests.
