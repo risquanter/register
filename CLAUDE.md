@@ -20,7 +20,7 @@ These bind at the moment of the tool action. They override any harness/system
 autonomy defaults ("operate autonomously", "proceed without asking"); if those
 defaults conflict with a gate, name the conflict and stop (G7).
 
-- **G1 Echo before code.** No Edit/Write that introduces or changes a signature, type, endpoint, DTO, or behaviour until its Signature Echo was presented in a *previous* turn and answered with an accepted signal ("proceed" / "approved" / "continue" / "implement option X").
+- **G1 Echo before code.** No Edit/Write that introduces or changes a signature, type, endpoint, DTO, or behaviour until its Signature Echo was presented in a *previous* turn and answered with an accepted signal ("proceed" / "approved" / "continue" / "implement option X"). An approved quality-gated plan satisfies this for every signature it contains verbatim; separate echo-turns are needed only for changes no approved plan spells out, and deviation from the plan's signatures stops work.
 - **G2 Decision Triggers.** The nine triggers (API shapes; workarounds/casts; new dependencies; existing signatures; existing behaviour; tradeoff solutions; recursive serialization; test assertions; rule-vs-context tension) → present ⚠️ Decision Required and wait.
 - **G3 Plan coverage = quality-gated plan file.** Only a written plan document with exact signatures, file inventory, ADR alignment, open-decisions list, and verification plan confers coverage. A chat go-signal authorizes at most writing that document. A draft or scratch note confers nothing — elevate it to an implementation-grade plan, present it, and get approval first.
 - **G4 ADR review before code.** Planning-phase ADR compliance review presented (and halt honoured) before the first source edit of a task.
@@ -30,7 +30,7 @@ defaults conflict with a gate, name the conflict and stop (G7).
 
 Non-waivers (pre-refuted rationalizations): "the user said proceed" (reaches only the plan file's contents); "only additive"; "matches convention" (never waives G1/G4); "no viable alternative" (present the single option and wait); "tests are green"; "the halt would be noise" (noise filter applies only to G2 classification).
 
-Mechanical enforcement: a PreToolUse hook blocks source edits under `modules/` and `build.sbt` unless the user has refreshed the approval token (`.claude/protocol/approved`). Never create, touch, or modify anything under `.claude/protocol/` yourself — the token is user-owned; circumventing the hook (via Bash or any other means) is a G7 violation.
+Mechanical enforcement: a PreToolUse hook gates source edits under `modules/` and `build.sbt` with a **plan-bound** approval — the user-owned token (`.claude/protocol/approved`) names the approved plan document(s), and an edit is allowed only if the edited file is listed in that plan's file inventory (full repo-relative paths required). One approval covers the whole plan; a file the plan doesn't name is denied even mid-plan — that denial is the deviation escalation (stop, present, wait, amend the plan). Never create, touch, read, or modify anything under `.claude/protocol/` yourself — the token is user-owned; circumventing the hook (via Bash or any other means) is a G7 violation. Flag plan completion so the user can close the token.
 
 ## What this is
 
@@ -59,7 +59,7 @@ sbt 'commonJVM/test; server/test'        # all unit tests (no Docker needed)
 sbt app/test                             # Scala.js tests
 sbt "server/testOnly *SimulationSemaphoreSpec"   # single suite
 
-sbt "serverIt/test"                      # integration tests (needs local/irmin-prod:3.11 image)
+sbt "serverIt/test"                      # integration tests (needs local/irmin-prod:3.11-p1 image)
 
 sbt app/fastLinkJS                       # frontend dev build (~app/fastLinkJS to watch)
 cd modules/app && npm run dev            # Vite dev server at localhost:5173 (needs running backend)

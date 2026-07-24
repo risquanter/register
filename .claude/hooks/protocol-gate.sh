@@ -3,18 +3,24 @@
 #
 # Two checks, dispatched on tool_name from the hook's stdin JSON:
 #  - Bash: deny any command that references the approval-token path — the
-#    token is user-owned; the agent must never create, refresh, or delete it.
-#  - Edit/Write/NotebookEdit: deny edits to gated source paths (modules/**,
-#    build.sbt) unless the user-owned approval token exists and is fresh.
+#    token is user-owned; the agent must never create, refresh, read, or
+#    delete it.
+#  - Edit/Write/NotebookEdit on gated paths (modules/**, build.sbt): the
+#    token must name an approved plan document, and the edited file must be
+#    listed in that plan. Approval is PLAN-SCOPED (user ruling 2026-07-24):
+#    not time-based, not blanket — the token binds to one plan's declared
+#    file set, so unplanned files are denied even while a plan is approved
+#    (that denial IS the escalation trigger: stop, present, wait).
 #
-# The user grants approval from their own terminal:
-#   mkdir -p .claude/protocol && touch .claude/protocol/approved
-# One approval stays valid for TTL_SECONDS, then edits block again.
+# The user approves a plan from their own terminal:
+#   mkdir -p .claude/protocol && echo "docs/dev/PLAN-<name>.md" > .claude/protocol/approved
+# Multiple concurrent plans: one repo-relative plan path per line.
+# Revoke / close out: rm -rf .claude/protocol   (the agent flags plan
+# completion in its landing report so the user knows when).
 set -euo pipefail
 
 ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 TOKEN="$ROOT/.claude/protocol/approved"
-TTL_SECONDS=1800
 
 deny() {
   jq -n --arg reason "$1" \
@@ -29,7 +35,7 @@ if [ "$TOOL" = "Bash" ]; then
   CMD="$(jq -r '.tool_input.command // empty' <<<"$INPUT")"
   case "$CMD" in
     *".claude/protocol"*)
-      deny "Blocked: the approval token under .claude/protocol/ is user-owned. Only the user may create, refresh, or remove it (working-protocol G7). Ask the user to run the approval command themselves."
+      deny "Blocked: the approval token under .claude/protocol/ is user-owned. Only the user may create, refresh, read, or remove it (working-protocol G7). Ask the user to run the approval command themselves."
       ;;
   esac
   exit 0
@@ -47,14 +53,29 @@ case "$ABS" in
   *) exit 0 ;;
 esac
 
-if [ -f "$TOKEN" ]; then
-  NOW=$(date +%s)
-  MTIME=$(stat -c %Y "$TOKEN" 2>/dev/null || stat -f %m "$TOKEN")
-  AGE=$((NOW - MTIME))
-  if [ "$AGE" -le "$TTL_SECONDS" ]; then
-    exit 0
-  fi
-  deny "Blocked (working-protocol G1/G3): approval token expired (${AGE}s old, TTL ${TTL_SECONDS}s). Present the pending signature echo / quality-gated plan and wait. The user re-approves by running: touch .claude/protocol/approved"
+REL="${ABS#"$ROOT"/}"
+
+if [ ! -f "$TOKEN" ]; then
+  deny "Blocked (working-protocol G3): no approved plan (token absent). Present the quality-gated plan document and wait. The user approves by running: mkdir -p .claude/protocol && echo \"docs/dev/PLAN-<name>.md\" > .claude/protocol/approved"
 fi
 
-deny "Blocked (working-protocol G1/G3): no approval token. Present the signature echo / quality-gated plan and wait for an accepted signal. The user approves by running: mkdir -p .claude/protocol && touch .claude/protocol/approved"
+MISSING=""
+while IFS= read -r LINE; do
+  LINE="${LINE%%#*}"
+  LINE="$(echo "$LINE" | xargs 2>/dev/null || true)"
+  [ -n "$LINE" ] || continue
+  PLAN="$ROOT/$LINE"
+  if [ ! -f "$PLAN" ]; then
+    MISSING="$LINE"
+    continue
+  fi
+  if grep -qF "$REL" "$PLAN"; then
+    exit 0
+  fi
+done < "$TOKEN"
+
+if [ -n "$MISSING" ]; then
+  deny "Blocked (working-protocol G3): the approval token names plan '$MISSING' which does not exist. Ask the user to point the token at the approved plan document."
+fi
+
+deny "Blocked (working-protocol G3): '$REL' is not listed in the approved plan(s) named by the token. This is a plan deviation — stop, present the deviation (why this file is needed), and wait; after approval the plan's file inventory must be amended."

@@ -14,7 +14,7 @@ mitigation. Each gate names the action it blocks.
 
 | # | Gate | Blocked action |
 |---|------|----------------|
-| G1 | **Echo before code.** A Signature Echo for a change must be presented in a PREVIOUS turn and answered with an accepted signal before that change is written. | Any Edit/Write that introduces or alters a signature, type, endpoint, DTO, or behaviour |
+| G1 | **Echo before code.** A Signature Echo for a change must be presented in a PREVIOUS turn and answered with an accepted signal before that change is written. **An approved quality-gated plan satisfies this gate for every signature it contains verbatim** — approving the plan approves those signatures; no per-change re-echo. A separate echo-turn is required only for a change no approved plan spells out, and any deviation from the plan's signatures stops work (G2/G7). | Any Edit/Write that introduces or alters a signature, type, endpoint, DTO, or behaviour not covered verbatim by an approved plan |
 | G2 | **Decision Triggers halt.** Any of the nine Decision Triggers below → present ⚠️ Decision Required and wait. | The triggering edit or command |
 | G3 | **"Approved plan" means an implementation-grade plan file.** Plan coverage exists only for what a written plan document (`PLAN-*.md` or equivalent) specifies with exact signatures, AND only if that document passes the Plan Quality Gate below. A chat go-signal ("proceed", "start implementation", "approved") authorizes at most writing or updating that plan document — never source code the document does not spell out. | Any edit justified as "covered by the approved plan" without a quality-gated plan file naming it |
 | G4 | **ADR review before code.** The planning-phase ADR compliance review must be presented (and the halt honoured) before the first source edit of a task. | First Edit/Write of the task |
@@ -45,7 +45,10 @@ five items are required:
 1. **Exact signatures** — every new or changed function, type, endpoint, and
    DTO written out verbatim (copy-pasteable Scala / Tapir definitions), not
    described in prose.
-2. **File inventory** — every file to be created or modified, by path.
+2. **File inventory** — every file to be created or modified, by **full
+   repo-relative path** (no abbreviations or `…` ellipses). The enforcement
+   hook matches gated edits against this inventory, so a path it cannot
+   find verbatim is a path it will deny.
 3. **ADR alignment** — which ADRs bear on the change, and for each: compliant,
    or a flagged deviation awaiting decision.
 4. **Open decisions** — every unresolved choice listed with its options, or an
@@ -60,17 +63,38 @@ it into an implementation-grade plan document, present that document (G6
 halt), and obtain an accepted signal on the document itself. Only then does
 G3 coverage exist.
 
-### Mechanical enforcement
+### Mechanical enforcement — plan-bound approval
 
 A PreToolUse hook (`.claude/hooks/protocol-gate.sh`, wired in
-`.claude/settings.json`) blocks agent edits to `modules/**` and `build.sbt`
-unless the user-owned approval token `.claude/protocol/approved` exists and
-is fresh (TTL 1800 s), and blocks any agent shell command referencing the
-token path. The token is user-owned: the user grants approval from their own
-terminal (`mkdir -p .claude/protocol && touch .claude/protocol/approved`).
-A blocked edit is not an obstacle to work around — it means a presentation
-and an accepted signal are still owed. Attempting to circumvent the hook by
-any means is a G7 violation.
+`.claude/settings.json`) gates agent edits to `modules/**` and `build.sbt`,
+and blocks any agent shell command referencing the token path.
+
+Approval is **bound to a plan, not to time** (user ruling 2026-07-24:
+approvals happen at decision points — a plan approval — never per substep,
+never on a timer). The user-owned token `.claude/protocol/approved` contains
+the repo-relative path(s) of the approved plan document(s), one per line.
+The user approves a plan from their own terminal:
+
+```
+mkdir -p .claude/protocol && echo "docs/dev/PLAN-<name>.md" > .claude/protocol/approved
+```
+
+On every gated edit the hook opens the named plan(s) and allows the edit
+only if the edited file's repo-relative path appears there — this is why
+the Plan Quality Gate requires full paths in the file inventory. A gated
+file the plan does not name is denied even while the plan is approved:
+that denial is the deviation escalation — stop, present why the file is
+needed, wait, and amend the plan's inventory after approval. Consequence
+of the matching rule: name a gated path in a plan only where coverage is
+intended.
+
+One approval therefore covers the entire implementation of the approved
+plan, with no re-approval mid-plan. The agent flags plan completion in the
+landing report so the user can close the token (`rm -rf .claude/protocol`)
+or repoint it at the next plan. Mid-implementation deviations, unforeseen
+decisions, and rule conflicts still halt via G2/G6/G7 regardless of the
+token. A blocked edit is not an obstacle to work around — attempting to
+circumvent the hook by any means is a G7 violation.
 
 ---
 

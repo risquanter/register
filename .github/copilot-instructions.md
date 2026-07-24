@@ -109,6 +109,13 @@ options were never presented is a double violation, not a loophole. The echo
 and the implementation are always separate turns — an echo answered in the
 same turn it was written authorizes nothing.
 
+An approved implementation-grade plan satisfies the signature-echo
+requirement for every signature it contains verbatim — approving the plan
+approves those signatures, and the whole plan is then implemented without
+per-change halts. A separate echo-turn is required only for a change no
+approved plan spells out; any deviation from the plan's signatures stops
+work and escalates.
+
 ---
 
 ## Plan coverage and the Plan Quality Gate
@@ -123,7 +130,8 @@ A document confers plan coverage only if it is **implementation-grade** — all
 five items present:
 
 1. Exact signatures for everything new or changed (verbatim, copy-pasteable — not prose)
-2. File inventory (every file to create or modify, by path)
+2. File inventory (every file to create or modify, by full repo-relative
+   path — no abbreviations; enforcement tooling matches edits against it)
 3. ADR alignment (which ADRs bear; compliant or flagged deviation for each)
 4. Open decisions listed with options, or an explicit "no open decisions"
 5. Verification plan (tests to add + exact commands that must be green)
