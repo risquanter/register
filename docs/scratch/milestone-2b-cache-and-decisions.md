@@ -1496,9 +1496,11 @@ Phase C: Comparison
     per-branch colour picker (BranchPaletteState/Picker),
     ✎ changed-node markers, dual/N-branch curve overlay.
     Remaining: Ctrl+Alt+click mirror-select (not built);
-    overlay chart↔tree hover with @branch-suffixed series ids
-    (backlog — side-by-side per-panel hover already works via
-    per-slot ChartHoverBridges).                             [Scala.js/Laminar]
+    overlay chart↔tree hover (backlog — retargeted 2026-07-25
+    to slot-scoped series ids per PLAN-C-REFACTOR.md Task B,
+    which widens the slot coordinate branch → (tree, revision);
+    side-by-side per-panel hover already works via per-slot
+    ChartHoverBridges).                                      [Scala.js/Laminar]
   - ✅ Cross-branch cache reuse (UC6, implicit) — confirmed
     working in RiskResultResolverLive, no work needed
 

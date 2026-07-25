@@ -1,0 +1,16 @@
+ Marginals and dependence — how the literature and other tools handle it
+The problem has three established answers, and it's worth knowing our engine already embodies the first:
+
+(a) Aggregate at the trial/event level, then compare aggregates. Catastrophe-modeling platforms (RMS, Verisk/AIR) keep per-event or per-year loss tables (ELTs/YLTs) and aggregate portfolios by summing losses within each simulated year — dependence enters through shared events, and any curve you draw from the aggregate already contains it. Our engine is architecturally this: trial-aligned sparse maps, portfolio aggregation by per-trial summation. The practical consequence: the dependence-aware way to compare two risks is not marginal-vs-marginal but with-vs-without at the portfolio level — compare the portfolio's curve including risk X against the portfolio without it (or with it mitigated). Our scenario branches make that comparison a first-class flow today: fork, modify/remove the risk, compare the portfolio node's curve across branches. So the tool already has the standard answer for the case where dependence matters most; the marginal overlay is the right tool for the simpler "which risk is bigger on its own" question. (Caveat for honesty: our leaves currently simulate independently, so cross-risk dependence beyond shared-tree aggregation isn't modelled yet — correlation/copula modelling would be future engine work.)
+
+(b) Model dependence explicitly when combining marginals. Insurance capital frameworks combine marginal distributions via correlation matrices (Solvency II standard formula) or copulas (internal models, Sklar's theorem). Relevant to us only if/when risks stop being independent — this is where a future mitigation/correlation feature would sit, not a charting question.
+
+(c) Compare with different metrics than the whole curve. Standard practice alongside curve overlays:
+
+Return-period loss tables — the loss at 1-in-10 / 1-in-100 / 1-in-200 side by side per risk. This is just reading the curves at fixed probabilities; cheap to add as a table under the chart.
+AAL (we already compute it) and prob-of-exceedance at a threshold (we already have the endpoint) — single-number comparisons.
+TVaR / expected shortfall — the mean loss beyond a quantile; preferred in the literature over the quantile itself because it's subadditive (tail-focused, aggregation-friendly).
+Difference ("delta") curves — plot A minus B across the loss axis; used for before/after mitigation views.
+Stochastic dominance — the rigorous version of "this risk is smaller": if one exceedance curve lies entirely below the other, first-order dominance holds. Visually, this is exactly what the overlay shows; the literature just gives the crossing/non-crossing observation a name and a decision rule.
+Tail-contribution allocation (co-TVaR / Euler allocation) — "how much of the group's tail does Op Risk contribute vs Brand Damage" — the fully dependence-aware comparison; meaningful for us once dependence modelling exists, since under independence contributions are close to what with/without comparison already shows.
+None of this is Phase E scope; I'd file return-period tables and delta curves as cheap chart-side backlog candidates, and the rest as background for when dependence modelling gets designed.
