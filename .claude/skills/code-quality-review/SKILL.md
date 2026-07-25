@@ -19,13 +19,23 @@ Do not rubber-stamp. Report PASS when clean. Report FINDING when not. Do not pro
 options without flagging which decision the user must make — **all decisions are the
 user's to resolve**.
 
-Two binding rules on the report itself (working-protocol G6):
+Three binding rules on the report itself (working-protocol G6):
 
 - Presenting the review report is a presentation — halt after it. No fixes,
   no commits, no further tool calls until the user rules on the findings.
 - Never self-classify a finding as "non-blocking", "note-only-so-proceeding",
   or "acceptable" on the user's behalf. Severity is yours to assess; the
   disposition of every finding is the user's.
+- Any finding that needs the user's feedback is presented in decision-guide
+  format (the `decision-guide` skill's structure), and this is the default
+  vehicle for every such point — never a bare severity list or an
+  AskUserQuestion multiple-choice as the vehicle. Each decision guide states:
+  the decision goal and why it matters now; every genuinely viable option with
+  plain-English pros and cons AND a concrete example of how the defect is
+  reached and what it means from the user's perspective; and an
+  explicitly-labelled recommendation. A straightforward single-answer fix
+  still gets a one-line concrete fix; the moment there is a real choice, it is
+  a decision guide.
 
 The criteria below are not exhaustive. Use general principles and industry best
 practices to catch issues the checklist has not yet anticipated.
