@@ -2,23 +2,52 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 
-import com.risquanter.register.domain.data.iron.BranchChoice
+import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
-/** What a Compare branch picker slot currently holds. Built on `BranchChoice`
-  * (the single internal spelling of "main vs. a named scenario") — this enum
-  * only adds the picker-specific "nothing chosen yet" case.
+/** What a Compare slot is pointed at: a branch, plus either the tab's active
+  * tree (`treeOverride = None`, the default — the slot follows whatever tree
+  * the tab has selected) or a specific other tree (`Some(t)`, cross-tree
+  * comparison). The effective tree is resolved against the tab's active tree
+  * at the point the slot is consumed, so a default slot keeps tracking the
+  * active tree exactly as before.
+  */
+final case class SlotCoordinate(branch: BranchChoice, treeOverride: Option[TreeId]):
+  /** The tree this slot compares on when the tab's selected tree is
+    * `activeTree`: the pinned override, else the active tree. */
+  def effectiveTree(activeTree: Option[TreeId]): Option[TreeId] =
+    treeOverride.orElse(activeTree)
+
+  /** True when this coordinate and `other` resolve to the same
+    * (branch, effective tree) pair under the tab's current active tree — the
+    * one relation every exclusion, engagement, and collision check delegates
+    * to. */
+  def samePairAs(other: SlotCoordinate, activeTree: Option[TreeId]): Boolean =
+    branch == other.branch && effectiveTree(activeTree) == other.effectiveTree(activeTree)
+
+  /** True when this coordinate resolves to the same pair the tab itself shows.
+    * The tab is the coordinate (activeBranch, follow-active). */
+  def collidesWith(activeBranch: BranchChoice, activeTree: Option[TreeId]): Boolean =
+    samePairAs(SlotCoordinate.activeTab(activeBranch), activeTree)
+
+object SlotCoordinate:
+  /** The active tab as a coordinate: its branch, following the active tree
+    * (no pinned override), so `effectiveTree(activeTreeId) == activeTreeId`. */
+  def activeTab(branch: BranchChoice): SlotCoordinate = SlotCoordinate(branch, None)
+
+/** What a Compare branch picker slot currently holds — a chosen coordinate,
+  * or nothing.
   */
 enum CompareTarget:
   case NotChosen
-  case Target(choice: BranchChoice)
+  case Target(coordinate: SlotCoordinate)
 
 extension (target: CompareTarget)
-  /** `None` if nothing has been chosen yet (don't fire a diff/curve fetch);
-    * `Some(choice)` otherwise. */
-  def toChoice: Option[BranchChoice] = target match
-    case CompareTarget.NotChosen      => None
-    case CompareTarget.Target(choice) => Some(choice)
+  /** `Some(coordinate)` once chosen; `None` while nothing is chosen (don't
+    * fire a diff/curve fetch). */
+  def toCoordinate: Option[SlotCoordinate] = target match
+    case CompareTarget.Target(c) => Some(c)
+    case CompareTarget.NotChosen => None
 
 /** How the comparison is displayed. `Overlay` draws every compared branch's
   * curves on one chart, coloured by branch family; `SideBySide` tiles one
@@ -29,34 +58,33 @@ enum CompareMode:
   case Off, Overlay, SideBySide
 
 /** One compared-branch picker slot. Slot identity is stable: choosing or
-  * clearing one slot never moves another slot's branch, so the other slot's
-  * card keeps its tree and selection untouched.
+  * clearing one slot never moves another slot's coordinate, so the other
+  * slot's card keeps its tree and selection untouched.
   */
 final class CompareSlotState:
   val target: Var[CompareTarget] = Var(CompareTarget.NotChosen)
 
-  /** The slot's target as a plain `BranchChoice` — the branch signal the
-    * slot's `TreeViewState` is constructed with, which needs a definite
-    * branch before any choice exists. Falls back to `Main` while `target` is
-    * `NotChosen`, so no state tied to it (branch-keyed list fetches, the
-    * key-change reload in `TreeViewState`) can act on a branch that may no
-    * longer exist. Synced here so views write `target` only. */
-  val chosenBranch: Var[BranchChoice] = Var(BranchChoice.Main)
-
-  target.signal.changes.foreach {
-    case CompareTarget.Target(choice) => chosenBranch.set(choice)
-    case CompareTarget.NotChosen      => chosenBranch.set(BranchChoice.Main)
-  }(using unsafeWindowOwner)
+  /** The slot's chosen branch as a signal (Main while `NotChosen`) — the
+    * branch identity for the palette, and (materialized strict at the one
+    * seam that needs `.now()`, the slot's `TreeViewState`) the branch its
+    * fetches read. Derived from `target`, so branch and target never drift
+    * across a transaction — which is why the slot's tree-selection wiring
+    * needs no "wait for the branch to catch up" guard. `.distinct` keeps it
+    * emitting only on a genuine branch change, so a coordinate write that
+    * changes only the tree override does not fire the branch-change machinery
+    * in the slot's `TreeViewState`.
+    */
+  val branchSignal: Signal[BranchChoice] = target.signal.map {
+    case CompareTarget.Target(c) => c.branch
+    case CompareTarget.NotChosen => BranchChoice.Main
+  }.distinct
 
 /** A compared-branch slot's full bundle: its picker state, the per-branch
   * services built on it — an independent tree view (selection surface +
-  * curve cache on the slot's chosen branch) and the content-hash diff
+  * curve cache on the slot's chosen coordinate) and the content-hash diff
   * against the tab's active branch — and the palette family that identifies
   * the branch in the Overlay chart, its card swatch, and its tree
-  * highlights. The palette is a signal: the slot's chosen branch's
-  * user-assigned family (`BranchPaletteState`), falling back to the slot's
-  * own default family while the branch has no assignment. Constructed once
-  * at startup (`Main`), one per slot.
+  * highlights. Constructed once at startup (`Main`), one per slot.
   */
 final class CompareSlot(
   val state: CompareSlotState,

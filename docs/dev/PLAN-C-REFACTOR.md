@@ -156,12 +156,12 @@ enum CompareTarget:
 // hand-sync lag — no longer exists).
 
 // modules/app/.../chart/CompareColorAssigner.scala
-final case class OverlaySide(curves: Map[NodeId, LECNodeCurve], palette: Vector[HexColor], slotLabel: String)
+final case class OverlaySide(curves: Map[NodeId, LECNodeCurve], visible: Set[NodeId], palette: Vector[HexColor], slotLabel: String)
 // (branchLabel → slotLabel; series id s"${nid.value}@${s.slotLabel}";
 //  labels: "active", "s1", "s2" — stable slot identity)
 
 // modules/app/.../state/BranchPaletteState.scala
-// resolve(...) gains the slot-de-collision rule above (pure, display-only)
+// adds a separate pure `deCollide` function (display-only; resolve unchanged)
 ```
 
 ### Files (Task B)

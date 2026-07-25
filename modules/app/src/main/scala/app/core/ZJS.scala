@@ -150,29 +150,6 @@ object ZJS:
           })
       }
 
-  /** Extension for ZIO effects returning `Option[B]` — unwraps into `LoadState[B]`. */
-  extension [E <: Throwable, B](zio: ZIO[BackendClient, E, Option[B]])
-
-    /** Fork the ZIO and push `Some(b) → Loaded(b)`, `None → Failed(noneMessage)`.
-      *
-      * Useful for endpoints that return `Option` (e.g. getById) where the
-      * target `Var` holds the unwrapped type.
-      * Workspace-level errors reset to Idle (see `loadInto`).
-      */
-    def loadOptionInto(target: Var[LoadState[B]], noneMessage: String): Unit =
-      target.set(LoadState.Loading)
-      forkProvided {
-        zio
-          .tap {
-            case Some(b) => ZIO.succeed(target.set(LoadState.Loaded(b)))
-            case None    => ZIO.succeed(target.set(LoadState.Failed(noneMessage)))
-          }
-          .tapError(e => ZIO.succeed {
-            if RepositoryFailure.isWorkspaceSentinel(e) then target.set(LoadState.Idle)
-            else target.set(LoadState.Failed(e.safeMessage))
-          })
-      }
-
   // ---------------------------------------------------------------------------
   // Trigger → outcome request pipelines (supersede stale in-flight requests)
   // ---------------------------------------------------------------------------
@@ -221,6 +198,25 @@ object ZJS:
       loading = LoadState.Loading,
       settle  = {
         case Right(a)                                            => LoadState.Loaded(a)
+        case Left(e) if RepositoryFailure.isWorkspaceSentinel(e) => LoadState.Idle
+        case Left(e)                                             => LoadState.Failed(e.safeMessage)
+      }
+    )
+
+  /** `loadStatePipeline` for requests returning `Option[A]`: `Some` loads,
+    * `None` fails with `noneMessage`, error routing as `loadStatePipeline`.
+    */
+  def loadOptionStatePipeline[A](
+    triggers: EventStream[Option[() => EventStream[Either[Throwable, Option[A]]]]],
+    noneMessage: String
+  ): EventStream[LoadState[A]] =
+    requestPipeline[Either[Throwable, Option[A]], LoadState[A]](
+      triggers,
+      idle    = LoadState.Idle,
+      loading = LoadState.Loading,
+      settle  = {
+        case Right(Some(a))                                      => LoadState.Loaded(a)
+        case Right(None)                                         => LoadState.Failed(noneMessage)
         case Left(e) if RepositoryFailure.isWorkspaceSentinel(e) => LoadState.Idle
         case Left(e)                                             => LoadState.Failed(e.safeMessage)
       }

@@ -167,9 +167,19 @@ object FormInputs:
    * of copy-pasting the fix (or missing it) per call site.
    *
    * @param options Signal of (value, label) pairs, in display order.
+   * @param disabledValues Option values to render as `disabled` (present but
+   *                       not user-selectable) rather than removing them — so
+   *                       an excluded value that is the current selection stays
+   *                       displayed instead of dropping the select to its
+   *                       placeholder. Default disables nothing.
    */
-  def splitOptions(options: Signal[List[(String, String)]]): Modifier[HtmlElement] =
-    children <-- options.split(_._1) { (key, initial, _) => option(value := key, initial._2) }
+  def splitOptions(
+    options: Signal[List[(String, String)]],
+    disabledValues: Signal[Set[String]] = Val(Set.empty)
+  ): Modifier[HtmlElement] =
+    children <-- options.split(_._1) { (key, initial, _) =>
+      option(value := key, disabled <-- disabledValues.map(_.contains(key)), initial._2)
+    }
 
   /**
    * Cross-field error display (for errors not tied to a specific field).

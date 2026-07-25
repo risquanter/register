@@ -114,21 +114,12 @@ object BranchBar:
     *                  browser's native selection even though the tracked Var
     *                  is unchanged, leaving the select on its placeholder
     *                  until the Var next emits.
-    * @param excludeValues Raw option values to omit — e.g. each Compare-mode
-    *                      picker hides the tab's own baseline branch
-    *                      (comparing a branch to itself is a no-op) and the
-    *                      other pickers' current choices (comparing a branch
-    *                      to itself twice over is the same no-op). The
-    *                      default omits nothing — every branch, including
-    *                      main, is always offered.
     */
   def branchOptionEntries(
-    scenarios: Signal[List[ScenarioSummaryResponse]],
-    excludeValues: Signal[Set[String]] = Val(Set.empty)
+    scenarios: Signal[List[ScenarioSummaryResponse]]
   ): Signal[List[(String, String)]] =
-    scenarios.combineWith(excludeValues).map { (list, excl) =>
-      val all = (mainSentinel -> "main") :: list.map(s => s.name.value.toString -> s.name.value.toString)
-      all.filterNot { case (v, _) => excl.contains(v) }
+    scenarios.map { list =>
+      (mainSentinel -> "main") :: list.map(s => s.name.value.toString -> s.name.value.toString)
     }
 
   /** Plain "pick a branch" `<select>` — no switch/create/duplicate/delete

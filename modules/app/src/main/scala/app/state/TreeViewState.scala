@@ -97,6 +97,20 @@ final class TreeViewState(
   val selectedTreeId: Var[Option[TreeId]] = Var(None)
   val selectedTree: Var[LoadState[RiskTree]] = Var(LoadState.Idle)
 
+  // Not written directly by `loadTreeStructure`/`deselectTree`: driven from
+  // the EventBus-fed `flatMapSwitch` pipeline below. A newer load or a
+  // deselect drops the subscription to whatever the previous request was
+  // still doing, so a stale response can never land after a newer request
+  // has started, regardless of which round trip finishes first.
+  private val treeTrigger =
+    new EventBus[Option[() => EventStream[Either[Throwable, Option[RiskTree]]]]]
+
+  // Idempotency guard: `Var.set` doesn't dedupe by value, and consumers of
+  // `selectedTree` recompute on every set; only write on a real change.
+  loadOptionStatePipeline(treeTrigger.events, "Tree not found").foreach { v =>
+    if selectedTree.now() != v then selectedTree.set(v)
+  }(using unsafeWindowOwner)
+
   // ── UI state (uses NodeId per ADR-001 §7) ─────────────────────
   val expandedNodes: Var[Set[NodeId]] = Var(Set.empty)
   val selectedNodeId: Var[Option[NodeId]] = Var(None)
@@ -147,7 +161,9 @@ final class TreeViewState(
     chartState.reset()
     keySignal.now() match
       case Some(key) =>
-        getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor())).loadOptionInto(selectedTree, "Tree not found")
+        treeTrigger.emit(Some(() =>
+          getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor())).toOutcomeEventStream
+        ))
       case None => ()
 
   /** Select a tree by id — sets `selectedTreeId` and triggers structure fetch. */
@@ -164,7 +180,8 @@ final class TreeViewState(
   def deselectTree(): Unit =
     if selectedTreeId.now().isDefined then
       selectedTreeId.set(None)
-      selectedTree.set(LoadState.Idle)
+      // Resolves the pipeline to Idle and supersedes any in-flight load.
+      treeTrigger.emit(None)
       chartState.reset()
 
   def toggleExpanded(nodeId: NodeId): Unit =

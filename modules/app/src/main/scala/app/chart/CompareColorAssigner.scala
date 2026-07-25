@@ -19,25 +19,27 @@ object CompareColorAssigner:
     * agree.
     */
   final case class OverlaySide(
-    curves:      Map[NodeId, LECNodeCurve],
-    visible:     Set[NodeId],
-    palette:     Vector[HexColor],
-    branchLabel: String
+    curves:    Map[NodeId, LECNodeCurve],
+    visible:   Set[NodeId],
+    palette:   Vector[HexColor],
+    slotLabel: String
   )
 
   /** For each side's visible nodes present in that side's curve map, emit
     * one entry carrying the side's palette shade and a series id distinct
-    * from the same node's entry on any other branch (`NodeId` alone can't
-    * disambiguate several branches' curves for the same node — see
-    * `LECSpecBuilder.buildFromSeries`).
+    * from the same node's entry on any other side. The suffix is the side's
+    * stable SLOT label ("active"/"s1"/"s2"), not its branch name — so two
+    * sides on the same branch but different trees (cross-tree comparison)
+    * still get distinct series (`NodeId` alone can't disambiguate several
+    * sides' curves for the same node — see `LECSpecBuilder.buildFromSeries`).
     *
-    * A node selected on a branch but missing from that branch's curve map
+    * A node selected on a side but missing from that side's curve map
     * (fetch not landed yet, or the node doesn't exist there) contributes
     * nothing for that side.
     */
   def pairForOverlay(sides: Vector[OverlaySide]): Vector[(LECNodeCurve, HexColor, String)] =
     sides.flatMap { s =>
       s.visible.toVector.sortBy(_.value).flatMap { nid =>
-        s.curves.get(nid).map(curve => (curve, ColorAssigner.shade(s.palette, nid), s"${nid.value}@${s.branchLabel}"))
+        s.curves.get(nid).map(curve => (curve, ColorAssigner.shade(s.palette, nid), s"${nid.value}@${s.slotLabel}"))
       }
     }

@@ -76,12 +76,15 @@ object Main:
       "every compare slot needs its own default palette family"
     )
     val analyzeCompareSlots = analyzeCompareState.slots.zip(compareSlotDefaultPalettes).map { (slotState, defaultPalette) =>
-      val slotPalette = branchPaletteState.paletteFor(slotState.chosenBranch.signal, defaultPalette)
+      val slotPalette = branchPaletteState.paletteFor(slotState.branchSignal, defaultPalette)
       new CompareSlot(
         state = slotState,
         treeViewState = new TreeViewState(
           wsState.keySignal, treeListState, globalError, () => wsState.currentUserId,
-          slotState.chosenBranch.signal, userPalette = slotPalette
+          // The slot's branch derives from its target; TreeViewState needs a
+          // StrictSignal (it reads .now()), so observe the derived signal for
+          // the app's lifetime instead of keeping a hand-synced Var.
+          slotState.branchSignal.observe(unsafeWindowOwner), userPalette = slotPalette
         ),
         diffState = new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId),
         palette = slotPalette
