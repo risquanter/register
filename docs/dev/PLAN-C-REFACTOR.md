@@ -1,78 +1,192 @@
-# PLAN — Phase C machinery refactor ("C-refactor", Scope 1) (DRAFT)
+# PLAN — Phase C machinery refactor ("C-refactor", Scope 1)
 
-Status: DRAFT 2026-07-25 — task inventory settled; exact signatures and file
-inventories to be finalized before approval (G3). Decision context and fixed
-constraints: `PLAN-PHASE-E-HISTORY.md`. No code work is authorized by this
-document in its draft state.
+Status: PRESENTED 2026-07-25, awaiting approval. Scope 1 of the milestone-2b
+close-out; companion (Scope 2, depends on this plan): `PLAN-PHASE-E-HISTORY.md`.
+Decision context, rulings E1–E7, and fixed security constraints live in the
+companion document.
 
-Two self-contained, independently landable and revertable tasks. They touch
-disjoint modules (A: server, B: app) and can land in either order; both
-precede the Phase E feature scope.
+Two self-contained, independently landable and revertable tasks. Disjoint
+modules (A: server, B: app); either order; both precede Scope 2.
+
+---
 
 ## Task A — read-path consistency (server, internal only)
 
-Problem: the non-atomic multi-query read class recorded in
-`PLAN-PHASE-E-HISTORY.md` ("Problem class on record") — every read in a
-multi-query operation (tree load: meta `get` + node `list` + per-node
-`get`s; the two sides of a changed-nodes computation; merge-preview value
-reads) dereferences the mutable branch head independently, so a concurrent
-commit produces a torn read mixing two commits' states.
+### Problem
 
-Scope: the tree read path (structure, LEC, changed-nodes service reads).
-Other readers (merge preview byte reads, workspace reconciliation) migrate
-opportunistically later, not here.
+Recorded in `PLAN-PHASE-E-HISTORY.md` → "Problem class on record": a tree
+load is several independent GraphQL queries (meta `get`, node `list`,
+per-node `get`s), each dereferencing the mutable branch head independently.
+A commit landing mid-load produces a torn read (meta from one commit, nodes
+from another). Writes are atomic since DD-7; reads are not.
 
-No wire contract changes, no new endpoints, no UI changes. The fix's
-signature shape is finalized at plan approval (pending the Phase E
-API-shape rulings it must stay consistent with).
+### Design
 
-Regression gate: every existing suite green; observable behaviour
-identical; plus a new test pinning read consistency under a concurrent
-write (the previously-untestable torn-read case).
+Resolve the branch head **once per load**, then perform every constituent
+read pinned to that commit. Public repository signatures are unchanged;
+the fix is contained inside the Irmin implementation. The in-memory
+repository (no commit concept) is untouched.
+
+Behaviour preservation rule: a read on a nonexistent branch returns
+`None`/empty today and MUST continue to do so — head resolution yielding
+"branch absent" maps to the same result, never to a new error.
+
+### Signatures
+
+```scala
+// modules/server/.../infra/irmin/IrminQueries.scala — NEW
+/** List a subtree's entries as of a specific commit (commit(hash:).tree). */
+def listTreeAtCommit(commitHash: CommitHash, path: IrminPath): String
+// Body: same field selection as the existing listTree, rooted at
+// commit(hash:){ tree { ... } } — selection copied verbatim at implementation.
+
+// modules/server/.../infra/irmin/IrminClient.scala — NEW op (trait + companion accessor)
+def listAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, List[IrminPath]]
+
+// modules/server/.../infra/irmin/model/IrminResponses.scala — NEW envelope
+// CommitTreeListResponse — mirrors the existing branch-list envelope rooted at
+// commit.tree; exact field names copied from that envelope at implementation.
+
+// modules/server/.../repositories/RiskTreeRepositoryIrmin.scala — private helpers;
+// PUBLIC TRAIT SIGNATURES UNCHANGED
+private def resolveHead(branch: BranchRef): Task[Option[CommitHash]]
+  // via irmin.getBranch; None = branch absent (preserves today's semantics);
+  // head hash refined through CommitHash.fromString (invalid → RepositoryFailure)
+private def loadTreeAt(wsId: WorkspaceId, id: TreeId, at: CommitHash): Task[Option[TreeWithMeta]]
+private def readNodesAt(prefix: IrminPath, at: CommitHash): Task[Seq[RiskNode]]
+// getById / getAllForWorkspace: resolveHead once → *At reads for everything.
+// getAllForWorkspace resolves ONE head for the whole listing (list + every tree).
+```
+
+Scope 2 later exposes `loadTreeAt` through a public commit-keyed read
+(`Revision` model, see companion plan); this task deliberately builds the
+internals it will wrap.
+
+### Files (Task A inventory)
+
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala
+- modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala
+- modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeReadConsistencySpec.scala (NEW)
+- modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminClientIntegrationSpec.scala (add `listAtCommit` case)
+
+### Tests (Task A)
+
+- `RiskTreeReadConsistencySpec` (NEW, deterministic, no Docker): scripted
+  stub `IrminClient` whose branch state advances between the meta read and
+  the node reads. Pins: (1) the loaded tree is entirely pre-advance state
+  (the torn read is impossible by construction); (2) exactly one head
+  resolution per load; (3) nonexistent branch → `None` (behaviour
+  preservation).
+- `IrminClientIntegrationSpec`: `listAtCommit` returns the listing as of an
+  older commit after the path has since changed.
+
+---
 
 ## Task B — compare-slot coordinate generalization (app, client only)
 
-Today a compare slot's coordinate is a branch (`CompareTarget` wrapping
-`BranchChoice`); the slot already bundles everything else it needs as an
-independent source: its own `TreeViewState` (tree + selection), curve
-cache, palette family, and changed-nodes state. This task widens the slot
-coordinate from `branch` to `(tree, revision)` so a slot can point at a
-different tree (and, once Phase E lands, a pinned commit) — enabling
-cross-tree curve comparison (e.g. an Operational Risk tree against a Brand
-Damage tree) and giving Phase E's compare-to-current a slot semantics
-instead of special wiring.
+### Design
 
-Items:
+A compare slot already bundles an independent source (own `TreeViewState`,
+curve cache, palette family, changed-nodes state); its coordinate is
+currently just a branch. Widen the coordinate to `(tree, branch)` so a slot
+can point at a different tree — enabling cross-tree curve comparison — with
+the revision pin (`at`) added by Scope 2 as a third component.
 
-- Slot coordinate type: `branch` → `(tree, revision)`; revision = branch
-  now, branch-or-pin after Phase E. Slot-identity stability rule unchanged.
-- Slot picker UI: choose tree and branch, not only branch.
-- Palette keying: currently by branch name (localStorage); key widens with
-  the coordinate.
-- Overlay series-id suffix: currently `@<branch>`; becomes slot-scoped.
-  This supersedes the design basis of the open backlog item "compare-mode
-  hover bridge" (parse/build branch-suffixed ids) — that fix must target
-  slot-scoped ids, not branch-suffixed ones.
-- Changed-nodes markers: requested only when both sides share tree lineage
-  (same `TreeId`); cross-tree slots simply do not call the service — no
-  lineage, no markers, by design (see the identity-vs-value comparison
-  distinction in `PLAN-PHASE-E-HISTORY.md` context).
-- Chart composition: same-tree slots keep today's ID pairing (two curves =
-  two versions of one node, per-node shade matching, missing-side
-  handling); cross-tree slots draw the plain union of selected curves as
-  independent series — the pairing step is skipped, colour identifies the
-  slot.
+- **Identity vs value comparison rule** (settled): ✎ changed-node markers
+  are requested only when the slot's tree equals the active tree (shared
+  node lineage); cross-tree slots never call the changed-nodes endpoint —
+  no lineage, no markers. Chart comparison is selection-driven and
+  lineage-free: same-tree slots keep today's per-node ID pairing; cross-tree
+  slots contribute the plain union of their selected curves as independent
+  series.
+- **Series ids** become slot-scoped (stable slot identity, not branch
+  name). This supersedes the design basis of the deferred "compare-mode
+  hover bridge" backlog item; hover behaviour itself is NOT changed in this
+  task (overlay hover stays non-resolving exactly as today — no regression,
+  backlog item stays open, retargeted).
+- **Palette**: `BranchPaletteState` storage and assignment stay branch-keyed
+  (user preference per branch; storage key format unchanged). New display-
+  level rule: two slots resolving to the same family (now possible: same
+  branch, different trees) — the later slot takes the first unassigned
+  family for display only, never persisted. Pure helper + test.
+- **Slot picker** gains a tree selector (options: the workspace's trees;
+  default: the tab's active tree — today's behaviour).
 
-Server changes: none.
+### Signatures
 
-Regression gate: existing branch-compare behaviour byte-identical for
-same-tree slots (pairing, palettes, markers, hover); `sbt app/test` green;
-manual check of the §6 compare flows unchanged.
+```scala
+// modules/app/.../state/CompareState.scala
+final case class SlotCoordinate(tree: TreeId, branch: BranchChoice)
+enum CompareTarget:
+  case NotChosen
+  case Target(coordinate: SlotCoordinate)
+// CompareSlotState.chosenBranch: Var[BranchChoice]
+//   → chosenCoordinate: Var[SlotCoordinate]  (fallback: (active tree, Main))
+// extension chosen: Option[BranchChoice] → Option[SlotCoordinate]
 
-## Downstream plans that build on this design
+// modules/app/.../chart/CompareColorAssigner.scala
+final case class OverlaySide(curves: Map[NodeId, LECNodeCurve], palette: Vector[HexColor], slotLabel: String)
+// (branchLabel → slotLabel; series id s"${nid.value}@${s.slotLabel}";
+//  labels: "active", "s1", "s2" — stable slot identity)
 
-- `PLAN-PHASE-E-HISTORY.md` (Scope 2): compare-to-current is a slot whose
-  revision is pinned — not bespoke wiring; the changed-nodes endpoint's
-  same-tree constraint is the lineage rule above.
-- Backlog "compare-mode hover bridge" fix: retargeted to slot-scoped
-  series ids (noted in the backlog entry).
+// modules/app/.../state/BranchPaletteState.scala
+// resolve(...) gains the slot-de-collision rule above (pure, display-only)
+```
+
+### Files (Task B inventory)
+
+- modules/app/src/main/scala/app/state/CompareState.scala
+- modules/app/src/main/scala/app/state/BranchPaletteState.scala
+- modules/app/src/main/scala/app/chart/CompareColorAssigner.scala
+- modules/app/src/main/scala/app/views/AnalyzeView.scala
+- modules/app/src/main/scala/app/Main.scala (slot construction wiring, if its shape changes)
+- modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala
+- modules/app/src/test/scala/app/state/BranchPaletteStateSpec.scala
+- modules/app/src/test/scala/app/state/CompareStateSpec.scala (NEW)
+
+### Tests (Task B)
+
+- `CompareColorAssignerSpec`: slot-label series ids; cross-tree union (no
+  pairing, one series per selected curve); same-tree pairing unchanged.
+- `BranchPaletteStateSpec`: slot family de-collision (same branch on two
+  slots → distinct display families; persistence untouched).
+- `CompareStateSpec` (NEW): coordinate fallback; slot-identity stability
+  under choose/clear (existing documented rule, now pinned).
+
+---
+
+## ADR alignment
+
+- Nominal types only (`TreeId`, `BranchChoice`, `CommitHash`, `IrminPath`) —
+  no raw `String`/primitive domain parameters anywhere, private helpers
+  included (adr-constraints amendment 2026-07-24).
+- No wire/API change in either task → no endpoint, DTO, or codec edits; the
+  correct-by-construction boundary rules are untouched.
+- DD-10 error model unchanged (behaviour-preservation rule above forbids
+  new error paths on reads).
+
+## Open decisions
+
+None blocking. Trivial defaults taken: slot labels "active"/"s1"/"s2";
+de-collision picks the first unassigned family in palette declaration order.
+
+## Verification
+
+- `sbt server/compile`, `sbt "server/testOnly *RiskTreeReadConsistencySpec"`,
+  `sbt server/test` (Task A)
+- `sbt "serverIt/testOnly *IrminClientIntegrationSpec"` (Task A; needs
+  `local/irmin-prod:3.11-p1`)
+- `sbt app/test` (Task B)
+- Manual (Task B): compare flows of §6 unchanged for same-tree slots
+  (overlay, side-by-side, cards, markers, colour picker); new: pick a
+  different tree in a slot → union chart, no markers, distinct families.
+- Pass/fail reporting only.
+
+## Versioning
+
+Task A: PATCH (bug fix — torn reads). Task B: MINOR (new user-visible
+feature — cross-tree comparison). Bump on landing of each, mirrored to
+`.env` and `.env.irmin`.

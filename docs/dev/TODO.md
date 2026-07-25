@@ -1613,3 +1613,40 @@ its final form (commits 53a575f, ca82acc, 8e03e00):
   the strict y-intercept `1 − P(no loss)`, and `getTicks` clamps its step to
   ≥ 1 so narrow loss ranges (span < nEntries) no longer collapse to a
   single-point (invisible) curve.
+
+---
+
+## 31. Ephemeral Irmin mode — full branch/history features without persistence — OPEN
+
+**Origin (2026-07-25, Phase E planning):** the in-memory repository
+(`RiskTreeRepositoryInMemory`) serves only the main branch, so DD-9 disables
+the entire scenario/history UI in in-memory mode. Demos and manual testing of
+branch features therefore require the persistence profile and accumulate a
+permanent irmin-pack store. An "ephemeral Irmin" mode runs the **unchanged**
+`local/irmin-prod:3.11-p1` image with throwaway storage: `/data` on a tmpfs
+mount (or an anonymous volume discarded on teardown). Exact prod code path —
+irmin-pack, GraphQL, the 3.11-p1 merge patch — but all state dies with the
+container. This does NOT replace the in-memory repository: Docker-free unit
+tests (`sbt server/test`) and BATS suite C keep using the TrieMap backend.
+
+**Scope:**
+
+1. **Implementation** — a compose variant (override file or profile) that
+   starts the `irmin` service with tmpfs-backed `/data` instead of the
+   `irmin-data` named volume, with `REGISTER_REPOSITORY_TYPE=irmin`. No image
+   or Scala changes.
+2. **Documentation** — new use case in `docs/user/DOCKER-DEVELOPMENT.md` and
+   the register-dev skill's compose section (when to use ephemeral vs.
+   persistent vs. in-memory); note the DD-9 consequence (branch/history UI
+   available without a permanent store).
+3. **Testing** — BATS smoke coverage for the ephemeral variant (start, CRUD +
+   scenario fork round-trip, teardown, restart, verify state is empty);
+   confirm suites A/C are unaffected.
+4. **register-infra** — mirror the option in the sibling repo's Irmin helm
+   chart (`../register-infra/infra/helm/irmin/`): a values switch for
+   `emptyDir` in place of the StatefulSet's PVC, validated on the local
+   k3d/k3s setup per that repo's `docs/K8S-TESTING.md`.
+
+**Open point to verify during implementation:** whether the compose `tmpfs`
+form or an anonymous volume interacts correctly with the container's non-root
+user (UID 65532) writing `/data`.
