@@ -394,6 +394,9 @@ App tests:
 - modules/app/src/test/scala/app/state/ChangedNodesStateSpec.scala (RENAME target)
 - modules/app/src/test/scala/app/state/TreeHistoryStateSpec.scala (NEW: pure derivations)
 
+Versioning:
+- build.sbt (ThisBuild / version → 0.8.0 MINOR on landing; APP_VERSION mirrored to .env and .env.irmin, which are ungated and need no bullet)
+
 ## ADR alignment
 
 - Nominal Iron types at every boundary (`CommitHash`, `BranchChoice`,

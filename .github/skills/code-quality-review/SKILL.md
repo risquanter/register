@@ -30,6 +30,16 @@ Two binding rules on the report itself (working-protocol G6):
 The criteria below are not exhaustive. Use general principles and industry best
 practices to catch issues the checklist has not yet anticipated.
 
+**Boyscout rule — whole-file scope.** A file is brought into scope by a
+single changed line — **including an import-only change** (imports swap
+implementations and widen implicit scope; when in doubt, the file is in
+scope). Review it as a whole: read every touched file in full and apply the
+criteria to the entire file, not just the diff hunks.
+Findings outside the diff are reported tagged **pre-existing (boyscout)** so
+they are distinguishable from regressions the change introduces; their
+disposition (fix now, queue, ignore) is the user's, like every other
+finding.
+
 ---
 
 ## Pass 0a — Domain primitive typing (Layer A₀, run first)
