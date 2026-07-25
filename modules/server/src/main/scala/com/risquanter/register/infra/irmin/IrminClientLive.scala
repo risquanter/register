@@ -179,6 +179,14 @@ final class IrminClientLive private (
       _        <- ZIO.logDebug(s"Irmin GET@commit result: ${value.map(_.take(50))}")
     yield value
 
+  override def listAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, List[IrminPath]] =
+    for
+      _        <- ZIO.logDebug(s"Irmin LIST@${commit.value.take(12)}: ${path.value}")
+      response <- executeQuery[CommitTreeListResponse](IrminQueries.listTreeAtCommit(commit, path))
+      paths    <- extractListAtCommit(path, response)
+      _        <- ZIO.logDebug(s"Irmin LIST@commit result (${paths.size}): ${paths.map(_.value).mkString(", ")}")
+    yield paths
+
   override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): IO[IrminError, List[IrminCommit]] =
     for
       _        <- ZIO.logDebug(s"Irmin HISTORY: ${path.value} (n=$n)${branchLog(branch)}")
@@ -268,19 +276,26 @@ final class IrminClientLive private (
         val (messages, path) = collectGraphQl(response.errors)
         ZIO.fail(IrminGraphQLError(messages, path))
 
-  private def extractList(prefix: IrminPath, response: ListTreeResponse): IO[IrminError, List[IrminPath]] =
-    response.data.flatMap(_.main).flatMap(_.tree.get_tree).map(_.list) match
+  /** Shared tail of the branch-scoped and commit-scoped list extractors: turn
+    * the optional `list` payload into child paths relative to `prefix`. A null
+    * payload (path absent / empty store / unknown commit) is an empty listing
+    * unless Irmin reported actual errors. */
+  private def childPaths(prefix: IrminPath, list: Option[List[TreeNode]], errors: Option[List[GraphQLError]]): IO[IrminError, List[IrminPath]] =
+    list match
       case Some(nodes) =>
         val base = if prefix.value.isEmpty then "" else s"${prefix.value}/"
-        val cleanedPaths = nodes.map(_.path.stripPrefix("/"))
-        val childNames = cleanedPaths.map(_.stripPrefix(base)).filter(_.nonEmpty)
+        val childNames = nodes.map(_.path.stripPrefix("/").stripPrefix(base)).filter(_.nonEmpty)
         ZIO.foreach(childNames)(name => ZIO.fromEither(IrminPath.from(name).left.map(IrminUnavailable(_))))
       case None =>
-        // get_tree returns null when the path doesn't exist yet (e.g. empty store).
-        // Treat as empty list unless Irmin reported actual errors.
-        response.errors match
-          case Some(errs) if errs.nonEmpty => failWithListError(response.errors)
-          case _                          => ZIO.succeed(List.empty)
+        errors match
+          case Some(errs) if errs.nonEmpty => failWithListError(errors)
+          case _                           => ZIO.succeed(List.empty)
+
+  private def extractList(prefix: IrminPath, response: ListTreeResponse): IO[IrminError, List[IrminPath]] =
+    childPaths(prefix, response.data.flatMap(_.main).flatMap(_.tree.get_tree).map(_.list), response.errors)
+
+  private def extractListAtCommit(prefix: IrminPath, response: CommitTreeListResponse): IO[IrminError, List[IrminPath]] =
+    childPaths(prefix, response.data.flatMap(_.commit).flatMap(_.tree.get_tree).map(_.list), response.errors)
 
   private def commitFromData(c: CommitData): IO[IrminError, IrminCommit] =
     ZIO.succeed(IrminCommit(

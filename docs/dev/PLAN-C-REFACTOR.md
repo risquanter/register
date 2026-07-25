@@ -1,6 +1,8 @@
 # PLAN — Phase C machinery refactor ("C-refactor", Scope 1)
 
-Status: PRESENTED 2026-07-25, awaiting approval. Scope 1 of the milestone-2b
+Status: PRESENTED 2026-07-25 (amended 2026-07-25: `## File inventory` heading
+made hook-readable; three `IrminClient` test stubs added to Task A;
+`loadTree` shared-helper scope clarified), awaiting approval. Scope 1 of the milestone-2b
 close-out; companion (Scope 2, depends on this plan): `PLAN-PHASE-E-HISTORY.md`.
 Decision context, rulings E1–E7, and fixed security constraints live in the
 companion document.
@@ -26,6 +28,20 @@ Resolve the branch head **once per load**, then perform every constituent
 read pinned to that commit. Public repository signatures are unchanged;
 the fix is contained inside the Irmin implementation. The in-memory
 repository (no commit concept) is untouched.
+
+The resolve-head-once logic lands in the shared private helper `loadTree`,
+which today backs `getById` and `getTreeWithMeta` (the pre-write read in
+`update` and `delete`). Routing all three through the same head-pinned
+`loadTreeAt` gives them a consistent snapshot from one change instead of
+duplicating the fix per caller. `getAllForWorkspace` cannot reuse the
+per-tree helper as-is: it must resolve ONE head for the whole listing (the
+tree enumeration plus every tree load), so it resolves the head itself and
+calls `loadTreeAt` per tree.
+
+Scope boundary: `update`/`delete` stay a non-atomic read-modify-write (no
+compare-and-set on the following `set_tree`), so this task makes their read
+consistent but adds no lost-update protection; write-side optimistic
+concurrency is a separate concern, out of scope.
 
 Behaviour preservation rule: a read on a nonexistent branch returns
 `None`/empty today and MUST continue to do so — head resolution yielding
@@ -54,7 +70,7 @@ private def resolveHead(branch: BranchRef): Task[Option[CommitHash]]
   // head hash refined through CommitHash.fromString (invalid → RepositoryFailure)
 private def loadTreeAt(wsId: WorkspaceId, id: TreeId, at: CommitHash): Task[Option[TreeWithMeta]]
 private def readNodesAt(prefix: IrminPath, at: CommitHash): Task[Seq[RiskNode]]
-// getById / getAllForWorkspace: resolveHead once → *At reads for everything.
+// loadTree (shared by getById, update, delete): resolveHead once → *At reads.
 // getAllForWorkspace resolves ONE head for the whole listing (list + every tree).
 ```
 
@@ -62,24 +78,21 @@ Scope 2 later exposes `loadTreeAt` through a public commit-keyed read
 (`Revision` model, see companion plan); this task deliberately builds the
 internals it will wrap.
 
-### Files (Task A inventory)
+### Files (Task A)
 
-- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
-- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala
-- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
-- modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala
-- modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala
-- modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeReadConsistencySpec.scala (NEW)
-- modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminClientIntegrationSpec.scala (add `listAtCommit` case)
+Enumerated in the consolidated `## File inventory` section below (Task A
+subgroup); that H2 section is the only one the enforcement hook reads.
 
 ### Tests (Task A)
 
 - `RiskTreeReadConsistencySpec` (NEW, deterministic, no Docker): scripted
-  stub `IrminClient` whose branch state advances between the meta read and
-  the node reads. Pins: (1) the loaded tree is entirely pre-advance state
+  stub `IrminClient` (implements the full trait, including the new
+  `listAtCommit`) whose branch state advances between the meta read and the
+  node reads. Pins: (1) the loaded tree is entirely pre-advance state
   (the torn read is impossible by construction); (2) exactly one head
   resolution per load; (3) nonexistent branch → `None` (behaviour
-  preservation).
+  preservation); (4) meta absent but nodes present at the resolved commit →
+  `RepositoryFailure` (behaviour preservation of today's `loadTree`).
 - `IrminClientIntegrationSpec`: `listAtCommit` returns the listing as of an
   older commit after the path has since changed.
 
@@ -136,16 +149,10 @@ final case class OverlaySide(curves: Map[NodeId, LECNodeCurve], palette: Vector[
 // resolve(...) gains the slot-de-collision rule above (pure, display-only)
 ```
 
-### Files (Task B inventory)
+### Files (Task B)
 
-- modules/app/src/main/scala/app/state/CompareState.scala
-- modules/app/src/main/scala/app/state/BranchPaletteState.scala
-- modules/app/src/main/scala/app/chart/CompareColorAssigner.scala
-- modules/app/src/main/scala/app/views/AnalyzeView.scala
-- modules/app/src/main/scala/app/Main.scala (slot construction wiring, if its shape changes)
-- modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala
-- modules/app/src/test/scala/app/state/BranchPaletteStateSpec.scala
-- modules/app/src/test/scala/app/state/CompareStateSpec.scala (NEW)
+Enumerated in the consolidated `## File inventory` section below (Task B
+subgroup); that H2 section is the only one the enforcement hook reads.
 
 ### Tests (Task B)
 
@@ -157,6 +164,37 @@ final case class OverlaySide(curves: Map[NodeId, LECNodeCurve], palette: Vector[
   under choose/clear (existing documented rule, now pinned).
 
 ---
+
+## File inventory
+
+The enforcement hook authorizes gated edits only from bullet lines in this
+H2 section (up to the next `## ` heading). Approving the plan (token → this
+document) authorizes every file below; Tasks A and B still land and revert
+independently.
+
+### Task A — read-path consistency (server)
+
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala
+- modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala
+- modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeReadConsistencySpec.scala (NEW)
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/ScenarioControllerSpec.scala (add listAtCommit to inline IrminClient stub)
+- modules/server/src/test/scala/com/risquanter/register/services/ScenarioServiceLiveSpec.scala (add listAtCommit to inline IrminClient stub)
+- modules/server/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceSpec.scala (add listAtCommit to inline IrminClient stub)
+- modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminClientIntegrationSpec.scala (add listAtCommit case)
+
+### Task B — compare-slot coordinate generalization (app)
+
+- modules/app/src/main/scala/app/state/CompareState.scala
+- modules/app/src/main/scala/app/state/BranchPaletteState.scala
+- modules/app/src/main/scala/app/chart/CompareColorAssigner.scala
+- modules/app/src/main/scala/app/views/AnalyzeView.scala
+- modules/app/src/main/scala/app/Main.scala
+- modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala
+- modules/app/src/test/scala/app/state/BranchPaletteStateSpec.scala
+- modules/app/src/test/scala/app/state/CompareStateSpec.scala (NEW)
 
 ## ADR alignment
 

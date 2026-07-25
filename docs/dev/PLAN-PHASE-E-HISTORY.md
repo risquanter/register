@@ -1,6 +1,8 @@
 # PLAN — Milestone-2b Phase E: History / Time Travel (Scope 2)
 
-Status: PRESENTED 2026-07-25, awaiting approval. Prerequisite:
+Status: PRESENTED 2026-07-25 (amended 2026-07-25: RENAME inventory entries
+split into old+new full-path bullets so the enforcement hook authorizes the
+post-rename files), awaiting approval. Prerequisite:
 `PLAN-C-REFACTOR.md` (Scope 1) landed. All Phase E decisions are ruled
 (E1–E7 below); one new decision surfaced during planning (E8, revert
 granularity) is presented with a recommendation and needs a ruling at plan
@@ -322,14 +324,16 @@ Common:
 - modules/common/src/main/scala/com/risquanter/register/http/requests/ScenarioRequests.scala
 - modules/common/src/main/scala/com/risquanter/register/http/requests/RevertTreeRequest.scala (NEW)
 - modules/common/src/main/scala/com/risquanter/register/http/responses/TreeHistoryResponse.scala (NEW)
-- modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioDiffResponse.scala → ChangedNodesResponse.scala (RENAME)
+- modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioDiffResponse.scala (RENAME → ChangedNodesResponse.scala; old path, remove after rename)
+- modules/common/src/main/scala/com/risquanter/register/http/responses/ChangedNodesResponse.scala (RENAME target)
 - modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala (BranchChoice header/query codec if not co-located in OpaqueTypes)
 
 Server:
 - modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala
 - modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala
 - modules/server/src/main/scala/com/risquanter/register/services/TreeHistoryService.scala (NEW)
-- modules/server/src/main/scala/com/risquanter/register/services/ScenarioDiffService.scala → ChangedNodesService.scala (RENAME)
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioDiffService.scala (RENAME → ChangedNodesService.scala; old path, remove after rename)
+- modules/server/src/main/scala/com/risquanter/register/services/ChangedNodesService.scala (RENAME target)
 - modules/server/src/main/scala/com/risquanter/register/services/ScenarioService.scala
 - modules/server/src/main/scala/com/risquanter/register/services/ScenarioServiceLive.scala
 - modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala
@@ -372,7 +376,8 @@ Server IT:
 App:
 - modules/app/src/main/scala/app/state/TreeHistoryState.scala (NEW)
 - modules/app/src/main/scala/app/state/TreeRevertState.scala (NEW)
-- modules/app/src/main/scala/app/state/ScenarioDiffState.scala → ChangedNodesState.scala (RENAME)
+- modules/app/src/main/scala/app/state/ScenarioDiffState.scala (RENAME → ChangedNodesState.scala; old path, remove after rename)
+- modules/app/src/main/scala/app/state/ChangedNodesState.scala (RENAME target)
 - modules/app/src/main/scala/app/state/CompareState.scala
 - modules/app/src/main/scala/app/state/TreeViewState.scala
 - modules/app/src/main/scala/app/state/LECChartState.scala
@@ -385,7 +390,8 @@ App:
 - modules/app/styles/app.css
 
 App tests:
-- modules/app/src/test/scala/app/state/ScenarioDiffStateSpec.scala → ChangedNodesStateSpec.scala (RENAME)
+- modules/app/src/test/scala/app/state/ScenarioDiffStateSpec.scala (RENAME → ChangedNodesStateSpec.scala; old path, remove after rename)
+- modules/app/src/test/scala/app/state/ChangedNodesStateSpec.scala (RENAME target)
 - modules/app/src/test/scala/app/state/TreeHistoryStateSpec.scala (NEW: pure derivations)
 
 ## ADR alignment

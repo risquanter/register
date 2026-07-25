@@ -168,6 +168,19 @@ trait IrminClient:
   def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, Option[String]]
 
   /**
+    * List immediate child paths under a prefix as of a specific commit — the
+    * commit-pinned counterpart of [[list]]. Used by the read-consistency path
+    * (resolve the branch head once, then read every constituent path pinned to
+    * that commit) so a commit landing mid-load cannot produce a torn read.
+    *
+    * @param commit Commit whose tree to list
+    * @param path Path prefix to list
+    * @return Child paths relative to the prefix; empty if the prefix is absent
+    *         at that commit or the commit is unknown (oracle constancy)
+    */
+  def listAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, List[IrminPath]]
+
+  /**
     * Commit history touching a path (Irmin `last_modified`; Phase E groundwork).
     *
     * @param path Path whose history to read
@@ -245,6 +258,9 @@ object IrminClient:
 
   def getAtCommit(commit: CommitHash, path: IrminPath): ZIO[IrminClient, IrminError, Option[String]] =
     ZIO.serviceWithZIO[IrminClient](_.getAtCommit(commit, path))
+
+  def listAtCommit(commit: CommitHash, path: IrminPath): ZIO[IrminClient, IrminError, List[IrminPath]] =
+    ZIO.serviceWithZIO[IrminClient](_.listAtCommit(commit, path))
 
   def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main): ZIO[IrminClient, IrminError, List[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.getHistory(path, n, branch))

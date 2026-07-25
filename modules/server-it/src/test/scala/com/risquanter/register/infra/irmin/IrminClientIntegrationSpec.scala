@@ -288,6 +288,21 @@ object IrminClientIntegrationSpec extends ZIOSpecDefault:
       )
     },
 
+    test("listAtCommit lists a subtree as of an older commit after the path has since changed") {
+      for
+        base   <- uniquePath("list-at-commit")
+        branch <- freshBranch
+        c1     <- IrminClient.setTree(base, List(entry("nodes/a", "\"a1\""), entry("nodes/b", "\"b1\"")), "list@commit v1", branch)
+        _      <- IrminClient.setTree(base, List(entry("nodes/b", "\"b2\""), entry("nodes/c", "\"c1\"")), "list@commit v2", branch)
+        nodes   = IrminPath.unsafeFrom(s"${base.value}/nodes")
+        atC1   <- IrminClient.listAtCommit(commitHash(c1.hash), nodes)
+        atHead <- IrminClient.list(nodes, branch)
+      yield assertTrue(
+        atC1.map(_.value).toSet == Set("a", "b"),   // older commit's listing, unaffected by the later replace
+        atHead.map(_.value).toSet == Set("b", "c")  // current head after the subtree replace
+      )
+    },
+
     test("setTree with empty entries removes the whole subtree") {
       for
         base   <- uniquePath("settree-delete")

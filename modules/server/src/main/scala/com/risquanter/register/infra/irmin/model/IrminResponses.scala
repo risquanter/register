@@ -245,6 +245,29 @@ object CommitTreeGetResponse:
   given JsonCodec[CommitTreeGetResponse] = DeriveJsonCodec.gen[CommitTreeGetResponse]
 
 /**
+  * Response for `commit(hash) { tree { get_tree(path) { list } } }` query.
+  * `commit` is null for an unknown hash; `get_tree` is null for an absent path.
+  */
+final case class CommitTreeListResponse(
+    data: Option[CommitTreeListData],
+    errors: Option[List[GraphQLError]]
+)
+
+final case class CommitTreeListData(
+    commit: Option[CommitListTreeData]
+)
+
+final case class CommitListTreeData(
+    tree: ListTreeTreeData
+)
+
+object CommitTreeListResponse:
+  import ListTreeResponse.given  // Reuse ListTreeTreeData / ListTreeGetTree / TreeNode codecs
+  given JsonCodec[CommitListTreeData] = DeriveJsonCodec.gen[CommitListTreeData]
+  given JsonCodec[CommitTreeListData] = DeriveJsonCodec.gen[CommitTreeListData]
+  given JsonCodec[CommitTreeListResponse] = DeriveJsonCodec.gen[CommitTreeListResponse]
+
+/**
   * Response for `commit(hash)` query.
   */
 final case class CommitQueryResponse(

@@ -70,29 +70,17 @@ object IrminQueries:
     * @param path Path to list (empty string for root)
     * @param branch Branch to read from (Main = Irmin's default branch)
     */
-  def listTree(path: IrminPath, branch: BranchRef = BranchRef.Main): String =
+  /** The `tree { get_tree(path) { list { … } } }` selection shared by the
+    * branch-scoped [[listTree]] and commit-scoped [[listTreeAtCommit]] queries.
+    * GraphQL ignores the surrounding whitespace, so a compact single line keeps
+    * the two queries identical apart from their root selector — the listing
+    * shape lives in exactly one place. */
+  private def listSelection(path: IrminPath): String =
     val pathPart = if path.value.isEmpty then "" else s"""(path: "${path.value}")"""
-    s"""
-    |{
-    |  ${branchSelector(branch)} {
-    |    tree {
-    |      get_tree$pathPart {
-    |        list {
-    |          ... on Contents {
-    |            path
-    |            hash
-    |            value
-    |          }
-    |          ... on Tree {
-    |            path
-    |            hash
-    |          }
-    |        }
-    |      }
-    |    }
-    |  }
-    |}
-    """.stripMargin.trim
+    s"tree { get_tree$pathPart { list { ... on Contents { path hash value } ... on Tree { path hash } } } }"
+
+  def listTree(path: IrminPath, branch: BranchRef = BranchRef.Main): String =
+    s"{ ${branchSelector(branch)} { ${listSelection(path)} } }"
 
   /**
     * Mutation to set a value at a path.
@@ -328,6 +316,19 @@ object IrminQueries:
     |  }
     |}
     """.stripMargin.trim
+
+  /**
+    * Query to list contents at a path as of a specific commit
+    * (`commit(hash:).tree.get_tree`). The commit-pinned counterpart of
+    * [[listTree]]: reads the store's state at that commit, independent of any
+    * branch head, so a load that resolves the head once then lists pinned to
+    * that commit cannot tear against a concurrent write.
+    *
+    * @param commitHash Commit whose tree to list
+    * @param path Path to list (empty string for root)
+    */
+  def listTreeAtCommit(commitHash: CommitHash, path: IrminPath): String =
+    s"""{ commit(hash: "${commitHash.value}") { ${listSelection(path)} } }"""
 
   /**
     * Query to find a commit by hash.

@@ -5,7 +5,7 @@ import zio.json.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoCastIron
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.{RepositoryFailure, AppError, IrminError}
 import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
@@ -69,18 +69,24 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
 
   override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
     val root = IrminPath.unsafeFrom(WorkspaceStoragePaths.treesRoot(wsId))
-    handleIrmin(irmin.list(root, branch)).flatMap { treeIds =>
-      ZIO.foreach(treeIds)(treeIdPath =>
-        for
-          treeId  <- parseTreeId(treeIdPath.value)
-          loaded  <- loadTree(wsId, treeId, branch).either
-        yield loaded match
-          case Right(Some(value)) => Right(value.tree)
-          case Right(None)        => Left(RepositoryFailure(s"Tree ${treeIdPath.value} not found (missing meta and nodes)"))
-          case Left(err: RepositoryFailure) => Left(err)
-          case Left(err: AppError)          => Left(RepositoryFailure(err.getMessage))
-          case Left(err)                    => Left(RepositoryFailure(err.getMessage))
-      )
+    // Resolve ONE head for the whole listing (enumeration + every tree load),
+    // so the returned set is a single consistent snapshot.
+    resolveHead(branch).flatMap {
+      case None       => ZIO.succeed(Nil) // branch absent → empty listing, as before
+      case Some(head) =>
+        handleIrmin(irmin.listAtCommit(head, root)).flatMap { treeIds =>
+          ZIO.foreach(treeIds)(treeIdPath =>
+            for
+              treeId  <- parseTreeId(treeIdPath.value)
+              loaded  <- loadTreeAt(wsId, treeId, head).either
+            yield loaded match
+              case Right(Some(value)) => Right(value.tree)
+              case Right(None)        => Left(RepositoryFailure(s"Tree ${treeIdPath.value} not found (missing meta and nodes)"))
+              case Left(err: RepositoryFailure) => Left(err)
+              case Left(err: AppError)          => Left(RepositoryFailure(err.getMessage))
+              case Left(err)                    => Left(RepositoryFailure(err.getMessage))
+          )
+        }
     }
 
   // ----------------------------------------------------------------------------
@@ -101,22 +107,23 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   private def decodeMeta(json: String): Task[TreeMetadata] =
     ZIO.fromEither(json.fromJson[TreeMetadata].left.map(err => RepositoryFailure(s"Decode meta failed: $err")))
 
-  private def readNodes(nodePrefix: IrminPath, branch: BranchRef): Task[Seq[RiskNode]] =
+  private def readNodesAt(prefix: IrminPath, at: CommitHash): Task[Seq[RiskNode]] =
     for
-      childNames <- handleIrmin(irmin.list(nodePrefix, branch))
+      childNames <- handleIrmin(irmin.listAtCommit(at, prefix))
       nodes      <- ZIO.foreach(childNames) { child =>
-                      val fullPath = IrminPath.unsafeFrom(s"${nodePrefix.value}/${child.value}")
-                      handleIrmin(irmin.get(fullPath, branch)).flatMap {
-                        case Some(json) =>
-                          val decoded: Either[String, RiskNode] =
-                            json.fromJson[RiskLeaf].map(node => node: RiskNode)
-                              .orElse(json.fromJson[RiskPortfolio].map(node => node: RiskNode))
-                          ZIO.fromEither(decoded.left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err")))
-                        case None =>
-                          ZIO.fail(RepositoryFailure(s"Missing node value at ${fullPath.value}"))
+                      val fullPath = IrminPath.unsafeFrom(s"${prefix.value}/${child.value}")
+                      handleIrmin(irmin.getAtCommit(at, fullPath)).flatMap {
+                        case Some(json) => decodeNode(child, json)
+                        case None       => ZIO.fail(RepositoryFailure(s"Missing node value at ${fullPath.value}"))
                       }
                     }
     yield nodes
+
+  private def decodeNode(child: IrminPath, json: String): Task[RiskNode] =
+    val decoded: Either[String, RiskNode] =
+      json.fromJson[RiskLeaf].map(node => node: RiskNode)
+        .orElse(json.fromJson[RiskPortfolio].map(node => node: RiskNode))
+    ZIO.fromEither(decoded.left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err")))
 
   private def rebuildTree(meta: TreeMetadata, nodes: Seq[RiskNode]): Task[RiskTree] =
     if nodes.isEmpty then
@@ -134,14 +141,38 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   private def parseTreeId(raw: String): Task[TreeId] =
     ZIO.fromEither(TreeId.fromString(raw)).mapError(errs => RepositoryFailure(errs.map(_.message).mkString("; ")))
 
+  /** Resolve the branch head once, then read every constituent path pinned to
+    * that commit — a commit landing mid-load cannot tear the read. A branch
+    * that is absent or has no commits yields None, preserving today's
+    * semantics. Shared by getById, update, and delete. */
   private def loadTree(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[Option[TreeWithMeta]] =
+    resolveHead(branch).flatMap {
+      case None       => ZIO.succeed(None)
+      case Some(head) => loadTreeAt(wsId, id, head)
+    }
+
+  private def resolveHead(branch: BranchRef): Task[Option[CommitHash]] =
+    handleIrmin(irmin.getBranch(branch)).flatMap { branchInfo =>
+      // None = branch absent OR branch exists with no commits; both preserve
+      // today's "no head → empty read" semantics.
+      branchInfo.flatMap(_.head) match
+        case None         => ZIO.succeed(None)
+        case Some(commit) =>
+          ZIO.fromEither(CommitHash.fromString(commit.hash))
+            .mapBoth(
+              errs => RepositoryFailure(s"Invalid branch head hash: ${errs.map(_.message).mkString("; ")}"),
+              Some(_)
+            )
+    }
+
+  private def loadTreeAt(wsId: WorkspaceId, id: TreeId, at: CommitHash): Task[Option[TreeWithMeta]] =
     val metaPath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMeta(wsId, id))
     val nodePrefix = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeNodes(wsId, id))
     for
-      maybeMetaJson <- handleIrmin(irmin.get(metaPath, branch))
+      maybeMetaJson <- handleIrmin(irmin.getAtCommit(at, metaPath))
       maybeMeta <- maybeMetaJson match
         case None =>
-          handleIrmin(irmin.list(nodePrefix, branch)).flatMap { children =>
+          handleIrmin(irmin.listAtCommit(at, nodePrefix)).flatMap { children =>
             if children.nonEmpty then ZIO.fail(RepositoryFailure(s"Metadata missing for tree $id but nodes exist"))
             else ZIO.succeed(None)
           }
@@ -150,7 +181,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         case None => ZIO.succeed(None)
         case Some(meta) =>
           for
-            nodes <- readNodes(nodePrefix, branch)
+            nodes <- readNodesAt(nodePrefix, at)
             tree  <- rebuildTree(meta, nodes)
           yield Some(TreeWithMeta(meta, tree))
     yield result

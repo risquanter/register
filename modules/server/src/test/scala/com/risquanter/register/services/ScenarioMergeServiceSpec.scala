@@ -60,6 +60,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
     override def revert(c: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def getAtCommit(c: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused by this spec"))
+    override def listAtCommit(c: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))
     override def healthCheck = ZIO.die(new NotImplementedError("unused by this spec"))
     override def list(prefix: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by this spec"))

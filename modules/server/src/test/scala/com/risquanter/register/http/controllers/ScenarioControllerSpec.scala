@@ -75,6 +75,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused"))
     override def getAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused"))
+    override def listAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused"))
     override def getHistory(path: IrminPath, n: PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
     override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(new NotImplementedError("unused"))
     override def healthCheck = ZIO.die(new NotImplementedError("unused"))
