@@ -1,6 +1,6 @@
 # PLAN — Compare UI redesign: implicit comparison via Load Trees rows
 
-Status: COMPLETE (uncommitted, pending user manual verification + commit).
+Status: CLOSED — landed and committed (`2dba914`, `844994e` "visual rework").
 Redesign + continuation "mirror-baseline-selection + styling polish" both
 implemented, Opus code-reviewed, Opus security-reviewed (PASS), all green.
 Code-review NOTEs ruled by the user 2026-07-26: NOTE 1 (mirror cap bypass) left
@@ -10,8 +10,8 @@ the post-0.8.0 backlog (handleNodeClick if/else→match); NOTE 5 done (CSS class
 renamed `.compare-select--disabled`); NOTE 6 done (`LECChartStateSpec` covers
 `setUserSelection`). All changes are in `modules/app` (client only) plus docs +
 version files. No wire/API change, no server change, no dependency change.
-Version: PATCH 0.8.0 → 0.8.1 for the whole compare rework (build.sbt + .env +
-.env.irmin all set to 0.8.1).
+Version: the whole compare rework shipped at 0.9.0 (build.sbt + .env +
+.env.irmin).
 
 Continuation 2 (Load-Trees grouping + button/toggle styling) implemented
 2026-07-26; `app/compile` + `app/test` green. Comparand rows + add button +

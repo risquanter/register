@@ -2,11 +2,12 @@
 
 Status: PRESENTED 2026-07-25 (amended 2026-07-25: RENAME inventory entries
 split into old+new full-path bullets so the enforcement hook authorizes the
-post-rename files), awaiting approval. Prerequisite:
-`PLAN-C-REFACTOR.md` (Scope 1) landed. All Phase E decisions are ruled
-(E1–E7 below); one new decision surfaced during planning (E8, revert
-granularity) is presented with a recommendation and needs a ruling at plan
-approval.
+post-rename files; amended 2026-07-26: §8 re-specified against the landed
+compare-UI redesign — history slider replaces the Tree|History tab, rulings
+H1–H6, SPA sliced Analyze-first then Design), awaiting approval.
+Prerequisites landed: `PLAN-C-REFACTOR.md` (Scope 1) and
+`PLAN-COMPARE-UI-REDESIGN.md` (slot-card Analyze layout §8 now builds on).
+All Phase E decisions are ruled (E1–E8 below, H1–H6 in §8).
 
 ## Rulings (2026-07-25, user)
 
@@ -286,30 +287,88 @@ exists. Files: `SSEEvent.scala` (field on the invalidation event case
 class), `InvalidationHandler.scala` (publisher supplies it), SPA consumer
 filters events to the tab's branch.
 
-### 8. SPA
+### 8. SPA — history slider (re-specified 2026-07-26 against the landed compare-UI redesign)
 
-- History tab: `AnalyzeView` right panel gains Tree | History tabs; NEW
-  `TreeHistoryState` (endpoint call + `LoadState`), NEW `HistoryPanel`
-  component (commit list; per-commit actions: View at this point / Compare
-  to current / Create scenario from here, per §7 of the UI plan).
+The originally planned Tree | History right-panel tab (UI plan §7) is
+replaced: the redesigned Analyze panel is a stack of self-contained slot
+cards (baseline + comparands), so history browsing attaches to each slot as
+a **history slider** instead of living in a separate panel. All rulings
+below are user rulings, 2026-07-26.
+
+- **H1 Slider model.** Each Analyze slot card gains a slider row under its
+  picker row. The stops are the commits of the slot's (branch, effective
+  tree) from `getTreeHistoryEndpoint` — discrete, index-spaced (one notch
+  per commit, even spacing regardless of wall-clock gaps). Right edge =
+  branch head ("latest"), left edge = oldest fetched commit ("initial").
+  Every pick displays timestamp + short commit hash (handle tooltip/popup)
+  — enough identifying data that the same point in time can be picked from
+  either view's slider.
+- **H2 Pinned reads.** `SlotCoordinate` (Scope 1) gains
+  `at: Option[CommitHash]` — `None` = head (live, today's behaviour),
+  `Some(hash)` = rewound. A rewound slot re-issues its structure and curve
+  fetches with the `at` pin: the hierarchy re-renders from the pinned
+  structure and the selected nodes' curves are the ones that existed at
+  that commit.
+- **H3 Missing nodes.** A selected node absent at the pinned commit is
+  dropped from the chart (no greyed placeholder — there is no value to
+  show). A transient notice lists the dropped selections ("not present at
+  this point in time") so a vanished curve is explained, not silent.
+- **H4 Read-only at rewind.** Any slider position other than head makes
+  the slot read-only: selection editing locked (reuses the existing
+  `selectionLocked` mechanism), pinned banner naming timestamp + hash. At
+  the head the slot is live and behaves exactly as today.
+- **H5 Both views get the slider; fork lives in Design.** Design gains the
+  same slider under its tree selection. Rewinding pins DesignView
+  read-only: tree detail + forms display the pinned state with all edit
+  affordances disabled and the pinned banner shown. The **fork button**
+  sits in Design next to the slider — greyed at head, active when rewound;
+  it prompts for a `ScenarioName`, creates with `source = Commit(hash)`
+  (E5), switches the tab's branch to the new scenario, and leaves the user
+  editing in Design at exactly the inspected state. This supersedes UI-plan
+  principle 4 (fork-in-Analyze): that placement existed only to avoid
+  building a read-only Design mode, which now exists for value inspection
+  in its own right.
+- **H6 Revert unchanged.** Stays in Design: BranchBar scenario-menu item
+  "↩ Revert this branch…" enabled; NEW `TreeRevertState` + NEW
+  `RevertModal` (destructive confirm naming branch and target commit —
+  MergeModal pattern).
+
+Components/state:
+
+- NEW `HistorySlider` component (replaces the previously planned
+  `HistoryPanel`): renders the discrete stop row from a commit list, shows
+  timestamp + hash per stop, emits the chosen `Option[CommitHash]`.
+- NEW `TreeHistoryState` (unchanged from the original spec): history
+  endpoint call + `LoadState`, per (tree, branch).
 - Pinned view: `TreeViewState` and `LECChartState` fetches thread the `at`
-  pin; read-only banner + suppressed edit affordances while pinned (client
-  state).
-- Compare-to-current: `SlotCoordinate` (Scope 1) gains
-  `at: Option[CommitHash]`; the History panel's compare action fills a free
-  slot with (active tree, active branch, pinned commit).
-- Fork-from-history: prompt for `ScenarioName`, create with
-  `source = Commit(hash)`, switch tab branch, navigate to Design
-  (`ScenarioState` create call adapts to the new request shape).
-- Revert: BranchBar scenario-menu item "↩ Revert this branch…" enabled;
-  NEW `TreeRevertState` + NEW `RevertModal` (destructive confirm naming
-  branch and target commit — MergeModal pattern).
+  pin.
 - Rename: `ScenarioDiffState` → `ChangedNodesState` (file rename + call
   shape for the new endpoint); `CompareState`/`AnalyzeView` gating from
   Scope 1 Task B adapts to the renamed state.
 - `X-Branch` required: transparent to SPA call sites (they already pass
   `BranchChoice` through the shared endpoint definitions; the codec now
   always emits a value).
+- Slider depth (trivial default taken): the slider covers the most recent
+  `n` commits the history endpoint returns (default 50); deeper paging is
+  deferred until a real tree exceeds it.
+
+### 8a. SPA slicing (user-ruled 2026-07-26): Analyze first, then Design
+
+Three slices, this plan:
+
+- **Slice 0 — backend (§1–§7).** All wire/service/repository work. The only
+  SPA-visible change is the required `X-Branch` header (transparent) and
+  the `ScenarioDiffState`/create-request adaptations needed to keep the app
+  compiling against the renamed/changed wire surface.
+- **Slice E-A — Analyze.** `HistorySlider` + `TreeHistoryState` +
+  `SlotCoordinate.at` + pinned slot fetches + read-only-at-rewind +
+  missing-node notice. Compare-past-vs-current falls out of the slot model:
+  baseline at head, comparand slot rewound. Fork is NOT reachable in this
+  slice (it ships with Design in E-B); browse and compare are complete and
+  self-contained.
+- **Slice E-B — Design.** Design slider + read-only pinned mode (forms +
+  tree detail + banner) + fork button (greyed at head) + revert
+  (`TreeRevertState`, `RevertModal`, scenario-menu enablement).
 
 ## File inventory (Scope 2)
 
@@ -382,10 +441,16 @@ App:
 - modules/app/src/main/scala/app/state/TreeViewState.scala
 - modules/app/src/main/scala/app/state/LECChartState.scala
 - modules/app/src/main/scala/app/state/ScenarioState.scala
-- modules/app/src/main/scala/app/components/HistoryPanel.scala (NEW)
+- modules/app/src/main/scala/app/components/HistorySlider.scala (NEW)
 - modules/app/src/main/scala/app/components/RevertModal.scala (NEW)
 - modules/app/src/main/scala/app/components/BranchBar.scala
 - modules/app/src/main/scala/app/views/AnalyzeView.scala
+- modules/app/src/main/scala/app/views/DesignView.scala
+- modules/app/src/main/scala/app/views/TreeBuilderView.scala
+- modules/app/src/main/scala/app/views/TreeDetailView.scala
+- modules/app/src/main/scala/app/views/TreeListView.scala
+- modules/app/src/main/scala/app/views/RiskLeafFormView.scala
+- modules/app/src/main/scala/app/views/PortfolioFormView.scala
 - modules/app/src/main/scala/app/Main.scala
 - modules/app/styles/app.css
 
@@ -395,7 +460,7 @@ App tests:
 - modules/app/src/test/scala/app/state/TreeHistoryStateSpec.scala (NEW: pure derivations)
 
 Versioning:
-- build.sbt (ThisBuild / version → 0.8.0 MINOR on landing; APP_VERSION mirrored to .env and .env.irmin, which are ungated and need no bullet)
+- build.sbt (ThisBuild / version → 0.10.0 MINOR on landing — 0.8.x/0.9.0 were consumed by the compare rework; APP_VERSION mirrored to .env and .env.irmin, which are ungated and need no bullet)
 
 ## ADR alignment
 
@@ -414,10 +479,13 @@ Versioning:
 
 ## Open decisions
 
-- None. E8 ruled 2026-07-25 (per-tree, see §5); everything else was ruled
-  E1–E7.
-- Trivial defaults taken: history page size `n=50`; `HistoryOperation`
-  vocabulary as listed; discriminator field name `"type"`.
+- None. E8 ruled 2026-07-25 (per-tree, see §5); E1–E7 ruled 2026-07-25;
+  H1–H6 (slider model, missing-node handling, read-only rewind, slider in
+  both views, fork in Design, revert placement) ruled 2026-07-26 (§8);
+  slicing ruled 2026-07-26 (§8a).
+- Trivial defaults taken: history page size `n=50` (also the slider depth);
+  `HistoryOperation` vocabulary as listed; discriminator field name
+  `"type"`.
 
 ## Verification
 
@@ -426,17 +494,22 @@ Versioning:
 - `sbt serverIt/test` (needs `local/irmin-prod:3.11-p1`) — including the
   three NEW IT specs
 - BATS suite C after server changes
-- Manual: history list on main and a scenario; view-at-point (tree + chart,
-  read-only banner, back-to-current); compare-to-current via pinned slot;
-  fork-from-history → lands in Design on the new scenario; revert with
-  confirm → both states visible in history; `X-Branch` absent → 400
-  (curl check).
+- Manual (nginx stack): rewind a baseline slot's slider on main and on a
+  scenario — tree re-renders at the pinned commit, timestamp + hash shown,
+  slot read-only, back to right edge restores live behaviour; select a
+  node, rewind past its creation — curve drops from the chart and the
+  notice names it; compare past-vs-current — baseline at head, comparand
+  slot rewound, both curves on one chart; Design slider — rewind pins the
+  forms read-only with banner, fork button greys at head and activates
+  when rewound; fork-from-rewind → new scenario at that state, editable in
+  Design; revert with confirm → both states visible in the slider's stop
+  list; `X-Branch` absent → 400 (curl check).
 - Pass/fail reporting only.
 
 ## Versioning
 
 MINOR on landing (external API changes: required renamed header, new
-endpoints, changed request/response shapes): `0.7.x → 0.8.0`, mirrored to
+endpoints, changed request/response shapes): `0.9.x → 0.10.0`, mirrored to
 `.env` and `.env.irmin`.
 
 ## Post-landing step (mandated 2026-07-25): branch-semantics API sweep
