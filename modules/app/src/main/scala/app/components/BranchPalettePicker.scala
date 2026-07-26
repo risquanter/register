@@ -64,7 +64,7 @@ object BranchPalettePicker:
         if open.now() then open.set(false)
       },
       span(
-        cls := "branch-card-swatch branch-palette-trigger",
+        cls := "color-swatch branch-palette-trigger",
         title := "Branch colour…",
         styleAttr <-- effectivePalette.map(f => s"background-color: ${PaletteData.familySwatch(f).value};"),
         inContext { trigger =>

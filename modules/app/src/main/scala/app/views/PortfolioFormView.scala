@@ -1,8 +1,9 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
-import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forPortfolio}
+import app.state.{PortfolioFormState, PortfolioField, TreeBuilderState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forPortfolio, name}
 import app.components.FormInputs
+import app.components.FormCard
 import app.components.ConfirmGuard.proceedOrConfirm
 import zio.prelude.Validation
 import com.risquanter.register.domain.data.iron.SafeName
@@ -104,6 +105,26 @@ object PortfolioFormView:
       case _                                                              => false
     }
 
+    // Card focus: expanded when this form is the active one; collapsed when a
+    // leaf is active (`Inactive`) or a fresh leaf draft is in progress
+    // (`Drafting`, passed through by `forPortfolio`).
+    val expanded: Signal[Boolean] = portfolioMode.map {
+      case FormMode.Inactive | FormMode.Drafting(_) => false
+      case _                                        => true
+    }
+    val headerText: Signal[String] = portfolioMode.map {
+      case FormMode.Locked(t)  => s"Portfolio: ${t.name.value}"
+      case FormMode.Editing(t) => s"Edit Portfolio: ${t.name.value}"
+      case _                   => "Add Portfolio"
+    }
+
+    // Activating a collapsed portfolio form = the same Inactive→Drafting
+    // transition the "Add Portfolio" button runs from Inactive.
+    def activateForm(): Unit =
+      proceedOrConfirm(builderState.leafFormDirtyVar.now(), "This will discard the leaf you're currently editing. Continue?") { () =>
+        builderState.activeForm.set(FormMode.Drafting(FormKind.Portfolio))
+      }
+
     def onAddSubmitClick(): Unit =
       val raw = builderState.activeForm.now()
       raw.forPortfolio match
@@ -125,9 +146,7 @@ object PortfolioFormView:
         // locks its own Add/Edit buttons instead of quietly offering to
         // discard this the moment it's clicked.
         case FormMode.Inactive =>
-          proceedOrConfirm(builderState.leafFormDirtyVar.now(), "This will discard the leaf you're currently editing. Continue?") { () =>
-            builderState.activeForm.set(FormMode.Drafting(FormKind.Portfolio))
-          }
+          activateForm()
         case FormMode.Locked(t: FormTarget.Portfolio) => builderState.activeForm.set(FormMode.Templating(t))
         case FormMode.Templating(_: FormTarget.Portfolio) => handleSubmit(form, builderState, submitError)
         case _ => ()
@@ -156,16 +175,12 @@ object PortfolioFormView:
         case _ => ()
       submitError.set(None)
 
-    div(
+    FormCard(
+      header = div(cls := "form-card-title", child.text <-- headerText),
+      expanded = expanded,
+      onHeaderActivate = () => activateForm(),
+      body = div(
       cls := "portfolio-form",
-      h2(child.text <-- portfolioMode.map {
-        case FormMode.Blank         => "Add Portfolio"
-        case FormMode.Inactive      => "Add Portfolio"
-        case FormMode.Drafting(_)   => "Add Portfolio"
-        case FormMode.Locked(_)     => "Portfolio Details"
-        case FormMode.Editing(_)    => "Edit Portfolio"
-        case FormMode.Templating(_) => "Add Portfolio"
-      }),
 
       // When the active target is this portfolio, populate the form from its
       // saved draft. Any other target (Blank, or a leaf) clears the fields.
@@ -250,6 +265,7 @@ object PortfolioFormView:
       ),
       // Builder-level error (e.g., duplicate name or root constraint)
       child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
+      )
     )
 
   private def handleSubmit(

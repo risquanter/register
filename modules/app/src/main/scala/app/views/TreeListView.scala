@@ -32,12 +32,18 @@ object TreeListView:
     *                       own list + selected-tree refresh — Analyze passes the
     *                       compare card's refresh so a failed fetch there is
     *                       recoverable from the same control.
+    * @param bare           When true, renders only the picker controls
+    *                       (leadingControl + tree selector) with no box,
+    *                       header/title, or slot labels — for use inside a
+    *                       slot-card header (Analyze baseline). When false, the
+    *                       boxed list with title (Design).
     */
   def apply(
     state: TreeViewState,
     onNewTree: Option[() => Unit] = None,
     leadingControl: Option[HtmlElement] = None,
-    onRefreshExtra: () => Unit = () => ()
+    onRefreshExtra: () => Unit = () => (),
+    bare: Boolean = false
   ): HtmlElement =
     // Remembers the last successfully loaded list so a refetch (branch switch,
     // refresh click) doesn't blank the selector while in flight — every
@@ -50,52 +56,70 @@ object TreeListView:
     // one case that should still show "Loading trees…", not a stale selector.
     val lastKnownTrees: Var[Option[List[SimulationResponse]]] = Var(None)
 
-    div(
-      cls := "tree-list-view",
-      div(
-        cls := "tree-list-header",
-        h3("Saved Trees"),
-        onNewTree.map(action =>
-          button(
-            cls := "new-tree-btn",
-            tpe := "button",
-            "+ New Tree",
-            onClick --> { _ => action() }
-          )
-        ).getOrElse(emptyNode)
-      ),
-      // ensureTreeListLoaded, not loadTreeList: both views' instances mount at
-      // startup (only hidden via CSS), and the shared TreeListState collapses
-      // their concurrent asks for the same branch into one request.
+    // The tree <select> (or a placeholder/error), shared by both layouts.
+    val treeSelectChild: Signal[HtmlElement] =
+      state.availableTrees.combineWith(lastKnownTrees.signal).map {
+        case (LoadState.Loaded(trees), _) =>
+          if trees.isEmpty then renderPlaceholder("No saved trees yet.")
+          else renderSelector(trees, state, onRefreshExtra)
+        case (LoadState.Loading, Some(prev)) if prev.nonEmpty =>
+          renderSelector(prev, state, onRefreshExtra)
+        case (LoadState.Loading, _) => renderPlaceholder("Loading trees…")
+        case (LoadState.Failed(msg), _) => renderError(msg, state)
+        case (LoadState.Idle, _) => renderPlaceholder("Waiting to load…")
+      }
+
+    // ensureTreeListLoaded, not loadTreeList: both views' instances mount at
+    // startup (only hidden via CSS), and the shared TreeListState collapses
+    // their concurrent asks for the same branch into one request.
+    val listPlumbing: Seq[Modifier[HtmlElement]] = Seq(
       onMountCallback(_ => state.ensureTreeListLoaded()),
       state.availableTrees.changes.collect { case LoadState.Loaded(trees) => trees } --> { trees =>
         lastKnownTrees.set(Some(trees))
-      },
+      }
+    )
+
+    if bare then
+      // Just the controls — no box, header/title, or slot labels — for use
+      // inside a slot-card header. Branch + tree selects flex to fill the row.
       div(
-        cls := "tree-list-controls-row",
-        // Labeled explicitly — otherwise two adjacent selects with no caption
-        // read as unclear duplicates rather than "which scenario, which tree".
-        leadingControl.map(c => div(
-          cls := "tree-list-branch-slot",
-          span(cls := "tree-list-slot-label", "Scenario"),
-          c
-        )).getOrElse(emptyNode),
+        cls := "tree-list-bare",
+        listPlumbing,
+        leadingControl.getOrElse(emptyNode),
+        div(cls := "tree-list-tree-slot tree-list-tree-slot--bare", child <-- treeSelectChild)
+      )
+    else
+      div(
+        cls := "tree-list-view",
         div(
-          cls := "tree-list-tree-slot",
-          span(cls := "tree-list-slot-label", "Tree"),
-          child <-- state.availableTrees.combineWith(lastKnownTrees.signal).map {
-            case (LoadState.Loaded(trees), _) =>
-              if trees.isEmpty then renderPlaceholder("No saved trees yet.")
-              else renderSelector(trees, state, onRefreshExtra)
-            case (LoadState.Loading, Some(prev)) if prev.nonEmpty =>
-              renderSelector(prev, state, onRefreshExtra)
-            case (LoadState.Loading, _) => renderPlaceholder("Loading trees…")
-            case (LoadState.Failed(msg), _) => renderError(msg, state)
-            case (LoadState.Idle, _) => renderPlaceholder("Waiting to load…")
-          }
+          cls := "tree-list-header",
+          h3("Saved Trees"),
+          onNewTree.map(action =>
+            button(
+              cls := "new-tree-btn",
+              tpe := "button",
+              "+ New Tree",
+              onClick --> { _ => action() }
+            )
+          ).getOrElse(emptyNode)
+        ),
+        listPlumbing,
+        div(
+          cls := "tree-list-controls-row",
+          // Labeled explicitly — otherwise two adjacent selects with no caption
+          // read as unclear duplicates rather than "which scenario, which tree".
+          leadingControl.map(c => div(
+            cls := "tree-list-branch-slot",
+            span(cls := "tree-list-slot-label", "Scenario"),
+            c
+          )).getOrElse(emptyNode),
+          div(
+            cls := "tree-list-tree-slot",
+            span(cls := "tree-list-slot-label", "Tree"),
+            child <-- treeSelectChild
+          )
         )
       )
-    )
 
   private def renderPlaceholder(message: String): HtmlElement =
     div(cls := "tree-list-placeholder", p(message))

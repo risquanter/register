@@ -108,6 +108,33 @@ object Icons:
       svg.path(svg.d := "M3 21v-5h5")
     )
 
+  /** Lucide `eye` — a row's curves are shown in the chart. */
+  def eye(cls: String = "eye-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"),
+      svg.circle(svg.cx := "12", svg.cy := "12", svg.r := "3")
+    )
+
+  /** Lucide `eye-off` — a row's curves are hidden from the chart. */
+  def eyeOff(cls: String = "eye-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"),
+      svg.path(svg.d := "M14.084 14.158a3 3 0 0 1-4.242-4.242"),
+      svg.path(svg.d := "M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"),
+      svg.path(svg.d := "m2 2 20 20")
+    )
+
+  /** Lucide `link` — a row's selection is mirrored to (linked with) the
+    * baseline's charted set. */
+  def mirror(cls: String = "mirror-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"),
+      svg.path(svg.d := "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71")
+    )
+
   /** Lucide `file-chart-line` — placeholder chart icon for modelling panel. */
   def fileChartLine(cls: String = "placeholder-icon"): SvgElement =
     icon24(

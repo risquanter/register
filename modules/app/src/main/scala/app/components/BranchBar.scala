@@ -131,7 +131,7 @@ object BranchBar:
   def picker(
     scenarioState: ScenarioState,
     scenariosEnabled: Signal[Boolean],
-    domCls: String = "baseline-branch-select"
+    domCls: String = "compare-branch-select"
   ): HtmlElement =
     select(
       cls := domCls,

@@ -24,6 +24,11 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   *
   * @param state             Tree navigation and chart state.
   * @param queryMatchedNodes Signal of node IDs matching the active query.
+  * @param changedNodeIds    Signal of node IDs the Compare diff reports changed
+  *                          (renders the ✎ marker).
+  * @param selectionLocked   When true (the row mirrors the baseline), Ctrl+click
+  *                          selection is disabled and shows a transient notice;
+  *                          a persistent header hint marks the mirrored state.
   */
 object TreeDetailView:
 
@@ -90,13 +95,18 @@ object TreeDetailView:
     state: TreeViewState,
     queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
     hoverBridge: ChartHoverBridge = new ChartHoverBridge(),
-    changedNodeIds: Signal[Set[NodeId]] = Signal.fromValue(Set.empty)
+    changedNodeIds: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
+    selectionLocked: StrictSignal[Boolean] = Val(false)
   ): HtmlElement =
     // Local state: which node's picker popover is open (if any)
     val pickerOpenFor: Var[Option[NodeId]] = Var(None)
+    // Pulsed true when a Ctrl-gesture is blocked because the row mirrors the
+    // baseline selection; auto-hides shortly after so the notice is transient.
+    val lockedNoticeVisible: Var[Boolean] = Var(false)
 
     div(
       cls := "tree-detail-view",
+      position.relative,
       // Close picker when clicking outside (attached to the container).
       // Guarded: this fires on EVERY click in the tree, and Var.set emits
       // even when the value is unchanged — an unguarded None-over-None write
@@ -107,6 +117,17 @@ object TreeDetailView:
       onKeyDown --> { ev => if ev.key == "Escape" && pickerOpenFor.now().isDefined then pickerOpenFor.set(None) },
       // F-GP2(B): reactively clear preview whenever picker closes
       pickerOpenFor.signal.changes.filter(_.isEmpty) --> { _ => state.clearPreview() },
+      // Auto-hide the transient selection-locked notice; each fresh block
+      // restarts the timer (flatMapSwitch drops the previous delay).
+      lockedNoticeVisible.signal.changes.filter(identity)
+        .flatMapSwitch(_ => EventStream.fromValue(false).delay(2200)) --> lockedNoticeVisible.writer,
+      // Turning Mirror off clears any pending notice at once, so it never keeps
+      // telling the user to disable an already-disabled toggle.
+      selectionLocked.changes.filter(!_) --> { _ => if lockedNoticeVisible.now() then lockedNoticeVisible.set(false) },
+      child.maybe <-- lockedNoticeVisible.signal.map { visible =>
+        if visible then Some(div(cls := "selection-locked-notice", "Selection mirrors the baseline — turn Mirror off to select manually."))
+        else None
+      },
       child <-- state.selectedTree.signal.map {
         case LoadState.Idle        => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Loading     => renderPlaceholder("Loading tree structure…")
@@ -117,7 +138,7 @@ object TreeDetailView:
         // on this literal message for the same event).
         case LoadState.Failed("Tree not found") => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Failed(msg) => renderError(msg)
-        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds)
+        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, selectionLocked, lockedNoticeVisible)
       }
     )
 
@@ -128,7 +149,7 @@ object TreeDetailView:
     div(cls := "tree-detail-error", p(cls := "error-message", message))
 
   /** Render the full tree from a RiskTree domain object. */
-  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge, pickerOpenFor: Var[Option[NodeId]], changedNodeIds: Signal[Set[NodeId]]): HtmlElement =
+  private def renderTree(tree: RiskTree, state: TreeViewState, queryMatchedNodes: Signal[Set[NodeId]], hoverBridge: ChartHoverBridge, pickerOpenFor: Var[Option[NodeId]], changedNodeIds: Signal[Set[NodeId]], selectionLocked: StrictSignal[Boolean], lockedNoticeVisible: Var[Boolean]): HtmlElement =
     // Build children lookup: parentId → child nodes
     val childrenOf: Map[Option[NodeId], Seq[RiskNode]] =
       tree.nodes.groupBy(_.parentId)
@@ -140,13 +161,17 @@ object TreeDetailView:
       div(
         cls := "tree-detail-header",
         Icons.treeRoot("tree-root-icon"),
-        span(cls := "tree-name", tree.name.value.toString)
+        span(cls := "tree-name", tree.name.value.toString),
+        child.maybe <-- selectionLocked.map { locked =>
+          if locked then Some(span(cls := "selection-lock-hint", "mirroring baseline"))
+          else None
+        }
       ),
       rootNode match
         case Some(root) =>
           div(
             cls := "tree-detail-nodes",
-            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, depth = 0)
+            renderNode(root, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, selectionLocked, lockedNoticeVisible, depth = 0)
           )
         case None =>
           div(cls := "tree-detail-error", p("Root node not found"))
@@ -154,14 +179,16 @@ object TreeDetailView:
 
   /** Recursively render a node and its children. */
   private def renderNode(
-    node:              RiskNode,
-    childrenOf:        Map[Option[NodeId], Seq[RiskNode]],
-    state:             TreeViewState,
-    queryMatchedNodes: Signal[Set[NodeId]],
-    hoverBridge:       ChartHoverBridge,
-    pickerOpenFor:     Var[Option[NodeId]],
-    changedNodeIds:    Signal[Set[NodeId]],
-    depth:             Int
+    node:                RiskNode,
+    childrenOf:          Map[Option[NodeId], Seq[RiskNode]],
+    state:               TreeViewState,
+    queryMatchedNodes:   Signal[Set[NodeId]],
+    hoverBridge:         ChartHoverBridge,
+    pickerOpenFor:       Var[Option[NodeId]],
+    changedNodeIds:      Signal[Set[NodeId]],
+    selectionLocked:     StrictSignal[Boolean],
+    lockedNoticeVisible: Var[Boolean],
+    depth:               Int
   ): HtmlElement =
     val nodeId      = node.id
     val children    = childrenOf.getOrElse(Some(nodeId), Seq.empty)
@@ -182,15 +209,21 @@ object TreeDetailView:
       //   Ctrl/Cmd+Click          → add node to LEC chart selection (no-op if already selected)
       //   Ctrl/Cmd+Shift+Click    → remove node from LEC chart selection (no-op if not selected)
       //   plain Click             → navigate / show node detail
+      // While the row mirrors the baseline, its selection is driven by the
+      // baseline; the Ctrl-gestures are blocked and pulse the transient notice
+      // instead. Plain click (navigate) still works.
       if ev.ctrlKey || ev.metaKey then
         ev.preventDefault()
-        val alreadySelected = state.userSelectedNodeIds.now().contains(nodeId)
-        if ev.shiftKey then
-          // Remove gesture — only emit if the node is currently selected
-          if alreadySelected then state.userSelectionToggle.onNext(nodeId)
+        if selectionLocked.now() then
+          lockedNoticeVisible.set(true)
         else
-          // Add gesture — only emit if the node is not yet selected
-          if !alreadySelected then state.userSelectionToggle.onNext(nodeId)
+          val alreadySelected = state.userSelectedNodeIds.now().contains(nodeId)
+          if ev.shiftKey then
+            // Remove gesture — only emit if the node is currently selected
+            if alreadySelected then state.userSelectionToggle.onNext(nodeId)
+          else
+            // Add gesture — only emit if the node is not yet selected
+            if !alreadySelected then state.userSelectionToggle.onNext(nodeId)
       else
         state.selectNode(nodeId)
 
@@ -246,7 +279,7 @@ object TreeDetailView:
           cls := "node-children",
           display <-- isExpanded.map(if _ then "block" else "none"),
           children.toList.map { c =>
-            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, depth + 1)
+            renderNode(c, childrenOf, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, selectionLocked, lockedNoticeVisible, depth + 1)
           }
         )
       else

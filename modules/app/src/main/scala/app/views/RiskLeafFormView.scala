@@ -2,8 +2,9 @@ package app.views
 
 import com.raquo.laminar.api.L.{*, given}
 import zio.prelude.Validation
-import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forLeaf}
+import app.state.{RiskLeafFormState, RiskLeafField, DistributionMode, TreeBuilderState, DistributionChartState, FormMode, FormKind, FormTarget, FieldSnapshot, ParentSelection, forLeaf, name}
 import app.components.FormInputs.*
+import app.components.FormCard
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.errors.ValidationError
@@ -104,6 +105,27 @@ object RiskLeafFormView:
       case _                                                              => false
     }
 
+    // Card focus: expanded when this form is the active one; collapsed when a
+    // portfolio is active (`Inactive`) or a fresh portfolio draft is in progress
+    // (`Drafting`, passed through by `forLeaf`).
+    val expanded: Signal[Boolean] = leafMode.map {
+      case FormMode.Inactive | FormMode.Drafting(_) => false
+      case _                                        => true
+    }
+    val headerText: Signal[String] = leafMode.map {
+      case FormMode.Locked(t)  => s"Risk Leaf: ${t.name.value}"
+      case FormMode.Editing(t) => s"Edit Risk Leaf: ${t.name.value}"
+      case _                   => "Add Risk Leaf"
+    }
+
+    // Activating a collapsed leaf form = the same Inactive→Drafting transition
+    // the "Add Leaf" button runs from Inactive (reclaims `activeForm` from a
+    // portfolio, discarding an unsaved portfolio draft only after confirming).
+    def activateForm(): Unit =
+      proceedOrConfirm(builderState.portfolioFormDirtyVar.now(), "This will discard the portfolio you're currently editing. Continue?") { () =>
+        builderState.activeForm.set(FormMode.Drafting(FormKind.Leaf))
+      }
+
     def onAddSubmitClick(): Unit =
       val raw = builderState.activeForm.now()
       raw.forLeaf match
@@ -125,9 +147,7 @@ object RiskLeafFormView:
         // so it locks its own Add/Edit buttons instead of quietly offering
         // to discard this the moment it's clicked.
         case FormMode.Inactive =>
-          proceedOrConfirm(builderState.portfolioFormDirtyVar.now(), "This will discard the portfolio you're currently editing. Continue?") { () =>
-            builderState.activeForm.set(FormMode.Drafting(FormKind.Leaf))
-          }
+          activateForm()
         case FormMode.Locked(t: FormTarget.Leaf) => builderState.activeForm.set(FormMode.Templating(t))
         case FormMode.Templating(_: FormTarget.Leaf) => handleSubmit(state, builderState, submitError)
         case _ => ()
@@ -156,16 +176,12 @@ object RiskLeafFormView:
         case _ => ()
       submitError.set(None)
 
-    div(
+    FormCard(
+      header = div(cls := "form-card-title", child.text <-- headerText),
+      expanded = expanded,
+      onHeaderActivate = () => activateForm(),
+      body = div(
       cls := "risk-leaf-form",
-      h2(child.text <-- leafMode.map {
-        case FormMode.Blank         => "Add Risk Leaf"
-        case FormMode.Inactive      => "Add Risk Leaf"
-        case FormMode.Drafting(_)   => "Add Risk Leaf"
-        case FormMode.Locked(_)     => "Risk Leaf Details"
-        case FormMode.Editing(_)    => "Edit Risk Leaf"
-        case FormMode.Templating(_) => "Add Risk Leaf"
-      }),
       p(
         cls := "form-description",
         "Configure a risk leaf node with either expert distribution or lognormal distribution."
@@ -333,8 +349,9 @@ object RiskLeafFormView:
         )
       ),
       child.maybe <-- submitError.signal.map(_.map(msg => div(cls := "form-error", msg)))
+      )
     )
-  
+
   /** Expert mode specific fields */
   private def expertFields(state: RiskLeafFormState, isDisabled: Signal[Boolean], showLockIcon: Signal[Boolean]): HtmlElement =
     div(

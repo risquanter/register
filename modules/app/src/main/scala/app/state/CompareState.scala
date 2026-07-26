@@ -2,6 +2,7 @@ package app.state
 
 import com.raquo.laminar.api.L.{*, given}
 
+import app.chart.PaletteData
 import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
@@ -49,20 +50,29 @@ extension (target: CompareTarget)
     case CompareTarget.Target(c) => Some(c)
     case CompareTarget.NotChosen => None
 
-/** How the comparison is displayed. `Overlay` draws every compared branch's
-  * curves on one chart, coloured by branch family; `SideBySide` tiles one
-  * chart per branch on shared pinned axes, keeping normal single-branch node
-  * colours inside each panel.
+/** How multiple loaded trees are displayed. `Overlay` draws every visible
+  * side's curves on one chart, coloured by branch family; `SideBySide` tiles
+  * one chart per side on shared pinned axes. With no visible comparand side,
+  * both render the plain single-tree chart.
   */
-enum CompareMode:
-  case Off, Overlay, SideBySide
+enum CompareLayout:
+  case Overlay, SideBySide
 
-/** One compared-branch picker slot. Slot identity is stable: choosing or
-  * clearing one slot never moves another slot's coordinate, so the other
-  * slot's card keeps its tree and selection untouched.
+/** One comparand picker slot. Slot identity is stable: choosing or clearing
+  * one slot never moves another slot's coordinate, so the other slot's card
+  * keeps its tree and selection untouched.
   */
 final class CompareSlotState:
   val target: Var[CompareTarget] = Var(CompareTarget.NotChosen)
+
+  /** Eye state: this slot's curves are excluded from the chart while true; all
+    * other machinery (fetches, diffs, resets, viewer card) stays live. */
+  val hidden: Var[Boolean] = Var(false)
+
+  /** Mirror state: while true this row's selection continuously tracks the
+    * baseline's charted set (the counterparts present in this row's tree), and
+    * manual Ctrl+click selection on the row is locked. */
+  val mirror: Var[Boolean] = Var(false)
 
   /** The slot's chosen branch as a signal (Main while `NotChosen`) — the
     * branch identity for the palette, and (materialized strict at the one
@@ -94,33 +104,51 @@ final class CompareSlot(
 )
 
 object CompareState:
-  /** The comparison cap: at most this many branches on screen — the tab's
-    * active branch plus `MaxBranches - 1` compared slots. Raising the cap
-    * means changing this constant and giving each new slot its palette
-    * family (`Main.scala`, which asserts the two lists agree in length). */
-  val MaxBranches: Int = 3
+  /** Branches on screen at most: one per palette family — the baseline (Aqua
+    * default) plus a comparand pool slot per remaining family. Derived from
+    * the palette list, so adding a family raises the cap automatically. */
+  val MaxBranches: Int = PaletteData.namedFamilies.size
 
   val ComparedSlotCount: Int = MaxBranches - 1
 
-/** Per-tab UI state for the Analyze comparison mode — how the comparison is
-  * displayed (off / overlay / side-by-side), and which branches (if any) to
-  * compare the tab's active branch against. Not fetched from the server.
+  /** The pool slot a new row claims: lowest index not currently in use. */
+  def nextFreeSlot(rows: Vector[Int], poolSize: Int): Option[Int] =
+    (0 until poolSize).find(i => !rows.contains(i))
+
+/** Per-tab UI state for the Analyze comparison view — how loaded trees are
+  * displayed (overlay / side-by-side), which pool slots are on screen as
+  * comparand rows, and the eye state hiding a side's chart contribution. Not
+  * fetched from the server.
   */
 final class CompareState:
-  val mode: Var[CompareMode] = Var(CompareMode.Off)
+  val layout: Var[CompareLayout] = Var(CompareLayout.Overlay)
 
-  /** The compared-branch picker slots, in display order. */
+  /** Baseline eye state — mirrors `CompareSlotState.hidden` for row 0. */
+  val baselineHidden: Var[Boolean] = Var(false)
+
+  /** Fixed pool; a pool slot is live only while its index is in `rows`. */
   val slots: Vector[CompareSlotState] =
     Vector.fill(CompareState.ComparedSlotCount)(new CompareSlotState)
 
-  /** True in either comparison mode — everything shared by Overlay and
-    * Side-by-side (branch cards, ✎ diff markers, entry seeding, the compare
-    * cards' fetches) keys off this rather than the specific mode. */
-  val comparisonOn: Signal[Boolean] = mode.signal.map(_ != CompareMode.Off)
+  /** Pool indices of the user-added comparand rows, in display order. */
+  val rows: Var[Vector[Int]] = Var(Vector.empty)
 
-  def comparisonOnNow: Boolean = mode.now() != CompareMode.Off
+  /** (poolIdx, target) pairs in row order — the engagement/dedup input. */
+  val rowTargets: Signal[Vector[(Int, CompareTarget)]] =
+    rows.signal
+      .combineWith(Signal.combineSeq(slots.map(_.target.signal)))
+      .map { (order, ts) => order.map(i => i -> ts(i)) }
 
-  /** Every slot's target, in slot order — what the card stack, the panel
-    * grid, and the pickers' mutual-exclusion lists all read. */
-  val targets: Signal[Vector[CompareTarget]] =
-    Signal.combineSeq(slots.map(_.target.signal)).map(_.toVector)
+  /** Per-pool-slot hidden flags (pool order). */
+  val hiddenFlags: Signal[Vector[Boolean]] =
+    Signal.combineSeq(slots.map(_.hidden.signal)).map(_.toVector)
+
+  def addRow(): Unit =
+    CompareState.nextFreeSlot(rows.now(), slots.size)
+      .foreach(i => rows.update(_ :+ i))
+
+  def removeRow(poolIdx: Int): Unit =
+    rows.update(_.filterNot(_ == poolIdx))
+    slots(poolIdx).target.set(CompareTarget.NotChosen)
+    slots(poolIdx).hidden.set(false)
+    slots(poolIdx).mirror.set(false)

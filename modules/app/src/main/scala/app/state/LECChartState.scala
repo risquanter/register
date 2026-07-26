@@ -96,7 +96,7 @@ final class LECChartState(
   // .distinct at the producer (here and on nodeColorMap below), not at each
   // consumer: Var.set emits even when the value is unchanged, and every
   // consumer of these signals rebuilds something expensive (the Vega spec in
-  // specSignal, AnalyzeView's compare-mode combined spec, per-row tree
+  // specSignal, AnalyzeView's combined overlay spec, per-row tree
   // styling). Deduplicating once here absorbs any no-op upstream write —
   // e.g. a query re-run writing an equal satisfyingNodeIds set — for all of
   // them.
@@ -200,6 +200,12 @@ final class LECChartState(
     * value is unchanged. */
   def clearPreview(): Unit =
     if previewOverride.now().isDefined then previewOverride.set(None)
+
+  /** Replace the user selection wholesale (mirror-baseline sync). Writes
+    * directly, like `reset()`, so the whole set changes in one transaction
+    * rather than one toggle per node; skips the write when nothing changes. */
+  def setUserSelection(ids: Set[NodeId]): Unit =
+    if userSelectedNodeIds.now() != ids then userSelectedNodeIds.set(ids)
 
   /** Reset chart state (called when tree selection changes). Also supersedes
     * an in-flight curve fetch, if one was still running. */

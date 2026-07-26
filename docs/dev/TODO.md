@@ -1650,3 +1650,21 @@ tests (`sbt server/test`) and BATS suite C keep using the TrieMap backend.
 **Open point to verify during implementation:** whether the compose `tmpfs`
 form or an anonymous volume interacts correctly with the container's non-root
 user (UID 65532) writing `/data`.
+
+---
+
+## 32. Phase F — multi-tree queries
+
+**Origin (2026-07-26):** the Analyze compare redesign (PLAN-COMPARE-UI-REDESIGN.md)
+made loading several trees the norm — a baseline row plus comparand rows — but
+the VQL query pane still runs only against the baseline's (branch, tree). Phase F
+is to plan how the query pane extends beyond the baseline: per-row query
+targeting (run the same expression against a chosen row) or cross-tree
+predicates (an expression that draws nodes from more than one loaded tree, e.g.
+comparing a leaf's figures across the baseline and a comparand).
+
+**Scope:** design task only — no grammar, backend, or UI changes proposed yet.
+Related to item 28 (VQL across trees/scenarios), which frames the query-language
+question; this item is the compare-view's driver for it.
+
+**Status:** recorded per user instruction; no design started.

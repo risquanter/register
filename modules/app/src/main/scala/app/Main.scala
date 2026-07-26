@@ -70,10 +70,13 @@ object Main:
     // to the slot's own default family. Passing it to the TreeViewState
     // makes the card's tree highlights match its curves.
     val analyzeCompareState = new CompareState
-    val compareSlotDefaultPalettes = Vector(PaletteData.Purple, PaletteData.Orange)
+    val compareSlotDefaultPalettes = Vector(
+      PaletteData.Purple, PaletteData.Orange, PaletteData.Green,
+      PaletteData.Yellow, PaletteData.Red, PaletteData.Pink, PaletteData.Emerald
+    )
     require(
       compareSlotDefaultPalettes.length == CompareState.ComparedSlotCount,
-      "every compare slot needs its own default palette family"
+      "one default palette family per compare slot"
     )
     val analyzeCompareSlots = analyzeCompareState.slots.zip(compareSlotDefaultPalettes).map { (slotState, defaultPalette) =>
       val slotPalette = branchPaletteState.paletteFor(slotState.branchSignal, defaultPalette)

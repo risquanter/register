@@ -4,6 +4,7 @@ import zio.test.*
 import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
+import app.chart.PaletteData
 import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId, ScenarioName}
 
 /** Pure tests for the Compare slot coordinate model: the target projections,
@@ -105,5 +106,38 @@ object CompareStateSpec extends ZIOSpecDefault:
         s1AfterChoose == CompareTarget.NotChosen,
         s1AfterClear == CompareTarget.NotChosen
       )
+    },
+
+    test("nextFreeSlot picks the lowest free pool index and is empty when the pool is full") {
+      assertTrue(
+        CompareState.nextFreeSlot(Vector.empty, 3).contains(0),
+        CompareState.nextFreeSlot(Vector(0, 2), 3).contains(1),
+        CompareState.nextFreeSlot(Vector(0, 1, 2), 3).isEmpty
+      )
+    },
+
+    test("a slot's mirror flag defaults to off") {
+      assertTrue(!new CompareSlotState().mirror.now())
+    },
+
+    test("removeRow resets the slot's target, hidden, and mirror flags and drops only that row") {
+      val state = new CompareState
+      state.addRow()
+      state.addRow()
+      state.slots(0).target.set(CompareTarget.Target(SlotCoordinate(BranchChoice.Scenario(scenarioA), Some(tid))))
+      state.slots(0).hidden.set(true)
+      state.slots(0).mirror.set(true)
+      state.removeRow(0)
+      assertTrue(
+        state.rows.now() == Vector(1),
+        state.slots(0).target.now() == CompareTarget.NotChosen,
+        !state.slots(0).hidden.now(),
+        !state.slots(0).mirror.now(),
+        state.slots(1).target.now() == CompareTarget.NotChosen
+      )
+    },
+
+    test("MaxBranches equals the number of palette families") {
+      assertTrue(CompareState.MaxBranches == PaletteData.namedFamilies.size)
     }
   )

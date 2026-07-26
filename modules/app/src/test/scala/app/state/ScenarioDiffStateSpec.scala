@@ -5,9 +5,9 @@ import zio.test.*
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.responses.{ScenarioDiffResponse, NodeDiffEntry}
 
-/** Pure tests for `ScenarioDiffState.deriveChangedNodeIds` (milestone-2b
-  * Phase C, Analyze Overlay compare mode) — no Laminar Var/Signal harness
-  * needed, since the derivation is a plain function of `LoadState`.
+/** Pure tests for `ScenarioDiffState.deriveChangedNodeIds` (the Analyze
+  * overlay ✎ change markers) — no Laminar Var/Signal harness needed, since
+  * the derivation is a plain function of `LoadState`.
   */
 object ScenarioDiffStateSpec extends ZIOSpecDefault:
 

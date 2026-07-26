@@ -207,7 +207,7 @@ final class AnalyzeQueryState(
     * from `queryResult`, and `AnalyzeView.chartNodeIds` folds that set into
     * the chart's node selection — without this reset, a previous tree's
     * matched node IDs would keep flowing into the newly selected tree's
-    * chart (and, for Compare mode, into curve fetches against the new tree
+    * chart (and, for comparand slots, into curve fetches against the new tree
     * using node IDs that may not even exist there). Also supersedes an
     * in-flight query for the *previous* tree, if one was still running.
     */
