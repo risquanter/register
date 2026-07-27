@@ -400,6 +400,218 @@ Three slices, this plan:
   tree detail + banner) + fork button (greyed at head) + revert
   (`TreeRevertState`, `RevertModal`, scenario-menu enablement).
 
+### 8b. Slice E-A — implementation signatures
+
+Verbatim signatures for the Analyze slider. Ordering is a solved property (no
+server work): `getHistory` returns commits oldest-first in ancestry order,
+pinned by `RiskTreeRepositoryIrminSpec` — so a stop list is used as-is,
+`list.head` = oldest (left), `list.last` = newest (right, = head). Decisions
+ruled: point-in-time `at` lives in the coordinate and participates in slot pair
+identity (decision 2); no ordering implementation (decision 1 dissolved).
+
+**New — `modules/app/src/main/scala/app/state/TreeHistoryState.scala`** (mirrors
+`ChangedNodesState` exactly — EventBus trigger + `ZJS.loadStatePipeline` +
+idempotency guard):
+
+```scala
+final class TreeHistoryState(
+  keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  userIdAccessor: () => Option[UserId.Authenticated] = () => None
+) extends WorkspaceTreeEndpoints:
+  val history: Var[LoadState[TreeHistoryResponse]] = Var(LoadState.Idle)
+  private val historyTrigger =
+    new EventBus[Option[() => EventStream[Either[Throwable, TreeHistoryResponse]]]]
+  ZJS.loadStatePipeline(historyTrigger.events).foreach { v =>
+    if history.now() != v then history.set(v)
+  }(using unsafeWindowOwner)
+
+  /** Fetch a tree's commit history on a branch (oldest-first). */
+  def loadHistory(treeId: TreeId, branch: BranchChoice, n: Int = 50): Unit
+  /** Supersede an in-flight fetch and clear. */
+  def reset(): Unit
+
+  /** Oldest-first commit stops for the slider; empty for any non-loaded state. */
+  val commits: Signal[List[TreeHistoryEntry]] = history.signal.map(TreeHistoryState.deriveCommits)
+
+object TreeHistoryState:
+  /** Pure derivation, testable without a Laminar harness. */
+  def deriveCommits(result: LoadState[TreeHistoryResponse]): List[TreeHistoryEntry] = result match
+    case LoadState.Loaded(resp) => resp.entries
+    case _                      => Nil
+```
+
+`loadHistory` calls `getTreeHistoryEndpoint((userIdAccessor(), key, treeId,
+branch, n))` (input tuple: authed userId header + key path + treeId path +
+`branchHeader` + `n` query).
+
+**New — `modules/app/src/main/scala/app/components/HistorySlider.scala`**:
+
+```scala
+object HistorySlider:
+  /** Discrete commit stops for one (tree, branch), index-spaced oldest→left,
+    * newest→right. `commits` is oldest-first (as `getHistory` returns): the
+    * rightmost stop is the branch head and pins `None` (live); every earlier
+    * stop pins `Some(entry.commitHash)`. Each stop shows its timestamp + short
+    * hash (tooltip). Emits the chosen pin via `onPick`. */
+  def apply(
+    commits: Signal[List[TreeHistoryEntry]],
+    selected: StrictSignal[Option[CommitHash]],
+    onPick: Option[CommitHash] => Unit
+  ): HtmlElement
+```
+
+**Changed — `modules/app/src/main/scala/app/state/CompareState.scala`**:
+
+```scala
+// SlotCoordinate gains `at`; it participates in pair identity (decision 2), so
+// a rewound slot on the baseline's tree is a DIFFERENT pair (both chart) rather
+// than a collision. effectiveTree is unchanged.
+final case class SlotCoordinate(branch: BranchChoice, treeOverride: Option[TreeId], at: Option[CommitHash]):
+  def effectiveTree(activeTree: Option[TreeId]): Option[TreeId] = treeOverride.orElse(activeTree)
+  def samePairAs(other: SlotCoordinate, activeTree: Option[TreeId]): Boolean =
+    branch == other.branch && effectiveTree(activeTree) == other.effectiveTree(activeTree) && at == other.at
+  def collidesWith(activeBranch: BranchChoice, activeTree: Option[TreeId]): Boolean =
+    samePairAs(SlotCoordinate.activeTab(activeBranch), activeTree)
+
+object SlotCoordinate:
+  def activeTab(branch: BranchChoice): SlotCoordinate = SlotCoordinate(branch, None, None)
+
+// CompareSlotState gains `atSignal`, derived from `target` exactly like
+// `branchSignal` — so the slider writes `target` and the pin follows, and pair
+// identity stays consistent within one transaction:
+final class CompareSlotState:
+  // ...existing target/hidden/mirror/branchSignal unchanged...
+  val atSignal: Signal[Option[CommitHash]] = target.signal.map {
+    case CompareTarget.Target(c) => c.at
+    case CompareTarget.NotChosen => None
+  }.distinct
+  /** Slider writes the pin into the coordinate (no-op while NotChosen). */
+  def setAt(at: Option[CommitHash]): Unit =
+    target.update { case CompareTarget.Target(c) => CompareTarget.Target(c.copy(at = at)); case nc => nc }
+
+// CompareSlot gains a per-slot history source for its slider:
+final class CompareSlot(
+  val state: CompareSlotState,
+  val treeViewState: TreeViewState,
+  val diffState: ChangedNodesState,
+  val historyState: TreeHistoryState,   // NEW
+  val palette: Signal[Vector[HexColor]]
+)
+
+// CompareState gains the baseline pin (the baseline is the active tab, not a slot):
+final class CompareState:
+  // ...existing layout/baselineHidden/slots/rows unchanged...
+  val baselineAt: Var[Option[CommitHash]] = Var(None)
+```
+
+Every `NotChosen`/`activeTab` construction and the `CompareTarget.Target(SlotCoordinate(...))`
+call sites gain the third `at` argument (default `None`).
+
+**Changed — `modules/app/src/main/scala/app/state/TreeViewState.scala`** (add a
+pin signal, mirroring `activeBranchSignal`):
+
+```scala
+final class TreeViewState(
+  keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  treeListState: TreeListState,
+  globalError: Var[Option[GlobalError]],
+  userIdAccessor: () => Option[UserId.Authenticated] = () => None,
+  activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
+  atSignal: StrictSignal[Option[CommitHash]] = Val(None),   // NEW
+  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua)
+) extends WorkspaceTreeEndpoints:
+  private def atAccessor(): Option[CommitHash] = atSignal.now()
+  // NEW: a pin change re-fetches the pinned structure (same guard as branch change).
+  atSignal.changes.foreach(_ => refreshSelectedTree())(using unsafeWindowOwner)
+  // loadTreeStructure: the Option.empty[CommitHash] placeholder becomes atAccessor():
+  //   getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), atAccessor()))
+  // chartState gains atAccessor:
+  val chartState: LECChartState =
+    LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError,
+                  userIdAccessor, branchAccessor, atAccessor, userPalette)
+```
+
+**Changed — `modules/app/src/main/scala/app/state/LECChartState.scala`**:
+
+```scala
+final class LECChartState(
+  // ...existing params...,
+  branchAccessor: () => BranchChoice = () => BranchChoice.Main,
+  atAccessor: () => Option[CommitHash] = () => None,   // NEW (before userPalette)
+  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua)
+):
+  // loadCurves: the Option.empty[CommitHash] placeholder becomes atAccessor():
+  //   getWorkspaceLECCurvesMultiEndpoint((userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), atAccessor()))
+
+  /** Selected nodes with no curve in the current cache — i.e. selections that do
+    * not exist at the pinned commit (H3). Empty at head. Drives the transient
+    * "not present at this point in time" notice; the chart already omits them. */
+  val droppedSelections: Signal[Set[NodeId]] =
+    userSelectedNodeIds.signal.combineWith(curveCache.signal).map(LECChartState.deriveDropped)
+
+object LECChartState:
+  def deriveDropped(selected: Set[NodeId], cache: LoadState[Map[NodeId, LECNodeCurve]]): Set[NodeId] =
+    cache match
+      case LoadState.Loaded(m) => selected -- m.keySet
+      case _                   => Set.empty
+```
+
+**Changed — `modules/app/src/main/scala/app/views/TreeDetailView.scala`** (pinned
+read-only + banner):
+
+```scala
+def apply(
+  state: TreeViewState,
+  queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
+  hoverBridge: ChartHoverBridge = new ChartHoverBridge(),
+  changedNodeIds: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
+  selectionLocked: Signal[Boolean] = Val(false),        // widened from StrictSignal
+  pinnedAt: Signal[Option[TreeHistoryEntry]] = Val(None) // NEW: pinned banner (timestamp + hash)
+): HtmlElement
+```
+
+`pinnedAt = Some(entry)` renders the pinned banner (naming `entry.at` +
+short `entry.commitHash`); the caller passes `selectionLocked = mirror ||
+pinned` so rewind locks selection via the existing mechanism.
+
+**Changed — `modules/app/src/main/scala/app/state/ChangedNodesState.scala`**
+(wire the pins so compare = baseline@its-pin vs comparand@its-pin; today both
+are hard-`None`):
+
+```scala
+def loadDiff(
+  treeId: TreeId,
+  activeBranch: BranchChoice, activeAt: Option[CommitHash],
+  compareBranch: BranchChoice, compareAt: Option[CommitHash]
+): Unit
+// emits getChangedNodesEndpoint((userIdAccessor(), key, treeId,
+//   activeBranch, activeAt, compareBranch, compareAt))
+```
+
+**Wiring — `modules/app/src/main/scala/app/views/AnalyzeView.scala`**:
+
+- Construct one `TreeHistoryState` per `CompareSlot` (alongside its
+  `treeViewState`/`diffState` at the existing build site) and one for the
+  baseline; the slot's `TreeViewState` now receives `atSignal =
+  state.atSignal`, the baseline's receives `atSignal = compareState.baselineAt.signal`.
+- `renderComparandHead`: add a slider row after the `slot-card-picker` div —
+  `HistorySlider(slot.historyState.commits, <slot at as StrictSignal>, slot.state.setAt)`;
+  the baseline card gets the same row bound to `baselineAt`. A subscription
+  (re)loads each `TreeHistoryState` when its (effective tree, branch) changes.
+- `TreeDetailView` calls pass `selectionLocked = mirror || pinned` and
+  `pinnedAt` resolved from the slot's `atSignal` against `historyState.commits`;
+  render `LECChartState.droppedSelections` as the transient H3 notice.
+- `engagedSlots`/`samePairAs` now key on `at` too (above), so a rewound slot on
+  the baseline's tree engages instead of being deduped as a tab collision —
+  this is the past-vs-current compare path, no extra code.
+
+**New test — `modules/app/src/test/scala/app/state/TreeHistoryStateSpec.scala`**:
+pure `TreeHistoryState.deriveCommits` (Loaded → entries; Idle/Loading/Failed →
+Nil) and `LECChartState.deriveDropped` (selected minus loaded curve keys;
+non-loaded → empty), styled like `ChangedNodesStateSpec` (no DOM/HTTP harness).
+
+Open decisions (Slice E-A): none — decisions 1 and 2 ruled; ordering solved.
+
 ## File inventory (Scope 2)
 
 Common:

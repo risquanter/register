@@ -212,6 +212,45 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         )
       },
 
+      // getHistory returns a tree's commits oldest-first, which maps directly to
+      // the slider's left-to-right fill (left = initial, right = latest). The
+      // order is the transaction chain: each entry is the sole parent of the next.
+      test("history is returned oldest-first in ancestry (transaction) order") {
+        for
+          repo    <- ZIO.service[RiskTreeRepository]
+          irmin   <- ZIO.service[IrminClient]
+          tree     = sampleTree(treeId("tree-hist-order"), "Hist Order")
+          base     = s"workspaces/${wsId.value}/risk-trees/${tree.id.value}"
+          _       <- repo.create(wsId, tree, BranchRef.Main)
+          _       <- repo.update(wsId, tree.id, _ => updatedTree(tree), BranchRef.Main)
+          hMeta   <- irmin.getHistory(IrminPath.unsafeFrom(s"$base/meta"), positiveInt(10))
+        yield assertTrue(
+          hMeta.size == 2,
+          hMeta.zip(hMeta.drop(1)).forall((older, newer) => newer.parents == List(older.hash))
+        )
+      },
+
+      // The same-second caveat matters for automated/scripted callers that fire
+      // many writes to one tree with no clock delay. Force a rapid burst (commits
+      // sharing a wall-clock second) and prove the returned history is still a
+      // valid oldest-first ancestry chain — i.e. not scrambled by same-second ties.
+      test("history stays ancestry-ordered under a rapid same-second write burst") {
+        val tid  = treeId("tree-hist-burst")
+        val full = sampleTree(tid, "Burst")
+        val base = s"workspaces/${wsId.value}/risk-trees/${tid.value}"
+        for
+          repo    <- ZIO.service[RiskTreeRepository]
+          irmin   <- ZIO.service[IrminClient]
+          _       <- repo.create(wsId, full, BranchRef.Main)
+          _       <- ZIO.foreachDiscard(1 to 12)(i =>
+                       repo.update(wsId, tid, _ => if i % 2 == 0 then full else updatedTree(full), BranchRef.Main))
+          hMeta   <- irmin.getHistory(IrminPath.unsafeFrom(s"$base/meta"), positiveInt(50))
+        yield assertTrue(
+          hMeta.size == 13,
+          hMeta.zip(hMeta.drop(1)).forall((older, newer) => newer.parents == List(older.hash))
+        )
+      },
+
       test("delete is one commit that leaves no residue under the tree path") {
         for
           repo    <- ZIO.service[RiskTreeRepository]

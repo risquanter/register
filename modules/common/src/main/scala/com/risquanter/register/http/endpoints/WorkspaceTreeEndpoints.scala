@@ -73,7 +73,7 @@ trait WorkspaceTreeEndpoints extends BaseEndpoint:
     authedBaseEndpoint
       .tag("workspaces")
       .name("getTreeHistory")
-      .description("Per-tree commit history on a branch, most recent first")
+      .description("Per-tree commit history on a branch, oldest first")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "history")
       .get
       .in(branchHeader)

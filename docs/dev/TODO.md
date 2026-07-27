@@ -1668,3 +1668,38 @@ Related to item 28 (VQL across trees/scenarios), which frames the query-language
 question; this item is the compare-view's driver for it.
 
 **Status:** recorded per user instruction; no design started.
+
+## 33. Tree-history ordering under concurrent writers — informative research only
+
+**Origin (2026-07-27):** Phase E history-slider work established, and pinned with
+property tests in `RiskTreeRepositoryIrminSpec`, that `getHistory` returns a
+tree's commits oldest-first in commit-DAG (ancestry) order — verified for both
+normal writes and a rapid same-second burst. Those tests fire writes
+sequentially, so they do not exercise genuinely concurrent writers to one tree.
+
+**Idea:** a test that fires concurrent `set_tree` from multiple fibers at the
+same tree on the same branch, then asserts the returned history is still a valid
+ancestry chain. Ancestry order is a DAG property and is expected to hold
+regardless of writer count; such a test would also likely surface the
+lost-update behaviour noted in item 34.
+
+**Status:** informative research only — not scheduled, not a Phase E dependency.
+Ordering is already test-pinned for the serialized write stream the app produces
+today.
+
+## 34. Tree writes use unconditional `set_tree` (no optimistic concurrency) — informative research only
+
+**Origin (2026-07-27):** `IrminQueries.setTree` writes a tree unconditionally —
+no compare-and-set on the branch head. The CAS primitive `test_and_set_branch`
+exists but is used only for scenario branch create/delete, not for tree writes.
+So two concurrent updates to the same tree on the same branch are
+last-write-wins: a lost update is possible.
+
+**Relevance:** independent of history ordering (a separate, DAG-based property
+— item 33). It matters only if concurrent editing of a single tree becomes a
+real workflow — a multi-writer future the architecture does not currently commit
+to either way. Closable by routing tree writes through `test_and_set_branch`
+with a read-modify-write retry, mirroring how scenario branch ops already CAS.
+
+**Status:** informative research only — independent of Phase E; no work
+scheduled.
