@@ -397,6 +397,34 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         )
       },
 
+      test("getLECCurvesMulti fails on an absent node with the default (omitAbsent = false)") {
+        val missing = NodeId.fromString("01HX9ABCDE0000000000000099").toOption.get
+        for {
+          tree <- service(_.create(stubWsId, validRequest, BranchRef.Main))
+          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(tree.rootId, missing), testEntity, false, Revision.Head(BranchRef.Main))).exit
+        } yield assertTrue(exit.isFailure)
+      },
+
+      test("getLECCurvesMulti omits absent nodes and returns the present ones when omitAbsent = true") {
+        val missing = NodeId.fromString("01HX9ABCDE0000000000000099").toOption.get
+        for {
+          tree   <- service(_.create(stubWsId, validRequest, BranchRef.Main))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(tree.rootId, missing), testEntity, false, Revision.Head(BranchRef.Main), true))
+        } yield assertTrue(
+          curves.contains(tree.rootId),
+          !curves.contains(missing)
+        )
+      },
+
+      test("getLECCurvesMulti with omitAbsent returns empty when every requested node is absent") {
+        val missing1 = NodeId.fromString("01HX9ABCDE0000000000000099").toOption.get
+        val missing2 = NodeId.fromString("01HX9ABCDE0000000000000098").toOption.get
+        for {
+          tree   <- service(_.create(stubWsId, validRequest, BranchRef.Main))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(missing1, missing2), testEntity, false, Revision.Head(BranchRef.Main), true))
+        } yield assertTrue(curves.isEmpty)
+      },
+
       // ========================================
       // Seed identity assignment (PLAN-SEED-IDENTITY §5)
       // ========================================

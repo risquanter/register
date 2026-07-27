@@ -48,4 +48,6 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
       .in(jsonBody[List[NodeId]].description("Array of node IDs"))
       .in(branchHeader)
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
+      .in(query[Boolean]("omitAbsent").default(false)
+        .description("When true, requested node IDs absent from the tree at this revision are omitted from the result instead of failing the request (point-in-time reads)."))
       .out(jsonBody[Map[NodeId, LECNodeCurve]])

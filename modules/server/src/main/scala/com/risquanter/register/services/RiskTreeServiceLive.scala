@@ -66,12 +66,15 @@ class RiskTreeServiceLive private (
       ))))
     yield (tree, node)
 
-  /** Fetch tree and all requested nodes; fail with aggregated validation errors when any node is missing. */
-  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision): Task[(RiskTree, Map[NodeId, RiskNode])] =
+  /** Fetch tree and all requested nodes. With `omitAbsent = false` (the
+    * default), fail with aggregated validation errors when any node is missing;
+    * with `omitAbsent = true`, absent nodes are simply not in the returned map
+    * (the point-in-time read path — a node may not exist at an earlier commit). */
+  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): Task[(RiskTree, Map[NodeId, RiskNode])] =
     for
       tree <- getTreeOrFail(wsId, treeId, rev)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
-      _ <- if missing.isEmpty then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
+      _ <- if missing.isEmpty || omitAbsent then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
         field = "nodeIds",
         code = ValidationErrorCode.NOT_FOUND,
         message = s"Node ${id.value} not found in tree ${tree.id}"
@@ -442,7 +445,7 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): Task[Map[NodeId, LECNodeCurve]] =
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean): Task[Map[NodeId, LECNodeCurve]] =
     traced("getLECCurvesMulti") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -458,12 +461,17 @@ class RiskTreeServiceLive private (
             message = "nodeIds set is empty"
           ))))
         } else {
-          lookupNodesInTree(wsId, treeId, nodeIds, rev)
+          lookupNodesInTree(wsId, treeId, nodeIds, rev, omitAbsent)
         }
         (tree, nodesMap) = treeWithNodes
-        
-        // Batch cache-aside: ensure all results are cached
-        results <- resolver.ensureCachedAll(tree, nodeIds, seedEntityId, includeProvenance)
+        // With omitAbsent, nodesMap holds only the ids present at this revision;
+        // resolve and log against that present set (empty input still failed above).
+        presentIds = nodesMap.keySet
+        _ <- ZIO.when(omitAbsent && presentIds.size < nodeIds.size)(
+               ZIO.logInfo(s"lec-multi omitAbsent: ${nodeIds.size - presentIds.size} absent node(s) omitted at $rev"))
+
+        // Batch cache-aside: ensure all present results are cached
+        results <- resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance)
         _ <- tracing.setAttribute("results_resolved", results.size.toLong)
         
         // Generate curves with shared tick domain (ADR-014 render-time strategy)

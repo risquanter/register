@@ -682,6 +682,7 @@ Server tests:
 - modules/server/src/test/scala/com/risquanter/register/http/controllers/ScenarioControllerSpec.scala
 - modules/server/src/test/scala/com/risquanter/register/services/TreeHistoryServiceSpec.scala (NEW)
 - modules/server/src/test/scala/com/risquanter/register/domain/BranchChoiceWireSpec.scala (NEW: fromWireString, "main" reservation)
+- modules/server/src/test/scala/com/risquanter/register/services/CascadeTestStubs.scala (§C3: RiskTreeService stub gains omitAbsent param)
 
 Server IT:
 - modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminRevertSemanticsSpec.scala (NEW: E3 probe — native revert is a head-set)
@@ -721,8 +722,9 @@ App tests:
 - modules/app/src/test/scala/app/state/ScenarioDiffStateSpec.scala (RENAME → ChangedNodesStateSpec.scala; old path, remove after rename)
 - modules/app/src/test/scala/app/state/ChangedNodesStateSpec.scala (RENAME target)
 - modules/app/src/test/scala/app/state/TreeHistoryStateSpec.scala (NEW: pure derivations)
-- modules/app/src/test/scala/app/state/CompareStateSpec.scala (§C2: per-slot palette default/reset coverage)
+- modules/app/src/test/scala/app/state/CompareStateSpec.scala (§C2: per-slot palette default/reset coverage; §C3: collidesWith activeAt)
 - modules/app/src/test/scala/app/state/BranchPaletteStateSpec.scala (DELETE — §C2 retires branch-keyed palette)
+- modules/app/src/test/scala/app/views/AnalyzeViewSeedSpec.scala (§C3: engagedSlots activeAt param)
 
 Versioning:
 - build.sbt (ThisBuild / version → 0.10.0 MINOR on landing — 0.8.x/0.9.0 were consumed by the compare rework; APP_VERSION mirrored to .env and .env.irmin, which are ungated and need no bullet)
@@ -1298,3 +1300,193 @@ there. No `common`/`server` changes.
 PATCH bump on landing (shipped SPA behaviour changed): `build.sbt` →
 `0.10.2` (0.10.1 is the §C1 slot), `APP_VERSION` mirrored to `.env` and
 `.env.irmin`.
+
+# Continuation §C3 — compare-history fixes (3a collision, 3b omitAbsent)
+
+Two defects found in manual review of the §C2 build (2026-07-27). Both rulings
+below are user-confirmed.
+
+## Goal
+
+1. **3a — present-vs-past on one tree engages.** With the baseline rewound to
+   the past, a comparand set to the live head (`at = None`) of the same branch
+   and tree currently disengages, because `collidesWith`/`activeTab` hardcode
+   the active tab's `at = None` and so treat the comparand as a duplicate of an
+   (assumed-at-head) baseline. Thread the baseline's real pin (`baselineAt`)
+   into the active-tab coordinate.
+2. **3b — rewind before a node existed drops it, not errors.** The multi-curve
+   fetch fails the whole request if any node is absent from the pinned tree
+   (`lookupNodesInTree`), so rewinding before a node's creation blanks the chart
+   with a 400. Add an additive `omitAbsent` flag; when set, absent nodes are
+   omitted (the H3 drop path) instead of failing.
+
+## Rulings (2026-07-27, user)
+
+- **3a**: single correct fix — active-tab coordinate carries `baselineAt`.
+- **3b**: Option B — a **separate** `omitAbsent: Boolean` query param (default
+  `false`), orthogonal to `at` (clean separation of concerns; `at` = which
+  commit, `omitAbsent` = error semantics). The frontend sends `omitAbsent = true`
+  on every curve fetch (never blank the chart on a missing curve); the server
+  omits absent nodes and logs the count for observability. Existing strict
+  behaviour and its callers are unchanged by the `false` default.
+
+## Fix 3a — active-tab coordinate carries the baseline pin
+
+### `CompareState.scala`
+
+```scala
+// collidesWith gains the active tab's current pin; samePairAs is unchanged
+// (it already compares `at`).
+def collidesWith(activeBranch: BranchChoice, activeTree: Option[TreeId], activeAt: Option[CommitHash]): Boolean =
+  samePairAs(SlotCoordinate.activeTab(activeBranch, activeAt), activeTree)
+
+object SlotCoordinate:
+  /** The active tab as a coordinate: its branch, following the active tree, at
+    * its current history pin (`baselineAt`) — so a comparand at a different
+    * point in time is a distinct pair, not a collision. */
+  def activeTab(branch: BranchChoice, at: Option[CommitHash]): SlotCoordinate =
+    SlotCoordinate(branch, None, at)
+```
+
+### `AnalyzeView.scala`
+
+- `engagedSlots(targets, activeBranch, activeTreeId, activeAt: Option[CommitHash])`
+  and `engagedPoolSlots(rowTs, activeBranch, activeTid, activeAt)` gain
+  `activeAt`, forwarded to `collidesWith`.
+- Thread `compareState.baselineAt.signal` into the combines that must recompute
+  engagement on a rewind: the three that call `engagedPoolSlots`
+  (`combinedSpecSignal`, `sideBySideSpecs`, the `analyze-lec-panel` child) **and**
+  the per-slot effective-tree loader (so a slot that was a same-head collision
+  re-engages and loads its tree once the baseline moves off head).
+- The per-slot active-branch reset subscription reads `compareState.baselineAt
+  .now()` for its `collidesWith` check but is **not** re-triggered by it — a
+  rewind must never clear a comparand's chosen target (it only reversibly
+  engages/disengages).
+
+## Fix 3b — additive `omitAbsent`
+
+### `WorkspaceAnalysisEndpoints.scala` (common)
+
+Add after the `at` query (sibling to the existing `includeProvenance` flag):
+
+```scala
+.in(query[Boolean]("omitAbsent").default(false)
+  .description("When true, requested node IDs absent from the tree at this revision are omitted from the result instead of failing the request (point-in-time reads)."))
+```
+
+Endpoint input tuple becomes
+`(userId, key, treeId, includeProvenance, nodeIds, branch, at, omitAbsent)`.
+
+### `RiskTreeService.scala` + `RiskTreeServiceLive.scala`
+
+```scala
+def getLECCurvesMulti(
+  wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId],
+  seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean,
+  rev: Revision, omitAbsent: Boolean = false
+): Task[Map[NodeId, LECNodeCurve]]
+```
+
+`lookupNodesInTree` gains `omitAbsent`; it skips the missing-node failure when
+true (the `nodes` map already contains present ids only):
+
+```scala
+private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): Task[(RiskTree, Map[NodeId, RiskNode])] =
+  for
+    tree    <- getTreeOrFail(wsId, treeId, rev)
+    missing  = nodeIds.filterNot(tree.index.nodes.contains)
+    _       <- if missing.isEmpty || omitAbsent then ZIO.unit
+               else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
+                 field = "nodeIds", code = ValidationErrorCode.NOT_FOUND,
+                 message = s"Node ${id.value} not found in tree ${tree.id}"))))
+    nodes    = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
+  yield (tree, nodes)
+```
+
+`getLECCurvesMulti` resolves only the present set and logs any omission (empty
+INPUT list still fails `EMPTY_COLLECTION` — unchanged):
+
+```scala
+(tree, nodesMap) = treeWithNodes
+presentIds       = nodesMap.keySet
+_ <- ZIO.when(omitAbsent && presentIds.size < nodeIds.size)(
+       ZIO.logInfo(s"lec-multi omitAbsent: ${nodeIds.size - presentIds.size} absent node(s) omitted at $rev"))
+results <- resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance)
+```
+
+### `WorkspaceAnalysisController.scala`
+
+Match the extra tuple element and pass it through:
+
+```scala
+getWorkspaceLECCurvesMultiEndpoint.serverLogic { case (userId, key, treeId, includeProvenance, nodeIds, branch, at, omitAbsent) =>
+  ...
+  result <- riskTreeService.getLECCurvesMulti(ws.id, treeId, nodeIds.toSet, ws.seedEntityId, includeProvenance, rev, omitAbsent)
+```
+
+### `LECChartState.scala` (client)
+
+`loadCurves` sends `omitAbsent = true` on every fetch:
+
+```scala
+getWorkspaceLECCurvesMultiEndpoint(
+  (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), atAccessor(), true)
+)
+```
+
+`droppedSelections` is unchanged — with partial results the absent ids fall out
+of `curveCache.keySet` and surface via the existing H3 notice, exactly as the
+feature was designed.
+
+## Open decisions
+
+None — 3a is a single correct fix; 3b Option B + frontend always-`true` are ruled.
+
+## ADR alignment
+
+- **Security (OWASP API Security Top 10 2023, verified against the source).**
+  `omitAbsent` returns a subset of the caller's own already-authorised tree.
+  Node existence at a commit is authoritative and readable via
+  `getWorkspaceTreeStructureEndpoint(at)`, so omission discloses nothing new,
+  crosses no tenant boundary (API1 BOLA is cross-tenant only), is not an
+  existence oracle, and is not over-exposure (API3 — it returns less, never
+  more). `WorkspaceId` stays server-resolved, never accepted or echoed.
+- **API4**: does not change the (already unbounded — pre-existing SHOULD-FIX)
+  `nodeIds` body size; not made worse.
+- **ADR-001**: `omitAbsent` is a genuine boolean flag, not a domain primitive —
+  no Iron type. `Revision`/Iron types elsewhere unchanged.
+
+## Verification
+
+```bash
+sbt 'commonJVM/test; server/test'    # + new omitAbsent server tests
+sbt app/compile; sbt app/test        # 3a engagement + client wiring
+sbt "serverIt/test"                  # endpoint default (omitAbsent=false) — existing lec-multi IT unaffected
+```
+
+- **Server tests (RiskTreeServiceLiveSpec, additive):** missing node with
+  `omitAbsent = false` → 400 (strict guard intact); with `omitAbsent = true` →
+  omitted, present nodes returned; all-absent with `true` → empty map, no
+  failure; empty input still `EMPTY_COLLECTION`.
+- **App tests:** update `engagedSlots`/`collidesWith` call sites in
+  `AnalyzeViewSeedSpec` + `CompareStateSpec` for the new `activeAt`; add a case
+  that a comparand at head engages against a baseline pinned to the past (3a).
+- **Manual (localhost:18080, rebuilt frontend):** baseline rewound to the past +
+  a comparand set to the present of the same tree → both chart (3a); baseline
+  rewound before Insider Threat existed → the chart drops it with the H3 notice,
+  no error (3b).
+
+## §C3 file inventory (additions to the Scope 2 inventory above)
+
+Added to the Scope 2 `## File inventory`: `AnalyzeViewSeedSpec.scala` (App
+tests) and `CascadeTestStubs.scala` (Server tests — the `RiskTreeService` stub
+double had to gain the `omitAbsent` param). Already listed:
+`WorkspaceAnalysisEndpoints`, `RiskTreeService`, `RiskTreeServiceLive`,
+`WorkspaceAnalysisController`, `RiskTreeServiceLiveSpec`, `CompareState`,
+`AnalyzeView`, `LECChartState`, `CompareStateSpec`.
+
+## Versioning
+
+PATCH on landing (shipped behaviour changed, server + SPA): `build.sbt` →
+`0.10.3` if landed after `0.10.2`, or folded into the still-uncommitted
+`0.10.2` if landed together — user's call given the `build.sbt` WIP.

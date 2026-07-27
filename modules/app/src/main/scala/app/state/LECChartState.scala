@@ -255,7 +255,10 @@ final class LECChartState(
       case (Some(key), Some(treeId)) =>
         curvesTrigger.emit(Some(() =>
           getWorkspaceLECCurvesMultiEndpoint(
-            (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), atAccessor())
+            // omitAbsent = true: a rewound read must drop nodes that don't exist
+            // at the pinned commit (surfaced via droppedSelections / H3) rather
+            // than fail the whole chart.
+            (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), atAccessor(), true)
           ).toOutcomeEventStream
         ))
       case _ => () // No workspace or tree selected — nothing to do

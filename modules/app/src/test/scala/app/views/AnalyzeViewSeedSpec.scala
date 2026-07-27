@@ -4,7 +4,7 @@ import zio.test.*
 
 import app.components.BranchBar
 import app.state.{CompareTarget, SlotCoordinate}
-import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, ScenarioName, TreeId}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, ScenarioName, TreeId}
 
 /** Pure tests for `AnalyzeView`'s comparison rules: `computeSeed` (what a
   * compare card gets selected when its branch enters the comparison),
@@ -110,7 +110,7 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
         CompareTarget.Target(SlotCoordinate(scenarioB, Some(tid))),
         CompareTarget.Target(SlotCoordinate(scenarioB, None)) // follows active tree = tid: same pair
       )
-      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid))
+      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), None)
       assertTrue(engaged == Vector((0, scenarioB)))
     },
 
@@ -119,7 +119,7 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
         CompareTarget.Target(SlotCoordinate(scenarioB, Some(tid))),
         CompareTarget.Target(SlotCoordinate(scenarioB, Some(tid2)))
       )
-      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, None)
+      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, None, None)
       assertTrue(engaged == Vector((0, scenarioB), (1, scenarioB)))
     },
 
@@ -128,8 +128,18 @@ object AnalyzeViewSeedSpec extends ZIOSpecDefault:
         CompareTarget.Target(SlotCoordinate(BranchChoice.Main, None)), // = the tab's own pair
         CompareTarget.Target(SlotCoordinate(scenarioB, None))
       )
-      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid))
+      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), None)
       assertTrue(engaged == Vector((1, scenarioB)))
+    },
+
+    test("engagedSlots keeps a comparand at head when the baseline is pinned to the past (3a)") {
+      val commit = CommitHash.fromString("c" * 40).toOption.get
+      // same branch + effective tree as the tab, at the live head
+      val targets = Vector(CompareTarget.Target(SlotCoordinate(BranchChoice.Main, None)))
+      // active tab pinned to `commit`: the comparand at head is a distinct point
+      // in time, so it engages instead of colliding
+      val engaged = AnalyzeView.engagedSlots(targets, BranchChoice.Main, Some(tid), Some(commit))
+      assertTrue(engaged == Vector((0, BranchChoice.Main)))
     },
 
     test("excludedBranchValues hides another slot's branch exactly when the effective trees coincide") {

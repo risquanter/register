@@ -97,9 +97,13 @@ trait RiskTreeService {
     * @param nodeIds Set of node identifiers
     * @param includeProvenance Whether to include provenance metadata for reproducibility
     * @param rev Read coordinate — branch head or a pinned commit.
+    * @param omitAbsent When true, node IDs absent from the tree at `rev` are
+    *                   omitted from the result instead of failing the request —
+    *                   the point-in-time read path (a node may not exist yet at
+    *                   an earlier commit).
     * @return Map from nodeId to LECNodeCurve (id, name, curve points, quantiles)
     */
-  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): Task[Map[NodeId, LECNodeCurve]]
+  def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean = false): Task[Map[NodeId, LECNodeCurve]]
 }
 
 object RiskTreeService:

@@ -28,15 +28,19 @@ final case class SlotCoordinate(branch: BranchChoice, treeOverride: Option[TreeI
     branch == other.branch && effectiveTree(activeTree) == other.effectiveTree(activeTree) && at == other.at
 
   /** True when this coordinate resolves to the same pair the tab itself shows.
-    * The tab is the coordinate (activeBranch, follow-active, live head). */
-  def collidesWith(activeBranch: BranchChoice, activeTree: Option[TreeId]): Boolean =
-    samePairAs(SlotCoordinate.activeTab(activeBranch), activeTree)
+    * The tab is the coordinate (activeBranch, follow-active, its current pin) —
+    * `activeAt` is the baseline's own history pin (`baselineAt`), so a comparand
+    * at a different point in time is a distinct pair, not a collision. */
+  def collidesWith(activeBranch: BranchChoice, activeTree: Option[TreeId], activeAt: Option[CommitHash]): Boolean =
+    samePairAs(SlotCoordinate.activeTab(activeBranch, activeAt), activeTree)
 
 object SlotCoordinate:
   /** The active tab as a coordinate: its branch, following the active tree
-    * (no pinned override), at the live head (no pin), so
-    * `effectiveTree(activeTreeId) == activeTreeId`. */
-  def activeTab(branch: BranchChoice): SlotCoordinate = SlotCoordinate(branch, None, None)
+    * (no pinned override), at its current history pin (`baselineAt`), so
+    * `effectiveTree(activeTreeId) == activeTreeId` and the pin participates in
+    * identity. */
+  def activeTab(branch: BranchChoice, at: Option[CommitHash]): SlotCoordinate =
+    SlotCoordinate(branch, None, at)
 
 /** What a Compare branch picker slot currently holds — a chosen coordinate,
   * or nothing.

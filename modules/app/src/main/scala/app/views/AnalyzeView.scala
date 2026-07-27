@@ -8,7 +8,7 @@ import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, SlotPalette
 import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, PaletteData, PinnedAxes}
 import app.state.{TreeViewState, TreeHistoryState, AnalyzeQueryState, LoadState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareLayout, CompareState, CompareSlot, CompareSlotState, CompareTarget, SlotCoordinate, toCoordinate}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
-import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, ScenarioName}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** Analyze view — tree inspection, query pane, and LEC chart (ADR-028).
@@ -108,9 +108,10 @@ object AnalyzeView:
     def engagedPoolSlots(
       rowTs: Vector[(Int, CompareTarget)],
       activeBranch: BranchChoice,
-      activeTid: Option[TreeId]
+      activeTid: Option[TreeId],
+      activeAt: Option[CommitHash]
     ): Vector[(Int, BranchChoice)] =
-      engagedSlots(rowTs.map(_._2), activeBranch, activeTid)
+      engagedSlots(rowTs.map(_._2), activeBranch, activeTid, activeAt)
         .map { (rowPos, branch) => (rowTs(rowPos)._1, branch) }
 
     /** Per-slot Overlay inputs: the slot's curve cache (deduplicated for the
@@ -151,17 +152,17 @@ object AnalyzeView:
             .combineWith(treeViewState.curveCache.distinct, visibleNodeIds, activePalette),
           compareState.rowTargets
             .combineWith(compareState.hiddenFlags, compareState.baselineHidden.signal)
-            .combineWith(slotOverlayInputs, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal)
+            .combineWith(slotOverlayInputs, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
         )
         .map {
           case (layout, (singleSpec, thisCurves, thisVisible, thisPalette),
-                (rowTs, hidden, baselineHidden, slotInputs, activeBranch, activeTid)) =>
+                (rowTs, hidden, baselineHidden, slotInputs, activeBranch, activeTid, baselineAt)) =>
             // Visible comparand sides: engaged (tab-collision + duplicate-pair
             // dedup) minus the eye-hidden ones. Hide is a display filter only —
             // a hidden earlier slot still wins the dedup, so its duplicate
             // stays inert regardless.
             val visibleComparands =
-              engagedPoolSlots(rowTs, activeBranch, activeTid).collect { case (pi, _) if !hidden(pi) => pi }
+              engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }
             (layout, visibleComparands.isEmpty) match
               case (_, true) =>
                 if baselineHidden then LoadState.Idle else singleSpec
@@ -211,17 +212,17 @@ object AnalyzeView:
           treeViewState.curveCache.distinct
             .combineWith(visibleNodeIds, treeViewState.nodeColorMap),
           compareState.rowTargets
-            .combineWith(compareState.hiddenFlags, slotPanelInputs, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal)
+            .combineWith(compareState.hiddenFlags, slotPanelInputs, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
         )
         .map {
           case (baselineHidden, (thisCurves, thisVisible, thisColors),
-                (rowTs, hidden, slotInputs, activeBranch, activeTid)) =>
+                (rowTs, hidden, slotInputs, activeBranch, activeTid, baselineAt)) =>
             // Panels shown = engaged (tab collision + duplicate-pair dedup)
             // minus the eye-hidden ones — so the panel grid always agrees with
             // the overlay and the card stack on which sides show. Hidden panels
             // also drop out of the shared pinned-axis extents.
             val visiblePool =
-              engagedPoolSlots(rowTs, activeBranch, activeTid).collect { case (pi, _) if !hidden(pi) => pi }.toSet
+              engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }.toSet
             val thisPairs = ColorAssigner.pairWithColors(loadedOrEmpty(thisCurves), thisVisible, thisColors)
             val slotPairs = slotInputs.zipWithIndex.map { case ((curves, visible, colors, _), pi) =>
               if visiblePool.contains(pi)
@@ -347,8 +348,10 @@ object AnalyzeView:
       compareSlots.map { slot =>
         scenarioState.activeBranch.signal.changes --> { active =>
           slot.state.target.now() match
+            // Reads the baseline pin via now() but is NOT triggered by it — a
+            // rewind must never clear a comparand's chosen target.
             case CompareTarget.Target(coord)
-                if coord.collidesWith(active, treeViewState.selectedTreeId.now()) =>
+                if coord.collidesWith(active, treeViewState.selectedTreeId.now(), compareState.baselineAt.now()) =>
               slot.state.target.set(CompareTarget.NotChosen)
             case _ => ()
         }
@@ -402,12 +405,15 @@ object AnalyzeView:
       // across a transaction (the slot's own branch subscription refetches on
       // a branch change independently).
       compareSlots.map { slot =>
+        // baselineAt joins the combine so a rewind re-evaluates the collision:
+        // a slot that was a same-head duplicate re-engages (and loads its tree)
+        // once the baseline moves off head, and vice versa.
         treeViewState.selectedTreeId.signal
-          .combineWith(slot.state.target.signal, scenarioState.activeBranch.signal)
+          .combineWith(slot.state.target.signal, scenarioState.activeBranch.signal, compareState.baselineAt.signal)
           .changes --> {
-            case (activeTid, CompareTarget.Target(coord), activeBranch) =>
+            case (activeTid, CompareTarget.Target(coord), activeBranch, baselineAt) =>
               coord.effectiveTree(activeTid) match
-                case Some(tid) if !coord.collidesWith(activeBranch, activeTid) =>
+                case Some(tid) if !coord.collidesWith(activeBranch, activeTid, baselineAt) =>
                   if !slot.treeViewState.selectedTreeId.now().contains(tid) then
                     slot.treeViewState.selectTree(tid)
                 case _ =>
@@ -561,10 +567,10 @@ object AnalyzeView:
       div(
         cls := "analyze-lec-panel",
         child <-- compareState.layout.signal
-          .combineWith(compareState.rowTargets, compareState.hiddenFlags, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal)
-          .map { (layout, rowTs, hidden, activeBranch, activeTid) =>
+          .combineWith(compareState.rowTargets, compareState.hiddenFlags, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
+          .map { (layout, rowTs, hidden, activeBranch, activeTid, baselineAt) =>
             val visibleComparands =
-              engagedPoolSlots(rowTs, activeBranch, activeTid).collect { case (pi, _) if !hidden(pi) => pi }
+              engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }
             (layout, visibleComparands)
           }
           .distinct
@@ -866,21 +872,23 @@ object AnalyzeView:
 
   /** Slots taking part in the comparison right now, as (slot index, branch)
     * in slot order. A slot is engaged when it holds a chosen target whose
-    * (branch, effective tree) pair differs from the tab's own AND from every
-    * earlier engaged slot's pair — a duplicate pair is inert (earlier slot
-    * wins), exactly like a tab collision: the slot's target is untouched, so
-    * it re-engages as soon as a tree or branch change differentiates it. */
+    * (branch, effective tree, pin) triple differs from the tab's own — the tab
+    * at its current pin `activeAt` (`baselineAt`) — AND from every earlier
+    * engaged slot's triple. A duplicate is inert (earlier slot wins), exactly
+    * like a tab collision: the slot's target is untouched, so it re-engages as
+    * soon as a tree, branch, or pin change differentiates it. */
   private[views] def engagedSlots(
     targets: Vector[CompareTarget],
     activeBranch: BranchChoice,
-    activeTreeId: Option[TreeId]
+    activeTreeId: Option[TreeId],
+    activeAt: Option[CommitHash]
   ): Vector[(Int, BranchChoice)] =
     targets.zipWithIndex
       .foldLeft((Vector.empty[SlotCoordinate], Vector.empty[(Int, BranchChoice)])) {
         case ((engaged, acc), (t, i)) =>
           t.toCoordinate match
             case Some(c)
-                if !c.collidesWith(activeBranch, activeTreeId) &&
+                if !c.collidesWith(activeBranch, activeTreeId, activeAt) &&
                    !engaged.exists(e => c.samePairAs(e, activeTreeId)) =>
               (engaged :+ c, acc :+ (i, c.branch))
             case _ => (engaged, acc)

@@ -5,7 +5,7 @@ import com.raquo.laminar.api.L.*
 import com.raquo.airstream.ownership.ManualOwner
 
 import app.chart.PaletteData
-import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId, ScenarioName}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, TreeId, ScenarioName}
 
 /** Pure tests for the Compare slot coordinate model: the target projections,
   * the branch signal derived from the target, and slot-identity stability. */
@@ -48,25 +48,35 @@ object CompareStateSpec extends ZIOSpecDefault:
       )
     },
 
-    test("activeTab is the branch following the active tree, with no pinned override") {
-      val tab = SlotCoordinate.activeTab(BranchChoice.Main)
+    test("activeTab carries the branch, the active tree, and the given pin") {
+      val commit = CommitHash.fromString("a" * 40).toOption.get
+      val tabHead = SlotCoordinate.activeTab(BranchChoice.Main, None)
+      val tabPinned = SlotCoordinate.activeTab(BranchChoice.Main, Some(commit))
       assertTrue(
-        tab.treeOverride.isEmpty,
-        tab.branch == BranchChoice.Main,
-        tab.effectiveTree(Some(tid)).contains(tid)
+        tabHead.treeOverride.isEmpty,
+        tabHead.branch == BranchChoice.Main,
+        tabHead.effectiveTree(Some(tid)).contains(tid),
+        tabHead.at.isEmpty,
+        tabPinned.at.contains(commit)
       )
     },
 
-    test("collidesWith is true only when the coordinate resolves to the active (branch, tree) pair") {
+    test("collidesWith accounts for branch, tree, and the active tab's own pin") {
       val activeBranch = BranchChoice.Main
       val otherBranch = BranchChoice.Scenario(scenarioA)
+      val commit = CommitHash.fromString("b" * 40).toOption.get
       assertTrue(
-        SlotCoordinate(activeBranch, None).collidesWith(activeBranch, Some(tid)),
-        SlotCoordinate(activeBranch, Some(tid)).collidesWith(activeBranch, Some(tid)),
-        !SlotCoordinate(activeBranch, Some(tid2)).collidesWith(activeBranch, Some(tid)),
-        !SlotCoordinate(otherBranch, None).collidesWith(activeBranch, Some(tid)),
-        !SlotCoordinate(otherBranch, Some(tid)).collidesWith(activeBranch, Some(tid)),
-        !SlotCoordinate(activeBranch, Some(tid)).collidesWith(activeBranch, None)
+        // active tab at head (activeAt = None): the (branch, tree) rules hold
+        SlotCoordinate(activeBranch, None).collidesWith(activeBranch, Some(tid), None),
+        SlotCoordinate(activeBranch, Some(tid)).collidesWith(activeBranch, Some(tid), None),
+        !SlotCoordinate(activeBranch, Some(tid2)).collidesWith(activeBranch, Some(tid), None),
+        !SlotCoordinate(otherBranch, None).collidesWith(activeBranch, Some(tid), None),
+        !SlotCoordinate(otherBranch, Some(tid)).collidesWith(activeBranch, Some(tid), None),
+        !SlotCoordinate(activeBranch, Some(tid)).collidesWith(activeBranch, None, None),
+        // 3a: baseline rewound to `commit` — a comparand at head is NOT a collision
+        !SlotCoordinate(activeBranch, None).collidesWith(activeBranch, Some(tid), Some(commit)),
+        // and a comparand at the baseline's same pin IS a collision
+        SlotCoordinate(activeBranch, None, Some(commit)).collidesWith(activeBranch, Some(tid), Some(commit))
       )
     },
 
