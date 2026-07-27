@@ -5,7 +5,7 @@ import zio.test.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, TrialId, Loss}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.services.cache.RiskResultResolver
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -101,8 +101,8 @@ object SeedStabilitySpec extends ZIOSpecDefault {
 
       test("same logical tree created twice (different ULIDs) → byte-identical figures at every node") {
         for
-          a  <- service(_.create(wsId, treeReq("Recreate Figures A")))
-          b  <- service(_.create(wsId, treeReq("Recreate Figures B")))
+          a  <- service(_.create(wsId, treeReq("Recreate Figures A"), BranchRef.Main))
+          b  <- service(_.create(wsId, treeReq("Recreate Figures B"), BranchRef.Main))
           fa <- figures(a, entity1)
           fb <- figures(b, entity1)
         yield assertTrue(
@@ -114,7 +114,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
 
       test("editing one leaf's loss distribution leaves untouched leaves byte-identical and keeps the edited leaf's occurrence trials (CRN)") {
         for
-          created <- service(_.create(wsId, treeReq("CRN Edit Tree")))
+          created <- service(_.create(wsId, treeReq("CRN Edit Tree"), BranchRef.Main))
           before  <- figures(created, entity1)
           updated <- service(_.update(wsId, created.id, RiskTreeUpdateRequest(
             name = "CRN Edit Tree",
@@ -125,7 +125,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
             ),
             newPortfolios = Seq.empty,
             newLeaves = Seq.empty
-          )))
+          ), BranchRef.Main))
           after <- figures(updated, entity1)
         yield assertTrue(
           // untouched leaf: byte-identical
@@ -141,7 +141,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
 
       test("renaming the tree and a leaf changes no figure") {
         for
-          created <- service(_.create(wsId, treeReq("Rename Figures Tree")))
+          created <- service(_.create(wsId, treeReq("Rename Figures Tree"), BranchRef.Main))
           before  <- figures(created, entity1)
           updated <- service(_.update(wsId, created.id, RiskTreeUpdateRequest(
             name = "Rename Figures Tree v2",
@@ -152,7 +152,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
             ),
             newPortfolios = Seq.empty,
             newLeaves = Seq.empty
-          )))
+          ), BranchRef.Main))
           after <- figures(updated, entity1)
         yield assertTrue(
           after("Cyber Attack Renamed") == before("Cyber Attack"),
@@ -164,8 +164,8 @@ object SeedStabilitySpec extends ZIOSpecDefault {
 
       test("same spec under two seedEntityIds → different figures (entity isolation)") {
         for
-          a  <- service(_.create(wsId, treeReq("Entity Isolation A")))
-          b  <- service(_.create(wsId, treeReq("Entity Isolation B")))
+          a  <- service(_.create(wsId, treeReq("Entity Isolation A"), BranchRef.Main))
+          b  <- service(_.create(wsId, treeReq("Entity Isolation B"), BranchRef.Main))
           fa <- figures(a, entity1)
           fb <- figures(b, entity2)
         yield assertTrue(
@@ -185,7 +185,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
             name = "Export Source Tree",
             portfolios = Seq(RiskPortfolioDefinitionRequest("Stable Root", None)),
             leaves = Seq(leafDef("Alpha", "Stable Root"), leafDef("Beta", "Stable Root"), leafDef("Gamma", "Stable Root"))
-          )))
+          ), BranchRef.Main))
           pruned <- service(_.update(wsId, created.id, RiskTreeUpdateRequest(
             name = "Export Source Tree",
             portfolios = Seq(portfolioUpd(created, "Stable Root")),
@@ -195,7 +195,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
             ),
             newPortfolios = Seq.empty,
             newLeaves = Seq.empty
-          )))
+          ), BranchRef.Main))
           exported = seedsByName(pruned)
           sourceFigs <- figures(pruned, entity1)
 
@@ -206,7 +206,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
               leafDef("Alpha", "Stable Root", seedVarId = Some(exported("Alpha"))),
               leafDef("Gamma", "Stable Root", seedVarId = Some(exported("Gamma")))
             )
-          )))
+          ), BranchRef.Main))
           importedFigs <- figures(imported, entity1)
         yield assertTrue(
           exported == Map("Alpha" -> 1L, "Gamma" -> 3L),

@@ -5,7 +5,7 @@ import zio.test.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
 import com.risquanter.register.services.cache.RiskResultResolver
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -100,7 +100,7 @@ object Item17RegressionSpec extends ZIOSpecDefault {
         val correctAnalytic = 1.0 - (1.0 - 0.6) * (1.0 - 0.25) * (1.0 - 0.25) // 0.775
 
         for
-          created <- service(_.create(wsId, createReq))
+          created <- service(_.create(wsId, createReq, BranchRef.Main))
           resolver <- ZIO.service[RiskResultResolver]
 
           // Simulate the whole tree BEFORE the edit (warm every cache path —
@@ -121,7 +121,7 @@ object Item17RegressionSpec extends ZIOSpecDefault {
             ),
             newPortfolios = Seq.empty,
             newLeaves = Seq.empty
-          )))
+          ), BranchRef.Main))
 
           after   <- resolver.ensureCached(updated, updated.rootId, entity1)
           measured = after.probOfExceedance(1L)

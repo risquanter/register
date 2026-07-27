@@ -5,34 +5,31 @@ import sttp.tapir.server.ServerEndpoint
 
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, ResourceRef, ResourceType, UserContextExtractor}
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
-import com.risquanter.register.domain.data.iron.BranchRef
-import com.risquanter.register.http.responses.{SimulationResponse, ScenarioDiffResponse, NodeDiffEntry}
-import com.risquanter.register.services.{RiskTreeService, ScenarioDiffService, ScenarioDiffResult}
+import com.risquanter.register.domain.data.iron.{BranchRef, Revision, ValidationUtil}
+import com.risquanter.register.domain.errors.ValidationFailed
+import com.risquanter.register.http.responses.{SimulationResponse, ChangedNodesResponse, NodeChangeEntry, TreeHistoryResponse}
+import com.risquanter.register.services.{RiskTreeService, ChangedNodesService, ChangedNodesResult, TreeHistoryService}
 import com.risquanter.register.services.workspace.WorkspaceStore
 
 /** Workspace tree controller.
   *
-  * Owns workspace-scoped CRUD for trees. (The manual cache-invalidation
-  * endpoint was retired with the content-addressed cache — DD-20: under
-  * content addressing there is nothing NodeId-keyed to invalidate.)
+  * Owns workspace-scoped CRUD for trees, plus point-in-time reads, per-tree
+  * history, changed-nodes comparison, and revert.
   *
   * Authorization layers:
   *  - Layer 0: [[WorkspaceStore.resolveTreeWorkspace]] validates the workspace key
   *    and asserts the tree belongs to that workspace.
   *  - Layer 1: [[UserContextExtractor.extract]] fails closed when `requirePresent`
-  *    is injected via `register.auth.mode=identity`. The `UserId` is bound as
-  *    `userId` because it is immediately consumed by the Layer 2 check.
-  *  - Layer 2: `authzService.check(userId, Permission.*, ResourceRef(RiskTree, treeId))`
-  *    calls are present in this controller, but the SpiceDB backend is not yet
-  *    deployed (Phase K). Currently resolved by [[AuthorizationServiceNoOp]]
-  *    (always-permit). Full enforcement activates when Phase K infra is provisioned.
+  *    is injected via `register.auth.mode=identity`.
+  *  - Layer 2: `authzService.check(userId, Permission.*, ResourceRef(RiskTree, treeId))`.
   *
   * @see AUTHORIZATION-PLAN.md — Layered Model
   * @see ADR-024 — Application as Pure PEP
   */
 class WorkspaceTreeController private (
   riskTreeService: RiskTreeService,
-  scenarioDiffService: ScenarioDiffService,
+  changedNodesService: ChangedNodesService,
+  treeHistoryService: TreeHistoryService,
   workspaceStore: WorkspaceStore,
   authzService: AuthorizationService,
   userCtx: UserContextExtractor
@@ -46,37 +43,52 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.getById(ws.id, treeId, branch).map(_.map(SimulationResponse.fromRiskTree))
+        result <- riskTreeService.getById(ws.id, treeId, Revision.Head(branch)).map(_.map(SimulationResponse.fromRiskTree))
       yield result).either
   }
 
   val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, activeBranch) =>
+    case (maybeUserId, key, treeId, activeBranch, at) =>
       (for
         userId <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.getById(ws.id, treeId, branch)
+        rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
+        result <- riskTreeService.getById(ws.id, treeId, rev)
       yield result).either
   }
 
-  val getScenarioDiff: ServerEndpoint[Any, Task] = getScenarioDiffEndpoint.serverLogic {
-    case (maybeUserId, key, treeId, activeBranch, compareBranch) =>
+  val getChangedNodes: ServerEndpoint[Any, Task] = getChangedNodesEndpoint.serverLogic {
+    case (maybeUserId, key, treeId, a, aAt, b, bAt) =>
       (for
         userId  <- userCtx.requireAuthenticated(maybeUserId)
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws      <- workspaceStore.resolveTreeWorkspace(key, treeId)
-        branchA <- ActiveBranch.resolve(ws.id, activeBranch)
-        branchB <- ActiveBranch.resolve(ws.id, compareBranch)
-        result  <- scenarioDiffService.diff(ws.id, treeId, branchA, branchB)
+        branchA <- ActiveBranch.resolve(ws.id, a)
+        branchB <- ActiveBranch.resolve(ws.id, b)
+        revA     = aAt.fold[Revision](Revision.Head(branchA))(Revision.At(_))
+        revB     = bAt.fold[Revision](Revision.Head(branchB))(Revision.At(_))
+        result  <- changedNodesService.changedNodes(ws.id, treeId, revA, revB)
       yield result match
-        case ScenarioDiffResult.Diff(entries) =>
-          ScenarioDiffResponse("ok", entries.map(d => NodeDiffEntry(d.nodeId.value, d.status.toWire)))
-        case ScenarioDiffResult.MissingOnA    => ScenarioDiffResponse("missing-on-a", Nil)
-        case ScenarioDiffResult.MissingOnB    => ScenarioDiffResponse("missing-on-b", Nil)
-        case ScenarioDiffResult.MissingOnBoth => ScenarioDiffResponse("missing-on-both", Nil)
+        case ChangedNodesResult.Changes(entries) =>
+          ChangedNodesResponse("ok", entries.map(c => NodeChangeEntry(c.nodeId.value, c.status.toWire)))
+        case ChangedNodesResult.MissingOnA    => ChangedNodesResponse("missing-on-a", Nil)
+        case ChangedNodesResult.MissingOnB    => ChangedNodesResponse("missing-on-b", Nil)
+        case ChangedNodesResult.MissingOnBoth => ChangedNodesResponse("missing-on-both", Nil)
       ).either
+  }
+
+  val getTreeHistory: ServerEndpoint[Any, Task] = getTreeHistoryEndpoint.serverLogic {
+    case (maybeUserId, key, treeId, activeBranch, n) =>
+      (for
+        userId <- userCtx.requireAuthenticated(maybeUserId)
+        given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
+        limit  <- ZIO.fromEither(ValidationUtil.refinePositiveInt(n, "n")).mapError(ValidationFailed(_))
+        entries <- treeHistoryService.history(ws.id, treeId, branch, limit)
+      yield TreeHistoryResponse(entries)).either
   }
 
   val updateTree: ServerEndpoint[Any, Task] = updateWorkspaceTreeEndpoint.serverLogic {
@@ -87,6 +99,17 @@ class WorkspaceTreeController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         result <- riskTreeService.update(ws.id, treeId, req, branch).map(SimulationResponse.fromRiskTree)
+      yield result).either
+  }
+
+  val revertTree: ServerEndpoint[Any, Task] = revertTreeEndpoint.serverLogic {
+    case (maybeUserId, key, treeId, activeBranch, req) =>
+      (for
+        userId <- userCtx.requireAuthenticated(maybeUserId)
+        given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
+        result <- riskTreeService.revertTree(ws.id, treeId, req.toCommit, branch).map(SimulationResponse.fromRiskTree)
       yield result).either
   }
 
@@ -113,17 +136,20 @@ class WorkspaceTreeController private (
     List(
       getTreeById,
       getTreeStructure,
-      getScenarioDiff,
+      getChangedNodes,
+      getTreeHistory,
       updateTree,
+      revertTree,
       deleteTree
     )
 
 object WorkspaceTreeController:
-  val makeZIO: ZIO[RiskTreeService & ScenarioDiffService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, WorkspaceTreeController] =
+  val makeZIO: ZIO[RiskTreeService & ChangedNodesService & TreeHistoryService & WorkspaceStore & AuthorizationService & UserContextExtractor, Nothing, WorkspaceTreeController] =
     for
       riskTreeService      <- ZIO.service[RiskTreeService]
-      scenarioDiffService  <- ZIO.service[ScenarioDiffService]
+      changedNodesService  <- ZIO.service[ChangedNodesService]
+      treeHistoryService   <- ZIO.service[TreeHistoryService]
       workspaceStore       <- ZIO.service[WorkspaceStore]
       authzService         <- ZIO.service[AuthorizationService]
       userCtx              <- ZIO.service[UserContextExtractor]
-    yield WorkspaceTreeController(riskTreeService, scenarioDiffService, workspaceStore, authzService, userCtx)
+    yield WorkspaceTreeController(riskTreeService, changedNodesService, treeHistoryService, workspaceStore, authzService, userCtx)

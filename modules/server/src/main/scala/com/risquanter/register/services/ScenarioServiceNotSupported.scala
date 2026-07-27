@@ -17,7 +17,7 @@ import com.risquanter.register.domain.errors.ScenariosNotSupported
 object ScenarioServiceNotSupported extends ScenarioService:
   private val reason = "Scenarios require the Irmin backend (repository.type=irmin)"
 
-  override def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource = ScenarioSource.Main)
+  override def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
     (using Checked[Permission]): Task[BranchRef] =
     ZIO.fail(ScenariosNotSupported(reason))
 

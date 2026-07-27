@@ -1,7 +1,7 @@
 package com.risquanter.register.http.sse
 
 import zio.json.*
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, BranchChoice}
 
 /**
   * Server-Sent Events for real-time updates to browser clients.
@@ -58,10 +58,16 @@ object SSEEvent {
     *
     * @param nodeIds Node IDs whose figures changed (nodes + ancestors)
     * @param treeId Tree containing the nodes
+    * @param branch Client-facing branch the change landed on — `Main` or a
+    *   scenario name (never the internal `BranchRef`, which embeds the
+    *   WorkspaceId). Required (DD-22 / E7): the SPA filters events to the tab's
+    *   branch, so there is no absent-means-main state. Serializes as the same
+    *   `"main"`/slug string a raw `String` would.
     */
   final case class CacheInvalidated(
-      nodeIds: List[String],
-      treeId: TreeId
+      nodeIds: List[NodeId],
+      treeId: TreeId,
+      branch: BranchChoice
   ) extends SSEEvent {
     override def eventType: String = "cache_invalidated"
   }

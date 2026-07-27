@@ -23,7 +23,7 @@ import com.risquanter.register.infra.irmin.model.IrminBranch
   */
 final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
-  override def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource = ScenarioSource.Main)
+  override def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
     (using Checked[Permission]): Task[BranchRef] =
     for
       branch     <- scenarioBranch(wsId, name)
@@ -83,6 +83,18 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                                message = s"Scenario '${scenario.value}' not found in workspace ${wsId.value}"
                              ))))
         yield head
+      case ScenarioSource.AtCommit(commit) =>
+        // Fork-from-history: verify the commit exists (absent → NOT_FOUND,
+        // oracle-constant with any other not-found), then fork at it directly.
+        irmin.getCommit(commit).flatMap {
+          case Some(_) => ZIO.succeed(commit)
+          case None =>
+            ZIO.fail(ValidationFailed(List(ValidationError(
+              field = "source",
+              code = ValidationErrorCode.NOT_FOUND,
+              message = s"Commit not found in workspace ${wsId.value}"
+            ))))
+        }
 
   private def summaryFor(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Task[ScenarioSummary] =
     for

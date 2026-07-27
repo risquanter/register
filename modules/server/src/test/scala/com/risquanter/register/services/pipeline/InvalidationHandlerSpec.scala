@@ -123,7 +123,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       val newTree = treeWith(Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, changedSoftware))
       for {
         handler <- ZIO.service[InvalidationHandler]
-        result  <- handler.handleMutation(testTree, newTree)
+        result  <- handler.handleMutation(testTree, newTree, BranchChoice.Main)
       } yield {
         val ids = result.invalidatedNodes.map(_.value).toSet
         // software's aggregates changed with it: software → it-risk → ops-risk
@@ -159,7 +159,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       val newTree = treeWith(Seq(newRoot, cyberLeaf, newItPortfolio, movedChangedHardware, softwareLeaf))
       for {
         handler <- ZIO.service[InvalidationHandler]
-        result  <- handler.handleMutation(testTree, newTree)
+        result  <- handler.handleMutation(testTree, newTree, BranchChoice.Main)
       } yield {
         val ids = result.invalidatedNodes.map(_.value).toSet
         // The exclusive if/else-if dropped hardware itself here — the node
@@ -174,7 +174,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     test("no-change mutation publishes nothing") {
       for {
         handler <- ZIO.service[InvalidationHandler]
-        result  <- handler.handleMutation(testTree, testTree)
+        result  <- handler.handleMutation(testTree, testTree, BranchChoice.Main)
       } yield assertTrue(result.invalidatedNodes.isEmpty) &&
         assertTrue(result.subscribersNotified == 0)
     },
@@ -207,7 +207,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       ))
       for {
         handler <- ZIO.service[InvalidationHandler]
-        result  <- handler.handleMutation(buildExpertTree(), buildExpertTree())
+        result  <- handler.handleMutation(buildExpertTree(), buildExpertTree(), BranchChoice.Main)
       } yield assertTrue(result.invalidatedNodes.isEmpty)
     },
 
@@ -241,7 +241,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         handler <- ZIO.service[InvalidationHandler]
         result  <- handler.handleMutation(
           build(Array(1000.0, 5000.0, 25000.0)),
-          build(Array(1000.0, 5000.0, 30000.0))
+          build(Array(1000.0, 5000.0, 30000.0)),
+          BranchChoice.Main
         )
       } yield assertTrue(
         result.invalidatedNodes.map(_.value).toSet ==
@@ -259,7 +260,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       val newTree = treeWith(Seq(rootPortfolio, cyberLeaf, newItPortfolio, softwareLeaf))
       for {
         handler <- ZIO.service[InvalidationHandler]
-        result  <- handler.handleMutation(testTree, newTree)
+        result  <- handler.handleMutation(testTree, newTree, BranchChoice.Main)
       } yield {
         val ids = result.invalidatedNodes.map(_.value).toSet
         assertTrue(ids.contains(idStr("hardware"))) &&     // removed node
@@ -270,7 +271,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     test("tree deletion publishes every node ID") {
       for {
         handler <- ZIO.service[InvalidationHandler]
-        result  <- handler.handleTreeDeletion(testTree)
+        result  <- handler.handleTreeDeletion(testTree, BranchChoice.Main)
       } yield assertTrue(
         result.invalidatedNodes.map(_.value).toSet ==
           Set(idStr("ops-risk"), idStr("cyber"), idStr("it-risk"), idStr("hardware"), idStr("software"))
@@ -299,7 +300,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         fiber   <- stream.foreach(queue.offer).fork
         // Wait for subscriber to be registered
         _       <- hub.subscriberCount(testTreeId).repeatUntil(_ >= 1)
-        result  <- handler.handleMutation(testTree, newTree)
+        result  <- handler.handleMutation(testTree, newTree, BranchChoice.Main)
         _       <- fiber.interrupt
         // Verify subscriber was counted
       } yield assertTrue(result.subscribersNotified == 1)

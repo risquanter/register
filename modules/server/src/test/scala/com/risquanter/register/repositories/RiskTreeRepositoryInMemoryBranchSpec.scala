@@ -2,7 +2,7 @@ package com.risquanter.register.repositories
 
 import zio.*
 import zio.test.*
-import com.risquanter.register.domain.data.iron.{WorkspaceId, BranchRef}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, BranchRef, Revision}
 import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.testutil.TestHelpers.{safeId, treeId}
 
@@ -22,18 +22,17 @@ object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
 
   def spec = suite("RiskTreeRepositoryInMemory branch handling")(
 
-    test("None and Main are served") {
+    test("main head is served") {
       for {
         repo  <- ZIO.service[RiskTreeRepository]
-        rNone <- repo.getById(wsId, someTree)
-        rMain <- repo.getById(wsId, someTree, BranchRef.Main)
-      } yield assertTrue(rNone.isEmpty, rMain.isEmpty)
+        rMain <- repo.getById(wsId, someTree, Revision.Head(BranchRef.Main))
+      } yield assertTrue(rMain.isEmpty)
     },
 
     test("a non-main branch request fails with a typed RepositoryFailure") {
       for {
         repo <- ZIO.service[RiskTreeRepository]
-        exit <- repo.getById(wsId, someTree, scenarioBranch).exit
+        exit <- repo.getById(wsId, someTree, Revision.Head(scenarioBranch)).exit
       } yield assertTrue(
         exit.causeOption.flatMap(_.failureOption).exists(_.isInstanceOf[RepositoryFailure])
       )

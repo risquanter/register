@@ -10,7 +10,7 @@ import io.github.iltotore.iron.constraint.all.*
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTreeUpdateRequest, RiskTreeRequests}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LECPoint, LECNodeCurve, Distribution}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, ValidationUtil, OccurrenceProbability, DistributionType, TreeId, NodeId, WorkspaceId, SeedVarId, SeedEntityId, BranchRef, CommitHash, Revision, BranchChoice, ScenarioName}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode, RepositoryFailure, SimulationFailure, AppError}
 import com.risquanter.register.domain.errors.ValidationExtensions.*
@@ -44,8 +44,8 @@ class RiskTreeServiceLive private (
   import RiskTreeServiceLive.ErrorContext
   
   /** Fetch tree by id or fail with ValidationFailed. */
-  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
-    repo.getById(wsId, treeId, branch).flatMap {
+  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): Task[RiskTree] =
+    repo.getById(wsId, treeId, rev).flatMap {
       case Some(tree) => ZIO.succeed(tree)
       case None =>
         ZIO.fail(ValidationFailed(List(ValidationError(
@@ -56,9 +56,9 @@ class RiskTreeServiceLive private (
     }
 
   /** Fetch tree and node together or fail with ValidationFailed. */
-  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, branch: BranchRef = BranchRef.Main): Task[(RiskTree, RiskNode)] =
+  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): Task[(RiskTree, RiskNode)] =
     for
-      tree <- getTreeOrFail(wsId, treeId, branch)
+      tree <- getTreeOrFail(wsId, treeId, rev)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
         field = "nodeId",
         code = ValidationErrorCode.NOT_FOUND,
@@ -67,9 +67,9 @@ class RiskTreeServiceLive private (
     yield (tree, node)
 
   /** Fetch tree and all requested nodes; fail with aggregated validation errors when any node is missing. */
-  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], branch: BranchRef = BranchRef.Main): Task[(RiskTree, Map[NodeId, RiskNode])] =
+  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision): Task[(RiskTree, Map[NodeId, RiskNode])] =
     for
-      tree <- getTreeOrFail(wsId, treeId, branch)
+      tree <- getTreeOrFail(wsId, treeId, rev)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
       _ <- if missing.isEmpty then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
         field = "nodeIds",
@@ -103,8 +103,11 @@ class RiskTreeServiceLive private (
       if errors.nonEmpty then ZIO.fail(ValidationFailed(errors)) else ZIO.unit
     }
 
+  // Uniqueness is checked against main's tree set regardless of the write
+  // branch (pre-existing behaviour, preserved verbatim while the read default
+  // was removed). A per-branch-uniqueness fix is tracked separately.
   private def collectAllTrees(wsId: WorkspaceId): Task[List[RiskTree]] =
-    repo.getAllForWorkspace(wsId).flatMap { results =>
+    repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main)).flatMap { results =>
       val (errs, trees) = results.foldLeft((List.empty[RepositoryFailure], List.empty[RiskTree])) {
         case ((es, ts), Left(err))  => (err :: es, ts)
         case ((es, ts), Right(t))   => (es, t :: ts)
@@ -303,8 +306,24 @@ class RiskTreeServiceLive private (
     (domainNodes, rootId)
   }
   
+  /** Client-facing branch identity for the SSE tag: `Main` or the scenario
+    * name. Never the internal `BranchRef.toBranchRef` — that embeds the
+    * WorkspaceId, which must not cross the client boundary. The branch is always
+    * composed from this same `wsId` (ActiveBranch.resolve), so the prefix strip
+    * always yields a valid scenario slug; a parse failure is an unreachable
+    * invariant violation, mirroring `ActiveBranch.resolve`'s own die-on-compose. */
+  private def clientBranchName(wsId: WorkspaceId, branch: BranchRef): BranchChoice =
+    if branch == BranchRef.Main then BranchChoice.Main
+    else
+      val slug = branch.toBranchRef.stripPrefix(s"scenarios.${wsId.value.toLowerCase}.")
+      ScenarioName.fromString(slug) match
+        case Right(name) => BranchChoice.Scenario(name)
+        case Left(errs)  => throw new IllegalStateException(
+          s"scenario branch slug is not a valid ScenarioName: ${errs.map(_.message).mkString(", ")} — " +
+          "unreachable (composed from a valid ScenarioName)")
+
   // Config CRUD - only persist, no execution
-  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+  override def create(wsId: WorkspaceId, req: RiskTreeDefinitionRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
     val operation = for {
       treeId <- IdGenerators.nextTreeId
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
@@ -330,9 +349,9 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+  override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
     val operation = for {
-      oldTree <- getTreeOrFail(wsId, id, branch)
+      oldTree <- getTreeOrFail(wsId, id, Revision.Head(branch))
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
       resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, excludeId = Some(id))
@@ -358,7 +377,7 @@ class RiskTreeServiceLive private (
         seedVarHighWater = Some(seedVarHighWater)
       ).toZIOValidation
       updated <- repo.update(wsId, id, _ => riskTree, branch)
-      _ <- invalidationHandler.handleMutation(oldTree, updated)
+      _ <- invalidationHandler.handleMutation(oldTree, updated, clientBranchName(wsId, branch))
     } yield updated
     
     operation.tapBoth(
@@ -367,16 +386,33 @@ class RiskTreeServiceLive private (
     )
   }
   
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] =
     repo.delete(wsId, id, branch)
-      .tap(tree => invalidationHandler.handleTreeDeletion(tree))
+      .tap(tree => invalidationHandler.handleTreeDeletion(tree, clientBranchName(wsId, branch)))
       .tapBoth(
       error => logIfUnexpected("delete")(error) *> recordOperation("delete", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("delete", success = true)
     )
 
-  override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]] =
-    repo.getById(wsId, id, branch).tapBoth(
+  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+    val operation = for {
+      // Head state (for invalidation) — None when the tree was deleted at head;
+      // reverting then recreates it, which behaves like create (nothing cached).
+      oldTree  <- repo.getById(wsId, id, Revision.Head(branch))
+      reverted <- repo.revert(wsId, id, toCommit, branch)
+      _        <- oldTree match
+                    case Some(prev) => invalidationHandler.handleMutation(prev, reverted, clientBranchName(wsId, branch))
+                    case None       => ZIO.unit
+    } yield reverted
+
+    operation.tapBoth(
+      error => logIfUnexpected("revert")(error) *> recordOperation("revert", success = false, Some(extractErrorContext(error))),
+      _ => recordOperation("revert", success = true)
+    )
+  }
+
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]] =
+    repo.getById(wsId, id, rev).tapBoth(
       error => logIfUnexpected("getById")(error) *> recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
     )
@@ -385,7 +421,7 @@ class RiskTreeServiceLive private (
   // New LEC Query APIs (ADR-015)
   // ========================================
   
-  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: BranchRef = BranchRef.Main): Task[Double] =
+  override def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): Task[Double] =
     traced("probOfExceedance") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -394,7 +430,7 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
 
         // Fetch requested tree and ensure node exists within it
-        (tree, _) <- lookupNodeInTree(wsId, treeId, nodeId, branch)
+        (tree, _) <- lookupNodeInTree(wsId, treeId, nodeId, rev)
         
         // Ensure result is cached (cache-aside pattern via RiskResultResolver)
         result <- resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
@@ -406,7 +442,7 @@ class RiskTreeServiceLive private (
       } yield prob
     }
   
-  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false, branch: BranchRef = BranchRef.Main): Task[Map[NodeId, LECNodeCurve]] =
+  override def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): Task[Map[NodeId, LECNodeCurve]] =
     traced("getLECCurvesMulti") {
       for {
         _ <- tracing.setAttribute("tree_id", treeId.value)
@@ -422,7 +458,7 @@ class RiskTreeServiceLive private (
             message = "nodeIds set is empty"
           ))))
         } else {
-          lookupNodesInTree(wsId, treeId, nodeIds, branch)
+          lookupNodesInTree(wsId, treeId, nodeIds, rev)
         }
         (tree, nodesMap) = treeWithNodes
         

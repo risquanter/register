@@ -7,7 +7,7 @@ import scala.scalajs.js
 import app.chart.{ColorAssigner, LECSpecBuilder, PaletteData}
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
@@ -65,7 +65,7 @@ final class LECChartState(
     * `reset` emit triggers instead of setting this Var, so a new request or a
     * reset supersedes whatever the previous request was still doing and a
     * stale response can never overwrite a newer one. Same mechanism as
-    * `ScenarioDiffState.diffResult` and `TreeListState`.
+    * `ChangedNodesState.diffResult` and `TreeListState`.
     */
   val curveCache: Var[LoadState[Map[NodeId, LECNodeCurve]]] = Var(LoadState.Idle)
 
@@ -233,7 +233,7 @@ final class LECChartState(
       case (Some(key), Some(treeId)) =>
         curvesTrigger.emit(Some(() =>
           getWorkspaceLECCurvesMultiEndpoint(
-            (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor())
+            (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), Option.empty[CommitHash])
           ).toOutcomeEventStream
         ))
       case _ => () // No workspace or tree selected — nothing to do

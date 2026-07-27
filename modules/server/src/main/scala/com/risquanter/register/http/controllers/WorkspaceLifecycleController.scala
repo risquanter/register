@@ -6,7 +6,7 @@ import sttp.tapir.server.ServerEndpoint
 import com.risquanter.register.auth.{ AuthorizationService, BootstrapProvisioner, Checked, Permission, UserContextExtractor }
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode, ValidationFailed}
-import com.risquanter.register.domain.data.iron.BranchChoice
+import com.risquanter.register.domain.data.iron.{BranchChoice, BranchRef, Revision}
 import com.risquanter.register.http.endpoints.WorkspaceLifecycleEndpoints
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, WorkspaceRotateResponse}
 import com.risquanter.register.services.{CascadeDelete, RiskTreeService, ScenarioService}
@@ -56,7 +56,7 @@ class WorkspaceLifecycleController private (
         // exempt: pre-resource-creation — no resource exists yet to check
         key    <- workspaceStore.create(seedEntityId)
         ws     <- workspaceStore.resolve(key)  // exempt: Layer 0 capability gate
-        tree   <- riskTreeService.create(ws.id, req)
+        tree   <- riskTreeService.create(ws.id, req, BranchRef.Main)
         _      <- workspaceStore.addTree(key, tree.id)
         _      <- bootstrapProvisioner.recordOwnership(userId, ws.id)
       yield WorkspaceBootstrapResponse(
@@ -75,7 +75,7 @@ class WorkspaceLifecycleController private (
         given Checked[Permission] <- authzService.check(userId, Permission.ViewWorkspace, ws.id.asResource)
         branch   <- ActiveBranch.resolve(ws.id, activeBranch)
         ids      <- workspaceStore.listTrees(key)
-        trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id, branch))
+        trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id, Revision.Head(branch)))
         existing  = trees.collect { case Some(t) => SimulationResponse.fromRiskTree(t) }
       yield existing).either
   }
@@ -101,7 +101,7 @@ class WorkspaceLifecycleController private (
                       scenarioService.list(ws.id).flatMap { scenarios =>
                         ZIO.unless(scenarios.exists(_.name == name))(
                           ZIO.fail(ValidationFailed(List(ValidationError(
-                            field = "X-Active-Branch",
+                            field = "X-Branch",
                             code = ValidationErrorCode.NOT_FOUND,
                             message = s"Scenario '${name.value}' not found — create it via POST /scenarios before creating a tree on it"
                           ))))

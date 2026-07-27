@@ -16,7 +16,7 @@ import com.risquanter.register.auth.{
 }
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, ScenarioName, CommitHash}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, ScenarioName, CommitHash, Revision}
 import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeafDefinitionRequest, RiskPortfolioDefinitionRequest, RiskTreeDefinitionRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
@@ -55,18 +55,27 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
   // controller test regardless of whether the branch was actually threaded.
   private def stubRepo: RiskTreeRepository = new RiskTreeRepository:
     private val db = collection.mutable.Map[(WorkspaceId, BranchRef, TreeId), RiskTree]()
-    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+    // Reads take a Revision; these branch-scoped tests only ever read a head,
+    // so a commit pin (`At`) resolves to nothing here.
+    private def branchOf(rev: Revision): Option[BranchRef] = rev match
+      case Revision.Head(b) => Some(b)
+      case Revision.At(_)   => None
+    override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): Task[RiskTree] =
       com.risquanter.register.util.IdGenerators.nextTreeId.map { id =>
         val tree = t.copy(id = id); db += ((wsId, branch, id) -> tree); tree
       }
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] =
       ZIO.attempt { val t = db((wsId, branch, id)); val u = op(t); db += ((wsId, branch, id) -> u); u }
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] =
       ZIO.attempt { val t = db((wsId, branch, id)); db -= ((wsId, branch, id)); t }
-    override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
-      ZIO.succeed(db.get((wsId, branch, id)))
-    override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
-      ZIO.succeed(db.collect { case ((wid, b, _), t) if wid == wsId && b == branch => Right(t) }.toList)
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+      ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
+      ZIO.succeed(branchOf(rev).flatMap(b => db.get((wsId, b, id))))
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
+      ZIO.succeed(branchOf(rev) match
+        case Some(b) => db.collect { case ((wid, bb, _), t) if wid == wsId && bb == b => Right(t) }.toList
+        case None    => Nil)
 
   // ── Controller factory ───────────────────────────────────────────────────────
 
@@ -148,7 +157,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       .post(uri"http://localhost/w/$key/risk-trees")
       .body(validRequest.copy(name = name).toJson)
       .contentType("application/json")
-    branch.fold(base)(b => base.header("X-Active-Branch", b)).send(backend)
+    base.header("X-Branch", branch.getOrElse("main")).send(backend)
 
   private def listTreesRequest(
     backend: SttpBackend[Task, Any],
@@ -156,7 +165,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
     branch:  Option[String]
   ): Task[Response[Either[String, String]]] =
     val base = basicRequest.get(uri"http://localhost/w/$key/risk-trees")
-    branch.fold(base)(b => base.header("X-Active-Branch", b)).send(backend)
+    base.header("X-Branch", branch.getOrElse("main")).send(backend)
 
   // ── Spec ─────────────────────────────────────────────────────────────────────
 
@@ -202,7 +211,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       yield assertTrue(response.code.code == 403)
     },
 
-    test("listWorkspaceTrees is branch-scoped: X-Active-Branch selects which trees are visible") {
+    test("listWorkspaceTrees is branch-scoped: X-Branch selects which trees are visible") {
       val branchName = scenarioBranch("stress-2026")
       val scenarioSvc = CascadeTestStubs.scenarioService(
         onList   = _ => ZIO.succeed(List(ScenarioSummary(branchName, CommitHash.fromString("a" * 40).toOption.get))),

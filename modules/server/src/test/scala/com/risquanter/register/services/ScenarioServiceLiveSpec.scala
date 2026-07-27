@@ -76,7 +76,7 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
         val wsId = ws("ws-alpha")
         for
           svc    <- makeService(Map("main" -> hash('a')))
-          branch <- svc.create(wsId, name("draft-v1"))
+          branch <- svc.create(wsId, name("draft-v1"), ScenarioSource.Main)
           fetched <- svc.list(wsId)
         yield assertTrue(
           branch.toBranchRef == s"scenarios.${wsId.value.toLowerCase}.draft-v1",
@@ -88,7 +88,7 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
         val wsId = ws("ws-empty")
         for
           svc  <- makeService(Map.empty)
-          exit <- svc.create(wsId, name("draft-v1")).exit
+          exit <- svc.create(wsId, name("draft-v1"), ScenarioSource.Main).exit
         yield assert(exit)(fails(isSubtype[ValidationFailed](anything)))
       },
 
@@ -117,7 +117,7 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
         val existingBranch = s"scenarios.${wsId.value.toLowerCase}.draft-v1"
         for
           svc  <- makeService(Map("main" -> hash('a'), existingBranch -> hash('a')))
-          exit <- svc.create(wsId, name("draft-v1")).exit
+          exit <- svc.create(wsId, name("draft-v1"), ScenarioSource.Main).exit
         yield assert(exit)(fails(isSubtype[DataConflict](anything)))
       },
 

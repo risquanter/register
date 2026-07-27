@@ -1,7 +1,7 @@
 package com.risquanter.register.http.codecs
 
 import sttp.tapir.*
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeInt, NonNegativeLong, SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, TreeId, NodeId, WorkspaceKeySecret, UserId, ValidationUtil, SeedEntityId, SeedVarId, ScenarioName, CommitHash, BranchChoice}
 
 /**
  * Tapir codecs for Iron refined types.
@@ -187,6 +187,33 @@ object IronTapirCodecs {
         DecodeResult.Value(_)
       )
     )(hash => s"\"${hash.value}\"")
+
+  /** Codec for BranchChoice — the explicit branch wire value (E7). "main" or a
+    * scenario slug; there is no absent-means-main state. Serves both the
+    * required `X-Branch` header (`header[BranchChoice]`) and the changed-nodes
+    * branch query parameters (`query[BranchChoice]`). Absence of a required
+    * header/param fails decoding → 400, as intended.
+    */
+  given Codec[String, BranchChoice, CodecFormat.TextPlain] =
+    Codec.string.mapDecode[BranchChoice] {
+      case "main" => DecodeResult.Value(BranchChoice.Main)
+      case raw =>
+        ScenarioName.fromString(raw).fold(
+          errs => DecodeResult.Error(raw, new IllegalArgumentException(errs.map(_.message).mkString("; "))),
+          name => DecodeResult.Value(BranchChoice.Scenario(name))
+        )
+    } {
+      case BranchChoice.Main           => "main"
+      case BranchChoice.Scenario(name) => name.value
+    }
+
+  given Schema[BranchChoice] = Schema.string.map[BranchChoice](
+    (s: String) => if s == "main" then Some(BranchChoice.Main)
+                   else ScenarioName.fromString(s).toOption.map(BranchChoice.Scenario(_))
+  ) {
+    case BranchChoice.Main           => "main"
+    case BranchChoice.Scenario(name) => name.value
+  }
 
   /** Schema for SafeName.SafeName for JSON body derivation. */
   given Schema[SafeName.SafeName] = Schema.string.map[SafeName.SafeName](

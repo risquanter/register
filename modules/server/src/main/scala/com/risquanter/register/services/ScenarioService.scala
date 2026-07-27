@@ -21,6 +21,7 @@ import com.risquanter.register.domain.errors.{ScenariosNotSupported, ScenarioHea
 enum ScenarioSource:
   case Main
   case ForkOf(scenario: ScenarioName.ScenarioName)
+  case AtCommit(commit: CommitHash)
 
 /** One scenario as returned by `list`. `head` is the branch's current commit,
   * needed by the caller to satisfy `delete`'s CAS precondition (DD-5 Option A,
@@ -48,14 +49,15 @@ trait ScenarioService:
     *
     * @param wsId Workspace that owns the scenario
     * @param name User-supplied scenario name (already validated `ScenarioName`)
-    * @param source What to fork from — main (default) or an existing scenario
+    * @param source What to fork from — main, an existing scenario, or a
+    *               specific commit (fork-from-history). Required; no default.
     * @return The new scenario's branch reference
     * @see BranchAlreadyExists translated to `DataConflict` — name collision (CAS).
     *      `BranchHeadStale` cannot occur here: `createBranchAt`'s CAS only
     *      guards the new branch's name, never the source's staleness — forking
     *      is by commit hash, immune to the source changing mid-fork (A9).
     */
-  def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource = ScenarioSource.Main)
+  def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
     (using Checked[Permission]): Task[BranchRef]
 
   /** List a workspace's scenarios (DD-11: ownership = branch-name prefix filter).
@@ -76,7 +78,7 @@ trait ScenarioService:
     (using Checked[Permission]): Task[Unit]
 
 object ScenarioService:
-  def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource = ScenarioSource.Main)
+  def create(wsId: WorkspaceId, name: ScenarioName.ScenarioName, source: ScenarioSource)
     (using Checked[Permission]): ZIO[ScenarioService, Throwable, BranchRef] =
     ZIO.serviceWithZIO[ScenarioService](_.create(wsId, name, source))
 

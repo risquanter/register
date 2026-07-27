@@ -12,9 +12,9 @@ import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, Checked, Permission, UserContextExtractor}
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, ScenarioName, WorkspaceId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, ScenarioName, WorkspaceId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.IrminError
-import com.risquanter.register.http.requests.CreateScenarioRequest
+import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, ScenarioResponse, ScenarioSummaryResponse}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
@@ -115,7 +115,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         (backend, key) <- buildBackend()
         resp <- basicRequest
           .post(uri"http://localhost/w/${key.reveal}/scenarios")
-          .body(CreateScenarioRequest(name = scenarioName("draft-v1"), forkOf = None).toJson)
+          .body(CreateScenarioRequest(name = scenarioName("draft-v1"), source = ScenarioSourceDto.Branch(BranchChoice.Main)).toJson)
           .contentType("application/json")
           .send(backend)
         body = orThrow(resp.body.toOption, s"expected success body, got: $resp")
@@ -134,9 +134,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       for
         (backend, key) <- buildBackend()
         _     <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
-                   .body(CreateScenarioRequest(scenarioName("base"), None).toJson).contentType("application/json").send(backend)
+                   .body(CreateScenarioRequest(scenarioName("base"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
         _     <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
-                   .body(CreateScenarioRequest(scenarioName("fork"), Some(scenarioName("base"))).toJson).contentType("application/json").send(backend)
+                   .body(CreateScenarioRequest(scenarioName("fork"), ScenarioSourceDto.Branch(BranchChoice.Scenario(scenarioName("base")))).toJson).contentType("application/json").send(backend)
         resp  <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios").send(backend)
         body   = orThrow(resp.body.toOption, s"expected list body, got: $resp")
         listed = orThrow(body.fromJson[List[ScenarioSummaryResponse]].toOption, s"bad list json: $body")
@@ -151,9 +151,9 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       for
         (backend, key) <- buildBackend()
         _    <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
-                  .body(CreateScenarioRequest(scenarioName("draft-v1"), None).toJson).contentType("application/json").send(backend)
+                  .body(CreateScenarioRequest(scenarioName("draft-v1"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
         resp <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
-                  .body(CreateScenarioRequest(scenarioName("draft-v1"), None).toJson).contentType("application/json").send(backend)
+                  .body(CreateScenarioRequest(scenarioName("draft-v1"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
       yield assertTrue(resp.code.code == 409)
     },
 
@@ -182,7 +182,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       for
         (backend, key) <- buildBackend()
         _      <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
-                    .body(CreateScenarioRequest(scenarioName("draft-v1"), None).toJson).contentType("application/json").send(backend)
+                    .body(CreateScenarioRequest(scenarioName("draft-v1"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
         // main's seeded head is hash('a') and create forks it verbatim (A9), so
         // the new branch's head equals main's head.
         del    <- basicRequest.delete(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1")
@@ -197,7 +197,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       for
         (backend, key) <- buildBackend()
         _    <- basicRequest.post(uri"http://localhost/w/${key.reveal}/scenarios")
-                  .body(CreateScenarioRequest(scenarioName("draft-v1"), None).toJson).contentType("application/json").send(backend)
+                  .body(CreateScenarioRequest(scenarioName("draft-v1"), ScenarioSourceDto.Branch(BranchChoice.Main)).toJson).contentType("application/json").send(backend)
         resp <- basicRequest.delete(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1")
                   .header("If-Match", s""""${hash('f').value}"""").send(backend)
       yield assertTrue(resp.code.code == 409)
@@ -228,7 +228,7 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         // `ScenarioService.create`, which would let a caller dictate the branch ref.
         resp <- basicRequest
           .post(uri"http://localhost/w/${key.reveal}/scenarios")
-          .body("""{"name":"scenarios.01j8zq3fkwp2x9m4v7rtbnd6ea.high-cyber","forkOf":null}""")
+          .body("""{"name":"scenarios.01j8zq3fkwp2x9m4v7rtbnd6ea.high-cyber","source":{"type":"branch","name":"main"}}""")
           .contentType("application/json")
           .send(backend)
       yield assertTrue(resp.code.code == 400)

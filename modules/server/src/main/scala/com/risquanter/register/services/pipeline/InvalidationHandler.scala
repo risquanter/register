@@ -5,7 +5,7 @@ import zio.json.EncoderOps
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent
 import com.risquanter.register.domain.data.{RiskTree, RiskNode}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, BranchChoice}
 
 /**
   * Notifies SSE subscribers which nodes' figures changed after a tree
@@ -62,9 +62,11 @@ trait InvalidationHandler {
     *
     * @param oldTree Tree state before mutation
     * @param newTree Tree state after mutation (treeId derived from newTree.id)
+    * @param branch Client-facing branch name (`"main"` or a scenario name) the
+    *   mutation landed on — tags the SSE event so the SPA filters by tab branch.
     * @return Notification result containing affected nodes and subscriber count
     */
-  def handleMutation(oldTree: RiskTree, newTree: RiskTree): UIO[InvalidationResult]
+  def handleMutation(oldTree: RiskTree, newTree: RiskTree, branch: BranchChoice): UIO[InvalidationResult]
 
   /**
     * Handle tree deletion by publishing a CacheInvalidated event with all
@@ -72,9 +74,11 @@ trait InvalidationHandler {
     * NOT_FOUND, signaling the tree is gone.
     *
     * @param tree The deleted tree (treeId and node IDs derived from tree)
+    * @param branch Client-facing branch name (`"main"` or a scenario name) the
+    *   deletion landed on.
     * @return Notification result containing all node IDs and subscriber count
     */
-  def handleTreeDeletion(tree: RiskTree): UIO[InvalidationResult]
+  def handleTreeDeletion(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult]
 }
 
 object InvalidationHandler {
@@ -86,11 +90,11 @@ object InvalidationHandler {
     ZLayer.fromFunction(InvalidationHandlerLive(_))
 
   // Accessor methods for ZIO service pattern
-  def handleMutation(oldTree: RiskTree, newTree: RiskTree): URIO[InvalidationHandler, InvalidationResult] =
-    ZIO.serviceWithZIO[InvalidationHandler](_.handleMutation(oldTree, newTree))
+  def handleMutation(oldTree: RiskTree, newTree: RiskTree, branch: BranchChoice): URIO[InvalidationHandler, InvalidationResult] =
+    ZIO.serviceWithZIO[InvalidationHandler](_.handleMutation(oldTree, newTree, branch))
 
-  def handleTreeDeletion(tree: RiskTree): URIO[InvalidationHandler, InvalidationResult] =
-    ZIO.serviceWithZIO[InvalidationHandler](_.handleTreeDeletion(tree))
+  def handleTreeDeletion(tree: RiskTree, branch: BranchChoice): URIO[InvalidationHandler, InvalidationResult] =
+    ZIO.serviceWithZIO[InvalidationHandler](_.handleTreeDeletion(tree, branch))
 }
 
 /**
@@ -104,17 +108,17 @@ final case class InvalidationHandlerLive(
     * Publish a CacheInvalidated SSE event and return the InvalidationResult.
     * Shared by both handler methods to ensure consistent event shape and logging.
     */
-  private def publishInvalidation(treeId: TreeId, nodeIds: List[NodeId], context: String): UIO[InvalidationResult] =
+  private def publishInvalidation(treeId: TreeId, nodeIds: List[NodeId], branch: BranchChoice, context: String): UIO[InvalidationResult] =
     if nodeIds.isEmpty then
       ZIO.succeed(InvalidationResult(invalidatedNodes = Nil, subscribersNotified = 0))
     else
-      val event = SSEEvent.CacheInvalidated(nodeIds = nodeIds.map(_.value), treeId = treeId)
+      val event = SSEEvent.CacheInvalidated(nodeIds = nodeIds, treeId = treeId, branch = branch)
       for
         subscriberCount <- hub.publish(treeId, event)
-        _               <- ZIO.logInfo(s"$context: treeId=$treeId, nodes=${nodeIds.size}, subscribers=$subscriberCount")
+        _               <- ZIO.logInfo(s"$context: treeId=$treeId, branch=$branch, nodes=${nodeIds.size}, subscribers=$subscriberCount")
       yield InvalidationResult(invalidatedNodes = nodeIds, subscribersNotified = subscriberCount)
 
-  override def handleMutation(oldTree: RiskTree, newTree: RiskTree): UIO[InvalidationResult] =
+  override def handleMutation(oldTree: RiskTree, newTree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
     // Defense-in-depth (ADR-010 §3): internal precondition — caller controls both trees
     require(oldTree.id == newTree.id,
       s"handleMutation precondition violated: oldTree.id=${oldTree.id} != newTree.id=${newTree.id}")
@@ -128,11 +132,11 @@ final case class InvalidationHandlerLive(
       // Each affected node's aggregates up to the root changed with it
       val withAncestors = affected.flatMap(nid => newTree.index.ancestorPath(nid))
       val allAffectedNodes = (withAncestors ++ removed).toList
-      publishInvalidation(treeId, allAffectedNodes, "Mutation notification")
+      publishInvalidation(treeId, allAffectedNodes, branch, "Mutation notification")
 
-  override def handleTreeDeletion(tree: RiskTree): UIO[InvalidationResult] =
+  override def handleTreeDeletion(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
     val allNodeIds = tree.index.nodes.keys.toList // browser re-fetches → gets NOT_FOUND
-    publishInvalidation(tree.id, allNodeIds, "Tree deletion notification")
+    publishInvalidation(tree.id, allNodeIds, branch, "Tree deletion notification")
 
   // ========================================
   // Tree diff logic

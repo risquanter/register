@@ -13,7 +13,7 @@ import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
-import com.risquanter.register.services.{RiskTreeServiceLive, ScenarioDiffServiceLive, ScenarioServiceNotSupported, ScenarioMergeServiceNotSupported}
+import com.risquanter.register.services.{RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService, ScenarioServiceNotSupported, ScenarioMergeServiceNotSupported}
 import com.risquanter.register.services.SimulationSemaphore
 import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
@@ -66,7 +66,8 @@ object StubHttpTestHarness {
         CacheScope.layer,
         RiskResultResolverLive.layer,
         RiskTreeServiceLive.layer,
-        ScenarioDiffServiceLive.layer,
+        ChangedNodesServiceLive.layer,
+        ZLayer.succeed(TreeHistoryService.empty),
         SSEHub.live,
         InvalidationHandler.live,
         WorkspaceStoreLive.layer,

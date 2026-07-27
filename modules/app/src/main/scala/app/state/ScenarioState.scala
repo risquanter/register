@@ -7,7 +7,7 @@ import app.core.ZJS.*
 import app.core.safeMessage
 import com.risquanter.register.domain.data.iron.{BranchChoice, UserId, WorkspaceKeySecret, ScenarioName}
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
-import com.risquanter.register.http.requests.CreateScenarioRequest
+import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
 /** Per-view active-branch selection (milestone-2b Phase B — BranchBar,
@@ -88,7 +88,12 @@ final class ScenarioState(
         submitState.set(ScenarioSubmitState.Failed("Cannot create a scenario — no active workspace"))
       case Some(key) =>
         submitState.set(ScenarioSubmitState.Submitting)
-        createScenarioEndpoint((userIdAccessor(), key, CreateScenarioRequest(name, forkOf)))
+        // forkOf None = fork from main's head; Some(n) = fork from scenario n's
+        // head. Fork-from-commit (ScenarioSourceDto.Commit) lands with the
+        // history slider's fork button (Slice E-B).
+        val source = forkOf.fold[ScenarioSourceDto](ScenarioSourceDto.Branch(BranchChoice.Main))(n =>
+          ScenarioSourceDto.Branch(BranchChoice.Scenario(n)))
+        createScenarioEndpoint((userIdAccessor(), key, CreateScenarioRequest(name, source)))
           .tap(response => ZIO.succeed {
             submitState.set(ScenarioSubmitState.Success(response))
             listState.refresh()

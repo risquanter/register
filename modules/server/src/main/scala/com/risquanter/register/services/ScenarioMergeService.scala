@@ -44,7 +44,7 @@ object MergeConflictPath:
         MergeConflictPath(rel, None, None)
 
 /** Outcome of a merge preview. A plain multi-case enum (mirrors
-  * `ScenarioDiffResult`): a missing scenario is a distinct non-error outcome
+  * `ChangedNodesResult`): a missing scenario is a distinct non-error outcome
   * of a read-only preview, not a failure.
   */
 enum MergePreviewResult:
@@ -66,7 +66,7 @@ enum MergePreviewResult:
   * The pre-check compares full persisted node JSON byte-for-byte between
   * main, the scenario, and their lowest common ancestor — the storage
   * relation of ADR-032. It never consults the domain content hashes
-  * (`ScenarioDiffService`), which by design ignore renames/moves and
+  * (`ChangedNodesService`), which by design ignore renames/moves and
   * therefore cannot predict merge outcomes.
   *
   * Scanning is scoped to the workspace's own subtree: scenario branches only

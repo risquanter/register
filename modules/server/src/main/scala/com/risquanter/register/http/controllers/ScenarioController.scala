@@ -6,7 +6,9 @@ import sttp.tapir.server.ServerEndpoint
 import com.risquanter.register.auth.{AuthorizationService, Checked, Permission, UserContextExtractor}
 import com.risquanter.register.auth.ResourceRef.asResource
 import com.risquanter.register.http.endpoints.ScenarioEndpoints
+import com.risquanter.register.http.requests.ScenarioSourceDto
 import com.risquanter.register.http.responses.{ScenarioResponse, ScenarioSummaryResponse, MergePreviewResponse, MergeConflictEntry, MergeScenarioResponse}
+import com.risquanter.register.domain.data.iron.BranchChoice
 import com.risquanter.register.services.{ScenarioService, ScenarioSource, ScenarioMergeService, MergePreviewResult}
 import com.risquanter.register.services.workspace.WorkspaceStore
 
@@ -36,7 +38,10 @@ class ScenarioController private (
         userId <- userCtx.requireAuthenticated(maybeUserId)
         ws     <- workspaceStore.resolve(key)
         given Checked[Permission] <- authzService.check(userId, Permission.DesignWrite, ws.id.asResource)
-        source  = req.forkOf.fold(ScenarioSource.Main)(ScenarioSource.ForkOf(_))
+        source  = req.source match
+                    case ScenarioSourceDto.Branch(BranchChoice.Main)           => ScenarioSource.Main
+                    case ScenarioSourceDto.Branch(BranchChoice.Scenario(name)) => ScenarioSource.ForkOf(name)
+                    case ScenarioSourceDto.Commit(hash)                        => ScenarioSource.AtCommit(hash)
         _      <- scenarioService.create(ws.id, req.name, source)
       yield ScenarioResponse(req.name)).either
   }

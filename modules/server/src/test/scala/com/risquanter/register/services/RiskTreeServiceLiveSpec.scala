@@ -6,7 +6,7 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision, CommitHash}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -29,28 +29,31 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private def makeStubRepo = new RiskTreeRepository {
     private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
     
-    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] = ZIO.succeed {
+    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree] = ZIO.succeed {
       db += ((wsId, riskTree.id) -> riskTree)
       riskTree
     }
-    
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] = ZIO.attempt {
+
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       val updated = op(riskTree)
       db += ((wsId, id) -> updated)
       updated
     }
-    
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] = ZIO.attempt {
+
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       db -= ((wsId, id))
       riskTree
     }
-    
-    override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
+
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+      ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
+
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
       ZIO.succeed(db.get((wsId, id)))
-    
-    override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
+
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
       ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
   }
   
@@ -127,7 +130,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   override def spec: Spec[TestEnvironment & Scope, Any] =
     suite("RiskTreeServiceLive")(
       test("create validates and persists risk tree config") {
-        val program = service(_.create(stubWsId, validRequest))
+        val program = service(_.create(stubWsId, validRequest, BranchRef.Main))
 
         program.assert { result =>
           result.id.value.nonEmpty &&
@@ -172,7 +175,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           )
         )
 
-        val program = service(_.create(stubWsId, hierarchicalRequest))
+        val program = service(_.create(stubWsId, hierarchicalRequest, BranchRef.Main))
 
         program.assert { result =>
           val root = result.root.asInstanceOf[RiskPortfolio]
@@ -185,7 +188,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("root NodeId is present in tree nodes (ADR-018 nominal identity)") {
         // Verifies that RiskNode.id (NodeId) matches rootId (NodeId) via
         // structural equality — the same invariant guarded by ensureRootPresent
-        val program = service(_.create(stubWsId, validRequest))
+        val program = service(_.create(stubWsId, validRequest, BranchRef.Main))
 
         program.assert { tree =>
           val rootId = tree.rootId
@@ -200,7 +203,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("create fails with invalid name") {
         val invalidRequest = validRequest.copy(name = "")
-        val program = service(_.create(stubWsId, invalidRequest)).flip
+        val program = service(_.create(stubWsId, invalidRequest, BranchRef.Main)).flip
 
         program.assert {
           case ValidationFailed(errors) => errors.exists(e => e.field.toLowerCase.contains("name"))
@@ -212,7 +215,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         val invalidRequest = validRequest.copy(
           leaves = Seq(validRequest.leaves.head.copy(probability = 1.5))
         )
-        val program = service(_.create(stubWsId, invalidRequest)).flip
+        val program = service(_.create(stubWsId, invalidRequest, BranchRef.Main)).flip
 
         program.assert {
           case ValidationFailed(errors) => errors.exists(_.field.contains("probability"))
@@ -222,8 +225,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getById returns risk tree when exists") {
         val program = for {
-          created <- service(_.create(stubWsId, validRequest))
-          found   <- service(_.getById(stubWsId, created.id))
+          created <- service(_.create(stubWsId, validRequest, BranchRef.Main))
+          found   <- service(_.getById(stubWsId, created.id, Revision.Head(BranchRef.Main)))
         } yield (created, found)
 
         program.assert {
@@ -235,7 +238,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       test("getById returns None when not exists") {
-        val program = service(_.getById(stubWsId, treeId("nonexistent")))
+        val program = service(_.getById(stubWsId, treeId("nonexistent"), Revision.Head(BranchRef.Main)))
 
         program.assert(_ == None)
       },
@@ -245,13 +248,13 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       // ========================================
       test("probOfExceedance returns probability for given threshold") {
         val program = for {
-          tree <- service(_.create(stubWsId, validRequest))
+          tree <- service(_.create(stubWsId, validRequest, BranchRef.Main))
           rootId = tree.rootId
           
           // Test at multiple thresholds
-          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 1000L, testEntity))   // Low threshold
-          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 25000L, testEntity))  // Mid threshold
-          prob3 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 50000L, testEntity))  // High threshold
+          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 1000L, testEntity, false, Revision.Head(BranchRef.Main)))   // Low threshold
+          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 25000L, testEntity, false, Revision.Head(BranchRef.Main)))  // Mid threshold
+          prob3 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 50000L, testEntity, false, Revision.Head(BranchRef.Main)))  // High threshold
         } yield (prob1, prob2, prob3)
 
         program.assert { case (prob1, prob2, prob3) =>
@@ -266,12 +269,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("probOfExceedance returns deterministic results") {
         val program = for {
-          tree <- service(_.create(stubWsId, validRequest))
+          tree <- service(_.create(stubWsId, validRequest, BranchRef.Main))
           rootId = tree.rootId
           
           // Call twice with same threshold
-          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity))
-          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity))
+          prob1 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity, false, Revision.Head(BranchRef.Main)))
+          prob2 <- service(_.probOfExceedance(stubWsId, tree.id, rootId, 10000L, testEntity, false, Revision.Head(BranchRef.Main)))
         } yield (prob1, prob2)
 
         program.assert { case (prob1, prob2) =>
@@ -318,11 +321,11 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         )
 
         val program = for {
-          tree <- service(_.create(stubWsId, hierarchicalRequest))
+          tree <- service(_.create(stubWsId, hierarchicalRequest, BranchRef.Main))
           idsByName = tree.index.nodes.map((nid, n) => n.name.value.toString -> nid).toMap
           leaf1Id = idsByName("Leaf 1")
           leaf2Id = idsByName("Leaf 2")
-          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(leaf1Id, leaf2Id), testEntity))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(leaf1Id, leaf2Id), testEntity, false, Revision.Head(BranchRef.Main)))
         } yield curves
 
         program.assert { curves =>
@@ -366,12 +369,12 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         )
 
         val program = for {
-          tree <- service(_.create(stubWsId, hierarchicalRequest))
+          tree <- service(_.create(stubWsId, hierarchicalRequest, BranchRef.Main))
           idsByName = tree.index.nodes.map((nid, n) => n.name.value.toString -> nid).toMap
           nodeAId = idsByName("Node A")
           nodeBId = idsByName("Node B")
           
-          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(nodeAId, nodeBId), testEntity))
+          curves <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set(nodeAId, nodeBId), testEntity, false, Revision.Head(BranchRef.Main)))
         } yield (curves, nodeAId, nodeBId)
 
         program.assert { case (curves, nodeAId, nodeBId) =>
@@ -387,8 +390,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("getLECCurvesMulti rejects empty set") {
         for {
-          tree <- service(_.create(stubWsId, validRequest))
-          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set.empty, testEntity)).exit
+          tree <- service(_.create(stubWsId, validRequest, BranchRef.Main))
+          exit <- service(_.getLECCurvesMulti(stubWsId, tree.id, Set.empty, testEntity, false, Revision.Head(BranchRef.Main))).exit
         } yield assertTrue(
           exit.isFailure
         )
@@ -408,7 +411,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             leafDef("Mid Risk", "Seed Root")
           )
         )
-        val program = service(_.create(stubWsId, request))
+        val program = service(_.create(stubWsId, request, BranchRef.Main))
         program.assert { tree =>
           val seeds = seedsByName(tree)
           seeds == Map("Alpha Risk" -> 1L, "Mid Risk" -> 2L, "Zeta Risk" -> 3L) &&
@@ -419,8 +422,8 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       test("recreating the same tree yields the same seedVarIds (item 12 core property)") {
         val request = seedTreeRequest("Recreate A")
         val program = for {
-          first  <- service(_.create(stubWsId, request))
-          second <- service(_.create(stubWsId, seedTreeRequest("Recreate B")))
+          first  <- service(_.create(stubWsId, request, BranchRef.Main))
+          second <- service(_.create(stubWsId, seedTreeRequest("Recreate B"), BranchRef.Main))
         } yield (first, second)
         program.assert { case (first, second) =>
           seedsByName(first) == seedsByName(second)
@@ -429,7 +432,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("update preserves surviving leaves' seedVarIds, including across a rename") {
         val program = for {
-          created <- service(_.create(stubWsId, seedTreeRequest("Rename Tree")))
+          created <- service(_.create(stubWsId, seedTreeRequest("Rename Tree"), BranchRef.Main))
           leafId   = leafIdByName(created, "Cyber Attack")
           updated <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
             name = "Rename Tree",
@@ -440,7 +443,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             ),
             newPortfolios = Seq.empty,
             newLeaves = Seq.empty
-          )))
+          ), BranchRef.Main))
         } yield (created, updated)
         program.assert { case (created, updated) =>
           val before = seedsByName(created)
@@ -461,7 +464,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             leafDef("Auto Alpha", "Seed Root")
           )
         )
-        val program = service(_.create(stubWsId, request))
+        val program = service(_.create(stubWsId, request, BranchRef.Main))
         program.assert { tree =>
           seedsByName(tree) == Map("Pinned Risk" -> 5L, "Auto Alpha" -> 6L, "Auto Beta" -> 7L) &&
             tree.seedVarHighWater.value == 7L
@@ -470,7 +473,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("update: a provided seedVarId clashing with a surviving leaf's ID is rejected (§5.1)") {
         val program = for {
-          created <- service(_.create(stubWsId, seedTreeRequest("Clash Tree")))
+          created <- service(_.create(stubWsId, seedTreeRequest("Clash Tree"), BranchRef.Main))
           clashId  = seedsByName(created)("Cyber Attack")
           exit <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
             name = "Clash Tree",
@@ -481,7 +484,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             ),
             newPortfolios = Seq.empty,
             newLeaves = Seq(leafDef("Usurper", "Seed Root").copy(seedVarId = Some(clashId)))
-          ))).exit
+          ), BranchRef.Main)).exit
         } yield exit
         program.assert {
           case Exit.Failure(cause) =>
@@ -498,7 +501,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("update: a provided seedVarId may deliberately resurrect a freed ID (§5.1)") {
         val program = for {
-          created <- service(_.create(stubWsId, seedTreeRequest("Resurrect Tree")))
+          created <- service(_.create(stubWsId, seedTreeRequest("Resurrect Tree"), BranchRef.Main))
           freedId  = seedsByName(created)("Cyber Attack")
           // Delete "Cyber Attack", then re-add a leaf explicitly claiming its freed ID.
           after <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
@@ -507,7 +510,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             leaves = Seq(leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")),
             newPortfolios = Seq.empty,
             newLeaves = Seq(leafDef("Cyber Attack Reborn", "Seed Root").copy(seedVarId = Some(freedId)))
-          )))
+          ), BranchRef.Main))
         } yield (freedId, created, after)
         program.assert { case (freedId, created, after) =>
           seedsByName(after)("Cyber Attack Reborn") == freedId &&
@@ -517,7 +520,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
       test("update: a new leaf gets highWater+1; a deleted leaf's ID is never reused") {
         val program = for {
-          created <- service(_.create(stubWsId, seedTreeRequest("HighWater Tree")))
+          created <- service(_.create(stubWsId, seedTreeRequest("HighWater Tree"), BranchRef.Main))
           // Delete "Cyber Attack" (drop it), add "New Risk"
           afterDelete <- service(_.update(stubWsId, created.id, RiskTreeUpdateRequest(
             name = "HighWater Tree",
@@ -525,7 +528,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             leaves = Seq(leafUpd(leafIdByName(created, "Fraud"), "Fraud", "Seed Root")),
             newPortfolios = Seq.empty,
             newLeaves = Seq(leafDef("New Risk", "Seed Root"))
-          )))
+          ), BranchRef.Main))
         } yield (created, afterDelete)
         program.assert { case (created, after) =>
           val freedId = seedsByName(created)("Cyber Attack")

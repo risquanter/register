@@ -29,14 +29,14 @@ trait QueryService:
     * @param wsId   Workspace that owns the target risk tree
     * @param treeId  Target risk tree identifier
     * @param parsed  Pre-parsed query (from `QueryRequest.resolve()`)
-    * @param branch Target branch (milestone-2b Phase B item 4b); defaults to `main`.
-    *   Caller (controller) must have already verified `branch` belongs to `wsId`
-    *   — see `ActiveBranch.resolve`; this method trusts it.
+    * @param branch Target branch. Queries run against the branch head. The
+    *   controller must have already verified `branch` belongs to `wsId` —
+    *   see `ActiveBranch.resolve`; this method trusts it.
     * @return Query response with satisfaction result and matching node IDs
     */
-  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef = BranchRef.Main): Task[QueryResponse]
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): Task[QueryResponse]
 
 object QueryService:
 
-  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef = BranchRef.Main): ZIO[QueryService, Throwable, QueryResponse] =
+  def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): ZIO[QueryService, Throwable, QueryResponse] =
     ZIO.serviceWithZIO[QueryService](_.evaluate(wsId, treeId, parsed, seedEntityId, branch))

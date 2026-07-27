@@ -9,6 +9,23 @@ Prerequisites landed: `PLAN-C-REFACTOR.md` (Scope 1) and
 `PLAN-COMPARE-UI-REDESIGN.md` (slot-card Analyze layout §8 now builds on).
 All Phase E decisions are ruled (E1–E8 below, H1–H6 in §8).
 
+**Slice 0 (backend, §1–§7) IMPLEMENTED 2026-07-27, uncommitted.** All modules
+compile (`sbt compile` green); `server/test` and `app/test` pass. The 3 new IT
+specs (`TreeRevertItSpec`, `PinnedReadAuthorizationItSpec`,
+`IrminRevertSemanticsSpec`) are authored and compile (`serverIt/Test/compile`
+green) — running them needs the `local/irmin-prod:3.11-p1` image (user-run).
+Rulings applied this pass: repo revert Option A; `NodeDiff*`→`NodeChange*`
+rename; `collectAllTrees` preserved on main (per-branch-uniqueness fix deferred
+to a separate Fable→Opus follow-up); history/changed-nodes permission =
+`ViewTree` (matches the controller's other tree reads, not the §2 `ViewWorkspace`
+mention); SSE `CacheInvalidated.branch` typed `BranchChoice` and `nodeIds`
+typed `List[NodeId]` (user-requested typing fixes). Version bumped to 0.10.0
+(build.sbt + .env + .env.irmin). Doc sweep was surgical (ADR-032, ADR-004a
+header) — historical records (TODO.md, plan docs, ADR-006/007 proposals) left
+intact because a literal rename there would either falsify old semantics
+("X-Branch absent = main") or corrupt proposal-internal types. Slices E-A
+(Analyze slider) and E-B (Design slider + fork/revert UI) remain.
+
 ## Rulings (2026-07-25, user)
 
 - **E1** History entries are typed, parsed server-side; raw commit messages
@@ -236,10 +253,23 @@ val revertTreeEndpoint =
 // modules/server/.../services/RiskTreeService.scala — NEW
 def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)
   (using Checked[Permission]): Task[RiskTree]
-// Live: load the tree at toCommit (Scope 1 internals) — absent → NotFound —
-// then write it through the ordinary write path as ONE set_tree commit with
-// message workspace:{ws}:risk-tree:{id}:revert. No precondition (E4).
-// Invalidation + SSE fire via the shared write path. Permission DesignWrite.
+// Live: reads head (for invalidation), then repo.revert; absent target →
+// NotFound. No precondition (E4). Invalidation via the shared write path:
+// revertTree calls invalidationHandler.handleMutation(oldHead, reverted) — the
+// same call update uses — and skips it when oldHead is None (revert recreates a
+// deleted tree, which behaves like create: nothing cached to invalidate).
+// Permission DesignWrite.
+
+// modules/server/.../repositories/RiskTreeRepository.scala — NEW (ruled 2026-07-26, Option A)
+def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree]
+// Irmin: loadTreeAt(wsId, id, toCommit) — absent (commit or path) → NotFound
+// (oracle constancy) — then writeTree with meta.copy(updatedAt = now,
+// schemaVersion = CurrentSchemaVersion) and message
+// workspace:{ws}:risk-tree:{id}:revert. Loading at the commit internally
+// preserves the tree's original createdAt and handles reverting a tree that was
+// deleted at head. One set_tree commit (DD-7), forward write only (E3), the
+// tree's own subtree only (E8). InMemory: ValidationFailed (point-in-time reads
+// require the Irmin backend), unreachable in normal operation (DD-9).
 ```
 
 **E8 (RULED 2026-07-25: per-tree, option a).** Revert restores tree T's
@@ -431,6 +461,7 @@ Server IT:
 - modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala (NEW: forward-commit revert — both states in history; SSE/invalidation fires)
 - modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala (continuation §C1: per-branch tree-name uniqueness over real Irmin fork inheritance)
 
 App:
 - modules/app/src/main/scala/app/state/TreeHistoryState.scala (NEW)
@@ -462,6 +493,43 @@ App tests:
 Versioning:
 - build.sbt (ThisBuild / version → 0.10.0 MINOR on landing — 0.8.x/0.9.0 were consumed by the compare rework; APP_VERSION mirrored to .env and .env.irmin, which are ungated and need no bullet)
 
+Compile-fix ripple (mechanical adaptation forced by E5/E6/E7 — default removal,
+diff→changed-nodes rename, X-Branch required, forkOf→source):
+
+Server sources:
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioServiceNotSupported.scala
+- modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala
+
+Server tests:
+- modules/server/src/test/scala/com/risquanter/register/services/ScenarioDiffServiceSpec.scala (RENAME → ChangedNodesServiceSpec.scala; old path, remove after rename)
+- modules/server/src/test/scala/com/risquanter/register/services/ChangedNodesServiceSpec.scala (RENAME target)
+- modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemoryBranchSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeReadConsistencySpec.scala
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/RouteSecurityRegressionSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerCascadeSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/services/CascadeTestStubs.scala
+- modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala (handleMutation/handleTreeDeletion gain branch tag)
+- modules/server/src/test/scala/com/risquanter/register/services/Item17RegressionSpec.scala (handleMutation gains branch tag)
+- modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala (create gains branch)
+
+Server-IT tests:
+- modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala
+
+App (Slice-0 compile-fix):
+- modules/app/src/main/scala/app/state/ScenarioMergeState.scala
+- modules/app/src/main/scala/app/state/AnalyzeQueryState.scala
+- modules/app/src/main/scala/app/state/ScenarioListState.scala
+- modules/app/src/test/scala/app/state/BranchPaletteStateSpec.scala (E7 "main" reservation invalidates its scenario-named-main setup; option C — unsafe-construct for defense-in-depth)
+
+Any further existing test/harness file the compile surfaces as broken by these
+same signature changes is appended here as an exact bullet and fixed as a
+mechanical compile-fix (no assertion changes; a real assertion change halts).
+
+
 ## ADR alignment
 
 - Nominal Iron types at every boundary (`CommitHash`, `BranchChoice`,
@@ -486,6 +554,16 @@ Versioning:
 - Trivial defaults taken: history page size `n=50` (also the slider depth);
   `HistoryOperation` vocabulary as listed; discriminator field name
   `"type"`.
+- Changed-nodes rename extends to the service-internal `NodeDiffStatus` /
+  `NodeDiff` → `NodeChangeStatus` / `NodeChange` (ruled 2026-07-26) for naming
+  consistency with `ChangedNodesService` / `ChangedNodesResult`; doc references
+  swept to match.
+- `collectAllTrees` uniqueness quirk (the tree-uniqueness check reads main
+  regardless of the write branch) is a pre-existing bug surfaced by removing
+  the `getAllForWorkspace` default. Slice 0 PRESERVES it exactly
+  (`Revision.Head(BranchRef.Main)`); the per-branch-uniqueness fix is a
+  separate follow-up (Fable designs/verifies the plan → Opus implements →
+  Opus high-complexity review), not part of this plan.
 
 ## Verification
 
@@ -522,3 +600,210 @@ logic; API or functional duplication between changed-nodes, compare reads,
 and the merge preview's read path; parameters that became redundant.
 Output: findings in decision-guide format (per the review-output rule); any
 resulting work is planned separately — no code edits inside the sweep.
+
+---
+
+# Continuation §C1 — Tree uniqueness checked against the write branch
+
+Follow-up surfaced during Scope 2: `RiskTreeServiceLive` checks tree-name and
+tree-ID uniqueness against main's head regardless of the branch being written.
+Sequenced after Slice 0. Lands as PATCH `0.10.0 → 0.10.1` (`build.sbt` +
+`APP_VERSION` mirrored to `.env` and `.env.irmin`).
+
+Both decisions are ruled (2026-07-27, user): **semantics = Option A (per-branch
+uniqueness); integration-test coverage = Option A (one HTTP-level IT over real
+Irmin fork inheritance).**
+
+## Goal
+
+`create` and `update` check tree-ID and tree-name uniqueness against the head
+of the branch being written, not against `Revision.Head(BranchRef.Main)`.
+
+## Bug (verified in code)
+
+In `RiskTreeServiceLive.scala`:
+
+- `ensureUniqueTree(wsId, treeId, treeName, excludeId)` (line 82) calls
+  `collectAllTrees(wsId)` (line 109), which calls
+  `repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))` — main's head,
+  always.
+- `create` (line 331) and `update` (line 357) are the only callers of
+  `ensureUniqueTree`; `ensureUniqueTree` is the only caller of
+  `collectAllTrees`. Both already receive the write target as `branch: BranchRef`
+  and pass it to every repository write and to `update`'s own read.
+
+Consequences:
+
+- False block: a name used at main's head blocks creating that name on a
+  scenario branch where it is free (the scenario deleted/renamed the inherited
+  tree, or main gained the name after the fork).
+- False allow: a duplicate name within a scenario branch passes the check,
+  because the check read main's tree set, not the scenario's.
+- The tree-ID arm is practically unaffected (server-generated ULIDs); the ID
+  arm is kept as-is, only the revision it reads changes.
+
+Fork semantics: a scenario branch is an Irmin fork of main; at fork time it
+contains main's trees, so names held by main at the fork remain taken on the
+scenario under a per-branch check. Per-branch and cross-branch checks diverge
+only after the branches diverge.
+
+## Signatures
+
+Changed (private helpers in `RiskTreeServiceLive`):
+
+```scala
+// Before
+private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, excludeId: Option[TreeId] = None): Task[Unit]
+private def collectAllTrees(wsId: WorkspaceId): Task[List[RiskTree]]
+
+// After
+private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId] = None): Task[Unit]
+private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): Task[List[RiskTree]]
+```
+
+`branch` sits after the domain arguments (matching `create(wsId, riskTree,
+branch)`) and before `excludeId` so the default stays last. `collectAllTrees`
+takes `BranchRef`, not `Revision`: uniqueness is only ever checked at a branch
+head, so the tighter type prevents passing a pinned commit. Inside, it calls
+`repo.getAllForWorkspace(wsId, Revision.Head(branch))`.
+
+No public signature changes: trait, repository, endpoints, and DTOs untouched.
+
+### Call-site trace (complete — grep-verified)
+
+| Caller | Current call | New call |
+|---|---|---|
+| `create` (:331) | `ensureUniqueTree(wsId, treeId, resolved.treeName)` | `ensureUniqueTree(wsId, treeId, resolved.treeName, branch)` |
+| `update` (:357) | `ensureUniqueTree(wsId, id, resolved.treeName, excludeId = Some(id))` | `ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))` |
+| `ensureUniqueTree` (:83) | `collectAllTrees(wsId)` | `collectAllTrees(wsId, branch)` |
+| `collectAllTrees` body (:110) | `repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))` | `repo.getAllForWorkspace(wsId, Revision.Head(branch))` |
+
+No other callers (verified by `grep -rn "ensureUniqueTree\|collectAllTrees" modules/`).
+
+### Comment update (doc-consistency, same pass)
+
+The comment above `collectAllTrees` (:106–108) becomes current-state:
+
+```scala
+  // Trees at the head of the branch being written; uniqueness (tree ID and
+  // name) is checked against exactly this set.
+```
+
+## Semantics — RULED Option A (per-branch uniqueness)
+
+A name must be unique within the tree set at `Revision.Head(branch)` of the
+branch being written; nothing else is consulted. Matches the branch model,
+fixes both the false block and the false allow, minimal change (the four call
+sites), consistent with `update`'s existing read of the write branch. Inherited
+names stay blocked on a scenario automatically (the fork contains the same
+trees).
+
+The one gap it leaves — two branches can independently create same-name /
+different-ULID trees, and a later merge brings both to main undetected (the
+byte-level merge sees disjoint ULID paths) — is a merge-time concern no
+write-time check can close. Captured as a to-be-planned Phase F requirement:
+`docs/scratch/milestone-2b-cache-and-decisions.md`, "Deferred: Phase D Option-2
+conflict resolution", requirement 4.
+
+(Rejected: Option B, workspace-wide uniqueness — it makes the false-block bug
+policy, needs branch enumeration inside the service, and is still not atomic
+across branches.)
+
+## Test changes
+
+Existing tests — verified impact:
+
+- `RiskTreeControllerSpec.scala` "duplicate tree name is rejected" (:154): both
+  creates target main, so the outcome is identical under per-branch semantics.
+  No assertion changes; file not modified.
+- `RiskTreeServiceLiveSpec.scala`: every existing create/update/read targets
+  main; no existing assertion changes. The stub repository is reworked (below);
+  existing tests run unchanged on top of it.
+
+No assertion removed, weakened, or reframed (Decision Trigger #8 does not fire).
+
+Stub repository rework in `RiskTreeServiceLiveSpec` (fixture change, ratified
+here): map keyed by `(WorkspaceId, BranchRef, TreeId)`; reads pattern-match on
+the revision:
+
+```scala
+override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
+  rev match
+    case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)))
+    case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
+
+override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
+  rev match
+    case Revision.Head(branch) => ZIO.succeed(db.collect { case ((wid, b, _), tree) if wid == wsId && b == branch => Right(tree) }.toList)
+    case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
+```
+
+Known fixture limitation (stated in a stub comment): a stub scenario branch
+starts empty — it does not model Irmin's fork-time inheritance. The unit tests
+therefore exercise post-divergence cases; fork inheritance is covered by the IT
+below.
+
+New unit tests (added to `RiskTreeServiceLiveSpec`, suite "Per-branch
+uniqueness"):
+
+1. "same tree name on two branches is allowed" — name N on main; name N on the
+   scenario branch; both succeed. (False-block fix.)
+2. "duplicate tree name within a scenario branch is rejected" — name N twice on
+   the scenario branch; second fails with `ValidationFailed` where
+   `field == "name" && code == ValidationErrorCode.DUPLICATE_VALUE`. (False-allow fix.)
+3. "update rename to a name taken on the same branch is rejected" — trees A, B
+   on main; rename B to A's name; `DUPLICATE_VALUE` on `"name"`.
+4. "update rename to a name held only on another branch is allowed" — tree N on
+   main; tree T on the scenario branch; rename T to N; succeeds.
+
+## Integration test — RULED Option A
+
+One HTTP-level test in `HttpApiIntegrationSpec.scala`: create tree N on main;
+create a scenario; verify create N on the scenario is rejected while the
+inherited tree exists (fork inheritance); delete it on the scenario; verify
+create N then succeeds and a second N on the scenario is rejected. This asserts
+the one behaviour the unit stub cannot model — fork-time inheritance composed
+with the uniqueness check — over the real service+repo+Irmin path. The spec
+does not currently drive scenario endpoints, so this test adds that wiring.
+
+## ADR alignment
+
+- ADR-001: compliant — uniqueness is a service-level cross-entity invariant, not
+  input re-validation; all parameters are already-validated nominal/refined types.
+- ADR-010: compliant — `ensureUniqueTree` keeps accumulating ID-arm and name-arm
+  errors into one `ValidationFailed`; only the revision read changes.
+- ADR-018: compliant — `BranchRef` passed through end to end; no stringly-typed
+  branch handling.
+- Repository revision contract: compliant — removes the last hard-coded
+  `Revision.Head(BranchRef.Main)` read in the service write path.
+- Decision Triggers: #5 (behavior change) is the trigger this discharges; #1/#4
+  do not fire (no endpoint/DTO/public-signature change); #8 does not fire.
+- Code style: the stub's revision handling uses `match` on `Revision`.
+
+## Non-goals (unchanged by this fix)
+
+- check-then-write is not transactional even within one branch (pre-existing).
+- `revertTree` performs no uniqueness check (pre-existing).
+- Merge does not deduplicate tree names — the post-merge duplicate-name case is
+  Phase F (requirement 4).
+
+## Verification
+
+```bash
+sbt server/compile
+sbt "server/testOnly *RiskTreeServiceLiveSpec"
+sbt "server/testOnly *RiskTreeControllerSpec"
+sbt 'commonJVM/test; server/test'
+sbt "serverIt/test"   # Option A IT; needs local/irmin-prod:3.11-p1
+```
+
+Landing: PATCH bump `build.sbt` to `0.10.1`, mirror `APP_VERSION=0.10.1` into
+`.env` and `.env.irmin`, flag plan completion.
+
+## Continuation §C1 file inventory (additions to the Scope 2 inventory above)
+
+All folded into the Scope 2 `## File inventory` section — the enforcement hook
+reads only that heading. `RiskTreeServiceLive.scala`, `RiskTreeServiceLiveSpec.scala`,
+and `build.sbt` were already listed there; `HttpApiIntegrationSpec.scala` was
+added to the Server IT block for this continuation. `.env`/`.env.irmin` are
+ungated (no bullet needed). No other files.

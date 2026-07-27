@@ -25,7 +25,7 @@ trait ScenarioEndpoints extends BaseEndpoint:
     authedBaseEndpoint
       .tag("scenarios")
       .name("createScenario")
-      .description("Create a scenario, forked from main or from an existing scenario's current head")
+      .description("Create a scenario from a required source: a branch head (main or another scenario) or a specific commit (fork-from-history)")
       .in("w" / path[WorkspaceKeySecret]("key") / "scenarios")
       .post
       .in(jsonBody[CreateScenarioRequest])

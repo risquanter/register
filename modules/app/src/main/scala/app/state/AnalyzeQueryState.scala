@@ -158,7 +158,7 @@ final class AnalyzeQueryState(
 
   // Built on the shared `requestPipeline` (see ZJS) — the same
   // "one request, or reset, supersedes whatever the previous one was still
-  // doing" skeleton `ScenarioDiffState` and `ScenarioListState` use via
+  // doing" skeleton `ChangedNodesState` and `ScenarioListState` use via
   // `loadStatePipeline`. Only the settle mapping is local: it needs the
   // `DomainError` case (inline 400-level query failures), which the plain
   // `LoadState` specialization can't carry.

@@ -99,7 +99,7 @@ final class CompareSlotState:
 final class CompareSlot(
   val state: CompareSlotState,
   val treeViewState: TreeViewState,
-  val diffState: ScenarioDiffState,
+  val diffState: ChangedNodesState,
   val palette: Signal[Vector[HexColor]]
 )
 

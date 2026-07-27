@@ -2,6 +2,7 @@ package app.state
 
 import zio.test.*
 
+import io.github.iltotore.iron.*
 import app.chart.PaletteData
 import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName}
 
@@ -11,11 +12,16 @@ import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName}
 object BranchPaletteStateSpec extends ZIOSpecDefault:
 
   private val scenarioA = ScenarioName.fromString("scenario-a").toOption.get
-  private val mainNamed = ScenarioName.fromString("main").toOption.get
+  // "main" is reserved as a scenario name at the boundary (E7), so
+  // ScenarioName.fromString("main") rejects it and it can never arrive through
+  // normal input. Built here via the unsafe refinement purely as
+  // defense-in-depth: storageKeyOf must stay injective for main vs a scenario
+  // named "main" even though that scenario is now boundary-unconstructible.
+  private val mainNamed = ScenarioName.ScenarioName("main".refineUnsafe)
 
   def spec = suite("BranchPaletteState")(
 
-    test("main and a scenario literally named 'main' get distinct storage keys") {
+    test("storageKeyOf is injective for main vs a scenario named 'main' (defense-in-depth; boundary-rejected input)") {
       assertTrue(
         BranchPaletteState.storageKeyOf(BranchChoice.Main)
           != BranchPaletteState.storageKeyOf(BranchChoice.Scenario(mainNamed))

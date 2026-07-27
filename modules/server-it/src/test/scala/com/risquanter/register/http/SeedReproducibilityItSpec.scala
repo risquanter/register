@@ -9,7 +9,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, LECPoint, TrialId, Loss}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, NodeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, NodeId, BranchRef, Revision}
 import com.risquanter.register.http.HttpTestHarness.HarnessConfig
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
@@ -149,7 +149,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
           persisted <- ZIO.scoped {
             freshStack(cfg).build.flatMap { env =>
               for
-                tree <- env.get[RiskTreeService].create(wsId, treeReq("Restart Reload Tree"))
+                tree <- env.get[RiskTreeService].create(wsId, treeReq("Restart Reload Tree"), BranchRef.Main)
                 figs <- figures(env.get[RiskResultResolver])(tree, entity1)
               yield (tree.id, figs)
             }
@@ -158,7 +158,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
           after <- ZIO.scoped {
             freshStack(cfg).build.flatMap { env =>
               for
-                treeOpt <- env.get[RiskTreeRepository].getById(wsId, treeId)
+                treeOpt <- env.get[RiskTreeRepository].getById(wsId, treeId, Revision.Head(BranchRef.Main))
                 tree    <- ZIO.fromOption(treeOpt).orElseFail(new RuntimeException(s"tree ${treeId.value} not found after reload"))
                 figs    <- figures(env.get[RiskResultResolver])(tree, entity1)
               yield figs

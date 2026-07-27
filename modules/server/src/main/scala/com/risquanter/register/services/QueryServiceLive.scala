@@ -4,7 +4,7 @@ import zio.*
 import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
 
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
@@ -34,13 +34,13 @@ class QueryServiceLive private (
   private def traced[A](name: String)(body: Task[A]): Task[A] =
     tracing.span(s"QueryService.$name", SpanKind.INTERNAL)(body)
 
-  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef = BranchRef.Main): Task[QueryResponse] =
+  override def evaluate(wsId: WorkspaceId, treeId: TreeId, parsed: ParsedQuery, seedEntityId: SeedEntityId.SeedEntityId, branch: BranchRef): Task[QueryResponse] =
     traced("evaluate") {
       for
         _ <- tracing.setAttribute("query.tree_id", treeId.value)
 
-        // 1. Load tree
-        tree <- repo.getById(wsId, treeId, branch).flatMap {
+        // 1. Load tree at the branch head (queries never run point-in-time)
+        tree <- repo.getById(wsId, treeId, Revision.Head(branch)).flatMap {
           case Some(t) => ZIO.succeed(t)
           case None =>
             ZIO.fail(ValidationFailed(List(ValidationError(

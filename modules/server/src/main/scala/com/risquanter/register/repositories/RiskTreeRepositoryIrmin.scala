@@ -5,7 +5,7 @@ import zio.json.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.autoCastIron
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode}
-import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash}
+import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{RepositoryFailure, AppError, IrminError}
 import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
@@ -23,7 +23,7 @@ import com.risquanter.register.repositories.model.TreeMetadata
   */
 final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeRepository:
 
-  override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+  override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree] =
     val basePath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, riskTree.id))
     for
       _   <- ensureRootPresent(riskTree.rootId, riskTree.nodes)
@@ -40,7 +40,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       _   <- writeTree(basePath, meta, riskTree.nodes, createMessage(wsId, riskTree.id), branch)
     yield riskTree
 
-  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] =
     val basePath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, id))
     for
       existing    <- getTreeWithMeta(wsId, id, branch)
@@ -57,21 +57,42 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       _           <- writeTree(basePath, updatedMeta, updatedTree.nodes, updateMessage(wsId, id), branch)
     yield updatedTree
 
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] =
     val basePath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, id))
     for
       existing <- getTreeWithMeta(wsId, id, branch)
       _        <- handleIrmin(irmin.setTree(basePath, Nil, deleteMessage(wsId, id), branch))
     yield existing.tree
 
-  override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
-    loadTree(wsId, id, branch).map(_.map(_.tree))
+  /** Revert a tree to `toCommit` (E3/E4/E8, Option A). Loads the tree state at
+    * that commit — absent (commit or path) → NotFound — then writes it forward
+    * as ONE `set_tree` commit with a `:revert` message. Loading at the commit
+    * preserves the tree's original `createdAt` and handles reverting a tree
+    * that was deleted at head (no head-meta dependency). */
+  override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+    val basePath = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, id))
+    loadTreeAt(wsId, id, toCommit).flatMap {
+      case None =>
+        ZIO.fail(RepositoryFailure(s"RiskTree $id not found at commit ${toCommit.value} in workspace ${wsId.value}"))
+      case Some(existing) =>
+        for
+          now         <- Clock.instant
+          revertedMeta = existing.meta.copy(updatedAt = now, schemaVersion = CurrentSchemaVersion)
+          _           <- writeTree(basePath, revertedMeta, existing.tree.nodes, revertMessage(wsId, id), branch)
+        yield existing.tree
+    }
 
-  override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
+    resolveRevision(rev).flatMap {
+      case None       => ZIO.succeed(None)
+      case Some(head) => loadTreeAt(wsId, id, head).map(_.map(_.tree))
+    }
+
+  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
     val root = IrminPath.unsafeFrom(WorkspaceStoragePaths.treesRoot(wsId))
-    // Resolve ONE head for the whole listing (enumeration + every tree load),
+    // Resolve ONE commit for the whole listing (enumeration + every tree load),
     // so the returned set is a single consistent snapshot.
-    resolveHead(branch).flatMap {
+    resolveRevision(rev).flatMap {
       case None       => ZIO.succeed(Nil) // branch absent → empty listing, as before
       case Some(head) =>
         handleIrmin(irmin.listAtCommit(head, root)).flatMap { treeIds =>
@@ -151,6 +172,14 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       case Some(head) => loadTreeAt(wsId, id, head)
     }
 
+  /** Resolve a read `Revision` to the commit to read at: `Head` resolves the
+    * branch head once (None if the branch is absent/empty, preserving today's
+    * empty-read semantics); `At` uses the pinned commit directly. */
+  private def resolveRevision(rev: Revision): Task[Option[CommitHash]] =
+    rev match
+      case Revision.Head(branch) => resolveHead(branch)
+      case Revision.At(commit)   => ZIO.succeed(Some(commit))
+
   private def resolveHead(branch: BranchRef): Task[Option[CommitHash]] =
     handleIrmin(irmin.getBranch(branch)).flatMap { branchInfo =>
       // None = branch absent OR branch exists with no commits; both preserve
@@ -204,6 +233,9 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
 
   private def deleteMessage(wsId: WorkspaceId, treeId: TreeId): String =
     s"workspace:${wsId.value}:risk-tree:${treeId.value}:delete"
+
+  private def revertMessage(wsId: WorkspaceId, treeId: TreeId): String =
+    s"workspace:${wsId.value}:risk-tree:${treeId.value}:revert"
 
   private def handleIrmin[A](effect: IO[IrminError, A]): Task[A] =
     effect.mapError { err =>

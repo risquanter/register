@@ -60,7 +60,7 @@ final class ScenarioListState(
   // branch-fallback subscription and silently kick the creating view off the
   // branch it just switched to. The pipeline's `flatMapSwitch` drops the
   // superseded request instead. The `now() != v` guard mirrors
-  // `ScenarioDiffState`: `Var.set` doesn't dedupe by value, and downstream
+  // `ChangedNodesState`: `Var.set` doesn't dedupe by value, and downstream
   // subscriptions (the branch fallbacks) react to `.changes`.
   private val refreshTrigger =
     new EventBus[Option[() => EventStream[Either[Throwable, List[ScenarioSummaryResponse]]]]]

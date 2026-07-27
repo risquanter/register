@@ -7,7 +7,7 @@ import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
-import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash}
+import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{IrminError, RepositoryFailure}
 import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry}
@@ -170,7 +170,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         setup             <- scripted(Some(headC1), advanceTo = Some(headC2),
                                store = Map(headC1 -> storeOf(treeC1), headC2 -> storeOf(treeC2)))
         (repo, calls, queried) = setup
-        result            <- repo.getById(wsId, treeIdF, BranchRef.Main)
+        result            <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main))
         headResolutions   <- calls.get
         commitsRead       <- queried.get
       yield assertTrue(
@@ -185,7 +185,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       for
         setup             <- scripted(initialHead = None, advanceTo = None, store = Map.empty)
         (repo, _, _)       = setup
-        result            <- repo.getById(wsId, treeIdF, BranchRef.Main)
+        result            <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main))
       yield assertTrue(result.isEmpty)
     },
 
@@ -195,7 +195,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         setup             <- scripted(Some(headC1), advanceTo = None,
                                store = Map(headC1 -> storeWithoutMeta(treeC1)))
         (repo, _, _)       = setup
-        exit              <- repo.getById(wsId, treeIdF, BranchRef.Main).exit
+        exit              <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).exit
       yield assert(exit)(fails(isSubtype[RepositoryFailure](anything)))
     },
 
@@ -206,7 +206,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         setup             <- scripted(Some(headC1), advanceTo = Some(headC2),
                                store = Map(headC1 -> storeOf(treeF, treeG), headC2 -> Map.empty))
         (repo, calls, queried) = setup
-        result            <- repo.getAllForWorkspace(wsId, BranchRef.Main)
+        result            <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))
         headResolutions   <- calls.get
         commitsRead       <- queried.get
       yield assertTrue(

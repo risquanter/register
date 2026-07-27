@@ -7,7 +7,7 @@ import scala.scalajs.js
 import app.chart.PaletteData
 import app.core.ZJS.*
 import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LECNodeCurve}
-import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, UserId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, NodeId, TreeId, UserId, WorkspaceKeySecret}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.http.endpoints.WorkspaceTreeEndpoints
 import com.risquanter.register.http.responses.SimulationResponse
@@ -162,7 +162,7 @@ final class TreeViewState(
     keySignal.now() match
       case Some(key) =>
         treeTrigger.emit(Some(() =>
-          getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor())).toOutcomeEventStream
+          getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), Option.empty[CommitHash])).toOutcomeEventStream
         ))
       case None => ()
 

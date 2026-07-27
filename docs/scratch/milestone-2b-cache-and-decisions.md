@@ -1530,6 +1530,9 @@ Phase F: Semantic merge conflict resolution (DEFERRED — final
   - Parameter-average resolution mode (domain-level)      [Scala/Scala.js]
   - Merge sneak-peek: resolved result as a previewable,
     simulatable model comparable against source branches  [Scala/Scala.js]
+  - Tree-name collision at merge: detect + resolve two
+    same-name / different-ULID trees that per-branch
+    uniqueness (Option A) lets both branches create        [Scala/Scala.js]
 ```
 
 ### Deferred: Phase D Option-2 conflict resolution (target Phase F)
@@ -1574,6 +1577,21 @@ Phase D uses. Captured now as to-be-planned requirements, not yet designed.
    compare it in the existing comparison view against the source branches
    (`scen-1`, `scen-2`, `main`) before committing the merge. Semi-automated
    creation of this merge-preview model for comparison.
+4. **Tree-name collision detection and resolution at merge.** Per-branch
+   tree-name uniqueness (`PLAN-PHASE-E-HISTORY.md` §C1, Option A, ruled
+   2026-07-27) lets two branches independently create trees with the same name
+   but different ULIDs. The byte-level Irmin merge keys on ULID storage paths,
+   so both trees survive the merge and main ends with two trees of the same
+   name, undetected. The write-time uniqueness check never runs on the merge
+   path and cannot close this — it is a merge-time concern. Because tree
+   identity is the ULID and not the name, the collision is resolvable rather
+   than a hard conflict: detect it in the merge preview (scan for distinct
+   ULIDs sharing a name that would coexist post-merge, alongside the existing
+   per-node byte-level check), then resolve it at merge — reject as a conflict,
+   auto-rename one side, or prompt the user to rename or keep both. The same
+   mechanism applies to a future branch→branch merge (today merge targets main
+   only). Captured as a to-be-planned requirement; not yet designed, and not a
+   committed final scope.
 
 **Note:** requirements 2 and 3 are the reason this is a distinct phase —
 byte-level Irmin merge cannot average parameters or produce a

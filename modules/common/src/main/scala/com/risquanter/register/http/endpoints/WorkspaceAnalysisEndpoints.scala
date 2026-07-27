@@ -5,7 +5,7 @@ import sttp.tapir.json.zio.*
 import sttp.tapir.generic.auto.*
 import sttp.model.{Header, MediaType}
 
-import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId, ScenarioName}
+import com.risquanter.register.domain.data.iron.{WorkspaceKeySecret, TreeId, NodeId, CommitHash}
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 import com.risquanter.register.domain.data.LECNodeCurve
 
@@ -14,11 +14,11 @@ import com.risquanter.register.domain.data.LECNodeCurve
   * All operations are served exclusively under `/w/{key}/...` to enforce
   * workspace capability checks.
   *
-  * Each endpoint accepts an optional `X-Active-Branch` header (milestone-2b
-  * Phase B item 4b, redesigned 2026-07-21) naming the scenario to read by
-  * its `ScenarioName` — absent header targets `main` (DD-4 default). The
-  * controller composes the actual Irmin branch from this name and the
-  * caller's own resolved `WorkspaceId` — see `ActiveBranch.resolve`.
+  * Each endpoint carries a required `X-Branch` header (E7) naming the target
+  * branch (`"main"` or a scenario name); absence is a 400. Reads accept an
+  * optional `at` commit pin for point-in-time access — absent = the branch
+  * head. The controller composes the actual Irmin branch from this name and
+  * the caller's own resolved `WorkspaceId` — see `ActiveBranch.resolve`.
   */
 trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
 
@@ -28,22 +28,24 @@ trait WorkspaceAnalysisEndpoints extends BaseEndpoint:
     authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceProbOfExceedance")
-      .description("Get probability of exceeding a loss threshold (workspace-scoped)")
+      .description("Get probability of exceeding a loss threshold (workspace-scoped); optional `at` commit pin")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "nodes" / path[NodeId]("nodeId") / "prob-of-exceedance")
       .get
       .in(query[Long]("threshold"))
       .in(query[Boolean]("includeProvenance").default(false))
-      .in(activeBranchHeader)
+      .in(branchHeader)
+      .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
       .out(jsonBody[Double])
 
   val getWorkspaceLECCurvesMultiEndpoint =
     authedBaseEndpoint
       .tag("workspaces")
       .name("getWorkspaceLECCurvesMulti")
-      .description("Get LEC curves for multiple nodes (workspace-scoped)")
+      .description("Get LEC curves for multiple nodes (workspace-scoped); optional `at` commit pin")
       .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "nodes" / "lec-multi")
       .post
       .in(query[Boolean]("includeProvenance").default(false))
       .in(jsonBody[List[NodeId]].description("Array of node IDs"))
-      .in(activeBranchHeader)
+      .in(branchHeader)
+      .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
       .out(jsonBody[Map[NodeId, LECNodeCurve]])

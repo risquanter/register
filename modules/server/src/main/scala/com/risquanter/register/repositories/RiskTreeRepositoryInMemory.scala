@@ -2,8 +2,8 @@ package com.risquanter.register.repositories
 
 import zio.*
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef}
-import com.risquanter.register.domain.errors.RepositoryFailure
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.errors.{RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode}
 
 /** In-memory implementation of RiskTreeRepository for testing and development.
   *
@@ -11,9 +11,12 @@ import com.risquanter.register.domain.errors.RepositoryFailure
   * enforced at the storage level. A wrong or missing WorkspaceId will yield None /
   * NoSuchElementException rather than silently crossing workspace boundaries.
   *
-  * Branches are an Irmin capability: this backend serves only the main
-  * branch. A request for any other branch fails with a typed
-  * RepositoryFailure rather than silently answering with main-branch data.
+  * Branches and commit pins are an Irmin capability: this backend serves only
+  * the main branch at its head. A non-main branch fails with a typed
+  * RepositoryFailure; a commit pin (`Revision.At`) fails with a typed
+  * ValidationFailed — point-in-time reads require the Irmin backend. Neither is
+  * reachable in normal operation (scenario/history UI is disabled on the
+  * in-memory backend, DD-9).
   */
 class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
   private val db = collection.concurrent.TrieMap[(WorkspaceId, TreeId), RiskTree]()
@@ -27,7 +30,19 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       s"In-memory repository has no branches: requested '${branch.toBranchRef}' (use the Irmin backend for scenario branches)"
     ))
 
-  override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+  // A read Revision resolves to "main head" only; a scenario branch or a commit
+  // pin is rejected with a typed failure rather than silently served from main.
+  private def requireMainRevision(rev: Revision): Task[Unit] =
+    rev match
+      case Revision.Head(branch) => requireMain(branch)
+      case Revision.At(_) =>
+        ZIO.fail(ValidationFailed(List(ValidationError(
+          field = "at",
+          code = ValidationErrorCode.NOT_SUPPORTED,
+          message = "point-in-time reads require the Irmin backend"
+        ))))
+
+  override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree] =
     requireMain(branch) *> ZIO.attempt {
       val key = (wsId, riskTree.id)
       if db.contains(key) then throw new IllegalStateException(s"RiskTree with id ${riskTree.id} already exists in workspace $wsId")
@@ -35,7 +50,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       riskTree
     }
 
-  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+  override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] =
     requireMain(branch) *> ZIO.attempt {
       val key = (wsId, id)
       val riskTree = db.getOrElse(key, throw new NoSuchElementException(s"RiskTree with id $id not found in workspace $wsId"))
@@ -44,7 +59,7 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       updated
     }
 
-  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] =
+  override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] =
     requireMain(branch) *> ZIO.attempt {
       val key = (wsId, id)
       val riskTree = db.getOrElse(key, throw new NoSuchElementException(s"RiskTree with id $id not found in workspace $wsId"))
@@ -52,11 +67,18 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       riskTree
     }
 
-  override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
-    requireMain(branch) *> ZIO.succeed(db.get((wsId, id)))
+  override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+    ZIO.fail(ValidationFailed(List(ValidationError(
+      field = "toCommit",
+      code = ValidationErrorCode.NOT_SUPPORTED,
+      message = "revert requires the Irmin backend (point-in-time reads unavailable in memory)"
+    ))))
 
-  override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
-    requireMain(branch) *> ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
+    requireMainRevision(rev) *> ZIO.succeed(db.get((wsId, id)))
+
+  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
+    requireMainRevision(rev) *> ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
 }
 
 object RiskTreeRepositoryInMemory {

@@ -9,7 +9,7 @@ import com.risquanter.register.domain.errors.RepositoryFailure
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.* // For .assert extension method
-import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeId, TreeId, WorkspaceId, BranchRef}
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, SafeId, TreeId, WorkspaceId, BranchRef, Revision, CommitHash}
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode}
 import com.risquanter.register.util.IdGenerators
@@ -30,30 +30,33 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
   private def makeStubRepo() = new RiskTreeRepository {
     private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
     
-    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] = 
+    override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree] =
       IdGenerators.nextTreeId.map { nextId =>
         val newRiskTree = riskTree.copy(id = nextId)
         db += ((wsId, nextId) -> newRiskTree)
         newRiskTree
       }
-    
-    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef = BranchRef.Main): Task[RiskTree] = ZIO.attempt {
+
+    override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       val updated = op(riskTree)
       db += ((wsId, id) -> updated)
       updated
     }
-    
-    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[RiskTree] = ZIO.attempt {
+
+    override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
       val riskTree = db((wsId, id))
       db -= ((wsId, id))
       riskTree
     }
-    
-    override def getById(wsId: WorkspaceId, id: TreeId, branch: BranchRef = BranchRef.Main): Task[Option[RiskTree]] =
+
+    override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
+      ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
+
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
       ZIO.succeed(db.get((wsId, id)))
-    
-    override def getAllForWorkspace(wsId: WorkspaceId, branch: BranchRef = BranchRef.Main): Task[List[Either[RepositoryFailure, RiskTree]]] =
+
+    override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
       ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
   }
 
@@ -138,7 +141,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
           )
         )
 
-        val program = service(_.create(stubWsId, request))
+        val program = service(_.create(stubWsId, request, BranchRef.Main))
 
         program.assert { tree =>
           tree.name.value == "Ops Risk Portfolio" &&
@@ -170,8 +173,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         )
 
         val program = for {
-          _ <- service(_.create(stubWsId, firstRequest))
-          e <- service(_.create(stubWsId, secondRequest)).flip
+          _ <- service(_.create(stubWsId, firstRequest, BranchRef.Main))
+          e <- service(_.create(stubWsId, secondRequest, BranchRef.Main)).flip
         } yield e
 
         program.assert {
@@ -187,8 +190,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         val request = validRequest.copy(name = "Test Tree")
 
         val program = for {
-          tree <- service(_.create(stubWsId, request))
-          result <- service(_.getById(stubWsId, tree.id))
+          tree <- service(_.create(stubWsId, request, BranchRef.Main))
+          result <- service(_.getById(stubWsId, tree.id, Revision.Head(BranchRef.Main)))
         } yield result
 
         program.assert { maybeTree =>

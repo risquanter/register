@@ -50,12 +50,12 @@ Irmin is itself a Merkle store — the distinction is **which JSON gets hashed**
 
 ### 2. Semantic diff uses the domain relation
 
-`ScenarioDiffService` compares domain content hashes. A renamed or moved node reports `Identical`: the diff tells a user whether the *risk content* differs between branches, and a rename is not a risk change.
+`ChangedNodesService` compares domain content hashes. A renamed or moved node reports `Identical`: the comparison tells a user whether the *risk content* differs between branches, and a rename is not a risk change.
 
 ```scala
 // Rename on one branch, no other edit:
 diffService.diff(wsId, treeId, main, scenario)
-// → NodeDiff(nodeId, Identical)   — correct for this relation
+// → NodeChange(nodeId, Identical)   — correct for this relation
 ```
 
 ### 3. Merge-conflict prediction uses the storage relation
@@ -125,7 +125,7 @@ final case class LeafSimContent(seedVarId: SeedVarId.SeedVarId, /* ... */)
 |----------|----------|------|
 | `ContentHashIndex` | Domain | Builds per-node domain hashes (leaf projection + portfolio Merkle) |
 | `LeafSimContent` | Domain | The hashed projection; also the cache-key preimage |
-| `ScenarioDiffService` | Domain | Branch-to-branch semantic diff |
+| `ChangedNodesService` | Domain | Branch-to-branch semantic changed-nodes comparison |
 | `RiskTreeRepositoryIrmin.nodeJson` | Storage | Defines the persisted blob Irmin hashes |
 | `IrminClient.mergeBranch` / `lca` | Storage | Byte-level three-way merge and its base |
 

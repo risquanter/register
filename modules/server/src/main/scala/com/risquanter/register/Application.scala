@@ -15,7 +15,8 @@ import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.persistence.{FlywayService, FlywayServiceLive, Repository}
 import com.risquanter.register.services.RiskTreeServiceLive
-import com.risquanter.register.services.ScenarioDiffServiceLive
+import com.risquanter.register.services.ChangedNodesServiceLive
+import com.risquanter.register.services.{TreeHistoryService, TreeHistoryServiceLive}
 import com.risquanter.register.services.{ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioMergeServiceNotSupported}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
@@ -121,6 +122,27 @@ object Application extends ZIOAppDefault {
             ZIO.scoped(irminScenarioMergeServiceLayer.build.map(_.get[ScenarioMergeService]))
           case RepositoryType.InMemory =>
             ZIO.succeed(ScenarioMergeServiceNotSupported: ScenarioMergeService)
+        }
+      } yield svc
+    }
+
+  private val irminTreeHistoryServiceLayer: ZLayer[Any, Throwable, TreeHistoryService] =
+    ZLayer.make[TreeHistoryService](
+      IrminConfig.layer,
+      IrminClientLive.layer >>> irminHealthCheck,
+      TreeHistoryServiceLive.layer
+    )
+
+  private val chooseTreeHistoryService: ZLayer[RepositoryConfig, Throwable, TreeHistoryService] =
+    ZLayer.fromZIO {
+      for {
+        repoCfg <- ZIO.service[RepositoryConfig]
+        svc <- repoCfg.repositoryType match {
+          case RepositoryType.Irmin =>
+            ZIO.scoped(irminTreeHistoryServiceLayer.build.map(_.get[TreeHistoryService]))
+          case RepositoryType.InMemory =>
+            ZIO.logInfo("repository.type=in-memory; tree history empty (no commit log)") *>
+              ZIO.succeed(TreeHistoryService.empty)
         }
       } yield svc
     }
@@ -268,7 +290,8 @@ object Application extends ZIOAppDefault {
       SSEHub.live,
       InvalidationHandler.live,     // SSE-only mutation notifications (requires SSEHub)
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + SimulationConfig + Tracing + SimulationSemaphore + Meter
-      ScenarioDiffServiceLive.layer, // UC5 hash-diff (milestone-2b Phase C) — requires RiskTreeService
+      ChangedNodesServiceLive.layer, // UC5 content-hash changed-nodes — requires RiskTreeService
+      RepositoryConfig.layer >>> chooseTreeHistoryService, // E1 per-tree history — Irmin-backed, empty in-memory
       QueryServiceLive.layer,       // Requires RiskTreeRepository + RiskResultResolver + Tracing
       chooseWorkspaceStore,
       chooseFlywayService,

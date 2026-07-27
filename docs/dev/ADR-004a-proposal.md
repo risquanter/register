@@ -69,7 +69,7 @@ connection_status   connect / heartbeat lifecycle
 ```
 
 SSE is a **notification** channel, not a data channel: clients re-fetch over
-HTTP, which carries auth and `X-Active-Branch`. Events will carry a branch tag
+HTTP, which carries auth and `X-Branch`. Events will carry a branch tag
 in the payload using the wire encoding — `Option[ScenarioName]`, absent = main
 (DD-8 symmetry) — not `BranchRef`, which embeds `WorkspaceId` and never
 crosses the client boundary; subscription stays tree-scoped — one stream hears
@@ -93,7 +93,7 @@ Computed results live in ZIO, never in Irmin. One `ContentCache` per workspace
 ### 5. Data Flow
 
 ```
-Browser edit → REST mutation (X-Active-Branch)
+Browser edit → REST mutation (X-Branch)
   → ZIO writes ONE Irmin commit (set_tree)
   → InvalidationHandler diffs old vs new tree in-request
   → SSE cache_invalidated {nodeIds, treeId, branch}
@@ -124,7 +124,7 @@ RiskTreeRepositoryIrmin → IrminClient.setTree(...)
 es.onmessage = e => renderChart(e.data.quantiles)
 
 // GOOD: notification only; re-fetch over HTTP
-es.onmessage = e => refetch(e.data.nodeIds)   // request carries X-Active-Branch
+es.onmessage = e => refetch(e.data.nodeIds)   // request carries X-Branch
 ```
 
 ### ❌ Computation in Irmin Layer

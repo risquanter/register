@@ -5,7 +5,7 @@ import org.scalajs.dom
 
 import app.chart.PaletteData
 import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, BranchPaletteState, CompareState, CompareSlot, ScenarioDiffState}
+import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, BranchPaletteState, CompareState, CompareSlot, ChangedNodesState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -89,7 +89,7 @@ object Main:
           // the app's lifetime instead of keeping a hand-synced Var.
           slotState.branchSignal.observe(unsafeWindowOwner), userPalette = slotPalette
         ),
-        diffState = new ScenarioDiffState(wsState.keySignal, () => wsState.currentUserId),
+        diffState = new ChangedNodesState(wsState.keySignal, () => wsState.currentUserId),
         palette = slotPalette
       )
     }

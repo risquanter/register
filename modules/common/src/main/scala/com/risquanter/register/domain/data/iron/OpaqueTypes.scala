@@ -414,6 +414,19 @@ object BranchChoice:
   def fromWire(wire: Option[ScenarioName.ScenarioName]): BranchChoice =
     wire.fold(Main)(Scenario(_))
 
+  /** Explicit string wire shape (E7): "main" or a scenario slug — no
+    * absent-means-main state. Used by the required `X-Branch` header codec,
+    * the changed-nodes branch query codec, and the scenario-source DTO body.
+    */
+  given JsonEncoder[BranchChoice] = JsonEncoder[String].contramap {
+    case Main           => "main"
+    case Scenario(name) => name.value
+  }
+  given JsonDecoder[BranchChoice] = JsonDecoder[String].mapOrFail {
+    case "main" => Right(BranchChoice.Main)
+    case s      => ScenarioName.fromString(s).map(BranchChoice.Scenario(_)).left.map(_.mkString(", "))
+  }
+
 // ScenarioName: user-supplied scenario name (DD-5, closed 2026-07-18). Two
 // stages: an input whitelist (letters/digits/space/hyphen/underscore only —
 // anything else is a 400 at the boundary, never silently stripped: "no lossy
@@ -440,9 +453,20 @@ object ScenarioName:
   extension (sn: ScenarioName)
     def value: ScenarioNameStr = sn
 
-  // Convenience constructor from plain String
+  // Convenience constructor from plain String. "main" is reserved as the
+  // branch-vs-scenario vocabulary rule: main is a branch, never a scenario, so
+  // a scenario named "main" (in any case — the slug lowercases) is rejected at
+  // the boundary before it could collide with the main branch reference.
   def fromString(s: String): Either[List[ValidationError], ScenarioName] =
-    ValidationUtil.refineScenarioName(s)
+    ValidationUtil.refineScenarioName(s).flatMap { name =>
+      if name.value == "main" then
+        Left(List(ValidationError(
+          field = "name",
+          code = ValidationErrorCode.INVALID_FORMAT,
+          message = "'main' is reserved and cannot be used as a scenario name"
+        )))
+      else Right(name)
+    }
 
   // JSON codecs (companion object placement ensures implicit scope)
   given JsonEncoder[ScenarioName] = JsonEncoder[String].contramap(_.value)
@@ -505,6 +529,14 @@ object CommitHash:
   given JsonEncoder[CommitHash] = JsonEncoder[String].contramap(_.value)
   given JsonDecoder[CommitHash] = JsonDecoder[String].mapOrFail(s =>
     CommitHash.fromString(s).left.map(_.mkString(", ")))
+
+// Revision: the read coordinate for a tree. `Head` names a branch, resolved to
+// its head commit exactly once inside the Irmin repository; `At` pins a
+// specific commit directly. Co-located with BranchRef/CommitHash — the two
+// coordinates it composes.
+enum Revision:
+  case Head(branch: BranchRef)
+  case At(commit: CommitHash)
 
 // SafeId: Canonical ULID (Crockford base32, 26 chars, uppercase)
 // Accepts input case-insensitively, normalizes to uppercase canonical string.
