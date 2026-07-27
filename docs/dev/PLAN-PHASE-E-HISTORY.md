@@ -428,7 +428,6 @@ Server:
 - modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala
 - modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala
 - modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala
-- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala (IT-surfaced bug: strip Irmin's trailing newline on commit messages so operation-suffix matching works)
 - modules/server/src/main/scala/com/risquanter/register/http/controllers/ActiveBranch.scala
 - modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala
 - modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisController.scala
