@@ -6,7 +6,7 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.stream.*
 
-import com.risquanter.register.http.sse.SSEEvent
+import com.risquanter.register.http.sse.{SSEEvent, NodeChangeType, ConnectionState}
 import com.risquanter.register.domain.data.iron.TreeId
 import com.risquanter.register.testutil.TestHelpers.*
 
@@ -54,7 +54,7 @@ object SSEHubSpec extends ZIOSpecDefault {
     test("publish with no subscribers returns 0") {
       for
         hub   <- ZIO.service[SSEHub]
-        event  = SSEEvent.ConnectionStatus("test", None)
+        event  = SSEEvent.ConnectionStatus(ConnectionState.Connected, None)
         count <- hub.publish(tid("tree-999"), event)
       yield assertTrue(count == 0)
     },
@@ -84,7 +84,7 @@ object SSEHubSpec extends ZIOSpecDefault {
         hub      <- ZIO.service[SSEHub]
         stream1  <- hub.subscribe(tid("tree-2"))
         stream2  <- hub.subscribe(tid("tree-2"))
-        event     = SSEEvent.NodeChanged("node-2", tid("tree-2"), "updated")
+        event     = SSEEvent.NodeChanged("node-2", tid("tree-2"), NodeChangeType.Updated)
         queue1   <- Queue.unbounded[SSEEvent]
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork
@@ -145,7 +145,7 @@ object SSEHubSpec extends ZIOSpecDefault {
         hub      <- ZIO.service[SSEHub]
         stream1  <- hub.subscribe(tid("tree-100"))
         stream2  <- hub.subscribe(tid("tree-200"))
-        event     = SSEEvent.ConnectionStatus("broadcast", Some("system message"))
+        event     = SSEEvent.ConnectionStatus(ConnectionState.Heartbeat, Some("system message"))
         queue1   <- Queue.unbounded[SSEEvent]
         queue2   <- Queue.unbounded[SSEEvent]
         fiber1   <- stream1.foreach(queue1.offer).fork

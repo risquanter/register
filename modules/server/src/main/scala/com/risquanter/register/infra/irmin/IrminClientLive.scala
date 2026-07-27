@@ -305,10 +305,7 @@ final class IrminClientLive private (
       info = IrminInfo(
         date = c.info.date,
         author = c.info.author,
-        // Irmin appends a trailing newline to commit messages; strip it so
-        // operation-suffix matching (":create"/":update"/":revert") and message
-        // equality behave.
-        message = c.info.message.stripTrailing
+        message = c.info.message
       )
     ))
 

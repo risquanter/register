@@ -19,6 +19,52 @@ sealed trait SSEEvent {
   def eventType: String
 }
 
+/** Kind of structural change reported by a `NodeChanged` event. */
+enum NodeChangeType:
+  case Added, Updated, Removed
+
+  /** Wire form for `NodeChanged.changeType` — colocated with the case list so a
+    * new case and its wire string are added in the same place (mirrors
+    * `NodeChangeStatus.toWire`).
+    */
+  def toWire: String = this match
+    case NodeChangeType.Added   => "added"
+    case NodeChangeType.Updated => "updated"
+    case NodeChangeType.Removed => "removed"
+
+object NodeChangeType:
+  def fromWire(s: String): Either[String, NodeChangeType] = s match
+    case "added"   => Right(NodeChangeType.Added)
+    case "updated" => Right(NodeChangeType.Updated)
+    case "removed" => Right(NodeChangeType.Removed)
+    case other     => Left(s"unknown node change type: $other")
+
+  given JsonEncoder[NodeChangeType] = JsonEncoder[String].contramap(_.toWire)
+  given JsonDecoder[NodeChangeType] = JsonDecoder[String].mapOrFail(fromWire)
+
+/** Connection lifecycle state reported by a `ConnectionStatus` event. */
+enum ConnectionState:
+  case Connected, Heartbeat, Disconnecting
+
+  /** Wire form for `ConnectionStatus.status` — colocated with the case list so a
+    * new case and its wire string are added in the same place (mirrors
+    * `NodeChangeStatus.toWire`).
+    */
+  def toWire: String = this match
+    case ConnectionState.Connected     => "connected"
+    case ConnectionState.Heartbeat     => "heartbeat"
+    case ConnectionState.Disconnecting => "disconnecting"
+
+object ConnectionState:
+  def fromWire(s: String): Either[String, ConnectionState] = s match
+    case "connected"     => Right(ConnectionState.Connected)
+    case "heartbeat"     => Right(ConnectionState.Heartbeat)
+    case "disconnecting" => Right(ConnectionState.Disconnecting)
+    case other           => Left(s"unknown connection state: $other")
+
+  given JsonEncoder[ConnectionState] = JsonEncoder[String].contramap(_.toWire)
+  given JsonDecoder[ConnectionState] = JsonDecoder[String].mapOrFail(fromWire)
+
 object SSEEvent {
 
   /**
@@ -41,12 +87,12 @@ object SSEEvent {
     *
     * @param nodeId Affected node
     * @param treeId Tree containing the node
-    * @param changeType Type of change: "added", "updated", "removed"
+    * @param changeType Kind of structural change to the node
     */
   final case class NodeChanged(
       nodeId: String,
       treeId: TreeId,
-      changeType: String
+      changeType: NodeChangeType
   ) extends SSEEvent {
     override def eventType: String = "node_changed"
   }
@@ -75,11 +121,11 @@ object SSEEvent {
   /**
     * Connection lifecycle event.
     *
-    * @param status "connected", "heartbeat", "disconnecting"
+    * @param status Connection lifecycle state
     * @param message Optional message
     */
   final case class ConnectionStatus(
-      status: String,
+      status: ConnectionState,
       message: Option[String] = None
   ) extends SSEEvent {
     override def eventType: String = "connection_status"

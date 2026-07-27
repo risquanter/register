@@ -81,7 +81,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
     * Initial connection event.
     */
   private def connectedEvent(treeId: TreeId): String =
-    formatAsSSE(SSEEvent.ConnectionStatus("connected", Some(s"Subscribed to tree ${treeId.value}")))
+    formatAsSSE(SSEEvent.ConnectionStatus(ConnectionState.Connected, Some(s"Subscribed to tree ${treeId.value}")))
 
   /**
     * Periodic heartbeat to keep SSE connection alive.
@@ -90,7 +90,7 @@ class SSEController private (sseHub: SSEHub, workspaceStore: WorkspaceStore, aut
   private val heartbeatStream: ZStream[Any, Nothing, String] =
     ZStream
       .tick(HeartbeatInterval)
-      .map(_ => formatAsSSE(SSEEvent.ConnectionStatus("heartbeat", None)))
+      .map(_ => formatAsSSE(SSEEvent.ConnectionStatus(ConnectionState.Heartbeat, None)))
 
   // Cast to Any capability - ZioHttpInterpreter handles ZioStreams at runtime
   override val routes: List[ServerEndpoint[Any, Task]] =
