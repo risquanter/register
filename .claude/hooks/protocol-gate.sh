@@ -18,6 +18,13 @@
 #    file. Prose elsewhere in the plan — including "Not touched:" notes —
 #    never grants access, even if it names the path.
 #
+#    Test escape hatch: an edit to modules/<X>/src/test/** is also authorized
+#    when the plan's file inventory lists any modules/<X>/src/main/** file, so
+#    a signature change in a module's production source covers the forced edits
+#    to that same module's tests without re-listing each. Production source and
+#    other modules (server-it integration tests included) still require an
+#    exact bullet entry.
+#
 # The user approves a plan from their own terminal:
 #   mkdir -p .claude/protocol && echo "docs/dev/PLAN-<name>.md" > .claude/protocol/approved
 # Multiple concurrent plans: one repo-relative plan path per line.
@@ -85,6 +92,27 @@ while IFS= read -r LINE || [ -n "$LINE" ]; do
     exit 0
   fi
 done < "$TOKEN"
+
+# Test escape hatch (Option B): authorize a same-module unit-test edit when a
+# plan touches that module's production source. Runs only after exact-match
+# above fails. server-it and production source are unaffected — they match
+# neither this test pattern nor gain a src/main entry from it.
+case "$REL" in
+  modules/*/src/test/*)
+    MODULE="${REL#modules/}"; MODULE="${MODULE%%/*}"
+    while IFS= read -r LINE || [ -n "$LINE" ]; do
+      LINE="${LINE%%#*}"
+      LINE="$(echo "$LINE" | xargs 2>/dev/null || true)"
+      [ -n "$LINE" ] || continue
+      PLAN="$ROOT/$LINE"
+      [ -f "$PLAN" ] || continue
+      if awk '/^## File inventory/{f=1;next} /^## /{f=0} f && /^[[:space:]]*- /' "$PLAN" \
+          | grep -qF "modules/$MODULE/src/main/"; then
+        exit 0
+      fi
+    done < "$TOKEN"
+    ;;
+esac
 
 if [ -n "$MISSING" ]; then
   deny "Blocked (working-protocol G3): the approval token names plan '$MISSING' which does not exist. Ask the user to point the token at the approved plan document."
