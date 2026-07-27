@@ -38,21 +38,24 @@ final class ChangedNodesState(
     if diffResult.now() != v then diffResult.set(v)
   }(using unsafeWindowOwner)
 
-  /** Fetch the changed nodes for `treeId` between `activeBranch` and
-    * `compareBranch`, each at its branch head (point-in-time pins land with the
-    * history slider, Slice E-A). */
+  /** Fetch the changed nodes for `treeId` between `activeBranch@activeAt` and
+    * `compareBranch@compareAt`. Each `at` is `None` at the live head and
+    * `Some(commit)` when that side's history slider is rewound — the compare
+    * card rewound against the baseline at head is the past-vs-current view. */
   def loadDiff(
     treeId: TreeId,
     activeBranch: BranchChoice,
-    compareBranch: BranchChoice
+    activeAt: Option[CommitHash],
+    compareBranch: BranchChoice,
+    compareAt: Option[CommitHash]
   ): Unit =
     keySignal.now() match
       case Some(key) =>
         diffTrigger.emit(Some(() =>
           getChangedNodesEndpoint((
             userIdAccessor(), key, treeId,
-            activeBranch, Option.empty[CommitHash],
-            compareBranch, Option.empty[CommitHash]
+            activeBranch, activeAt,
+            compareBranch, compareAt
           )).toOutcomeEventStream
         ))
       case None => reset()

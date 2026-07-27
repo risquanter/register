@@ -79,7 +79,7 @@ object CompareStateSpec extends ZIOSpecDefault:
 
     test("branchSignal derives the chosen branch, falling back to Main while NotChosen") {
       val owner = new ManualOwner
-      val slot = new CompareSlotState
+      val slot = new CompareSlotState(PaletteData.Purple)
       val observed = slot.branchSignal.observe(owner)
       val initial = observed.now()
       slot.target.set(CompareTarget.Target(SlotCoordinate(BranchChoice.Scenario(scenarioA), None)))
@@ -116,23 +116,35 @@ object CompareStateSpec extends ZIOSpecDefault:
       )
     },
 
-    test("a slot's mirror flag defaults to off") {
-      assertTrue(!new CompareSlotState().mirror.now())
+    test("a slot's mirror flag defaults to off and its palette to its default family") {
+      val slot = new CompareSlotState(PaletteData.Purple)
+      assertTrue(!slot.mirror.now(), slot.palette.now() == PaletteData.Purple)
     },
 
-    test("removeRow resets the slot's target, hidden, and mirror flags and drops only that row") {
+    test("pool slots default to the per-slot palette families, distinct from the baseline") {
+      val state = new CompareState
+      assertTrue(
+        state.baselinePalette.now() == PaletteData.Aqua,
+        state.slots.map(_.palette.now()) == CompareState.slotDefaultPalettes,
+        state.slots.head.palette.now() != state.baselinePalette.now()
+      )
+    },
+
+    test("removeRow resets the slot's target, hidden, mirror, and palette and drops only that row") {
       val state = new CompareState
       state.addRow()
       state.addRow()
       state.slots(0).target.set(CompareTarget.Target(SlotCoordinate(BranchChoice.Scenario(scenarioA), Some(tid))))
       state.slots(0).hidden.set(true)
       state.slots(0).mirror.set(true)
+      state.slots(0).palette.set(PaletteData.Red)
       state.removeRow(0)
       assertTrue(
         state.rows.now() == Vector(1),
         state.slots(0).target.now() == CompareTarget.NotChosen,
         !state.slots(0).hidden.now(),
         !state.slots(0).mirror.now(),
+        state.slots(0).palette.now() == state.slots(0).defaultPalette,
         state.slots(1).target.now() == CompareTarget.NotChosen
       )
     },

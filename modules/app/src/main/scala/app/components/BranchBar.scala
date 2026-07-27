@@ -3,17 +3,13 @@ package app.components
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
-import app.chart.PaletteData
 import app.components.FormInputs
-import app.state.{BranchPaletteState, ScenarioState, ScenarioSubmitState, LoadState, Section}
+import app.state.{ScenarioState, ScenarioSubmitState, LoadState}
 import com.risquanter.register.domain.data.iron.{BranchChoice, ScenarioName}
 import com.risquanter.register.http.responses.ScenarioSummaryResponse
 
 /** Branch indicator + scenario management surfaces. Independent pieces:
   *
-  *   - `chipForSection` — read-only topbar indicator, always visible in both
-  *                        Design and Analyze — shows whichever section's own
-  *                        branch is on screen.
   *   - `toolbar`         — the interactive "Scenarios ▾" menu (switch/create/
   *                        duplicate/delete), Design-only, sits atop TreeBuilderView.
   *   - `picker`          — plain "pick a branch" `<select>` with no management
@@ -40,45 +36,14 @@ object BranchBar:
 
   /** Plain display name for a branch — `"main"` or the scenario's own name.
     * Shared by the Compare branch cards and the chart legend's branch
-    * suffixes; the topbar chip's own label adds the ⎇ glyph on top. */
+    * suffixes. */
   def branchDisplayName(choice: BranchChoice): String = choice match
     case BranchChoice.Main           => "main"
     case BranchChoice.Scenario(name) => name.value.toString
 
+  /** Display name with the ⎇ glyph — the Design toolbar's active-branch label. */
   private def branchLabel(choice: BranchChoice): String =
     s"⎇ ${branchDisplayName(choice)}"
-
-  /** Topbar branch indicator. Inert — no click handler. Carries the shown
-    * branch's palette swatch: its user-assigned family (`BranchPaletteState`),
-    * Aqua — the single-branch chart's selected-node family — while
-    * unassigned.
-    *
-    * Design and Analyze each own an independent `ScenarioState`. The topbar
-    * chip is shared chrome above both views, so it shows whichever section's
-    * own branch is presently on screen rather than always Design's.
-    */
-  def chipForSection(
-    activeSection: Signal[Section],
-    designScenarioState: ScenarioState,
-    analyzeScenarioState: ScenarioState,
-    scenariosEnabled: Signal[Boolean],
-    branchPaletteState: BranchPaletteState
-  ): HtmlElement =
-    val shownBranch: Signal[BranchChoice] = activeSection
-      .combineWith(designScenarioState.activeBranch.signal, analyzeScenarioState.activeBranch.signal)
-      .map { case (section, designBranch, analyzeBranch) =>
-        if section == Section.Design then designBranch else analyzeBranch
-      }
-    span(
-      cls := "topbar-badge branch-chip",
-      display <-- scenariosEnabled.map(if _ then "inline-flex" else "none"),
-      span(
-        cls := "branch-chip-swatch",
-        styleAttr <-- branchPaletteState.paletteFor(shownBranch, PaletteData.Aqua)
-          .map(family => s"background-color: ${PaletteData.familySwatch(family).value};")
-      ),
-      child.text <-- shownBranch.map(branchLabel)
-    )
 
   /** Sentinel for "main" in a branch-picker `<select>`'s raw value protocol.
     * A `ScenarioName` can never collide with it (see `ScenarioName`'s

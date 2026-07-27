@@ -42,9 +42,10 @@ import com.risquanter.register.http.responses.SimulationResponse
   *                           having to remember to wire that reload themselves.
   * @param userPalette        Palette family for user-selected (Ctrl+click) nodes,
   *                           passed through to `LECChartState`. A signal so the
-  *                           family can follow the branch's user-assigned
-  *                           palette (`BranchPaletteState`) — the tree
-  *                           highlights match the branch's curve family.
+  *                           family follows this slot's own palette
+  *                           (`CompareSlotState.palette` / `CompareState
+  *                           .baselinePalette`) — the tree highlights match the
+  *                           slot's curve family.
   */
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
@@ -52,10 +53,19 @@ final class TreeViewState(
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
+  atSignal: StrictSignal[Option[CommitHash]] = Val(None),
   userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua)
 ) extends WorkspaceTreeEndpoints:
 
   private def branchAccessor(): BranchChoice = activeBranchSignal.now()
+  private def atAccessor(): Option[CommitHash] = atSignal.now()
+
+  // A rewind (pin change) re-reads the selected tree at the new pin and
+  // re-fetches the current selection's curves there, WITHOUT clearing the
+  // selection — so the same curves scrub back and forth through history
+  // (nodes absent at the pin drop via the H3 notice and return on moving
+  // forward). Distinct from a branch/tree switch, which resets the chart.
+  atSignal.changes.foreach(_ => rewindReload())(using unsafeWindowOwner)
 
   // Set by a caller (DesignView) immediately before it reverts the active branch
   // itself (a declined confirm dialog) — suppresses exactly that one echo so the
@@ -116,7 +126,7 @@ final class TreeViewState(
   val selectedNodeId: Var[Option[NodeId]] = Var(None)
 
   // ── Chart state (delegated) ───────────────────────────────────
-  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor, branchAccessor, userPalette)
+  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor, branchAccessor, atAccessor, userPalette)
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.
@@ -154,17 +164,32 @@ final class TreeViewState(
   def ensureTreeListLoaded(): Unit =
     treeListState.ensureLoaded(branchAccessor())
 
-  /** Fetch the full tree structure for the given id. */
+  /** Emit only the structure fetch at the current (branch, pin) — no chart,
+    * expand, or node-selection resets. Shared by `loadTreeStructure` (after
+    * its resets) and `rewindReload` (which keeps the chart selection). */
+  private def emitStructureFetch(id: TreeId): Unit =
+    keySignal.now() match
+      case Some(key) =>
+        treeTrigger.emit(Some(() =>
+          getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), atAccessor())).toOutcomeEventStream
+        ))
+      case None => ()
+
+  /** Fetch the full tree structure for the given id, resetting UI + chart
+    * state — the tree-switch path (a different tree has a different node
+    * lineage, so the old selection must go). */
   def loadTreeStructure(id: TreeId): Unit =
     expandedNodes.set(Set.empty)
     selectedNodeId.set(None)
     chartState.reset()
-    keySignal.now() match
-      case Some(key) =>
-        treeTrigger.emit(Some(() =>
-          getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), Option.empty[CommitHash])).toOutcomeEventStream
-        ))
-      case None => ()
+    emitStructureFetch(id)
+
+  /** Pin change (history slider): re-read the selected tree at the new pin and
+    * re-fetch the current selection's curves there, preserving the selection.
+    * No-op when nothing is selected. */
+  private def rewindReload(): Unit =
+    selectedTreeId.now().foreach(emitStructureFetch)
+    chartState.reloadCurrentCurves()
 
   /** Select a tree by id — sets `selectedTreeId` and triggers structure fetch. */
   def selectTree(id: TreeId): Unit =

@@ -21,7 +21,6 @@ object AppShell:
     healthStatus: Signal[Option[Boolean]],
     workspaceBadge: Signal[String],
     appVersion: Signal[String],
-    branchChip: HtmlElement,
     designView: HtmlElement,
     analyzeView: HtmlElement
   ): HtmlElement =
@@ -45,7 +44,6 @@ object AppShell:
           div(
             cls := "topbar-right",
             healthDot(healthStatus),
-            branchChip,
             span(
               cls := "topbar-badge",
               child.text <-- workspaceBadge

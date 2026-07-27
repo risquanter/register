@@ -484,21 +484,6 @@ body {
   font-family: var(--font-mono);
 }
 
-/* ── Branch chip (topbar indicator) ── */
-.branch-chip {
-  font-family: var(--font-mono);
-  align-items: center;
-  gap: var(--sp-1);
-}
-
-.branch-chip-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
 /* ── Scenario toolbar (Design view, atop TreeBuilderView) ── */
 .scenario-toolbar {
   align-items: center;
@@ -2340,6 +2325,60 @@ select.form-input:has(option[value=""]:checked) {
   gap: var(--sp-2);
 }
 
+/* History slider — discrete commit stops under a card's picker row. Oldest is
+   leftmost, the branch head (live) rightmost; the active stop is filled. */
+.slot-card-slider {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.history-slider {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1, 4px);
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 2px 0;
+}
+.history-stop {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border, #4b5563);
+  background: transparent;
+  cursor: pointer;
+}
+.history-stop:hover {
+  border-color: var(--accent, #38bdf8);
+}
+.history-stop--latest {
+  border-style: dashed;
+}
+.history-stop--active {
+  background: var(--accent, #38bdf8);
+  border-color: var(--accent, #38bdf8);
+}
+
+/* Read-only banner shown while a card is rewound to an earlier stop. */
+.pinned-banner {
+  font-size: 0.75rem;
+  padding: 2px var(--sp-2);
+  border-radius: 4px;
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent, #38bdf8);
+  margin-bottom: var(--sp-2);
+}
+
+/* Transient notice: selected curves that don't exist at the rewound commit. */
+.dropped-selections-notice {
+  font-size: 0.75rem;
+  padding: 2px var(--sp-2);
+  color: var(--text-muted, #9ca3af);
+}
+
 /* Bare TreeListView (baseline card header): branch + tree selects flex, eye
    trails. */
 .tree-list-bare {
@@ -2399,9 +2438,9 @@ select.form-input:has(option[value=""]:checked) {
   opacity: 1;
 }
 
-/* ── Swatch-picker popovers (per-node colour grid, branch palette row) ── */
+/* ── Swatch-picker popovers (per-node colour grid, slot palette row) ── */
 .color-swatch-picker,
-.branch-palette-popover {
+.slot-palette-popover {
   position: absolute;
   z-index: 100;
   background-color: var(--surface-raised);
@@ -2453,27 +2492,27 @@ select.form-input:has(option[value=""]:checked) {
   background: var(--surface-overlay-hover);
 }
 
-/* ── Branch palette picker (slot-card header swatch popover) ── */
-.branch-palette-picker {
+/* ── Slot palette picker (slot-card header swatch popover) ── */
+.slot-palette-picker {
   position: relative;
   display: inline-flex;
 }
 
-.branch-palette-trigger {
+.slot-palette-trigger {
   cursor: pointer;
 }
-.branch-palette-trigger:hover {
+.slot-palette-trigger:hover {
   box-shadow: 0 0 0 1px var(--foreground);
 }
 
 /* Viewport-positioned (top/left set inline from the swatch's bounding box):
-   the branch card's overflow:hidden would clip an absolutely-positioned
+   the slot card's overflow:hidden would clip an absolutely-positioned
    child — on a collapsed card, entirely. */
-.branch-palette-popover {
+.slot-palette-popover {
   position: fixed;
 }
 
-.branch-palette-cells {
+.slot-palette-cells {
   display: flex;
   gap: 3px;
 }

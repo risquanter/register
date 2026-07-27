@@ -4,9 +4,9 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
-import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, BranchPalettePicker, Icons}
+import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, SlotPalettePicker, Icons, HistorySlider}
 import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, PaletteData, PinnedAxes}
-import app.state.{TreeViewState, AnalyzeQueryState, LoadState, BranchPaletteState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareLayout, CompareState, CompareSlot, CompareSlotState, CompareTarget, SlotCoordinate, toCoordinate}
+import app.state.{TreeViewState, TreeHistoryState, AnalyzeQueryState, LoadState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareLayout, CompareState, CompareSlot, CompareSlotState, CompareTarget, SlotCoordinate, toCoordinate}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
 import com.risquanter.register.domain.data.iron.{BranchChoice, NodeId, TreeId, ScenarioName}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
@@ -52,17 +52,15 @@ object AnalyzeView:
     appConfigState: AppConfigState,
     compareState: CompareState,
     compareSlots: Vector[CompareSlot],
-    branchPaletteState: BranchPaletteState
+    baselineHistoryState: TreeHistoryState
   ): HtmlElement =
 
-    /** The tab's active branch's palette family — its user-assigned family,
-      * Aqua (the single-branch chart's selected-node family) while
-      * unassigned. Colours the active branch's overlay curves, its
-      * side-by-side panel and card swatches, matching the single chart's
-      * own `nodeColorMap` (whose `TreeViewState` is built on this same
-      * assignment in `Main`). */
+    /** The baseline slot's colour family (default Aqua). Slot-keyed, not
+      * branch: colours the baseline's overlay curves, its side-by-side panel
+      * and card swatch, matching the single chart's own `nodeColorMap` (whose
+      * `TreeViewState` is built on this same `baselinePalette` in `Main`). */
     val activePalette: Signal[Vector[HexColor]] =
-      branchPaletteState.paletteFor(scenarioState.activeBranch.signal, PaletteData.Aqua)
+      compareState.baselinePalette.signal
 
     /** Fire query against selected tree. No-op if no tree is selected. */
     def runQuery(): Unit = queryState.executeQuery()
@@ -124,7 +122,7 @@ object AnalyzeView:
     val slotOverlayInputs: Signal[Vector[(LoadState[Map[NodeId, LECNodeCurve]], Set[NodeId], CompareTarget, Vector[HexColor])]] =
       Signal.combineSeq(compareSlots.map { slot =>
         slot.treeViewState.curveCache.distinct
-          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.state.target.signal, slot.palette)
+          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.state.target.signal, slot.state.palette.signal)
       }).map(_.toVector)
 
     /** The single chart surface (used for both layouts whenever the panel
@@ -295,19 +293,40 @@ object AnalyzeView:
       // the newly-chosen branch's name.
       compareSlots.map { slot =>
         treeViewState.selectedTreeId.signal
-          .combineWith(slot.state.target.signal, scenarioState.activeBranch.signal)
+          .combineWith(slot.state.target.signal, scenarioState.activeBranch.signal, compareState.baselineAt.signal)
           .changes.debounce(100) --> {
-            case (Some(activeTid), CompareTarget.Target(coord), activeBranch)
-                if coord.treeOverride.forall(_ == activeTid) && coord.branch != activeBranch =>
-              // Same-tree, cross-branch only: ✎ changed-node markers need
-              // shared node lineage across two branches. A cross-tree slot
-              // (override names a different tree) has no lineage; a same-branch
-              // slot has no second branch to diff against. Both get no diff.
-              slot.diffState.loadDiff(activeTid, activeBranch, coord.branch)
+            case (Some(activeTid), CompareTarget.Target(coord), activeBranch, baselineAt)
+                if coord.treeOverride.forall(_ == activeTid) &&
+                   (coord.branch != activeBranch || coord.at != baselineAt) =>
+              // Same-tree only (shared node lineage), and the two sides differ in
+              // branch or in point-in-time — cross-branch diff, or past-vs-current
+              // on one branch when a history stop is rewound. A cross-tree slot
+              // (override names a different tree) has no lineage; two sides at the
+              // same (branch, pin) have nothing to diff. Both get no diff.
+              slot.diffState.loadDiff(activeTid, activeBranch, baselineAt, coord.branch, coord.at)
             case _ =>
               slot.diffState.reset()
           }
       },
+      // Per slot: load the slider's stops for the slot's (effective tree,
+      // branch); reset when the slot holds no tree.
+      compareSlots.map { slot =>
+        treeViewState.selectedTreeId.signal
+          .combineWith(slot.state.target.signal)
+          .changes.debounce(100) --> {
+            case (Some(activeTid), CompareTarget.Target(coord)) =>
+              slot.historyState.loadHistory(coord.treeOverride.getOrElse(activeTid), coord.branch)
+            case _ =>
+              slot.historyState.reset()
+          }
+      },
+      // Baseline slider stops: the active tree's history on the active branch.
+      treeViewState.selectedTreeId.signal
+        .combineWith(scenarioState.activeBranch.signal)
+        .changes.debounce(100) --> {
+          case (Some(tid), branch) => baselineHistoryState.loadHistory(tid, branch)
+          case _                   => baselineHistoryState.reset()
+        },
       // Per slot: reset the slot's target when it stops being a
       // valid choice. Two independent triggers, deliberately kept separate so
       // a scenario-list refresh can never be mistaken for a branch change:
@@ -567,7 +586,7 @@ object AnalyzeView:
                 visible.map { pi =>
                   chartPanel(
                     compareSlots(pi).state.branchSignal.map(BranchBar.branchDisplayName),
-                    compareSlots(pi).palette.map(PaletteData.familySwatch),
+                    compareSlots(pi).state.palette.signal.map(PaletteData.familySwatch),
                     sideBySideSpecs.map(_._2(pi)),
                     slotHoverBridges(pi),
                     chartParams
@@ -575,7 +594,17 @@ object AnalyzeView:
                 }
               )
             case _ =>
-              LECChartView(combinedSpecSignal, hoverBridge, chartParams)
+              div(
+                cls := "lec-chart-surface",
+                // H3: selections absent at a rewound commit are dropped from the
+                // chart; name them so a vanished curve is explained, not silent.
+                child.maybe <-- treeViewState.chartState.droppedSelections.map { dropped =>
+                  if dropped.isEmpty then None
+                  else Some(div(cls := "dropped-selections-notice",
+                    s"${dropped.size} selected node(s) not present at this point in time"))
+                },
+                LECChartView(combinedSpecSignal, hoverBridge, chartParams)
+              )
           }
       )
     )
@@ -593,13 +622,20 @@ object AnalyzeView:
         cls := "slot-card-stack",
         BranchCard(
           header = renderBaselineHead(
-            treeViewState, scenarioState, appConfigState, compareState, branchPaletteState, activePalette,
+            treeViewState, scenarioState, appConfigState, compareState,
+            baselineHistoryState,
             // No-op for slots not holding a tree (a slot's selectedTreeId is
             // cleared whenever its row is torn down), so it's safe to pass ungated.
             onRefreshExtra = () => compareSlots.foreach(_.treeViewState.refreshSelectedTree())
           ),
-          body = TreeDetailView(treeViewState, queryState.satisfyingNodeIds, hoverBridge)
-                   .amend(cls := "tree-detail-view--in-card"),
+          body = TreeDetailView(
+                   treeViewState, queryState.satisfyingNodeIds, hoverBridge,
+                   // Rewinding the baseline does NOT lock selection — the pin is
+                   // a read dimension; Ctrl+click still charts through history.
+                   pinnedAt = compareState.baselineAt.signal
+                     .combineWith(baselineHistoryState.commits)
+                     .map { (at, commits) => at.flatMap(h => commits.find(_.commitHash == h)) }
+                 ).amend(cls := "tree-detail-view--in-card"),
           // Same as a comparand card: starts collapsed (header only), expands to
           // host the tree when one loads.
           initiallyOpen = false,
@@ -612,11 +648,19 @@ object AnalyzeView:
             header = renderComparandHead(
               scenarioState, slot, poolIdx, compareState,
               otherSlots = compareSlots.map(_.state).filterNot(_ eq slot.state),
-              activeTreeId = treeViewState.selectedTreeId.signal,
-              branchPaletteState = branchPaletteState
+              activeTreeId = treeViewState.selectedTreeId.signal
             ),
-            body = TreeDetailView(slot.treeViewState, hoverBridge = slotHoverBridges(poolIdx), changedNodeIds = slotChangedNodeIds(poolIdx), selectionLocked = slot.state.mirror.signal)
-                     .amend(cls := "tree-detail-view--in-card"),
+            body = TreeDetailView(
+                     slot.treeViewState,
+                     hoverBridge = slotHoverBridges(poolIdx),
+                     changedNodeIds = slotChangedNodeIds(poolIdx),
+                     // Lock only while Mirror is on. A rewound slot (at set) stays
+                     // interactive — rewind is a read dimension, not a lock.
+                     selectionLocked = slot.state.mirror.signal,
+                     pinnedAt = slot.state.atSignal
+                       .combineWith(slot.historyState.commits)
+                       .map { (at, commits) => at.flatMap(h => commits.find(_.commitHash == h)) }
+                   ).amend(cls := "tree-detail-view--in-card"),
             initiallyOpen = false,
             expandOn = slot.treeViewState.selectedTree.signal.changes
                          .collect { case LoadState.Loaded(t) => t.id }.distinct.mapToUnit
@@ -689,21 +733,29 @@ object AnalyzeView:
     scenarioState: ScenarioState,
     appConfigState: AppConfigState,
     compareState: CompareState,
-    branchPaletteState: BranchPaletteState,
-    activePalette: Signal[Vector[HexColor]],
+    baselineHistoryState: TreeHistoryState,
     onRefreshExtra: () => Unit
   ): HtmlElement =
     div(
       cls := "slot-card-content",
       div(
         cls := "slot-card-picker",
-        BranchPalettePicker(branchPaletteState, scenarioState.activeBranch.signal, activePalette),
+        SlotPalettePicker(
+          compareState.baselinePalette.signal,
+          compareState.baselinePalette.set,
+          () => compareState.baselinePalette.set(PaletteData.Aqua)
+        ),
         TreeListView(
           treeViewState,
           leadingControl = Some(BranchBar.picker(scenarioState, appConfigState.scenariosEnabled.signal)),
           onRefreshExtra = onRefreshExtra,
           bare = true
         )
+      ),
+      // History slider under the picker: rewind the baseline to an earlier stop.
+      div(
+        cls := "slot-card-slider",
+        HistorySlider(baselineHistoryState.commits, compareState.baselineAt.signal, compareState.baselineAt.set(_))
       ),
       // Actions row — the eye alone, right-aligned, stacking under the refresh
       // and lining up with the comparand rows' rightmost button.
@@ -723,15 +775,24 @@ object AnalyzeView:
     poolIdx: Int,
     compareState: CompareState,
     otherSlots: Vector[CompareSlotState],
-    activeTreeId: Signal[Option[TreeId]],
-    branchPaletteState: BranchPaletteState
+    activeTreeId: Signal[Option[TreeId]]
   ): HtmlElement =
     div(
       cls := "slot-card-content",
       div(
         cls := "slot-card-picker",
-        BranchPalettePicker(branchPaletteState, slot.state.branchSignal, slot.palette),
+        SlotPalettePicker(
+          slot.state.palette.signal,
+          slot.state.palette.set,
+          () => slot.state.palette.set(slot.state.defaultPalette)
+        ),
         renderBranchPicker(scenarioState, slot, otherSlots, activeTreeId)
+      ),
+      // History slider under the picker: rewind this comparand to an earlier
+      // stop (past-vs-current against the baseline at head).
+      div(
+        cls := "slot-card-slider",
+        HistorySlider(slot.historyState.commits, slot.state.atSignal, slot.state.setAt(_))
       ),
       div(
         cls := "slot-card-actions",

@@ -3,9 +3,8 @@ package app
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
-import app.chart.PaletteData
-import app.components.{AppShell, BranchBar}
-import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, BranchPaletteState, CompareState, CompareSlot, ChangedNodesState}
+import app.components.AppShell
+import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, CompareState, CompareSlot, ChangedNodesState, TreeHistoryState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
 
@@ -49,48 +48,39 @@ object Main:
       wsState.keySignal, scenarioListState.scenarios, () => wsState.currentUserId
     )
 
-    // Per-branch palette assignments — one app-wide store, so every surface
-    // (both sections' charts, the topbar chip, the compare cards) reads the
-    // same colour for the same branch.
-    val branchPaletteState = new BranchPaletteState
-
     val builderState = new TreeBuilderState
     val designTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, designScenarioState.activeBranch.signal
     )
+    // Compare state is built before the baseline tree view so the baseline
+    // slider's pin (`baselineAt`) can feed the baseline's own `atSignal`.
+    val analyzeCompareState = new CompareState
     val analyzeTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal,
-      userPalette = branchPaletteState.paletteFor(analyzeScenarioState.activeBranch.signal, PaletteData.Aqua)
+      atSignal = analyzeCompareState.baselineAt.signal,
+      userPalette = analyzeCompareState.baselinePalette.signal
     )
+    val analyzeBaselineHistoryState = new TreeHistoryState(wsState.keySignal, () => wsState.currentUserId)
     // Compare cards: each compared-branch slot gets its own full
     // TreeViewState — an independent tree view, Ctrl+click surface, and
     // curve cache on the slot's chosen branch — plus its own hash-diff
-    // state. The palette family is the slot's branch identity in the
-    // Overlay chart: the chosen branch's user-assigned family, falling back
-    // to the slot's own default family. Passing it to the TreeViewState
+    // state. Colour identity is the slot's own per-slot family
+    // (`CompareSlotState.palette`, default set by `CompareState`), so two
+    // slots on the same branch stay distinct; passing it to the TreeViewState
     // makes the card's tree highlights match its curves.
-    val analyzeCompareState = new CompareState
-    val compareSlotDefaultPalettes = Vector(
-      PaletteData.Purple, PaletteData.Orange, PaletteData.Green,
-      PaletteData.Yellow, PaletteData.Red, PaletteData.Pink, PaletteData.Emerald
-    )
-    require(
-      compareSlotDefaultPalettes.length == CompareState.ComparedSlotCount,
-      "one default palette family per compare slot"
-    )
-    val analyzeCompareSlots = analyzeCompareState.slots.zip(compareSlotDefaultPalettes).map { (slotState, defaultPalette) =>
-      val slotPalette = branchPaletteState.paletteFor(slotState.branchSignal, defaultPalette)
+    val analyzeCompareSlots = analyzeCompareState.slots.map { slotState =>
       new CompareSlot(
         state = slotState,
         treeViewState = new TreeViewState(
           wsState.keySignal, treeListState, globalError, () => wsState.currentUserId,
-          // The slot's branch derives from its target; TreeViewState needs a
-          // StrictSignal (it reads .now()), so observe the derived signal for
-          // the app's lifetime instead of keeping a hand-synced Var.
-          slotState.branchSignal.observe(unsafeWindowOwner), userPalette = slotPalette
+          // The slot's branch and pin derive from its target; TreeViewState needs
+          // StrictSignals (it reads .now()), so observe the derived signals for
+          // the app's lifetime instead of keeping hand-synced Vars.
+          slotState.branchSignal.observe(using unsafeWindowOwner),
+          slotState.atSignal.observe(using unsafeWindowOwner), userPalette = slotState.palette.signal
         ),
         diffState = new ChangedNodesState(wsState.keySignal, () => wsState.currentUserId),
-        palette = slotPalette
+        historyState = new TreeHistoryState(wsState.keySignal, () => wsState.currentUserId)
       )
     }
     val analyzeQueryState = new AnalyzeQueryState(
@@ -145,10 +135,6 @@ object Main:
       healthStatus = healthState.status.signal,
       workspaceBadge = workspaceBadge,
       appVersion = appConfigState.appVersion.signal,
-      branchChip = BranchBar.chipForSection(
-        navState.activeSection.signal, designScenarioState, analyzeScenarioState, appConfigState.scenariosEnabled.signal,
-        branchPaletteState
-      ),
       designView = DesignView(
         builderState,
         designTreeViewState,
@@ -169,7 +155,7 @@ object Main:
         appConfigState,
         analyzeCompareState,
         analyzeCompareSlots,
-        branchPaletteState
+        analyzeBaselineHistoryState
       )
     )
 

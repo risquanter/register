@@ -35,11 +35,12 @@ import com.risquanter.register.http.endpoints.WorkspaceAnalysisEndpoints
   * @param userIdAccessor Returns the current user identity (None in capability-only mode).
   * @param branchAccessor Returns this tab's active branch (BranchChoice) — BranchBar.
   * @param userPalette    Palette family for user-selected (Ctrl+click) nodes.
-  *                       A signal: the family follows the branch's
-  *                       user-assigned palette (`BranchPaletteState`), so the
-  *                       tree highlights and curve colours match the branch's
-  *                       family in the Overlay chart. Default Aqua matches
-  *                       the chart's single-branch colour system.
+  *                       A signal: the family follows this slot's own palette
+  *                       (`CompareSlotState.palette` / `CompareState
+  *                       .baselinePalette`), so the tree highlights and curve
+  *                       colours match the slot's family in the Overlay chart.
+  *                       Default Aqua matches the chart's single-branch colour
+  *                       system.
   */
 final class LECChartState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
@@ -48,6 +49,7 @@ final class LECChartState(
   globalError: Var[Option[GlobalError]],
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   branchAccessor: () => BranchChoice = () => BranchChoice.Main,
+  atAccessor: () => Option[CommitHash] = () => None,
   userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua)
 ) extends WorkspaceAnalysisEndpoints:
 
@@ -104,6 +106,16 @@ final class LECChartState(
     userSelectedNodeIds.signal
       .combineWith(satisfyingNodeIds.signal)
       .map { (user, query) => user ++ query }
+      .distinct
+
+  /** User-selected nodes with no curve in the current cache — selections that
+    * do not exist at the pinned commit (H3). Empty at head (every selection has
+    * a curve). Drives the transient "not present at this point in time" notice;
+    * the chart already omits them. */
+  val droppedSelections: Signal[Set[NodeId]] =
+    userSelectedNodeIds.signal
+      .combineWith(curveCache.signal)
+      .map(LECChartState.deriveDropped)
       .distinct
 
   /** Node → hex colour mapping for chart curves and tree highlights.
@@ -220,6 +232,16 @@ final class LECChartState(
   def clearCurves(): Unit =
     curvesTrigger.emit(None)
 
+  /** Re-fetch the current visible selection's curves at the current pin — used
+    * when only the point-in-time (`at`) changes: the selection is unchanged but
+    * its curves must be re-read at the new commit, so the same curves scrub
+    * through history. Empty selection → clear. Nodes absent at the pin come
+    * back missing from the cache and surface via `droppedSelections` (H3). */
+  def reloadCurrentCurves(): Unit =
+    (userSelectedNodeIds.now() ++ satisfyingNodeIds.now()).toList match
+      case Nil => clearCurves()
+      case ids => loadCurves(ids)
+
   /** Fetch LEC curves from the backend for the given node IDs.
     *
     * Calls the `lec-multi` endpoint, which returns structured
@@ -233,8 +255,17 @@ final class LECChartState(
       case (Some(key), Some(treeId)) =>
         curvesTrigger.emit(Some(() =>
           getWorkspaceLECCurvesMultiEndpoint(
-            (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), Option.empty[CommitHash])
+            (userIdAccessor(), key, treeId, false, nodeIds, branchAccessor(), atAccessor())
           ).toOutcomeEventStream
         ))
       case _ => () // No workspace or tree selected — nothing to do
+
+object LECChartState:
+  /** Pure derivation extracted from `droppedSelections` so it's testable
+    * without a Laminar harness: selected nodes not present in the loaded curve
+    * map. Non-loaded cache → empty (nothing charted yet, nothing dropped). */
+  def deriveDropped(selected: Set[NodeId], cache: LoadState[Map[NodeId, LECNodeCurve]]): Set[NodeId] =
+    cache match
+      case LoadState.Loaded(m) => selected -- m.keySet
+      case _                   => Set.empty
 

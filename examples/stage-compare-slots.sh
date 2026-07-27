@@ -86,7 +86,7 @@ ok "Expires at    : $EXPIRES"
 header "Step 2 — Create Tree B"
 
 TREE_B_RESP=$(curl -s -X POST "$BASE/w/$WS_KEY/risk-trees" \
-  -H 'Content-Type: application/json' \
+  -H 'Content-Type: application/json' -H "X-Branch: main" \
   -d '{
     "name": "Compare Demo Tree B",
     "portfolios": [
@@ -122,7 +122,7 @@ mk_scenario() {
   local resp
   resp=$(curl -s -X POST "$BASE/w/$WS_KEY/scenarios" \
     -H 'Content-Type: application/json' \
-    -d "{\"name\": \"$name\", \"forkOf\": null}")
+    -d "{\"name\": \"$name\", \"source\": {\"type\": \"branch\", \"name\": \"main\"}}")
   if echo "$resp" | jq -e '.name // .head // .branch' >/dev/null 2>&1; then
     ok "Scenario created : $name"
   else
@@ -138,7 +138,7 @@ mk_scenario "beta"
 # structure on the alpha branch; .rootId gives the portfolio id directly.
 header "Step 4 — Edit Leaf One on scenario alpha (creates the diff)"
 
-STRUCT=$(curl -s "$BASE/w/$WS_KEY/risk-trees/$TREE_A/structure" -H "X-Active-Branch: alpha")
+STRUCT=$(curl -s "$BASE/w/$WS_KEY/risk-trees/$TREE_A/structure" -H "X-Branch: alpha")
 ROOT_ID=$(echo "$STRUCT" | jq -r '.rootId // empty')
 # node JSON may wrap a sealed subtype as {"RiskLeaf":{…}} or be flat; tolerate both.
 leaf_id() { echo "$STRUCT" | jq -r --arg n "$1" '.nodes[] | (.RiskLeaf // .) | select(.name==$n and (.probability!=null)) | .id' | head -1; }
@@ -151,7 +151,7 @@ if [[ -z "$ROOT_ID" || -z "$LEAF1_ID" || -z "$LEAF2_ID" ]]; then
   echo "$STRUCT" | jq . 2>/dev/null | head -40 || echo "$STRUCT"
 else
   UPDATE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/w/$WS_KEY/risk-trees/$TREE_A" \
-    -H 'Content-Type: application/json' -H "X-Active-Branch: alpha" \
+    -H 'Content-Type: application/json' -H "X-Branch: alpha" \
     -d "{
       \"name\": \"Compare Demo Tree A\",
       \"portfolios\": [ { \"id\": \"$ROOT_ID\", \"name\": \"Root\", \"parentName\": null } ],

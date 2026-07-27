@@ -23,8 +23,24 @@ typed `List[NodeId]` (user-requested typing fixes). Version bumped to 0.10.0
 (build.sbt + .env + .env.irmin). Doc sweep was surgical (ADR-032, ADR-004a
 header) — historical records (TODO.md, plan docs, ADR-006/007 proposals) left
 intact because a literal rename there would either falsify old semantics
-("X-Branch absent = main") or corrupt proposal-internal types. Slices E-A
-(Analyze slider) and E-B (Design slider + fork/revert UI) remain.
+("X-Branch absent = main") or corrupt proposal-internal types. Slice 0 has since
+been committed by the user.
+
+**Slice E-A (Analyze slider, §8b) IMPLEMENTED 2026-07-27, uncommitted.**
+`commonJVM/test`, `server/test`, `app/test` all pass; `app/compile` warning-free.
+Ordering needed no code (getHistory is oldest-first ancestry, pinned by
+`RiskTreeRepositoryIrminSpec`). Where implementation refined §8b: `SlotCoordinate.at`
+carries a `= None` default (fewer call-site edits, satisfies "default None");
+`HistorySlider.selected` takes `Signal` not `StrictSignal` (only `.map` used, no
+`.observe` at call sites); `TreeDetailView` keeps a strict `lockedNow` mirror of
+the widened `Signal[Boolean]` lock so the click handler reads it synchronously;
+the baseline `TreeHistoryState` is a new `AnalyzeView.apply` param (built in
+`Main`); the H3 dropped-selections notice renders on the baseline chart surface
+(comparand side-by-side notice deferred). One behaviour change to flag: the ✎
+changed-node diff gate now fires for same-branch-different-`at` (past-vs-current
+on one branch when a stop is rewound), not only cross-branch — a direct
+consequence of `at` joining pair identity (decision 2). Slice E-B (Design slider
++ fork/revert UI) remains.
 
 ## Rulings (2026-07-25, user)
 
@@ -687,6 +703,9 @@ App:
 - modules/app/src/main/scala/app/components/HistorySlider.scala (NEW)
 - modules/app/src/main/scala/app/components/RevertModal.scala (NEW)
 - modules/app/src/main/scala/app/components/BranchBar.scala
+- modules/app/src/main/scala/app/components/SlotPalettePicker.scala (NEW — §C2 per-slot palette)
+- modules/app/src/main/scala/app/components/BranchPalettePicker.scala (DELETE — §C2 retires branch-keyed palette)
+- modules/app/src/main/scala/app/state/BranchPaletteState.scala (DELETE — §C2 retires branch-keyed palette)
 - modules/app/src/main/scala/app/views/AnalyzeView.scala
 - modules/app/src/main/scala/app/views/DesignView.scala
 - modules/app/src/main/scala/app/views/TreeBuilderView.scala
@@ -695,12 +714,15 @@ App:
 - modules/app/src/main/scala/app/views/RiskLeafFormView.scala
 - modules/app/src/main/scala/app/views/PortfolioFormView.scala
 - modules/app/src/main/scala/app/Main.scala
+- modules/app/src/main/scala/app/components/AppShell.scala (§C2 D-C2-1=B: drops the branchChip slot)
 - modules/app/styles/app.css
 
 App tests:
 - modules/app/src/test/scala/app/state/ScenarioDiffStateSpec.scala (RENAME → ChangedNodesStateSpec.scala; old path, remove after rename)
 - modules/app/src/test/scala/app/state/ChangedNodesStateSpec.scala (RENAME target)
 - modules/app/src/test/scala/app/state/TreeHistoryStateSpec.scala (NEW: pure derivations)
+- modules/app/src/test/scala/app/state/CompareStateSpec.scala (§C2: per-slot palette default/reset coverage)
+- modules/app/src/test/scala/app/state/BranchPaletteStateSpec.scala (DELETE — §C2 retires branch-keyed palette)
 
 Versioning:
 - build.sbt (ThisBuild / version → 0.10.0 MINOR on landing — 0.8.x/0.9.0 were consumed by the compare rework; APP_VERSION mirrored to .env and .env.irmin, which are ungated and need no bullet)
@@ -741,6 +763,9 @@ App (Slice-0 compile-fix):
 - modules/app/src/main/scala/app/state/AnalyzeQueryState.scala
 - modules/app/src/main/scala/app/state/ScenarioListState.scala
 - modules/app/src/test/scala/app/state/BranchPaletteStateSpec.scala (E7 "main" reservation invalidates its scenario-named-main setup; option C — unsafe-construct for defense-in-depth)
+
+Stale doc:
+- modules/app/src/main/scala/app/chart/PaletteData.scala
 
 Any further existing test/harness file the compile surfaces as broken by these
 same signature changes is appended here as an exact bullet and fixed as a
@@ -1024,3 +1049,252 @@ reads only that heading. `RiskTreeServiceLive.scala`, `RiskTreeServiceLiveSpec.s
 and `build.sbt` were already listed there; `HttpApiIntegrationSpec.scala` was
 added to the Server IT block for this continuation. `.env`/`.env.irmin` are
 ungated (no bullet needed). No other files.
+
+# Continuation §C2 — Slice E-A manual-review fixes (history charting + per-slot palette)
+
+Three defects found in the uncommitted E-A build during manual review
+(2026-07-27). All three trace to two design decisions in E-A, not three
+independent bugs. Both directions are user-ruled (2026-07-27).
+
+## Goal
+
+1. **Single-tree history charting works.** Moving the slider on a single tree
+   currently calls `chartState.reset()` (wipes the selection and curves) and
+   locks selection (`selectionLocked = baselineAt.isDefined`), showing the
+   "mirrors the baseline" notice on a tree that has no mirror. Rewinding must
+   instead re-read the structure AND the current selection's curves at the pin,
+   keeping the selection, so the same curves scrub through time (absent nodes
+   drop via the existing H3 notice and return on moving forward). Rewound cards
+   stay fully interactive (Ctrl+click still selects); the pin is a read
+   dimension, not a lock. This **reverses §8b's "rewind = read-only via
+   selectionLocked"** — that call was wrong for the feature's primary use.
+2. **Same-branch comparand no longer force-locked (2b).** The comparand lock
+   `mirror || at.isDefined` locks a rewound slot even with Mirror off, and
+   toggling Mirror cannot free it. Lock becomes `mirror` only.
+3. **Per-slot palette (2a), Option A (ruled).** Curve colour is keyed by
+   branch, so two sides of the same branch (main@head vs main@C2) resolve to
+   one family and share one picker. Colour identity moves to the **slot**
+   (baseline + each comparand pool slot), each independently pickable; two
+   slots may deliberately hold the same family (no forced uniqueness). The
+   branch-keyed `BranchPaletteState` + `BranchPalettePicker` are retired.
+
+## Fix 1 + 2b — rewind = live time-scrubbing (no lock, no reset)
+
+### `TreeViewState.scala`
+
+Split the structure fetch out of `loadTreeStructure` so a pin change can
+re-read structure without the tree-switch resets, and re-fetch the selection's
+curves at the pin:
+
+```scala
+// Emit only the structure fetch at the current (branch, pin) — no chart/expand
+// resets. Shared by loadTreeStructure (after its resets) and rewindReload.
+private def emitStructureFetch(id: TreeId): Unit =
+  keySignal.now() match
+    case Some(key) =>
+      treeTrigger.emit(Some(() =>
+        getWorkspaceTreeStructureEndpoint((userIdAccessor(), key, id, branchAccessor(), atAccessor())).toOutcomeEventStream
+      ))
+    case None => ()
+
+def loadTreeStructure(id: TreeId): Unit =
+  expandedNodes.set(Set.empty)
+  selectedNodeId.set(None)
+  chartState.reset()
+  emitStructureFetch(id)
+
+// Pin change (history slider): re-read the selected tree at the new pin and
+// re-fetch the current selection's curves there, WITHOUT clearing the
+// selection — the same curves scrub through time.
+private def rewindReload(): Unit =
+  selectedTreeId.now().foreach(emitStructureFetch)
+  chartState.reloadCurrentCurves()
+
+// replaces the current `atSignal.changes.foreach(_ => refreshSelectedTree())`
+atSignal.changes.foreach(_ => rewindReload())(using unsafeWindowOwner)
+```
+
+`refreshSelectedTree()` (used by the branch-change path and the refresh button)
+is unchanged — those keep resetting the chart, which is correct for a genuine
+tree/branch switch. Only the pin path changes.
+
+### `LECChartState.scala`
+
+```scala
+/** Re-fetch the current visible selection's curves at the current pin — used
+  * when only `at` changes (selection unchanged, curves must be re-read at the
+  * new commit). Empty selection → clear. */
+def reloadCurrentCurves(): Unit =
+  (userSelectedNodeIds.now() ++ satisfyingNodeIds.now()).toList match
+    case Nil => clearCurves()
+    case ids => loadCurves(ids)
+```
+
+### `AnalyzeView.scala` — drop the at-based lock
+
+- Baseline body: **remove** `selectionLocked = compareState.baselineAt.signal.map(_.isDefined)`
+  (defaults to `Val(false)`); keep the `pinnedAt` banner.
+- Comparand body: `selectionLocked = slot.state.mirror.signal` (drop
+  `.combineWith(slot.state.atSignal)` and the `|| at.isDefined`).
+
+### `TreeDetailView.scala` — neutral pin banner
+
+Line 119: drop the `" — read-only"` suffix — the banner is an informational
+"viewing a past commit" indicator, not a lock:
+
+```scala
+Some(div(cls := "pinned-banner", s"Viewing ${entry.at} · ${entry.commitHash.value.take(8)}"))
+```
+
+## Fix 2a — per-slot palette (Option A)
+
+### `CompareState.scala`
+
+```scala
+object CompareState:
+  // moved verbatim from Main (with its require) — CompareState owns slot identity.
+  val slotDefaultPalettes: Vector[Vector[HexColor]] = Vector(
+    PaletteData.Purple, PaletteData.Orange, PaletteData.Green,
+    PaletteData.Yellow, PaletteData.Red, PaletteData.Pink, PaletteData.Emerald
+  )
+  require(slotDefaultPalettes.length == ComparedSlotCount, "one default palette family per compare slot")
+
+final class CompareSlotState(val defaultPalette: Vector[HexColor]):
+  // ... target / hidden / mirror / branchSignal / atSignal / setAt unchanged ...
+  /** This slot's curve/tree/highlight colour family — slot-keyed, not branch:
+    * two slots on the same branch stay distinct and independently pickable.
+    * Defaults to the slot's family; the picker overwrites it. */
+  val palette: Var[Vector[HexColor]] = Var(defaultPalette)
+
+final class CompareSlot(                       // `palette` field REMOVED (now on state)
+  val state: CompareSlotState,
+  val treeViewState: TreeViewState,
+  val diffState: ChangedNodesState,
+  val historyState: TreeHistoryState
+)
+
+final class CompareState:
+  // ...
+  /** Baseline (active tab) colour family — slot-keyed like the comparands. */
+  val baselinePalette: Var[Vector[HexColor]] = Var(PaletteData.Aqua)
+
+  val slots: Vector[CompareSlotState] =
+    CompareState.slotDefaultPalettes.map(new CompareSlotState(_))
+
+  // removeRow also resets the freed slot's palette:
+  //   slots(poolIdx).palette.set(slots(poolIdx).defaultPalette)
+```
+
+### New `SlotPalettePicker.scala` (ports the popover from `BranchPalettePicker`, slot-keyed, ADR-019 callbacks)
+
+```scala
+object SlotPalettePicker:
+  /** Clickable swatch showing `current`'s family; opens a popover of the named
+    * families + "↺ Auto". Emits the chosen family via `onSelect`, reset via
+    * `onReset` (parent writes its own Var — ADR-019 Pattern 2). */
+  def apply(
+    current: Signal[Vector[HexColor]],
+    onSelect: Vector[HexColor] => Unit,
+    onReset: () => Unit
+  ): HtmlElement
+```
+
+Active-cell highlight: `current.map(cur => PaletteData.namedFamilies.find(_._2 == cur).map(_._1))`.
+
+### `AnalyzeView.scala` — repoint palette wiring
+
+- Drop the `branchPaletteState: BranchPaletteState` param and its import.
+- `activePalette` becomes `compareState.baselinePalette.signal` (drop the
+  `paletteFor` derivation).
+- `renderBaselineHead`: drop its `branchPaletteState` param; the picker becomes
+  `SlotPalettePicker(compareState.baselinePalette.signal, compareState.baselinePalette.set, () => compareState.baselinePalette.set(PaletteData.Aqua))`.
+- `renderComparandHead`: drop its `branchPaletteState` param; the picker becomes
+  `SlotPalettePicker(slot.state.palette.signal, slot.state.palette.set, () => slot.state.palette.set(slot.state.defaultPalette))`.
+- Overlay/panel reads of `slot.palette` → `slot.state.palette.signal`
+  (`slotOverlayInputs`, `chartPanel(compareSlots(pi).state.palette.signal…)`).
+
+### `Main.scala`
+
+- Remove `val branchPaletteState` and the `compareSlotDefaultPalettes` vector +
+  `require` (now in `CompareState`).
+- Baseline `TreeViewState` `userPalette = analyzeCompareState.baselinePalette.signal`.
+- Slot `TreeViewState` `userPalette = slotState.palette.signal`; build
+  `new CompareSlot(state, treeViewState, diffState, historyState)` (no palette arg).
+- Drop `branchPaletteState` from the `BranchBar.chipForSection` and `AnalyzeView`
+  calls.
+
+### `BranchBar.scala` + `AppShell.scala` + `Main.scala` — remove the topbar chip (D-C2-1 = B)
+
+The topbar branch chip is redundant with each section's own in-place branch
+control (Design's `BranchBar.toolbar`, Analyze's baseline-card `BranchBar.picker`)
+and the two sections never share branch state, so it is removed entirely rather
+than kept as a colourless label:
+- `BranchBar.chipForSection` deleted (its only caller is `Main`); any import it
+  alone used (`BranchPaletteState`, `Section`, `PaletteData`) is dropped if now
+  unused.
+- `AppShell.apply` drops the `branchChip: HtmlElement` param and its render slot.
+- `Main` stops constructing the chip and drops the `branchChip = …` argument.
+
+### Deletions
+
+`BranchPaletteState.scala` and `BranchPalettePicker.scala` are removed — their
+only callers (the two compare-card pickers and the chip) are repointed above.
+`app.css`: `.branch-palette-*` / `.branch-chip-swatch` rules pruned; the
+`.pinned-banner` "read-only" copy is unaffected (text lives in the view).
+
+## Open decisions
+
+**D-C2-1 — topbar branch chip. RULED B (2026-07-27): remove the chip entirely.**
+It duplicated each section's own branch control, the two sections never share
+branch state, and Option A left its colour swatch sourceless — so a text-only
+chip would be pure duplication. Removed from `BranchBar` + `AppShell` + `Main`;
+`.branch-chip*` CSS pruned.
+
+No other open decisions — Fix 1/2b behaviour and Option A are user-ruled.
+
+## ADR alignment
+
+- **ADR-019** (Pattern 2 parent-owns-Vars; Pattern 4 child emits callbacks):
+  per-slot `palette` Vars live on `CompareSlotState`/`CompareState` (parent
+  state); `SlotPalettePicker` takes a `Signal` + `onSelect`/`onReset`
+  callbacks, owning only its local popover-open flag — same shape as
+  `ColorSwatchPicker`. `reloadCurrentCurves` and `rewindReload` are
+  state-owned effects fired from the state's own `atSignal` subscription, not
+  `.now()` reads in the render path. Compliant.
+- **ADR-001**: no raw-primitive domain params introduced; palette is
+  `Vector[HexColor]`. Compliant.
+- No API-shape, endpoint, DTO, persistence, or auth change — pure SPA
+  reactive-wiring + colour-identity change.
+
+## Verification
+
+```bash
+sbt app/compile      # zero new warnings
+sbt app/test         # TreeHistoryStateSpec unchanged; deriveDropped still covers H3
+sbt 'commonJVM/test; server/test'   # untouched, regression guard
+```
+
+- No new pure derivation is introduced that isn't already covered
+  (`reloadCurrentCurves`/`rewindReload` are imperative effect wrappers over
+  the already-tested `loadCurves`/`deriveDropped`); if the palette active-cell
+  match is extracted to a pure companion, add a case to `TreeHistoryStateSpec`.
+- Manual re-test at `localhost:18080` with
+  `examples/stage-history-slider-curl.sh`: (1) single tree — chart a node,
+  scrub the slider, curves follow through time and the H3 notice fires only for
+  the pre-C4 stops on Insider Threat; (2) two slots on main (head vs C2) —
+  distinct colours, each picker independent, Mirror-off frees selection while
+  rewound.
+
+## §C2 file inventory (additions to the Scope 2 inventory above)
+
+`SlotPalettePicker.scala` (NEW), `BranchPalettePicker.scala` (DELETE),
+`BranchPaletteState.scala` (DELETE) added to the Scope 2 App block. All other
+touched files (`TreeViewState`, `LECChartState`, `CompareState`, `AnalyzeView`,
+`TreeDetailView`, `BranchBar`, `Main.scala`, `app.css`) were already listed
+there. No `common`/`server` changes.
+
+## Versioning
+
+PATCH bump on landing (shipped SPA behaviour changed): `build.sbt` →
+`0.10.2` (0.10.1 is the §C1 slot), `APP_VERSION` mirrored to `.env` and
+`.env.irmin`.

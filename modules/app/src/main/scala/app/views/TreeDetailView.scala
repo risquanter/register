@@ -7,6 +7,7 @@ import app.components.{Icons, ColorSwatchPicker, TreeNodeRow}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
+import com.risquanter.register.http.responses.TreeHistoryEntry
 
 /** Expandable hierarchical view of a server-persisted risk tree.
   *
@@ -96,17 +97,30 @@ object TreeDetailView:
     queryMatchedNodes: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
     hoverBridge: ChartHoverBridge = new ChartHoverBridge(),
     changedNodeIds: Signal[Set[NodeId]] = Signal.fromValue(Set.empty),
-    selectionLocked: StrictSignal[Boolean] = Val(false)
+    selectionLocked: Signal[Boolean] = Val(false),
+    pinnedAt: Signal[Option[TreeHistoryEntry]] = Val(None)
   ): HtmlElement =
     // Local state: which node's picker popover is open (if any)
     val pickerOpenFor: Var[Option[NodeId]] = Var(None)
     // Pulsed true when a Ctrl-gesture is blocked because the row mirrors the
     // baseline selection; auto-hides shortly after so the notice is transient.
     val lockedNoticeVisible: Var[Boolean] = Var(false)
+    // Strict mirror of the (possibly derived — mirror OR rewound) incoming lock,
+    // so the click handler can read it synchronously via `.now()`.
+    val lockedNow: Var[Boolean] = Var(false)
 
     div(
       cls := "tree-detail-view",
       position.relative,
+      selectionLocked --> lockedNow.writer,
+      // Historical-view banner while a history stop other than the head is
+      // pinned. Informational only — the pin is a read dimension, not a lock:
+      // Ctrl+click still charts curves at the pinned commit.
+      child.maybe <-- pinnedAt.map {
+        case Some(entry) =>
+          Some(div(cls := "pinned-banner", s"Viewing ${entry.at} · ${entry.commitHash.value.take(8)}"))
+        case None => None
+      },
       // Close picker when clicking outside (attached to the container).
       // Guarded: this fires on EVERY click in the tree, and Var.set emits
       // even when the value is unchanged — an unguarded None-over-None write
@@ -123,7 +137,7 @@ object TreeDetailView:
         .flatMapSwitch(_ => EventStream.fromValue(false).delay(2200)) --> lockedNoticeVisible.writer,
       // Turning Mirror off clears any pending notice at once, so it never keeps
       // telling the user to disable an already-disabled toggle.
-      selectionLocked.changes.filter(!_) --> { _ => if lockedNoticeVisible.now() then lockedNoticeVisible.set(false) },
+      lockedNow.signal.changes.filter(!_) --> { _ => if lockedNoticeVisible.now() then lockedNoticeVisible.set(false) },
       child.maybe <-- lockedNoticeVisible.signal.map { visible =>
         if visible then Some(div(cls := "selection-locked-notice", "Selection mirrors the baseline — turn Mirror off to select manually."))
         else None
@@ -138,7 +152,7 @@ object TreeDetailView:
         // on this literal message for the same event).
         case LoadState.Failed("Tree not found") => renderPlaceholder("Select a tree to view its structure.")
         case LoadState.Failed(msg) => renderError(msg)
-        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, selectionLocked, lockedNoticeVisible)
+        case LoadState.Loaded(tree) => renderTree(tree, state, queryMatchedNodes, hoverBridge, pickerOpenFor, changedNodeIds, lockedNow.signal, lockedNoticeVisible)
       }
     )
 

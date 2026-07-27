@@ -66,9 +66,9 @@ object PaletteData:
   ).map(hex)
 
   /** All 8 families with their stable names, in picker grid order
-    * (light-to-dark per row). The names are the persisted spelling of a
-    * per-branch palette assignment (`BranchPaletteState`), so they must not
-    * change once released — the hex values may. */
+    * (light-to-dark per row). The names label the cells in `SlotPalettePicker`;
+    * the hex values may change, but a name once released should keep pointing
+    * at a recognisable family. */
   val namedFamilies: Vector[(String, Vector[HexColor])] = Vector(
     "green"   -> Green,
     "aqua"    -> Aqua,

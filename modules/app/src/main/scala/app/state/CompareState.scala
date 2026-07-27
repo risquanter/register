@@ -3,7 +3,7 @@ package app.state
 import com.raquo.laminar.api.L.{*, given}
 
 import app.chart.PaletteData
-import com.risquanter.register.domain.data.iron.{BranchChoice, TreeId}
+import com.risquanter.register.domain.data.iron.{BranchChoice, CommitHash, TreeId}
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
 /** What a Compare slot is pointed at: a branch, plus either the tab's active
@@ -13,28 +13,30 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   * at the point the slot is consumed, so a default slot keeps tracking the
   * active tree exactly as before.
   */
-final case class SlotCoordinate(branch: BranchChoice, treeOverride: Option[TreeId]):
+final case class SlotCoordinate(branch: BranchChoice, treeOverride: Option[TreeId], at: Option[CommitHash] = None):
   /** The tree this slot compares on when the tab's selected tree is
     * `activeTree`: the pinned override, else the active tree. */
   def effectiveTree(activeTree: Option[TreeId]): Option[TreeId] =
     treeOverride.orElse(activeTree)
 
   /** True when this coordinate and `other` resolve to the same
-    * (branch, effective tree) pair under the tab's current active tree — the
-    * one relation every exclusion, engagement, and collision check delegates
-    * to. */
+    * (branch, effective tree, point-in-time) triple under the tab's current
+    * active tree — the one relation every exclusion, engagement, and collision
+    * check delegates to. The `at` pin is part of identity: a rewound slot on
+    * the baseline's tree is a distinct pair (both chart), not a collision. */
   def samePairAs(other: SlotCoordinate, activeTree: Option[TreeId]): Boolean =
-    branch == other.branch && effectiveTree(activeTree) == other.effectiveTree(activeTree)
+    branch == other.branch && effectiveTree(activeTree) == other.effectiveTree(activeTree) && at == other.at
 
   /** True when this coordinate resolves to the same pair the tab itself shows.
-    * The tab is the coordinate (activeBranch, follow-active). */
+    * The tab is the coordinate (activeBranch, follow-active, live head). */
   def collidesWith(activeBranch: BranchChoice, activeTree: Option[TreeId]): Boolean =
     samePairAs(SlotCoordinate.activeTab(activeBranch), activeTree)
 
 object SlotCoordinate:
   /** The active tab as a coordinate: its branch, following the active tree
-    * (no pinned override), so `effectiveTree(activeTreeId) == activeTreeId`. */
-  def activeTab(branch: BranchChoice): SlotCoordinate = SlotCoordinate(branch, None)
+    * (no pinned override), at the live head (no pin), so
+    * `effectiveTree(activeTreeId) == activeTreeId`. */
+  def activeTab(branch: BranchChoice): SlotCoordinate = SlotCoordinate(branch, None, None)
 
 /** What a Compare branch picker slot currently holds — a chosen coordinate,
   * or nothing.
@@ -62,7 +64,7 @@ enum CompareLayout:
   * one slot never moves another slot's coordinate, so the other slot's card
   * keeps its tree and selection untouched.
   */
-final class CompareSlotState:
+final class CompareSlotState(val defaultPalette: Vector[HexColor]):
   val target: Var[CompareTarget] = Var(CompareTarget.NotChosen)
 
   /** Eye state: this slot's curves are excluded from the chart while true; all
@@ -73,6 +75,13 @@ final class CompareSlotState:
     * baseline's charted set (the counterparts present in this row's tree), and
     * manual Ctrl+click selection on the row is locked. */
   val mirror: Var[Boolean] = Var(false)
+
+  /** This slot's curve/tree-highlight colour family. Slot-keyed, not branch:
+    * two slots on the same branch (past vs present of one tree) stay visually
+    * distinct and are pickable independently. Defaults to the slot's family;
+    * the card's `SlotPalettePicker` overwrites it, and two slots may hold the
+    * same family deliberately. */
+  val palette: Var[Vector[HexColor]] = Var(defaultPalette)
 
   /** The slot's chosen branch as a signal (Main while `NotChosen`) — the
     * branch identity for the palette, and (materialized strict at the one
@@ -89,6 +98,22 @@ final class CompareSlotState:
     case CompareTarget.NotChosen => BranchChoice.Main
   }.distinct
 
+  /** The slot's rewind pin, derived from `target` exactly like `branchSignal`,
+    * so the slider writes `target` (via `setAt`) and the pin follows without
+    * `target` and pin ever drifting across a transaction. `None` = live head. */
+  val atSignal: Signal[Option[CommitHash]] = target.signal.map {
+    case CompareTarget.Target(c) => c.at
+    case CompareTarget.NotChosen => None
+  }.distinct
+
+  /** Set the slot's rewind pin into its coordinate (no-op while nothing is
+    * chosen — there is no tree to rewind). */
+  def setAt(at: Option[CommitHash]): Unit =
+    target.update {
+      case CompareTarget.Target(c) => CompareTarget.Target(c.copy(at = at))
+      case CompareTarget.NotChosen => CompareTarget.NotChosen
+    }
+
 /** A compared-branch slot's full bundle: its picker state, the per-branch
   * services built on it — an independent tree view (selection surface +
   * curve cache on the slot's chosen coordinate) and the content-hash diff
@@ -100,7 +125,7 @@ final class CompareSlot(
   val state: CompareSlotState,
   val treeViewState: TreeViewState,
   val diffState: ChangedNodesState,
-  val palette: Signal[Vector[HexColor]]
+  val historyState: TreeHistoryState
 )
 
 object CompareState:
@@ -110,6 +135,17 @@ object CompareState:
   val MaxBranches: Int = PaletteData.namedFamilies.size
 
   val ComparedSlotCount: Int = MaxBranches - 1
+
+  /** Default colour family per comparand pool slot (pool order) — the named
+    * families other than the baseline's Aqua, one per slot. */
+  val slotDefaultPalettes: Vector[Vector[HexColor]] = Vector(
+    PaletteData.Purple, PaletteData.Orange, PaletteData.Green,
+    PaletteData.Yellow, PaletteData.Red, PaletteData.Pink, PaletteData.Emerald
+  )
+  require(
+    slotDefaultPalettes.length == ComparedSlotCount,
+    "one default palette family per compare slot"
+  )
 
   /** The pool slot a new row claims: lowest index not currently in use. */
   def nextFreeSlot(rows: Vector[Int], poolSize: Int): Option[Int] =
@@ -126,9 +162,18 @@ final class CompareState:
   /** Baseline eye state — mirrors `CompareSlotState.hidden` for row 0. */
   val baselineHidden: Var[Boolean] = Var(false)
 
+  /** Baseline rewind pin — the baseline is the active tab, not a slot, so its
+    * history pin lives here rather than in a coordinate. `None` = live head. */
+  val baselineAt: Var[Option[CommitHash]] = Var(None)
+
+  /** Baseline (active tab) colour family — slot-keyed like the comparands, so
+    * the baseline owns its colour independently of its branch. Default Aqua,
+    * the single-branch chart's selected-node family. */
+  val baselinePalette: Var[Vector[HexColor]] = Var(PaletteData.Aqua)
+
   /** Fixed pool; a pool slot is live only while its index is in `rows`. */
   val slots: Vector[CompareSlotState] =
-    Vector.fill(CompareState.ComparedSlotCount)(new CompareSlotState)
+    CompareState.slotDefaultPalettes.map(new CompareSlotState(_))
 
   /** Pool indices of the user-added comparand rows, in display order. */
   val rows: Var[Vector[Int]] = Var(Vector.empty)
@@ -152,3 +197,4 @@ final class CompareState:
     slots(poolIdx).target.set(CompareTarget.NotChosen)
     slots(poolIdx).hidden.set(false)
     slots(poolIdx).mirror.set(false)
+    slots(poolIdx).palette.set(slots(poolIdx).defaultPalette)
