@@ -36,6 +36,7 @@ object DemoSpecSupport:
 
   def query(client: SttpClientFixture.Client, key: String, treeId: String)(q: String): Task[QueryResponse] =
     basicRequest
+      .header("X-Branch", "main")
       .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
       .body(QueryRequest(q))
       .response(asJson[QueryResponse])

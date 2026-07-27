@@ -60,23 +60,25 @@ object TreeRevertItSpec extends ZIOSpecDefault:
           repo    <- ZIO.service[RiskTreeRepository]
           irmin   <- ZIO.service[IrminClient]
           _       <- repo.create(wsId, v1, BranchRef.Main)
-          histC   <- irmin.getHistory(IrminPath.unsafeFrom(treeRoot(tid)), positiveInt(20), BranchRef.Main)
+          histC   <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
           c1Hash  <- ZIO.fromEither(CommitHash.fromString(histC.head.hash)).mapError(e => new RuntimeException(e.mkString(", ")))
           _       <- repo.update(wsId, tid, _ => treeV2(v1), BranchRef.Main)
-          histU   <- irmin.getHistory(IrminPath.unsafeFrom(treeRoot(tid)), positiveInt(20), BranchRef.Main)
+          histU   <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
           reverted <- repo.revert(wsId, tid, c1Hash, BranchRef.Main)
           loaded  <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main))
-          histR   <- irmin.getHistory(IrminPath.unsafeFrom(treeRoot(tid)), positiveInt(20), BranchRef.Main)
+          histR   <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
+          headAfter <- irmin.mainBranch.map(_.flatMap(_.head))
         yield assertTrue(
           // restored to v1 — leaf-2 is back (3 nodes)
           loaded.exists(_.index.nodes.size == 3),
           reverted.index.nodes.size == 3,
           // forward write: history grew by exactly one over the post-update history
           histR.size == histU.size + 1,
-          // the newest commit is the revert
-          histR.headOption.exists(_.info.message.endsWith(":revert")),
-          // non-destructive: the superseded (update) commit is still in history
-          histU.headOption.map(_.hash).exists(h => histR.map(_.hash).contains(h))
+          // the newest commit is the revert — last_modified gives no list-order
+          // guarantee, so "newest" is read from the branch head, not list position
+          headAfter.exists(_.info.message.endsWith(":revert")),
+          // non-destructive: every pre-revert commit is still present in history
+          histU.map(_.hash).toSet.subsetOf(histR.map(_.hash).toSet)
         )
       },
 

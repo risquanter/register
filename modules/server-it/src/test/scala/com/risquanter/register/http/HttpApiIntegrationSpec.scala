@@ -67,7 +67,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
       test("health endpoint returns OK (Irmin-backed server)") {
         for
           client   <- ZIO.service[SttpClientFixture.Client]
-          response <- basicRequest.get(uri"${client.baseUrl}/health").send(client.backend)
+          response <- basicRequest.header("X-Branch", "main").get(uri"${client.baseUrl}/health").send(client.backend)
         yield assertTrue(response.code.isSuccess) && assertTrue(response.body.exists(_.contains("healthy")))
       },
       test("workspace bootstrap, list, and get structure via workspace-scoped API") {
@@ -76,7 +76,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           client <- ZIO.service[SttpClientFixture.Client]
 
           // 1) Bootstrap workspace (POST /workspaces) → creates workspace + first tree
-          bootstrapResp <- basicRequest
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/workspaces")
             .body(request)
             .response(asJson[WorkspaceBootstrapResponse])
@@ -86,14 +86,14 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           createdTree = bootstrap.tree
 
           // 2) List trees in workspace (GET /w/{key}/risk-trees)
-          listResp <- basicRequest
+          listResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees")
             .response(asJson[List[SimulationResponse]])
             .send(client.backend)
           listed <- ZIO.fromEither(listResp.body)
 
           // 3) Get full tree structure (GET /w/{key}/risk-trees/{treeId}/structure)
-          structResp <- basicRequest
+          structResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees/${createdTree.id.value}/structure")
             .response(asJson[Option[RiskTree]])
             .send(client.backend)
@@ -112,7 +112,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
         for
           client <- ZIO.service[SttpClientFixture.Client]
 
-          bootstrapResp <- basicRequest
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/workspaces?seedEntityId=4242")
             .body(request)
             .response(asJson[WorkspaceBootstrapResponse])
@@ -120,7 +120,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           bootstrap <- ZIO.fromEither(bootstrapResp.body)
           key        = bootstrap.workspaceKey.reveal
 
-          structResp <- basicRequest
+          structResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees/${bootstrap.tree.id.value}/structure")
             .response(asJson[Option[RiskTree]])
             .send(client.backend)
@@ -136,7 +136,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           client <- ZIO.service[SttpClientFixture.Client]
 
           // Bootstrap workspace with first tree
-          bootstrapResp <- basicRequest
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/workspaces")
             .body(bootstrapReq)
             .response(asJson[WorkspaceBootstrapResponse])
@@ -145,7 +145,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           key        = bootstrap.workspaceKey.reveal
 
           // Create additional tree (POST /w/{key}/risk-trees)
-          createResp <- basicRequest
+          createResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees")
             .body(secondTreeReq)
             .response(asJson[SimulationResponse])
@@ -153,7 +153,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           created <- ZIO.fromEither(createResp.body)
 
           // Verify both trees appear in listing
-          listResp <- basicRequest
+          listResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees")
             .response(asJson[List[SimulationResponse]])
             .send(client.backend)
@@ -170,7 +170,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           client <- ZIO.service[SttpClientFixture.Client]
 
           // Bootstrap workspace
-          bootstrapResp <- basicRequest
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/workspaces")
             .body(request)
             .response(asJson[WorkspaceBootstrapResponse])
@@ -180,7 +180,7 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
           treeId     = bootstrap.tree.id
 
           // Get tree summary (GET /w/{key}/risk-trees/{treeId})
-          summaryResp <- basicRequest
+          summaryResp <- basicRequest.header("X-Branch", "main")
             .get(uri"${client.baseUrl}/w/$key/risk-trees/${treeId.value}")
             .response(asJson[Option[SimulationResponse]])
             .send(client.backend)

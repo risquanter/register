@@ -251,7 +251,7 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
       test("all queries match pinned simulation results") {
         for
           client <- ZIO.service[SttpClientFixture.Client]
-          boot   <- basicRequest
+          boot   <- basicRequest.header("X-Branch", "main")
                       .post(uri"${client.baseUrl}/workspaces")
                       .body(demoTreeRequest)
                       .response(asJson[WorkspaceBootstrapResponse])

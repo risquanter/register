@@ -23,7 +23,11 @@ final case class TreeHistoryServiceLive(irmin: IrminClient) extends TreeHistoryS
 
   override def history(wsId: WorkspaceId, treeId: TreeId, branch: BranchRef, limit: PositiveInt)
     (using Checked[Permission]): Task[List[TreeHistoryEntry]] =
-    val path = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeRoot(wsId, treeId))
+    // History is read from the tree's meta blob: every mutation (create, update,
+    // revert) rewrites meta with a fresh updatedAt, so its last_modified log is
+    // the tree's full commit history. The tree root holds no contents value —
+    // last_modified on it returns nothing.
+    val path = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMeta(wsId, treeId))
     handleIrmin(irmin.getHistory(path, limit, branch)).flatMap(commits => ZIO.foreach(commits)(toEntry))
 
   private def toEntry(commit: IrminCommit): Task[TreeHistoryEntry] =

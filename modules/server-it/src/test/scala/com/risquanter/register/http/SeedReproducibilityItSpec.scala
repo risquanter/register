@@ -112,17 +112,17 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
     val u = seedEntityId match
       case Some(e) => uri"${client.baseUrl}/workspaces?seedEntityId=$e"
       case None    => uri"${client.baseUrl}/workspaces"
-    basicRequest.post(u).body(req)
+    basicRequest.header("X-Branch", "main").post(u).body(req)
       .response(asJson[WorkspaceBootstrapResponse]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
 
   private def addTree(client: SttpClientFixture.Client, key: String, req: RiskTreeDefinitionRequest): Task[SimulationResponse] =
-    basicRequest.post(uri"${client.baseUrl}/w/$key/risk-trees").body(req)
+    basicRequest.header("X-Branch", "main").post(uri"${client.baseUrl}/w/$key/risk-trees").body(req)
       .response(asJson[SimulationResponse]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
 
   private def structure(client: SttpClientFixture.Client, key: String, treeId: String): Task[RiskTree] =
-    basicRequest.get(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/structure")
+    basicRequest.header("X-Branch", "main").get(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/structure")
       .response(asJson[Option[RiskTree]]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))
       .flatMap(opt => ZIO.fromOption(opt).orElseFail(new RuntimeException(s"structure not found for tree $treeId")))
@@ -134,7 +134,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
 
   private def curvesByName(client: SttpClientFixture.Client, key: String, tree: RiskTree): Task[Map[String, (Vector[LECPoint], Map[String, Double])]] =
     val nodeIds: List[NodeId] = tree.rootId :: tree.nodes.collect { case l: RiskLeaf => l.id }.toList
-    basicRequest.post(uri"${client.baseUrl}/w/$key/risk-trees/${tree.id.value}/nodes/lec-multi")
+    basicRequest.header("X-Branch", "main").post(uri"${client.baseUrl}/w/$key/risk-trees/${tree.id.value}/nodes/lec-multi")
       .body(nodeIds)
       .response(asJson[Map[NodeId, LECNodeCurve]]).send(client.backend)
       .flatMap(r => ZIO.fromEither(r.body))

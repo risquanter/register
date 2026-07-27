@@ -88,7 +88,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
         for
           client <- ZIO.service[SttpClientFixture.Client]
 
-          bootstrapResp <- basicRequest
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/workspaces")
             .body(demoTreeRequest)
             .response(asJson[WorkspaceBootstrapResponse])
@@ -97,7 +97,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
           key        = bootstrap.workspaceKey.reveal
           treeId     = bootstrap.tree.id.value
 
-          queryResp <- basicRequest
+          queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
             .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 1000))"""))
             .response(asJson[QueryResponse])
@@ -111,7 +111,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
         for
           client <- ZIO.service[SttpClientFixture.Client]
 
-          bootstrapResp <- basicRequest
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/workspaces")
             .body(demoTreeRequest)
             .response(asJson[WorkspaceBootstrapResponse])
@@ -120,7 +120,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
           key        = bootstrap.workspaceKey.reveal
           treeId     = bootstrap.tree.id.value
 
-          queryResp <- basicRequest
+          queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
             .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, "unterminated), gt_loss(p95(x), 1000))"""))
             .response(asStringAlways)
@@ -140,7 +140,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
         for
           client <- ZIO.service[SttpClientFixture.Client]
 
-          bootstrapResp <- basicRequest
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/workspaces")
             .body(demoTreeRequest)
             .response(asJson[WorkspaceBootstrapResponse])
@@ -149,7 +149,7 @@ object QueryEndpointSpec extends ZIOSpecDefault:
           key        = bootstrap.workspaceKey.reveal
           treeId     = bootstrap.tree.id.value
 
-          queryResp <- basicRequest
+          queryResp <- basicRequest.header("X-Branch", "main")
             .post(uri"${client.baseUrl}/w/$key/risk-trees/$treeId/query")
             .body(QueryRequest("""Q[>=]^{1/2} x (leaf_descendant_of(x, "NonExistentNode"), gt_loss(p95(x), 1000))"""))
             .response(asStringAlways)

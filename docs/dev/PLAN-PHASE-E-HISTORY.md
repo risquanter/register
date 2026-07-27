@@ -428,6 +428,7 @@ Server:
 - modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala
 - modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala
 - modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala
+- modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala (IT-surfaced bug: strip Irmin's trailing newline on commit messages so operation-suffix matching works)
 - modules/server/src/main/scala/com/risquanter/register/http/controllers/ActiveBranch.scala
 - modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala
 - modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisController.scala
@@ -518,6 +519,11 @@ Server tests:
 Server-IT tests:
 - modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala
 - modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala (E7 runtime ripple: send required X-Branch header)
+- modules/server-it/src/test/scala/com/risquanter/register/http/QueryEndpointSpec.scala (E7 runtime ripple: send required X-Branch header)
+- modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala (E7 runtime ripple: send required X-Branch header)
+- modules/server-it/src/test/scala/com/risquanter/register/http/DemoSimpleScriptSpec.scala (E7 runtime ripple: send required X-Branch header)
+- modules/server-it/src/test/scala/com/risquanter/register/http/support/DemoSpecSupport.scala (E7 runtime ripple: shared demo request builder sends required X-Branch header)
 
 App (Slice-0 compile-fix):
 - modules/app/src/main/scala/app/state/ScenarioMergeState.scala

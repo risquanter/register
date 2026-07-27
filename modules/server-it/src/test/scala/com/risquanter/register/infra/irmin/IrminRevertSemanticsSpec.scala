@@ -56,7 +56,7 @@ object IrminRevertSemanticsSpec extends ZIOSpecDefault:
           repo       <- ZIO.service[RiskTreeRepository]
           irmin      <- ZIO.service[IrminClient]
           _          <- repo.create(wsId, v1, BranchRef.Main)
-          histC      <- irmin.getHistory(IrminPath.unsafeFrom(treeRoot(tid)), positiveInt(20), BranchRef.Main)
+          histC      <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
           c1Hash     <- ZIO.fromEither(CommitHash.fromString(histC.head.hash)).mapError(e => new RuntimeException(e.mkString(", ")))
           _          <- repo.update(wsId, tid, _ => treeV2(v1), BranchRef.Main)
           headBefore <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
