@@ -1703,3 +1703,20 @@ with a read-modify-write retry, mirroring how scenario branch ops already CAS.
 
 **Status:** informative research only — independent of Phase E; no work
 scheduled.
+
+## 35. Replace Vega-Lite bound toggles with native Laminar chart controls — polish
+
+**Origin (2026-07-28):** the Analyze LEC chart's toggles (interpolation select +
+the P90/P95/P99/P995/AAL/no-loss checkboxes) are Vega-Lite `bind` inputs, so they
+carry Vega's default look and are laid out by Vega. The chart-UX change (D1,
+Option A) moves them to a left column via CSS and makes the chart width
+responsive, but keeps them as Vega-styled inputs.
+
+**Idea (Option C, deferred from D1):** drop the `bind` from the spec and render
+native Laminar controls (checkboxes/select) that write straight into the Vega
+view signals (`view.signal(name, value)` — `ChartParamStore` already does exactly
+this on capture/restore). Gives app-consistent styling and full layout control,
+at the cost of a two-way-wired control panel per signal.
+
+**Status:** backlog polish — do only if the Vega-styled inputs read as
+out-of-place after D1-A lands. Not scheduled.

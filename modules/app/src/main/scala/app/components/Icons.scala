@@ -144,6 +144,26 @@ object Icons:
       svg.path(svg.d := "m16 13-3.5 3.5-2-2L8 17")
     )
 
+  /** Lucide `maximize` — enter fullscreen for the LEC chart. */
+  def maximize(cls: String = "action-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "M8 3H5a2 2 0 0 0-2 2v3"),
+      svg.path(svg.d := "M21 8V5a2 2 0 0 0-2-2h-3"),
+      svg.path(svg.d := "M3 16v3a2 2 0 0 0 2 2h3"),
+      svg.path(svg.d := "M16 21h3a2 2 0 0 0 2-2v-3")
+    )
+
+  /** Lucide `minimize` — exit fullscreen for the LEC chart. */
+  def minimize(cls: String = "action-icon"): SvgElement =
+    icon24(
+      svg.cls := cls,
+      svg.path(svg.d := "M8 3v3a2 2 0 0 1-2 2H3"),
+      svg.path(svg.d := "M21 8h-3a2 2 0 0 1-2-2V3"),
+      svg.path(svg.d := "M3 16h3a2 2 0 0 1 2 2v3"),
+      svg.path(svg.d := "M16 21v-3a2 2 0 0 1 2-2h3")
+    )
+
   // ── Danago Systems signet (logo) ──────────────────────────────
 
   /** The Danago Systems app logo (rounded square + two chevrons).

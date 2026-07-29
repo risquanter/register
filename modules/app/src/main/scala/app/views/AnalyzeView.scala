@@ -186,7 +186,7 @@ object AnalyzeView:
                       CompareColorAssigner.OverlaySide(loadedOrEmpty(curves), visible, palette, s"s${pi + 1}")
                     }
                     val paired = CompareColorAssigner.pairForOverlay(sides)
-                    if paired.nonEmpty then LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired))
+                    if paired.nonEmpty then LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired, responsive = true, zoomable = true))
                     else if (baselineHidden || thisVisible.isEmpty) && comparandSides.forall(_._3.isEmpty) then LoadState.Idle
                     else LoadState.Loading
         }

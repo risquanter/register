@@ -74,13 +74,14 @@ object PinnedAxes:
 
 object LECSpecBuilder:
 
-  /** The user-facing input params declared in the spec's `params` array
-    * below (interpolation select + the annotation checkboxes).
+  /** The user-facing input params declared in `buildSpec`'s `paramsArr`
+    * (interpolation select + the annotation checkboxes).
     * `LECChartView` reads their live values off the old Vega view before a
     * re-embed and re-applies them to the new one, so changing the chart's
     * data (new selection, compare toggled) doesn't silently reset the
-    * user's toggle choices to the spec defaults. Keep in sync with the
-    * `params` array in `buildFromSeries`.
+    * user's toggle choices to the spec defaults. Keep in sync with `paramsArr`.
+    * The optional `grid` zoom param (added when `zoomable`) is deliberately
+    * absent — a re-embed resets the pan/zoom because the data changed.
     */
   val preservedParams: List[String] =
     List("interpolate", "showP90", "showP95", "showP99", "showP995", "showAAL", "showNoLossProbability")
@@ -93,6 +94,12 @@ object LECSpecBuilder:
     * @param height        Chart height in pixels
     * @param pinned        Explicit axis extents; `None` (the default) keeps
     *                      the automatic per-spec extents
+    * @param responsive    When true, `width`/`height` become `"container"` so
+    *                      the chart fills its box (single/overlay Analyze
+    *                      chart); false keeps the fixed pixel size (side-by-side
+    *                      panels, Design preview)
+    * @param zoomable      When true, adds a `bind:"scales"` interval param so
+    *                      the two continuous axes pan/zoom in place
     * @return Vega-Lite spec as `js.Dynamic`, ready for `vegaEmbed`
     */
   def build(
@@ -100,9 +107,11 @@ object LECSpecBuilder:
     interpolation: String = "monotone",
     width: Int = 950,
     height: Int = 400,
-    pinned: Option[PinnedAxes] = None
+    pinned: Option[PinnedAxes] = None,
+    responsive: Boolean = false,
+    zoomable: Boolean = false
   ): js.Dynamic =
-    buildFromSeries(curves.map { case (nc, color) => (nc, color, nc.id.value) }, interpolation, width, height, pinned)
+    buildFromSeries(curves.map { case (nc, color) => (nc, color, nc.id.value) }, interpolation, width, height, pinned, responsive, zoomable)
 
   /** Same as `build`, but the chart's series identity (`curveId` — the data
     * points, colour-scale domain, and legend match) is given explicitly per
@@ -118,11 +127,13 @@ object LECSpecBuilder:
     interpolation: String = "monotone",
     width: Int = 950,
     height: Int = 400,
-    pinned: Option[PinnedAxes] = None
+    pinned: Option[PinnedAxes] = None,
+    responsive: Boolean = false,
+    zoomable: Boolean = false
   ): js.Dynamic =
     val allPoints = curves.flatMap(_._1.curve)
-    if curves.isEmpty || allPoints.isEmpty then emptySpec(width, height)
-    else buildSpec(curves, interpolation, width, height, pinned)
+    if curves.isEmpty || allPoints.isEmpty then emptySpec(width, height, responsive)
+    else buildSpec(curves, interpolation, width, height, pinned, responsive, zoomable)
 
   // ── Private builders ──────────────────────────────────────────
 
@@ -131,7 +142,9 @@ object LECSpecBuilder:
     interpolation: String,
     width: Int,
     height: Int,
-    pinned: Option[PinnedAxes]
+    pinned: Option[PinnedAxes],
+    responsive: Boolean,
+    zoomable: Boolean
   ): js.Dynamic =
     // Stable ordering: sort by curveId for deterministic domain/range
     val ordered = curves.sortBy(_._3)
@@ -285,6 +298,32 @@ object LECSpecBuilder:
       )
     )
 
+    // Point-layer params: the hover selection, plus (when zoomable) the
+    // scale-bound interval selection for pan/zoom. Both live on this one layer
+    // rather than at the top level: a `bind:"scales"` interval selection placed
+    // at the top of a layered spec is pushed into every layer sharing the axes,
+    // declaring its `grid_x`/`grid_y` signals more than once ("Duplicate signal
+    // name"). Defined on a single layer it is generated once; the scales are
+    // shared, so pan/zoom still applies to the whole chart.
+    val pointParams = js.Array[js.Any](
+      js.Dynamic.literal(
+        "name"   -> "hover",
+        "select" -> js.Dynamic.literal(
+          "type"    -> "point",
+          "on"      -> "pointerover",
+          "clear"   -> "pointerout",
+          "nearest" -> true,
+          "fields"  -> js.Array("curveId")
+        )
+      )
+    )
+    if zoomable then
+      pointParams.push(js.Dynamic.literal(
+        "name"   -> "grid",
+        "select" -> js.Dynamic.literal("type" -> "interval", "encodings" -> js.Array("x", "y")),
+        "bind"   -> "scales"
+      ))
+
     // Invisible point layer for voronoi-based nearest-point hover detection
     val pointLayer = js.Dynamic.literal(
       "data" -> js.Dynamic.literal("values" -> makeDataValues()),
@@ -304,18 +343,7 @@ object LECSpecBuilder:
         ),
         "color" -> makeColorEncoding()
       ),
-      "params" -> js.Array(
-        js.Dynamic.literal(
-          "name"   -> "hover",
-          "select" -> js.Dynamic.literal(
-            "type"    -> "point",
-            "on"      -> "pointerover",
-            "clear"   -> "pointerout",
-            "nearest" -> true,
-            "fields"  -> js.Array("curveId")
-          )
-        )
-      )
+      "params" -> pointParams
     )
 
     // Assemble layers: per-curve annotations + line layer + point layer
@@ -324,10 +352,81 @@ object LECSpecBuilder:
     allLayers.push(lineLayer)
     allLayers.push(pointLayer)
 
+    // Responsive sizing: "container" lets vega-embed's ResizeObserver size the
+    // chart to its box (the single/overlay Analyze chart); the fixed pixel size
+    // otherwise (side-by-side panels, Design preview).
+    val widthField: js.Any  = if responsive then "container" else width
+    val heightField: js.Any = if responsive then "container" else height
+
+    // The user-facing bound inputs (interpolation select + annotation
+    // checkboxes). The pan/zoom selection is NOT here — it lives on the point
+    // layer (see `pointParams`) to avoid duplicate signals on this layered spec.
+    val paramsArr = js.Array[js.Any](
+      js.Dynamic.literal(
+        "name"  -> "interpolate",
+        "value" -> interpolation,
+        "bind"  -> js.Dynamic.literal(
+          "input"   -> "select",
+          "options" -> js.Array("monotone", "basis", "linear", "step-after"),
+          "name"    -> "Interpolation: "
+        )
+      ),
+      // Only P95 starts checked among the percentile toggles — one
+      // uncluttered default line; the rest are opt-in.
+      js.Dynamic.literal(
+        "name"  -> "showP90",
+        "value" -> false,
+        "bind"  -> js.Dynamic.literal(
+          "input" -> "checkbox",
+          "name"  -> "Show P90: "
+        )
+      ),
+      js.Dynamic.literal(
+        "name"  -> "showP95",
+        "value" -> true,
+        "bind"  -> js.Dynamic.literal(
+          "input" -> "checkbox",
+          "name"  -> "Show P95: "
+        )
+      ),
+      js.Dynamic.literal(
+        "name"  -> "showP99",
+        "value" -> false,
+        "bind"  -> js.Dynamic.literal(
+          "input" -> "checkbox",
+          "name"  -> "Show P99: "
+        )
+      ),
+      js.Dynamic.literal(
+        "name"  -> "showP995",
+        "value" -> false,
+        "bind"  -> js.Dynamic.literal(
+          "input" -> "checkbox",
+          "name"  -> "Show P99.5: "
+        )
+      ),
+      js.Dynamic.literal(
+        "name"  -> "showAAL",
+        "value" -> true,
+        "bind"  -> js.Dynamic.literal(
+          "input" -> "checkbox",
+          "name"  -> "Show AAL: "
+        )
+      ),
+      js.Dynamic.literal(
+        "name"  -> "showNoLossProbability",
+        "value" -> true,
+        "bind"  -> js.Dynamic.literal(
+          "input" -> "checkbox",
+          "name"  -> "Show no-loss probability: "
+        )
+      )
+    )
+
     js.Dynamic.literal(
       "$schema"    -> "https://vega.github.io/schema/vega-lite/v6.json",
-      "width"      -> width,
-      "height"     -> height,
+      "width"      -> widthField,
+      "height"     -> heightField,
       "background" -> "transparent",
       "config"     -> js.Dynamic.literal(
         // Matches the app's own font stack — Vega/canvas-free (svg renderer,
@@ -356,67 +455,7 @@ object LECSpecBuilder:
         ),
         "title" -> js.Dynamic.literal("color" -> "#e6e8e8", "fontSize" -> 13)
       ),
-      "params" -> js.Array(
-        js.Dynamic.literal(
-          "name"  -> "interpolate",
-          "value" -> interpolation,
-          "bind"  -> js.Dynamic.literal(
-            "input"   -> "select",
-            "options" -> js.Array("monotone", "basis", "linear", "step-after"),
-            "name"    -> "Interpolation: "
-          )
-        ),
-        // Only P95 starts checked among the percentile toggles — one
-        // uncluttered default line; the rest are opt-in.
-        js.Dynamic.literal(
-          "name"  -> "showP90",
-          "value" -> false,
-          "bind"  -> js.Dynamic.literal(
-            "input" -> "checkbox",
-            "name"  -> "Show P90: "
-          )
-        ),
-        js.Dynamic.literal(
-          "name"  -> "showP95",
-          "value" -> true,
-          "bind"  -> js.Dynamic.literal(
-            "input" -> "checkbox",
-            "name"  -> "Show P95: "
-          )
-        ),
-        js.Dynamic.literal(
-          "name"  -> "showP99",
-          "value" -> false,
-          "bind"  -> js.Dynamic.literal(
-            "input" -> "checkbox",
-            "name"  -> "Show P99: "
-          )
-        ),
-        js.Dynamic.literal(
-          "name"  -> "showP995",
-          "value" -> false,
-          "bind"  -> js.Dynamic.literal(
-            "input" -> "checkbox",
-            "name"  -> "Show P99.5: "
-          )
-        ),
-        js.Dynamic.literal(
-          "name"  -> "showAAL",
-          "value" -> true,
-          "bind"  -> js.Dynamic.literal(
-            "input" -> "checkbox",
-            "name"  -> "Show AAL: "
-          )
-        ),
-        js.Dynamic.literal(
-          "name"  -> "showNoLossProbability",
-          "value" -> true,
-          "bind"  -> js.Dynamic.literal(
-            "input" -> "checkbox",
-            "name"  -> "Show no-loss probability: "
-          )
-        )
-      ),
+      "params" -> paramsArr,
       "layer" -> allLayers
     )
 
@@ -514,11 +553,11 @@ object LECSpecBuilder:
 
   // ── Empty spec ────────────────────────────────────────────────
 
-  private def emptySpec(width: Int, height: Int): js.Dynamic =
+  private def emptySpec(width: Int, height: Int, responsive: Boolean): js.Dynamic =
     js.Dynamic.literal(
       "$schema"    -> "https://vega.github.io/schema/vega-lite/v6.json",
-      "width"      -> width,
-      "height"     -> height,
+      "width"      -> (if responsive then ("container": js.Any) else (width: js.Any)),
+      "height"     -> (if responsive then ("container": js.Any) else (height: js.Any)),
       "background" -> "transparent",
       "data"       -> js.Dynamic.literal("values" -> js.Array[js.Any]()),
       "mark"       -> js.Dynamic.literal("type" -> "text", "color" -> "#b0b8b8"),

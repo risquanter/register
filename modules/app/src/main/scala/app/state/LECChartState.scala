@@ -159,7 +159,9 @@ final class LECChartState(
         if visible.isEmpty then LoadState.Idle
         else cacheState.map { allCurves =>
           LECSpecBuilder.build(
-            ColorAssigner.pairWithColors(allCurves, visible, colorMap)
+            ColorAssigner.pairWithColors(allCurves, visible, colorMap),
+            responsive = true,
+            zoomable = true
           )
         }
       }

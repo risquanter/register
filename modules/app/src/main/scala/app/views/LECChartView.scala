@@ -1,10 +1,12 @@
 package app.views
 
 import com.raquo.laminar.api.L.{*, given}
+import com.raquo.airstream.web.DomEventStream
 import org.scalajs.dom
 
 import scala.scalajs.js
 
+import app.components.Icons
 import app.facades.{vegaEmbed, EmbedResult}
 import app.state.{LoadState, ChartHoverBridge, ChartParamStore}
 
@@ -42,6 +44,11 @@ object LECChartView:
     // re-triggering the signal (which would dispose the container).
     val renderError$ : Var[Option[String]] = Var(None)
 
+    // The root element, captured on mount, is the fullscreen target; the button
+    // reflects the live fullscreen state so Esc/F11 keep it in sync.
+    var rootRef: dom.Element = null
+    val isFullscreen: Var[Boolean] = Var(false)
+
     def disposeChart(): Unit =
       currentResult.foreach { result =>
         paramStore.capture(result.view)
@@ -52,7 +59,26 @@ object LECChartView:
 
     div(
       cls := "lec-chart-view",
-      h3("LEC Chart"),
+      onMountCallback(ctx => rootRef = ctx.thisNode.ref),
+      DomEventStream[dom.Event](dom.document, "fullscreenchange", useCapture = false)
+        --> { _ => isFullscreen.set(dom.document.fullscreenElement != null) },
+      div(
+        cls := "lec-chart-header",
+        h3("LEC Chart"),
+        button(
+          cls := "chart-fullscreen-btn",
+          tpe := "button",
+          title <-- isFullscreen.signal.map(fs => if fs then "Exit fullscreen" else "Fullscreen"),
+          child <-- isFullscreen.signal.map(fs =>
+            if fs then Icons.minimize("chart-icon") else Icons.maximize("chart-icon")
+          ),
+          onClick --> { _ =>
+            if dom.document.fullscreenElement == null then rootRef.requestFullscreen()
+            else dom.document.exitFullscreen()
+            ()
+          }
+        )
+      ),
       div(
         cls := "lec-chart-content",
         // Laminar → Vega hover push (§3B.3)

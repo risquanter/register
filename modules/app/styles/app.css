@@ -1002,6 +1002,53 @@ body {
   height: auto !important;
 }
 
+/* ── Single / overlay Analyze chart (not the side-by-side panels) ──
+   Responsive fill: the Vega spec is built with width/height "container", so the
+   chart needs a box with a concrete height to size against. The surface owns
+   that height; the view/content/container flex to fill it (overriding the
+   height:auto above via equal-specificity later rules). Fullscreen overrides
+   the fixed height to fill the screen. */
+.lec-chart-surface {
+  display: flex;
+  flex-direction: column;
+  height: 460px;
+}
+
+.lec-chart-surface .lec-chart-view {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.lec-chart-surface .lec-chart-content,
+.lec-chart-surface .lec-chart-container,
+.lec-chart-surface .lec-chart-container .vega-embed {
+  height: 100% !important;
+}
+
+/* Bound toggles (interpolation + annotations) move to a left column; the chart
+   takes the remaining width. vega-embed renders `.vega-bindings` as a sibling
+   of the chart inside `.vega-embed`. */
+.lec-chart-surface .lec-chart-container .vega-embed {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.lec-chart-surface .vega-bindings {
+  order: -1;
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.lec-chart-surface .lec-chart-container .vega-embed > :not(.vega-bindings) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* ── Side-by-side comparison panels ──
    Auto-fit grid: panels keep a minimum readable width and overflow to
    further rows automatically. */
@@ -1392,12 +1439,55 @@ body {
   flex-direction: column;
 }
 
-.lec-chart-view h3 {
+.lec-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+
+.lec-chart-header h3 {
   font-family: var(--font-mono);
   font-size: var(--text-lg);
   font-weight: var(--font-weight-medium);
   color: var(--foreground);
-  margin-bottom: var(--sp-4);
+  margin-bottom: 0;
+}
+
+/* Fullscreen affordance — single/overlay chart only; hidden on the fixed-size
+   side-by-side panels (which reuse this component). */
+.chart-fullscreen-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-1);
+  background-color: var(--surface-overlay);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--foreground-muted);
+  cursor: pointer;
+}
+
+.chart-fullscreen-btn:hover {
+  color: var(--foreground);
+  border-color: var(--border-strong, var(--border));
+}
+
+.chart-fullscreen-btn .chart-icon {
+  width: 18px;
+  height: 18px;
+}
+
+.lec-panel .chart-fullscreen-btn {
+  display: none;
+}
+
+/* When the chart element itself is fullscreened, fill the screen. */
+.lec-chart-view:fullscreen {
+  height: 100%;
+  background-color: var(--background);
+  padding: var(--sp-4);
 }
 
 .lec-chart-content {
