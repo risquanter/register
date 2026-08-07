@@ -569,55 +569,55 @@ object AnalyzeView:
         // The one native control panel (interpolation + annotation toggles) for
         // the whole chart area, driving the shared `chartParams` — so it applies
         // to the single/overlay chart and every side-by-side panel at once.
-        LecChartControls(chartParams.signal, chartParams),
+        LecChartControls(chartParams.signal, chartParams.setInterpolation, chartParams.toggleAnnotation),
         div(
           cls := "analyze-lec-chart-area",
           child <-- compareState.layout.signal
-          .combineWith(compareState.rowTargets, compareState.hiddenFlags, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
-          .map { (layout, rowTs, hidden, activeBranch, activeTid, baselineAt) =>
-            val visibleComparands =
-              engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }
-            (layout, visibleComparands)
-          }
-          .distinct
-          .map {
-            case (CompareLayout.SideBySide, visible) if visible.nonEmpty =>
-              div(
-                cls := "lec-panel-grid",
-                child <-- compareState.baselineHidden.signal.map {
-                  case true  => emptyNode
-                  case false =>
+            .combineWith(compareState.rowTargets, compareState.hiddenFlags, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
+            .map { (layout, rowTs, hidden, activeBranch, activeTid, baselineAt) =>
+              val visibleComparands =
+                engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }
+              (layout, visibleComparands)
+            }
+            .distinct
+            .map {
+              case (CompareLayout.SideBySide, visible) if visible.nonEmpty =>
+                div(
+                  cls := "lec-panel-grid",
+                  child <-- compareState.baselineHidden.signal.map {
+                    case true  => emptyNode
+                    case false =>
+                      chartPanel(
+                        scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
+                        activePalette.map(PaletteData.familySwatch),
+                        sideBySideSpecs.map(_._1),
+                        hoverBridge,
+                        chartParams
+                      )
+                  },
+                  visible.map { pi =>
                     chartPanel(
-                      scenarioState.activeBranch.signal.map(BranchBar.branchDisplayName),
-                      activePalette.map(PaletteData.familySwatch),
-                      sideBySideSpecs.map(_._1),
-                      hoverBridge,
+                      compareSlots(pi).state.branchSignal.map(BranchBar.branchDisplayName),
+                      compareSlots(pi).state.palette.signal.map(PaletteData.familySwatch),
+                      sideBySideSpecs.map(_._2(pi)),
+                      slotHoverBridges(pi),
                       chartParams
                     )
-                },
-                visible.map { pi =>
-                  chartPanel(
-                    compareSlots(pi).state.branchSignal.map(BranchBar.branchDisplayName),
-                    compareSlots(pi).state.palette.signal.map(PaletteData.familySwatch),
-                    sideBySideSpecs.map(_._2(pi)),
-                    slotHoverBridges(pi),
-                    chartParams
-                  )
-                }
-              )
-            case _ =>
-              div(
-                cls := "lec-chart-surface",
-                // H3: selections absent at a rewound commit are dropped from the
-                // chart; name them so a vanished curve is explained, not silent.
-                child.maybe <-- treeViewState.chartState.droppedSelections.map { dropped =>
-                  if dropped.isEmpty then None
-                  else Some(div(cls := "dropped-selections-notice",
-                    s"${dropped.size} selected node(s) not present at this point in time"))
-                },
-                LECChartView(combinedSpecSignal, hoverBridge, chartParams)
-              )
-          }
+                  }
+                )
+              case _ =>
+                div(
+                  cls := "lec-chart-surface",
+                  // H3: selections absent at a rewound commit are dropped from the
+                  // chart; name them so a vanished curve is explained, not silent.
+                  child.maybe <-- treeViewState.chartState.droppedSelections.map { dropped =>
+                    if dropped.isEmpty then None
+                    else Some(div(cls := "dropped-selections-notice",
+                      s"${dropped.size} selected node(s) not present at this point in time"))
+                  },
+                  LECChartView(combinedSpecSignal, hoverBridge, chartParams)
+                )
+            }
         )
       )
     )

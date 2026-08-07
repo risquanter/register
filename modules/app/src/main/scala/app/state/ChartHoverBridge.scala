@@ -76,6 +76,10 @@ object ChartHoverBridge:
     *
     * Returns None on unexpected shapes — never throws.
     * Encapsulates `asInstanceOf` casts at the Vega JS boundary.
+    *
+    * Catches `Throwable`, not `NonFatal`: a malformed value makes a JS-boundary
+    * cast raise `UndefinedBehaviorError` (e.g. `undefined`→`Int` on `.length`
+    * under fastLinkJS), which `NonFatal` classes as fatal and would let escape.
     */
   def parseHoverSignal(value: js.Dynamic): Option[NodeId] =
     try

@@ -171,6 +171,7 @@ sbt app/test         # unchanged suites (no new pure logic; the flags are wiring
 - modules/app/src/main/scala/app/chart/LecChartParams.scala
 - modules/app/src/main/scala/app/state/LECChartState.scala
 - modules/app/src/main/scala/app/state/ChartParamStore.scala
+- modules/app/src/main/scala/app/state/ChartHoverBridge.scala
 - modules/app/src/main/scala/app/components/LecChartControls.scala
 - modules/app/src/main/scala/app/components/Icons.scala
 - modules/app/src/main/scala/app/views/AnalyzeView.scala
@@ -285,16 +286,23 @@ final class ChartParamStore:
 
 Pure view (owns no state): a select + one checkbox per `LecAnnotation`,
 rendered by iterating the enums. Styled with the app's own `form-*` classes.
+Takes signals + callbacks (not the store), matching the `SlotPalettePicker`
+convention.
 
 ```scala
 object LecChartControls:
-  def apply(params: Signal[ChartParams], store: ChartParamStore): HtmlElement
+  def apply(
+    params: Signal[ChartParams],
+    onSetInterpolation: Interpolation => Unit,
+    onToggle: LecAnnotation => Unit
+  ): HtmlElement
   // internally: select(controlled(value <-- params.map(_.interpolation.signalValue),
-  //   onInput.mapToValue --> (s => store.setInterpolation(Interpolation.fromSignal(s)))),
+  //   onInput.mapToValue --> (s => onSetInterpolation(Interpolation.fromSignal(s)))),
   //   Interpolation.values.map(i => option(value := i.signalValue, i.label)))
   // and LecAnnotation.values.map(a => label(input(typ := "checkbox",
   //   controlled(checked <-- params.map(_.annotations.contains(a)),
-  //     onInput.mapToChecked --> (_ => store.toggleAnnotation(a)))), span(a.label)))
+  //     onInput.mapToChecked --> (_ => onToggle(a)))), span(a.label)))
+// call site: LecChartControls(chartParams.signal, chartParams.setInterpolation, chartParams.toggleAnnotation)
 ```
 
 ### `LECSpecBuilder.scala`

@@ -47,7 +47,11 @@ final case class ChartParams(interpolation: Interpolation, annotations: Set[LecA
 
   /** Push these values onto a live Vega view. This is the only place raw Vega
     * signal names/values are used. Per-signal try-guards: an empty/base spec
-    * may not declare a signal, and Vega throws on unknown names. */
+    * may not declare a signal, and Vega throws on unknown names.
+    *
+    * Catches `Throwable`, not `NonFatal`: a Scala.js JS-boundary call can raise
+    * `UndefinedBehaviorError` (e.g. an `undefined`→`Int` cast under fastLinkJS),
+    * which `NonFatal` classes as fatal and would let escape. */
   def applyTo(view: js.Dynamic): Unit =
     try { view.signal("interpolate", interpolation.signalValue); () }
     catch case _: Throwable => ()
