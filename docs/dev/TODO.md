@@ -1722,3 +1722,17 @@ at the cost of a two-way-wired control panel per signal.
 Vega `bind` inputs dropped; native `LecChartControls` (Laminar) drive the view
 signals via `ChartParams`. `Interpolation`/`LecAnnotation` enums are the single
 source of truth for the toggle signals.
+
+## 36. Repo-wide ADR template conformance sweep
+
+**Origin:** the error-handling ADR work (boundary-exception reconciliation) brought
+the touched ADR(s) into conformance with the `ADR-00X.md` meta-template, but only
+the touched ones. Several ADRs predate or exceed the template (e.g. ADR-010 runs
+~300 lines vs the 100–200-line target; some lack the exact Context/Decision/Code
+Smells/Implementation shape).
+
+**Task:** audit every `docs/dev/ADR-*.md` against `ADR-00X.md` (structure, sizing,
+timeless-context phrasing, code-first style) and bring each into conformance, or
+split oversized ones per the template's guidance. Keep each ADR's number.
+
+**Status:** scheduled — run right after the error-handling ADR change lands. Not started.

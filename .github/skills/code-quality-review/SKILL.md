@@ -19,6 +19,17 @@ Do not rubber-stamp. Report PASS when clean. Report FINDING when not. Do not pro
 options without flagging which decision the user must make — **all decisions are the
 user's to resolve**.
 
+**Convention vs. hygiene is a real finding, not a "just conform" auto-pass.** When
+an existing codebase convention conflicts with code hygiene, clean code, or a best
+practice, raise it (decision-guide format) with an explicit **code-cleanup scope**
+option — fix the convention across all its occurrences now, or schedule it — so
+inherited (bad) convention is never silently perpetuated. But first VERIFY the
+cleaner alternative actually builds and passes tests: an apparent bad convention
+often encodes a real constraint (e.g. bare `catch _: Throwable` at the Scala.js JS
+boundary is deliberate — `NonFatal` does not catch `UndefinedBehaviorError`). Never
+recommend a hygiene change you have not verified green. Full rule: working-protocol
+skill, noise-filter carve-out.
+
 Three binding rules on the report itself (working-protocol G6):
 
 - Presenting the review report is a presentation — halt after it. No fixes,

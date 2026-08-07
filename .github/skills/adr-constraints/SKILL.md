@@ -117,6 +117,16 @@ serialization/escaping helpers.
 ✅ INSTEAD: assign new state to exactly one layer (field-level vs assembly-level) before writing.
 *ADR-019*
 
+### Exception catching
+
+❌ NEVER catch `scala.util.control.NonFatal` — on Scala.js it silently misses `UndefinedBehaviorError`; it is never the narrowest sound catch.
+✅ INSTEAD: catch the narrowest type guaranteed to cover every failure the call can raise — a named exception on the JVM; `Throwable` only at a Scala.js↔JS interop edge, via the shared `JsBoundary` helper.
+*ADR-033*
+
+❌ NEVER add a `catch` to code that calls no throwing API, and never wrap a total-fallback boundary in an error channel no caller reads.
+✅ INSTEAD: throw-free code stays catch-free (errors are values, ADR-010); a boundary with no recovery path returns `Option`/`Unit`; typed errors are reserved for failures a caller branches on.
+*ADR-033*
+
 ### Container & Infrastructure
 
 ❌ NEVER build container images manually outside the documented 5-step order.
