@@ -172,12 +172,21 @@ sbt app/test         # unchanged suites (no new pure logic; the flags are wiring
 - modules/app/src/main/scala/app/state/LECChartState.scala
 - modules/app/src/main/scala/app/state/ChartParamStore.scala
 - modules/app/src/main/scala/app/state/ChartHoverBridge.scala
+- modules/app/src/main/scala/app/state/FormState.scala
+- modules/app/src/main/scala/app/core/JsBoundary.scala
 - modules/app/src/main/scala/app/components/LecChartControls.scala
 - modules/app/src/main/scala/app/components/Icons.scala
 - modules/app/src/main/scala/app/views/AnalyzeView.scala
 - modules/app/src/main/scala/app/views/LECChartView.scala
 - modules/app/src/test/scala/app/chart/LecChartParamsSpec.scala
+- modules/app/src/test/scala/app/core/JsBoundarySpec.scala
 - modules/app/styles/app.css
+- modules/server/src/main/scala/com/risquanter/register/services/TreeHistoryService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
+- modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala
+- build.sbt
 
 ## Versioning
 

@@ -303,23 +303,29 @@ object WorkspaceStorePostgres:
         case _ => Left(s"Unsupported interval format: $value")
 
     private def buildDuration(days: String, hours: String, minutes: String, seconds: String, original: String): Either[String, Duration] =
-      scala.util.Try {
-        val daysPart = days.toLong
-        val hoursPart = hours.toLong
-        val minutesPart = minutes.toLong
-        val secondsPart = BigDecimal(seconds)
-        val nanosPerSecond = BigDecimal(1000000000L)
-        val wholeSeconds = secondsPart.setScale(0, BigDecimal.RoundingMode.DOWN).toLongExact
-        val nanos = ((secondsPart - BigDecimal(wholeSeconds)) * nanosPerSecond)
-          .setScale(0, BigDecimal.RoundingMode.HALF_UP)
-          .toLongExact
-        Duration
-          .ofDays(daysPart)
-          .plusHours(hoursPart)
-          .plusMinutes(minutesPart)
-          .plusSeconds(wholeSeconds)
-          .plusNanos(nanos)
-      }.toEither.left.map(err => Option(err.getMessage).getOrElse(s"Invalid interval: $original"))
+      (days.toLongOption, hours.toLongOption, minutes.toLongOption) match
+        case (Some(daysPart), Some(hoursPart), Some(minutesPart)) =>
+          // Named coverage (ADR-033 §3): toLongExact / Duration.plus* overflow →
+          // ArithmeticException; BigDecimal(seconds) → NumberFormatException
+          // (regex-constrained input, kept for sound coverage).
+          try
+            val secondsPart = BigDecimal(seconds)
+            val nanosPerSecond = BigDecimal(1000000000L)
+            val wholeSeconds = secondsPart.setScale(0, BigDecimal.RoundingMode.DOWN).toLongExact
+            val nanos = ((secondsPart - BigDecimal(wholeSeconds)) * nanosPerSecond)
+              .setScale(0, BigDecimal.RoundingMode.HALF_UP)
+              .toLongExact
+            Right(
+              Duration
+                .ofDays(daysPart)
+                .plusHours(hoursPart)
+                .plusMinutes(minutesPart)
+                .plusSeconds(wholeSeconds)
+                .plusNanos(nanos)
+            )
+          catch case _: ArithmeticException | _: NumberFormatException =>
+            Left(s"Invalid interval: $original")
+        case _ => Left(s"Invalid interval: $original")
 
   val layer: ZLayer[Quill.Postgres[SnakeCase] & WorkspaceConfig, Nothing, WorkspaceStore] =
     ZLayer.fromZIO {

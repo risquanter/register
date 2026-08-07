@@ -66,7 +66,7 @@ object TrialOutcomes {
    * `Validation`-returning variant of `combine` itself. Any construction
    * entry point that feeds user-derived data through this function must
    * catch `ArithmeticException` and convert it to a `ValidationError` before
-   * it crosses a public API (ADR-010) — `RiskResultGroup.create` is the
+   * it crosses a public API (ADR-033 §3) — `RiskResultGroup.create` is the
    * conversion layer for the production aggregation path.
    */
   def combine(a: TrialOutcomes, b: TrialOutcomes): TrialOutcomes = {

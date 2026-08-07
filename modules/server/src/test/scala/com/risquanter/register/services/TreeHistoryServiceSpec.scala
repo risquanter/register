@@ -42,6 +42,9 @@ object TreeHistoryServiceSpec extends ZIOSpecDefault:
       },
       test("passes a non-numeric date through unchanged") {
         assertTrue(TreeHistoryServiceLive.toIso("2026-07-27T00:00:00Z") == "2026-07-27T00:00:00Z")
+      },
+      test("passes an epoch outside Instant's range through unchanged") {
+        assertTrue(TreeHistoryServiceLive.toIso(Long.MaxValue.toString) == Long.MaxValue.toString)
       }
     )
   )

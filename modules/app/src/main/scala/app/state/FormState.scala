@@ -98,11 +98,11 @@ trait FormState[F]:
 
   /** Helper to parse a string as a Double */
   protected def parseDouble(s: String): Option[Double] =
-    scala.util.Try(s.trim.toDouble).toOption
+    s.trim.toDoubleOption
 
   /** Helper to parse a string as a Long */
   protected def parseLong(s: String): Option[Long] =
-    scala.util.Try(s.trim.toLong).toOption
+    s.trim.toLongOption
 
   /** Helper to parse a comma-separated string as a list of Doubles */
   protected def parseDoubleList(s: String): List[Double] =

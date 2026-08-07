@@ -4,6 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
+import app.core.JsBoundary
 import com.risquanter.register.domain.data.iron.NodeId
 
 /** Bidirectional hover bridge between Vega chart and Laminar tree (§3B).
@@ -75,20 +76,17 @@ object ChartHoverBridge:
   /** Extract a NodeId from a Vega selection signal value.
     *
     * Returns None on unexpected shapes — never throws.
-    * Encapsulates `asInstanceOf` casts at the Vega JS boundary.
-    *
-    * Catches `Throwable`, not `NonFatal`: a malformed value makes a JS-boundary
-    * cast raise `UndefinedBehaviorError` (e.g. `undefined`→`Int` on `.length`
-    * under fastLinkJS), which `NonFatal` classes as fatal and would let escape.
+    * Encapsulates `asInstanceOf` casts at the Vega JS boundary, guarded by
+    * `JsBoundary.orElse` (ADR-033 §4).
     */
   def parseHoverSignal(value: js.Dynamic): Option[NodeId] =
-    try
+    JsBoundary.orElse(Option.empty[NodeId]) {
       val arr = value.asInstanceOf[js.Array[js.Dynamic]]
       if arr.length > 0 then
         val values = arr(0).values.asInstanceOf[js.Array[String]]
         if values.length > 0 then NodeId.fromString(values(0)).toOption else None
       else None
-    catch case _: Throwable => None
+    }
 
   /** Build a Vega selection store for a given NodeId (or empty if None).
     *

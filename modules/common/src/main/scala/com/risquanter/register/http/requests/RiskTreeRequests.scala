@@ -332,7 +332,7 @@ object RiskTreeRequests {
     * incorrectly allow a single childless portfolio through.
     *
     * '''Defence-in-depth:''' `RiskPortfolio` has a `require(childIds.nonEmpty)`
-    * invariant (ADR-010) that catches this at construction time. This guard
+    * invariant (ADR-033 §5) that catches this at construction time. This guard
     * catches it earlier with a typed `ValidationError`.
     *
     * @see ADR-017 §Topology validation

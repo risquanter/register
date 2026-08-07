@@ -1,8 +1,7 @@
 package com.risquanter.register.services
 
 import zio.*
-import java.time.Instant
-import scala.util.Try
+import java.time.{DateTimeException, Instant}
 import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, PositiveInt, CommitHash}
 import com.risquanter.register.domain.errors.{RepositoryFailure, IrminError}
@@ -68,7 +67,11 @@ object TreeHistoryServiceLive:
     case _                                   => HistoryOperation.Other
 
   /** Irmin renders the commit date as an epoch-seconds string; normalize to
-    * ISO-8601. If it is already non-numeric (a future Irmin change), pass it
-    * through unchanged rather than failing the whole history read. */
+    * ISO-8601. If it is already non-numeric (a future Irmin change) or outside
+    * `Instant`'s range, pass it through unchanged rather than failing the
+    * whole history read. */
   def toIso(date: String): String =
-    Try(Instant.ofEpochSecond(date.trim.toLong).toString).getOrElse(date)
+    date.trim.toLongOption.fold(date) { epoch =>
+      try Instant.ofEpochSecond(epoch).toString
+      catch case _: DateTimeException => date
+    }

@@ -2,6 +2,8 @@ package app.chart
 
 import scala.scalajs.js
 
+import app.core.JsBoundary
+
 /** Line interpolation mode for the LEC chart, offered as a select control.
   * `signalValue` is the value written to the Vega `interpolate` signal (the
   * one place the raw string crosses into Vega). */
@@ -46,21 +48,15 @@ final case class ChartParams(interpolation: Interpolation, annotations: Set[LecA
     copy(annotations = next)
 
   /** Push these values onto a live Vega view. This is the only place raw Vega
-    * signal names/values are used. Per-signal try-guards: an empty/base spec
-    * may not declare a signal, and Vega throws on unknown names.
-    *
-    * Catches `Throwable`, not `NonFatal`: a Scala.js JS-boundary call can raise
-    * `UndefinedBehaviorError` (e.g. an `undefined`→`Int` cast under fastLinkJS),
-    * which `NonFatal` classes as fatal and would let escape. */
+    * signal names/values are used. Per-signal guards (`JsBoundary.orElse`,
+    * ADR-033 §4): an empty/base spec may not declare a signal, and Vega throws
+    * on unknown names — one missing signal must not block the others. */
   def applyTo(view: js.Dynamic): Unit =
-    try { view.signal("interpolate", interpolation.signalValue); () }
-    catch case _: Throwable => ()
+    JsBoundary.orElse(()) { view.signal("interpolate", interpolation.signalValue); () }
     LecAnnotation.values.foreach { a =>
-      try { view.signal(a.signalName, annotations.contains(a)); () }
-      catch case _: Throwable => ()
+      JsBoundary.orElse(()) { view.signal(a.signalName, annotations.contains(a)); () }
     }
-    try { view.run(); () }
-    catch case _: Throwable => ()
+    JsBoundary.orElse(()) { view.run(); () }
 
 object ChartParams:
   val default: ChartParams = ChartParams(Interpolation.default, LecAnnotation.defaults)

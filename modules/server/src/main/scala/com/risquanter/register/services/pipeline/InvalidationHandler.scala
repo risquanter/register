@@ -119,7 +119,7 @@ final case class InvalidationHandlerLive(
       yield InvalidationResult(invalidatedNodes = nodeIds, subscribersNotified = subscriberCount)
 
   override def handleMutation(oldTree: RiskTree, newTree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
-    // Defense-in-depth (ADR-010 §3): internal precondition — caller controls both trees
+    // Defense-in-depth (ADR-033 §5): internal precondition — caller controls both trees
     require(oldTree.id == newTree.id,
       s"handleMutation precondition violated: oldTree.id=${oldTree.id} != newTree.id=${newTree.id}")
 
