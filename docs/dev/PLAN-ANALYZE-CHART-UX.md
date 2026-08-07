@@ -374,3 +374,157 @@ green; then the manual pass at localhost:18080: toggles render as app-styled
 controls in a left column and drive the chart live (single, overlay, and every
 side-by-side panel), the chart fills the freed width with no bottom gap, zoom +
 fullscreen still work.
+
+---
+
+## Continuation — ADR-033 implementation (JsBoundary helper, Try migrations, citation fixes)
+
+Implements ADR-033 across the code the audit flagged. User rulings: MetalogDistribution
+accepted as conform (documented in ADR-033's table); the `Try` sites migrate to
+throw-free/named-catch forms; the JS-boundary catches route through the shared helper.
+
+### Signatures
+
+#### NEW `modules/app/src/main/scala/app/core/JsBoundary.scala`
+
+```scala
+package app.core
+
+object JsBoundary:
+  /** The one sanctioned `catch Throwable` site (ADR-033 §4): converts ANY
+    * throwable — including Scala.js `UndefinedBehaviorError`, which `NonFatal`
+    * and named types miss — into the total fallback. Use only at a
+    * Scala.js ↔ JS interop edge. */
+  inline def orElse[A](inline fallback: A)(inline body: A): A =
+    try body catch case _: Throwable => fallback
+```
+
+#### `modules/app/src/main/scala/app/state/ChartHoverBridge.scala`
+
+```scala
+def parseHoverSignal(value: js.Dynamic): Option[NodeId] =
+  JsBoundary.orElse(Option.empty[NodeId]) {
+    val arr = value.asInstanceOf[js.Array[js.Dynamic]]
+    if arr.length > 0 then
+      val values = arr(0).values.asInstanceOf[js.Array[String]]
+      if values.length > 0 then NodeId.fromString(values(0)).toOption else None
+    else None
+  }
+```
+
+Import `app.core.JsBoundary`; the "Catches `Throwable`, not `NonFatal`" scaladoc
+paragraph is replaced by a one-line ADR-033 §4 citation (the helper carries the
+explanation).
+
+#### `modules/app/src/main/scala/app/chart/LecChartParams.scala` (`ChartParams.applyTo`)
+
+```scala
+def applyTo(view: js.Dynamic): Unit =
+  JsBoundary.orElse(()) { view.signal("interpolate", interpolation.signalValue); () }
+  LecAnnotation.values.foreach { a =>
+    JsBoundary.orElse(()) { view.signal(a.signalName, annotations.contains(a)); () }
+  }
+  JsBoundary.orElse(()) { view.run(); () }
+```
+
+Same scaladoc treatment (per-signal-guard rationale stays; width rationale → ADR-033 §4).
+
+#### `modules/app/src/main/scala/app/state/FormState.scala` — throw-free (ADR-033 §2)
+
+```scala
+protected def parseDouble(s: String): Option[Double] = s.trim.toDoubleOption
+protected def parseLong(s: String): Option[Long]     = s.trim.toLongOption
+```
+
+(`scala.util.Try` import dropped. Semantics identical for every reachable input.)
+
+#### `modules/server/src/main/scala/com/risquanter/register/services/TreeHistoryService.scala` (`toIso`)
+
+```scala
+def toIso(date: String): String =
+  date.trim.toLongOption.fold(date) { epoch =>
+    try Instant.ofEpochSecond(epoch).toString
+    catch case _: DateTimeException => date   // epoch outside Instant's range
+  }
+```
+
+`import scala.util.Try` → `import java.time.DateTimeException`. Same pass-through
+behaviour for non-numeric and out-of-range input.
+
+#### `modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala` (`buildDuration`)
+
+```scala
+private def buildDuration(days: String, hours: String, minutes: String, seconds: String, original: String): Either[String, Duration] =
+  (days.toLongOption, hours.toLongOption, minutes.toLongOption) match
+    case (Some(daysPart), Some(hoursPart), Some(minutesPart)) =>
+      try
+        val secondsPart = BigDecimal(seconds)
+        val nanosPerSecond = BigDecimal(1000000000L)
+        val wholeSeconds = secondsPart.setScale(0, BigDecimal.RoundingMode.DOWN).toLongExact
+        val nanos = ((secondsPart - BigDecimal(wholeSeconds)) * nanosPerSecond)
+          .setScale(0, BigDecimal.RoundingMode.HALF_UP)
+          .toLongExact
+        Right(
+          Duration.ofDays(daysPart).plusHours(hoursPart).plusMinutes(minutesPart)
+            .plusSeconds(wholeSeconds).plusNanos(nanos))
+      catch case _: ArithmeticException | _: NumberFormatException =>
+        Left(s"Invalid interval: $original")
+    case _ => Left(s"Invalid interval: $original")
+```
+
+Named coverage: `toLongExact`/`Duration.plus*` → `ArithmeticException`;
+`BigDecimal(seconds)` → `NumberFormatException` (regex-constrained input, kept for
+sound coverage). Behaviour note: the `Left` message becomes the uniform
+`"Invalid interval: $original"` instead of sometimes echoing an exception message —
+same `Either` shape, internal config-parse consumer.
+
+#### Stale ADR citations (comment-only, one line each)
+
+- `modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala` — "(ADR-010 §3)" → "(ADR-033 §5)"
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala` — "invariant (ADR-010)" → "invariant (ADR-033 §5)"
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala` — "public API (ADR-010)" → "public API (ADR-033 §3)"
+
+#### NEW test `modules/app/src/test/scala/app/core/JsBoundarySpec.scala`
+
+Pure: body value passes through when nothing throws; fallback on a thrown
+`RuntimeException`; fallback on a thrown `java.lang.Error` (demonstrates the
+catch-all width that `NonFatal` would refuse). `TreeHistoryServiceSpec` gains
+`toIso` cases: numeric epoch → ISO, non-numeric → pass-through, out-of-range
+epoch → pass-through.
+
+### ADR alignment
+
+- **ADR-033**: this is its implementation — helper (§4), throw-free parsing (§2), named catches (§3). Compliant.
+- **ADR-010**: error values/shapes unchanged except the `buildDuration` message noted above. Compliant.
+- **ADR-001/ADR-011**: no new types, no new dependencies; imports adjusted per convention. Compliant.
+
+### Open decisions
+
+None — all five audit/sweep decisions ruled 2026-08-07.
+
+### Verification
+
+```bash
+sbt 'commonJVM/test; server/test'   # common + server touched
+sbt app/test
+sbt serverIt/test                   # full tier — server touched
+```
+
+All green before done; leaked `register_it_` containers cleaned before serverIt.
+
+### Versioning
+
+Shipped code changes (refactor, no external API change): PATCH on landing, mirror
+`APP_VERSION` to `.env` and `.env.irmin`.
+
+### File inventory additions — merged into `## File inventory` upon approval
+
+- modules/app/src/main/scala/app/core/JsBoundary.scala
+- modules/app/src/main/scala/app/state/FormState.scala
+- modules/server/src/main/scala/com/risquanter/register/services/TreeHistoryService.scala
+- modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
+- modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala
+- modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala
+- modules/app/src/test/scala/app/core/JsBoundarySpec.scala
+- build.sbt

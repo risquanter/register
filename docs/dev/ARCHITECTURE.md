@@ -880,58 +880,10 @@ HDR Histogram would require fundamental architecture changes (approximate merge,
 
 ### **Key Architectural Decisions**
 
-#### **ADR-001: Iron Refinement Types for Domain Models**
-- **Decision:** Use Iron opaque types for all validated domain primitives
-- **Rationale:** Compile-time safety, zero runtime overhead, self-documenting
-- **Status:** ✅ Implemented
-- **Alternatives Rejected:** Runtime validation only, custom wrapper types
-
-#### **ADR-002: ZIO Prelude for Error Accumulation**
-- **Decision:** Use `Validation[String, A]` for parallel error collection
-- **Rationale:** Better UX (all errors at once), functional, composable
-- **Status:** ✅ Implemented
-- **Alternatives Rejected:** Fail-fast Either, exceptions
-
-#### **ADR-003: Separate Config from Computation**
-- **Decision:** POST creates config, GET /lec computes results
-- **Rationale:** Config is fast/synchronous, computation is slow/expensive
-- **Status:** ✅ Implemented
-- **Alternatives Rejected:** POST runs simulation immediately
-
-#### **ADR-004: Metalog Storage (No Raw Trials)**
-- **Decision:** Store Metalog coefficients, not raw trial data
-- **Rationale:** 1000x size reduction, reproducible, fast serialization
-- **Status:** ✅ Implemented
-- **Alternatives Rejected:** Store raw trials, store histograms
-
-#### **ADR-005: SSE for Server→Client Push**
-- **Decision:** Use Server-Sent Events for stale-figure notifications (nodes whose results changed)
-- **Rationale:** Simple unidirectional streaming, browser-native support
-- **Status:** ✅ Implemented
-
-#### **ADR-009: Simulation Configuration**
-- **Decision:** Simulation parameters from server config, not API parameters
-- **Rationale:** Consistent results, simpler API
-- **Status:** ✅ Implemented
-
-#### **ADR-010: Flat Node Storage**
-- **Decision:** Flat node collection with ID references, not recursive nesting
-- **Rationale:** Enables O(1) lookup via TreeIndex, simplifies serialization
-- **Status:** ✅ Implemented
-
-#### **ADR-014: LEC Caching Architecture**
-- **Decision:** ~~Per-tree cache with O(depth) node-to-root invalidation~~ Superseded by the content-addressed ContentCache (milestone 2b Phase A): keys are content hashes, so no invalidation exists; isolation is per workspace (DD-17)
-- **Status:** ✅ Superseded, 2026-07-18
-
-#### **ADR-015: Cache-Aside LEC Resolution**
-- **Decision:** RiskResultResolver uses cache-aside pattern for LEC queries
-- **Rationale:** Lazy computation, transparent caching; no invalidation needed under content addressing
-- **Status:** ✅ Accepted
-
-#### **ADR-018: Nominal Wrappers for Identity Types**
-- **Decision:** `NodeId` and `TreeId` case class wrappers over `SafeId`
-- **Rationale:** Prevents accidental interchange of semantically distinct IDs
-- **Status:** ✅ Implemented
+The architecture decision records themselves are the single source of truth:
+every `docs/dev/ADR-*.md` file present is in force (see the ADR meta-template,
+`ADR-00X.md`, for structure and the deletion-is-archival rule). No summary copy
+is maintained here — a duplicated index drifts from the files it summarizes.
 
 ---
 
