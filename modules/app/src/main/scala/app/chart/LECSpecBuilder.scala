@@ -74,22 +74,14 @@ object PinnedAxes:
 
 object LECSpecBuilder:
 
-  /** The user-facing input params declared in `buildSpec`'s `paramsArr`
-    * (interpolation select + the annotation checkboxes).
-    * `LECChartView` reads their live values off the old Vega view before a
-    * re-embed and re-applies them to the new one, so changing the chart's
-    * data (new selection, compare toggled) doesn't silently reset the
-    * user's toggle choices to the spec defaults. Keep in sync with `paramsArr`.
-    * The optional `grid` zoom param (added when `zoomable`) is deliberately
-    * absent — a re-embed resets the pan/zoom because the data changed.
-    */
-  val preservedParams: List[String] =
-    List("interpolate", "showP90", "showP95", "showP99", "showP995", "showAAL", "showNoLossProbability")
-
   /** Build a Vega-Lite spec from paired curve data and colours.
     *
+    * The interpolation mode and annotation-toggle visibility are driven live
+    * off the Vega view's signals by `ChartParams.applyTo` — the spec only
+    * declares those signals at their defaults (`Interpolation.default` /
+    * `LecAnnotation.defaultOn`), so no initial-value parameter is taken here.
+    *
     * @param curves        Ordered pairs of (curve data, assigned colour)
-    * @param interpolation Initial interpolation mode
     * @param width         Chart width in pixels
     * @param height        Chart height in pixels
     * @param pinned        Explicit axis extents; `None` (the default) keeps
@@ -104,14 +96,13 @@ object LECSpecBuilder:
     */
   def build(
     curves: Vector[(LECNodeCurve, HexColor)],
-    interpolation: String = "monotone",
     width: Int = 950,
     height: Int = 400,
     pinned: Option[PinnedAxes] = None,
     responsive: Boolean = false,
     zoomable: Boolean = false
   ): js.Dynamic =
-    buildFromSeries(curves.map { case (nc, color) => (nc, color, nc.id.value) }, interpolation, width, height, pinned, responsive, zoomable)
+    buildFromSeries(curves.map { case (nc, color) => (nc, color, nc.id.value) }, width, height, pinned, responsive, zoomable)
 
   /** Same as `build`, but the chart's series identity (`curveId` — the data
     * points, colour-scale domain, and legend match) is given explicitly per
@@ -124,7 +115,6 @@ object LECSpecBuilder:
     */
   def buildFromSeries(
     curves: Vector[(LECNodeCurve, HexColor, String)],
-    interpolation: String = "monotone",
     width: Int = 950,
     height: Int = 400,
     pinned: Option[PinnedAxes] = None,
@@ -133,13 +123,12 @@ object LECSpecBuilder:
   ): js.Dynamic =
     val allPoints = curves.flatMap(_._1.curve)
     if curves.isEmpty || allPoints.isEmpty then emptySpec(width, height, responsive)
-    else buildSpec(curves, interpolation, width, height, pinned, responsive, zoomable)
+    else buildSpec(curves, width, height, pinned, responsive, zoomable)
 
   // ── Private builders ──────────────────────────────────────────
 
   private def buildSpec(
     curves: Vector[(LECNodeCurve, HexColor, String)],
-    interpolation: String,
     width: Int,
     height: Int,
     pinned: Option[PinnedAxes],
@@ -177,8 +166,10 @@ object LECSpecBuilder:
     // shown together (Compare/Overlay, or a multi-select on one tree), each
     // curve's markers are told apart by the same colour as its line.
     // Each tail quantile gets its own independent toggle (not one shared
-    // "show all percentiles" switch) — showP90/showP95/showP99/showP995.
-    val quantileToggles = List("p90" -> ("P90", "showP90"), "p95" -> ("P95", "showP95"), "p99" -> ("P99", "showP99"), "p99.5" -> ("P99.5", "showP995"))
+    // "show all percentiles" switch). The `LecAnnotation` case is the single
+    // source of truth for each toggle's signal name and label; the string key
+    // here is the `LECNodeCurve.quantiles` map key it reads.
+    val quantileToggles = List("p90" -> LecAnnotation.P90, "p95" -> LecAnnotation.P95, "p99" -> LecAnnotation.P99, "p99.5" -> LecAnnotation.P995)
     val annotationLayers = js.Array[js.Any]()
     // Only curves with data get annotations — a node with an empty curve
     // (no simulation outcomes) carries aal = 0.0 / noLoss = 1.0 fallbacks
@@ -186,13 +177,13 @@ object LECSpecBuilder:
     // "no loss: 100%" row for a line that isn't on the chart at all.
     val withData = ordered.filter { case (nc, _, _) => nc.curve.nonEmpty }
     withData.foreach { case (nc, hexColor, _) =>
-      quantileToggles.foreach { case (key, (rawLabel, toggleParam)) =>
+      quantileToggles.foreach { case (key, ann) =>
         nc.quantiles.get(key).foreach { value =>
-          verticalAnnotation(value, Seq(rawLabel, formatLossValue(value)), hexColor.value, dashed = true, toggleParam = toggleParam)
+          verticalAnnotation(value, Seq(ann.label, formatLossValue(value)), hexColor.value, dashed = true, toggleParam = ann.signalName)
             .foreach(annotationLayers.push(_))
         }
       }
-      verticalAnnotation(nc.averageAnnualLoss, Seq("AAL", formatLossValue(nc.averageAnnualLoss)), hexColor.value, dashed = false, toggleParam = "showAAL")
+      verticalAnnotation(nc.averageAnnualLoss, Seq(LecAnnotation.AAL.label, formatLossValue(nc.averageAnnualLoss)), hexColor.value, dashed = false, toggleParam = LecAnnotation.AAL.signalName)
         .foreach(annotationLayers.push(_))
     }
 
@@ -358,70 +349,19 @@ object LECSpecBuilder:
     val widthField: js.Any  = if responsive then "container" else width
     val heightField: js.Any = if responsive then "container" else height
 
-    // The user-facing bound inputs (interpolation select + annotation
-    // checkboxes). The pan/zoom selection is NOT here — it lives on the point
-    // layer (see `pointParams`) to avoid duplicate signals on this layered spec.
+    // Named signals the chart's `expr`s read (the line's `interpolate`, each
+    // annotation's opacity). No Vega `bind` inputs — these are driven live by
+    // `ChartParams.applyTo` from the native `LecChartControls` panel; the spec
+    // only declares them at their defaults. `LecAnnotation` is the single source
+    // of truth for the toggle signal names and defaults. The pan/zoom selection
+    // is NOT here — it lives on the point layer (see `pointParams`) to avoid
+    // duplicate signals on this layered spec.
     val paramsArr = js.Array[js.Any](
-      js.Dynamic.literal(
-        "name"  -> "interpolate",
-        "value" -> interpolation,
-        "bind"  -> js.Dynamic.literal(
-          "input"   -> "select",
-          "options" -> js.Array("monotone", "basis", "linear", "step-after"),
-          "name"    -> "Interpolation: "
-        )
-      ),
-      // Only P95 starts checked among the percentile toggles — one
-      // uncluttered default line; the rest are opt-in.
-      js.Dynamic.literal(
-        "name"  -> "showP90",
-        "value" -> false,
-        "bind"  -> js.Dynamic.literal(
-          "input" -> "checkbox",
-          "name"  -> "Show P90: "
-        )
-      ),
-      js.Dynamic.literal(
-        "name"  -> "showP95",
-        "value" -> true,
-        "bind"  -> js.Dynamic.literal(
-          "input" -> "checkbox",
-          "name"  -> "Show P95: "
-        )
-      ),
-      js.Dynamic.literal(
-        "name"  -> "showP99",
-        "value" -> false,
-        "bind"  -> js.Dynamic.literal(
-          "input" -> "checkbox",
-          "name"  -> "Show P99: "
-        )
-      ),
-      js.Dynamic.literal(
-        "name"  -> "showP995",
-        "value" -> false,
-        "bind"  -> js.Dynamic.literal(
-          "input" -> "checkbox",
-          "name"  -> "Show P99.5: "
-        )
-      ),
-      js.Dynamic.literal(
-        "name"  -> "showAAL",
-        "value" -> true,
-        "bind"  -> js.Dynamic.literal(
-          "input" -> "checkbox",
-          "name"  -> "Show AAL: "
-        )
-      ),
-      js.Dynamic.literal(
-        "name"  -> "showNoLossProbability",
-        "value" -> true,
-        "bind"  -> js.Dynamic.literal(
-          "input" -> "checkbox",
-          "name"  -> "Show no-loss probability: "
-        )
-      )
+      js.Dynamic.literal("name" -> "interpolate", "value" -> Interpolation.default.signalValue)
     )
+    LecAnnotation.values.foreach { a =>
+      paramsArr.push(js.Dynamic.literal("name" -> a.signalName, "value" -> a.defaultOn))
+    }
 
     js.Dynamic.literal(
       "$schema"    -> "https://vega.github.io/schema/vega-lite/v6.json",
@@ -538,7 +478,7 @@ object LECSpecBuilder:
     * the way a data-encoded mark could. `index` stacks one row per curve.
     */
   private def noLossStat(label: String, color: String, index: Int, fontSize: Int = 13): Seq[js.Dynamic] =
-    val toggleOpacity = js.Dynamic.literal("expr" -> "showNoLossProbability ? 1 : 0")
+    val toggleOpacity = js.Dynamic.literal("expr" -> s"${LecAnnotation.NoLoss.signalName} ? 1 : 0")
     Seq(
       js.Dynamic.literal(
         "data"     -> js.Dynamic.literal("values" -> js.Array(js.Dynamic.literal("label" -> label))),

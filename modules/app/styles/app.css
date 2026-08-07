@@ -980,34 +980,75 @@ body {
   opacity: 0.7;
 }
 
+/* The panel is a flex row: the native control column on the left, the chart
+   area (single surface or side-by-side grid) filling the rest. */
 .analyze-lec-panel {
   flex: 0 0 auto;
   min-height: 0;
   overflow: visible;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: var(--sp-4);
   background-color: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: var(--sp-4);
 }
 
+.analyze-lec-chart-area {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Native chart controls — left column, app-styled (replaces Vega's own bind
+   inputs, which rendered inside the width-measured chart element). */
+.lec-chart-controls {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.lec-controls-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.lec-controls-select {
+  width: auto;
+}
+
+.lec-controls-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.lec-controls-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
 .analyze-lec-panel .lec-chart-view {
   height: auto;
 }
 
+/* Panels keep the fixed-size chart filling their cell width. */
 .analyze-lec-panel .lec-chart-content,
-.analyze-lec-panel .lec-chart-container,
-.analyze-lec-panel .lec-chart-container .vega-embed,
-.analyze-lec-panel .lec-chart-container canvas {
+.analyze-lec-panel .lec-chart-container {
   width: 100% !important;
   height: auto !important;
 }
 
 /* ── Single / overlay Analyze chart (not the side-by-side panels) ──
-   Responsive fill: the Vega spec is built with width/height "container", so the
-   chart needs a box with a concrete height to size against. The surface owns
-   that height; the view/content/container flex to fill it (overriding the
-   height:auto above via equal-specificity later rules). Fullscreen overrides
-   the fixed height to fill the screen. */
+   The Vega spec is built with width/height "container", so the chart needs a
+   box with a concrete height to size against. The surface owns that height; the
+   view/content/container flex to fill it (overriding the height:auto above via
+   equal-specificity later rules). Fullscreen overrides the fixed height. */
 .lec-chart-surface {
   display: flex;
   flex-direction: column;
@@ -1021,32 +1062,8 @@ body {
 }
 
 .lec-chart-surface .lec-chart-content,
-.lec-chart-surface .lec-chart-container,
-.lec-chart-surface .lec-chart-container .vega-embed {
+.lec-chart-surface .lec-chart-container {
   height: 100% !important;
-}
-
-/* Bound toggles (interpolation + annotations) move to a left column; the chart
-   takes the remaining width. vega-embed renders `.vega-bindings` as a sibling
-   of the chart inside `.vega-embed`. */
-.lec-chart-surface .lec-chart-container .vega-embed {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  gap: var(--sp-3);
-}
-
-.lec-chart-surface .vega-bindings {
-  order: -1;
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-}
-
-.lec-chart-surface .lec-chart-container .vega-embed > :not(.vega-bindings) {
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
 /* ── Side-by-side comparison panels ──

@@ -6,6 +6,7 @@ import org.scalajs.dom
 
 import scala.scalajs.js
 
+import app.chart.ChartParams
 import app.components.Icons
 import app.facades.{vegaEmbed, EmbedResult}
 import app.state.{LoadState, ChartHoverBridge, ChartParamStore}
@@ -24,13 +25,14 @@ import app.state.{LoadState, ChartHoverBridge, ChartParamStore}
   */
 object LECChartView:
 
-  /** @param paramStore Carries the user's toggle/interpolation choices
-    *                    across re-embeds and across chart-instance swaps —
-    *                    pass one shared store to every chart surface whose
-    *                    settings should feel like one chart (Analyze's
-    *                    single chart and both side-by-side panels). The
-    *                    default private store preserves them only within
-    *                    this one component instance.
+  /** @param paramStore Holds the user's interpolation/annotation choices as
+    *                    app-side state (the source of truth). This view applies
+    *                    them to its Vega view whenever they change and on each
+    *                    embed. Pass one shared store to every chart surface whose
+    *                    settings should feel like one chart (Analyze's single
+    *                    chart and both side-by-side panels), so the one
+    *                    `LecChartControls` panel drives them all. The default
+    *                    private store keeps this view at the defaults.
     */
   def apply(
       specSignal: Signal[LoadState[js.Dynamic]],
@@ -49,9 +51,13 @@ object LECChartView:
     var rootRef: dom.Element = null
     val isFullscreen: Var[Boolean] = Var(false)
 
+    // Latest control state, kept off the store's signal so a freshly embedded
+    // view can be initialised to it (the subscription only re-fires on change).
+    // Same component-local edge pattern as `currentResult`.
+    var latestParams: ChartParams = ChartParams.default
+
     def disposeChart(): Unit =
       currentResult.foreach { result =>
-        paramStore.capture(result.view)
         hoverBridge.detachFromView(result.view)
         result.finalize()
         currentResult = js.undefined
@@ -81,6 +87,14 @@ object LECChartView:
       ),
       div(
         cls := "lec-chart-content",
+        // Control panel → Vega: push the shared control state onto the current
+        // view whenever it changes (and once on mount — a Signal emits its
+        // current value on subscribe). A newly embedded view is initialised
+        // from `latestParams` in `onResult`, since this only re-fires on change.
+        paramStore.signal --> { params =>
+          latestParams = params
+          currentResult.foreach(result => params.applyTo(result.view))
+        },
         // Laminar → Vega hover push (§3B.3)
         hoverBridge.hoveredCurveId.signal.changes --> { maybeId =>
           currentResult.foreach { result =>
@@ -106,7 +120,7 @@ object LECChartView:
                     spec,
                     onResult = result => {
                       currentResult = result
-                      paramStore.restore(result.view)
+                      latestParams.applyTo(result.view)
                       hoverBridge.attachToView(result.view)
                     },
                     onError = msg => renderError$.set(Some(msg))

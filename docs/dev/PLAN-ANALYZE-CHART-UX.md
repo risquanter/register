@@ -168,10 +168,14 @@ sbt app/test         # unchanged suites (no new pure logic; the flags are wiring
 ## File inventory
 
 - modules/app/src/main/scala/app/chart/LECSpecBuilder.scala
+- modules/app/src/main/scala/app/chart/LecChartParams.scala
 - modules/app/src/main/scala/app/state/LECChartState.scala
+- modules/app/src/main/scala/app/state/ChartParamStore.scala
+- modules/app/src/main/scala/app/components/LecChartControls.scala
+- modules/app/src/main/scala/app/components/Icons.scala
 - modules/app/src/main/scala/app/views/AnalyzeView.scala
 - modules/app/src/main/scala/app/views/LECChartView.scala
-- modules/app/src/main/scala/app/components/Icons.scala
+- modules/app/src/test/scala/app/chart/LecChartParamsSpec.scala
 - modules/app/styles/app.css
 
 ## Versioning
@@ -179,3 +183,186 @@ sbt app/test         # unchanged suites (no new pure logic; the flags are wiring
 New user-facing SPA feature (zoom + fullscreen), no API change: PATCH on landing
 (or MINOR if you'd rather mark the feature) — user's call. Mirror `APP_VERSION`
 to `.env` and `.env.irmin`.
+
+---
+
+## Continuation — Option C: native Laminar toggle controls (replaces the CSS-reflow toggles-left)
+
+### Why this supersedes the D1-A CSS reflow
+
+vega-embed puts its `vega-embed` class **on the mount element itself**
+(`div.lec-chart-container.vega-embed`) and renders the bound toggle inputs
+(`.vega-bindings`) **inside** that same element — the element it measures for
+`width:"container"`. So a CSS-only "toggles to the left column" cannot both move
+the toggles and let the chart fill correctly: the toggles either don't move
+(descendant selector never matched a single-element node) or they share the width
+Vega is measuring. Option C removes the root cause: drop Vega's `bind` inputs and
+render the toggles as native Laminar controls in our own left column, driving the
+Vega view's signals directly. This also retires TODO item 35 (app-consistent
+control styling).
+
+### Design principles applied (reloaded skills)
+
+- **ADR-019.** State Vars live in one owner (`ChartParamStore`); the control
+  component is a pure derived view (Pattern 4) receiving `Signal`s + callbacks,
+  owning no state. No `.now()` in any render pipeline — the Vega view is an
+  imperative external object, updated only from lifecycle callbacks and `-->`
+  observers (edges), mirroring the existing `var currentResult` edge pattern in
+  `LECChartView`.
+- **Pass 0a (domain typing).** The interpolation mode is a `String` with a fixed
+  valid set → becomes `enum Interpolation`. The six annotation toggles become a
+  closed `enum LecAnnotation` with an enabled-`Set`, not six parallel `Boolean`
+  Vars.
+- **Pass 0b / DRY.** The enums are the single source of truth for the signal
+  names, labels, and defaults. `LECSpecBuilder` builds the signal declarations by
+  iterating the enum values; the control panel renders by iterating the same
+  values; `preservedParams` (a third copy of the name list) is deleted. Vega
+  signal-name/value strings are used only at the `view.signal(...)` bridge (the
+  third-party-bridge exception to within-domain adhesion).
+- **JS-bridge isolation.** `ChartParams.applyTo(view)` is the one place raw
+  signal names cross into Vega.
+
+### New: `modules/app/src/main/scala/app/chart/LecChartParams.scala`
+
+```scala
+package app.chart
+
+import scala.scalajs.js
+
+enum Interpolation(val signalValue: String, val label: String):
+  case Monotone  extends Interpolation("monotone", "Monotone")
+  case Basis     extends Interpolation("basis", "Basis")
+  case Linear    extends Interpolation("linear", "Linear")
+  case StepAfter extends Interpolation("step-after", "Step after")
+
+object Interpolation:
+  val default: Interpolation = Monotone
+  def fromSignal(s: String): Interpolation = values.find(_.signalValue == s).getOrElse(default)
+
+/** A LEC annotation with its own show/hide toggle. `signalName` is the Vega
+  * signal the spec's opacity `expr` reads; `defaultOn` is its initial state. */
+enum LecAnnotation(val signalName: String, val label: String, val defaultOn: Boolean):
+  case P90    extends LecAnnotation("showP90", "P90", false)
+  case P95    extends LecAnnotation("showP95", "P95", true)
+  case P99    extends LecAnnotation("showP99", "P99", false)
+  case P995   extends LecAnnotation("showP995", "P99.5", false)
+  case AAL    extends LecAnnotation("showAAL", "AAL", true)
+  case NoLoss extends LecAnnotation("showNoLossProbability", "No-loss probability", true)
+
+object LecAnnotation:
+  val defaults: Set[LecAnnotation] = values.filter(_.defaultOn).toSet
+
+/** The user's chart-control state, and the sole bridge that pushes it onto a
+  * live Vega view. `toggle` is a pure method (unit-tested without a Var). */
+final case class ChartParams(interpolation: Interpolation, annotations: Set[LecAnnotation]):
+  def toggle(a: LecAnnotation): ChartParams =    // flip membership, pure
+    copy(annotations = if annotations.contains(a) then annotations - a else annotations + a)
+  def applyTo(view: js.Dynamic): Unit =
+    try view.signal("interpolate", interpolation.signalValue) catch case _: Throwable => ()
+    LecAnnotation.values.foreach { a =>
+      try view.signal(a.signalName, annotations.contains(a)) catch case _: Throwable => ()
+    }
+    try { view.run(); () } catch case _: Throwable => ()
+
+object ChartParams:
+  val default: ChartParams = ChartParams(Interpolation.default, LecAnnotation.defaults)
+```
+
+### Rewrite: `modules/app/src/main/scala/app/state/ChartParamStore.scala`
+
+State moves app-side; `capture`/`restore` (read-from / write-to the dying view)
+are removed — the store is now the source of truth, not the Vega view.
+
+```scala
+final class ChartParamStore:
+  private val state: Var[ChartParams] = Var(ChartParams.default)
+  val signal: Signal[ChartParams] = state.signal
+  def setInterpolation(i: Interpolation): Unit = state.update(_.copy(interpolation = i))
+  def toggleAnnotation(a: LecAnnotation): Unit = state.update(_.toggle(a))
+```
+
+### New: `modules/app/src/main/scala/app/components/LecChartControls.scala`
+
+Pure view (owns no state): a select + one checkbox per `LecAnnotation`,
+rendered by iterating the enums. Styled with the app's own `form-*` classes.
+
+```scala
+object LecChartControls:
+  def apply(params: Signal[ChartParams], store: ChartParamStore): HtmlElement
+  // internally: select(controlled(value <-- params.map(_.interpolation.signalValue),
+  //   onInput.mapToValue --> (s => store.setInterpolation(Interpolation.fromSignal(s)))),
+  //   Interpolation.values.map(i => option(value := i.signalValue, i.label)))
+  // and LecAnnotation.values.map(a => label(input(typ := "checkbox",
+  //   controlled(checked <-- params.map(_.annotations.contains(a)),
+  //     onInput.mapToChecked --> (_ => store.toggleAnnotation(a)))), span(a.label)))
+```
+
+### `LECSpecBuilder.scala`
+
+- Remove the `interpolation: String` parameter from `build`/`buildFromSeries`
+  (no caller passes it; the live value comes from `ChartParams.applyTo`). The
+  spec declares the `interpolate` signal with `Interpolation.default.signalValue`.
+- Build the toggle signal declarations by iterating `LecAnnotation.values`
+  (`name` → `signalName`, `value` → `defaultOn`), **without** `bind`.
+- Source the annotation layers' `toggleParam` and labels from `LecAnnotation`
+  (single source of truth); the `quantiles` map key ("p90"…"p99.5") stays a
+  local mapping to the enum case.
+- Delete `preservedParams`. Keep the `grid` pan/zoom param on the point layer
+  (unchanged).
+
+### `LECChartView.scala`
+
+- Content becomes chart-only (no `.vega-bindings` anywhere). Keep the header +
+  fullscreen button + hover bridge.
+- Replace `capture`/`restore` with: a mounted subscription
+  `paramStore.signal --> { p => latestParams = p; currentResult.foreach(r => p.applyTo(r.view)) }`
+  (edge, no `.now()`), plus `latestParams.applyTo(view)` in `onResult` so a
+  freshly embedded view also gets the current values. `latestParams` is a
+  component-local `var`, same edge pattern as `currentResult`.
+
+### `AnalyzeView.scala`
+
+- Render `LecChartControls(chartParams.signal, chartParams)` **once**, in a left
+  column beside the whole chart area (so it applies in both single/overlay and
+  side-by-side layouts, driving the one shared `chartParams`). The chart area
+  (single surface or panel grid) sits to its right and fills the rest.
+- `panelSpec` / the `build`/`buildFromSeries` call sites drop the (now removed)
+  interpolation argument — none pass it today, so this is mechanical.
+- Panels render no controls of their own; each panel's `LECChartView` reacts to
+  the shared store via its subscription.
+
+### `app.css`
+
+- Replace the (non-matching) `.lec-chart-surface .vega-embed` toggles-left rules
+  with a real flex row on the chart area: `LecChartControls` left column
+  (auto width), chart right (`flex: 1`). Fix the single-chart vertical sizing so
+  the bottom gap is gone. Style `.lec-chart-controls` with `form-*` variables.
+  Keep the fullscreen/responsive rules.
+
+### Tests — `modules/app/src/test/scala/app/chart/LecChartParamsSpec.scala`
+
+Pure (no DOM/Vega): `ChartParams.default` matches the enum defaults;
+`toggleAnnotation` adds then removes (idempotent round-trip); enum
+`signalName`/`signalValue`/`label` mappings are stable; `LecAnnotation.defaults`
+= the `defaultOn` set. (`applyTo` is a JS-view side effect, exercised in the
+manual pass, not unit-tested.)
+
+### ADR alignment
+
+- **ADR-019:** compliant — single Var owner, pure control view with
+  signals+callbacks, no `.now()` in render pipelines, Vega updated only at edges.
+- No API/DTO/endpoint/service/domain change — SPA only. No new dependency.
+
+### Open decisions
+
+None — Option C is the ruled approach; the placement of the control column
+(left of the whole chart area, shared across layouts) follows from "one chart's
+worth of settings," not a fresh choice.
+
+### Verification
+
+`sbt app/compile` (zero new warnings) + `sbt app/test` (adds `LecChartParamsSpec`)
+green; then the manual pass at localhost:18080: toggles render as app-styled
+controls in a left column and drive the chart live (single, overlay, and every
+side-by-side panel), the chart fills the freed width with no bottom gap, zoom +
+fullscreen still work.

@@ -4,7 +4,7 @@ import com.raquo.laminar.api.L.{*, given}
 
 import scala.scalajs.js
 
-import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, SlotPalettePicker, Icons, HistorySlider}
+import app.components.{SplitPane, FormInputs, BranchBar, BranchCard, SlotPalettePicker, Icons, HistorySlider, LecChartControls}
 import app.chart.{LECSpecBuilder, ColorAssigner, CompareColorAssigner, PaletteData, PinnedAxes}
 import app.state.{TreeViewState, TreeHistoryState, AnalyzeQueryState, LoadState, ChartHoverBridge, ChartParamStore, ScenarioState, AppConfigState, CompareLayout, CompareState, CompareSlot, CompareSlotState, CompareTarget, SlotCoordinate, toCoordinate}
 import com.risquanter.register.domain.data.{LECNodeCurve, RiskNode, RiskTree}
@@ -566,7 +566,13 @@ object AnalyzeView:
       // eye toggle doesn't rebuild the whole grid.
       div(
         cls := "analyze-lec-panel",
-        child <-- compareState.layout.signal
+        // The one native control panel (interpolation + annotation toggles) for
+        // the whole chart area, driving the shared `chartParams` — so it applies
+        // to the single/overlay chart and every side-by-side panel at once.
+        LecChartControls(chartParams.signal, chartParams),
+        div(
+          cls := "analyze-lec-chart-area",
+          child <-- compareState.layout.signal
           .combineWith(compareState.rowTargets, compareState.hiddenFlags, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
           .map { (layout, rowTs, hidden, activeBranch, activeTid, baselineAt) =>
             val visibleComparands =
@@ -612,6 +618,7 @@ object AnalyzeView:
                 LECChartView(combinedSpecSignal, hoverBridge, chartParams)
               )
           }
+        )
       )
     )
 

@@ -1718,5 +1718,7 @@ view signals (`view.signal(name, value)` — `ChartParamStore` already does exac
 this on capture/restore). Gives app-consistent styling and full layout control,
 at the cost of a two-way-wired control panel per signal.
 
-**Status:** backlog polish — do only if the Vega-styled inputs read as
-out-of-place after D1-A lands. Not scheduled.
+**Status:** DONE (0.10.5) — implemented as Option C in PLAN-ANALYZE-CHART-UX.md:
+Vega `bind` inputs dropped; native `LecChartControls` (Laminar) drive the view
+signals via `ChartParams`. `Interpolation`/`LecAnnotation` enums are the single
+source of truth for the toggle signals.
