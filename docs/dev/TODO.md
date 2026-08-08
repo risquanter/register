@@ -1736,3 +1736,50 @@ timeless-context phrasing, code-first style) and bring each into conformance, or
 split oversized ones per the template's guidance. Keep each ADR's number.
 
 **Status:** scheduled — run right after the error-handling ADR change lands. Not started.
+
+## 37. LECGenerator single-pass statistics — efficiency
+
+**Origin (2026-07-23 code review; queued as own item 2026-08-07):** the per-node
+LEC statistics in `modules/server/src/main/scala/com/risquanter/register/simulation/LECGenerator.scala`
+are computed by independent walks over the same sparse `outcomeCount` map on
+every curve request: `calculateQuantiles` runs `unconditionalQuantile`'s
+cumulative scan four times (p90/p95/p99/p99.5), `clippedMaxLoss` runs a fifth
+for the axis clip, and `averageAnnualLoss` / `probabilityOfNoLoss` each make
+their own pass (plus repeated `outcomeCount.values.sum` totals inside them) —
+roughly eight traversals per node per request.
+
+**Task:** one cumulative walk over `outcomeCount` computes all of them: running
+count crosses the four percentile targets, running loss-weighted sum yields AAL,
+and the implicit/explicit zero totals yield the no-loss probability. Keep the
+existing public signatures where practical; property tests must assert
+byte-identical outputs to the current per-statistic implementations before the
+old paths are removed.
+
+**Status:** OPEN. Pure server-side efficiency, no API or output change; payoff
+grows with tree size, trial count, and curve count.
+
+## 38. Compare-mode hover: slot-scoped routing fix + mirror toggle (Option B, ruled 2026-08-07)
+
+**Origin (2026-07-23 review, branch-cards slice; retargeted 2026-07-25 to
+slot-scoped ids; direction ruled 2026-08-07):** two halves, one routing point.
+
+1. **Bug:** hovering a curve on a compare chart highlights nothing in the tree —
+   compare series ids are slot-scoped (`"<nodeId>@<slotLabel>"`, see
+   `CompareColorAssigner`), but `ChartHoverBridge.parseHoverSignal` /
+   `buildSelectionStore` only handle bare `NodeId` strings.
+2. **Accidental behaviour to make deliberate:** the shared hover bridge mirrors
+   tree-side hover into every surface indiscriminately; slot-scoped surfaces
+   are disconnected from it.
+
+**Task (ruled: Option B):** parse the slot-scoped id into (node, slot) and
+route through a fan-out policy with a user toggle in the compare bar:
+- **mirror ON (default):** hover highlights the node in every slot whose tree
+  contains it — cross-branch tracing, the deliberate version of today's
+  accident;
+- **mirror OFF:** hover stays in the origin slot only (for heavily divergent
+  branches where mirroring is noise).
+Toggle state is one boolean in `CompareState`. Do NOT implement against the
+old branch-suffixed ids.
+
+**Status:** direction ruled; implementation needs its own plan continuation
+(PLAN-ANALYZE-CHART-UX workstream) before any code.

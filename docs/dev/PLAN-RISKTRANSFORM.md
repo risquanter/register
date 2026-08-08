@@ -258,3 +258,105 @@ pipeline-stage decision (B3 stands).
      question.
    - **D5** — after D1's build, as its own ADR.
 5. None of the remaining items blocks milestone-2b Phase A.
+
+---
+
+## 6. First-consumer concept (high level — not a build spec yet)
+
+Recorded at concept level. Signatures, codecs, and file inventory are deferred
+to a build plan; this section fixes the shape of the idea, not the details.
+
+**Mitigation is a first-class, explicit domain concept — not a baked parameter
+edit.** It must be visible, queryable, toggleable, comparable with/without, and
+recorded as a provenance step. Dissolving a mitigation into edited node numbers
+and keeping only a metadata trace is rejected.
+
+- **Two stages, named.** `RiskResultTransform` (result-stage,
+  `TrialOutcomes => TrialOutcomes` — the current `RiskTransform`, to be renamed)
+  for effects with no parameter preimage (hard cap, deductible).
+  `RiskLeafTransform` (parameter-stage, `RiskLeaf => RiskLeaf`) for
+  likelihood/severity parameter changes — a **product** of a `LikelihoodTransform`
+  on the probability and a `DistributionTransform` on the distribution, either
+  component the identity. Product (disjoint fields, commuting), unlike the
+  result-stage pipeline, which is an ordered, non-commutative composition.
+- **Explicit representation, stored in versioned tree content** — either on the
+  affected node or associated with the tree with a transparent node mapping.
+- **Effective node derived at resolution:** parameter-stage before simulation,
+  result-stage at the resolve edge (D3). Caching the effective
+  (post-parameter-mitigation) leaf's simulation is an orthogonal efficiency
+  choice, keyed on effective content; it does not touch the explicitness
+  requirement.
+- **Targeting is a transparent node predicate; mechanism VQL.** **Decided:
+  tree-associated** — `RiskTree` gains a top-level `mitigations` collection in the
+  versioned blob; on-node is only the degenerate single-node mapping. **Range
+  expressiveness decided (B):** extend the *typed* range to full formulas
+  (`∧`/`¬`/`∃`, closed-world negation) rather than adapter-derived predicates — a
+  sibling vql-engine change (`docs/scratch/MITIGATION-PRE-PLANNING.md` §P-4). A
+  mitigation's targeting predicate is a **restricted** sublanguage (closed in `x`,
+  no answer variables, bounded auxiliary quantifiers, no mitigation-state
+  predicates; §P-1).
+
+**Open research feeding this concept:**
+
+- **VQL soundness for targeting.** Exact-mode FOL predicate over the node domain
+  gives crisp, deterministic, reproducible selection — sound for targeting.
+  Keep two uncertainties separate: mitigation **coverage/rollout** across a
+  population of nodes/instances is a sound vague-quantifier + sampler use;
+  mitigation **efficiency/effect-size** on one node is not a quantifier concept
+  and belongs in the Monte Carlo layer as a distribution-valued transform
+  parameter sampled per trial. Conflating them is a category error.
+- **Asset / knowledge-graph transferability.** The VQL knowledge base is a
+  relational fact store already shaped around assets–risks–mitigations (engine
+  example domain). Register currently feeds only the risk tree
+  (`RiskTreeKnowledgeBase`: domain = tree nodes, structural predicates + sim
+  functions). An asset / company-configuration graph is additive — a second KB
+  source joined to risks by type/instance — and needs no engine change. The
+  explicit-mitigation + VQL-targeting model transfers directly, with targeting
+  predicates ranging over asset attributes instead of tree structure; keeping
+  mitigation explicit is precisely what makes that future join possible. Node
+  identity should move from name-based to stable-id-based before this.
+
+**Scope.** Risk planning does not include asset scope. The mitigation design
+targets the risk tree only. The requirements below keep an asset / knowledge-graph
+extension open without building it now.
+
+**Requirements carried into the build plan:**
+
+- **Source-agnostic targeting.** The mitigation's targeting predicate must not be
+  hard-wired to tree structure. It selects a set of targets through an interface
+  that ranges over tree nodes today and can range over asset-graph elements later,
+  with no change to the mitigation entity or its persistence — only the predicate's
+  backing source changes.
+- **Stable-id identity.** Mitigation targeting resolves to and stores stable node
+  ids, never node names. The name-keyed VQL domain
+  (`RiskTreeKnowledgeBase`, `Value(Asset, node.name.value)`) must be reconciled to
+  id-based identity so targeting survives duplicate/renamed names and future
+  multi-instance asset elements.
+
+**Algebra (settled framing).** Three complementary structures, none in conflict:
+
+1. **Commutative** aggregation monoid on `TrialOutcomes` — per-trial sum of
+   children (ADR-009). Job: combine siblings into a portfolio.
+2. **Non-commutative** mitigation-composition monoid on transforms — ordered
+   composition (`Identity[RiskTransform]` / `Identity[TransformPipeline]`). Job:
+   stack several controls on one node, in order.
+3. **Monoid action** `Mits × Tree → Tree` — a scoped set of mitigations acting on
+   a tree, folded at the right stage. Job: "apply these mitigations to this tree."
+   Refinement: it is a **trace monoid** — scoped mitigations commute iff their
+   scopes are disjoint, so order matters only where scopes overlap.
+
+Consequences that follow from this framing:
+
+- **Associativity invariant.** The aggregation combine is a pure per-trial sum
+  with no mitigation logic. A mitigation transforms the values a combine
+  **consumes** (a leaf operand) or **produces** (a node's finished aggregate),
+  never the summation **step** — which keeps aggregation lawful (the old B4 point).
+- **Scope ≠ affected set.** A mitigation directly transforms its **scoped** nodes;
+  the **effect propagates** to all ancestors via aggregation (a portfolio benefits
+  without being in scope). UI/provenance distinguish *directly-scoped* from
+  *affected-by-descendant*.
+- **Resolution is the action.** Because mitigations live in tree content, applying
+  them is effectively `Tree → ResolvedTree`; resolving each predicate's scope
+  against the tree is part of computing the action, so it recomputes per
+  tree-version (memoized). Binding (type-check) is schema-stable and independent of
+  ordinary tree edits.

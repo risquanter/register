@@ -537,3 +537,187 @@ Shipped code changes (refactor, no external API change): PATCH on landing, mirro
 - modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala
 - modules/app/src/test/scala/app/core/JsBoundarySpec.scala
 - build.sbt
+
+---
+
+## Continuation — Chart-spec deduplication (shared theme, folded annotation layers, one percent formatter)
+
+Retires the chart-code dedup items from the 2026-07-23 review backlog. Three
+duplications, one root design: the Vega building blocks that both spec builders
+need live once, in one shared object; the per-annotation layer explosion is
+folded into datum-driven shared layers at the same time (same mechanism: data
+carries what layers used to hard-code).
+
+Already moot from that backlog list (deleted by the Option C rewrite): the six
+`bind`-toggle param literals and `preservedParams`.
+
+### Step 1 — NEW `modules/app/src/main/scala/app/chart/VegaSpecShared.scala`
+
+```scala
+package app.chart
+
+import scala.scalajs.js
+
+/** Shared Vega-Lite building blocks for every chart surface (LEC chart +
+  * distribution preview): the dark theme, the loss-axis label formatting,
+  * datum-driven vertical rule/label annotation layers, and the no-data spec. */
+object VegaSpecShared:
+
+  /** App dark-theme Vega config — font stack, label/title colours and sizes.
+    * Single source of truth (was duplicated and drifted in
+    * `DistributionSpecBuilder.darkConfig`). Content: the current
+    * `LECSpecBuilder` config verbatim (font `'Geist', ui-sans-serif, ...`,
+    * legend/axis label sizes 12/13, axis labelColor #c8ced0). */
+  def darkConfig: js.Dynamic
+
+  /** X-axis B/M `labelExpr` shared by all loss axes (was duplicated between
+    * the LEC line layer's x-axis and `DistributionSpecBuilder.xEncoding`). */
+  val lossAxisLabelExpr: String =
+    "if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')"
+
+  /** One vertical rule + its stacked text label, as data. `visibilityKey` is
+    * the annotation-toggle signal name gating it (a `LecAnnotation.signalName`);
+    * `None` = always visible (distribution anchors). */
+  final case class VerticalRuleDatum(
+    x: Double,
+    labelLines: Seq[String],
+    ruleColor: String,
+    textColor: String,
+    dashed: Boolean,
+    visibilityKey: Option[String]
+  )
+
+  /** TWO layers — one rule layer + one text layer — covering ALL given data.
+    * Replaces the per-annotation layer pairs (the layer-count fold: colour,
+    * dash, label and toggle come from datum fields with `scale: null` /
+    * conditions; visibility is one chained expr over `LecAnnotation.values`
+    * mapping `datum.toggle` to its signal, defaulting to visible when the
+    * datum has no toggle). Text styling params default to the LEC chart's
+    * values; the distribution preview passes its own. */
+  def verticalRuleLayers(
+    data: Vector[VerticalRuleDatum],
+    fontSize: Int = 13,
+    textDx: Int = 4,
+    textDy: Int = 4,
+    baseline: String = "top"
+  ): Seq[js.Dynamic]
+
+  /** Text-only spec for the no-data state (was duplicated `emptySpec`s). */
+  def emptyMessageSpec(
+    width: Int,
+    height: Int,
+    responsive: Boolean,
+    message: String,
+    fontSize: Int = 11
+  ): js.Dynamic
+```
+
+Datum fields on the folded layers: `x`, `label` (array → stacked lines),
+`ruleColor`/`textColor` (via `scale: null`), `dashed` (strokeDash condition),
+`toggle` (signal name or absent). The visibility expr is generated from
+`LecAnnotation.values` — e.g.
+`datum.toggle == 'showP90' ? (showP90 ? 1 : 0) : ... : 1` — so the enum stays
+the single source of truth for toggle signals.
+
+### Step 2 — NEW `modules/app/src/main/scala/app/core/NumberFormat.scala`
+
+```scala
+package app.core
+
+object NumberFormat:
+  /** A 0–1 domain value as its 0–100 percent string (no "%" suffix), rounded
+    * HALF_UP to `decimals` places via BigDecimal (no floating-point noise),
+    * trailing zeros stripped. Single source for percent display (form fields
+    * and chart labels). */
+  def percentValue(p: Double, decimals: Int): String =
+    BigDecimal(p * 100.0)
+      .setScale(decimals, scala.math.BigDecimal.RoundingMode.HALF_UP)
+      .underlying.stripTrailingZeros.toPlainString
+```
+
+- `RiskLeafFormState.domainToDisplayPct(p, decimals)` keeps its name and
+  callers (`FormMode` ×2) and delegates to `NumberFormat.percentValue`.
+- `LECSpecBuilder.formatProbability(p)` becomes
+  `s"${NumberFormat.percentValue(p, 0)}%"` — output identical (`math.round`
+  and HALF_UP agree on non-negative input).
+
+### Step 3 — `LECSpecBuilder.scala` (already in the file inventory)
+
+- Config literal → `VegaSpecShared.darkConfig`; x-axis labelExpr →
+  `VegaSpecShared.lossAxisLabelExpr`; `emptySpec` → `VegaSpecShared.emptyMessageSpec(width, height, responsive, "No data available")`.
+- Delete private `verticalAnnotation`; the per-curve quantile/AAL loop now
+  builds `Vector[VerticalRuleDatum]` (quantiles dashed, AAL solid, rule and
+  text colour = the curve's hex, `visibilityKey = Some(ann.signalName)`) and
+  pushes the TWO layers from `VegaSpecShared.verticalRuleLayers(...)`.
+- Delete private `noLossStat`; replace with private `noLossLayer(rows: Vector[(String, String)]): js.Dynamic`
+  — ONE text layer whose data rows carry `(label, color)` and a per-row pixel
+  `y` (field with `scale: null`), gated by the NoLoss signal. LEC-only, so it
+  stays private here rather than in `VegaSpecShared`.
+- Layer count for a full chart: line + point + 2 rule/label layers + 1 no-loss
+  layer = 5, was 2 + up-to-11 per curve (145 at the 13-curve cap).
+- `formatLossValue` stays as-is (its tier-boundary rounding is a separate
+  backlog item, not this scope).
+
+### Step 4 — `DistributionSpecBuilder.scala`
+
+- Delete the local `darkConfig` (the diverged copy) → `VegaSpecShared.darkConfig`.
+  Drop the per-encoding `labelColor`/`titleColor` literals in `xEncoding` and
+  the y-encodings so the shared config governs.
+- Delete `ruleAnnotation`; anchors build `Vector[VerticalRuleDatum]`
+  (`ruleColor = "#6a8a8e"`, `textColor = "#a0b0b0"`, `dashed = true`,
+  `visibilityKey = None`) → `VegaSpecShared.verticalRuleLayers(data, fontSize = 11, textDx = 4, textDy = -6, baseline = "middle")`.
+- `emptySpec` → `VegaSpecShared.emptyMessageSpec(width, height, responsive = false, message = "Enter distribution parameters to see a preview", fontSize = 14)`.
+- `cdfAnchorDot` stays (no counterpart anywhere).
+
+### Behaviour changes (explicit, part of this approval)
+
+1. **Distribution preview adopts the shared theme**: app font stack, axis/legend
+   label sizes 12/13, axis labelColor `#c8ced0` (brighter). The old local copy
+   was drift — the LEC values are the deliberate readability improvements that
+   never reached the preview chart. Visual-only; no data or interaction change.
+2. **LEC annotation layers are folded**: rendered marks, colours, toggles, and
+   labels are the same by construction (same values, moved from per-layer
+   literals into datum fields); verified in the manual pass.
+3. Everything else is output-identical (percent strings, empty-state specs,
+   axis formatting).
+
+### ADR alignment
+
+- **ADR-019**: untouched — pure spec builders, no state, no `.now()`.
+- **ADR-001 / Pass 0a**: the raw `String` colours/exprs are Vega-edge literals
+  (third-party bridge exception); no domain value loses typing.
+- No API/DTO/endpoint/service change; no new dependency. Both new objects have
+  immediate call sites (no dead code).
+
+### Open decisions
+
+None — the behaviour changes above are stated consequences of unifying on the
+current LEC theme. If the preview chart should instead keep its exact current
+look, that is a parameterization of `darkConfig`, not a different structure.
+
+### Verification
+
+```bash
+sbt app/compile   # zero new warnings
+sbt app/test      # adds NumberFormatSpec; existing suites unchanged
+sbt 'commonJVM/test; server/test'
+sbt serverIt/test
+```
+
+Manual at localhost:18080 (rebuilt frontend): LEC chart pixel-comparable to
+today (annotations per curve, toggles, hover, legend, zoom); distribution
+preview (Design → leaf form) renders with the app font and brighter labels,
+anchors and dots unchanged in position.
+
+### Versioning
+
+Refactor of shipped code, no external API change: PATCH on landing; mirror
+`APP_VERSION` to `.env` and `.env.irmin`.
+
+### File inventory additions — merged into `## File inventory` upon approval
+
+- modules/app/src/main/scala/app/chart/VegaSpecShared.scala
+- modules/app/src/main/scala/app/chart/DistributionSpecBuilder.scala
+- modules/app/src/main/scala/app/core/NumberFormat.scala
+- modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+- modules/app/src/test/scala/app/core/NumberFormatSpec.scala

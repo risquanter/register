@@ -532,15 +532,18 @@ children).
   best cache fit.
 - **B4** should be modeled as an endomorphism **applied after** `combineAll`, explicitly **outside**
   the monoid, to avoid breaking associativity.
-- **Composition algebra**: prefer **ordered endomorphism composition** over a mitigation-monoid,
-  because real mitigations (deductible vs. cap) do **not** commute; claiming a monoid here would be
-  unlawful and is exactly the kind of "mathematically pretty but wrong" trap the source
-  conversation falls into elsewhere.
+- **Composition algebra**: mitigation composition **is** a monoid — but a *non-commutative* one:
+  ordered endomorphism composition (associative, identity = the no-op transform), exactly what
+  `Identity[RiskTransform]` / `Identity[TransformPipeline]` implement. What must **not** be claimed
+  is a *commutative* monoid: real mitigations (deductible vs. cap) do **not** commute, so they cannot
+  be reordered the way aggregation's commutative monoid on `TrialOutcomes` can. Asserting
+  commutativity here would be the "mathematically pretty but wrong" trap; the ordered
+  (non-commutative) monoid is lawful and is the adopted structure.
 
 ### B.7 Open decisions for mitigation
 
 1. ~~Which stage(s) to support — single (B3?) or a small combination (B1 + B3)?~~ ✅ **Resolved** — B3 (`RiskTransform`) is implemented. B1 has no implementation and no use case identified yet.
-2. ~~Composition algebra: ordered endomorphisms vs. monoid (recommendation: ordered).~~ ✅ **Resolved** — `Identity[RiskTransform]` uses ordered composition (`l then r`); `andThen`/`compose` methods explicit.
+2. ~~Composition algebra: ordered endomorphisms vs. monoid (recommendation: ordered).~~ ✅ **Resolved** — mitigation composition is a **non-commutative monoid** (`Identity[RiskTransform]`, ordered `l then r`, `andThen`/`compose` explicit). "vs. monoid" in the original framing meant *commutative* monoid — ordered composition is itself a lawful monoid.
 3. ~~Caching of pre- vs. post-mitigation results.~~ ✅ **Decided 2026-07-17 (PLAN-RISKTRANSFORM.md D3, Option 1):** cache raw simulation results; apply the transform at the resolver edge on every read. Transform parameters never enter the cache-key projection.
 4. **Whether mitigation becomes a client-facing concept** → if yes, this is a deliberate **API-shape decision** (trigger #1) requiring its own ADR, not a refactor. (PLAN-RISKTRANSFORM.md D5; open, gated on its D1.)
 5. **Provenance representation of a mitigation event** — `RiskTransform` does not record provenance. What record should represent a transform application is unresolved (PLAN-RISKTRANSFORM.md D4; unblocked 2026-07-18 by DD-19's closure, itself still open — decide with D1's build or the first mitigation wiring).
