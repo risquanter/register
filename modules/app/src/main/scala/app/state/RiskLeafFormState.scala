@@ -479,16 +479,7 @@ object RiskLeafFormState:
     */
   def pctToDomain(pct: Double): Double = pct / 100.0
 
-  /** Convert a 0–1 domain value to its 0–100 display string, rounded to
-    * `decimals` decimal places using half-up rounding.
-    *
-    * Uses [[BigDecimal]] to eliminate floating-point noise
-    * (e.g., `0.1 * 100 = 10.000000000000001`).
-    *
-    * - `decimals = 0` → percentiles (integers: "10", "50", "90")
-    * - `decimals = 2` → probability ("20.5" — trailing zeros stripped)
-    */
+  /** Convert a 0–1 domain value to its 0–100 display string — the shared
+    * [[app.core.NumberFormat.percentValue]] under this form-facing name. */
   def domainToDisplayPct(p: Double, decimals: Int): String =
-    BigDecimal(p * 100.0)
-      .setScale(decimals, scala.math.BigDecimal.RoundingMode.HALF_UP)
-      .underlying.stripTrailingZeros.toPlainString
+    app.core.NumberFormat.percentValue(p, decimals)
