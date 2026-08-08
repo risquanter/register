@@ -19,11 +19,13 @@
 #     Root (portfolio)
 #     ├── Leaf One   lognormal  10%  $40K-$320K   (bumped to 30% on scenario alpha)
 #     └── Leaf Two   lognormal  10%  $20K-$150K
-#   Tree B "Compare Demo Tree B"
+#   Tree B "Compare Demo Tree B"  — deliberately ~10× heavier than Tree A, so a
+#   cross-tree overlay shows clearly separated curves, not two near-identical ones
 #     Root (portfolio)
-#     ├── Leaf B1    lognormal  15%  $30K-$250K
-#     └── Leaf B2    lognormal   8%  $10K-$90K
-#   Scenarios (forked from main): alpha (Leaf One edited -> diff vs main), beta (unchanged)
+#     ├── Leaf B1    lognormal  30%  $400K-$3M
+#     └── Leaf B2    lognormal  20%  $150K-$1.2M
+#   Scenarios (forked from main): alpha (Leaf One 10% -> 30% -> visibly higher
+#   curve + ✎ diff vs main), beta (unchanged -> overlays exactly on main)
 # =============================================================================
 set -euo pipefail
 
@@ -96,14 +98,14 @@ TREE_B_RESP=$(curl -s -X POST "$BASE/w/$WS_KEY/risk-trees" \
       {
         "name": "Leaf B1",
         "parentName": "Root",
-        "probability": 0.15,
-        "distributionShape": { "distributionType": "lognormal", "minLoss": 30000, "maxLoss": 250000, "percentiles": null, "quantiles": null, "terms": null }
+        "probability": 0.3,
+        "distributionShape": { "distributionType": "lognormal", "minLoss": 400000, "maxLoss": 3000000, "percentiles": null, "quantiles": null, "terms": null }
       },
       {
         "name": "Leaf B2",
         "parentName": "Root",
-        "probability": 0.08,
-        "distributionShape": { "distributionType": "lognormal", "minLoss": 10000, "maxLoss": 90000, "percentiles": null, "quantiles": null, "terms": null }
+        "probability": 0.2,
+        "distributionShape": { "distributionType": "lognormal", "minLoss": 150000, "maxLoss": 1200000, "percentiles": null, "quantiles": null, "terms": null }
       }
     ]
   }')
@@ -171,16 +173,6 @@ else
   fi
 fi
 
-# ── Done ──────────────────────────────────────────────────────────────────────
-header "Done — workspace info"
-ok "Workspace key : $WS_KEY"
-ok "Tree A ID     : $TREE_A   (Compare Demo Tree A — Leaf One, Leaf Two)"
-ok "Tree B ID     : $TREE_B   (Compare Demo Tree B — Leaf B1, Leaf B2)"
-ok "Scenarios     : alpha (Leaf One edited), beta (unchanged)"
-ok "Expires at    : $EXPIRES"
-ok "Open in app   : $BASE/w/$WS_KEY"
-info "Re-run anytime — the workspace key remains valid until expiry."
-
 cat <<EOF
 
 TEST LIST — Analyze tab. The right "Load Trees" panel holds the baseline row
@@ -224,3 +216,13 @@ implicit — it exists when 2+ rows have loaded trees with charted nodes.
 12 Palette: same colour family for baseline + a comparand -> overlay draws
    both in that family, swatches match. Distinct families -> distinct colours.
 EOF
+
+# ── Done (summary prints LAST) ────────────────────────────────────────────────
+header "Done — workspace info"
+ok "Workspace key : $WS_KEY"
+ok "Tree A ID     : $TREE_A   (Compare Demo Tree A — Leaf One, Leaf Two)"
+ok "Tree B ID     : $TREE_B   (Compare Demo Tree B — Leaf B1, Leaf B2; ~10× heavier than Tree A)"
+ok "Scenarios     : alpha (Leaf One 10% -> 30%), beta (unchanged)"
+ok "Expires at    : $EXPIRES"
+ok "Open in app   : $BASE/w/$WS_KEY"
+info "Re-run anytime — the workspace key remains valid until expiry."

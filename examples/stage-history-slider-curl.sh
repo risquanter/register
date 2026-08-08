@@ -201,17 +201,6 @@ put_tree mitigated "M1  Ransomware 18% -> 6% (mitigated)"
 BREACH_P=0.03
 put_tree mitigated "M2  Data Breach 8% -> 3% (mitigated)"
 
-# ── Done ──────────────────────────────────────────────────────────────────────
-header "Done — workspace info"
-ok "Workspace key : $WS_KEY"
-ok "Tree ID       : $TREE   (Cyber Risk Register)"
-ok "Branch main   : 6 commits (C1 create .. C6 revert)"
-ok "Branch mitig. : + M1, M2 on top of the fork"
-ok "pre-insider-audit : forked from commit C2 (before Insider Threat)"
-ok "Expires at    : $EXPIRES"
-ok "Open in app   : $BASE/w/$WS_KEY"
-info "Re-run anytime — the workspace key remains valid until expiry."
-
 cat <<EOF
 
 TEST LIST — Analyze tab, tree "Cyber Risk Register". Each slot card (the
@@ -246,3 +235,14 @@ the right. Rewinding a slot reads it at that commit (read-only, pinned banner).
    forked from commit C2, so its head has no Insider Threat; compare it against
    main head -> Insider Threat and the widened Data Breach show as differences.
 EOF
+
+# ── Done (summary prints LAST) ────────────────────────────────────────────────
+header "Done — workspace info"
+ok "Workspace key : $WS_KEY"
+ok "Tree ID       : $TREE   (Cyber Risk Register)"
+ok "Branch main   : 6 commits (C1 create .. C6 revert)"
+ok "Branch mitig. : + M1, M2 on top of the fork"
+ok "pre-insider-audit : forked from commit C2 (before Insider Threat)"
+ok "Expires at    : $EXPIRES"
+ok "Open in app   : $BASE/w/$WS_KEY"
+info "Re-run anytime — the workspace key remains valid until expiry."
