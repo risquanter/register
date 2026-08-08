@@ -3,6 +3,7 @@ package app.chart
 import scala.scalajs.js
 
 import app.state.DistributionViewMode
+import com.risquanter.register.domain.data.iron.HexColor.HexColor
 import com.risquanter.register.domain.data.Distribution
 import com.risquanter.register.domain.data.iron.IronConstants
 import com.risquanter.register.http.requests.{DistributionPreviewPoint, DistributionPreviewResponse}
@@ -10,7 +11,7 @@ import com.risquanter.register.http.requests.{DistributionPreviewPoint, Distribu
 /** Client-side Vega-Lite v6 specification builder for distribution preview charts.
   *
   * Produces `js.Dynamic` specs ready for `vegaEmbed` for both PDF and CDF views.
-  * Dark theme config mirrors [[LECSpecBuilder]] exactly.
+  * Dark theme config comes from [[VegaSpecShared]], shared with the LEC chart.
   *
   * The `draft` parameter supplies the original anchor points (percentiles/quantiles
   * for expert mode, minLoss/maxLoss for lognormal) used to draw overlay annotations.
@@ -50,8 +51,7 @@ object DistributionSpecBuilder:
         "y" -> js.Dynamic.literal(
           "field" -> "pdf",
           "type"  -> "quantitative",
-          "title" -> "Density",
-          "axis"  -> js.Dynamic.literal("labelColor" -> "#b0b8b8", "titleColor" -> "#e6e8e8")
+          "title" -> "Density"
         )
       )
     )
@@ -70,7 +70,7 @@ object DistributionSpecBuilder:
       "autosize"   -> "fit",
       "data"       -> js.Dynamic.literal("values" -> dataValues),
       "layer"      -> allLayers,
-      "config"     -> darkConfig
+      "config"     -> VegaSpecShared.darkConfig
     )
 
   private def buildCdfSpec(
@@ -93,11 +93,7 @@ object DistributionSpecBuilder:
           "field"  -> "cdf",
           "type"   -> "quantitative",
           "title"  -> "Probability",
-          "axis"   -> js.Dynamic.literal(
-            "format"     -> ".1~%",
-            "labelColor" -> "#b0b8b8",
-            "titleColor" -> "#e6e8e8"
-          ),
+          "axis"   -> js.Dynamic.literal("format" -> ".1~%"),
           "scale"  -> js.Dynamic.literal("domain" -> js.Array(0.0, 1.0))
         )
       )
@@ -117,25 +113,13 @@ object DistributionSpecBuilder:
       "autosize"   -> "fit",
       "data"       -> js.Dynamic.literal("values" -> dataValues),
       "layer"      -> allLayers,
-      "config"     -> darkConfig
+      "config"     -> VegaSpecShared.darkConfig
     )
 
   private def emptySpec(width: Int, height: Int): js.Dynamic =
-    js.Dynamic.literal(
-      "$schema"    -> "https://vega.github.io/schema/vega-lite/v6.json",
-      "width"      -> width,
-      "height"     -> height,
-      "background" -> "transparent",
-      "data"       -> js.Dynamic.literal("values" -> js.Array[js.Any]()),
-      "mark"       -> js.Dynamic.literal(
-        "type"    -> "text",
-        "color"   -> "#b0b8b8",
-        "fontSize"-> 14
-      ),
-      "encoding"   -> js.Dynamic.literal(
-        "text" -> js.Dynamic.literal("value" -> "Enter distribution parameters to see a preview")
-      ),
-      "config"     -> darkConfig
+    VegaSpecShared.emptyMessageSpec(
+      width, height, responsive = false,
+      message = "Enter distribution parameters to see a preview", fontSize = 14
     )
 
   // ── Data helpers ──────────────────────────────────────────────
@@ -149,13 +133,16 @@ object DistributionSpecBuilder:
 
   // ── Anchor overlay builders ───────────────────────────────────
 
-  /** Build anchor overlay layers for both PDF and CDF views. */
+  /** Build anchor overlay layers for both PDF and CDF views. Rules render as
+    * TWO datum-driven layers regardless of anchor count
+    * (`VegaSpecShared.verticalRuleLayers`); CDF anchor dots stay per-anchor. */
   private def anchorAnnotations(
     response: DistributionPreviewResponse,
     draft:    Option[Distribution],
     viewMode: DistributionViewMode
   ): js.Array[js.Any] =
     val layers = js.Array[js.Any]()
+    val rules = Vector.newBuilder[VegaSpecShared.VerticalRuleDatum]
     draft.foreach { d =>
       if d.distributionType == IronConstants.Expert then
         // Expert mode: vertical rules at each input quantile x-position
@@ -166,49 +153,31 @@ object DistributionSpecBuilder:
           viewMode match
             case DistributionViewMode.PDF =>
               // Vertical dashed rule + text label
-              ruleAnnotation(q, label).foreach(layers.push(_))
+              rules += anchorRule(q, label)
             case DistributionViewMode.CDF =>
               // Filled dot at (quantile_x, percentile) for exact-fit verification
               layers.push(cdfAnchorDot(q, p))
         }
       else
         // Lognormal: rules at minLoss (P05) and maxLoss (P95) — same in both views
-        d.minLoss.foreach { min => ruleAnnotation(min.toDouble, "P05").foreach(layers.push(_)) }
-        d.maxLoss.foreach { max => ruleAnnotation(max.toDouble, "P95").foreach(layers.push(_)) }
+        d.minLoss.foreach { min => rules += anchorRule(min.toDouble, "P05") }
+        d.maxLoss.foreach { max => rules += anchorRule(max.toDouble, "P95") }
     }
+    VegaSpecShared
+      .verticalRuleLayers(rules.result(), fontSize = 11, textDx = 4, textDy = -6, baseline = "alphabetic")
+      .foreach(layers.push(_))
     layers
 
-  /** Dashed vertical rule + text label at x = `value`. */
-  private def ruleAnnotation(value: Double, label: String): Seq[js.Dynamic] =
-    val data = js.Dynamic.literal(
-      "values" -> js.Array(js.Dynamic.literal("x" -> value))
-    )
-    val xEnc = js.Dynamic.literal("field" -> "x", "type" -> "quantitative")
-    Seq(
-      js.Dynamic.literal(
-        "data"     -> data,
-        "mark"     -> js.Dynamic.literal(
-          "type"        -> "rule",
-          "strokeDash"  -> js.Array(4, 4),
-          "color"       -> "#6a8a8e"
-        ),
-        "encoding" -> js.Dynamic.literal("x" -> xEnc)
-      ),
-      js.Dynamic.literal(
-        "data"     -> data,
-        "mark"     -> js.Dynamic.literal(
-          "type"     -> "text",
-          "color"    -> "#a0b0b0",
-          "fontSize" -> 11,
-          "dx"       -> 4,
-          "dy"       -> -6,
-          "align"    -> "left"
-        ),
-        "encoding" -> js.Dynamic.literal(
-          "x"    -> xEnc,
-          "text" -> js.Dynamic.literal("value" -> label)
-        )
-      )
+  private val AnchorRuleColor: HexColor = PaletteData.hex("#6a8a8e")
+  private val AnchorTextColor: HexColor = PaletteData.hex("#a0b0b0")
+
+  /** Always-visible dashed anchor rule in the preview's fixed colours — not
+    * hover-linked (the preview has no hover selection). */
+  private def anchorRule(x: Double, label: String): VegaSpecShared.VerticalRuleDatum =
+    VegaSpecShared.VerticalRuleDatum(
+      x, Seq(label),
+      ruleColor = AnchorRuleColor, textColor = AnchorTextColor,
+      dashed = true, visibilityKey = None, seriesId = None
     )
 
   /** Filled dot at (quantile_x, cdf_probability) for CDF anchor verification. */
@@ -238,28 +207,6 @@ object DistributionSpecBuilder:
       "title" -> title,
       "axis"  -> js.Dynamic.literal(
         "labelAngle" -> 0,
-        "labelColor" -> "#b0b8b8",
-        "titleColor" -> "#e6e8e8",
-        "labelExpr"  -> "if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')"
+        "labelExpr"  -> VegaSpecShared.lossAxisLabelExpr
       )
-    )
-
-  // ── Dark theme config (verbatim from LECSpecBuilder) ─────────
-
-  private def darkConfig: js.Dynamic =
-    js.Dynamic.literal(
-      "legend" -> js.Dynamic.literal(
-        "disable"    -> false,
-        "labelColor" -> "#e6e8e8",
-        "titleColor" -> "#e6e8e8"
-      ),
-      "axis" -> js.Dynamic.literal(
-        "grid"        -> true,
-        "gridColor"   -> "#1c2225",
-        "labelColor"  -> "#b0b8b8",
-        "titleColor"  -> "#e6e8e8",
-        "domainColor" -> "#4a5a5e",
-        "tickColor"   -> "#4a5a5e"
-      ),
-      "title" -> js.Dynamic.literal("color" -> "#e6e8e8")
     )

@@ -21,8 +21,10 @@ import com.risquanter.register.domain.data.iron.HexColorStr
   */
 object PaletteData:
 
-  /** Refine a `#RRGGBB` literal to `HexColor`. Safe for compile-time constants. */
-  private def hex(s: String): HexColor =
+  /** Refine a `#RRGGBB` literal to `HexColor`. Safe for compile-time
+    * constants. The chart package's single copy of this idiom — spec builders
+    * needing fixed colours use it rather than re-deriving the refinement. */
+  private[chart] def hex(s: String): HexColor =
     HexColor(s.refineUnsafe[Match["^#[0-9a-fA-F]{6}$"]])
 
   val Green: Vector[HexColor] = Vector(
