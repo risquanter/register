@@ -981,10 +981,11 @@ body {
 }
 
 /* The panel is a flex row: the native control column on the left, the chart
-   area (single surface or side-by-side grid) filling the rest. */
+   area (single surface or side-by-side grid) filling the rest. It absorbs the
+   left column's leftover viewport height (grow, never shrink below content),
+   so the single/overlay chart reaches the bottom of the screen. */
 .analyze-lec-panel {
-  flex: 0 0 auto;
-  min-height: 0;
+  flex: 1 0 auto;
   overflow: visible;
   display: flex;
   flex-direction: row;
@@ -999,6 +1000,9 @@ body {
 .analyze-lec-chart-area {
   flex: 1 1 auto;
   min-width: 0;
+  /* Column so the panel's height reaches the chart surface below. */
+  display: flex;
+  flex-direction: column;
 }
 
 /* Native chart controls — left column, app-styled (replaces Vega's own bind
@@ -1046,13 +1050,16 @@ body {
 
 /* ── Single / overlay Analyze chart (not the side-by-side panels) ──
    The Vega spec is built with width/height "container", so the chart needs a
-   box with a concrete height to size against. The surface owns that height; the
-   view/content/container flex to fill it (overriding the height:auto above via
-   equal-specificity later rules). Fullscreen overrides the fixed height. */
+   box with a concrete height to size against. The surface fills the chart
+   area's height (which the panel grows to the viewport bottom), with a floor
+   so the chart never collapses on short windows; the view/content/container
+   flex to fill it (overriding the height:auto above via equal-specificity
+   later rules). Fullscreen overrides this sizing. */
 .lec-chart-surface {
   display: flex;
   flex-direction: column;
-  height: 460px;
+  flex: 1 1 auto;
+  min-height: 460px;
 }
 
 .lec-chart-surface .lec-chart-view {
