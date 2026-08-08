@@ -2,6 +2,7 @@ package app.chart
 
 import scala.scalajs.js
 
+import app.core.NumberFormat
 import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.domain.data.iron.HexColor.HexColor
 
@@ -12,7 +13,7 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   * Spec features:
   *   - Hover selection param (`"hover"`) for pointer-based curve highlight
   *   - Invisible point layer for voronoi-based nearest-point detection
-  *   - Opacity condition: hovered curve = 1.0, others = 0.3
+  *   - Opacity condition: hovered curve = 1.0, others = 0.2
   *   - Data values shape: `{curveId, risk, loss, exceedance}`
   *   - Colour encoding: `scale.domain` (curveIds) + `scale.range` (hex colours)
   *   - Per-curve annotations, each coloured to match that curve's own line,
@@ -32,10 +33,11 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   *   - X-axis domain starts at 0 (not the smallest actual loss) — a
   *     risk's true likely outcome (often "no loss") must stay representable
   *   - Axes: B/M formatting on X, percentage on Y
-  *   - Dark theme config (transparent background, light-on-dark text,
-  *     app's own font stack, ~20% larger label/title text than Vega's
-  *     defaults for readability)
-  *   - Legend with `labelExpr` mapping curveId → node name
+  *   - Dark theme config ([[VegaSpecShared.darkConfig]] — transparent
+  *     background, light-on-dark text, app's own font stack, ~20% larger
+  *     label/title text than Vega's defaults for readability)
+  *   - Legend with `labelExpr` mapping curveId → the series' legend label
+  *     (node name by default; "node — branch · tree" in Overlay compare)
   *   - Interpolation toggle param (monotone/basis/linear/step-after)
   *   - Y-axis adaptive ceiling (capped at 1.0)
   */
@@ -48,6 +50,14 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   * @param probabilityMax Upper end of the y (exceedance) domain, ≤ 1.0.
   */
 final case class PinnedAxes(lossMax: Double, probabilityMax: Double)
+
+/** One chart series: a node's curve, its assigned colour, the series
+  * identity (`seriesId` — the data/colour-scale/legend key), and the legend
+  * text — `label` (the node name) stacked over `origin` ("branch · tree",
+  * when given) as two legend lines. A named type because the string fields
+  * are same-typed — as positional tuple members a swap would compile
+  * silently and render a legend of internal ids. */
+final case class ChartSeries(curve: LECNodeCurve, colour: HexColor, seriesId: String, label: String, origin: Option[String])
 
 object PinnedAxes:
   /** Shared extents over every given curve — the same headroom rule the
@@ -82,6 +92,9 @@ object LECSpecBuilder:
     * `LecAnnotation.defaultOn`), so no initial-value parameter is taken here.
     *
     * @param curves        Ordered pairs of (curve data, assigned colour)
+    * @param origin        Second legend line for every series ("branch ·
+    *                      tree") — the legend format is the same in every
+    *                      mode, so single-tree and compare read alike
     * @param width         Chart width in pixels
     * @param height        Chart height in pixels
     * @param pinned        Explicit axis extents; `None` (the default) keeps
@@ -96,69 +109,74 @@ object LECSpecBuilder:
     */
   def build(
     curves: Vector[(LECNodeCurve, HexColor)],
+    origin: Option[String] = None,
     width: Int = 950,
     height: Int = 400,
     pinned: Option[PinnedAxes] = None,
     responsive: Boolean = false,
     zoomable: Boolean = false
   ): js.Dynamic =
-    buildFromSeries(curves.map { case (nc, color) => (nc, color, nc.id.value) }, width, height, pinned, responsive, zoomable)
+    buildFromSeries(curves.map { case (nc, color) => ChartSeries(nc, color, nc.id.value, nc.name, origin) }, width, height, pinned, responsive, zoomable)
 
-  /** Same as `build`, but the chart's series identity (`curveId` — the data
-    * points, colour-scale domain, and legend match) is given explicitly per
-    * curve instead of always being `nc.id.value`. Needed when two curves
-    * share the same `NodeId` (e.g. the same node's curve fetched from two
-    * different branches for an Overlay comparison) — `NodeId` alone can't
-    * disambiguate them, and it can't be faked with a synthetic string since
-    * it's Iron-refined to a real ULID. `build` delegates here with today's
-    * default so every existing call site is unchanged.
+  /** Same as `build`, but each curve's series identity (`seriesId` — the
+    * data points, colour-scale domain, and legend match) AND its legend
+    * label are given explicitly instead of the defaults (`nc.id.value` /
+    * `nc.name`). Needed when two curves share the same `NodeId` (e.g. the
+    * same node's curve fetched from two different branches for an Overlay
+    * comparison) — `NodeId` alone can't disambiguate them, and it can't be
+    * faked with a synthetic string since it's Iron-refined to a real ULID;
+    * the caller likewise says how the legend names each side
+    * ("Root — main · Tree A"). `build` delegates here with today's defaults
+    * so every existing call site is unchanged.
     */
   def buildFromSeries(
-    curves: Vector[(LECNodeCurve, HexColor, String)],
+    series: Vector[ChartSeries],
     width: Int = 950,
     height: Int = 400,
     pinned: Option[PinnedAxes] = None,
     responsive: Boolean = false,
     zoomable: Boolean = false
   ): js.Dynamic =
-    val allPoints = curves.flatMap(_._1.curve)
-    if curves.isEmpty || allPoints.isEmpty then emptySpec(width, height, responsive)
-    else buildSpec(curves, width, height, pinned, responsive, zoomable)
+    val allPoints = series.flatMap(_.curve.curve)
+    if series.isEmpty || allPoints.isEmpty then
+      VegaSpecShared.emptyMessageSpec(width, height, responsive, "No data available")
+    else buildSpec(series, width, height, pinned, responsive, zoomable)
 
   // ── Private builders ──────────────────────────────────────────
 
+  /** The chart's hover selection name — declared on the point layer, read by
+    * the line and annotation layers' conditions. */
+  private val HoverParamName = "hover"
+
   private def buildSpec(
-    curves: Vector[(LECNodeCurve, HexColor, String)],
+    series: Vector[ChartSeries],
     width: Int,
     height: Int,
     pinned: Option[PinnedAxes],
     responsive: Boolean,
     zoomable: Boolean
   ): js.Dynamic =
-    // Stable ordering: sort by curveId for deterministic domain/range
-    val ordered = curves.sortBy(_._3)
+    // Stable ordering: sort by seriesId for deterministic domain/range
+    val ordered = series.sortBy(_.seriesId)
 
     // Y-axis ceiling: pinned extent if given, else adaptive (capped at 1.0)
     val yBuffer = 1.1
     val yCeiling = pinned.map(_.probabilityMax).getOrElse(math.min(
       1.0,
-      ordered.flatMap(_._1.curve.headOption).map(_.exceedanceProbability).max * yBuffer
+      ordered.flatMap(_.curve.curve.headOption).map(_.exceedanceProbability).max * yBuffer
     ))
 
-    // Legend labelExpr: map curveId → display name (immutable String, safe to share).
-    // `buildFromSeries` callers that disambiguate two branches' curves for the
-    // same node (Analyze Overlay compare) encode the branch as a "@branch"
-    // suffix on curveId (see CompareColorAssigner) — surfaced here as "(branch)"
-    // so the legend can tell the two apart instead of showing the same node
-    // name twice. `build`'s default curveId (`nc.id.value`) never contains
-    // '@', so every non-Compare call site's legend is unchanged.
-    val labelParts = ordered.map { case (nc, _, curveId) =>
-      val branchSuffix = curveId.lastIndexOf('@') match
-        case -1 => ""
-        case i  => s" (${curveId.substring(i + 1)})"
-      s"datum.value == '${curveId}' ? '${(nc.name + branchSuffix).replace("'", "\\'")}'"
+    // Legend labelExpr: map seriesId → the caller-supplied legend lines.
+    // The expr returns an ARRAY per entry — Vega stacks array text as one
+    // line per element — so every entry reads as the node name over its
+    // origin ("branch · tree"), the same format in every mode.
+    val labelParts = ordered.map { s =>
+      val lines = (s.label +: s.origin.toSeq)
+        .map(l => s"'${l.replace("'", "\\'")}'")
+        .mkString("[", ", ", "]")
+      s"datum.value == '${s.seriesId}' ? $lines"
     }
-    val legendLabelExpr = (labelParts :+ "datum.value").mkString(" : ")
+    val legendLabelExpr = (labelParts :+ "[datum.value]").mkString(" : ")
 
     // Per-curve annotations — tail quantiles, AAL, no-loss probability — each
     // coloured to match that curve's own assigned line colour (not a single
@@ -168,46 +186,49 @@ object LECSpecBuilder:
     // Each tail quantile gets its own independent toggle (not one shared
     // "show all percentiles" switch). The `LecAnnotation` case is the single
     // source of truth for each toggle's signal name and label; the string key
-    // here is the `LECNodeCurve.quantiles` map key it reads.
+    // here is the `LECNodeCurve.quantiles` map key it reads. All annotations
+    // render as TWO datum-driven layers (rules + labels) regardless of curve
+    // count — see `VegaSpecShared.verticalRuleLayers`.
     val quantileToggles = List("p90" -> LecAnnotation.P90, "p95" -> LecAnnotation.P95, "p99" -> LecAnnotation.P99, "p99.5" -> LecAnnotation.P995)
-    val annotationLayers = js.Array[js.Any]()
     // Only curves with data get annotations — a node with an empty curve
     // (no simulation outcomes) carries aal = 0.0 / noLoss = 1.0 fallbacks
     // that would otherwise draw a solid rule pinned to the y-axis and a
     // "no loss: 100%" row for a line that isn't on the chart at all.
-    val withData = ordered.filter { case (nc, _, _) => nc.curve.nonEmpty }
-    withData.foreach { case (nc, hexColor, _) =>
-      quantileToggles.foreach { case (key, ann) =>
-        nc.quantiles.get(key).foreach { value =>
-          verticalAnnotation(value, Seq(ann.label, formatLossValue(value)), hexColor.value, dashed = true, toggleParam = ann.signalName)
-            .foreach(annotationLayers.push(_))
+    val withData = ordered.filter(_.curve.curve.nonEmpty)
+    val annotationData: Vector[VegaSpecShared.VerticalRuleDatum] =
+      withData.flatMap { s =>
+        val nc = s.curve
+        val quantileRules = quantileToggles.flatMap { case (key, ann) =>
+          nc.quantiles.get(key).map { value =>
+            VegaSpecShared.VerticalRuleDatum(
+              value, Seq(ann.label, formatLossValue(value)),
+              ruleColor = s.colour, textColor = s.colour,
+              dashed = true, visibilityKey = Some(ann.signalName),
+              seriesId = Some(s.seriesId))
+          }
         }
+        quantileRules :+ VegaSpecShared.VerticalRuleDatum(
+          nc.averageAnnualLoss, Seq(LecAnnotation.AAL.label, formatLossValue(nc.averageAnnualLoss)),
+          ruleColor = s.colour, textColor = s.colour,
+          dashed = false, visibilityKey = Some(LecAnnotation.AAL.signalName),
+          seriesId = Some(s.seriesId))
       }
-      verticalAnnotation(nc.averageAnnualLoss, Seq(LecAnnotation.AAL.label, formatLossValue(nc.averageAnnualLoss)), hexColor.value, dashed = false, toggleParam = LecAnnotation.AAL.signalName)
-        .foreach(annotationLayers.push(_))
-    }
 
-    // "Probability of no loss" as fixed, view-relative text — not a line.
-    // This number doesn't correspond to any y-coordinate the curve's own
-    // P(Loss >= x) scale actually reaches: the curve is trivially 100% at
-    // x=0 exactly, then jumps straight down to the occurrence probability
-    // for any x>0 — there's no "70%" height anywhere on it to anchor a
-    // reference line to (that number is the *size of the drop*, not a
-    // *level*). Positioned via literal pixel values (no "field", so it's
-    // never subject to either data scale), one row per curve.
-    withData.zipWithIndex.foreach { case ((nc, hexColor, _), idx) =>
-      val label = s"${nc.name} — no loss: ${formatProbability(nc.probabilityOfNoLoss)}"
-      noLossStat(label, hexColor.value, idx).foreach(annotationLayers.push(_))
-    }
+    // "Probability of no loss" rows — see `noLossLayer` for why this is text
+    // at a fixed pixel position rather than a line.
+    val noLossRows: Vector[(String, HexColor, String)] =
+      withData.map { s =>
+        (s"${s.curve.name} — no loss: ${formatProbability(s.curve.probabilityOfNoLoss)}", s.colour, s.seriesId)
+      }
 
     // Fresh data values array — called per layer to avoid shared mutable state (F2)
     def makeDataValues(): js.Array[js.Any] =
       val arr = js.Array[js.Any]()
-      ordered.foreach { case (nc, _, curveId) =>
-        nc.curve.foreach { pt =>
+      ordered.foreach { s =>
+        s.curve.curve.foreach { pt =>
           arr.push(js.Dynamic.literal(
-            "curveId"    -> curveId,
-            "risk"       -> nc.name,
+            "curveId"    -> s.seriesId,
+            "risk"       -> s.curve.name,
             "loss"       -> pt.loss.toDouble,
             "exceedance" -> pt.exceedanceProbability
           ))
@@ -219,9 +240,9 @@ object LECSpecBuilder:
     def makeColorEncoding(): js.Dynamic =
       val domain = js.Array[js.Any]()
       val range = js.Array[js.Any]()
-      ordered.foreach { case (_, hexColor, curveId) =>
-        domain.push(curveId)
-        range.push(hexColor.value: String) // .value at the Vega edge
+      ordered.foreach { s =>
+        domain.push(s.seriesId)
+        range.push(s.colour.value: String) // .value at the Vega edge
       }
       js.Dynamic.literal(
         "field" -> "curveId",
@@ -232,7 +253,10 @@ object LECSpecBuilder:
           "range"  -> range
         ),
         "legend" -> js.Dynamic.literal(
-          "labelExpr" -> legendLabelExpr
+          "labelExpr"  -> legendLabelExpr,
+          // "…" cap for extreme names — the untruncated names stay readable
+          // on the slot cards.
+          "labelLimit" -> 220
         )
       )
 
@@ -252,7 +276,7 @@ object LECSpecBuilder:
           "title" -> "Loss",
           "axis"  -> js.Dynamic.literal(
             "labelAngle" -> 0,
-            "labelExpr"  -> "if(datum.value >= 1e3, format(datum.value / 1e3, ',.1f') + 'B', format(datum.value, ',.0f') + 'M')"
+            "labelExpr"  -> VegaSpecShared.lossAxisLabelExpr
           ),
           // Lower end is deliberately 0, not the curve's own smallest loss
           // tick: a risk's true likely outcome is often "no loss", which must
@@ -274,15 +298,15 @@ object LECSpecBuilder:
         "color"   -> makeColorEncoding(),
         "opacity" -> js.Dynamic.literal(
           "condition" -> js.Array(
-            js.Dynamic.literal("param" -> "hover", "empty" -> false, "value" -> 1.0),
-            js.Dynamic.literal("test" -> "length(data('hover_store')) == 0", "value" -> 1.0)
+            js.Dynamic.literal("param" -> HoverParamName, "empty" -> false, "value" -> 1.0),
+            js.Dynamic.literal("test" -> VegaSpecShared.hoverStoreEmptyTest(HoverParamName), "value" -> 1.0)
           ),
           "value" -> 0.2
         ),
         "strokeWidth" -> js.Dynamic.literal(
           "condition" -> js.Array(
-            js.Dynamic.literal("param" -> "hover", "empty" -> false, "value" -> 3.0),
-            js.Dynamic.literal("test" -> "length(data('hover_store')) == 0", "value" -> 1.5)
+            js.Dynamic.literal("param" -> HoverParamName, "empty" -> false, "value" -> 3.0),
+            js.Dynamic.literal("test" -> VegaSpecShared.hoverStoreEmptyTest(HoverParamName), "value" -> 1.5)
           ),
           "value" -> 1.5
         )
@@ -298,7 +322,7 @@ object LECSpecBuilder:
     // shared, so pan/zoom still applies to the whole chart.
     val pointParams = js.Array[js.Any](
       js.Dynamic.literal(
-        "name"   -> "hover",
+        "name"   -> HoverParamName,
         "select" -> js.Dynamic.literal(
           "type"    -> "point",
           "on"      -> "pointerover",
@@ -337,9 +361,11 @@ object LECSpecBuilder:
       "params" -> pointParams
     )
 
-    // Assemble layers: per-curve annotations + line layer + point layer
+    // Assemble layers: annotation rule/label layers + no-loss rows + line
+    // layer + point layer (annotations under the lines, as before the fold)
     val allLayers = js.Array[js.Any]()
-    for i <- 0 until annotationLayers.length do allLayers.push(annotationLayers(i))
+    VegaSpecShared.verticalRuleLayers(annotationData, hoverParam = Some(HoverParamName)).foreach(allLayers.push(_))
+    noLossLayer(noLossRows).foreach(allLayers.push(_))
     allLayers.push(lineLayer)
     allLayers.push(pointLayer)
 
@@ -368,33 +394,7 @@ object LECSpecBuilder:
       "width"      -> widthField,
       "height"     -> heightField,
       "background" -> "transparent",
-      "config"     -> js.Dynamic.literal(
-        // Matches the app's own font stack — Vega/canvas-free (svg renderer,
-        // see LECChartView) text otherwise falls back to a generic default
-        // that doesn't match the rest of the UI.
-        "font"   -> "'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif",
-        "legend" -> js.Dynamic.literal(
-          "disable"       -> false,
-          "labelColor"    -> "#e6e8e8",
-          "titleColor"    -> "#e6e8e8",
-          // ~20% larger than Vega-Lite's own defaults (~10/11), for readability
-          "labelFontSize" -> 12,
-          "titleFontSize" -> 13
-        ),
-        "axis" -> js.Dynamic.literal(
-          "grid"          -> true,
-          "gridColor"     -> "#1c2225",
-          // Brighter than before (#b0b8b8) — was too low-contrast against the
-          // dark background for tick labels specifically.
-          "labelColor"    -> "#c8ced0",
-          "titleColor"    -> "#e6e8e8",
-          "domainColor"   -> "#4a5a5e",
-          "tickColor"     -> "#4a5a5e",
-          "labelFontSize" -> 12,
-          "titleFontSize" -> 13
-        ),
-        "title" -> js.Dynamic.literal("color" -> "#e6e8e8", "fontSize" -> 13)
-      ),
+      "config"     -> VegaSpecShared.darkConfig,
       "params" -> paramsArr,
       "layer" -> allLayers
     )
@@ -416,90 +416,40 @@ object LECSpecBuilder:
   /** Format a probability (0.0-1.0) as a whole-number percentage, for the
     * no-loss annotation label. */
   private def formatProbability(p: Double): String =
-    s"${math.round(p * 100)}%"
-
-  /** A vertical rule + text label at x = `value` — used for tail quantiles
-    * (dashed) and AAL (solid, so it reads as "a central value" rather than
-    * "a threshold", the same solid/dashed distinction cat-modeling exhibits
-    * commonly use to tell a mean apart from a percentile at a glance).
-    *
-    * @param labelLines Label rendered as stacked lines (Vega text marks
-    *   treat an array datum as one line per element) — the name over its
-    *   value ("P95" / "$131M") so a narrow column of text hugs the rule,
-    *   overlapping far less than the previous single-line "P95: $131M"
-    *   when several quantile rules sit close together.
-    * @param toggleParam Name of the top-level checkbox param (declared in
-    *   `buildSpec`) gating this layer's visibility — referenced via `expr`
-    *   the same way the interpolation dropdown drives the line layer's
-    *   `interpolate` mark property, so no extra Scala-side state is needed.
-    */
-  private def verticalAnnotation(
-    value: Double,
-    labelLines: Seq[String],
-    color: String,
-    dashed: Boolean,
-    toggleParam: String,
-    fontSize: Int = 13
-  ): Seq[js.Dynamic] =
-    val data = js.Dynamic.literal(
-      "values" -> js.Array(js.Dynamic.literal("x" -> value))
-    )
-    val xEnc = js.Dynamic.literal("field" -> "x", "type" -> "quantitative")
-    val toggleOpacity = js.Dynamic.literal("expr" -> s"$toggleParam ? 1 : 0")
-    val ruleMark =
-      if dashed then js.Dynamic.literal("type" -> "rule", "strokeDash" -> js.Array(4, 4), "color" -> color, "opacity" -> toggleOpacity)
-      else js.Dynamic.literal("type" -> "rule", "color" -> color, "opacity" -> toggleOpacity)
-    Seq(
-      js.Dynamic.literal(
-        "mark"     -> ruleMark,
-        "data"     -> data,
-        "encoding" -> js.Dynamic.literal("x" -> xEnc)
-      ),
-      js.Dynamic.literal(
-        "mark"     -> js.Dynamic.literal(
-          "type"       -> "text",
-          "align"      -> "left",
-          "baseline"   -> "top",
-          "dx"         -> 4,
-          "dy"         -> 4,
-          "fontSize"   -> fontSize,
-          "lineHeight" -> (fontSize + 3),
-          "color"      -> color,
-          "opacity"    -> toggleOpacity
-        ),
-        "data"     -> js.Dynamic.literal("values" -> js.Array(js.Dynamic.literal("x" -> value, "label" -> js.Array(labelLines*)))),
-        "encoding" -> js.Dynamic.literal("x" -> xEnc, "text" -> js.Dynamic.literal("field" -> "label"))
-      )
-    )
+    s"${NumberFormat.percentValue(p, 0)}%"
 
   /** "Probability of no loss" as plain text, fixed at a pixel position
-    * within the plot area — no `"field"` on either channel, so it is never
-    * subject to the x or y data scale and can't collide with either domain
-    * the way a data-encoded mark could. `index` stacks one row per curve.
+    * within the plot area — ONE layer stacking one row per curve (rows carry
+    * the label, colour, and pixel `y` as data; mark-property exprs read
+    * them). Pixel-positioned, not a line: this number doesn't correspond to
+    * any y-coordinate the curve's own P(Loss >= x) scale actually reaches —
+    * the curve is trivially 100% at x=0 exactly, then jumps straight down to
+    * the occurrence probability for any x>0, so the number is the *size of
+    * the drop*, not a *level* a reference line could sit at. Neither channel
+    * uses a data scale, so the rows can't collide with either domain.
     */
-  private def noLossStat(label: String, color: String, index: Int, fontSize: Int = 13): Seq[js.Dynamic] =
-    val toggleOpacity = js.Dynamic.literal("expr" -> s"${LecAnnotation.NoLoss.signalName} ? 1 : 0")
-    Seq(
+  private def noLossLayer(rows: Vector[(String, HexColor, String)], fontSize: Int = 13): Option[js.Dynamic] =
+    Option.when(rows.nonEmpty) {
+      val values = js.Array[js.Any]()
+      rows.zipWithIndex.foreach { case ((label, color, seriesId), idx) =>
+        values.push(js.Dynamic.literal("label" -> label, "color" -> (color.value: String), "curveId" -> seriesId, "row" -> idx))
+      }
       js.Dynamic.literal(
-        "data"     -> js.Dynamic.literal("values" -> js.Array(js.Dynamic.literal("label" -> label))),
-        "mark"     -> js.Dynamic.literal("type" -> "text", "align" -> "left", "baseline" -> "top", "color" -> color, "fontSize" -> fontSize, "opacity" -> toggleOpacity),
+        "data" -> js.Dynamic.literal("values" -> values),
+        "mark" -> js.Dynamic.literal(
+          "type"     -> "text",
+          "align"    -> "left",
+          "baseline" -> "top",
+          "fontSize" -> fontSize,
+          "x"        -> 6,
+          "y"        -> js.Dynamic.literal("expr" -> s"6 + datum.row * ${fontSize + 3}"),
+          "color"    -> js.Dynamic.literal("expr" -> "datum.color")
+        ),
         "encoding" -> js.Dynamic.literal(
-          "x"    -> js.Dynamic.literal("value" -> 6),
-          "y"    -> js.Dynamic.literal("value" -> (6 + index * (fontSize + 3))),
-          "text" -> js.Dynamic.literal("field" -> "label")
+          "text" -> js.Dynamic.literal("field" -> "label"),
+          // Shared hover-follow conditions; hidden when the NoLoss toggle is off.
+          "opacity" -> VegaSpecShared.hoverOpacityConditions(
+            s"!${LecAnnotation.NoLoss.signalName}", HoverParamName)
         )
       )
-    )
-
-  // ── Empty spec ────────────────────────────────────────────────
-
-  private def emptySpec(width: Int, height: Int, responsive: Boolean): js.Dynamic =
-    js.Dynamic.literal(
-      "$schema"    -> "https://vega.github.io/schema/vega-lite/v6.json",
-      "width"      -> (if responsive then ("container": js.Any) else (width: js.Any)),
-      "height"     -> (if responsive then ("container": js.Any) else (height: js.Any)),
-      "background" -> "transparent",
-      "data"       -> js.Dynamic.literal("values" -> js.Array[js.Any]()),
-      "mark"       -> js.Dynamic.literal("type" -> "text", "color" -> "#b0b8b8"),
-      "encoding"   -> js.Dynamic.literal("text" -> js.Dynamic.literal("value" -> "No data available"))
-    )
+    }

@@ -36,6 +36,19 @@ import com.risquanter.register.domain.data.iron.HexColor.HexColor
   */
 object AnalyzeView:
 
+  /** One comparand slot's Overlay-chart inputs, combined per emission: the
+    * slot's curve cache, its card's own Ctrl+click selection, its chosen
+    * target, its palette family, its legend origin ("branch · tree"), and
+    * its explicit per-node colour picks. */
+  private final case class SlotOverlayInput(
+    curves:         LoadState[Map[NodeId, LECNodeCurve]],
+    visible:        Set[NodeId],
+    target:         CompareTarget,
+    palette:        Vector[HexColor],
+    origin:         Option[String],
+    explicitColors: Map[NodeId, HexColor]
+  )
+
   /** @param compareSlots One bundle per comparand pool slot (cap:
     *                     `CompareState.ComparedSlotCount`): each carries its
     *                     own `TreeViewState` — an independent tree view and
@@ -114,16 +127,18 @@ object AnalyzeView:
       engagedSlots(rowTs.map(_._2), activeBranch, activeTid, activeAt)
         .map { (rowPos, branch) => (rowTs(rowPos)._1, branch) }
 
-    /** Per-slot Overlay inputs: the slot's curve cache (deduplicated for the
-      * same reason as below), its card's own selection — independent of the
-      * tab's own, user Ctrl+clicks only (the query pane runs against the
-      * tab's active branch, so a slot's query set stays empty) — its chosen
-      * target, and its palette family (the branch's assignment, or the
-      * slot's default). */
-    val slotOverlayInputs: Signal[Vector[(LoadState[Map[NodeId, LECNodeCurve]], Set[NodeId], CompareTarget, Vector[HexColor])]] =
+    /** Per-slot Overlay inputs (`SlotOverlayInput`): the slot's curve cache
+      * (deduplicated for the same reason as below), its card's own selection
+      * — independent of the tab's own, user Ctrl+clicks only (the query pane
+      * runs against the tab's active branch, so a slot's query set stays
+      * empty) — its chosen target, and its palette family (the branch's
+      * assignment, or the slot's default). */
+    val slotOverlayInputs: Signal[Vector[SlotOverlayInput]] =
       Signal.combineSeq(compareSlots.map { slot =>
         slot.treeViewState.curveCache.distinct
-          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.state.target.signal, slot.state.palette.signal)
+          .combineWithFn(slot.treeViewState.chartState.visibleCurves, slot.state.target.signal, slot.state.palette.signal,
+            slot.treeViewState.chartOrigin,
+            slot.treeViewState.chartState.explicitColors)(SlotOverlayInput.apply)
       }).map(_.toVector)
 
     /** The single chart surface (used for both layouts whenever the panel
@@ -131,9 +146,10 @@ object AnalyzeView:
       * single-branch spec, untouched (baseline hidden with no comparands →
       * Idle). Overlay with visible comparands → the baseline (unless hidden)
       * plus every visible comparand contributes its own selection's curves,
-      * coloured by branch family (`CompareColorAssigner`), labelled with a
-      * stable per-pool-slot label (`active`/`s1`/`s2`…), so a slot keeps its
-      * chart identity regardless of row position.
+      * coloured by branch family (`CompareColorAssigner`). Series ids carry
+      * a stable per-pool-slot label (`active`/`s1`/`s2`…), so a slot keeps
+      * its chart identity regardless of row position; the legend shows the
+      * side as "branch · tree" (baseline marked "(active)").
       *
       * A side whose curves haven't landed yet simply contributes nothing on
       * this emission and fills in when its fetch settles — an already-drawn
@@ -149,13 +165,15 @@ object AnalyzeView:
       compareState.layout.signal
         .combineWith(
           treeViewState.chartState.specSignal
-            .combineWith(treeViewState.curveCache.distinct, visibleNodeIds, activePalette),
+            .combineWith(treeViewState.curveCache.distinct, visibleNodeIds, activePalette,
+              treeViewState.chartOrigin,
+              treeViewState.chartState.explicitColors),
           compareState.rowTargets
             .combineWith(compareState.hiddenFlags, compareState.baselineHidden.signal)
             .combineWith(slotOverlayInputs, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
         )
         .map {
-          case (layout, (singleSpec, thisCurves, thisVisible, thisPalette),
+          case (layout, (singleSpec, thisCurves, thisVisible, thisPalette, thisOrigin, thisExplicitColors),
                 (rowTs, hidden, baselineHidden, slotInputs, activeBranch, activeTid, baselineAt)) =>
             // Visible comparand sides: engaged (tab-collision + duplicate-pair
             // dedup) minus the eye-hidden ones. Hide is a display filter only —
@@ -172,32 +190,34 @@ object AnalyzeView:
               case (CompareLayout.Overlay, false) =>
                 val baselineSide =
                   if baselineHidden then None
-                  else Some(CompareColorAssigner.OverlaySide(loadedOrEmpty(thisCurves), thisVisible, thisPalette, "active"))
-                val comparandSides = visibleComparands.map { pi =>
-                  val (curves, visible, _, palette) = slotInputs(pi)
-                  (pi, curves, visible, palette)
-                }
+                  else Some(CompareColorAssigner.OverlaySide(loadedOrEmpty(thisCurves), thisVisible, thisPalette, "active",
+                    thisOrigin.getOrElse(BranchBar.branchDisplayName(activeBranch)) + " (active)",
+                    thisExplicitColors))
+                val comparandSides = visibleComparands.map(pi => (pi, slotInputs(pi)))
                 val curvesToCheck =
-                  (if baselineHidden then Vector.empty else Vector(thisCurves)) ++ comparandSides.map(_._2)
+                  (if baselineHidden then Vector.empty else Vector(thisCurves)) ++ comparandSides.map(_._2.curves)
                 curvesToCheck.collectFirst { case LoadState.Failed(msg) => msg } match
                   case Some(msg) => LoadState.Failed(msg)
                   case None =>
-                    val sides = baselineSide.toVector ++ comparandSides.map { (pi, curves, visible, palette) =>
-                      CompareColorAssigner.OverlaySide(loadedOrEmpty(curves), visible, palette, s"s${pi + 1}")
+                    val sides = baselineSide.toVector ++ comparandSides.map { (pi, input) =>
+                      val branchName = input.target.toCoordinate.map(c => BranchBar.branchDisplayName(c.branch)).getOrElse("")
+                      CompareColorAssigner.OverlaySide(loadedOrEmpty(input.curves), input.visible, input.palette, s"s${pi + 1}",
+                        input.origin.getOrElse(branchName), input.explicitColors)
                     }
                     val paired = CompareColorAssigner.pairForOverlay(sides)
                     if paired.nonEmpty then LoadState.Loaded(LECSpecBuilder.buildFromSeries(paired, responsive = true, zoomable = true))
-                    else if (baselineHidden || thisVisible.isEmpty) && comparandSides.forall(_._3.isEmpty) then LoadState.Idle
+                    else if (baselineHidden || thisVisible.isEmpty) && comparandSides.forall(_._2.visible.isEmpty) then LoadState.Idle
                     else LoadState.Loading
         }
 
     /** Per-slot Side-by-side inputs — as `slotOverlayInputs` plus the slot's
       * own node colour map, since each panel keeps its normal single-branch
       * node colours. */
-    val slotPanelInputs: Signal[Vector[(LoadState[Map[NodeId, LECNodeCurve]], Set[NodeId], Map[NodeId, HexColor], CompareTarget)]] =
+    val slotPanelInputs: Signal[Vector[(LoadState[Map[NodeId, LECNodeCurve]], Set[NodeId], Map[NodeId, HexColor], CompareTarget, Option[String])]] =
       Signal.combineSeq(compareSlots.map { slot =>
         slot.treeViewState.curveCache.distinct
-          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.treeViewState.nodeColorMap, slot.state.target.signal)
+          .combineWith(slot.treeViewState.chartState.visibleCurves, slot.treeViewState.nodeColorMap, slot.state.target.signal,
+            slot.treeViewState.chartOrigin)
       }).map(_.toVector)
 
     /** Side-by-side panel specs — the active branch's panel plus one per
@@ -210,12 +230,12 @@ object AnalyzeView:
       compareState.baselineHidden.signal
         .combineWith(
           treeViewState.curveCache.distinct
-            .combineWith(visibleNodeIds, treeViewState.nodeColorMap),
+            .combineWith(visibleNodeIds, treeViewState.nodeColorMap, treeViewState.chartOrigin),
           compareState.rowTargets
             .combineWith(compareState.hiddenFlags, slotPanelInputs, scenarioState.activeBranch.signal, treeViewState.selectedTreeId.signal, compareState.baselineAt.signal)
         )
         .map {
-          case (baselineHidden, (thisCurves, thisVisible, thisColors),
+          case (baselineHidden, (thisCurves, thisVisible, thisColors, thisOrigin),
                 (rowTs, hidden, slotInputs, activeBranch, activeTid, baselineAt)) =>
             // Panels shown = engaged (tab collision + duplicate-pair dedup)
             // minus the eye-hidden ones — so the panel grid always agrees with
@@ -224,7 +244,7 @@ object AnalyzeView:
             val visiblePool =
               engagedPoolSlots(rowTs, activeBranch, activeTid, baselineAt).collect { case (pi, _) if !hidden(pi) => pi }.toSet
             val thisPairs = ColorAssigner.pairWithColors(loadedOrEmpty(thisCurves), thisVisible, thisColors)
-            val slotPairs = slotInputs.zipWithIndex.map { case ((curves, visible, colors, _), pi) =>
+            val slotPairs = slotInputs.zipWithIndex.map { case ((curves, visible, colors, _, _), pi) =>
               if visiblePool.contains(pi)
               then Some(ColorAssigner.pairWithColors(loadedOrEmpty(curves), visible, colors))
               else None
@@ -232,10 +252,10 @@ object AnalyzeView:
             val baselinePairsForPin = if baselineHidden then Vector.empty else thisPairs
             val pinned = PinnedAxes.fromCurves((baselinePairsForPin ++ slotPairs.flatten.flatten).map(_._1))
             val slotSpecs = slotInputs.zip(slotPairs).map {
-              case ((curves, visible, _, _), Some(pairs)) => panelSpec(curves, visible, pairs, pinned)
-              case (_, None)                              => LoadState.Idle
+              case ((curves, visible, _, _, origin), Some(pairs)) => panelSpec(curves, visible, pairs, pinned, origin)
+              case (_, None)                                      => LoadState.Idle
             }
-            (panelSpec(thisCurves, thisVisible, thisPairs, pinned), slotSpecs)
+            (panelSpec(thisCurves, thisVisible, thisPairs, pinned, thisOrigin), slotSpecs)
         }
 
     // ── Node lookup for name resolution in QueryResultCard ───────
@@ -706,6 +726,7 @@ object AnalyzeView:
     case LoadState.Loaded(m) => m
     case _                   => Map.empty
 
+
   /** One side-by-side panel's spec lifecycle — mirrors `LECChartState
     * .specSignal`'s shape (empty selection → Idle; otherwise the cache's
     * own lifecycle carried over the built spec), plus the shared pinned
@@ -714,10 +735,11 @@ object AnalyzeView:
     cacheState: LoadState[Map[NodeId, LECNodeCurve]],
     visible: Set[NodeId],
     pairs: Vector[(LECNodeCurve, HexColor)],
-    pinned: Option[PinnedAxes]
+    pinned: Option[PinnedAxes],
+    origin: Option[String]
   ): LoadState[js.Dynamic] =
     if visible.isEmpty then LoadState.Idle
-    else cacheState.map(_ => LECSpecBuilder.build(pairs, width = 460, height = 340, pinned = pinned))
+    else cacheState.map(_ => LECSpecBuilder.build(pairs, origin = origin, width = 460, height = 340, pinned = pinned))
 
   /** One tile of the side-by-side grid: swatch + branch name header over
     * that branch's own chart. */

@@ -170,6 +170,8 @@ sbt app/test         # unchanged suites (no new pure logic; the flags are wiring
 - modules/app/src/main/scala/app/chart/LECSpecBuilder.scala
 - modules/app/src/main/scala/app/chart/LecChartParams.scala
 - modules/app/src/main/scala/app/state/LECChartState.scala
+- modules/app/src/main/scala/app/state/TreeViewState.scala
+- modules/app/src/main/scala/app/Main.scala
 - modules/app/src/main/scala/app/state/ChartParamStore.scala
 - modules/app/src/main/scala/app/state/ChartHoverBridge.scala
 - modules/app/src/main/scala/app/state/FormState.scala
@@ -180,6 +182,14 @@ sbt app/test         # unchanged suites (no new pure logic; the flags are wiring
 - modules/app/src/main/scala/app/views/LECChartView.scala
 - modules/app/src/test/scala/app/chart/LecChartParamsSpec.scala
 - modules/app/src/test/scala/app/core/JsBoundarySpec.scala
+- modules/app/src/main/scala/app/chart/VegaSpecShared.scala
+- modules/app/src/main/scala/app/chart/DistributionSpecBuilder.scala
+- modules/app/src/main/scala/app/chart/PaletteData.scala
+- modules/app/src/main/scala/app/chart/CompareColorAssigner.scala
+- modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala
+- modules/app/src/main/scala/app/core/NumberFormat.scala
+- modules/app/src/main/scala/app/state/RiskLeafFormState.scala
+- modules/app/src/test/scala/app/core/NumberFormatSpec.scala
 - modules/app/styles/app.css
 - modules/server/src/main/scala/com/risquanter/register/services/TreeHistoryService.scala
 - modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala
@@ -721,3 +731,529 @@ Refactor of shipped code, no external API change: PATCH on landing; mirror
 - modules/app/src/main/scala/app/core/NumberFormat.scala
 - modules/app/src/main/scala/app/state/RiskLeafFormState.scala
 - modules/app/src/test/scala/app/core/NumberFormatSpec.scala
+
+---
+
+## Continuation — Annotations follow hover (Option A) + informative overlay legend
+
+Two user-ruled chart refinements (2026-08-08). Option A: hovering a curve keeps
+its own statistics annotations (quantile/AAL rules, no-loss row) at full
+opacity and dims every other curve's annotations to the same ~20% the lines
+use; no hover → all full (today's look). Legend: overlay compare entries name
+the side as "branch · tree" instead of the internal slot label ("active"/"s1").
+
+### `modules/app/src/main/scala/app/chart/VegaSpecShared.scala`
+
+```scala
+final case class VerticalRuleDatum(
+    x: Double,
+    labelLines: Seq[String],
+    ruleColor: String,
+    textColor: String,
+    dashed: Boolean,
+    visibilityKey: Option[String],
+    seriesId: Option[String]        // NEW: the chart series this annotation belongs
+                                    // to (hover identity); None = not hover-linked
+)
+
+def verticalRuleLayers(
+    data: Vector[VerticalRuleDatum],
+    fontSize: Int = 13,
+    textDx: Int = 4,
+    textDy: Int = 4,
+    baseline: String = "top",
+    hoverParam: Option[String] = None  // NEW: Some("hover") = dim to 0.2 when
+                                       // another series is hovered (Option A)
+): Seq[js.Dynamic]
+```
+
+With `hoverParam = Some(p)`, the datums gain a `curveId` field (from
+`seriesId`) and opacity moves from the mark-level expr to an encoding-level
+condition list — first match wins, mirroring the line layer's own hover
+conditions:
+
+```
+"opacity": {"condition": [
+    {"test": "<toggle-off chain over LecAnnotation>", "value": 0},
+    {"param": p, "empty": false, "value": 1},
+    {"test": "length(data('<p>_store')) == 0", "value": 1}
+  ], "value": 0.2}
+```
+
+With `hoverParam = None` (distribution preview): exactly today's toggle-only
+mark expr — the preview spec has no hover store, so the hover conditions must
+not be emitted there.
+
+### `modules/app/src/main/scala/app/chart/LECSpecBuilder.scala`
+
+```scala
+def build(
+  curves: Vector[(LECNodeCurve, HexColor)],
+  width: Int = 950, height: Int = 400,
+  pinned: Option[PinnedAxes] = None,
+  responsive: Boolean = false, zoomable: Boolean = false
+): js.Dynamic =
+  buildFromSeries(curves.map { case (nc, c) => (nc, c, nc.id.value, nc.name) }, width, height, pinned, responsive, zoomable)
+
+def buildFromSeries(
+  curves: Vector[(LECNodeCurve, HexColor, String, String)],  // (curve, colour, series id, legend label)
+  width: Int = 950, height: Int = 400,
+  pinned: Option[PinnedAxes] = None,
+  responsive: Boolean = false, zoomable: Boolean = false
+): js.Dynamic
+```
+
+- The legend `labelExpr` maps series id → the given legend label verbatim
+  (escaped); the current '@'-suffix parsing is deleted (the caller now says
+  what the legend shows).
+- Annotation datums carry `seriesId = Some(curveId)`;
+  `verticalRuleLayers(..., hoverParam = Some("hover"))`.
+- `private def noLossLayer(rows: Vector[(String, String, String)], fontSize: Int = 13): Option[js.Dynamic]`
+  — rows become (label, colour, series id) with the same three-way condition.
+
+### `modules/app/src/main/scala/app/chart/CompareColorAssigner.scala`
+
+```scala
+final case class OverlaySide(
+    curves:       Map[NodeId, LECNodeCurve],
+    visible:      Set[NodeId],
+    palette:      Vector[HexColor],
+    slotLabel:    String,   // stable series-id suffix ("active"/"s1"/…) — role unchanged
+    displayLabel: String    // NEW: human legend text for the side ("<branch> · <tree>";
+                            // the baseline side appends " (active)")
+)
+
+def pairForOverlay(sides: Vector[OverlaySide]): Vector[(LECNodeCurve, HexColor, String, String)]
+// emits (curve, shade, s"${nid.value}@${s.slotLabel}", s"${curve.name} — ${s.displayLabel}")
+```
+
+### `modules/app/src/main/scala/app/views/AnalyzeView.scala`
+
+- `val baselineTreeName: Signal[Option[String]] = treeViewState.selectedTree.signal.map { case LoadState.Loaded(t) => Some(t.name.value); case _ => None }`
+  joined into `combinedSpecSignal`'s baseline combine; baseline side label:
+  `s"${BranchBar.branchDisplayName(activeBranch)} · ${name}" + " (active)"`
+  (branch only while the tree name hasn't loaded).
+- `slotOverlayInputs` tuple gains the slot's loaded tree name
+  (`slot.treeViewState.selectedTree` → `Option[String]`, same derivation);
+  slot side label: `s"${BranchBar.branchDisplayName(coord.branch)} · ${name}"`
+  with the branch read from the slot's existing `CompareTarget` coordinate.
+- A rewound side's pin (`at`) is deliberately NOT in the legend — the card's
+  pinned banner already shows it.
+
+### Tests — `modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala`
+
+Existing suite updated for the 4-tuple: every construction gains a
+`displayLabel`; assertions on series ids unchanged; new cases assert the
+legend-label element (`"<node> — <branch> · <tree>"`, baseline "(active)"
+marker included exactly once).
+
+### ADR alignment
+
+- **ADR-019**: unchanged — pure builders and one derived Signal per side; no
+  new Vars, no `.now()`.
+- No API/DTO/endpoint/service change (SPA-internal signatures only); no new
+  dependency.
+
+### Open decisions
+
+None — Option A and the "branch · tree" legend format are the 2026-08-08
+rulings; the pinned-commit omission from the legend is stated above.
+
+### Verification
+
+```bash
+sbt app/compile   # zero new warnings
+sbt app/test      # CompareColorAssignerSpec updated; rest unchanged
+sbt 'commonJVM/test; server/test'
+sbt serverIt/test
+```
+
+Manual (localhost:18080, `./examples/stage-compare-slots.sh`): hover a curve →
+its quantile/AAL rules and no-loss row stay full while other curves'
+annotations dim with their lines; hover off → all full; toggles still hide
+their annotation entirely in every hover state. Overlay compare legend reads
+"Root — main · Compare Demo Tree A (active)" / "Root — alpha · Compare Demo
+Tree A"; distribution preview unchanged.
+
+### Versioning
+
+User-visible chart behaviour refinement, no API change: PATCH on landing;
+mirror `APP_VERSION` to `.env` and `.env.irmin`.
+
+### File inventory additions — merged into `## File inventory` upon approval
+
+- modules/app/src/main/scala/app/chart/CompareColorAssigner.scala
+- modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala
+
+---
+
+## Continuation — statistic lines highlight like the curve (thickness parity)
+
+User feedback 2026-08-08: with dark palette shades, the full-vs-20% opacity
+difference on the thin (1px) statistic rules is hard to see — the hovered
+curve's rules must gain the same thickness boost the hovered curve line gets.
+
+### `modules/app/src/main/scala/app/chart/VegaSpecShared.scala` (already in the file inventory)
+
+Inside `verticalRuleLayers`, hover-aware branch only (`hoverParam = Some(p)`) —
+the rule layer's encoding gains a strokeWidth condition matching the line
+layer's own hover boost (hovered series 3px, everything else the rules'
+normal 1px):
+
+```scala
+val ruleWidth = js.Dynamic.literal(
+  "condition" -> js.Array[js.Any](
+    js.Dynamic.literal("param" -> p, "empty" -> false, "value" -> 3.0)
+  ),
+  "value" -> 1.0
+)
+ruleEncoding.updateDynamic("strokeWidth")(ruleWidth)
+```
+
+Text labels and the no-loss rows keep opacity-only treatment (text has no
+stroke width; the thickness cue on the rule is the target of this change).
+With `hoverParam = None` (distribution preview): no strokeWidth encoding —
+unchanged.
+
+### Open decisions
+
+None — direct implementation of the 2026-08-08 ruling.
+
+### Verification
+
+`sbt app/compile` + all four tiers green; manual: hover a curve → its P95/AAL
+rules render visibly thicker (3px) while other curves' rules stay thin and
+fade; distribution preview anchors unchanged.
+
+### Versioning
+
+PATCH on landing; mirror `APP_VERSION` to `.env` and `.env.irmin`.
+
+---
+
+## Continuation — Overlay compare honours per-curve colour overrides
+
+Bug (user repro 2026-08-08): on a comparand card, picking a single curve's
+colour updates the tree-node highlight but never repaints the curve in the
+Overlay chart; a later family change repaints everything with family shades.
+Cause: the Overlay pairing colours every curve as `shade(family, node)` only —
+`LECChartState.colorOverrides` (which `nodeColorMap` merges for the tree
+highlights and the side-by-side panels) never reaches `OverlaySide`. The
+side-by-side layout is NOT affected (panels read `nodeColorMap`).
+
+Fix: expose the explicit per-node choices from `LECChartState` and give them
+precedence over the family shade in the Overlay pairing — the same precedence
+`nodeColorMap` applies, so single-tree, side-by-side, and overlay behave
+identically: an explicit pick wins until cleared; family changes repaint only
+non-overridden curves.
+
+### `modules/app/src/main/scala/app/state/LECChartState.scala`
+
+```scala
+/** The user's explicit per-node colour choices — committed overrides plus
+  * any live picker preview. Branch-family independent; the Overlay compare
+  * pairing gives these precedence over the side's family shade, exactly as
+  * `nodeColorMap` does for the single-tree chart and tree highlights. */
+val explicitColors: Signal[Map[NodeId, HexColor]] =
+  colorOverrides.signal.combineWith(previewOverride.signal).map {
+    case (overrides, Some((nid, hex))) => overrides.updated(nid, hex)
+    case (overrides, None)             => overrides
+  }.distinct
+```
+
+### `modules/app/src/main/scala/app/chart/CompareColorAssigner.scala`
+
+```scala
+final case class OverlaySide(
+    curves:       Map[NodeId, LECNodeCurve],
+    visible:      Set[NodeId],
+    palette:      Vector[HexColor],
+    slotLabel:    String,
+    displayLabel: String,
+    overrides:    Map[NodeId, HexColor]   // NEW: explicit picks, win over the family shade
+)
+```
+
+In `pairForOverlay`, the colour becomes
+`s.overrides.getOrElse(nid, ColorAssigner.shade(s.palette, nid))`.
+
+### `modules/app/src/main/scala/app/views/AnalyzeView.scala`
+
+- `slotOverlayInputs` tuple gains `slot.treeViewState.chartState.explicitColors`.
+- The baseline combine gains `treeViewState.chartState.explicitColors`; the
+  baseline `OverlaySide` passes it too (fixes the same gap for the baseline's
+  own overrides when Overlay compare is engaged).
+
+### Tests — `modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala`
+
+`side` helper gains `overrides: Map[NodeId, HexColor] = Map.empty`; new cases:
+an overridden node renders the override (not the family shade); a
+non-overridden node on the same side keeps the family shade.
+
+### Open decisions
+
+None — override-wins is the only behaviour consistent with what the
+single-tree chart and side-by-side panels already do.
+
+### Verification
+
+All four tiers green; manual: on a comparand, pick a single curve colour →
+the Overlay curve repaints immediately; change the family → only the
+non-overridden curves adopt the new family; re-pick the single colour →
+repaints again; side-by-side unchanged.
+
+### Versioning
+
+PATCH on landing; mirror `APP_VERSION` to `.env` and `.env.irmin`.
+
+---
+
+## Continuation — Legend Option 2: two-line entries, always qualified
+
+Ruled 2026-08-08: every legend entry renders as two stacked lines — the node
+name over its origin ("branch · tree", the tab's own side marked "(active)")
+— in every mode, single-tree included, so the legend format never switches;
+a pixel cap with "…" guards extreme names. One origin definition
+(`TreeViewState.chartOrigin`) feeds the single chart, the side-by-side
+panels, and the Overlay side labels (replacing AnalyzeView's local
+`loadedTreeName`/`sideDisplayLabel` helpers).
+
+### `modules/app/src/main/scala/app/state/TreeViewState.scala`
+
+```scala
+final class TreeViewState(
+  keySignal: StrictSignal[Option[WorkspaceKeySecret]],
+  treeListState: TreeListState,
+  globalError: Var[Option[GlobalError]],
+  userIdAccessor: () => Option[UserId.Authenticated] = () => None,
+  activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
+  atSignal: StrictSignal[Option[CommitHash]] = Val(None),
+  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua),
+  branchDisplay: Option[BranchChoice => String] = None   // NEW
+) extends WorkspaceTreeEndpoints:
+
+  /** Legend origin line for this view's chart series — "branch · tree name",
+    * degrading to the branch alone while the tree name hasn't loaded; None
+    * when no branchDisplay function is configured (legends stay one-line).
+    * The display function is injected (Main passes
+    * `BranchBar.branchDisplayName`) so this state layer doesn't import the
+    * component layer. */
+  val chartOrigin: Signal[Option[String]] =
+    branchDisplay match
+      case None => Val(None)
+      case Some(display) =>
+        activeBranchSignal.combineWith(selectedTree.signal).map { (b, t) =>
+          val branch = display(b)
+          Some(t match
+            case LoadState.Loaded(tree) => s"$branch · ${tree.name.value}"
+            case _                      => branch)
+        }
+```
+
+`chartOrigin` is passed to the internal `LECChartState` as its `origin`.
+
+### `modules/app/src/main/scala/app/state/LECChartState.scala`
+
+Constructor gains `origin: Signal[Option[String]] = Val(None)` (after
+`userPalette`); `specSignal`'s combine adds it and passes it to
+`LECSpecBuilder.build(pairs, origin = o, ...)`.
+
+### `modules/app/src/main/scala/app/chart/LECSpecBuilder.scala`
+
+```scala
+final case class ChartSeries(curve: LECNodeCurve, colour: HexColor, seriesId: String, label: String, origin: Option[String])
+
+def build(
+  curves: Vector[(LECNodeCurve, HexColor)],
+  origin: Option[String] = None,   // NEW: second legend line for every series
+  width: Int = 950, height: Int = 400,
+  pinned: Option[PinnedAxes] = None,
+  responsive: Boolean = false, zoomable: Boolean = false
+): js.Dynamic =
+  buildFromSeries(curves.map { case (nc, c) => ChartSeries(nc, c, nc.id.value, nc.name, origin) }, width, height, pinned, responsive, zoomable)
+```
+
+- The legend `labelExpr` returns an ARRAY per entry (Vega renders array text
+  as stacked lines): `[label]` when `origin` is None, `[label, origin]`
+  otherwise (both single-quote-escaped); fallback arm `[datum.value]`.
+- `makeColorEncoding`'s legend literal gains `"labelLimit" -> 220` — the
+  "…" cap for extreme names.
+
+### `modules/app/src/main/scala/app/chart/CompareColorAssigner.scala`
+
+`pairForOverlay` emits `ChartSeries(curve, colour, id, curve.name, Some(s.displayLabel))`
+— the node name and the origin are separate lines now, no " — " concatenation.
+
+### `modules/app/src/main/scala/app/views/AnalyzeView.scala`
+
+- The baseline/slot origin derivations switch to the TreeViewStates'
+  `chartOrigin` (in `slotOverlayInputs` and the baseline combine);
+  `loadedTreeName` and `sideDisplayLabel` are deleted. Baseline display
+  label: `origin.getOrElse(BranchBar.branchDisplayName(activeBranch)) + " (active)"`;
+  slot: `origin.getOrElse(<branch name from the slot's coordinate>)`.
+- `panelSpec` gains `origin: Option[String]` passed to `build`, supplied per
+  side from the same `chartOrigin` signals (`slotPanelInputs` gains it) — the
+  side-by-side panels' legends read identically to the overlay's.
+
+### `modules/app/src/main/scala/app/Main.scala`
+
+The three Analyze TreeViewStates (baseline + the slot pool) and the Design
+TreeViewState gain `branchDisplay = Some(BranchBar.branchDisplayName)` — every
+chart legend in the app is qualified, no mode-dependent format anywhere.
+
+### Tests — `modules/app/src/test/scala/app/chart/CompareColorAssignerSpec.scala`
+
+The legend-label case asserts `label == curve name` and
+`origin == Some(<side display label>)` separately; the "(active)"-exactly-once
+assertion moves to the origins.
+
+### ADR alignment
+
+- **ADR-019**: `chartOrigin` is a derived Signal; the display function is
+  injected so `app.state` does not import `app.components`. Compliant.
+- No API/DTO/endpoint/service change; no new dependency.
+
+### Open decisions
+
+None — Option 2 is the ruling. One verification-gated risk, named: Vega
+legend `labelExpr` returning an array is the multi-line mechanism; if the
+manual pass shows the runtime not stacking array labels in legends, that is a
+blocked-state escalation (fallback candidate: single-line join under the
+`labelLimit` cap), not a silent substitution.
+
+### Verification
+
+`sbt app/compile` + all four tiers; manual: single tree → every legend entry
+is two lines ("Leaf One" over "main · Compare Demo Tree A"); engage compare →
+same format, comparand entries show their own branch · tree, "(active)" on
+exactly one side's entries; side-by-side panel legends match; extreme-length
+tree name → "…" truncation, no chart-area overlap.
+
+### Versioning
+
+User-visible chart change, no API change: PATCH on landing; mirror
+`APP_VERSION` to `.env` and `.env.irmin`.
+
+### File inventory additions — merged into `## File inventory` upon approval
+
+- modules/app/src/main/scala/app/state/TreeViewState.scala
+- modules/app/src/main/scala/app/Main.scala
+
+---
+
+## Continuation — review-NOTE fixes: shared hex refinement + named overlay-input type
+
+The two NOTEs queued from the legend-continuation quality review, both ruled
+"fix now"; the PaletteData inventory addition was accepted by the user in the
+same ruling.
+
+### `modules/app/src/main/scala/app/chart/PaletteData.scala`
+
+`hex` widens from `private` to `private[chart]` — the single
+`#RRGGBB`-literal refinement helper for the chart package:
+
+```scala
+private[chart] def hex(s: String): HexColor =
+  HexColor(s.refineUnsafe[Match["^#[0-9a-fA-F]{6}$"]])
+```
+
+### `modules/app/src/main/scala/app/chart/DistributionSpecBuilder.scala`
+
+Deletes its duplicated `hex` helper and the `io.github.iltotore.iron.*` /
+`Match` imports that existed only for it; the two anchor constants become
+`PaletteData.hex("#6a8a8e")` / `PaletteData.hex("#a0b0b0")`.
+
+### `modules/app/src/main/scala/app/views/AnalyzeView.scala`
+
+The `slotOverlayInputs` 6-tuple becomes a named view-local type:
+
+```scala
+private final case class SlotOverlayInput(
+  curves:         LoadState[Map[NodeId, LECNodeCurve]],
+  visible:        Set[NodeId],
+  target:         CompareTarget,
+  palette:        Vector[HexColor],
+  origin:         Option[String],
+  explicitColors: Map[NodeId, HexColor]
+)
+```
+
+`slotOverlayInputs: Signal[Vector[SlotOverlayInput]]`; `combinedSpecSignal`'s
+overlay branch reads named fields instead of positional destructures. No
+behaviour change.
+
+### ADR alignment
+
+No API/DTO/endpoint/service change, no new dependency. Visibility widening is
+package-internal; the case class is private to the view. ADR-019 layering
+untouched.
+
+### Open decisions
+
+None — both fixes are ruled.
+
+### Verification
+
+`sbt app/compile` + all four tiers green (app, commonJVM, server, serverIt).
+
+### Versioning
+
+Step landed with shipped code changed: PATCH to 0.10.12; mirror `APP_VERSION`
+to `.env` and `.env.irmin`.
+
+### File inventory additions — merged into `## File inventory` upon approval (accepted with this ruling)
+
+- modules/app/src/main/scala/app/chart/PaletteData.scala
+
+---
+
+## Continuation — preview parse-failure fix: toggle expression derived from the data (Option B)
+
+Every Design-view distribution preview fails at spec-parse time
+("Unrecognized signal name: showP90"). Cause: the shared annotation builder
+(`VegaSpecShared.verticalRuleLayers`, shared since the chart-spec
+deduplication) unconditionally emits a visibility expression whose text names
+every `LecAnnotation` toggle signal, and Vega resolves every signal name in
+an expression when it parses the spec — reachability is irrelevant. The LEC
+chart declares those params; the preview has no toggles and declares none, so
+its spec fails to compile. Ruled fix: Option B — build the expression from
+the toggle keys actually present in the data, so the emitted spec references
+exactly the signals the data demands.
+
+### `modules/app/src/main/scala/app/chart/VegaSpecShared.scala`
+
+The two chain builders become functions of the key set; the mark-opacity one
+returns `Option` so "no toggled datum" emits no expression at all:
+
+```scala
+private def toggleOpacityExpr(toggleKeys: Vector[String]): Option[String]
+private def toggleHiddenExpr(toggleKeys: Vector[String]): String   // "false" when empty
+```
+
+`verticalRuleLayers` computes `val toggleKeys = data.flatMap(_.visibilityKey).distinct`
+and feeds both. The builder no longer references `LecAnnotation` at all — the
+enum stays the single source of the signal names at the call sites that put
+keys into data (`LECSpecBuilder`), and `VegaSpecShared` becomes genuinely
+chart-neutral. The distribution preview's all-`None` data yields an empty key
+set → no expression → the spec parses; the LEC chart's data carries the
+toggle keys it uses → unchanged behaviour.
+
+### ADR alignment
+
+No API/DTO/endpoint/service change, no new dependency. Removes an
+LEC-specific dependency from a shared module.
+
+### Open decisions
+
+None — Option B is the ruling.
+
+### Verification
+
+`sbt app/compile` + all four tiers; manual: Design view — every node's
+distribution preview renders again (anchors visible, both PDF and CDF);
+Analyze view — annotation toggles and hover dimming behave exactly as before.
+
+### Versioning
+
+Regression fix, shipped code changed: PATCH to 0.10.13; mirror `APP_VERSION`
+to `.env` and `.env.irmin`.

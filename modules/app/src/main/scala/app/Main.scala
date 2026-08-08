@@ -3,7 +3,7 @@ package app
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom
 
-import app.components.AppShell
+import app.components.{AppShell, BranchBar}
 import app.state.{NavigationState, TreeBuilderState, TreeListState, TreeViewState, WorkspaceState, GlobalError, HealthState, AnalyzeQueryState, DistributionChartState, ScenarioState, ScenarioListState, ScenarioMergeState, AppConfigState, CompareState, CompareSlot, ChangedNodesState, TreeHistoryState}
 import app.views.{DesignView, AnalyzeView}
 import app.core.ZJS
@@ -50,7 +50,8 @@ object Main:
 
     val builderState = new TreeBuilderState
     val designTreeViewState = new TreeViewState(
-      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, designScenarioState.activeBranch.signal
+      wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, designScenarioState.activeBranch.signal,
+      branchDisplay = Some(BranchBar.branchDisplayName)
     )
     // Compare state is built before the baseline tree view so the baseline
     // slider's pin (`baselineAt`) can feed the baseline's own `atSignal`.
@@ -58,7 +59,8 @@ object Main:
     val analyzeTreeViewState = new TreeViewState(
       wsState.keySignal, treeListState, globalError, () => wsState.currentUserId, analyzeScenarioState.activeBranch.signal,
       atSignal = analyzeCompareState.baselineAt.signal,
-      userPalette = analyzeCompareState.baselinePalette.signal
+      userPalette = analyzeCompareState.baselinePalette.signal,
+      branchDisplay = Some(BranchBar.branchDisplayName)
     )
     val analyzeBaselineHistoryState = new TreeHistoryState(wsState.keySignal, () => wsState.currentUserId)
     // Compare cards: each compared-branch slot gets its own full
@@ -77,7 +79,8 @@ object Main:
           // StrictSignals (it reads .now()), so observe the derived signals for
           // the app's lifetime instead of keeping hand-synced Vars.
           slotState.branchSignal.observe(using unsafeWindowOwner),
-          slotState.atSignal.observe(using unsafeWindowOwner), userPalette = slotState.palette.signal
+          slotState.atSignal.observe(using unsafeWindowOwner), userPalette = slotState.palette.signal,
+          branchDisplay = Some(BranchBar.branchDisplayName)
         ),
         diffState = new ChangedNodesState(wsState.keySignal, () => wsState.currentUserId),
         historyState = new TreeHistoryState(wsState.keySignal, () => wsState.currentUserId)

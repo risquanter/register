@@ -46,6 +46,11 @@ import com.risquanter.register.http.responses.SimulationResponse
   *                           (`CompareSlotState.palette` / `CompareState
   *                           .baselinePalette`) — the tree highlights match the
   *                           slot's curve family.
+  * @param branchDisplay      Renders a `BranchChoice` as its display name for
+  *                           `chartOrigin` (legend origin lines). Injected as a
+  *                           function so this state layer doesn't import the
+  *                           component that owns the naming; `None` keeps
+  *                           legends one-line.
   */
 final class TreeViewState(
   keySignal: StrictSignal[Option[WorkspaceKeySecret]],
@@ -54,7 +59,8 @@ final class TreeViewState(
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   activeBranchSignal: StrictSignal[BranchChoice] = Val(BranchChoice.Main),
   atSignal: StrictSignal[Option[CommitHash]] = Val(None),
-  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua)
+  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua),
+  branchDisplay: Option[BranchChoice => String] = None
 ) extends WorkspaceTreeEndpoints:
 
   private def branchAccessor(): BranchChoice = activeBranchSignal.now()
@@ -125,8 +131,26 @@ final class TreeViewState(
   val expandedNodes: Var[Set[NodeId]] = Var(Set.empty)
   val selectedNodeId: Var[Option[NodeId]] = Var(None)
 
+  /** Legend origin line for this view's chart series — "branch · tree name",
+    * degrading to the branch alone while the tree name hasn't loaded; None
+    * when no `branchDisplay` function is configured (legends stay one-line).
+    * The display function is injected (Main passes
+    * `BranchBar.branchDisplayName`) so this state layer doesn't import the
+    * component layer. Feeds the single chart's legend (via `chartState`),
+    * the side-by-side panels, and the Overlay side labels. */
+  val chartOrigin: Signal[Option[String]] =
+    branchDisplay match
+      case None => Val(None)
+      case Some(display) =>
+        activeBranchSignal.combineWith(selectedTree.signal).map { (b, t) =>
+          val branch = display(b)
+          Some(t match
+            case LoadState.Loaded(tree) => s"$branch · ${tree.name.value}"
+            case _                      => branch)
+        }
+
   // ── Chart state (delegated) ───────────────────────────────────
-  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor, branchAccessor, atAccessor, userPalette)
+  val chartState: LECChartState = LECChartState(keySignal, selectedTreeId.signal, selectedTree.signal, globalError, userIdAccessor, branchAccessor, atAccessor, userPalette, chartOrigin)
 
   // ── Convenience accessors (preserve call-site compatibility) ──
   // Read-only signals — views should never .set() chart state directly.

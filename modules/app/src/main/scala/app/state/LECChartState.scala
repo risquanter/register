@@ -50,7 +50,8 @@ final class LECChartState(
   userIdAccessor: () => Option[UserId.Authenticated] = () => None,
   branchAccessor: () => BranchChoice = () => BranchChoice.Main,
   atAccessor: () => Option[CommitHash] = () => None,
-  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua)
+  userPalette: Signal[Vector[HexColor]] = Val(PaletteData.Aqua),
+  origin: Signal[Option[String]] = Val(None)
 ) extends WorkspaceAnalysisEndpoints:
 
   // ── User selection state ──────────────────────────────────────
@@ -91,6 +92,16 @@ final class LECChartState(
   private val previewOverride: Var[Option[(NodeId, HexColor)]] = Var(None)
 
   // ── Derived signals ───────────────────────────────────────────
+
+  /** The user's explicit per-node colour choices — committed overrides plus
+    * any live picker preview. Branch-family independent; the Overlay compare
+    * pairing gives these precedence over the side's family shade, exactly as
+    * `nodeColorMap` does for the single-tree chart and tree highlights. */
+  val explicitColors: Signal[Map[NodeId, HexColor]] =
+    colorOverrides.signal.combineWith(previewOverride.signal).map {
+      case (overrides, Some((nid, hex))) => overrides.updated(nid, hex)
+      case (overrides, None)             => overrides
+    }.distinct
 
   /** Union of query-matched + user-selected node IDs — the set of nodes
     * whose curves should be rendered in the chart.
@@ -140,7 +151,7 @@ final class LECChartState(
     * inside `LoadState.map`, eliminating manual Idle/Loading/Failed threading.
     */
   val specSignal: Signal[LoadState[js.Dynamic]] =
-    // All three inputs are deduplicated (structural equality on
+    // All inputs are deduplicated (structural equality on
     // LoadState/Set/Map — visibleCurves/nodeColorMap at their definitions
     // above): every recompute below creates a NEW js.Dynamic, and
     // LECChartView re-embeds the whole Vega chart on every emission —
@@ -148,8 +159,8 @@ final class LECChartState(
     // Var write upstream (e.g. TreeDetailView's close-picker-on-any-click
     // → clearPreview chain) tore the chart down on every plain tree click.
     curveCache.signal.distinct
-      .combineWith(visibleCurves, nodeColorMap)
-      .map { (cacheState, visible, colorMap) =>
+      .combineWith(visibleCurves, nodeColorMap, origin)
+      .map { (cacheState, visible, colorMap, o) =>
         // Short-circuit to Idle when no curves are selected.
         // Without this guard, deselecting the last node causes a transient
         // Loaded(emptySpec) emission (curveCache still holds stale data)
@@ -160,6 +171,7 @@ final class LECChartState(
         else cacheState.map { allCurves =>
           LECSpecBuilder.build(
             ColorAssigner.pairWithColors(allCurves, visible, colorMap),
+            origin = o,
             responsive = true,
             zoomable = true
           )
