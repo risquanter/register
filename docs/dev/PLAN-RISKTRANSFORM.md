@@ -5,7 +5,8 @@ and the following was implemented: B.8 defect fixes, D2 Option 1 (delete `Equal`
 D6 Option 1 (retarget to `TrialOutcomes`); D3 was decided (Option 1, cache raw)
 as policy — no code exists to wire it yet. D1 is decided (stratified
 `TransformSpec` + `TransformPipeline` design locked; build deferred to the first
-consumer). D4 (unblocked 2026-07-18 by DD-19's closure; decide with D1's
+consumer; the trait was later renamed `ResultTransformSpec` — §7 OD-2 ruling
+2026-08-08, `TransformPipeline` unchanged). D4 (unblocked 2026-07-18 by DD-19's closure; decide with D1's
 build or the first mitigation wiring) and D5 (after D1's build) remain open.
 Source material: `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B (B.0–B.8, which
 remains the historical record and scoring of the design space),
@@ -84,6 +85,11 @@ logged. D1, D4, and D5 all run into this fact.
 ## 4. Decisions
 
 ### D1 — Reify transforms as data (`TransformSpec`)? — ✅ DECIDED (2026-07-17): stratified design locked, build deferred
+
+> **Naming update (2026-08-08, §7 OD-2 ruling):** the trait sketched below ships
+> as `ResultTransformSpec` (two-stage naming: it is specifically the
+> result-stage spec, sibling to `RiskLeafTransform`). `TransformPipeline` keeps
+> its name. The sketch is preserved verbatim as the decision record.
 
 **Decision (user, 2026-07-17):** Reify, with the **stratified** design — atomic
 operations plus a flat pipeline, no recursion:
@@ -248,8 +254,9 @@ pipeline-stage decision (B3 stands).
 1. ~~B.8 `require` fixes + D2~~ ✅ done 2026-07-17, together with D6.
 2. ~~D3 before any wiring~~ ✅ decided 2026-07-17 (Option 1, cache raw).
 3. ~~D1 design~~ ✅ decided 2026-07-17 (stratified `TransformSpec` +
-   `TransformPipeline`; sketch in D1 above). **D1 build** waits for the first
-   concrete mitigation use case (dead-code rule; see D1).
+   `TransformPipeline`; sketch in D1 above; trait since renamed
+   `ResultTransformSpec` — §7 OD-2). **D1 build** lands in §7 M1 (the first
+   consumer has arrived).
 4. Remaining, in order of external trigger:
    - **D1 build** — with the first consumer, starting from the locked sketch.
    - **D4** — DD-19 closed 2026-07-18, so no longer gated on it; decide with
@@ -360,3 +367,738 @@ Consequences that follow from this framing:
   against the tree is part of computing the action, so it recomputes per
   tree-version (memoized). Binding (type-check) is schema-stable and independent of
   ordinary tree edits.
+
+---
+
+## 7. Build plan (continuation, 2026-08-08)
+
+Implements the §6 concept and the rulings recorded in
+`docs/scratch/MITIGATION-PRE-PLANNING.md` ("Decisions (ruled)"). The sibling
+vql-engine work is delegated under the contract
+`../vague-quantifier-logic/PROMPT-VQL-RANGE-AND-TARGETING.md` (AC-1…AC-10);
+this plan designs against those acceptance criteria and contains **no engine
+changes**.
+
+### 7.0 Phases and dependencies
+
+| Phase | Scope | Module(s) | Depends on |
+|---|---|---|---|
+| **M1** | Domain model: renames, reified transform specs, `Mitigation` entity, tree-level collection + codecs, pure application algebra | `common` (+ tests) | nothing |
+| **M2** | Persistence + resolution: Irmin storage paths, resolver-edge wiring (effective tree, result-stage application), mitigation-application record, override staleness detection | `server` (+ tests, server-it) | M1 |
+| **M3** | VQL targeting & analytics: `Predicate` target variant, targeting-sublanguage validation, scope resolution via `satisfyingSet`, KB schema (`Mitigation` sort, `mitigate`, precomputed `mitigated`/`unmitigated`), KB memoization (P-2/P-3), engine version bump | `common`, `server`, `build.sbt` | M1, M2, engine AC-1…AC-10 delivered |
+| **M4** | API surface + frontend: tree-PUT mitigation buckets, LEC endpoint selection parameter + mitigation-provenance layer in responses, mitigation selection UI (see OD-3), two-tier badges, override edit-popup + stale badge + nonsense check | `common`, `server`, `app` | M1–M3 (badges/selection UI need only M1–M2; predicate-scope UI needs M3) |
+| **M5** | Mitigation-aware change visibility: problem space recorded in §7.7 — **no design yet, planned only after M1–M4 have landed** (user ruling on OD-4, 2026-08-08) | TBD | M1–M4 landed |
+
+**Detail level.** M1 and M2 are specified to implementation grade below (exact
+signatures, file inventory). M3 and M4 are scoped as work items with their
+interfaces named but not frozen; each is elevated to implementation grade in a
+continuation section of THIS document (§7.5, §7.6) and presented for approval
+before its first source edit (G3). Rationale: M3's exact signatures depend on
+the delivered engine API (AC-5's final shape), and M4's on what M2/M3 actually
+expose — freezing them now would speculate. This staging is itself an open
+decision (OD-1) until approved.
+
+**Versioning.** PATCH bump on landing each phase (mirror `APP_VERSION` to
+`.env` and `.env.irmin`); MINOR when this plan closes. The M3 vql-engine bump
+is a first-party sibling artifact (`com.risquanter %%% vql-engine`): exact pin
+per ADR-020 §1; the 14-day cooldown (§10) targets external publishers and does
+not apply, noted here as the pin-site rationale.
+
+### 7.1 M1 — Domain model (`common`)
+
+#### 7.1.1 Rename `RiskTransform` → `RiskResultTransform`
+
+File `domain/data/RiskTransform.scala` is renamed to
+`RiskResultTransform.scala`; the type, companion, and all members keep their
+current shapes with only the type name changed (behaviour untouched):
+
+```scala
+case class RiskResultTransform(run: TrialOutcomes => TrialOutcomes) {
+  def apply(outcomes: TrialOutcomes): TrialOutcomes
+  def andThen(that: RiskResultTransform): RiskResultTransform
+  def compose(that: RiskResultTransform): RiskResultTransform
+}
+object RiskResultTransform {
+  val identityTransform: RiskResultTransform
+  given Identity[RiskResultTransform]
+  given Debug[RiskResultTransform]
+  def applyDeductible(deductible: NonNegativeLong): RiskResultTransform
+  def capLosses(cap: NonNegativeLong): RiskResultTransform
+  def scaleLosses(factor: NonNegativeDouble): RiskResultTransform
+  def insurancePolicy(deductible: NonNegativeLong, cap: NonNegativeLong): Validation[ValidationError, RiskResultTransform]
+  def filterBelowThreshold(threshold: NonNegativeLong): RiskResultTransform
+}
+```
+
+Test suite `RiskTransformSpec.scala` renamed to `RiskResultTransformSpec.scala`
+(assertions unchanged). The stale comment in `iron/OpaqueTypes.scala` line ~80
+referencing `RiskTransform.scaleLosses` is updated in the same pass.
+
+#### 7.1.2 Result-stage spec reified (D1 sketch, renamed)
+
+D1's locked sketch is built now (the first consumer has arrived), with the
+trait renamed `TransformSpec` → `ResultTransformSpec` to match the two-stage
+naming. **This is a deviation from D1's approved names — flagged as OD-2.**
+New file `domain/data/ResultTransformSpec.scala`:
+
+```scala
+sealed trait ResultTransformSpec
+object ResultTransformSpec {
+  final case class ApplyDeductible(deductible: NonNegativeLong)     extends ResultTransformSpec
+  final case class CapLosses(cap: NonNegativeLong)                  extends ResultTransformSpec
+  final case class ScaleLosses(factor: NonNegativeDouble)           extends ResultTransformSpec
+  final case class FilterBelowThreshold(threshold: NonNegativeLong) extends ResultTransformSpec
+  final case class InsurancePolicy private (deductible: NonNegativeLong, cap: NonNegativeLong)
+      extends ResultTransformSpec
+  object InsurancePolicy {
+    def create(deductible: NonNegativeLong, cap: NonNegativeLong)
+        : Validation[ValidationError, InsurancePolicy]              // cross-field: cap > deductible
+  }
+  def toTransform(spec: ResultTransformSpec): RiskResultTransform   // single exhaustive match
+  given Equal[ResultTransformSpec] = Equal.default
+  given JsonCodec[ResultTransformSpec]   // discriminated; per-case Raw + mapOrFail (DistributionParams precedent)
+}
+
+final case class TransformPipeline(steps: List[ResultTransformSpec])
+object TransformPipeline {
+  val empty: TransformPipeline
+  given Identity[TransformPipeline]      // list concatenation; associative, NOT commutative
+  given Equal[TransformPipeline] = Equal.default
+  given JsonCodec[TransformPipeline]
+  def toTransform(p: TransformPipeline): RiskResultTransform
+  // law (tested): toTransform(a <> b) ≙ toTransform(a) andThen toTransform(b)
+}
+```
+
+#### 7.1.3 Param-stage: `RiskLeafTransform` product
+
+New file `domain/data/RiskLeafTransform.scala`:
+
+```scala
+sealed trait LikelihoodTransform
+object LikelihoodTransform {
+  case object Keep extends LikelihoodTransform                              // identity component
+  final case class Scale(factor: NonNegativeDouble) extends LikelihoodTransform
+      // application clamps probability × factor into OccurrenceProbability's domain
+  final case class Override(probability: OccurrenceProbability) extends LikelihoodTransform
+  given Equal[LikelihoodTransform] = Equal.default
+  given JsonCodec[LikelihoodTransform]
+}
+
+sealed trait DistributionTransform
+object DistributionTransform {
+  case object Keep extends DistributionTransform
+  final case class ScaleSeverity(factor: NonNegativeDouble) extends DistributionTransform
+      // lognormal: scales minLoss/maxLoss; expert: scales quantiles — one semantic op per representation
+  final case class Narrow(fraction: ShrinkFraction) extends DistributionTransform
+      // contract the spread toward the median by `fraction` (0 = no-op, →1 = collapse);
+      // lognormal: shrink the CI symmetrically in log space; expert: pull quantiles toward the median quantile
+  final case class Override(params: OverrideDistributionParams) extends DistributionTransform
+  given Equal[DistributionTransform] = Equal.default
+  given JsonCodec[DistributionTransform]
+}
+
+// Iron alias in iron/OpaqueTypes.scala + refine helper in iron/ValidationUtil.scala:
+// type ShrinkFraction = Double :| (GreaterEqual[0.0] & Less[1.0])
+// def refineShrinkFraction(value: Double, fieldPath: String): Either[List[ValidationError], ShrinkFraction]
+
+/** Absolute replacement of a leaf's distribution — the expert-supplied post-mitigation shape.
+  * Same mode invariant as RiskLeaf (expert ⇒ percentiles+quantiles; lognormal ⇒ minLoss<maxLoss),
+  * validated once via a shared helper extracted from RiskLeaf.create (see 7.1.6). */
+final case class OverrideDistributionParams private (
+  distributionType: DistributionType,
+  percentiles: Option[Array[Double]],
+  quantiles: Option[Array[Double]],
+  minLoss: Option[NonNegativeLong],
+  maxLoss: Option[NonNegativeLong],
+  terms: Option[PositiveInt]
+)
+object OverrideDistributionParams {
+  def create(
+    distributionType: DistributionType,
+    percentiles: Option[Array[Double]],
+    quantiles: Option[Array[Double]],
+    minLoss: Option[NonNegativeLong],
+    maxLoss: Option[NonNegativeLong],
+    terms: Option[PositiveInt]
+  ): Validation[ValidationError, OverrideDistributionParams]
+  given Equal[OverrideDistributionParams]        // structural; array fields compared by content
+  given JsonCodec[OverrideDistributionParams]
+}
+
+/** Product of the two independent components; either may be Keep (identity). */
+final case class RiskLeafTransform(
+  likelihood: LikelihoodTransform,
+  distribution: DistributionTransform
+)
+object RiskLeafTransform {
+  val identity: RiskLeafTransform = RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.Keep)
+  /** Interpret onto a leaf; the output is a normal RiskLeaf revalidated through RiskLeaf.create. */
+  def applyTo(t: RiskLeafTransform, leaf: RiskLeaf): Validation[ValidationError, RiskLeaf]
+  given Equal[RiskLeafTransform] = Equal.default
+  given JsonCodec[RiskLeafTransform]
+}
+```
+
+#### 7.1.4 `Mitigation` entity + tree collection
+
+`iron/OpaqueTypes.scala` gains the ADR-018 nominal wrapper (with Tapir/JSON
+codecs following the `NodeId` pattern):
+
+```scala
+case class MitigationId(toSafeId: SafeId.SafeId)
+object MitigationId {
+  def fromString(s: String): Either[List[ValidationError], MitigationId]
+  // JsonEncoder/JsonDecoder/Schema/Tapir Codec — NodeId pattern
+}
+```
+
+New file `domain/data/Mitigation.scala`:
+
+```scala
+/** M1/M2 targeting: explicit stable-id set. The VQL `Predicate` variant is added in M3
+  * (additive sealed-trait extension; exhaustive matches surface every site). */
+sealed trait MitigationTarget
+object MitigationTarget {
+  final case class Nodes(ids: Set[NodeId]) extends MitigationTarget   // non-empty (checked in Mitigation.create)
+  given Equal[MitigationTarget] = Equal.default
+  given JsonCodec[MitigationTarget]
+}
+
+/** Global cross-mitigation order: ascending numeric key, MitigationId string as the stable
+  * tiebreak. The key is the stored source of truth (merge-stable); UI ordering is a skin. */
+final case class MitigationPrecedence(key: Int)
+object MitigationPrecedence {
+  val overrideBaseline: MitigationPrecedence = MitigationPrecedence(-1000)  // preset: applied first, relative ops blend on top
+  val default: MitigationPrecedence          = MitigationPrecedence(0)
+  val overrideFinal: MitigationPrecedence    = MitigationPrecedence(1000)   // preset: applied last, asserts the mitigated state
+  given Equal[MitigationPrecedence] = Equal.default
+  given JsonCodec[MitigationPrecedence]
+}
+
+sealed trait MitigationSpec
+object MitigationSpec {
+  /** Param-stage; leaves only. overrideBaseStamp = ContentHash of the target leaf's
+    * LeafSimContent (DD-16 projection) at authoring time — REQUIRED iff either component
+    * is an Override (staleness layer 1); renames/reparents do not change it by construction. */
+  final case class LeafStage(transform: RiskLeafTransform, overrideBaseStamp: Option[ContentHash]) extends MitigationSpec
+  /** Result-stage; any node. */
+  final case class ResultStage(pipeline: TransformPipeline) extends MitigationSpec
+  given Equal[MitigationSpec] = Equal.default
+  given JsonCodec[MitigationSpec]
+}
+
+final case class Mitigation private (
+  id: MitigationId,
+  name: SafeName.SafeName,
+  target: MitigationTarget,
+  spec: MitigationSpec,
+  precedence: MitigationPrecedence
+)
+object Mitigation {
+  /** Cross-field rules (accumulated):
+    *  - target Nodes set non-empty
+    *  - spec LeafStage with an Override component ⇒ target is a single node AND overrideBaseStamp defined
+    *  - spec LeafStage without Override ⇒ overrideBaseStamp empty
+    */
+  def create(
+    id: MitigationId,
+    name: SafeName.SafeName,
+    target: MitigationTarget,
+    spec: MitigationSpec,
+    precedence: MitigationPrecedence
+  ): Validation[ValidationError, Mitigation]
+  given Equal[Mitigation] = Equal.default
+  given JsonCodec[Mitigation]
+  given Schema[Mitigation]
+}
+
+/** D-4 provenance layer: one record per applied mitigation, stored beside the simulation
+  * provenance in responses — NEVER inside NodeProvenance (DD-19 stays identity-free). */
+final case class MitigationApplicationRecord(
+  mitigationId: MitigationId,
+  spec: MitigationSpec,
+  resolvedScope: Set[NodeId],
+  precedence: MitigationPrecedence
+)
+object MitigationApplicationRecord {
+  given JsonCodec[MitigationApplicationRecord]
+  given Schema[MitigationApplicationRecord]
+}
+```
+
+`domain/data/RiskTree.scala` changes:
+
+```scala
+final case class RiskTree(
+  id: TreeId,
+  name: SafeName.SafeName,
+  nodes: Seq[RiskNode],
+  rootId: NodeId,
+  index: TreeIndex,
+  seedVarHighWater: SeedVarId.SeedVarId,
+  mitigations: Seq[Mitigation] = Nil          // new field, default keeps all call sites source-compatible
+)
+
+// RiskTreeJson gains  mitigations: Option[Seq[Mitigation]]  (absent in pre-existing blobs → Nil)
+// fromNodes / fromNodesUnsafe gain  mitigations: Seq[Mitigation] = Nil  and validate:
+//  - mitigation ids unique;  names unique among mitigations (future VQL constants)
+//  - every MitigationTarget.Nodes id resolves in the TreeIndex
+//  - LeafStage targets are leaves;  (ResultStage targets: any node)
+```
+
+#### 7.1.5 Application algebra (pure, shared)
+
+New file `domain/data/MitigationApplication.scala` — the monoid action
+`Mits × Tree → Tree`, in `common` so the frontend can later preview
+effective parameters and run the nonsense check client-side:
+
+```scala
+/** Which mitigations to apply, each optionally restricted to a subset of its scope
+  * (per-(mitigation, node) enablement — OD-3 ruling 2026-08-09). Crosses the wire in
+  * M4 as a query parameter. A NodesOnly restriction intersects with the mitigation's
+  * resolved scope at application time: ids outside the current scope no-op. */
+sealed trait MitigationSelection
+object MitigationSelection {
+  case object None extends MitigationSelection
+  case object All extends MitigationSelection
+  final case class Selected(entries: Map[MitigationId, ScopeRestriction]) extends MitigationSelection
+  given JsonCodec[MitigationSelection]
+}
+
+sealed trait ScopeRestriction
+object ScopeRestriction {
+  case object FullScope extends ScopeRestriction                        // whole resolved scope (global toggle)
+  final case class NodesOnly(ids: Set[NodeId]) extends ScopeRestriction // explicit per-node enablement
+  given JsonCodec[ScopeRestriction]
+}
+
+object MitigationApplication {
+
+  /** Per-node applicable mitigations, ascending precedence key, MitigationId tiebreak. */
+  def scoped(tree: RiskTree, selection: MitigationSelection): Map[NodeId, List[Mitigation]]
+
+  /** The action's param-stage half: every scoped leaf replaced by its transformed self
+    * (Override wins per precedence; relative ops compose in order). Output is a normal
+    * RiskTree revalidated through RiskTree.fromNodes — closure by construction. */
+  def effectiveTree(tree: RiskTree, selection: MitigationSelection): Validation[ValidationError, RiskTree]
+
+  /** The action's result-stage half for one node: the composed pipeline of every
+    * ResultStage mitigation scoping this node, in precedence order (identity when none). */
+  def resultTransformFor(nodeId: NodeId, scoped: Map[NodeId, List[Mitigation]]): RiskResultTransform
+
+  /** Applications performed for a resolution — the D-4 records (resolvedScope = the
+    * target sets as resolved against this tree version). */
+  def applicationRecords(tree: RiskTree, selection: MitigationSelection): List[MitigationApplicationRecord]
+
+  /** Staleness layer 1: overrides whose stored base stamp no longer matches the target
+    * leaf's current LeafSimContent hash. Fires on any edit path (form, merge, API, revert). */
+  def staleOverrides(tree: RiskTree): Set[MitigationId]
+
+  /** Staleness layer 4 (nonsense check): overrides that make the node's expected severity
+    * or likelihood strictly worse than its current base. */
+  def worseningOverrides(tree: RiskTree): Set[MitigationId]
+}
+```
+
+Associativity invariant (tested): `effectiveTree` touches only leaves'
+persisted params; `resultTransformFor` is applied by the resolver to a node's
+finished `TrialOutcomes` (operand or finished aggregate) — never inside
+`TrialOutcomes.combine`.
+
+#### 7.1.6 Shared mode-fields invariant
+
+The RiskLeaf mode rule (expert ⇒ percentiles+quantiles present; lognormal ⇒
+minLoss < maxLoss) currently lives in `RiskLeaf` (require + create). It is
+extracted into one helper used by both `RiskLeaf.create` and
+`OverrideDistributionParams.create` (boyscout: single definition):
+
+```scala
+// in domain/data/RiskNode.scala (companion-level helper, exact home at implementation)
+private[data] def validateModeFields(
+  distributionType: DistributionType,
+  percentiles: Option[Array[Double]],
+  quantiles: Option[Array[Double]],
+  minLoss: Option[NonNegativeLong],
+  maxLoss: Option[NonNegativeLong],
+  fieldPrefix: String
+): Validation[ValidationError, Unit]
+```
+
+#### 7.1.7 M1 tests
+
+- `RiskResultTransformSpec` (renamed; unchanged assertions).
+- New `ResultTransformSpecSpec`: codec round-trip per case; `Equal` lawfulness;
+  pipeline law `toTransform(a <> b) ≙ toTransform(a) andThen toTransform(b)`;
+  `Identity[TransformPipeline]` laws.
+- New `RiskLeafTransformSpec`: `applyTo` produces a valid leaf for every op on
+  both representations; `Keep`/`Keep` is identity; Scale clamping; Narrow
+  contracts spread; Override replaces wholesale; property — output leaf always
+  passes `RiskLeaf.create`.
+- New `MitigationEntitySpec`: `Mitigation.create` cross-field rules (all
+  accumulation paths); codec round-trip; precedence ordering incl. tiebreak.
+- New `MitigationApplicationSpec`: `scoped` ordering; `effectiveTree` closure +
+  Override absorption + baseline/final preset semantics; `resultTransformFor`
+  composition order; `staleOverrides` fires on sim-relevant edits only (rename
+  does NOT fire — DD-16); `worseningOverrides`.
+- `RiskTree` codec: old-format JSON (no `mitigations` key) decodes to `Nil`;
+  round-trip with mitigations; `fromNodes` rejects dangling target ids,
+  duplicate mitigation ids/names, LeafStage targeting a portfolio.
+
+### 7.2 M2 — Persistence and resolution (`server`)
+
+#### 7.2.1 Storage (ADR-004a mapping extended)
+
+One Irmin path per mitigation, mirroring the per-node convention — this is
+what makes disjoint mitigation edits auto-merge and puts mitigation conflicts
+under the existing byte-level pre-check (ADR-032) with no new machinery:
+
+```
+workspaces/<wsId>/risk-trees/<treeId>/mitigations/<mitigationId>  → Mitigation JSON
+```
+
+```scala
+// infra/irmin/WorkspaceStoragePaths.scala
+def treeMitigations(wsId: WorkspaceId, treeId: TreeId): String
+
+// repositories/RiskTreeRepositoryIrmin.scala
+//  - writeTree: one IrminTreeEntry per mitigation ("mitigations/{id}") beside meta + nodes
+//    (DD-7 whole-subtree replacement keeps working: omitted mitigation = deleted)
+//  - read path (getById / getAtCommit): read mitigations/* and pass into RiskTree.fromNodes
+```
+
+`RiskTreeRepositoryInMemory` stores whole `RiskTree` values and is expected to
+need no change; it is in the inventory in case compilation surfaces one.
+
+#### 7.2.2 Resolver-edge wiring
+
+```scala
+// services/cache/RiskResultResolver.scala
+trait RiskResultResolver:
+  def ensureCached(
+    tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean = false,
+    mitigations: MitigationSelection = MitigationSelection.None
+  ): Task[LossDistribution]
+  def ensureCachedAll(
+    tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean = false,
+    mitigations: MitigationSelection = MitigationSelection.None
+  ): Task[Map[NodeId, LossDistribution]]
+```
+
+`RiskResultResolverLive` behaviour for a non-`None` selection:
+
+1. `MitigationApplication.effectiveTree(tree, selection)` once per resolution;
+   validation failure → `ValidationFailed` (typed channel, ADR-010).
+2. `ContentHashIndex.build(effectiveTree)` — cache keys are the **effective**
+   leaf content. DD-16's `LeafSimContent` and the cache value shape are
+   untouched; a param-mitigated leaf is simply different content. D3 stands:
+   the cache stores raw simulations; result-stage transforms are applied at
+   the edge on every read and never cached.
+3. In `resolveNode`, after a node's result exists (leaf hit/miss or portfolio
+   aggregate), apply `resultTransformFor(node.id, scoped).run` to its
+   `trialOutcomes` **before returning it to the parent** — the transform acts
+   on the combine's operand or finished aggregate, never inside the combine
+   (ADR-009 associativity honoured).
+4. Tracing: `mitigation.selection` and per-resolution applied-count attributes
+   (ADR-002).
+
+The with/without comparison is two resolver calls (`None` vs a selection) —
+cheap by design: raw leaf simulations are shared through the content cache
+whenever param-stage mitigation leaves a leaf untouched.
+
+#### 7.2.3 M2 tests
+
+- `RiskResultResolverSpec` extensions: selection `None` bit-identical to
+  today; param-stage: effective leaf simulated + cached under effective hash
+  (raw entry untouched — both keys coexist); result-stage leaf transform
+  applied before parent aggregation (portfolio aggregate reflects it);
+  result-stage on portfolio applied after aggregation; `Only(ids)` subset;
+  precedence order respected end-to-end; application records returned/logged.
+- `CacheTransparencySpec` extension: with/without pairs share raw-leaf cache
+  entries for out-of-scope leaves.
+- `serverIt` (`RiskTreeRepositoryIrminSpec` + a new `MitigationPersistenceItSpec`
+  if clearer): create/update/read round-trip with mitigations; omitted
+  mitigation deleted; branch fork + disjoint mitigation edits merge cleanly;
+  same-mitigation edits conflict (byte-level pre-check, ADR-032).
+
+### 7.3 M3 — VQL targeting & analytics (work items; elevate before build)
+
+- **Engine bump**: `vql-engine` to the AC-1…AC-10 release (exact pin in
+  `build.sbt`; breaking `ParsedQuery.range` widening absorbed at the register
+  HTTP boundary).
+- **`MitigationTarget.Predicate`**: validated targeting predicate — parsed by
+  the engine's FOL formula parser at the boundary (fails at parse time for
+  `Q[...]`/answer variables by construction), then binding-phase checks
+  (closed in the node variable, bounded auxiliary quantifiers, no
+  mitigation-state predicates — pre-planning P-1). New parser boundary → row
+  added to ADR-029 §3's table (no interpolation; length-capped source;
+  parse-don't-re-parse).
+- **Scope resolution** via the engine's `satisfyingSet` (AC-5), resolved per
+  tree-version, memoized; resolved sets feed `MitigationApplicationRecord.resolvedScope`.
+- **KB schema**: `Mitigation` sort; binary `mitigate(node, mitigation)`;
+  precomputed unary `mitigated(x)` / `unmitigated(x)` via the existing
+  precomputed-set dispatcher pattern (P-3).
+- **KB memoization** (P-2): `RiskTreeKnowledgeBase` built per tree-version
+  (keyed on workspace/tree/branch content identity), not per query; the
+  mitigation precomputes ride the same memoized build. **ADR-028 Decision 5
+  ("model built per-query") must be amended in the same change** (doc sweep).
+- **Range use**: analytics over mitigated/unmitigated populations arrive free
+  with AC-1/AC-2 once the KB predicates exist; register-side work is KB-only.
+
+### 7.4 M4 — API surface + frontend (work items; elevate before build)
+
+- **Tree PUT buckets**: `RiskTreeUpdateRequest`/`RiskTreeDefinitionRequest`
+  gain mitigation buckets (ADR-017 pattern: identity-preserving `mitigations`
+  + `newMitigations`); Tapir endpoint shape change (Decision Trigger #1 —
+  covered by this plan once §7.6 freezes the DTOs). This is D5's scope: the
+  DTO/endpoint design lands with its own ADR (ADR-034) per D5's ruling.
+- **LEC endpoints**: `mitigations` selection parameter on the analysis
+  endpoints; responses carry raw + selected-mitigated curves and the
+  mitigation-provenance layer (`MitigationApplicationRecord`s) beside
+  simulation provenance. Client toggling re-fetches per selection (SSE/HTTP
+  notification-refetch model, ADR-004a) — see OD-3.
+- **Frontend**: per-mitigation selection UI per OD-3's refined model —
+  mitigation child-styled rows under scoped nodes (per-(mitigation, node)
+  enablement) + global tri-state control; within-view mitigated-twin curves
+  beside unmitigated, with a client-side display mode giving a purely
+  mitigated (residual-risk) view — granularity per OD-3c; **Compare slots
+  gain mitigation selection as a slot dimension** with a copy-for-compare
+  gesture (variant comparison: raw vs fw vs fw+IDS as slots,
+  overlay/side-by-side, slot-keyed colours; comparand slots display their
+  variant only, baseline shows raw);
+  toggle↔curve colour consistency; two-tier badges (directly-scoped solid,
+  affected-by-descendant faint + tooltip); override edit-popup flow (ADR-019
+  Pattern 6 state machine) + stale badge + nonsense check surfacing; ADR-019
+  ownership rules throughout.
+- **Semantic diff**: `ChangedNodesService` compares node domain hashes only —
+  a mitigation edit changes results without changing any node hash. Ruled
+  (OD-4): recorded as phase M5, §7.7 — planned after M1–M4 land.
+
+### 7.4.1 User-facing documentation deliverable (lands with M3/M4)
+
+The dynamic-scope behaviour needs user documentation; the worked example below
+is the preserved seed text (user ruling 2026-08-09). Placement across the
+existing docs when the feature ships:
+
+- `README.md` → new "Mitigations" entry under **Features**: high-level
+  description (explicit first-class mitigations, two stages, predicate
+  targeting with auto-scope, with/without comparison) — a few sentences, no
+  walkthrough.
+- `docs/user/API-TUTORIAL.md` → new mitigation section carrying the **full
+  worked example below** (it is the step-by-step walkthrough document).
+- `docs/user/TERMINOLOGY.md` → entries: *mitigation*, *targeting predicate*,
+  *scope* vs *resolved scope*, *param-stage* vs *result-stage*, *override*,
+  *precedence*.
+- `docs/user/VQL-QUERY-EXAMPLES.md` → targeting-predicate examples +
+  mitigated/unmitigated population queries (cross-linked from the tutorial).
+
+**Seed text — dynamic predicate scope, worked example:**
+
+Say Firewall has the targeting predicate "all leaves whose name starts with
+`srv-`" instead of an explicit node list.
+
+- Tree version 1 has leaves `srv-web` and `srv-db`. The predicate resolves to
+  `{srv-web, srv-db}`. Firewall is enabled globally (full scope): both leaves
+  are mitigated; the LEC's provenance layer records
+  `resolvedScope = {srv-web, srv-db}`.
+- You add a leaf `srv-mail` (tree version 2). Scope re-resolves per tree
+  version, so `srv-mail` enters Firewall's scope automatically. Because the
+  enablement is full-scope, `srv-mail` is mitigated with no further action,
+  and the next LEC's provenance records the three-node set. The version-1
+  result's record still says two nodes — past results are not retro-altered.
+- Same story but Firewall was enabled per-node on `srv-web` only: after adding
+  `srv-mail`, only `srv-web` stays mitigated. A restriction is an explicit
+  list; new scope members are not silently pulled into it. `srv-mail` shows
+  Firewall's row (in scope, badge visible) unticked until clicked.
+- You delete `srv-web` while the per-node restriction names it: the stored id
+  no longer intersects the resolved scope, so the selection applies nothing —
+  a no-op, not an error. Selections are client-side view state, so nothing
+  persistent goes stale.
+
+### 7.5 / 7.6 — reserved for the M3 / M4 implementation-grade continuations.
+
+### 7.7 M5 — Mitigation-aware change visibility (problem space only)
+
+Ruled on OD-4 (2026-08-08): this is the plan's **last deliverable**, to be
+designed only after M1–M4 have landed. No design is locked here and no
+preference is stated — this section records the problem space so the work is
+explicitly part of the plan.
+
+**Problem.** The system has two equality relations (ADR-032). Mitigations
+deliberately live outside the domain relation: a mitigation edit changes every
+affected node's simulation results while every node's domain content hash — and
+therefore the semantic diff (`ChangedNodesService`), the compare view's
+changed-nodes markers, and any domain-hash-driven "what changed" surface —
+reports no change. Merge *safety* is unaffected (the byte-level pre-check
+covers the `mitigations/{id}` paths), but a user comparing two branches that
+differ only in mitigation content sees "no changes" while the curves differ.
+Adjacent surfaces with the same blindness: branch-compare overlays, history
+scrubbing annotations, and any future "changed since" indicator.
+
+**Follow-up instruction (verbatim scope for the M5 planning session):** once
+M1–M4 are landed, plan how mitigation-level changes become visible across the
+diff/compare/history surfaces — as a §7.8 implementation-grade continuation of
+this document, presented for approval before any source edit.
+
+### ADR alignment
+
+Reviewed the complete corpus in `docs/dev/` (all files in force per the
+adr-constraints skill). Per-ADR outcome for this plan:
+
+| ADR | Bearing | Alignment |
+|---|---|---|
+| 001 (Iron/smart constructors) | All new types | Compliant: every entity via `create`/refined params; no raw primitives in signatures |
+| 002 (logging/telemetry) | Resolver wiring | Compliant: span attributes extended; no new log sinks |
+| 003 (provenance) | D-4 layer | Compliant: `NodeProvenance` untouched; mitigation records are a separate layer beside it (DD-19 identity-free preserved) |
+| 004a (+appendix) (persistence) | Storage mapping | Compliant: per-mitigation path mirrors per-node convention; single writer; DD-7 atomic whole-subtree write extended |
+| 004b | — | No bearing (unadopted WebSocket variant) |
+| 005 | Cache | Historical (superseded by ContentCache); no bearing beyond ADR-014/15 notes below |
+| 006 | — | No bearing (collaboration unbuilt) |
+| 007 (+appendix) (branching/merge) | Mitigation merges | Compliant: path-level merge gives disjoint-edit auto-merge; conflicts surface via existing `MergeConflict` |
+| 008 | — | No bearing (conceptual error/resilience patterns; ADR-010/031 govern) |
+| 009 (aggregation monoid) | Result-stage application | Compliant: transforms act on operands/finished aggregates, never in `combine`; law tests added |
+| 010 (errors) | All validation | Compliant: `Validation` accumulation; typed channels; no exceptions |
+| 011 (imports) | All code | Compliant by convention |
+| 012 (mesh) | — | No app-level resilience/auth added |
+| 014 (+appendices) (caching) | Cache keys | Compliant: outcomes cached, not curves; no transform params in keys (D3); effective-content keying reuses DD-16 unchanged |
+| 015 (resolver) | Resolver edge | Compliant: `ensureCached` stays the single simulation entry point; mitigation is edge logic around it |
+| 016 (config) | — | No new config in M1/M2 |
+| 017 (+NOTES) (tree API) | M4 DTO buckets | Deferred to §7.6: whole-tree PUT + identity-preserving buckets pattern will be followed; flagged now |
+| 018 (nominal wrappers) | `MitigationId` | Compliant: case-class wrapper over `SafeId`, `NodeId` pattern |
+| 019 (frontend) | M4 | Deferred to §7.6: parent-owned state, Pattern 6 for the popup flow |
+| 020 (supply chain) + skill | M3 engine bump | Compliant: exact pin; first-party sibling → cooldown n/a (documented at pin site) |
+| 021 (capability URLs) | — | Endpoints stay under `/w/{key}`; no new auth surface |
+| 022 (secrets) | — | No credentials involved; mitigation data is ordinary domain content |
+| 023 | — | No bearing (TLS/local trust) |
+| 024 (PEP) | — | No authorization writes; PEP untouched |
+| 025/027 (SPA routing/nginx) | — | No new routes outside existing prefixes |
+| 026 (images) | — | Engine bump triggers the documented graalvm-builder rebuild (register-dev skill); no Dockerfile changes |
+| 028 (+appendix) (query pane) | M3 KB | **Amendment required in M3**: Decision 5 "model built per-query" superseded by tree-version memoization; KB schema additions follow the existing catalog/dispatcher patterns |
+| 029 (injection) | M3 predicate | **Table row required in M3**: targeting predicate is a new parser boundary (parsed once at the boundary by the formula parser; never interpolated) |
+| 030 (authz orchestration) | M4 endpoints | Deferred to §7.6: `Checked[Permission]` propagation on extended endpoints |
+| 031 (startup readiness) | — | No bearing |
+| 032 (equality relations) | Diff/merge | Compliant: mitigation blobs join the storage relation automatically; domain relation deliberately blind to mitigations (OD-4 covers the compare-view consequence) |
+| 033 (exception boundaries) | New code | Compliant: throw-free; no new catches |
+| INFRA-006 | — | No bearing (DB credentials) |
+
+### File inventory
+
+M1/M2 files (M3/M4 files are appended here when §7.5/§7.6 are approved):
+
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskResultTransform.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTransform.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/ResultTransformSpec.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskLeafTransform.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/Mitigation.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/MitigationApplication.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskNode.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationUtil.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTransformSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskResultTransformSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/ResultTransformSpecSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskLeafTransformSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationEntitySpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationApplicationSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeSeedVarIdSpec.scala`
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/WorkspaceStoragePaths.scala`
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala`
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolver.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolverLive.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultResolverSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CacheTransparencySpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala`
+- `build.sbt`
+
+### Open decisions
+
+Status after the 2026-08-08 review session:
+
+- **OD-1 — Plan staging.** ✅ RULED (Option A): M1+M2 implementation-grade now;
+  M3/M4 elevated in §7.5/§7.6 before their builds.
+- **OD-2 — D1 naming deviation.** ✅ RULED (Option A): `TransformSpec` →
+  `ResultTransformSpec`; `TransformPipeline` unchanged. Consistency sweep done
+  same day (this document's status header, D1 note, sequencing item;
+  `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` B.8 intro and checklist).
+- **OD-3 — Mitigation selection & comparison UX.** ✅ RULED (2026-08-09, user
+  preference Option A + assistant selection confirmed against the
+  copy-for-compare workflow): per-(mitigation, node) enablement via
+  child-styled mitigation rows under scoped nodes + additive global tri-state
+  control; M1 ships the generalized `MitigationSelection` /`ScopeRestriction`
+  ADT (§7.1.5); display control = chart-level tri-mode Raw / Mitigated / Both
+  per view and per slot (OD-3c ruled Option A — per-series eyes only if a
+  concrete mixed-visibility need appears later). **Copy-for-compare (aligned
+  semantics, generalized 2026-08-09):** available on the active (baseline)
+  view AND on every comparand slot card — a button beside the slot's existing
+  controls, styled like them. The gesture duplicates the source's complete
+  state — branch, tree, commit pin, charted node selection, mitigation
+  selection, display mode — into the next free comparand slot; source and
+  copy then diverge independently (scrub the copy's pin, add a mitigation,
+  …). Any slot can seed the next variant, so comparison chains build
+  incrementally (baseline → fw → copy of fw + IDS). Use case: small
+  comparisons — same risks, same mitigations, two versions back, plus one
+  extra mitigation. Remaining build detail lands at §7.6 elevation. History
+  of the decision below (kept as record):
+  OPEN, refined 2026-08-08.
+  Server side is settled for M2 (per-selection computation; every gesture
+  already costs one `lec-multi` round-trip today). User's clarified proposal
+  under review: a mitigation appears as a child-styled row **under each risk
+  node its scope covers** (one mitigation, several appearances), and
+  Ctrl+Click on such a row enables the mitigation **for that node only** —
+  per-(mitigation, node) enablement, i.e. applying a mitigation restricted to
+  a subset of its scope; ADDITIVELY, the originally designed global mechanism
+  (enable/disable a mitigation across its whole scope, tri-state when
+  partially enabled) is kept. Consequence if adopted: M1's
+  `MitigationSelection` generalizes from a set of mitigation ids to a
+  per-mitigation scope restriction (`Map[MitigationId, ScopeRestriction]`,
+  `ScopeRestriction = FullScope | NodesOnly(Set[NodeId])`) — the ruling
+  therefore fixes an M1 signature and must land before M1 freezes.
+  Comparison model (refined with the user 2026-08-08): the Analyze view's
+  **Compare slots** (`SlotCoordinate(branch, treeOverride, at)`; slots already
+  support same-branch pairs for time-travel comparison) gain **mitigation
+  selection as a slot dimension** — "copy-for-compare" duplicates the active
+  view into the next free slot, where clicking mitigations sets that slot's
+  selection; overlay/side-by-side then compares variants (raw vs fw vs fw+IDS
+  = one slot each) with slot-keyed colours. This is phased **into M4** as a
+  named work item (elevated at §7.6), not deferred. Display model (adopted
+  2026-08-09): the response for a selection always carries BOTH the raw and
+  mitigated series per charted node; which series are drawn is client-side
+  display state — so a **purely mitigated view** (residual-risk picture
+  without raw twins) is a display mode, not an API variant. Comparand slots
+  with a selection display their variant curves only (baseline shows raw),
+  keeping overlays free of duplicated raw curves. Open (OD-3c): the display
+  control's granularity — chart-level tri-mode (Raw / Mitigated / Both) per
+  view and slot, versus per-series visibility toggles, versus both. Scenario
+  branches are NOT the comparison vehicle.
+- **OD-4 — Semantic diff blindness.** ✅ RULED: backlog now, plus phase **M5**
+  (§7.7) — problem space recorded, no design, planned only after M1–M4 land.
+- **OD-5 — Selection default for existing read paths.** ✅ RULED (2026-08-08,
+  Option A): `MitigationSelection.None` is the default on every existing read
+  path — mitigation is strictly opt-in per request; no existing figure changes
+  until a caller explicitly selects mitigations. §7.2.2's resolver defaults
+  already encode this.
+
+### Verification plan
+
+Every phase lands only with the full suite green (no tier deferred):
+
+```bash
+sbt compile                          # zero warnings
+sbt commonJVM/test
+sbt server/test
+sbt app/test                         # Scala.js (shared module codecs compile + run on JS)
+sbt "serverIt/test"                  # integration (local/irmin-prod:3.11-p1)
+# BATS fast gate after code changes:
+#   run_bats tests/bats/suite-c-in-memory.bats   (register-dev skill invocation)
+```
+
+Tests added per phase are listed in §7.1.7 / §7.2.3; M3/M4 test plans arrive
+with their elevation sections. Each phase closes with the doc-consistency
+sweep (comments/docs touched by the change updated in the same pass) and its
+PATCH bump; plan close = MINOR bump.

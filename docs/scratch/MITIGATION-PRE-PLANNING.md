@@ -25,10 +25,11 @@ tracked in `PLAN-RISKTRANSFORM.md` and the working session.
   tooltip). Provenance stores the scoped set; affected is derived (ancestors of scoped nodes).
 - **Range expressiveness = (B)**, tree-associated representation, algebra framing — see
   `PLAN-RISKTRANSFORM.md` §6. The vql-engine work is delegated: agent prompt with the interface
-  contract (AC-1…AC-10) in `docs/scratch/PROMPT-VQL-RANGE-AND-TARGETING.md`; register's build plan
-  designs against those acceptance criteria (notably the `satisfyingSet` API for targeting).
+  contract (AC-1…AC-10) in `../vague-quantifier-logic/PROMPT-VQL-RANGE-AND-TARGETING.md` (moved to
+  the sibling repo); register's build plan designs against those acceptance criteria (notably the
+  `satisfyingSet` API for targeting).
 - **Build plan location = append as §7 of `PLAN-RISKTRANSFORM.md`** (one plan per workstream), folding
-  in this scratch doc's content.
+  in this scratch doc's content. §7 is drafted (2026-08-08) and awaiting review.
 - **`DistributionTransform` semantics = uniform semantic op interpreted per representation**, and
   prefer **result-stage** for any severity mitigation expressible on outcomes (representation-free).
   Normalize-then-transform rejected (breaks the "output is a normal leaf of the same kind" promise).

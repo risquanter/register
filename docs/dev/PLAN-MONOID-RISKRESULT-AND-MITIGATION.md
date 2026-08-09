@@ -557,8 +557,10 @@ existed, together with the D6 retarget of `run` to `TrialOutcomes => TrialOutcom
 (see `PLAN-RISKTRANSFORM.md` §2 and D6 for what was done). The `TransformSpec`
 shape speculated at the end of this section was decided on 2026-07-17 as
 PLAN-RISKTRANSFORM.md D1: stratified — a non-recursive sealed trait of atomic
-operations plus a flat ordered `TransformPipeline` list; build deferred to the
-first consumer. The original findings are kept below as the record.
+operations plus a flat ordered `TransformPipeline` list; it ships as
+`ResultTransformSpec` (PLAN-RISKTRANSFORM §7 OD-2 ruling 2026-08-08;
+`TransformPipeline` name unchanged), built in §7 M1. The original findings are
+kept below as the record.
 
 Code review 2026-07-14 against `RiskTransform.scala`. **Gap 6 is the opportunity, not an
 excuse**: `RiskTransform` is public API in a shared module (`commonJVM`/`commonJS`) with zero
@@ -716,6 +718,7 @@ Fixed inside the zero-caller window (gap 6), as required, together with the D6 r
       (`NonNegativeLong` / `NonNegativeDouble`); the cross-field rule `cap > deductible`
       lives in `insurancePolicy`, which returns `Validation` (ADR-001).
 - [x] `given Equal[RiskTransform] = Equal.default` deleted (D2, Option 1).
-- [x] Law-suite `Equal` case: moot — the instance was deleted, not kept. If D1's
-      `TransformSpec` later reintroduces a derived `Equal`, add the law case then.
+- [x] Law-suite `Equal` case: moot — the instance was deleted, not kept. D1's
+      spec (shipping as `ResultTransformSpec`, PLAN-RISKTRANSFORM §7 OD-2)
+      reintroduces a derived `Equal`; its law case is part of §7 M1's test plan.
 - [x] **Blocking gate satisfied:** all fixes landed before any production call path exists.
