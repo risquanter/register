@@ -77,13 +77,19 @@ type NonNegativeInt = Int :| GreaterEqual[0]
 // (Iron's compile-time literal refinement needs a literal, not a reference
 // to the `Double.MaxValue` val) and excludes +Infinity: unlike Probability/
 // OccurrenceProbability, this type has no upper bound to reject +Infinity as
-// a side effect, and downstream arithmetic (e.g. RiskTransform.scaleLosses'
+// a side effect, and downstream arithmetic (e.g. RiskResultTransform.scaleLosses'
 // `.toLong`) silently converts an unchecked Infinity/NaN into
 // Long.MaxValue/0L instead of failing. (-Infinity and NaN already fail
 // GreaterEqual[0.0], since IEEE 754 comparisons against them are always
 // false.) Not[Infinity] is semantically clearer but isn't compile-time
 // foldable for literal autoRefine in this Iron version.
 type NonNegativeDouble = Double :| (GreaterEqual[0.0] & LessEqual[1.7976931348623157e308])
+
+// Contraction fraction for DistributionTransform.Narrow: how far a loss
+// distribution's spread is pulled toward its median. 0.0 = no contraction;
+// values approach but never reach 1.0 (full collapse to the median is not a
+// distribution). NaN fails GreaterEqual[0.0] by IEEE 754 comparison.
+type ShrinkFraction = Double :| (GreaterEqual[0.0] & Less[1.0])
 
 /**
  * Common constant values for Iron refined types.
@@ -593,6 +599,27 @@ object NodeId:
   given JsonFieldEncoder[NodeId] = JsonFieldEncoder.string.contramap(_.value)
   given JsonFieldDecoder[NodeId] = JsonFieldDecoder.string.mapOrFail(s =>
     NodeId.fromString(s).left.map(_.mkString(", ")))
+
+// MitigationId: Nominal case class wrapper over SafeId for mitigation identity (ADR-018).
+// Compiler-distinct from TreeId/NodeId and raw SafeId. All validation delegates to SafeId.
+case class MitigationId(toSafeId: SafeId.SafeId):
+  /** Extract the canonical ULID string. */
+  def value: String = toSafeId.value.toString
+
+object MitigationId:
+  /** Smart constructor: delegates validation to SafeId.fromString, wraps result. */
+  def fromString(s: String): Either[List[ValidationError], MitigationId] =
+    SafeId.fromString(s).map(MitigationId(_))
+
+  // JSON codecs (companion object placement ensures implicit scope)
+  given JsonEncoder[MitigationId] = JsonEncoder[String].contramap(_.value)
+  given JsonDecoder[MitigationId] = JsonDecoder[String].mapOrFail(s =>
+    MitigationId.fromString(s).left.map(_.mkString(", ")))
+
+  // JSON map-key codecs — required for Map[MitigationId, V] serialization (ADR-001 §4)
+  given JsonFieldEncoder[MitigationId] = JsonFieldEncoder.string.contramap(_.value)
+  given JsonFieldDecoder[MitigationId] = JsonFieldDecoder.string.mapOrFail(s =>
+    MitigationId.fromString(s).left.map(_.mkString(", ")))
 
 // WorkspaceKeySecret: 128-bit SecureRandom credential, base64url encoded (22 chars, no padding).
 // Used as capability URL token for workspace access. Standalone type — NOT a ULID wrapper.

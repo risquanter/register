@@ -247,6 +247,20 @@ object ValidationUtil {
       )))
   }
 
+  // Refinement for a Narrow contraction fraction: >= 0.0 and strictly < 1.0
+  // (1.0 would collapse a distribution to its median). NaN fails
+  // GreaterEqual[0.0] by IEEE 754 comparison.
+  def refineShrinkFraction(value: Double, fieldPath: String = "fraction"): Either[List[ValidationError], ShrinkFraction] = {
+    value
+      .refineEither[GreaterEqual[0.0] & Less[1.0]]
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.shrinkFractionOutOfRange
+      )))
+  }
+
   // Refinement for distribution type (must be "expert" or "lognormal")
   def refineDistributionType(value: String, fieldPath: String = "distributionType"): Either[List[ValidationError], DistributionType] = {
     value

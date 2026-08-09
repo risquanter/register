@@ -7,7 +7,7 @@ import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCo
 /**
  * Pure transformation of TrialOutcomes for mitigation strategies.
  *
- * RiskTransform represents risk mitigation tactics that modify simulation outcomes:
+ * RiskResultTransform represents risk mitigation tactics that modify simulation outcomes:
  * - Insurance policies (deductibles, coverage limits)
  * - Risk controls (loss caps, diversification)
  * - Portfolio strategies (hedging, correlation adjustments)
@@ -30,17 +30,17 @@ import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCo
  *
  * The Identity instance enables:
  * ```scala
- * val deductible = RiskTransform.applyDeductible(10000L)
- * val cap = RiskTransform.capLosses(1000000L)
+ * val deductible = RiskResultTransform.applyDeductible(10000L)
+ * val cap = RiskResultTransform.capLosses(1000000L)
  *
  * // Compose: apply deductible THEN cap
- * val combined = Identity[RiskTransform].combine(deductible, cap)
+ * val combined = Identity[RiskResultTransform].combine(deductible, cap)
  * val mitigated = combined.run(originalOutcomes)
  * ```
  *
  * @param run Pure function transforming TrialOutcomes
  */
-case class RiskTransform(run: TrialOutcomes => TrialOutcomes) {
+case class RiskResultTransform(run: TrialOutcomes => TrialOutcomes) {
 
   /**
    * Apply this transformation to simulation outcomes.
@@ -56,8 +56,8 @@ case class RiskTransform(run: TrialOutcomes => TrialOutcomes) {
    * @param that Transformation to apply after this one
    * @return Combined transformation
    */
-  def andThen(that: RiskTransform): RiskTransform =
-    RiskTransform(to => that.run(this.run(to)))
+  def andThen(that: RiskResultTransform): RiskResultTransform =
+    RiskResultTransform(to => that.run(this.run(to)))
 
   /**
    * Compose with another transformation (that THEN this).
@@ -65,17 +65,17 @@ case class RiskTransform(run: TrialOutcomes => TrialOutcomes) {
    * @param that Transformation to apply before this one
    * @return Combined transformation
    */
-  def compose(that: RiskTransform): RiskTransform =
-    RiskTransform(to => this.run(that.run(to)))
+  def compose(that: RiskResultTransform): RiskResultTransform =
+    RiskResultTransform(to => this.run(that.run(to)))
 }
 
-object RiskTransform {
+object RiskResultTransform {
 
   /**
    * Identity transformation (no-op).
    * Returns input unchanged.
    */
-  val identityTransform: RiskTransform = RiskTransform(to => to)
+  val identityTransform: RiskResultTransform = RiskResultTransform(to => to)
 
   // ══════════════════════════════════════════════════════════════════
   // ZIO Prelude Type Class Instances
@@ -91,14 +91,14 @@ object RiskTransform {
    *
    * Combine semantics: compose(a, b) means "apply a, then apply b"
    */
-  given Identity[RiskTransform] with {
-    def identity: RiskTransform = identityTransform
+  given Identity[RiskResultTransform] with {
+    def identity: RiskResultTransform = identityTransform
 
-    def combine(l: => RiskTransform, r: => RiskTransform): RiskTransform =
-      RiskTransform(to => r.run(l.run(to)))  // l THEN r
+    def combine(l: => RiskResultTransform, r: => RiskResultTransform): RiskResultTransform =
+      RiskResultTransform(to => r.run(l.run(to)))  // l THEN r
   }
 
-  given Debug[RiskTransform] = Debug.make(_ => "RiskTransform(...)")
+  given Debug[RiskResultTransform] = Debug.make(_ => "RiskResultTransform(...)")
 
   // ══════════════════════════════════════════════════════════════════
   // Common Mitigation Strategies
@@ -113,12 +113,12 @@ object RiskTransform {
    *
    * @example
    * {{{
-   * val transform = RiskTransform.applyDeductible(10000L)
+   * val transform = RiskResultTransform.applyDeductible(10000L)
    * // Loss of 50000 becomes 40000
    * // Loss of 5000 becomes 0
    * }}}
    */
-  def applyDeductible(deductible: NonNegativeLong): RiskTransform = RiskTransform { to =>
+  def applyDeductible(deductible: NonNegativeLong): RiskResultTransform = RiskResultTransform { to =>
     val mitigated = to.outcomes.map { case (trial, loss) =>
       trial -> Math.max(0L, loss - deductible)
     }.filter(_._2 > 0)  // Remove zero losses (sparse storage)
@@ -135,12 +135,12 @@ object RiskTransform {
    *
    * @example
    * {{{
-   * val transform = RiskTransform.capLosses(1000000L)
+   * val transform = RiskResultTransform.capLosses(1000000L)
    * // Loss of 5000000 becomes 1000000
    * // Loss of 500000 remains 500000
    * }}}
    */
-  def capLosses(cap: NonNegativeLong): RiskTransform = RiskTransform { to =>
+  def capLosses(cap: NonNegativeLong): RiskResultTransform = RiskResultTransform { to =>
     val capped = to.outcomes.map { case (trial, loss) =>
       trial -> Math.min(loss, cap)
     }
@@ -157,11 +157,11 @@ object RiskTransform {
    *
    * @example
    * {{{
-   * val transform = RiskTransform.scaleLosses(0.8)  // 80% retention
+   * val transform = RiskResultTransform.scaleLosses(0.8)  // 80% retention
    * // Loss of 100000 becomes 80000
    * }}}
    */
-  def scaleLosses(factor: NonNegativeDouble): RiskTransform = RiskTransform { to =>
+  def scaleLosses(factor: NonNegativeDouble): RiskResultTransform = RiskResultTransform { to =>
     val scaled = to.outcomes.map { case (trial, loss) =>
       trial -> (loss * factor).toLong
     }.filter(_._2 > 0)  // Remove zero losses
@@ -183,10 +183,10 @@ object RiskTransform {
   def insurancePolicy(
     deductible: NonNegativeLong,
     cap: NonNegativeLong
-  ): Validation[ValidationError, RiskTransform] =
+  ): Validation[ValidationError, RiskResultTransform] =
     if (cap > deductible)
       Validation.succeed(
-        Identity[RiskTransform].combine(
+        Identity[RiskResultTransform].combine(
           applyDeductible(deductible),
           capLosses(cap)
         )
@@ -205,7 +205,7 @@ object RiskTransform {
    * @param threshold Minimum loss to keep (non-negative)
    * @return Transformation filtering losses
    */
-  def filterBelowThreshold(threshold: NonNegativeLong): RiskTransform = RiskTransform { to =>
+  def filterBelowThreshold(threshold: NonNegativeLong): RiskResultTransform = RiskResultTransform { to =>
     val filtered = to.outcomes.filter { case (_, loss) => loss >= threshold }
     to.copy(outcomes = filtered)
   }

@@ -6,7 +6,7 @@ import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, PositiveInt, ValidationUtil}
 
 /**
- * Property-based tests for RiskTransform Identity laws and mitigation strategies.
+ * Property-based tests for RiskResultTransform Identity laws and mitigation strategies.
  *
  * Verifies:
  * - Identity laws: associativity, left/right identity
@@ -14,7 +14,7 @@ import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeL
  * - Mitigation strategies: deductible, cap, scaling, insurance policy
  * - Composition correctness: order matters for non-commutative operations
  */
-object RiskTransformSpec extends ZIOSpecDefault {
+object RiskResultTransformSpec extends ZIOSpecDefault {
 
 
   // ══════════════════════════════════════════════════════════════════
@@ -40,30 +40,30 @@ object RiskTransformSpec extends ZIOSpecDefault {
   val genScaleFactor: Gen[Any, NonNegativeDouble] =
     Gen.double(0.1, 2.0).map(_.refineUnsafe)
 
-  /** Generate simple RiskTransform (deductible, cap, scale, or filter) */
-  val genSimpleTransform: Gen[Any, RiskTransform] = Gen.oneOf(
-    genLoss.map(RiskTransform.applyDeductible),
-    genLoss.map(RiskTransform.capLosses),
-    genScaleFactor.map(RiskTransform.scaleLosses),
-    genLoss.map(RiskTransform.filterBelowThreshold)
+  /** Generate simple RiskResultTransform (deductible, cap, scale, or filter) */
+  val genSimpleTransform: Gen[Any, RiskResultTransform] = Gen.oneOf(
+    genLoss.map(RiskResultTransform.applyDeductible),
+    genLoss.map(RiskResultTransform.capLosses),
+    genScaleFactor.map(RiskResultTransform.scaleLosses),
+    genLoss.map(RiskResultTransform.filterBelowThreshold)
   )
 
   // ══════════════════════════════════════════════════════════════════
   // Identity Law Tests
   // ══════════════════════════════════════════════════════════════════
 
-  def spec = suite("RiskTransformSpec")(
+  def spec = suite("RiskResultTransformSpec")(
 
     suite("Identity Laws - Property Tests")(
       test("associativity: combine(a, combine(b, c)) == combine(combine(a, b), c)") {
         check(genSimpleTransform, genSimpleTransform, genSimpleTransform, genTrialOutcomes) {
           (t1, t2, t3, outcomes) =>
-            val left = Identity[RiskTransform].combine(
+            val left = Identity[RiskResultTransform].combine(
               t1,
-              Identity[RiskTransform].combine(t2, t3)
+              Identity[RiskResultTransform].combine(t2, t3)
             )
-            val right = Identity[RiskTransform].combine(
-              Identity[RiskTransform].combine(t1, t2),
+            val right = Identity[RiskResultTransform].combine(
+              Identity[RiskResultTransform].combine(t1, t2),
               t3
             )
 
@@ -77,8 +77,8 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("left identity: combine(identity, a) == a") {
         check(genSimpleTransform, genTrialOutcomes) { (transform, outcomes) =>
-          val combined = Identity[RiskTransform].combine(
-            Identity[RiskTransform].identity,
+          val combined = Identity[RiskResultTransform].combine(
+            Identity[RiskResultTransform].identity,
             transform
           )
 
@@ -91,9 +91,9 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("right identity: combine(a, identity) == a") {
         check(genSimpleTransform, genTrialOutcomes) { (transform, outcomes) =>
-          val combined = Identity[RiskTransform].combine(
+          val combined = Identity[RiskResultTransform].combine(
             transform,
-            Identity[RiskTransform].identity
+            Identity[RiskResultTransform].identity
           )
 
           val directResult = transform.run(outcomes)
@@ -105,7 +105,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("identity transformation leaves outcomes unchanged") {
         check(genTrialOutcomes) { outcomes =>
-          val transformed = RiskTransform.identityTransform.run(outcomes)
+          val transformed = RiskResultTransform.identityTransform.run(outcomes)
 
           assertTrue(transformed == outcomes)
         }
@@ -125,7 +125,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
     suite("Deductible Transformation")(
       test("applyDeductible reduces losses by deductible amount") {
         val outcomes = TrialOutcomes(100, Map(1 -> 50000L, 2 -> 10000L, 3 -> 5000L))
-        val transform = RiskTransform.applyDeductible(10000L)
+        val transform = RiskResultTransform.applyDeductible(10000L)
         val mitigated = transform.run(outcomes)
 
         assertTrue(
@@ -137,7 +137,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("deductible removes trials below threshold (sparse)") {
         val outcomes = TrialOutcomes(100, Map(1 -> 50000L, 2 -> 8000L))
-        val transform = RiskTransform.applyDeductible(10000L)
+        val transform = RiskResultTransform.applyDeductible(10000L)
         val mitigated = transform.run(outcomes)
 
         assertTrue(
@@ -149,7 +149,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("zero deductible is identity") {
         check(genTrialOutcomes) { outcomes =>
-          val transform = RiskTransform.applyDeductible(0L)
+          val transform = RiskResultTransform.applyDeductible(0L)
           val mitigated = transform.run(outcomes)
 
           assertTrue(mitigated.outcomes == outcomes.outcomes)
@@ -160,7 +160,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
     suite("Cap Transformation")(
       test("capLosses limits each trial to maximum") {
         val outcomes = TrialOutcomes(100, Map(1 -> 5000000L, 2 -> 500000L, 3 -> 100000L))
-        val transform = RiskTransform.capLosses(1000000L)
+        val transform = RiskResultTransform.capLosses(1000000L)
         val capped = transform.run(outcomes)
 
         assertTrue(
@@ -172,7 +172,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("cap preserves all trials (even if modified)") {
         val outcomes = TrialOutcomes(100, Map(1 -> 2000000L, 2 -> 500000L))
-        val transform = RiskTransform.capLosses(1000000L)
+        val transform = RiskResultTransform.capLosses(1000000L)
         val capped = transform.run(outcomes)
 
         assertTrue(capped.outcomes.size == 2)
@@ -182,7 +182,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
         check(genTrialOutcomes) { outcomes =>
           val maxLoss = if (outcomes.outcomes.isEmpty) 0L
                        else outcomes.outcomes.values.max
-          val transform = RiskTransform.capLosses((maxLoss * 10).refineUnsafe)
+          val transform = RiskResultTransform.capLosses((maxLoss * 10).refineUnsafe)
           val capped = transform.run(outcomes)
 
           assertTrue(capped.outcomes == outcomes.outcomes)
@@ -193,7 +193,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
     suite("Scale Transformation")(
       test("scaleLosses multiplies each loss by factor") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L, 2 -> 50000L))
-        val transform = RiskTransform.scaleLosses(0.8)
+        val transform = RiskResultTransform.scaleLosses(0.8)
         val scaled = transform.run(outcomes)
 
         assertTrue(
@@ -204,7 +204,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("scale by 1.0 is identity") {
         check(genTrialOutcomes) { outcomes =>
-          val transform = RiskTransform.scaleLosses(1.0)
+          val transform = RiskResultTransform.scaleLosses(1.0)
           val scaled = transform.run(outcomes)
 
           assertTrue(scaled.outcomes == outcomes.outcomes)
@@ -213,7 +213,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("scale by 0.0 removes all losses") {
         check(genTrialOutcomes) { outcomes =>
-          val transform = RiskTransform.scaleLosses(0.0)
+          val transform = RiskResultTransform.scaleLosses(0.0)
           val scaled = transform.run(outcomes)
 
           assertTrue(scaled.outcomes.isEmpty)
@@ -222,7 +222,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("scale removes trials that round to zero") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100L, 2 -> 50000L))
-        val transform = RiskTransform.scaleLosses(0.001)  // 0.1%
+        val transform = RiskResultTransform.scaleLosses(0.001)  // 0.1%
         val scaled = transform.run(outcomes)
 
         // 100 * 0.001 = 0.1 rounds to 0, removed
@@ -237,7 +237,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
     suite("Insurance Policy (Combined)")(
       test("insurancePolicy applies deductible then cap") {
         val outcomes = TrialOutcomes(100, Map(1 -> 2000000L, 2 -> 50000L, 3 -> 5000L))
-        val insured = RiskTransform.insurancePolicy(
+        val insured = RiskResultTransform.insurancePolicy(
           deductible = 10000L,
           cap = 1000000L
         ).map(_.run(outcomes).outcomes).toEither
@@ -257,7 +257,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
           val cap: NonNegativeLong = if (loss1 >= loss2) loss2 else loss1
 
           // cap <= deductible must yield a validation failure
-          assertTrue(RiskTransform.insurancePolicy(deductible, cap).toEither.isLeft)
+          assertTrue(RiskResultTransform.insurancePolicy(deductible, cap).toEither.isLeft)
         }
       },
 
@@ -265,7 +265,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
         check(genLoss, Gen.long(1L, 10000L)) { (deductible, gap) =>
           val cap: NonNegativeLong = (deductible + gap).refineUnsafe
 
-          assertTrue(RiskTransform.insurancePolicy(deductible, cap).toEither.isRight)
+          assertTrue(RiskResultTransform.insurancePolicy(deductible, cap).toEither.isRight)
         }
       }
     ),
@@ -302,8 +302,8 @@ object RiskTransformSpec extends ZIOSpecDefault {
       test("andThen applies transformations in sequence") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
 
-        val deductible = RiskTransform.applyDeductible(10000L)
-        val scale = RiskTransform.scaleLosses(0.5)
+        val deductible = RiskResultTransform.applyDeductible(10000L)
+        val scale = RiskResultTransform.scaleLosses(0.5)
 
         // Apply deductible (100K -> 90K), then scale (90K -> 45K)
         val combined = deductible.andThen(scale)
@@ -315,8 +315,8 @@ object RiskTransformSpec extends ZIOSpecDefault {
       test("compose applies transformations in reverse") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
 
-        val deductible = RiskTransform.applyDeductible(10000L)
-        val scale = RiskTransform.scaleLosses(0.5)
+        val deductible = RiskResultTransform.applyDeductible(10000L)
+        val scale = RiskResultTransform.scaleLosses(0.5)
 
         // Compose: scale first (100K -> 50K), then deductible (50K -> 40K)
         val combined = deductible.compose(scale)
@@ -328,15 +328,15 @@ object RiskTransformSpec extends ZIOSpecDefault {
       test("order matters for non-commutative operations") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
 
-        val deductible = RiskTransform.applyDeductible(10000L)
-        val scale = RiskTransform.scaleLosses(0.5)
+        val deductible = RiskResultTransform.applyDeductible(10000L)
+        val scale = RiskResultTransform.scaleLosses(0.5)
 
         // deductible THEN scale
-        val order1 = Identity[RiskTransform].combine(deductible, scale)
+        val order1 = Identity[RiskResultTransform].combine(deductible, scale)
         val result1 = order1.run(outcomes).outcomeOf(1)
 
         // scale THEN deductible
-        val order2 = Identity[RiskTransform].combine(scale, deductible)
+        val order2 = Identity[RiskResultTransform].combine(scale, deductible)
         val result2 = order2.run(outcomes).outcomeOf(1)
 
         assertTrue(
@@ -350,7 +350,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
     suite("Edge Cases")(
       test("transform on empty outcomes is no-op") {
         val empty = TrialOutcomes(100, Map.empty)
-        val transform = RiskTransform.applyDeductible(10000L)
+        val transform = RiskResultTransform.applyDeductible(10000L)
         val transformed = transform.run(empty)
 
         assertTrue(transformed.outcomes.isEmpty)
@@ -358,7 +358,7 @@ object RiskTransformSpec extends ZIOSpecDefault {
 
       test("filterBelowThreshold removes small losses") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L, 2 -> 500L, 3 -> 50000L, 4 -> 200L))
-        val transform = RiskTransform.filterBelowThreshold(1000L)
+        val transform = RiskResultTransform.filterBelowThreshold(1000L)
         val filtered = transform.run(outcomes)
 
         assertTrue(

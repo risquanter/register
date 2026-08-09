@@ -3,7 +3,7 @@ package com.risquanter.register.testutil
 import zio.test.Gen
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.ValidationError
-import com.risquanter.register.domain.data.iron.{SafeId, NodeId, TreeId}
+import com.risquanter.register.domain.data.iron.{SafeId, NodeId, TreeId, MitigationId}
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import scala.annotation.tailrec
@@ -84,6 +84,12 @@ trait TestHelpers {
     * @see ADR-018 for nominal wrapper pattern
     */
   def treeId(s: String): TreeId = TreeId(safeId(s))
+
+  /**
+    * Create a MitigationId from a label (wraps safeId in MitigationId case class).
+    * @see ADR-018 for nominal wrapper pattern
+    */
+  def mitigationId(s: String): MitigationId = MitigationId(safeId(s))
     
   /**
     * ZIO Test generator for valid SafeId values.

@@ -206,12 +206,8 @@ object RiskLeaf {
         case "expert" =>
           validateExpertMode(percentiles, quantiles, fieldPrefix).flatMap { result =>
             termsV match {
-              case Validation.Success(_, Some(t)) if percentiles.exists(pct => t.toInt > pct.length) =>
-                Validation.fail(ValidationError(
-                  field = s"$fieldPrefix.terms",
-                  code = ValidationErrorCode.INVALID_COMBINATION,
-                  message = ValidationMessages.termsOutOfRange
-                ))
+              case Validation.Success(_, t) =>
+                requireTermsWithinPercentiles(t, percentiles, fieldPrefix).map(_ => result)
               case _ => Validation.succeed(result)
             }
           }
@@ -302,43 +298,114 @@ object RiskLeaf {
       case (Some(min), Some(max)) =>
         val minV = toValidation(ValidationUtil.refineNonNegativeLong(min, s"$fieldPrefix.minLoss"))
         val maxV = toValidation(ValidationUtil.refineNonNegativeLong(max, s"$fieldPrefix.maxLoss"))
-        
+
         // Validate both, then check cross-field constraint
         Validation.validateWith(minV, maxV) { (validMin, validMax) =>
-          Validation
-            .fromPredicateWith[ValidationError, (NonNegativeLong, NonNegativeLong)](
-              ValidationError(
-                field = s"$fieldPrefix.minLoss",
-                code = ValidationErrorCode.INVALID_RANGE,
-                message = s"minLoss ($validMin) must be less than maxLoss ($validMax)"
-              )
-            )((validMin, validMax)) { case (minVal, maxVal) => minVal < maxVal }
-            .map { case (minVal, maxVal) => (Some(minVal), Some(maxVal)) }
+          requireMinBelowMax(validMin, validMax, fieldPrefix)
+            .map(_ => (Some(validMin), Some(validMax)))
         }.flatten
-      
-      case (None, None) =>
-        Validation.fail(ValidationError(
-          field = s"$fieldPrefix.distributionType",
-          code = ValidationErrorCode.REQUIRED_FIELD,
-          message = "Lognormal mode requires both minLoss and maxLoss"
-        ))
-      
-      case (None, _) =>
-        Validation.fail(ValidationError(
-          field = s"$fieldPrefix.minLoss",
-          code = ValidationErrorCode.REQUIRED_FIELD,
-          message = "Lognormal mode requires minLoss"
-        ))
-      
-      case (_, None) =>
-        Validation.fail(ValidationError(
-          field = s"$fieldPrefix.maxLoss",
-          code = ValidationErrorCode.REQUIRED_FIELD,
-          message = "Lognormal mode requires maxLoss"
-        ))
+
+      case (None, None) => lognormalBothBoundsMissing(fieldPrefix)
+      case (None, _)    => lognormalMinMissing(fieldPrefix)
+      case (_, None)    => lognormalMaxMissing(fieldPrefix)
     }
   }
-  
+
+  // ── Mode-rule building blocks — single definition per rule, shared between
+  //    RiskLeaf.create's raw-input path and validateModeFields' refined-input
+  //    path (OverrideDistributionParams) ──
+
+  private def requireMinBelowMax(
+    min: NonNegativeLong,
+    max: NonNegativeLong,
+    fieldPrefix: String
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, Unit] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    Validation
+      .fromPredicateWith[ValidationError, (NonNegativeLong, NonNegativeLong)](
+        ValidationError(
+          field = s"$fieldPrefix.minLoss",
+          code = ValidationErrorCode.INVALID_RANGE,
+          message = s"minLoss ($min) must be less than maxLoss ($max)"
+        )
+      )((min, max)) { case (minVal, maxVal) => minVal < maxVal }
+      .map(_ => ())
+  }
+
+  private def requireTermsWithinPercentiles(
+    terms: Option[PositiveInt],
+    percentiles: Option[Array[Double]],
+    fieldPrefix: String
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, Unit] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    terms match {
+      case Some(t) if percentiles.exists(pct => t.toInt > pct.length) =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.terms",
+          code = ValidationErrorCode.INVALID_COMBINATION,
+          message = ValidationMessages.termsOutOfRange
+        ))
+      case _ => Validation.succeed(())
+    }
+  }
+
+  private def lognormalBothBoundsMissing[A](fieldPrefix: String): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    Validation.fail(ValidationError(
+      field = s"$fieldPrefix.distributionType",
+      code = ValidationErrorCode.REQUIRED_FIELD,
+      message = "Lognormal mode requires both minLoss and maxLoss"
+    ))
+  }
+
+  private def lognormalMinMissing[A](fieldPrefix: String): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    Validation.fail(ValidationError(
+      field = s"$fieldPrefix.minLoss",
+      code = ValidationErrorCode.REQUIRED_FIELD,
+      message = "Lognormal mode requires minLoss"
+    ))
+  }
+
+  private def lognormalMaxMissing[A](fieldPrefix: String): Validation[com.risquanter.register.domain.errors.ValidationError, A] = {
+    import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+    Validation.fail(ValidationError(
+      field = s"$fieldPrefix.maxLoss",
+      code = ValidationErrorCode.REQUIRED_FIELD,
+      message = "Lognormal mode requires maxLoss"
+    ))
+  }
+
+  /** The complete mode-fields rule on already-refined inputs — the single
+    * entry point for callers outside the leaf's own raw-input constructor
+    * (`OverrideDistributionParams.create`): expert ⇒ percentiles+quantiles
+    * present, non-empty, equal length, terms within percentile count;
+    * lognormal ⇒ both bounds present and minLoss < maxLoss.
+    */
+  private[data] def validateModeFields(
+    distributionType: DistributionType,
+    percentiles: Option[Array[Double]],
+    quantiles: Option[Array[Double]],
+    minLoss: Option[NonNegativeLong],
+    maxLoss: Option[NonNegativeLong],
+    terms: Option[PositiveInt],
+    fieldPrefix: String
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, Unit] =
+    distributionType.toString match {
+      case "expert" =>
+        validateExpertMode(percentiles, quantiles, fieldPrefix)
+          .flatMap(_ => requireTermsWithinPercentiles(terms, percentiles, fieldPrefix))
+      case "lognormal" =>
+        (minLoss, maxLoss) match {
+          case (Some(min), Some(max)) => requireMinBelowMax(min, max, fieldPrefix)
+          case (None, None)           => lognormalBothBoundsMissing(fieldPrefix)
+          case (None, _)              => lognormalMinMissing(fieldPrefix)
+          case (_, None)              => lognormalMaxMissing(fieldPrefix)
+        }
+      case unknown =>
+        failOnUnknownDistributionType(unknown, fieldPrefix).map(_ => ())
+    }
+
   /** Defense in depth: Fail validation for unknown distribution types that bypass Iron constraint */
   private def failOnUnknownDistributionType(
     unknown: String,

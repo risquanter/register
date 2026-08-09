@@ -55,6 +55,7 @@ object ValidationMessages:
   val valueMustBePositive: String       = "Value must be greater than zero"
   val capMustExceedDeductible: String   = "Cap must be greater than deductible"
   val aggregatedLossOverflow: String    = "Aggregated loss exceeds the maximum representable value"
+  val shrinkFractionOutOfRange: String  = "Narrowing fraction must be at least 0 and below 1"
 
   // ══════════════════════════════════════════════════════════════════
   // Probability (open interval 0 < p < 1)

@@ -26,6 +26,9 @@ import io.github.iltotore.iron.*
   *        decreases, so deleted leaves' stream IDs are never reused by
   *        auto-assignment (PLAN-SEED-IDENTITY §5.1). Merges as max across
   *        branches. Invariant: >= every leaf's seedVarId (checked in fromNodes).
+  * @param mitigations Tree-level mitigation collection — explicit first-class
+  *        entities scoping nodes by stable id, versioned with the tree content
+  *        (PLAN-RISKTRANSFORM §7). Application semantics: MitigationApplication.
   */
 final case class RiskTree(
   id: TreeId,
@@ -33,7 +36,8 @@ final case class RiskTree(
   nodes: Seq[RiskNode],
   rootId: NodeId,
   index: TreeIndex,
-  seedVarHighWater: SeedVarId.SeedVarId
+  seedVarHighWater: SeedVarId.SeedVarId,
+  mitigations: Seq[Mitigation] = Nil
 ) {
   /** Get the root node */
   def root: RiskNode = index.nodes(rootId)
@@ -45,21 +49,28 @@ object RiskTree {
   import com.risquanter.register.http.codecs.IronTapirCodecs.given
   import com.risquanter.register.domain.data.iron.SafeId
 
-  // Wire-shape DTO: mirrors JSON wire format (omits non-serialized TreeIndex)
+  // Wire-shape DTO: mirrors JSON wire format (omits non-serialized TreeIndex).
+  // `mitigations` is optional on the wire: absent (pre-mitigation payloads and
+  // mitigation-less trees) decodes to Nil; Nil encodes as absent.
   private case class RiskTreeJson(
     id: TreeId,
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
     rootId: NodeId,
-    seedVarHighWater: SeedVarId.SeedVarId
+    seedVarHighWater: SeedVarId.SeedVarId,
+    mitigations: Option[Seq[Mitigation]]
   )
   private object RiskTreeJson:
     given jsonCodec: JsonCodec[RiskTreeJson] = DeriveJsonCodec.gen[RiskTreeJson]
 
+  private def toJsonShape(t: RiskTree): RiskTreeJson =
+    RiskTreeJson(t.id, t.name, t.nodes, t.rootId, t.seedVarHighWater,
+      if (t.mitigations.isEmpty) None else Some(t.mitigations))
+
   given schema: Schema[RiskTree] =
     Schema.derived[RiskTreeJson]
-      .map(w => RiskTree.fromNodes(w.id, w.name, w.nodes, w.rootId, Some(w.seedVarHighWater)).toEither.toOption)(
-        t => RiskTreeJson(t.id, t.name, t.nodes, t.rootId, t.seedVarHighWater)
+      .map(w => RiskTree.fromNodes(w.id, w.name, w.nodes, w.rootId, Some(w.seedVarHighWater), w.mitigations.getOrElse(Nil)).toEither.toOption)(
+        toJsonShape
       )
 
   // JSON codecs for Iron refined types
@@ -78,12 +89,10 @@ object RiskTree {
   given codec: JsonCodec[RiskTree] = {
     JsonCodec(
       // Encoder: Serialize without index
-      JsonEncoder[RiskTreeJson].contramap[RiskTree] { tree =>
-        RiskTreeJson(tree.id, tree.name, tree.nodes, tree.rootId, tree.seedVarHighWater)
-      },
+      JsonEncoder[RiskTreeJson].contramap[RiskTree](toJsonShape),
       // Decoder: Deserialize via the smart constructor (rebuilds index, re-validates)
       JsonDecoder[RiskTreeJson].mapOrFail { json =>
-        fromNodes(json.id, json.name, json.nodes, json.rootId, Some(json.seedVarHighWater)).toEither.left.map(errors =>
+        fromNodes(json.id, json.name, json.nodes, json.rootId, Some(json.seedVarHighWater), json.mitigations.getOrElse(Nil)).toEither.left.map(errors =>
           s"Invalid tree structure: ${errors.map(e => s"[${e.field}] ${e.message}").mkString("; ")}"
         )
       }
@@ -119,7 +128,8 @@ object RiskTree {
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
     rootId: NodeId,
-    seedVarHighWater: Option[SeedVarId.SeedVarId] = None
+    seedVarHighWater: Option[SeedVarId.SeedVarId] = None,
+    mitigations: Seq[Mitigation] = Nil
   ): Validation[ValidationError, RiskTree] = {
     Validation
       .validateWith(
@@ -129,15 +139,73 @@ object RiskTree {
       ) { (index, _, highWater) => (index, highWater) }
       .flatMap { (index, highWater) =>
         Validation
-          .fromPredicateWith[ValidationError, TreeIndex](
-            ValidationError(
-              field = "rootId",
-              code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-              message = s"rootId '${rootId.value}' not found in nodes"
-            )
-          )(index)((idx: TreeIndex) => idx.nodes.contains(rootId))
-          .as(RiskTree(id, name, nodes, rootId, index, highWater))
+          .validateWith(
+            Validation
+              .fromPredicateWith[ValidationError, TreeIndex](
+                ValidationError(
+                  field = "rootId",
+                  code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+                  message = s"rootId '${rootId.value}' not found in nodes"
+                )
+              )(index)((idx: TreeIndex) => idx.nodes.contains(rootId)),
+            validateMitigations(index, mitigations)
+          ) { (_, _) => () }
+          .as(RiskTree(id, name, nodes, rootId, index, highWater, mitigations))
       }
+  }
+
+  /** Tree-level mitigation invariants: unique ids and names; every target id
+    * resolves in the index; LeafStage (param-stage) mitigations target leaves
+    * only. Result-stage mitigations may target any node.
+    */
+  private def validateMitigations(
+    index: TreeIndex,
+    mitigations: Seq[Mitigation]
+  ): Validation[ValidationError, Unit] = {
+    val duplicateIds = mitigations.groupBy(_.id).collect { case (mid, ms) if ms.sizeIs > 1 => mid }
+    val duplicateNames = mitigations.groupBy(_.name.value).collect { case (n, ms) if ms.sizeIs > 1 => n }
+
+    val distinctIdsV =
+      if (duplicateIds.isEmpty) Validation.succeed(())
+      else Validation.fail(ValidationError(
+        field = "mitigations",
+        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"duplicate mitigation id(s): ${duplicateIds.map(_.value).toList.sorted.mkString(", ")}"
+      ))
+
+    val distinctNamesV =
+      if (duplicateNames.isEmpty) Validation.succeed(())
+      else Validation.fail(ValidationError(
+        field = "mitigations",
+        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"duplicate mitigation name(s): ${duplicateNames.toList.sorted.mkString(", ")}"
+      ))
+
+    val perMitigationV = Validation.validateAll(mitigations.toList.map { m =>
+      val MitigationTarget.Nodes(targetIds) = m.target: @unchecked
+      val dangling = targetIds.filterNot(index.nodes.contains)
+      val danglingV =
+        if (dangling.isEmpty) Validation.succeed(())
+        else Validation.fail(ValidationError(
+          field = s"mitigations[id=${m.id.value}].target",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = s"target node(s) not in tree: ${dangling.map(_.value).toList.sorted.mkString(", ")}"
+        ))
+      val leafOnlyV = m.spec match {
+        case MitigationSpec.LeafStage(_, _) =>
+          val nonLeaves = targetIds.filter(tid => index.nodes.get(tid).exists(!_.isInstanceOf[RiskLeaf]))
+          if (nonLeaves.isEmpty) Validation.succeed(())
+          else Validation.fail(ValidationError(
+            field = s"mitigations[id=${m.id.value}].target",
+            code = ValidationErrorCode.INVALID_COMBINATION,
+            message = s"param-stage mitigation targets must be leaves; not leaves: ${nonLeaves.map(_.value).toList.sorted.mkString(", ")}"
+          ))
+        case MitigationSpec.ResultStage(_) => Validation.succeed(())
+      }
+      Validation.validateWith(danglingV, leafOnlyV) { (_, _) => () }
+    })
+
+    Validation.validateWith(distinctIdsV, distinctNamesV, perMitigationV) { (_, _, _) => () }
   }
 
   /** Resolve and validate the tree's seed watermark (see fromNodes scaladoc). */
@@ -177,9 +245,10 @@ object RiskTree {
     name: SafeName.SafeName,
     nodes: Seq[RiskNode],
     rootId: NodeId,
-    seedVarHighWater: Option[SeedVarId.SeedVarId] = None
+    seedVarHighWater: Option[SeedVarId.SeedVarId] = None,
+    mitigations: Seq[Mitigation] = Nil
   ): RiskTree = {
-    fromNodes(id, name, nodes, rootId, seedVarHighWater).toEither match {
+    fromNodes(id, name, nodes, rootId, seedVarHighWater, mitigations).toEither match {
       case Right(tree) => tree
       case Left(errors) =>
         throw new IllegalArgumentException(

@@ -691,15 +691,15 @@ object MitigationApplication {
     * target sets as resolved against this tree version). */
   def applicationRecords(tree: RiskTree, selection: MitigationSelection): List[MitigationApplicationRecord]
 
-  /** Staleness layer 1: overrides whose stored base stamp no longer matches the target
-    * leaf's current LeafSimContent hash. Fires on any edit path (form, merge, API, revert). */
-  def staleOverrides(tree: RiskTree): Set[MitigationId]
-
   /** Staleness layer 4 (nonsense check): overrides that make the node's expected severity
-    * or likelihood strictly worse than its current base. */
+    * or likelihood strictly worse than its current base. Diagnostic predicate (not part of
+    * the action); platform-neutral inputs, so it stays here. */
   def worseningOverrides(tree: RiskTree): Set[MitigationId]
 }
 ```
+
+`staleOverrides` (staleness layer 1) is **deliberately NOT here** — it lives in
+the server module (§7.2.2a). Decision record: OD-6.
 
 Associativity invariant (tested): `effectiveTree` touches only leaves'
 persisted params; `resultTransformFor` is applied by the resolver to a node's
@@ -739,8 +739,8 @@ private[data] def validateModeFields(
   accumulation paths); codec round-trip; precedence ordering incl. tiebreak.
 - New `MitigationApplicationSpec`: `scoped` ordering; `effectiveTree` closure +
   Override absorption + baseline/final preset semantics; `resultTransformFor`
-  composition order; `staleOverrides` fires on sim-relevant edits only (rename
-  does NOT fire — DD-16); `worseningOverrides`.
+  composition order; `worseningOverrides`. (Staleness tests are M2 —
+  `MitigationStaleness` lives server-side, OD-6.)
 - `RiskTree` codec: old-format JSON (no `mitigations` key) decodes to `Nil`;
   round-trip with mitigations; `fromNodes` rejects dangling target ids,
   duplicate mitigation ids/names, LeafStage targeting a portfolio.
@@ -808,6 +808,27 @@ The with/without comparison is two resolver calls (`None` vs a selection) —
 cheap by design: raw leaf simulations are shared through the content cache
 whenever param-stage mitigation leaves a leaf untouched.
 
+#### 7.2.2a Override staleness detection (server — OD-6)
+
+New file `services/cache/MitigationStaleness.scala`:
+
+```scala
+/** Staleness layer 1: overrides whose stored base stamp no longer matches the
+  * target leaf's current LeafSimContent hash. Fires on any edit path (form,
+  * merge, API PUT, time-travel revert); renames/reparents do not fire (DD-16
+  * projection). Diagnostic predicate — resolution ignores staleness (frozen
+  * expert opinion is the ruled semantics); consumers are handlers that put
+  * `staleMitigationIds` into read/update response payloads. */
+object MitigationStaleness {
+  def staleOverrides(tree: RiskTree): Set[MitigationId]  // compares via ContentHashIndex.hashOf
+}
+```
+
+Stamp writing is likewise server-side: the tree-PUT path computes
+`overrideBaseStamp = ContentHashIndex.hashOf(targetLeaf)` when an Override
+arrives or is re-affirmed (M4 wires the endpoints; M2 delivers the function
+and its tests).
+
 #### 7.2.3 M2 tests
 
 - `RiskResultResolverSpec` extensions: selection `None` bit-identical to
@@ -818,6 +839,10 @@ whenever param-stage mitigation leaves a leaf untouched.
   precedence order respected end-to-end; application records returned/logged.
 - `CacheTransparencySpec` extension: with/without pairs share raw-leaf cache
   entries for out-of-scope leaves.
+- New `MitigationStalenessSpec`: stale fires on sim-relevant base edits only
+  (probability/distribution change → stale; rename/reparent → NOT stale,
+  DD-16); re-stamp clears; non-Override mitigations never reported; resolution
+  output identical with and without staleness present.
 - `serverIt` (`RiskTreeRepositoryIrminSpec` + a new `MitigationPersistenceItSpec`
   if clearer): create/update/read round-trip with mitigations; omitted
   mitigation deleted; branch fork + disjoint mitigation edits merge cleanly;
@@ -983,7 +1008,7 @@ adr-constraints skill). Per-ADR outcome for this plan:
 | 033 (exception boundaries) | New code | Compliant: throw-free; no new catches |
 | INFRA-006 | — | No bearing (DB credentials) |
 
-### File inventory
+## File inventory
 
 M1/M2 files (M3/M4 files are appended here when §7.5/§7.6 are approved):
 
@@ -1010,6 +1035,8 @@ M1/M2 files (M3/M4 files are appended here when §7.5/§7.6 are approved):
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolver.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolverLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationStaleness.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationStalenessSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultResolverSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/CacheTransparencySpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala`
@@ -1083,6 +1110,41 @@ Status after the 2026-08-08 review session:
   path — mitigation is strictly opt-in per request; no existing figure changes
   until a caller explicitly selects mitigations. §7.2.2's resolver defaults
   already encode this.
+- **OD-6 — `staleOverrides` placement.** ✅ RULED (2026-08-09, Option B):
+  relocated from `common`'s `MitigationApplication` (§7.1.5 as originally
+  approved) to the server-side `MitigationStaleness` (§7.2.2a), original
+  signature unchanged. Reasons, recorded for the decision trail:
+  1. **Hash computation is JVM-only by prior decision.** `ContentHash` =
+     `sha256(LeafSimContent.toJson)` via `java.security.MessageDigest` in
+     `ContentHashIndex` — DD-14 (closed 2026-07-14 → "full JVM sha256"), whose
+     load-bearing consistency argument is the **single-producer invariant**:
+     no flow exists where two hash implementations must agree. Precision note:
+     `MessageDigest` referenced from `common` (`CrossType.Pure`, one source
+     tree) does compile under Scala.js and links as long as no JS code path
+     reaches it — `WorkspaceKeyHash.fromSecret` already relies on exactly that
+     unreachability pattern. A `common`-placed `staleOverrides` would have
+     been the second such reachability-fragile site, breakable at link time by
+     any future JS call; relocation removes the fragility instead of adding
+     to it.
+  2. **A second (JS/shared) hasher is ruled out**, not merely unchosen:
+     cross-validation can pin the SHA-256 core but not the preimage bytes
+     (platform-divergent `Double` rendering in the JSON preimage is silent,
+     value-specific breakage), and a false "not stale" asserts frozen expert
+     numbers against a changed base — reintroducing exactly the risk class
+     DD-14 designed away.
+  3. **`staleOverrides` is not algebra.** It participates in no law of the
+     monoid action (resolution ignores staleness by design); it is a
+     diagnostic predicate `Tree → Set[MitigationId]` comparing a stored
+     fingerprint with a recomputed one. Moving it severs no algebraic
+     structure; `MitigationApplication` keeps the complete action
+     (`scoped`/`effectiveTree`/`resultTransformFor`/`applicationRecords`)
+     plus the platform-neutral `worseningOverrides`.
+  4. **Its only caller is server-side by architecture.** Staleness is
+     computed in HTTP handlers (ADR-030 orchestration boundary) and shipped
+     as `staleMitigationIds` in payloads; the client renders, never computes.
+     The rejected Option A (inject `hashOf: RiskLeaf => ContentHash` into a
+     `common` signature) compiled fine but bought a shared capability with no
+     caller on the second platform.
 
 ### Verification plan
 
