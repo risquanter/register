@@ -301,7 +301,8 @@ and keeping only a metadata trace is rejected.
   sibling vql-engine change (`docs/scratch/MITIGATION-PRE-PLANNING.md` §P-4). A
   mitigation's targeting predicate is a **restricted** sublanguage (closed in `x`,
   no answer variables, bounded auxiliary quantifiers, no mitigation-state
-  predicates; §P-1).
+  predicates; §P-1 — pre-M3 the targeting fragment admits no quantifiers at
+  all, §8.4-3; auxiliary-sort quantifiers arrive with M3's sorts).
 
 **Open research feeding this concept:**
 
@@ -388,6 +389,13 @@ changes**.
 | **M3** | VQL targeting & analytics: `Predicate` target variant, targeting-sublanguage validation, scope resolution via `satisfyingSet`, KB schema (`Mitigation` sort, `mitigate`, precomputed `mitigated`/`unmitigated`), KB memoization (P-2/P-3), engine version bump | `common`, `server`, `build.sbt` | M1, M2, engine AC-1…AC-10 delivered |
 | **M4** | API surface + frontend: tree-PUT mitigation buckets, LEC endpoint selection parameter + mitigation-provenance layer in responses, mitigation selection UI (see OD-3), two-tier badges, override edit-popup + stale badge + nonsense check | `common`, `server`, `app` | M1–M3 (badges/selection UI need only M1–M2; predicate-scope UI needs M3) |
 | **M5** | Mitigation-aware change visibility: problem space recorded in §7.7 — **no design yet, planned only after M1–M4 have landed** (user ruling on OD-4, 2026-08-08) | TBD | M1–M4 landed |
+
+**Staging superseded for targeting (2026-08-10):** §8.2 is the
+authoritative phase map — targeting (the `Predicate` variant, sublanguage
+validation, scope resolution) moves from M3 into M1R, and KB + scope
+memoization moves into M2. The M1 sections below describe the as-built
+`Nodes`-based code, which stays until M1R lands (§8.2); §7.1.4's
+target-invariant lines and §7.3's targeting bullets are superseded by §8.
 
 **Detail level.** M1 and M2 are specified to implementation grade below (exact
 signatures, file inventory). M3 and M4 are scoped as work items with their
@@ -556,8 +564,9 @@ object MitigationId {
 New file `domain/data/Mitigation.scala`:
 
 ```scala
-/** M1/M2 targeting: explicit stable-id set. The VQL `Predicate` variant is added in M3
-  * (additive sealed-trait extension; exhaustive matches surface every site). */
+/** SUPERSEDED by §8 (2026-08-10 ruling): explicit-set general targeting is retired;
+  * targeting is predicate-first against the delivered vql-engine 0.11.0 contract.
+  * The signature below is the as-built M1 state until the §8 rework phase lands. */
 sealed trait MitigationTarget
 object MitigationTarget {
   final case class Nodes(ids: Set[NodeId]) extends MitigationTarget   // non-empty (checked in Mitigation.create)
@@ -850,6 +859,10 @@ and its tests).
 
 ### 7.3 M3 — VQL targeting & analytics (work items; elevate before build)
 
+Superseded in part by §8: the targeting items below (Predicate variant,
+sublanguage validation, scope resolution) moved into M1R, and KB
+memoization into M2; the remaining M3 scope is listed in §8.2.
+
 - **Engine bump**: `vql-engine` to the AC-1…AC-10 release (exact pin in
   `build.sbt`; breaking `ParsedQuery.range` widening absorbed at the register
   HTTP boundary).
@@ -918,6 +931,15 @@ existing docs when the feature ships:
   *precedence*.
 - `docs/user/VQL-QUERY-EXAMPLES.md` → targeting-predicate examples +
   mitigated/unmitigated population queries (cross-linked from the tutorial).
+- `docs/user/API-TUTORIAL.md` (same section) → **wire-format reference
+  examples** for the mitigation payloads (user ruling 2026-08-10, security
+  review F5): the mitigation entity, the op-discriminated
+  `ResultTransformSpec` shapes, `RiskLeafTransform`, target/selection JSON —
+  worked request/response bodies. These examples are the documentation of the
+  wire format; the OpenAPI document deliberately renders these types as
+  opaque objects (`Schema.any` — a derived or hand-written schema would
+  duplicate the custom codecs and drift silently, and no external OpenAPI
+  consumer exists).
 
 **Seed text — dynamic predicate scope, worked example:**
 
@@ -1164,3 +1186,419 @@ Tests added per phase are listed in §7.1.7 / §7.2.3; M3/M4 test plans arrive
 with their elevation sections. Each phase closes with the doc-consistency
 sweep (comments/docs touched by the change updated in the same pass) and its
 PATCH bump; plan close = MINOR bump.
+
+---
+
+## 8. Targeting re-plan (continuation, 2026-08-10): predicate-first
+
+**Ruling context.** The user rejected explicit-set general targeting
+(2026-08-10): the targeting predicate was always the designed mechanism, an
+explicit id set contributes nothing a predicate cannot express, and it is
+exactly the surface the security review flagged as unbounded client-supplied
+input (finding F4). This section re-plans targeting under the assumption
+that the vql-engine work lands **as described in the sibling plan**
+`../vague-quantifier-logic/docs/PLAN-range-formula-and-satisfying-set.md`
+(implements the AC-1…AC-10 contract of `PROMPT-VQL-RANGE-AND-TARGETING.md`;
+one authorized deviation: AC-9 superseded — untyped backend retired). It
+supersedes §7.1's `MitigationTarget.Nodes` design and absorbs most of the
+former M3 targeting scope.
+
+**Delivered contract assumed (vql-engine 0.11.0):**
+
+- Typed path only; cross-compiled (JVM + Scala.js) — the parser and
+  free-variable utilities are available in `common`/browser.
+- Formula ranges: `ParsedQuery.range: Formula[FOL]` (breaking construction
+  change), `BoundQuery.range: BoundFormula`, closed-world negation over the
+  active domain, denominator = compound population.
+- `satisfyingSet` entry point: exact, deterministic, type-checked,
+  `Either[QueryError, Set[Value]]`, no sampling; validates
+  free-variables-exactly-x and sort quantifiability (its input shape awaits
+  the sibling plan's Ruling 1 — recommendation on record there: pre-parsed
+  `Formula[FOL]` plus an `Either`-returning parse entry in the vague layer).
+
+### 8.1 Design
+
+**Targeting is a stored predicate.** The mitigation carries the predicate
+source text; scope is a server-side resolution against the tree, never a
+client-supplied node enumeration.
+
+```scala
+// common — new file domain/data/TargetingPredicate.scala
+/** Restricted targeting sublanguage over one free node variable.
+  * Boundary validation (cross-compiled, runs in browser and server):
+  *  - parses via the engine's Either-returning parse entry
+  *  - exactly one free variable (the target variable)
+  *  - no answer variables; no quantifiers and no function terms (targeting
+  *    fragment membership, §8.4-3 — auxiliary-sort quantifiers become
+  *    admissible at M3 via the P-1 bind-time sort rule)
+  *  - predicate whitelist: structural/attribute predicates only — the
+  *    mitigation-state predicates (`mitigate`, `mitigated`) are rejected
+  *    (self-reference/fixpoint exclusion, §6)
+  * Wire format: the source string. The parsed formula is derived state,
+  * never serialized. */
+final case class TargetingPredicate private (source: TargetingSource)
+object TargetingPredicate {
+  def create(source: String): Validation[ValidationError, TargetingPredicate]
+  given JsonCodec[TargetingPredicate]   // decode = create (boundary validation)
+}
+// iron/OpaqueTypes.scala: type TargetingSource = String :| (MinLength[1] & MaxLength[256])
+// 256 (user ruling 2026-08-10): realistic predicates are tens of characters
+// (a ~200-char string already holds a full multi-clause sentence); 256 is a
+// convenient power-of-two ceiling and bounds parser work on stored text.
+
+// common — Mitigation.scala rework
+sealed trait MitigationTarget
+object MitigationTarget {
+  final case class Predicate(predicate: TargetingPredicate) extends MitigationTarget
+  // Single-variant (RULED §8.4-1 = C, user 2026-08-10): the override anchor is
+  // not a target variant — it is `overrideAnchor: NodeId` on
+  // MitigationSpec.LeafStage, colocated with overrideBaseStamp (required iff
+  // an Override component is present). Nodes(Set[NodeId]) is REMOVED.
+}
+```
+
+**Resolution is a server component riding the memoized KB** (the ADR-028
+memoization obligation moves here from the former M3):
+
+```scala
+// server — services/MitigationScopeResolver.scala
+trait MitigationScopeResolver {
+  /** Resolve every mitigation's predicate to a node-id set against the tree,
+    * via the engine's satisfyingSet over the tree's typed model. Memoized per
+    * tree version together with the KB itself; the context names WHICH tree
+    * version (cache identity — see the memoization passage). */
+  def resolve(context: ScopeResolutionContext, tree: RiskTree): IO[AppError, ResolvedScopes]
+}
+// ScopeResolutionContext: workspaceId + treeId + branch + Irmin revision —
+// the full authority identity of the tree version (exact shape at M2
+// elevation). ResolvedScopes: the per-mitigation outcome map — resolved
+// Set[NodeId] or a per-mitigation resolution failure (F3 fix below); exact
+// shape at M2 elevation.
+```
+
+**Storage is a trust boundary (predicate = stored source text).** The
+predicate is necessarily persisted as its source string: the typed IL
+(`BoundFormula`) has no serialization format, and binding is relative to a
+specific tree version's type catalog — a stored bound form would go stale;
+the source text re-parsed at the boundary is the only durable
+representation. Every Irmin→register read therefore crosses the same
+validation boundary as client input, which is already how tree reads work
+today: `RiskTreeRepositoryIrmin.decodeNode`/`decodeMeta` decode through the
+validating zio-json codecs (smart constructors, ADR-001) and reassemble via
+`RiskTree.fromNodes` — tree-level invariants re-run on every read. The
+mitigation collection (M2 storage) follows the identical pattern: decode =
+`TargetingPredicate.create` = parse + sublanguage validation, so a
+tampered or corrupted stored predicate fails the read with a typed
+`RepositoryFailure`, never reaching the engine; parser cost on stored text
+is bounded by the 256-char cap, and parse failures are `Either`-returned
+(no exceptions) per the engine contract.
+
+**The application algebra takes resolved scopes as input** — it no longer
+reads ids off the mitigation (`common` stays engine-agnostic and the action
+`Mits × Tree → Tree` is unchanged as algebra; only scope acquisition moves):
+
+```scala
+// common — MitigationApplication.scala rework (signature deltas only)
+def scoped(tree: RiskTree, selection: MitigationSelection,
+           resolvedScopes: Map[MitigationId, Set[NodeId]]): Map[NodeId, List[Mitigation]]
+def effectiveTree(tree: RiskTree, selection: MitigationSelection,
+                  resolvedScopes: Map[MitigationId, Set[NodeId]]): Validation[ValidationError, RiskTree]
+def resultTransformFor(nodeId: NodeId, scoped: Map[NodeId, List[Mitigation]]): RiskResultTransform  // unchanged
+```
+
+In plain terms: the function that decides which mitigations apply to which
+nodes used to read the answer directly off each mitigation record (its
+stored id set). With predicates, that answer requires the engine and the
+tree's typed model — which exist only on the server — while the application
+algebra stays a pure function in `common`. So the server computes the
+answer once (`MitigationScopeResolver`) and hands it to the same pure
+functions as a lookup table. Example: Firewall stores the predicate
+`name starts with "srv-"`; the resolver evaluates it against the current
+tree and produces `{firewall → {srv-web, srv-db}}`; `effectiveTree` then
+transforms exactly those two leaves. This is a new consequence of the
+predicate-first ruling (2026-08-10), not a previously discussed design —
+its layering follows the OD-6 precedent (pure algebra in `common`,
+environment-dependent computation server-side).
+
+**Memoization — what changed vs. the earlier model (nothing structural,
+two things moved).** The earlier model (recorded pre-§8): the query
+knowledge base is rebuilt from scratch on every analytics query today; the
+planned fix was ONE cache keyed on the tree version (the Irmin revision) —
+same tree version, same KB — with mitigation scope resolution and the
+precomputed `mitigated(x)` riding that cached KB. That model is unchanged.
+What moved: (1) **when it lands** — it was an M3 (analytics) work item;
+it is now an M2 obligation, because with predicate targeting every
+*simulation* request needs scope resolution, so KB construction sits on the
+hot path much earlier than analytics; (2) **what is cached** — the cache
+entry now holds the KB *plus* the resolved scope map
+(`Map[MitigationId, Set[NodeId]]`), since the scopes are a pure function of
+the same tree version and would otherwise be recomputed per request. The
+invalidation rule is identical: a new tree version (any tree edit) drops
+the entry; nothing else does.
+
+**Cache identity (security-review F1 fix, user-approved 2026-08-10).** The
+cache must know *whose* tree version it holds, not merely which content:
+one resolver-cache instance **per workspace** (the `ContentCache` DD-17
+precedent — cross-workspace contamination becomes structurally
+impossible), keyed inside the instance by (`TreeId`, branch, Irmin
+revision), all passed explicitly via `ScopeResolutionContext`. Two
+non-options, ruled out with reasons: keying on `TreeId` alone serves one
+branch another branch's scope map; keying on the DD-16 **domain** hash is
+wrong because that projection deliberately excludes node *names* while
+predicates reference names — a rename changes resolution but not the
+domain hash (the two-hash-relations distinction: byte-level identity, not
+domain identity, is the correct key material). The KB built for scope
+resolution is **results-free** (no simulation results — the targeting
+sublanguage admits no simulation-backed symbols, §8.4-3), which is what
+makes the cached entry a true pure function of the tree version. Eviction
+of historic-revision entries: head-only, ruled (§8.4-5).
+
+**Stage-domain scope restriction (ruled 2026-08-10).** A mitigation's
+applied scope is **defined** as the predicate's satisfying set intersected
+with its stage's domain: `scope(m) = satisfying(m.predicate) ∩
+domain(m.spec)`, where `domain(LeafStage)` = the tree's leaves and
+`domain(ResultStage)` = all nodes. This is a definition applied at every
+resolution, not a validation check — a portfolio matched by a LeafStage
+predicate (authored so, or drifted into the satisfying set by a rename or
+merge) is simply outside the mitigation's scope, with no error and no
+drift signal; the M1 write-time rule "LeafStage targets are leaves"
+(§7.1.4) is superseded by this definition, which unlike the write check
+holds on every stored tree state, including merge results no PUT ever
+validated. The type level already makes the wrong application
+unrepresentable (`RiskLeafTransform.applyTo` accepts only `RiskLeaf`;
+`effectiveTree` transforms leaf positions of the sealed `RiskNode` ADT),
+so the definition and the types agree — the resolver computes what the
+algebra could apply anyway. Consequences: an Override whose anchor node
+is no longer a leaf applies nowhere (empty applied scope, surfaced
+through the per-mitigation outcome, F3 pattern); `resolvedScope` in the
+D-4 provenance record is the **applied** (post-restriction) scope.
+
+**Validation split.** `common` (`RiskTree.validateMitigations`) keeps unique
+ids/names and predicate parse-level validation; everything needing
+resolution moves server-side to tree-write validation: an Override's
+predicate must resolve to exactly `{overrideAnchor}` (§8.4-1, ruled C).
+Unresolvable predicates (valid syntax, empty scope) are a no-op, not an
+error — consistent with the dynamic-scope worked example (§7.4.1).
+Provenance continues to record the resolved scope set per LEC (D-4 layer;
+applied scope per the stage-domain definition above).
+
+**Per-mitigation error isolation (security-review F3 fix, ruled
+2026-08-10).** Resolution errors are isolated per mitigation and
+accumulated, never short-circuited — ZIO's error-accumulation combinators
+(`ZIO.partition`-style: resolve each predicate individually, collect all
+failures alongside all successes), not `flatMap` sequencing. A predicate
+that fails to *bind* against the tree version (its quoted node name was
+renamed/deleted → `UnknownConstantOrLiteralError`) yields, for that
+mitigation only, an empty scope plus a per-mitigation resolution-failure
+signal in `ResolvedScopes` — a sibling of the §8.4-1 scope-drift signal;
+the request as a whole never fails because one stored predicate went
+stale. The tree-write anchor check blocks a PUT only on resolution errors
+of the mitigation(s) being written, never on pre-existing ones. Read-time
+semantics of a *divergent* (bound but anchor-mismatched) override:
+apply-at-anchor, ruled (§8.4-4).
+
+**Size bounds (F4 residue, absorbed here).** With enumeration gone, the
+remaining wire bounds are small and land with the rework:
+`TargetingSource` MaxLength 256; `RiskTree.mitigations` max 1000;
+`TransformPipeline.steps` max 100 — all three as Iron literals (values +
+vehicle ruled 2026-08-10, §8.4-2). `ScopeRestriction.NodesOnly` (selection,
+request-scoped display state, M4) gets its bound in the M4 elevation.
+
+### 8.2 Phase rework map
+
+- **M1R (domain rework; replaces §7.1's targeting + absorbs former M3
+  domain scope):** `TargetingPredicate`, `MitigationTarget` rework, algebra
+  signature deltas above, bounds, test rework (MitigationEntitySpec /
+  MitigationApplicationSpec re-targeted to predicates; parse-validation
+  spec). Blocked on vql-engine **0.11.0 on Maven Central** and its Ruling 1
+  outcome; elevation to implementation-grade happens then (OD-1 pattern).
+  The as-built M1 `Nodes` code stays until M1R lands (pre-prod, nothing
+  persisted, no migration).
+- **M2 (persistence + resolver):** unchanged in storage shape
+  (`mitigations/{id}` paths store the mitigation with its predicate
+  source); `RiskResultResolver` consumes `MitigationScopeResolver` output;
+  `MitigationStaleness.staleOverrides` unchanged (OD-6). KB + scope
+  memoization per tree version lands here (was M3's perf item).
+- **M3 (shrinks):** what remains after M1R absorbs targeting: the KB
+  `Mitigation` sort + `mitigate`/`mitigated` analytics predicates with the
+  precomputed `mitigated(x)` (§6), ADR-028 amendment + ADR-029 parser-
+  boundary table row (the targeting predicate is a new parser boundary —
+  the boundary lands with M1R, the ADR-029 row records it), vql 0.11.0
+  adoption sweep (breaking `ParsedQuery` construction — register call sites
+  in QueryServiceLive / app query state adapted at the pin bump).
+- **M4/M5:** unchanged.
+
+### 8.3 ADR alignment (delta)
+
+ADR-028 (typed path only — strengthened by the engine's untyped
+retirement); ADR-029 (new parser boundary: targeting predicate — table row
+obligation); ADR-001 (predicate validated at the boundary via smart
+constructor; server receives validated types); ADR-030 (resolution in
+handlers/services, server-side). No new deviations.
+
+### 8.4 Open decisions
+
+All five items are **RULED** (2026-08-10) — no open decisions remain in
+this section; the entries are kept as the decision record. Plan-wide, D4
+and D5 (§4) remain open by design (decided at first mitigation wiring /
+M4 elevation respectively).
+
+1. **Override target anchoring.** The 4-layer staleness stack (stamp /
+   edit popup / stale badge / nonsense check) and the stamp's meaning
+   (ContentHash of the target leaf's DD-16 projection at authoring time —
+   renames excluded by construction) are DECIDED and not reopened here.
+   The only new question predicate-first targeting introduces is how the
+   override *points at* its one leaf. (A) Predicate-only: the predicate
+   must resolve to exactly one node, checked server-side at tree write. A
+   rename can silently re-point the predicate at a *different* leaf; the
+   stamp then mismatches, but the signal reads as "content changed" when
+   the truth is "target changed" — two distinct drifts, one indicator.
+   Worked example: override authored on `srv-db` via predicate
+   `name starts with "srv-"` ∧ …; `srv-db` is renamed `db-main`; the
+   predicate now resolves to `srv-web` alone, and the override applies to
+   the wrong leaf with only a stamp-mismatch badge as the clue. (B)
+   `SingleNode(NodeId)` variant reserved for Override: node ids are
+   rename-stable, so the override follows its leaf through renames with no
+   false staleness (stamp fires only on genuine content edits — exactly
+   the designed semantics); create-time checkable in `common`; costs one
+   special case in the target ADT. (C — user-proposed 2026-08-10, best of
+   both) Targeting stays **single-variant** (`Predicate` only, uniform
+   storage and UX); the override's anchor is a `NodeId` field colocated
+   with the stamp in `MitigationSpec.LeafStage`
+   (`overrideAnchor: NodeId`, required iff an Override component is
+   present — same cross-field rule family as `overrideBaseStamp`).
+   Server-side write validation: the predicate's resolution must equal
+   `{overrideAnchor}`. Divergence is a **distinct scope-drift staleness
+   signal**, separate from the stamp's content-drift signal — the
+   conflation that motivated B disappears, without forking the target ADT.
+   Default authoring path: the UI emits a stable-id equality predicate for
+   the picked leaf, which (ids being rename-stable) never diverges from
+   the anchor unless the node is deleted; a hand-written name-based
+   predicate is allowed and its drift is flagged precisely as scope drift.
+
+   **UI authoring mechanism (user-elaborated 2026-08-10):** the user never
+   types or pastes a node id — a node picker fills a fixed client-side
+   template (concrete syntax fixed at elevation against the vql 0.11.0
+   grammar) with the selected node's id, and the filled result travels as
+   an ordinary predicate string; there is no separate wire shape for
+   picked-vs-typed targeting. Security treatment of the template: the
+   server grants it no trust — the filled string is untrusted input like
+   every predicate (from the server's perspective the UI is just another
+   HTTP client) and goes through the same parse (256-char bound, typed
+   parse, `mitigate`/`mitigated` whitelist exclusion) plus the
+   resolution-equals-`{overrideAnchor}` check. Two layers apply to the
+   interpolation itself: `NodeId`'s refinement
+   (`^[0-9A-HJKMNP-TV-Z]{26}$`) admits no quotes, spaces, or operator
+   characters, so a conforming id cannot alter the template's parse shape
+   (defence-in-depth relying on the constraint, per ADR-029's
+   string-built-query rule); the controlling check is server-side — a
+   forged or tampered predicate either fails parse/validation or resolves
+   to something other than `{overrideAnchor}` and the write is rejected.
+   A conceptual security review of this surface (predicates from
+   untrusted actors generally) was commissioned 2026-08-10.
+
+   **RULED: C (user, 2026-08-10)** — uniform predicate targeting, stable
+   stamp anchor, and the two drift kinds become two distinguishable
+   signals instead of one ambiguous badge. The deep security review
+   (2026-08-10) confirmed the write-time anchor check is sound: no
+   storable predicate can make an override touch a node other than its
+   anchor at the moment of writing.
+2. **Bounds numbers** (§8.1). **RULED (user, 2026-08-10): values
+   confirmed (`RiskTree.mitigations` max 1000, `TransformPipeline.steps`
+   max 100), enforced as Iron literals** — the codebase's uniform vehicle
+   for persisted-content and wire validity bounds (every `MaxLength`
+   refinement in `iron/OpaqueTypes.scala`; the 256-char `TargetingSource`
+   bound is already Iron by the same ruling). Runtime configuration (the
+   `application.conf` nTrials pattern) was considered and rejected: that
+   pattern serves per-request execution parameters that are never part of
+   stored content, whereas these bounds govern persisted tree content
+   validated at materialization — a lowerable configured bound would
+   invalidate already-stored trees on re-read, and the grandfathering
+   alternative (a server write-path-only check) splits validation across
+   layers against ADR-001 and splits the bounding mechanism against the
+   F5 single-mechanism requirement. Changing a bound is a one-line
+   refinement edit shipped as a PATCH.
+3. **Targeting sublanguage enforcement mechanics (security-review F4).**
+   Settled part (no decision): simulation-backed symbols (`p95`, `p99`,
+   `lec`) are excluded from targeting — admitting them would put
+   whole-tree simulation on the tree-write path, make resolved scopes
+   seed-dependent, and make targeting circular. Open part (since ruled
+   below): the *mechanism*. User direction (2026-08-10): enforce by parsing targeting
+   predicates against a restricted **FOL sub-grammar** (no vague
+   quantifiers; term rule admits no function application, which excludes
+   the simulation functions grammatically rather than by symbol
+   whitelist), delegating as much as possible to the parser.
+
+   **Enforcement locus RULED (user, 2026-08-10): engine-side
+   fragment-membership API.** The engine gains a function (beside the
+   `fol.typed` layer; name and fragment-spec shape at elevation) that
+   walks a parsed `Formula` and reports whether it lies in a declared
+   fragment — for targeting: no quantifier nodes, no function terms; for
+   screening: quantifier depth ≤ k (one implementation, two fragment
+   specs — satisfies the F5 single-mechanism requirement for the cost
+   bound). Register calls parse + membership check as one boundary step
+   and keeps treating `Formula` as opaque. Rationale: the engine's
+   Harrison-port parser core is preserved verbatim under its ADR-007
+   (quantifier arms and the term-precedence tower are hardcoded there),
+   so a restricted parser entry point would fork or reshape that
+   protected core for no gain — a membership test on the parse tree
+   accepts exactly the same string set, and parse output is inert data,
+   so rejection before typed bind preserves the reject-at-the-language
+   security property in full. Ships as a small engine release after
+   0.11.0 (0.11.x); sibling-repo work, see §8.5.
+
+   **Quantifier exclusion RULED (user, 2026-08-10): excluded from the
+   targeting fragment spec pre-M3.** Today the node sort is the only
+   sort, so the exclusion equals the P-1 sort rule with no expressiveness
+   loss. At M3, when auxiliary sorts arrive, the spec line is removed and
+   the P-1 bind-time sort rule (built at M3 regardless — syntax cannot
+   know a variable's sort) takes over; the membership machinery itself is
+   unchanged. No open sub-questions remain on this item.
+4. **Read-time semantics of a divergent override (security-review F2).**
+   Merges (byte-level, domain-blind per ADR-032) and post-write renames
+   can produce stored trees where an override's predicate no longer
+   resolves to `{overrideAnchor}`; the write-time check never sees these
+   states. Options considered: suspend (no-op + scope-drift signal),
+   apply at the anchor (the `NodeId` field wins; predicate becomes
+   authoring convenience + drift detector), fail the read (rejected:
+   availability cost, and the only option incompatible with the F3
+   per-mitigation outcome pattern). **RULED (user, 2026-08-10):
+   apply-at-anchor** — the rename-stable anchor keeps the override on
+   the leaf the expert assessed; the divergence is reported as the
+   scope-drift signal in the per-mitigation outcome. The
+   companion question (LeafStage scope member that is not a leaf) is
+   dissolved, not ruled: the stage-domain scope definition (§8.1) makes
+   non-leaf matches fall outside a LeafStage mitigation's scope by
+   construction — no suspend semantics needed.
+5. **Resolver-cache eviction for historic revisions (security-review
+   F6).** Compare slots and history scrubbing resolve historic revisions;
+   memoizing those without bound accretes a heavyweight KB entry
+   (descendants index, ~n·depth set entries) per visited revision.
+   **RULED (user, 2026-08-10): head-only** — one entry per live
+   workspace/tree/branch, replaced on head advance; historic reads
+   resolve uncached. Cost analysis behind the ruling: at realistic tree
+   shapes (hundreds of nodes, depth < 10) a KB rebuild plus
+   quantifier-free resolution is single-digit milliseconds — below the
+   uncached portfolio re-aggregation a scrub step performs anyway, and
+   orders of magnitude below fresh simulation (leaves × nTrials,
+   default 10k) — while a retained entry is large; cheap-to-rebuild +
+   expensive-to-retain is the head-only profile. Structurally the memo
+   is a revision-checked slot per (tree, branch), not an evicting map —
+   no EvictionStrategy, no generic-cache extraction from ContentCache
+   (design + `CacheStats` reuse only). A bounded LRU over revisions
+   remains the recorded M4 upgrade (carrying the generic-cache
+   extraction with it) only if deep trees with thousands of nodes make
+   per-step rebuild perceptible.
+
+### 8.5 Sequencing note
+
+The engine plan is the critical path: registers M1R elevation waits for the
+sibling plan's rulings + phases 0–5 + a 0.11.0 Central release (supply-chain
+skill applies to the bump; first-party waiver per ADR-020 §10). No register
+mitigation code is written against an unreleased engine snapshot — the
+Central-binary flow (PLAN-DEPENDENCY-REPUBLISH) is the only consumption
+path. The fragment-membership API (§8.4-3, ruled engine-side) is a second
+sibling deliverable: a small engine release after 0.11.0 (0.11.x), needed
+by the register write-path validation at M2/M3 — not on the M1R critical
+path, but its engine-plan slot should be scheduled alongside the 0.11.0
+work.
