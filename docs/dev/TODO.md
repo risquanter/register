@@ -134,9 +134,16 @@ representation, for example:
 
 ---
 
-## 5b. SNAPSHOT dependency resolution strategy in Docker builds
+## ✅ 5b. SNAPSHOT dependency resolution strategy in Docker builds — RESOLVED 2026-08-09
 
-**Decision:** Inline `COPY + sbt publishLocal` per Dockerfile (Option 1).
+All three first-party libraries are published on Maven Central
+(`metalog-distribution:0.9.0`, `vql-engine:0.10.2`, `hdr-rng:0.1.0`) and the
+migration plan below was executed (PLAN-DEPENDENCY-REPUBLISH.md): the
+`COPY + sbt publishLocal` blocks and both per-Dockerfile `.dockerignore`
+files are gone, the frontend build context is `.`, and the graalvm-builder
+context is `containers/builders/`. The record below is historical.
+
+**Decision (historical):** Inline `COPY + sbt publishLocal` per Dockerfile (Option 1).
 
 Each Dockerfile that needs `hdr-rng` or `fol-engine` and cannot inherit a
 pre-warmed base image copies the sibling source trees into a temporary directory,
@@ -210,7 +217,7 @@ from a Maven registry (GitHub Packages or Maven Central):
 
 ---
 
-## 5a. [LOW PRIO / EXTERNAL] `vague-quantifier-logic` — add monotonicity validation to metalog constructor
+## 5a. [LOW PRIO / EXTERNAL] `metalog-distribution` — add monotonicity validation to metalog constructor
 
 **Context assessment:**
 `MetalogDistribution.fromPercentilesUnsafe` accepts non-monotone quantile arrays
@@ -253,7 +260,7 @@ explaining the layering:
 
 **Follow-up steps:**
 
-1. **`simulation-util` / `vague-quantifier-logic`**
+1. **`metalog-distribution`**
    - Add `MonotoneViolation` error type (or reuse an existing validation error
      type if one exists) carrying the violating indices and values.
    - Implement `fromPercentiles(...): Either[MonotoneViolation, MetalogDistribution]`
@@ -273,13 +280,13 @@ explaining the layering:
      call site is reached.
 
 **Status:** root cause confirmed, fix not yet started. Blocked on
-`simulation-util` work.
+`metalog-distribution` work.
 
 
 
 ---
 
-## 8. fol-engine typed vs. untyped pipeline mismatch — equality predicate not reachable
+## 8. vql-engine typed vs. untyped pipeline mismatch — equality predicate not reachable
 
 **Observed (2026-05-01).** A motivating query for the post-fix demo
 set of [docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md)
@@ -297,7 +304,7 @@ registered in the typed FOL dispatcher used by `register`
 lists only `leaf`, `portfolio`, `child_of`, `descendant_of`,
 `leaf_descendant_of`, `gt_loss`, `gt_prob`).
 
-**The puzzling part.** The sibling `fol-engine` repo *does* implement
+**The puzzling part.** The sibling `vql-engine` repo *does* implement
 equality, but only on a different code path:
 
 - `fol.bridge.ComparisonAugmenter` (untyped) registers `"="` for any
@@ -317,7 +324,7 @@ entirely on the typed pipeline, where equality is absent.
    `semantics.FOLSemantics` an earlier OCaml-faithful port that
    `fol.typed` was meant to subsume? An intentional escape hatch for
    ad-hoc usage? A research sandbox? Get a code-archaeology answer
-   from the fol-engine ADRs (especially ADR-007 "Preserve OCaml-Ported
+   from the vql-engine ADRs (especially ADR-007 "Preserve OCaml-Ported
    Parser Combinator Core") and any author commentary.
 2. **Why typed pipeline has no equality.** Is sort-polymorphic equality
    a known omission, an explicit decision (e.g. equality is meaningful
@@ -329,7 +336,7 @@ entirely on the typed pipeline, where equality is absent.
      equalities it needs) to its own `RiskTreeKnowledgeBase` catalog.
      Tiny, ADR-compliant, follows the existing per-predicate pattern
      exactly. Doesn't address the broader question.
-   - (b) **Generic equality in `fol.typed`** — fol-engine adds
+   - (b) **Generic equality in `fol.typed`** — vql-engine adds
      polymorphic `=` to the typed type-checker / dispatcher. Bigger
      change; needs the typed type-checker to admit a polymorphic
      predicate or to special-case `=`.
@@ -1783,3 +1790,66 @@ old branch-suffixed ids.
 
 **Status:** direction ruled; implementation needs its own plan continuation
 (PLAN-ANALYZE-CHART-UX workstream) before any code.
+
+---
+
+## 39. CoSign signature verification for the image pipeline + GitHub Actions migration
+
+Commissioned 2026-08-09 (PLAN-DEPENDENCY-REPUBLISH ruling (c)). Think through:
+
+1. **CoSign in the current two-stage build workflow.** First-party libraries
+   now arrive as binary artifacts from Maven Central, and sbt performs no
+   signature verification (ADR-020 §12 gap). Evaluate signing the artifacts
+   at release time (the library repos' GitHub Actions release workflows) and
+   verifying with `cosign verify-blob`/Sigstore in the builder and app image
+   builds, plus signing the built images themselves (`local/graalvm-builder`,
+   `local/register-server`, `local/frontend`, `local/irmin-prod`).
+2. **Holistic migration of image creation to GitHub Actions.** All images are
+   currently built on developer machines. Design a pipeline that builds,
+   signs, attests (SLSA provenance), and pushes them from CI — including how
+   the local dev loop (`docker compose` with `pull_policy: build`) coexists
+   with registry-published, signed images.
+
+**Status:** open; needs its own plan before any implementation.
+
+---
+
+## 40. Bound the multi-LEC endpoint's node-id list
+
+`getWorkspaceLECCurvesMultiEndpoint` accepts `jsonBody[List[NodeId]]` with no
+maximum size — a workspace-key holder can request thousands of curves in one
+call. Add a max-size refinement at the type boundary, consistent with the
+other request bounds (`REGISTER_MAX_NTRIALS` family). Candidate to share the
+bounded-input mechanism with the screening-query length cap (TODO 41) — one
+limiting mechanism, not per-endpoint re-implementations.
+
+**Status:** open (moved here from the code-quality-review skill's known-gap
+note, 2026-08-10; originally flagged in a security review).
+
+---
+
+## 41. Screening-query input bounds
+
+`QueryRequest.query` is an unbounded raw `String` (no Iron refinement) and
+the query language currently allows unrestricted quantifier nesting —
+evaluation cost is O(n^k) in nesting depth k. Two parts: (a) an Iron
+`MaxLength` refinement (~1024; analytics queries are legitimately longer
+than the 256-char targeting predicates) — fold into the vql-engine 0.11.0
+adoption sweep (PLAN-RISKTRANSFORM §8.2 M3), which touches these call sites
+anyway; (b) an evaluation-cost/quantifier-depth bound — placement (engine
+vs register KB boundary) is an open decision at the M3 elevation. Abstract
+the limiting mechanism so targeting predicates and screening queries share
+one implementation (user requirement 2026-08-10).
+
+**Status:** open; scheduled with the M3 sweep.
+
+---
+
+## 42. Scenario creation has no per-workspace rate limit
+
+Branch/scenario creation is unmetered per workspace — a key holder can
+create unbounded branches, each with storage and bookkeeping cost. Evaluate
+a per-workspace limit analogous to `REGISTER_WORKSPACE_MAX_CREATES_PER_IP`.
+
+**Status:** open (moved here from the code-quality-review skill's known-gap
+note, 2026-08-10).

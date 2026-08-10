@@ -292,8 +292,8 @@ count/size/depth must be bounded at the type boundary (Iron refinement with a
 max), matching `REGISTER_MAX_NTRIALS`/`REGISTER_MAX_PARALLELISM`/
 `REGISTER_WORKSPACE_MAX_TREES`. Flag any new unbounded `List[_]`/`Set[_]`
 request body (e.g. a node-ID list with no max-size constraint) as
-**SHOULD-FIX** — note as a known existing gap on `getWorkspaceLECCurvesMultiEndpoint`'s
-`jsonBody[List[NodeId]]`, worth a follow-up item, not blocking on its own.
+**SHOULD-FIX**. Known accepted gaps are tracked in `docs/dev/TODO.md` —
+report a match against one as pre-existing, not as a new finding.
 
 **API5:2023 Broken Function Level Authorization.** Every new service method
 that reads or mutates privileged data must require `using Checked[Permission]`
@@ -303,9 +303,8 @@ type is a function-level authorization gap. **MUST-FIX.**
 **API6:2023 Unrestricted Access to Sensitive Business Flows.** New
 resource-creation endpoints should be evaluated for abuse potential the same
 way workspace bootstrap already is (`REGISTER_WORKSPACE_MAX_CREATES_PER_IP`).
-Note as a known gap: scenario creation has no per-workspace rate limit today
-— flag if a diff touches scenario creation without addressing it.
-**SHOULD-FIX** (not a regression, but worth closing opportunistically).
+**SHOULD-FIX** on a new unguarded creation flow; known accepted gaps are
+tracked in `docs/dev/TODO.md`.
 
 **API7:2023 Server-Side Request Forgery.** Not applicable today — no endpoint
 fetches a client-supplied URL server-side (`IRMIN_URL` is operator-configured,
