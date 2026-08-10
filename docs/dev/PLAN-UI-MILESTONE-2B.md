@@ -1,9 +1,24 @@
 # PLAN — Milestone-2b UI (scenarios, comparison, merge, history)
 
 > **Status: APPROVED 2026-07-19 (conceptual, per the fidelity boundary
-> below) — no code yet.** This document closed **DD-9** (frontend UI
-> placement; confirmed 2026-07-19, see milestone doc Closed table). It covers all milestone-2b UI surfaces across Phases B–E so
+> below) — MOSTLY BUILT; two surfaces outstanding.** This document closed
+> **DD-9** (frontend UI placement; confirmed 2026-07-19, see milestone doc
+> Closed table). It covers all milestone-2b UI surfaces across Phases B–E so
 > placement is decided coherently once, phase-labelled for delivery.
+>
+> **Built and shipped:** Phase B (topbar branch chip + Scenario toolbar + CRUD),
+> Phase C (Off / Overlay / Side-by-side comparison), Phase D (merge in Design —
+> preview-then-confirm modal, shipped 2026-07-24), and the Analyze half of
+> Phase E (history slider).
+>
+> **Outstanding — exactly what is missing:**
+> - **Phase E Design-view history** — the history slider + read-only pinned mode
+>   in Design (and the fork/revert UI beside it) are not built. Tracked in
+>   `PLAN-PHASE-E-HISTORY.md` as Slice E-B.
+> - **Phase F merge-conflict resolution UI** — the one-click `[keep main]` /
+>   `[keep scenario]` buttons (§8) and semantic (param-average) resolution are
+>   NOT built; deferred to Phase F and tracked in the scratch tracker
+>   ("Deferred: Phase D Option-2 conflict resolution").
 > Companion: `docs/scratch/milestone-2b-cache-and-decisions.md` (decisions
 > DD-5/7/8/9/11 and phase outline). Rendered mockups (open locally in a
 > browser): v1 (neutral) and v2 (`--scenario` role token) are **superseded

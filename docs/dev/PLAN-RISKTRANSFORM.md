@@ -1596,7 +1596,7 @@ The engine plan is the critical path: registers M1R elevation waits for the
 sibling plan's rulings + phases 0–5 + a 0.11.0 Central release (supply-chain
 skill applies to the bump; first-party waiver per ADR-020 §10). No register
 mitigation code is written against an unreleased engine snapshot — the
-Central-binary flow (PLAN-DEPENDENCY-REPUBLISH) is the only consumption
+Central-binary flow (DONE-PLAN-DEPENDENCY-REPUBLISH) is the only consumption
 path. The fragment-membership API (§8.4-3, ruled engine-side) is a second
 sibling deliverable: a small engine release after 0.11.0 (0.11.x), needed
 by the register write-path validation at M2/M3 — not on the M1R critical

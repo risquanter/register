@@ -1,13 +1,30 @@
 # PLAN — Error Reporting Refactoring (ErrorResponse / FolQueryFailure / GlobalError)
 
-> **Status**: Proposed — not started.
+> **Status**: OPEN — the abstraction work is not started and three of the four
+> bugs remain. The `decode`-routes-on-`field` design is unchanged, so this plan's
+> analysis still holds verbatim. State of each bug, verified against current code:
+> - **Bug 1 (garbage `getMessage` on decode)** — STILL PRESENT. `decode` still
+>   reconstructs `FolUnknownSymbol(firstField, Nil)` / `FolUnknownReference(firstField)`
+>   / `FolDomainNotQuantifiable(firstField, …)` where `firstField == "query"`
+>   (`ErrorResponse.scala`).
+> - **Bug 2 (`FolQueryFailure` → `NetworkError` fall-through)** — FIXED.
+>   `GlobalError.fromThrowable` now has `case _: FolQueryFailure => ServerError(...)`
+>   (a dedicated `QueryError` variant remains an option, not a requirement).
+> - **Bug 3 (roundtrip tests assert type only)** — STILL PRESENT. `ErrorResponseSpec`
+>   still asserts `isInstanceOf` only, no payload; still no `FolUnknownReference`
+>   roundtrip test.
+> - **Bug 4 (SF-4 `firstField` variant)** — STILL PRESENT, now committed (no longer
+>   an "uncommitted working tree" change); repairs atomically with Bug 1.
+>
+> **Missing exactly**: fix Bugs 1 + 4 (decode/wire), tighten Bug 3's tests, and
+> decide the abstraction path (A / B / C, §5). Bug 2 is done.
 > **Triggered by**: Phase 5a §5.6 code-quality review uncovered SF-4
 > (`FolUnknownReference` decode pattern) which led to a deeper analysis of
 > `ErrorResponse` semantics and revealed multiple latent bugs and a
 > fundamental abstraction mismatch between JSON-validation and VQL error
 > reporting.
-> **Owner decision pending**: choice of solution path (A / B / C below) and
-> scoping of fixes vs. abstraction work.
+> **Owner decision pending**: choice of solution path (A / B / C below) for
+> Bugs 1 + 4 and the abstraction work.
 
 ---
 

@@ -1,15 +1,31 @@
 # PLAN — Milestone-2b Phase E: History / Time Travel (Scope 2)
 
-Status: PRESENTED 2026-07-25 (amended 2026-07-25: RENAME inventory entries
-split into old+new full-path bullets so the enforcement hook authorizes the
-post-rename files; amended 2026-07-26: §8 re-specified against the landed
-compare-UI redesign — history slider replaces the Tree|History tab, rulings
-H1–H6, SPA sliced Analyze-first then Design), awaiting approval.
-Prerequisites landed: `PLAN-C-REFACTOR.md` (Scope 1) and
-`PLAN-COMPARE-UI-REDESIGN.md` (slot-card Analyze layout §8 now builds on).
-All Phase E decisions are ruled (E1–E8 below, H1–H6 in §8).
+Status: PARTIALLY IMPLEMENTED — most of the plan has landed and been committed;
+two items remain. Prerequisites landed: `DONE-PLAN-C-REFACTOR.md` (Scope 1) and
+`DONE-PLAN-COMPARE-UI-REDESIGN.md` (slot-card Analyze layout §8 builds on). All
+Phase E decisions are ruled (E1–E8 below, H1–H6 in §8).
 
-**Slice 0 (backend, §1–§7) IMPLEMENTED 2026-07-27, uncommitted.** All modules
+**Landed and committed:** Slice 0 (backend §1–§7 — revision reads, X-Branch,
+revert, history; commit `1a69dec`, 0.10.0), Slice E-A (Analyze history slider,
+§8b), and continuations §C2 (live time-scrubbing + per-slot palette) and §C3
+(compare-history 3a/3b; commit `30cc365`, 0.10.3).
+
+**Outstanding — exactly what is missing:**
+
+- **Slice E-B — Design-view history (§7 "Slice E-B — Design", §8b).** The
+  history slider and read-only pinned mode in the Design view are not built:
+  `HistorySlider` is wired only into `AnalyzeView`, never `DesignView`. The
+  fork/revert UI that §8 places next to the Design slider is unbuilt with it.
+- **§C1 — per-branch tree uniqueness.** NOT implemented — code is in the "Before"
+  state of the §C1 signatures below. `create`/`update` write to the active
+  branch, but `ensureUniqueTree` → `collectAllTrees` still check uniqueness
+  against `main`: `RiskTreeServiceLive.collectAllTrees` hardcodes
+  `Revision.Head(BranchRef.Main)`, neither helper takes the `branch` parameter
+  §C1 specifies, and neither call site (`create`, `update`) passes it. Effect:
+  a tree created on a scenario branch is checked for name/ID collisions against
+  main, not the branch it is written to.
+
+**Slice 0 (backend, §1–§7) IMPLEMENTED 2026-07-27 (committed, `1a69dec`).** All modules
 compile (`sbt compile` green); `server/test` and `app/test` pass. The 3 new IT
 specs (`TreeRevertItSpec`, `PinnedReadAuthorizationItSpec`,
 `IrminRevertSemanticsSpec`) are authored and compile (`serverIt/Test/compile`
@@ -26,7 +42,7 @@ intact because a literal rename there would either falsify old semantics
 ("X-Branch absent = main") or corrupt proposal-internal types. Slice 0 has since
 been committed by the user.
 
-**Slice E-A (Analyze slider, §8b) IMPLEMENTED 2026-07-27, uncommitted.**
+**Slice E-A (Analyze slider, §8b) IMPLEMENTED 2026-07-27 (committed).**
 `commonJVM/test`, `server/test`, `app/test` all pass; `app/compile` warning-free.
 Ordering needed no code (getHistory is oldest-first ancestry, pinned by
 `RiskTreeRepositoryIrminSpec`). Where implementation refined §8b: `SlotCoordinate.at`
@@ -107,7 +123,7 @@ validation).
 ### Problem class: non-atomic multi-query reads
 
 Recorded here 2026-07-25; addressed by Scope 1 Task A (see
-`PLAN-C-REFACTOR.md`). Scope 2 builds on the commit-pinned internals it
+`DONE-PLAN-C-REFACTOR.md`). Scope 2 builds on the commit-pinned internals it
 introduced.
 
 ### Functional note (by design)

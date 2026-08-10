@@ -138,7 +138,7 @@ representation, for example:
 
 All three first-party libraries are published on Maven Central
 (`metalog-distribution:0.9.0`, `vql-engine:0.10.2`, `hdr-rng:0.1.0`) and the
-migration plan below was executed (PLAN-DEPENDENCY-REPUBLISH.md): the
+migration plan below was executed (DONE-PLAN-DEPENDENCY-REPUBLISH.md): the
 `COPY + sbt publishLocal` blocks and both per-Dockerfile `.dockerignore`
 files are gone, the frontend build context is `.`, and the graalvm-builder
 context is `containers/builders/`. The record below is historical.
@@ -587,7 +587,7 @@ Portfolios carry **no** seed ID (no stochastic behaviour — retracted).
 deliberately separate types with separate lifecycles.
 
 Implementation plan (full rationale, HDR paper findings, verified
-arithmetic, decision log): [PLAN-SEED-IDENTITY.md](./PLAN-SEED-IDENTITY.md).
+arithmetic, decision log): [DONE-PLAN-SEED-IDENTITY.md](./DONE-PLAN-SEED-IDENTITY.md).
 **Implemented in full — see the completion record below.**
 
 **Decision history (do not re-litigate):**
@@ -1662,7 +1662,7 @@ user (UID 65532) writing `/data`.
 
 ## 32. Phase F — multi-tree queries
 
-**Origin (2026-07-26):** the Analyze compare redesign (PLAN-COMPARE-UI-REDESIGN.md)
+**Origin (2026-07-26):** the Analyze compare redesign (DONE-PLAN-COMPARE-UI-REDESIGN.md)
 made loading several trees the norm — a baseline row plus comparand rows — but
 the VQL query pane still runs only against the baseline's (branch, tree). Phase F
 is to plan how the query pane extends beyond the baseline: per-row query
@@ -1725,7 +1725,7 @@ view signals (`view.signal(name, value)` — `ChartParamStore` already does exac
 this on capture/restore). Gives app-consistent styling and full layout control,
 at the cost of a two-way-wired control panel per signal.
 
-**Status:** DONE (0.10.5) — implemented as Option C in PLAN-ANALYZE-CHART-UX.md:
+**Status:** DONE (0.10.5) — implemented as Option C in DONE-PLAN-ANALYZE-CHART-UX.md:
 Vega `bind` inputs dropped; native `LecChartControls` (Laminar) drive the view
 signals via `ChartParams`. `Interpolation`/`LecAnnotation` enums are the single
 source of truth for the toggle signals.
@@ -1789,13 +1789,13 @@ Toggle state is one boolean in `CompareState`. Do NOT implement against the
 old branch-suffixed ids.
 
 **Status:** direction ruled; implementation needs its own plan continuation
-(PLAN-ANALYZE-CHART-UX workstream) before any code.
+(DONE-PLAN-ANALYZE-CHART-UX workstream) before any code.
 
 ---
 
 ## 39. CoSign signature verification for the image pipeline + GitHub Actions migration
 
-Commissioned 2026-08-09 (PLAN-DEPENDENCY-REPUBLISH ruling (c)). Think through:
+Commissioned 2026-08-09 (DONE-PLAN-DEPENDENCY-REPUBLISH ruling (c)). Think through:
 
 1. **CoSign in the current two-stage build workflow.** First-party libraries
    now arrive as binary artifacts from Maven Central, and sbt performs no

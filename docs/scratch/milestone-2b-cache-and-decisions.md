@@ -21,7 +21,7 @@
 > audit insights, the Phase A lean-down, implementation aid, and launch
 > prerequisites. Related: `docs/dev/TODO.md` item 17 (**RESOLVED 2026-07-18**
 > with Phase A) and item 12 (seed identity — **CLOSED 2026-07-16**,
-> implemented per `docs/dev/PLAN-SEED-IDENTITY.md`).
+> implemented per `docs/dev/DONE-PLAN-SEED-IDENTITY.md`).
 >
 > **Consistency sweep 2026-07-16 (item 12 closed):** seeds no longer derive
 > from ULIDs — `seedVarId` sits inside the stored leaf JSON, but
@@ -1258,7 +1258,7 @@ even though `name` does not affect simulation results.
 >
 > **Resolved 2026-07-15 — premise resurrected.** Item 12's final decision
 > (boundary-assigned seed IDs stored on the node — see
-> `docs/dev/PLAN-SEED-IDENTITY.md`) rejected the name-hash direction. The
+> `docs/dev/DONE-PLAN-SEED-IDENTITY.md`) rejected the name-hash direction. The
 > name influences **no** figure: result = f(seedVarId, params, children)
 > under the workspace's seedEntityId. This finding's premise is true again,
 > and stronger: with name and ULID both excluded from the content hash, a
@@ -1335,7 +1335,12 @@ Phase A: Foundation
     API docs mentioning invalidate). Nothing NodeId-keyed and
     nothing answering "invalidate" may survive               [review]
 
-Phase B: Scenario CRUD + Minimal UI
+Phase B: Scenario CRUD + Minimal UI — DONE (verified against source
+  2026-08-10: ScenarioService trait + Live + NotSupported, ScenarioController,
+  ScenarioEndpoints; Iron ScenarioName + 2-segment BranchRefConstraint;
+  IrminClient createBranchAt/deleteBranch via test_and_set_branch; BranchBar UI
+  + ScenarioState/List/Submit; specs ScenarioServiceLiveSpec,
+  ScenarioControllerSpec, ScenarioServiceCascadeSpec, ScenarioMergeServiceItSpec)
   (updated 2026-07-18 to the closed DD-5/7/8/11 — see Closed table + A9)
   - BranchRefConstraint: 3 → 2 segments (scenarios.<ws>.<name>);
     ScenarioName Iron type (^[a-zA-Z0-9 _-]+$, fold+map to slug) [Scala]
@@ -1497,7 +1502,7 @@ Phase C: Comparison
     ✎ changed-node markers, dual/N-branch curve overlay.
     Remaining: Ctrl+Alt+click mirror-select (not built);
     overlay chart↔tree hover (backlog — retargeted 2026-07-25
-    to slot-scoped series ids per PLAN-C-REFACTOR.md Task B,
+    to slot-scoped series ids per DONE-PLAN-C-REFACTOR.md Task B,
     which widens the slot coordinate branch → (tree, revision);
     side-by-side per-panel hover already works via per-slot
     ChartHoverBridges).                                      [Scala.js/Laminar]
@@ -1850,7 +1855,7 @@ See TODO item 12 for the seed-path analysis.
 **Superseded 2026-07-15 — item 12 decided against derived seeds entirely
 (implemented and closed 2026-07-16).**
 Seeds are now boundary-assigned IDs stored on the node
-(`docs/dev/PLAN-SEED-IDENTITY.md`): per-tree uniqueness is *enforced at the
+(`docs/dev/DONE-PLAN-SEED-IDENTITY.md`): per-tree uniqueness is *enforced at the
 boundary*, so within-tree accidental correlation is unrepresentable. The
 warning above survives only in its deliberate forms, which are features:
 scenario branches share seed IDs (common random numbers across scenarios),
@@ -1864,7 +1869,7 @@ from two sides, now always by intent, never by accident.
 item 12 changed is the *justification*, not the choice. Comparability is
 guaranteed by the **seed design**, not by branching. Two
 trees with the same leaf parameters and the same seed identities produce
-byte-identical figures (`docs/dev/PLAN-SEED-IDENTITY.md`; proven by the
+byte-identical figures (`docs/dev/DONE-PLAN-SEED-IDENTITY.md`; proven by the
 `SeedStabilitySpec` recreate test and the `SeedReproducibilityItSpec`
 export→import round trip). A scenario-vs-main diff therefore shows only the
 user's edits — whether the scenario is a branch or a copy.
@@ -2023,7 +2028,7 @@ A/C′ alternative is a post-landing follow-up.
 
 **Update 2026-07-15 — item 12's final decision constrains the key
 composition, whichever of B/C wins.** Seed identity is now boundary-assigned
-and stored on the node (`docs/dev/PLAN-SEED-IDENTITY.md`): `seedVarId` is
+and stored on the node (`docs/dev/DONE-PLAN-SEED-IDENTITY.md`): `seedVarId` is
 part of the leaf's JSON, `seedEntityId` is workspace-level. Consequences for
 this decision:
 

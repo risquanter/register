@@ -1,5 +1,9 @@
 # PLAN — Analyze LEC chart UX (toggles-left, responsive fill, zoom, fullscreen)
 
+Status: CLOSED — all sections and continuations landed and committed (0.10.5
+through 0.10.13); every "Open decisions" subsection resolved to None. Working
+tree clean.
+
 A distinct workstream from Phase E (history/time-travel): Analyze LEC chart
 interaction polish. Design decisions are user-ruled (2026-07-28):
 

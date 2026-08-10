@@ -1,9 +1,17 @@
 # PLAN — Phase D merge cleanup (DD-2 patch + slice-one open items, one pass)
 
-**Status:** decisions RULED by the user 2026-07-24 (see the Decisions
-section); document updated to the rulings and awaiting the user's final
-approval of the plan as a whole. No source edit is covered until that
-approval (G3) and the approval token is refreshed (hook).
+**Status:** DONE — the full pass landed. The `irmin-graphql` patch
+(`containers/builders/patches/irmin-graphql-3.11.0-merge-conflict.patch`) is
+applied in the builder image and prod is retagged `local/irmin-prod:3.11-p1`;
+conflicts surface as the typed `IrminMergeConflict` (raised in
+`IrminClientLive.mergeBranch`, compiler-checked above); the comparison and
+regression behaviour is pinned in `IrminMergeSemanticsSpec`; the F2 single-owner
+path extraction landed as `WorkspaceStoragePaths` (one file now holds the
+`workspaces/` strings) and the F5 controller test landed. Versioned 0.7.0 →
+0.7.1. Richer conflict resolution (one-click take-A/take-B, param-average, merge
+sneak-peek) was always out of scope here — deferred to Phase F and tracked in
+the milestone-2b scratch tracker ("Deferred: Phase D Option-2 conflict
+resolution").
 **Scope:** one implementation pass that (a) implements the DD-2 decision —
 patch `irmin-graphql` so `merge_with_branch` reports conflicts instead of
 swallowing them, (b) compares the patched behaviour against the unpatched

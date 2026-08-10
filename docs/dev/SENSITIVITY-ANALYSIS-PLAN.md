@@ -92,7 +92,7 @@ re-aggregation along the path — no subtraction.
 
 [`Simulator.createSamplerFromLeaf`](../../modules/server/src/main/scala/com/risquanter/register/services/helper/Simulator.scala):
 streams derive from the workspace's `seedEntityId` and the leaf's stored `seedVarId`
-(`SeedDerivation.streams`; PLAN-SEED-IDENTITY). Perturbing a leaf's *params* keeps its
+(`SeedDerivation.streams`; DONE-PLAN-SEED-IDENTITY). Perturbing a leaf's *params* keeps its
 `seedVarId`, so the occurrence stream and uniform draws are identical to baseline. Any
 change in the result reflects only the parameter change — no manual seed threading required.
 

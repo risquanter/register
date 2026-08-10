@@ -351,7 +351,7 @@ predicates). Recorded per user instruction 2026-07-26; no design yet.
 - **No Tapir/wire change** — Decision Triggers 1/3/7 not touched; the
   public-signature changes (TreeListView, BranchCard, CompareState) are
   covered by this plan (G3).
-- **PLAN-C-REFACTOR / PLAN-C-TASKB-FIXES**: the retained machinery
+- **DONE-PLAN-C-REFACTOR / DONE-PLAN-C-TASKB-FIXES**: the retained machinery
   (coordinates, dedup, resets, recovery, seeding) is explicitly NOT
   redesigned; this plan supersedes their UI-surface descriptions (slot bar,
   three-state control, engagement-gated card stack).

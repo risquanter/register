@@ -1,11 +1,13 @@
 # PLAN — Phase C machinery refactor ("C-refactor", Scope 1)
 
-Status: PRESENTED 2026-07-25 (amended 2026-07-25: `## File inventory` heading
-made hook-readable; three `IrminClient` test stubs added to Task A;
-`loadTree` shared-helper scope clarified), awaiting approval. Scope 1 of the milestone-2b
-close-out; companion (Scope 2, depends on this plan): `PLAN-PHASE-E-HISTORY.md`.
-Decision context, rulings E1–E7, and fixed security constraints live in the
-companion document.
+Status: DONE — both tasks landed. Task A (read-path consistency, server)
+shipped at 0.7.1 (commit `546da66`, `RiskTreeReadConsistencySpec`). Task B
+(compare-slot coordinate work, app) landed and was folded into the compare-UI
+redesign (`DONE-PLAN-COMPARE-UI-REDESIGN.md`); its review follow-ups live in
+`DONE-PLAN-C-TASKB-FIXES.md`. `PLAN-PHASE-E-HISTORY.md` records this plan as a
+landed prerequisite. Scope 1 of the milestone-2b close-out; companion (Scope 2):
+`PLAN-PHASE-E-HISTORY.md`. Decision context, rulings E1–E7, and fixed security
+constraints live in the companion document.
 
 Two self-contained, independently landable and revertable tasks. Disjoint
 modules (A: server, B: app); either order; both precede Scope 2.

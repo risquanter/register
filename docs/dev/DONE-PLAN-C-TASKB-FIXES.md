@@ -1,11 +1,10 @@
 # PLAN — Task B review fixes (Compare feature, app only)
 
-Status: Sub-decisions ruled 2026-07-25 (Open decision 1 → Option C, Open
-decision 2 → variant ii). Trio + trio-review fixes landed. Follow-up 2
-(exclusion Option C + correctness fix (a) + if/else 1-4) specified 2026-07-25,
-awaiting approval before implementation.
+Status: DONE — all fixes landed (app only). Sub-decisions ruled 2026-07-25
+(Open decision 1 → Option C, Open decision 2 → variant ii); the trio, its
+trio-review fixes, and Follow-ups 2 and 3 all landed. No open decisions remain.
 Follow-up to the Task B
-review of the uncommitted compare-slot coordinate work (PLAN-C-REFACTOR.md,
+review of the uncommitted compare-slot coordinate work (DONE-PLAN-C-REFACTOR.md,
 Task B). The three top-level choices are already ruled by the user
 (review Finding 2 → Option C, Finding 3 → Option A, Finding 4 → Option B);
 this plan specifies their implementation. Both sub-decisions are now ruled
@@ -41,7 +40,7 @@ active-tree events. The `.distinct` on `CompareSlotState.branchSignal`
 (review Finding 1, already applied) removes one trigger of the race; this
 fix removes the race itself.
 
-Relationship to PLAN-C-REFACTOR's "post-landing cleanup item": that item
+Relationship to DONE-PLAN-C-REFACTOR's "post-landing cleanup item": that item
 targets synchronous `.now()` reads in the reactive layer and is not
 executed here. Fix 1 is a separate hardening of the same file's fetch
 plumbing; it neither adds nor removes any `.now()` read population that the
@@ -423,7 +422,7 @@ duplicate…", "is display-only…"). Every other test stays. This deletes
 assertions only about the deleted function (Decision Trigger 8 — covered
 by approval of this plan).
 
-Doc alignment note: PLAN-C-REFACTOR.md Task B's design bullet "Palette …
+Doc alignment note: DONE-PLAN-C-REFACTOR.md Task B's design bullet "Palette …
 display-level de-collision rule" is superseded by this user ruling; that
 plan document is not edited (it records the state at its presentation
 date), this plan is the governing record for the change.
@@ -483,7 +482,7 @@ AnalyzeViewSeedSpec.scala, build.sbt (version handling below).
     own value via `.now()`, never reacts to the Var it corrects). The
     recommended variant (ii) adds one cross-signal `.now()` read inside an
     event handler — flagged in Open decision 2, including its tension with
-    the queued synchronous-reads cleanup (PLAN-C-REFACTOR post-landing
+    the queued synchronous-reads cleanup (DONE-PLAN-C-REFACTOR post-landing
     item).
   - Fix 3: compliant — pure removal; per-side palettes remain derived
     signals.
@@ -497,7 +496,7 @@ AnalyzeViewSeedSpec.scala, build.sbt (version handling below).
   (_ == activeTid) && branch != activeBranch` requests a diff exactly for
   cross-branch same-tree slots; cross-tree slots (no lineage) and
   same-branch slots (no second branch) get none. Compliant.
-- **PLAN-C-REFACTOR Task B** — Fix 3 supersedes its palette de-collision
+- **DONE-PLAN-C-REFACTOR Task B** — Fix 3 supersedes its palette de-collision
   design bullet (user ruling); flagged above, not a silent deviation.
 
 ## Open decisions
@@ -579,7 +578,7 @@ chosen, tree not yet).
   user can undo by browsing back. Pro: non-destructive, consistent with
   collision-as-inert-state (decision 1 B/C). Con: one more synchronous
   cross-signal read inside a subscription handler — the population the
-  queued PLAN-C-REFACTOR cleanup targets (that cleanup may later convert
+  queued DONE-PLAN-C-REFACTOR cleanup targets (that cleanup may later convert
   it to in-transaction sampling; the reset semantics chosen here are
   unaffected by that conversion).
 
@@ -642,7 +641,7 @@ Manual compare-flow verification (Vite dev stack per register-dev skill):
   (d) arrange full collision (same branch, same effective tree) — the slot
   resets or disengages per decision 2 outcome, and the overlay/panels/
   cards render the single-branch view;
-  (e) regression: all §6 same-tree flows of PLAN-C-REFACTOR Task B
+  (e) regression: all §6 same-tree flows of DONE-PLAN-C-REFACTOR Task B
   (overlay, side-by-side, cards, markers, colour picker) unchanged for
   cross-branch slots.
 - **Fix 3:** assign the same palette family to the active branch and a
@@ -654,7 +653,7 @@ Manual compare-flow verification (Vite dev stack per register-dev skill):
 ## Versioning
 
 These fixes amend the uncommitted Task B working tree. Landing together
-with Task B they are covered by Task B's MINOR bump (PLAN-C-REFACTOR
+with Task B they are covered by Task B's MINOR bump (DONE-PLAN-C-REFACTOR
 Versioning section). If landed as a separate commit after Task B, one
 MINOR bump (Fix 2 is a new user-visible capability), mirrored to `.env`
 and `.env.irmin`.
