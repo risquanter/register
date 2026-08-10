@@ -150,7 +150,7 @@ irmin_get() {
 
     # List trees through the full stack: nginx → server → Irmin → response
     local response count
-    response=$(curl -s -H 'Accept: application/json' \
+    response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees")
     count=$(echo "$response" | jq 'length')
     [[ "$count" -ge 1 ]]
@@ -167,9 +167,9 @@ irmin_get() {
     # Fetch a specific tree through the full stack
     local status response tree_id tree_name
     status=$(curl -s -o /dev/null -w '%{http_code}' \
-        -H 'Accept: application/json' \
+        -H 'Accept: application/json' -H 'X-Branch: main' \
         "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees/${TREE_ID}")
-    response=$(curl -s -H 'Accept: application/json' \
+    response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees/${TREE_ID}")
 
     [[ "$status" == "200" ]]

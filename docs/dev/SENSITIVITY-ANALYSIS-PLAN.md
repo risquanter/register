@@ -443,7 +443,7 @@ dominated by recompute-off-baseline in this immutable-data setting.
    untouched, so `ancestorPath` and the baseline sibling set remain valid.
 5. **Compare on `outcomes`, not full `RiskResult` equality, in the oracle test.**
    `Equal[RiskResult]` includes `provenances`, and `NodeProvenance` carries a wall-clock
-   `timestamp` (and `simulationUtilVersion`). Two independent simulations therefore never
+   `timestamp` (and `metalogDistributionVersion`). Two independent simulations therefore never
    compare equal under `==`, even with byte-identical losses. The equivalence test must
    compare `outcomes` (plus `nTrials`, `nodeId`), or strip/normalise provenance. Outcomes
    themselves are deterministic given identical leaf ids + `SimulationConfig` (seeds,

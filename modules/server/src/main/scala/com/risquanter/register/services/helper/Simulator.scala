@@ -216,7 +216,7 @@ object Simulator {
           distributionType = leaf.distributionType,
           distributionParams = distParams,
           timestamp = Instant.now(),
-          simulationUtilVersion = BuildInfo.simulationUtilVersion
+          metalogDistributionVersion = BuildInfo.metalogDistributionVersion
         )
 
     } yield (sampler, provenance)

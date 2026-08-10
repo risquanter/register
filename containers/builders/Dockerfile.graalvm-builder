@@ -5,12 +5,13 @@
 # Consumed by: containers/prod/Dockerfile.register-prod
 # Rebuild only when GraalVM or sbt versions change.
 #
-# Build context must be the parent of the register project so that
-# vague-quantifier-logic/ source is accessible (see fol-engine section below).
+# First-party libraries (metalog-distribution, vql-engine, hdr-rng) are
+# published on Maven Central and resolved by dependent images' `sbt update`
+# layers — nothing is copied from the build context.
 #
 # Build:  docker build -f containers/builders/Dockerfile.graalvm-builder \
-#           -t local/graalvm-builder:21 ..
-#         (run from the register project root; ".." = projects parent dir)
+#           -t local/graalvm-builder:21 containers/builders/
+#         (run from the register project root)
 # ============================================================================
 
 # 21-muslib pins the major Java version; the underlying GraalVM patch version
@@ -38,17 +39,3 @@ RUN wget -q "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${
 
 # Warm the sbt launcher so first project build doesn't pay startup cost
 RUN sbt --version
-
-# ---- Local SNAPSHOT libraries -----------------------------------------------
-# These are sibling projects not published to any public registry.
-# They must be publishLocal'd in dependency order before fol-engine.
-# Build context must be the parent of all sibling projects (see build command).
-
-# hdr-rng (com.risquanter:hdr-rng) — required by fol-engine
-COPY hdr-rng/ /tmp/hdr-rng/
-RUN cd /tmp/hdr-rng && sbt publishLocal && cd / && rm -rf /tmp/hdr-rng
-
-# vql-engine (com.risquanter:vql-engine) — required by register
-COPY vague-quantifier-logic/ /tmp/vql-engine/
-RUN cd /tmp/vql-engine && sbt publishLocal && cd / && rm -rf /tmp/vql-engine
-# ---- end local SNAPSHOT libraries -------------------------------------------

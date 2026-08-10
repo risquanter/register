@@ -6,7 +6,7 @@ This guide covers the local development workflow for contributors modifying Regi
 
 | Requirement | Detail |
 |---|---|
-| Repository cloned | All three sibling repos (`register/`, `vague-quantifier-logic/`, `hdr-rng/`) must be cloned side-by-side. See [Getting Started](../README.md#getting-started-in-memory-storage) for clone commands. |
+| Repository cloned | `register/` only — first-party libraries (`metalog-distribution`, `vql-engine`, `hdr-rng`) resolve from Maven Central. See [Getting Started](../README.md#getting-started-in-memory-storage). |
 | JDK 21 | Required by `sbt`. |
 | sbt | Scala Build Tool — handles backend compilation, Scala.js, and native-image builds. |
 | Node.js ≥20.5.0 and npm ≥10.9.8 | Required for the Scala.js / Vite frontend. Enforced by `modules/app/package.json`'s `engines` field + `engine-strict=true` in `modules/app/.npmrc` — `npm install`/`npm ci` refuse to run below these versions (ADR-020 §7/§9). |

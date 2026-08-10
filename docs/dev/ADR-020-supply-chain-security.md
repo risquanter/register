@@ -352,6 +352,11 @@ pass before the version reaches this project.
 - **Waiver — security fixes:** a version that fixes a disclosed vulnerability
   affecting this project is adopted immediately; waiting extends the exposure
   window. The standard audit workflow (§8 for npm, §4 for others) still runs.
+- **Waiver — first-party artifacts:** versions of `com.risquanter` artifacts
+  published by this organisation (`metalog-distribution`, `vql-engine`,
+  `hdr-rng`) are exempt from the cooldown — the account-takeover threat model
+  targets third-party upstreams, not artifacts we publish ourselves. The
+  pinning rule (§1) still applies. (User-approved 2026-08-09.)
 - Checking a version's publish date:
   - npm: `npm view <pkg>@<version> time` (or `npm view <pkg> time --json`)
   - Maven Central: artifact page on `central.sonatype.com` shows the publish date

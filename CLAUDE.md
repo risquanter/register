@@ -36,7 +36,7 @@ Mechanical enforcement: a PreToolUse hook gates source edits under `modules/` an
 
 Risquanter Register — a quantitative risk analysis platform. Domain experts describe hierarchical risk models (leaves = risk events with occurrence probability + loss distribution; portfolios aggregate children). Monte Carlo simulation produces Loss Exceedance Curves (LECs) at every tree level. Incremental re-simulation via a Merkle-tree cache: editing one leaf re-simulates only that node and its ancestors. Storage backend is Irmin (Git-like content-addressed store, GraphQL API). A vague-quantifier first-order-logic query language (vql-engine) supports screening queries over live trees.
 
-Sibling repos `../vague-quantifier-logic` and `../hdr-rng` must be checked out for Docker builder-image builds.
+First-party libraries (`metalog-distribution`, `vql-engine`, `hdr-rng`) are consumed as binary artifacts from Maven Central; sibling checkouts are not needed to build register or its images.
 
 ## Modules (sbt, Scala 3.7.4)
 

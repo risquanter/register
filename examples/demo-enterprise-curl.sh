@@ -567,7 +567,7 @@ run_query \
 # ── Sub-portfolio scoped queries (Q-A – Q-D, Phase 6) ────────────────────────
 # Scope the quantifier range to a named sub-portfolio via quoted node-name
 # literals. Requires PLAN-QUERY-NODE-NAME-LITERALS.md §F1–F3 (live since
-# vql-engine 0.10.1-SNAPSHOT + Phase 4 catalog.constants population).
+# vql-engine 0.10.2 + Phase 4 catalog.constants population).
 
 # Q-A — descendant scoping + P95: tail severity within the Cyber sub-portfolio
 # NOT SATISFIED: no Cyber leaf has unconditional P95 > $5M (prob ≤ 30% means most are zero at P95)

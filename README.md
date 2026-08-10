@@ -76,10 +76,13 @@ Register runs in two modes: in-memory storage for quick local trials, and a pers
 
 ```bash
 git clone https://github.com/risquanter/register.git
-git clone https://github.com/risquanter/vague-quantifier-logic.git
-git clone https://github.com/risquanter/hdr-rng.git
 cd register
 ```
+
+First-party libraries ([vql-engine](https://github.com/risquanter/vql-engine),
+[hdr-rng](https://github.com/risquanter/hdr-rng), metalog-distribution) are
+published on Maven Central and resolved automatically — no sibling checkouts
+are needed to build register.
 
 ### 2. Configure the environment
 
@@ -98,10 +101,8 @@ It is the only image you need to build manually — `docker compose` builds the 
 images itself on first start.
 
 ```bash
-# ~10-20 min on first run. Sibling repos vague-quantifier-logic/ and hdr-rng/
-# must be present at ../ (cloned in step 1).
 docker build -f containers/builders/Dockerfile.graalvm-builder \
-  -t local/graalvm-builder:21 ..
+  -t local/graalvm-builder:21 containers/builders/
 ```
 
 ### 4. Start the stack

@@ -1,6 +1,6 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.simulation.util.distribution.metalog.{Metalog, QPFitter}
+import com.risquanter.metalog.{Metalog, QPFitter}
 import com.risquanter.register.domain.data.iron.{Probability, PositiveInt}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -13,7 +13,7 @@ case class ValidationError(errors: List[String]) {
 }
 
 /**
- * Scala wrapper around simulation-util's Metalog distribution.
+ * Scala wrapper around metalog-distribution's Metalog implementation.
  * 
  * The Metalog is a flexible quantile-parameterized distribution that can represent
  * a wide variety of shapes (bounded, semi-bounded, unbounded) using percentile-quantile
@@ -27,9 +27,9 @@ case class ValidationError(errors: List[String]) {
  * - Functional error handling with Either
  * - Distribution trait implementation for uniform interface with Lognormal
  * 
- * @param fitter The underlying Java Metalog instance from simulation-util
- * @see com.risquanter.simulation.util.distribution.metalog.Metalog
- * @see com.risquanter.simulation.util.distribution.metalog.QPFitter
+ * @param fitter The underlying Java Metalog instance from metalog-distribution
+ * @see com.risquanter.metalog.Metalog
+ * @see com.risquanter.metalog.QPFitter
  */
 case class MetalogDistribution private(fitter: Metalog) extends Distribution {
   
@@ -58,7 +58,7 @@ object MetalogDistribution {
    * Uses Iron Probability type to ensure percentiles are in (0,1) (exclusive bounds).
    * The underlying QPFitter library requires strict (0,1) bounds - 0.0 and 1.0 are not valid.
    * 
-   * Validates inputs before calling simulation-util's QPFitter to provide
+   * Validates inputs before calling metalog-distribution's QPFitter to provide
    * better error messages and defensive testing against library changes.
    * 
    * @param percentiles Probabilities in (0, 1) (exclusive), must be sorted ascending

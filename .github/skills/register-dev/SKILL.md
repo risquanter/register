@@ -308,9 +308,9 @@ setup and CI. See `docs/user/IMAGE-BUILD-REFERENCE.md` for the full reference.
 Builder bases are independent of each other; app images require the corresponding builder.
 
 ```bash
-# GraalVM builder base (~1-2 min; context is parent dir — vql-engine must be in scope)
+# GraalVM builder base (~1-2 min; first-party libs resolve from Maven Central)
 docker build -f containers/builders/Dockerfile.graalvm-builder \
-  -t local/graalvm-builder:21 ..
+  -t local/graalvm-builder:21 containers/builders/
 
 # Irmin builder base (~15-40 min first run; rebuild only on Irmin/OCaml version change)
 docker build -f containers/builders/Dockerfile.irmin-builder \
@@ -320,26 +320,24 @@ docker build -f containers/builders/Dockerfile.irmin-builder \
 docker build -f containers/prod/Dockerfile.irmin-prod \
   -t local/irmin-prod:3.11-p1 containers/prod/
 
-# Frontend SPA (~10-15 min first run; context is parent dir)
+# Frontend SPA (~10-15 min first run)
 source .env
 docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:${APP_VERSION} ..
+  -t local/frontend:${APP_VERSION} .
 
 # Register server native binary (~5-10 min; requires graalvm-builder)
 docker build -f containers/prod/Dockerfile.register-prod \
   -t local/register-server:${APP_VERSION} .
 ```
 
-**After server source changes** (vql-engine unchanged):
+**After server source changes**:
 ```bash
 docker compose up -d register-server   # compose rebuilds via pull_policy: build
 ```
 
-**After vql-engine changes** (rebuild graalvm-builder first):
-```bash
-docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 .. \
-  && docker compose up -d register-server
-```
+**After a first-party library release** (metalog-distribution, vql-engine, hdr-rng):
+bump the pinned version in `build.sbt` (supply-chain skill applies); no builder
+rebuild is needed — images resolve the new version from Maven Central.
 
 ---
 

@@ -244,9 +244,9 @@ object LossDistributionSpec extends ZIOSpecDefault {
           distributionType = "lognormal",
           distributionParams = params,
           timestamp = Instant.parse("2026-01-01T00:00:00Z"),
-          simulationUtilVersion = "1.0.0"
+          metalogDistributionVersion = "1.0.0"
         )
-        val prov2 = prov1.copy(timestamp = Instant.parse("2026-06-18T12:00:00Z"), simulationUtilVersion = "1.1.0")
+        val prov2 = prov1.copy(timestamp = Instant.parse("2026-06-18T12:00:00Z"), metalogDistributionVersion = "1.1.0")
         val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), List(prov1)) }
         val r2 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), List(prov2)) }
 

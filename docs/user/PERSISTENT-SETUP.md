@@ -15,7 +15,6 @@ their trees would persist but the workspace pointing at them would not.
 | In-memory setup complete | Follow [Getting Started (in-memory storage)](../README.md#getting-started-in-memory-storage) first. This step builds the GraalVM builder base and the Register server image — the Irmin stack reuses both. |
 | Docker 20.10+ and Docker Compose 2.0+ | Required for all container builds and Compose operations. |
 | Build time | The Irmin builder downloads and compiles the OCaml toolchain from source. **Allow 15–40 minutes on the first run.** The resulting image is cached locally and survives `docker builder prune`. |
-| Sibling repos | `vague-quantifier-logic/` and `hdr-rng/` must be present as siblings of `register/` at `../` — the same requirement as the in-memory setup. |
 
 For the full environment variable reference, observability integration, and Kubernetes deployment options see [DOCKER-DEVELOPMENT.md](DOCKER-DEVELOPMENT.md).
 

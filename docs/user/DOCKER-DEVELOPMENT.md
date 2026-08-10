@@ -46,11 +46,10 @@ Build these once after cloning. Rebuild only when the toolchain version changes 
 triggers.
 
 ```bash
-# GraalVM builder base — GraalVM native-image + sbt (~10-20 min, once)
-# Context is the parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/
-# must be present at ../
+# GraalVM builder base — GraalVM native-image + sbt (~1-2 min, once)
+# First-party libraries resolve from Maven Central — no sibling checkouts needed.
 docker build -f containers/builders/Dockerfile.graalvm-builder \
-  -t local/graalvm-builder:21 ..
+  -t local/graalvm-builder:21 containers/builders/
 ```
 
 For Irmin persistence, the Irmin builder base is also required. See

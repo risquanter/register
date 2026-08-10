@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.10.14"
+ThisBuild / version      := "0.10.15"
 ThisBuild / scalaVersion := "3.7.4"
 
 ThisBuild / scalacOptions ++= Seq(
@@ -31,6 +31,8 @@ val ironVersion       = "3.2.2"
 val zioUlidVersion    = "1.3.1"
 val zioTelemetryVersion = "3.1.13"
 val openTelemetryVersion = "1.57.0"
+val metalogVersion    = "0.9.0"   // com.risquanter:metalog-distribution (Java)
+val vqlEngineVersion  = "0.10.2"  // com.risquanter:vql-engine (cross-compiled)
 
 // Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(
@@ -74,7 +76,7 @@ val serverDependencies = Seq(
   // Other
   "io.github.iltotore"            %% "iron-zio"                          % ironVersion,
   "org.scala-lang.modules"        %% "scala-parallel-collections"        % "1.0.4",
-  "com.risquanter"                 % "simulation.util"                   % "0.8.0",
+  "com.risquanter"                 % "metalog-distribution"              % metalogVersion,
   // HDR counter-based PRNG (pure Scala, cross-compiled)
   "com.risquanter"                %% "hdr-rng"                           % "0.1.0",
   // STTP zio-json integration for Irmin GraphQL client
@@ -95,7 +97,7 @@ lazy val common = crossProject(JVMPlatform, JSPlatform)
     libraryDependencies ++= commonDependencies,
     libraryDependencies += "com.bilal-fazlani" %%% "zio-ulid" % zioUlidVersion,
     // Vague quantifier logic — cross-compiled (ADR-028)
-    libraryDependencies += "com.risquanter" %%% "vql-engine" % "0.10.1-SNAPSHOT"
+    libraryDependencies += "com.risquanter" %%% "vql-engine" % vqlEngineVersion
   )
   .jsSettings(
     libraryDependencies ++= Seq(
@@ -116,7 +118,7 @@ lazy val server = (project in file("modules/server"))
     ),
     buildInfoKeys := Seq[BuildInfoKey](
       version,
-      "simulationUtilVersion" -> "0.8.0"
+      "metalogDistributionVersion" -> metalogVersion
     ),
     buildInfoPackage := "com.risquanter.register",
     // Native image configuration

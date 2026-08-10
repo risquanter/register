@@ -46,7 +46,7 @@ case class NodeProvenance(
   distributionType: String,         // "lognormal" | "expert"
   distributionParams: DistributionParams,
   timestamp: Instant,
-  simulationUtilVersion: String
+  metalogDistributionVersion: String
 )
 // JsonCodec already derived — no new codec needed
 ```

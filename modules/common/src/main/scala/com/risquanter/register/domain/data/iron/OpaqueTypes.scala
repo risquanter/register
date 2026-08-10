@@ -233,7 +233,7 @@ object SeedVarId:
     fromLong(v).left.map(_.mkString(", ")))
 
 // Probability values (must be between 0.0 and 1.0, exclusive)
-// Exclusive bounds are required for numerical stability in simulation-util's
+// Exclusive bounds are required for numerical stability in metalog-distribution's
 // inverse CDF calculations where 0.0 and 1.0 would cause division by zero or infinity.
 // NOTE: Used for Metalog percentiles which require exclusive (0,1) bounds.
 type Probability = Double :| (Greater[0.0] & Less[1.0])

@@ -190,8 +190,8 @@ services:
   # Full stack:  docker compose --profile persistence --profile frontend up
   frontend:
     build:
-      context: ..
-      dockerfile: register/containers/prod/Dockerfile.frontend-prod
+      context: .
+      dockerfile: containers/prod/Dockerfile.frontend-prod
     image: local/frontend:${APP_VERSION:-dev}
     pull_policy: build
     container_name: frontend

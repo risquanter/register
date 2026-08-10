@@ -8,7 +8,7 @@
 ## 1. FOL Terminology Reference
 
 This section defines the FOL concepts used throughout the design. All
-map directly to types in the vague-quantifier-logic codebase.
+map directly to types in the vql-engine codebase.
 
 | Concept | Definition | Code type | Example |
 |---|---|---|---|

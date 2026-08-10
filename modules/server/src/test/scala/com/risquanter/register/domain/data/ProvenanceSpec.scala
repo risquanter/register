@@ -63,7 +63,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
             confidenceInterval = 0.90
           ),
           timestamp = Instant.parse("2026-01-04T12:34:56Z"),
-          simulationUtilVersion = BuildInfo.simulationUtilVersion
+          metalogDistributionVersion = BuildInfo.metalogDistributionVersion
         )
         
         val json = provenance.toJson
@@ -407,7 +407,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           assertTrue(nodeProv.distributionType == "lognormal") &&
           assertTrue(nodeProv.distributionParams != null) &&
           assertTrue(nodeProv.timestamp != null) &&
-          assertTrue(nodeProv.simulationUtilVersion.nonEmpty)
+          assertTrue(nodeProv.metalogDistributionVersion.nonEmpty)
         }
       }
     ).provideLayerShared(testLayer)

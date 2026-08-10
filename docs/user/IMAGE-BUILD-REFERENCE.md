@@ -10,11 +10,11 @@ application Dockerfiles. Build once after cloning; rebuild only when the toolcha
 changes.
 
 ```bash
-# GraalVM builder base — GraalVM native-image + sbt (~10-20 min, once)
-# Rebuild when: GraalVM version changes, sbt version changes, or vql-engine SNAPSHOT bumps.
-# Context: parent directory — sibling repos vague-quantifier-logic/ and hdr-rng/ must be at ../
+# GraalVM builder base — GraalVM native-image + sbt (~1-2 min, once)
+# Rebuild when: GraalVM version changes or sbt version changes.
+# First-party libraries resolve from Maven Central — no sibling checkouts.
 docker build -f containers/builders/Dockerfile.graalvm-builder \
-  -t local/graalvm-builder:21 ..
+  -t local/graalvm-builder:21 containers/builders/
 
 # Irmin builder base — OCaml toolchain + opam packages (~15-40 min, once)
 # Rebuild when: Irmin version changes or OCaml version changes.
@@ -49,9 +49,8 @@ docker build -f containers/prod/Dockerfile.register-prod \
   -t local/register-server:${APP_VERSION} .
 
 # Frontend SPA — Scala.js + nginx (~10-15 min first run)
-# Context: parent directory — sibling repos must be at ../
 docker build -f containers/prod/Dockerfile.frontend-prod \
-  -t local/frontend:${APP_VERSION} ..
+  -t local/frontend:${APP_VERSION} .
 
 # Verify all images
 docker images | grep -E 'irmin|register|graalvm|frontend'
@@ -61,17 +60,20 @@ docker images | grep -E 'irmin|register|graalvm|frontend'
 
 | Image | Rebuild when |
 |-------|-------------|
-| `local/graalvm-builder:21` | GraalVM/sbt version bump; vql-engine SNAPSHOT bump |
+| `local/graalvm-builder:21` | GraalVM or sbt version bump |
 | `local/irmin-builder:3.11-p1` | OCaml or Irmin version change |
 | `local/register-server:*` | Server or common source changes — `docker compose up` handles this automatically |
 | `local/frontend:*` | Frontend or common source changes — `docker compose up` handles this automatically |
 | `local/irmin-prod:3.11-p1` | Irmin version change (requires irmin-builder rebuild first) |
 
-## After a vql-engine change (graalvm-builder rebuild required)
+## After a first-party library release (metalog-distribution, vql-engine, hdr-rng)
+
+No image rebuild is needed. Bump the pinned version in `build.sbt`
+(supply-chain rules apply), then let compose rebuild the application images —
+their `sbt update` layers resolve the new version from Maven Central:
 
 ```bash
-docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 .. \
-  && docker compose up -d register-server
+docker compose up -d register-server
 ```
 
 ## CI usage
@@ -85,7 +87,7 @@ APP_VERSION=$(sed -n 's/ThisBuild \/ version[[:space:]]*:= "\(.*\)"/\1/p' build.
 echo "APP_VERSION=${APP_VERSION}" > .env
 
 # 2. Build builder base (use CI cache)
-docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 ..
+docker build -f containers/builders/Dockerfile.graalvm-builder -t local/graalvm-builder:21 containers/builders/
 
 # 3. Build application images (compose builds them with the version from .env)
 docker compose build

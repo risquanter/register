@@ -19,9 +19,9 @@
 #   baked into the image (no ConfigMap required).
 #
 # Build:  docker build -f containers/prod/Dockerfile.frontend-prod \
-#           -t local/frontend:<version> ..
-#         (run from the register project root; ".." = projects parent dir,
-#          required so vague-quantifier-logic/ and hdr-rng/ are in context)
+#           -t local/frontend:<version> .
+#         (run from the register project root; first-party libraries
+#          resolve from Maven Central — no sibling checkouts needed)
 # Run:    docker run --rm -p 18080:8080 local/frontend:<version>
 # Test:   curl -s http://localhost:18080/ | grep -q '<html' && echo OK
 # ============================================================================
@@ -52,28 +52,14 @@ RUN wget -q "https://github.com/sbt/sbt/releases/download/v${SBT_VERSION}/sbt-${
 
 WORKDIR /app
 
-# ---- Local SNAPSHOT libraries -----------------------------------------------
-# These are sibling projects not published to any public registry.
-# Must be publishLocal'd before sbt resolves the main project dependencies.
-# Build context must be the parent of all sibling projects (see build command).
-# Mirrors the same pattern in containers/builders/Dockerfile.graalvm-builder.
-
-# hdr-rng (com.risquanter:hdr-rng) — required by vql-engine
-COPY hdr-rng/ /tmp/hdr-rng/
-RUN cd /tmp/hdr-rng && sbt publishLocal && cd / && rm -rf /tmp/hdr-rng
-
-# vql-engine (com.risquanter:vql-engine) — required by register (JS artifact: vql-engine_sjs1_3)
-COPY vague-quantifier-logic/ /tmp/vql-engine/
-RUN cd /tmp/vql-engine && sbt publishLocal && cd / && rm -rf /tmp/vql-engine
-# ---- end local SNAPSHOT libraries -------------------------------------------
-
 # --------------------------------------------------------------------------
 # Dependency layer — sbt resolution (cached unless build.sbt / project/ change)
 # Matches the pattern in containers/prod/Dockerfile.register-prod.
-# app/update resolves app + common.js (app.dependsOn(common.js)).
+# app/update resolves app + common.js (app.dependsOn(common.js)); first-party
+# libraries (metalog-distribution, vql-engine, hdr-rng) come from Maven Central.
 # --------------------------------------------------------------------------
-COPY register/build.sbt build.sbt
-COPY register/project/ project/
+COPY build.sbt build.sbt
+COPY project/ project/
 RUN sbt "app/update; commonJS/update"
 
 # --------------------------------------------------------------------------
@@ -85,9 +71,9 @@ RUN sbt "app/update; commonJS/update"
 # the committed lockfile (2026-07-21 incident, ADR-020 §7). --ignore-scripts
 # is belt-and-suspenders in addition to the .npmrc setting.
 # --------------------------------------------------------------------------
-COPY register/modules/app/package.json      modules/app/package.json
-COPY register/modules/app/package-lock.json modules/app/package-lock.json
-COPY register/modules/app/.npmrc            modules/app/.npmrc
+COPY modules/app/package.json      modules/app/package.json
+COPY modules/app/package-lock.json modules/app/package-lock.json
+COPY modules/app/.npmrc            modules/app/.npmrc
 RUN cd modules/app && npm ci --ignore-scripts
 
 # --------------------------------------------------------------------------
@@ -96,12 +82,12 @@ RUN cd modules/app && npm ci --ignore-scripts
 # @scala-js/vite-plugin-scalajs plugin (cwd: '../..' points to build.sbt).
 # Output: modules/app/dist/
 # --------------------------------------------------------------------------
-COPY register/modules/common/src/main/ modules/common/src/main/
-COPY register/modules/app/src/main/    modules/app/src/main/
-COPY register/modules/app/styles/      modules/app/styles/
-COPY register/modules/app/index.html   modules/app/index.html
-COPY register/modules/app/main.js      modules/app/main.js
-COPY register/modules/app/vite.config.js modules/app/vite.config.js
+COPY modules/common/src/main/ modules/common/src/main/
+COPY modules/app/src/main/    modules/app/src/main/
+COPY modules/app/styles/      modules/app/styles/
+COPY modules/app/index.html   modules/app/index.html
+COPY modules/app/main.js      modules/app/main.js
+COPY modules/app/vite.config.js modules/app/vite.config.js
 
 RUN cd modules/app && npm run build
 

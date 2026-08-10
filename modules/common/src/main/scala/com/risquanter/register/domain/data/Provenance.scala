@@ -40,7 +40,7 @@ import io.github.iltotore.iron.*
  * @param distributionType "expert" (Metalog) or "lognormal" (BCG 90% CI)
  * @param distributionParams Type-specific parameters for loss distribution
  * @param timestamp Simulation execution timestamp
- * @param simulationUtilVersion Version of simulation-util library (Metalog; HDR comes from hdr-rng)
+ * @param metalogDistributionVersion Version of the metalog-distribution library (Metalog fit; HDR randomness comes from hdr-rng)
  */
 case class NodeProvenance(
   // HDR Configuration - Deterministic Random Number Generation
@@ -56,7 +56,7 @@ case class NodeProvenance(
   
   // Execution Metadata
   timestamp: Instant,
-  simulationUtilVersion: String
+  metalogDistributionVersion: String
 )
 
 /**

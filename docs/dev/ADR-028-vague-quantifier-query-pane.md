@@ -23,7 +23,7 @@
 - These questions require iterating over nodes, computing per-node metrics
   (quantiles, exceedance probabilities), and checking a proportional
   threshold — they cannot be answered by a single LEC fetch
-- A standalone library (**vague-quantifier-logic**) implements first-order
+- A standalone library (**vql-engine**, repo `risquanter/vql-engine`) implements first-order
   logic with vague quantifiers (Fermüller, Hofer & Ortiz, FQAS 2017); it
   provides a parser, an FOL evaluator, and a `KnowledgeSource` abstraction
   but has no web API
@@ -37,7 +37,7 @@
 
 ### 1. Server-Side Evaluation (Architecture)
 
-The vague-quantifier-logic library is a JVM dependency of the `server`
+The vql-engine library is a JVM dependency of the `server`
 module. Queries are evaluated server-side with direct access to the
 simulation cache. Client-side (Scala.js) evaluation was ruled out due to
 JVM-only dependencies (Commons Math), large data transfer requirements,
@@ -92,7 +92,7 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
     Model(augmented)
 ```
 
-**Key property:** Zero changes to the vague-quantifier-logic library.
+**Key property:** Zero changes to the vql-engine library.
 Thresholds live in the query syntax (`gt_loss(p95(x), 5000000)`), making
 queries self-describing.
 

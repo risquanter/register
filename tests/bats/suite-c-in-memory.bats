@@ -60,7 +60,7 @@ setup() {
 @test "C03: GET /w/{key}/risk-trees returns JSON array" {
     create_workspace
     local response
-    response=$(curl -s -H 'Accept: application/json' \
+    response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${REGISTER_URL}/w/${WORKSPACE_KEY}/risk-trees")
     # Response should be a JSON array with at least the bootstrap tree
     local count
@@ -128,9 +128,9 @@ setup() {
     create_workspace
     local response status
     status=$(curl -s -o /dev/null -w '%{http_code}' \
-        -H 'Accept: application/json' \
+        -H 'Accept: application/json' -H 'X-Branch: main' \
         "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees")
-    response=$(curl -s -H 'Accept: application/json' \
+    response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${FRONTEND_URL}/w/${WORKSPACE_KEY}/risk-trees")
     [[ "$status" == "200" ]]
     # Should be a JSON array from the real backend, not HTML from SPA fallback
@@ -218,7 +218,7 @@ setup() {
     
     # List trees via workspace key
     local list_response
-    list_response=$(curl -s -H 'Accept: application/json' \
+    list_response=$(curl -s -H 'Accept: application/json' -H 'X-Branch: main' \
         "${REGISTER_URL}/w/${WORKSPACE_KEY}/risk-trees")
     local count
     count=$(echo "$list_response" | jq 'length')
@@ -227,6 +227,7 @@ setup() {
     # Get specific tree by ID
     local tree_response status
     status=$(curl -s -o /dev/null -w '%{http_code}' \
+        -H 'X-Branch: main' \
         "${REGISTER_URL}/w/${WORKSPACE_KEY}/risk-trees/${TREE_ID}")
     [[ "$status" == "200" ]]
 }

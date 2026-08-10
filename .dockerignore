@@ -18,6 +18,7 @@
 # Frontend (SPA) build sources — containers/prod/Dockerfile.frontend-prod
 # --------------------------------------------------------------------------
 !modules/app/package.json
+!modules/app/package-lock.json
 !modules/app/.npmrc
 !modules/app/src/main/
 !modules/app/styles/
@@ -25,13 +26,14 @@
 !modules/app/main.js
 !modules/app/vite.config.js
 
-# Exclude nested build artifacts even from allowed dirs
+# Exclude nested build artifacts and IDE metadata even from allowed dirs
 project/target/
 project/project/target/
 target/
-.bloop/
-.bsp/
-.metals/
+**/.bloop/
+**/.bsp/
+**/.metals/
+**/metals.sbt
 
 # Security: Block sensitive files
 .env

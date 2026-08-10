@@ -14,9 +14,11 @@ Per-ecosystem map (what is pinned where, what to rebuild):
 1. **Pin exactly.** Every version in every ecosystem is exact — no ranges,
    no `latest`, no unpinned installs (ADR-020 §1).
 2. **14-day cooldown.** Do not adopt a version published less than 14 days
-   ago; take the newest version older than that instead. **Waiver:** a
+   ago; take the newest version older than that instead. **Waivers:** a
    version fixing a disclosed vulnerability that affects this project is
-   adopted immediately (ADR-020 §10). Publish-date checks:
+   adopted immediately; first-party `com.risquanter` artifacts
+   (metalog-distribution, vql-engine, hdr-rng) are exempt
+   (ADR-020 §10). Publish-date checks:
    - npm: `npm view <pkg>@<version> time`
    - Maven Central: artifact page on central.sonatype.com
    - opam: version's commit date in `ocaml/opam-repository`
