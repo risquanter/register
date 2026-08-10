@@ -1810,7 +1810,12 @@ Commissioned 2026-08-09 (PLAN-DEPENDENCY-REPUBLISH ruling (c)). Think through:
    the local dev loop (`docker compose` with `pull_policy: build`) coexists
    with registry-published, signed images.
 
-**Status:** open; needs its own plan before any implementation.
+**Status:** open — design-level plan drafted (`PLAN-SIGSTORE-VERIFICATION.md`,
+2026-08-10) and awaiting review. Implementation requires elevation to
+implementation-grade (file inventory, scripts, workflow YAML), plan approval,
+and a mandatory `/security-review-deep` before landing. Two decisions ride in
+that plan's §5: admission controller (policy-controller vs Kyverno) and whether
+to adopt Rekor identity monitoring now.
 
 ---
 
@@ -1836,12 +1841,16 @@ evaluation cost is O(n^k) in nesting depth k. Two parts: (a) an Iron
 `MaxLength` refinement (~1024; analytics queries are legitimately longer
 than the 256-char targeting predicates) — fold into the vql-engine 0.11.0
 adoption sweep (PLAN-RISKTRANSFORM §8.2 M3), which touches these call sites
-anyway; (b) an evaluation-cost/quantifier-depth bound — placement (engine
-vs register KB boundary) is an open decision at the M3 elevation. Abstract
-the limiting mechanism so targeting predicates and screening queries share
-one implementation (user requirement 2026-08-10).
+anyway; (b) an evaluation-cost/quantifier-depth bound — placement RULED
+engine-side (PLAN-RISKTRANSFORM §8.4-3, 2026-08-10): a fragment-membership
+API beside the engine's `fol.typed` layer, one walker driven by two fragment
+specs (targeting: no quantifiers/functions; screening: quantifier depth ≤ k),
+so targeting predicates and screening queries share one implementation (the
+F5 single-mechanism requirement). Ships as engine 0.11.x after 0.11.0.
 
-**Status:** open; scheduled with the M3 sweep.
+**Status:** open — part (a) length cap folds into the M3 sweep; part (b)
+mechanism is ruled (§8.4-3), built as the sibling engine's fragment-membership
+API and consumed at register's write-path validation (M2/M3).
 
 ---
 

@@ -58,7 +58,7 @@ This determines where a fix or override can be applied.
 | Irmin server binary | **Compiled from source** inside `local/irmin-builder` (opam downloads OCaml sources and builds them) | We can patch upstream source locally via `opam pin` in the builder Dockerfile — no upstream release needed. The project carries such a patch (adopted 2026-07-24), so source compilation is **required** (cannot switch to a prebuilt Irmin), and every bump must re-apply + re-validate the patch — see the opam section below |
 | register-server | Our Scala compiled to a GraalVM native image; JVM dependencies consumed as **prebuilt jars** from Maven Central | Jar content cannot be patched locally; overriding means a version bump or a forked artifact |
 | Frontend bundle | Our Scala.js compiled + Vite bundle; npm packages consumed **prebuilt** from the registry | Transitive npm versions can be forced via `package.json` `"overrides"`; direct packages only by version bump |
-| vql-engine / hdr-rng | Sibling repos compiled into the GraalVM builder image | Upgrading them = rebuild `local/graalvm-builder` |
+| metalog-distribution / vql-engine / hdr-rng | First-party libraries consumed as **prebuilt jars** from Maven Central (resolved by each image's `sbt update` layer) | Upgrading them = bump the version `val` in `build.sbt`, then `docker compose up -d --build`; no builder-image rebuild |
 | apk packages | Prebuilt from the Alpine release repo; effectively pinned by the Alpine base version | Bumped implicitly with the base image tag |
 
 ---
