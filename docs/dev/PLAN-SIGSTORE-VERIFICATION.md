@@ -1,10 +1,13 @@
-# PLAN — Sigstore Signature Verification (TODO 39)
+# PLAN — CI Pipeline with Sigstore Signature Verification (TODO 39)
 
-Status: design-level draft — awaiting review. Two open decisions await the
-user's ruling at plan review (§5: admission controller; Rekor identity
-monitoring). Implementation requires elevation to implementation-grade
-(exact file inventory, scripts, workflow YAML) and plan approval. **User
-mandate 2026-08-10: the implementation undergoes a mandatory
+Status: design-level draft — awaiting review. **Scope widened (user
+directive 2026-08-10): this plan now covers the repository's full CI
+pipeline** — signature verification/signing (§1–§6) is one stage of it; the
+pipeline stages, static-analysis tooling, and image publishing are §7. Open
+decisions await the user's ruling at plan review (§5 and §7.5).
+Implementation requires elevation to implementation-grade (exact file
+inventory, scripts, workflow YAML) and plan approval. **User mandate
+2026-08-10: the implementation undergoes a mandatory
 `/security-review-deep` before landing, no extra instruction needed.**
 
 ## 1. Goal and ruled decisions
@@ -146,9 +149,121 @@ work, coordinated but not part of register's inventory.
 - **Mandatory `/security-review-deep` on the implementation diff** (user
   ruling 2026-08-10) before landing.
 
+## 7. CI pipeline (scope widening, user directive 2026-08-10)
+
+No CI exists today (`.github/workflows/` is absent) — the pipeline is
+greenfield. The signing/verification design in §1–§6 is unchanged and
+becomes the pipeline's release stage. Platform: GitHub Actions; image
+registry: GitHub Container Registry (`ghcr.io`), push by digest.
+
+All tool adoption in this section follows ADR-020: exact pins (GitHub
+Actions pinned by commit SHA, not tag), 14-day cooldown, publisher trust
+policy, and signature verification where the ecosystem supports it.
+
+### 7.1 Pipeline stages (design targets for elevation)
+
+1. **Build + test** — every sbt tier (`commonJVM`/`server`/`app` unit,
+   `serverIt` integration) on every push; BATS suites on release.
+2. **Static analysis** — SAST + code style (tool baseline §7.3; final
+   selection: open decision §7.5-3). Includes `scalafmtCheckAll` (config
+   already in-repo) and the custom project rule pack (§7.4).
+3. **Dependency + secrets scanning** — `scalacenter/sbt-dependency-submission`
+   feeds the GitHub dependency graph so Dependabot alerts cover Maven
+   dependencies (free on private repos); `npm audit` + `npm audit
+   signatures` for `modules/app` (already the local procedure, CI-ified);
+   gitleaks for committed secrets.
+4. **Image build + container scanning** — build the four images; scan with
+   Trivy (image CVEs, Dockerfile/compose misconfigurations, embedded
+   secrets); SBOM generation (CycloneDX via Trivy) feeding the §3.3
+   provenance attestation.
+5. **Publish + sign** — push images to `ghcr.io` by digest, keyless
+   `cosign sign` + SLSA provenance `cosign attest` (§3.3 row 3).
+6. **Verification gates** — the §3.3 verify script at dependency resolution
+   (Maven subjects) and pre-deploy (image subjects).
+
+Reporting constraint: GitHub's native code-scanning/security tab requires
+GitHub Advanced Security on private repositories — findings therefore
+surface as CI logs/artifacts (SARIF kept as a build artifact), not the
+security tab. Dependabot alerts and the dependency graph are free and do
+appear natively.
+
+### 7.2 What belongs in static analysis here (threat-model fit)
+
+This codebase's guarantees are mostly type-level (Iron refinements,
+smart constructors, validate-at-the-boundary, sealed hierarchies with
+exhaustivity promoted to errors). Generic taint-style SAST has limited
+purchase — there is no SQL, string-built queries are already a review
+red flag, and the injection surface is the FOL/GraphQL boundary already
+governed by typed codecs. The highest-value static checks are therefore
+**project-specific rules mechanizing the ADR negative constraints**
+(adr-constraints skill ❌-list): banned constructs that today rely on
+review memory. Candidate rule pack:
+
+- `Revision.Head(BranchRef.Main)` literal in `modules/server/**/services/`
+  (the §C1 branch-identity invariant guard, §7.4)
+- `scala.util.Random` anywhere token/ID entropy is produced (ADR-021)
+- `case class` credential types (ADR-022)
+- `catch` of `scala.util.control.NonFatal` (ADR-033)
+- `.now()` inside `modules/app` rendering pipelines (ADR-019)
+- `asInstanceOf` / `Schema.any` outside sanctioned interop files (G2 #2)
+
+### 7.3 Tool baseline (assessed 2026-08-10; selection = open decision §7.5-3)
+
+Assessment of the candidate list (external agent output, corrected):
+
+| Tool | Verdict | Basis |
+|---|---|---|
+| Compiler flags | **Adopt** (hardening scope: §7.5-4) | Cheapest, highest signal. Current set lacks `-Wunused:all`, `-Wvalue-discard`, `-Wnonunit-statement`; warnings-as-errors in CI. |
+| scalafmt check | **Adopt** | `.scalafmt.conf` already in-repo; `scalafmtCheckAll` is a zero-design CI step. |
+| Semgrep CE | **Adopt as custom-rule engine** | Engine LGPL; polyglot (Scala + Dockerfile + YAML + JS in one tool); no build coupling. Caveats vs. the agent claim: registry Scala rules are thin, cross-file taint analysis is the paid tier — the free value here is OUR rule pack (§7.2), not out-of-box vulnerability detection. Registry rules carry the Semgrep Rules License (internal CI use permitted). |
+| Scalafix | **Evaluate** (rides §7.5-3) | Scala 3 support good; semantic (symbol-accurate) custom rules; sbt-integrated so devs get it locally. Cost: SemanticDB compilation overhead + a rules sub-project to maintain. |
+| WartRemover | **Skip initially** | Agent claim "limited Scala 3 support" is outdated (Scala 3 plugin exists; some warts unported). Skipped because its useful warts overlap the hardened compiler flags + §7.2 rule pack; a compiler plugin taxes every compile. Revisit if a wart with no equivalent emerges. |
+| Scalastyle | **Reject** | Dormant project, no Scala 3 dialect — non-starter on 3.7.4. |
+| SonarQube CE | **Reject for now** | Requires a persistent server+DB; SonarSource's Scala analyzer (SLang) is shallow; the deeper community plugin (sonar-scala) is archived, no Scala 3; Scala taint analysis is not in CE. Revisit only if multi-repo governance dashboards become a need. |
+| Trivy | **Adopt** (fills the agent output's container gap) | Apache-2.0; image CVE + misconfig + secret scanning + CycloneDX SBOM in one tool; standard in ghcr pipelines. Grype is the fallback if Trivy disappoints. |
+| gitleaks | **Adopt** (fills the secrets gap) | MIT; CI + optional pre-commit; replaces the GHAS-gated native secret scanning. |
+| sbt-dependency-submission | **Adopt** (fills the sbt dependency-alert gap) | Scala Center, Apache-2.0; the only maintained route to Dependabot alerts for sbt (OWASP dependency-check's sbt plugin is stale). |
+
+The agent output's "~60–70% of commercial SAST coverage" figure is
+unverifiable and not load-bearing here; the selection above stands on the
+per-tool facts.
+
+### 7.4 Custom-rule obligation: branch-identity invariant guard
+
+The §C1 fix (PLAN-PHASE-E-HISTORY.md, Continuation §C1) removes the last
+hardcoded `Revision.Head(BranchRef.Main)` read from the service write path.
+The guard that keeps the bug class out — no constant branch coordinate in
+per-branch service operations — is implemented as a custom rule in the
+§7.5-3 mechanism (Semgrep pattern or Scalafix semantic rule), scoped to
+`modules/server/**/services/` with an explicit allow-list for the services
+whose business IS main (e.g. `ScenarioMergeService`). A unit test asserting
+the same by text search was considered and rejected: the rule engine gives
+the same regression protection without a brittle self-grepping spec.
+
+### 7.5 Open decisions (additions to §5)
+
+3. **Custom-rule mechanism** for §7.2/§7.4: (A) Semgrep CE only —
+   polyglot, no build coupling, textual matching (an aliased import could
+   evade a pattern; realistic risk low in reviewed code). (B) Scalafix
+   only — symbol-accurate, runs locally via sbt, Scala-only (Dockerfile/
+   YAML rules need a second tool anyway). (C) Both — Semgrep for breadth,
+   Scalafix for the rules needing semantic resolution; two rule sets to
+   maintain. Recommendation: **A** to start; add Scalafix only when a rule
+   demonstrably needs symbol accuracy.
+4. **Compiler-flag hardening scope**: adopt `-Wunused:all`,
+   `-Wvalue-discard`, `-Wnonunit-statement` + CI-only warnings-as-errors —
+   surfacing warnings in the existing codebase means a one-time cleanup
+   pass whose size is unknown until the flags are tried. Decide: flags now
+   with the cleanup as part of the CI plan's landing, or flags behind a
+   non-failing CI report first.
+5. **Pipeline trigger granularity**: which stages run per-push vs.
+   per-release (serverIt needs the Irmin image in CI; BATS needs the full
+   image set — both are cost/latency trade-offs). Shape at elevation.
+
 ## File inventory
 
 (To be completed at implementation-grade elevation — expected: policy file,
 verify script, GitHub Actions workflow(s), admission-controller manifests,
+Semgrep/Scalafix rule pack under `security/` or `.semgrep/`,
 ADR-020 §12 update, supply-chain skill update, VERSION-UPGRADE-PROTOCOL.md
 update, docs/dev/TODO.md item-39 closure.)

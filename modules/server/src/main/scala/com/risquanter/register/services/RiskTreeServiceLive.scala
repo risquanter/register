@@ -82,8 +82,8 @@ class RiskTreeServiceLive private (
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
     yield (tree, nodes)
 
-  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, excludeId: Option[TreeId] = None): Task[Unit] =
-    collectAllTrees(wsId).flatMap { trees =>
+  private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId] = None): Task[Unit] =
+    collectAllTrees(wsId, branch).flatMap { trees =>
       val candidates = trees.filterNot(t => excludeId.contains(t.id))
 
       val errors = List(
@@ -106,11 +106,10 @@ class RiskTreeServiceLive private (
       if errors.nonEmpty then ZIO.fail(ValidationFailed(errors)) else ZIO.unit
     }
 
-  // Uniqueness is checked against main's tree set regardless of the write
-  // branch (pre-existing behaviour, preserved verbatim while the read default
-  // was removed). A per-branch-uniqueness fix is tracked separately.
-  private def collectAllTrees(wsId: WorkspaceId): Task[List[RiskTree]] =
-    repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main)).flatMap { results =>
+  // Trees at the head of the branch being written; uniqueness (tree ID and
+  // name) is checked against exactly this set.
+  private def collectAllTrees(wsId: WorkspaceId, branch: BranchRef): Task[List[RiskTree]] =
+    repo.getAllForWorkspace(wsId, Revision.Head(branch)).flatMap { results =>
       val (errs, trees) = results.foldLeft((List.empty[RepositoryFailure], List.empty[RiskTree])) {
         case ((es, ts), Left(err))  => (err :: es, ts)
         case ((es, ts), Right(t))   => (es, t :: ts)
@@ -331,7 +330,7 @@ class RiskTreeServiceLive private (
       treeId <- IdGenerators.nextTreeId
       ids <- allocateIds(req.portfolios.size + req.leaves.size)
       resolved <- RiskTreeDefinitionRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
-      _ <- ensureUniqueTree(wsId, treeId, resolved.treeName)
+      _ <- ensureUniqueTree(wsId, treeId, resolved.treeName, branch)
       (seedVarIds, seedVarHighWater) <- ZIO
         .fromEither(SeedVarIdAssigner.assign(leafNamesOf(resolved.nodes), resolved.providedSeedVarIds, highWater = 0L))
         .mapError(e => ValidationFailed(List(e)))
@@ -357,7 +356,7 @@ class RiskTreeServiceLive private (
       oldTree <- getTreeOrFail(wsId, id, Revision.Head(branch))
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
       resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
-      _ <- ensureUniqueTree(wsId, id, resolved.treeName, excludeId = Some(id))
+      _ <- ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))
       allNodes = resolved.existing ++ resolved.added
       allLeafOccurrenceAndShape = resolved.existingLeafOccurrenceAndShape ++ resolved.addedLeafOccurrenceAndShape
       // Carried-over IDs (existing leaves, matched by node id) + caller-provided IDs

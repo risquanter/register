@@ -1,7 +1,7 @@
 # PLAN — Milestone-2b Phase E: History / Time Travel (Scope 2)
 
-Status: PARTIALLY IMPLEMENTED — most of the plan has landed and been committed;
-two items remain. Prerequisites landed: `DONE-PLAN-C-REFACTOR.md` (Scope 1) and
+Status: PARTIALLY IMPLEMENTED — most of the plan has landed; one item remains.
+Prerequisites landed: `DONE-PLAN-C-REFACTOR.md` (Scope 1) and
 `DONE-PLAN-COMPARE-UI-REDESIGN.md` (slot-card Analyze layout §8 builds on). All
 Phase E decisions are ruled (E1–E8 below, H1–H6 in §8).
 
@@ -10,20 +10,16 @@ revert, history; commit `1a69dec`, 0.10.0), Slice E-A (Analyze history slider,
 §8b), and continuations §C2 (live time-scrubbing + per-slot palette) and §C3
 (compare-history 3a/3b; commit `30cc365`, 0.10.3).
 
+**Landed (uncommitted):** §C1 — per-branch tree uniqueness (0.10.16). `create`
+and `update` now check tree-ID and tree-name uniqueness against the head of the
+branch being written; unit tests plus one HTTP-level fork-inheritance IT cover it.
+
 **Outstanding — exactly what is missing:**
 
 - **Slice E-B — Design-view history (§7 "Slice E-B — Design", §8b).** The
   history slider and read-only pinned mode in the Design view are not built:
   `HistorySlider` is wired only into `AnalyzeView`, never `DesignView`. The
   fork/revert UI that §8 places next to the Design slider is unbuilt with it.
-- **§C1 — per-branch tree uniqueness.** NOT implemented — code is in the "Before"
-  state of the §C1 signatures below. `create`/`update` write to the active
-  branch, but `ensureUniqueTree` → `collectAllTrees` still check uniqueness
-  against `main`: `RiskTreeServiceLive.collectAllTrees` hardcodes
-  `Revision.Head(BranchRef.Main)`, neither helper takes the `branch` parameter
-  §C1 specifies, and neither call site (`create`, `update`) passes it. Effect:
-  a tree created on a scenario branch is checked for name/ID collisions against
-  main, not the branch it is written to.
 
 **Slice 0 (backend, §1–§7) IMPLEMENTED 2026-07-27 (committed, `1a69dec`).** All modules
 compile (`sbt compile` green); `server/test` and `app/test` pass. The 3 new IT
@@ -865,14 +861,14 @@ resulting work is planned separately — no code edits inside the sweep.
 
 # Continuation §C1 — Tree uniqueness checked against the write branch
 
-Follow-up surfaced during Scope 2: `RiskTreeServiceLive` checks tree-name and
-tree-ID uniqueness against main's head regardless of the branch being written.
-Sequenced after Slice 0. Lands as PATCH `0.10.0 → 0.10.1` (`build.sbt` +
-`APP_VERSION` mirrored to `.env` and `.env.irmin`).
+IMPLEMENTED (0.10.16, uncommitted). `RiskTreeServiceLive` now checks tree-name
+and tree-ID uniqueness against the head of the branch being written.
+`build.sbt` + `APP_VERSION` mirrored to `.env` and `.env.irmin`.
 
-Both decisions are ruled (2026-07-27, user): **semantics = Option A (per-branch
+Both decisions were ruled (2026-07-27, user): **semantics = Option A (per-branch
 uniqueness); integration-test coverage = Option A (one HTTP-level IT over real
-Irmin fork inheritance).**
+Irmin fork inheritance).** The IT required real scenario support in the Irmin
+test harness — see the file-inventory note at the end of this section.
 
 ## Goal
 
@@ -883,11 +879,11 @@ of the branch being written, not against `Revision.Head(BranchRef.Main)`.
 
 In `RiskTreeServiceLive.scala`:
 
-- `ensureUniqueTree(wsId, treeId, treeName, excludeId)` (line 82) calls
-  `collectAllTrees(wsId)` (line 109), which calls
+- `ensureUniqueTree(wsId, treeId, treeName, excludeId)` (line 85) calls
+  `collectAllTrees(wsId)` (line 112), which calls
   `repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))` — main's head,
   always.
-- `create` (line 331) and `update` (line 357) are the only callers of
+- `create` (line 334) and `update` (line 360) are the only callers of
   `ensureUniqueTree`; `ensureUniqueTree` is the only caller of
   `collectAllTrees`. Both already receive the write target as `branch: BranchRef`
   and pass it to every repository write and to `update`'s own read.
@@ -933,16 +929,16 @@ No public signature changes: trait, repository, endpoints, and DTOs untouched.
 
 | Caller | Current call | New call |
 |---|---|---|
-| `create` (:331) | `ensureUniqueTree(wsId, treeId, resolved.treeName)` | `ensureUniqueTree(wsId, treeId, resolved.treeName, branch)` |
-| `update` (:357) | `ensureUniqueTree(wsId, id, resolved.treeName, excludeId = Some(id))` | `ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))` |
-| `ensureUniqueTree` (:83) | `collectAllTrees(wsId)` | `collectAllTrees(wsId, branch)` |
-| `collectAllTrees` body (:110) | `repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))` | `repo.getAllForWorkspace(wsId, Revision.Head(branch))` |
+| `create` (:334) | `ensureUniqueTree(wsId, treeId, resolved.treeName)` | `ensureUniqueTree(wsId, treeId, resolved.treeName, branch)` |
+| `update` (:360) | `ensureUniqueTree(wsId, id, resolved.treeName, excludeId = Some(id))` | `ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))` |
+| `ensureUniqueTree` (:86) | `collectAllTrees(wsId)` | `collectAllTrees(wsId, branch)` |
+| `collectAllTrees` body (:113) | `repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))` | `repo.getAllForWorkspace(wsId, Revision.Head(branch))` |
 
 No other callers (verified by `grep -rn "ensureUniqueTree\|collectAllTrees" modules/`).
 
 ### Comment update (doc-consistency, same pass)
 
-The comment above `collectAllTrees` (:106–108) becomes current-state:
+The comment above `collectAllTrees` (:109–111) becomes current-state:
 
 ```scala
   // Trees at the head of the branch being written; uniqueness (tree ID and
@@ -1023,8 +1019,14 @@ create a scenario; verify create N on the scenario is rejected while the
 inherited tree exists (fork inheritance); delete it on the scenario; verify
 create N then succeeds and a second N on the scenario is rejected. This asserts
 the one behaviour the unit stub cannot model — fork-time inheritance composed
-with the uniqueness check — over the real service+repo+Irmin path. The spec
-does not currently drive scenario endpoints, so this test adds that wiring.
+with the uniqueness check — over the real service+repo+Irmin path.
+
+Driving scenario endpoints needed real scenario support in the Irmin test
+harness, which previously wired `ScenarioServiceNotSupported` (501) because no
+IT exercised that path. `HttpTestHarness` now builds a single backend layer
+providing the tree repository plus `ScenarioServiceLive` and
+`ScenarioMergeServiceLive` from one shared `IrminClient`; the in-memory server
+keeps the `NotSupported` stubs (scenarios are an Irmin-branch feature).
 
 ## ADR alignment
 
@@ -1057,16 +1059,18 @@ sbt 'commonJVM/test; server/test'
 sbt "serverIt/test"   # Option A IT; needs local/irmin-prod:3.11-p1
 ```
 
-Landing: PATCH bump `build.sbt` to `0.10.1`, mirror `APP_VERSION=0.10.1` into
-`.env` and `.env.irmin`, flag plan completion.
+Landing: next PATCH bump in `build.sbt` (`0.10.16` as of this amendment),
+mirror the same `APP_VERSION` into `.env` and `.env.irmin`, flag plan
+completion.
 
 ## Continuation §C1 file inventory (additions to the Scope 2 inventory above)
 
 All folded into the Scope 2 `## File inventory` section — the enforcement hook
 reads only that heading. `RiskTreeServiceLive.scala`, `RiskTreeServiceLiveSpec.scala`,
-and `build.sbt` were already listed there; `HttpApiIntegrationSpec.scala` was
-added to the Server IT block for this continuation. `.env`/`.env.irmin` are
-ungated (no bullet needed). No other files.
+`build.sbt`, `HttpApiIntegrationSpec.scala`, and `HttpTestHarness.scala` are all
+listed there. `HttpTestHarness.scala` was touched to wire real scenario support
+for the Irmin path (see the integration-test note above) — the §C1 IT could not
+otherwise create a scenario. `.env`/`.env.irmin` are ungated (no bullet needed).
 
 # Continuation §C2 — Slice E-A manual-review fixes (history charting + per-slot palette)
 
@@ -1314,8 +1318,8 @@ there. No `common`/`server` changes.
 ## Versioning
 
 PATCH bump on landing (shipped SPA behaviour changed): `build.sbt` →
-`0.10.2` (0.10.1 is the §C1 slot), `APP_VERSION` mirrored to `.env` and
-`.env.irmin`.
+`0.10.2`, `APP_VERSION` mirrored to `.env` and `.env.irmin`. (§C1 lands at
+whatever PATCH is next when it lands — see §C1's landing note.)
 
 # Continuation §C3 — compare-history fixes (3a collision, 3b omitAbsent)
 

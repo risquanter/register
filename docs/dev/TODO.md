@@ -1811,11 +1811,16 @@ Commissioned 2026-08-09 (DONE-PLAN-DEPENDENCY-REPUBLISH ruling (c)). Think throu
    with registry-published, signed images.
 
 **Status:** open — design-level plan drafted (`PLAN-SIGSTORE-VERIFICATION.md`,
-2026-08-10) and awaiting review. Implementation requires elevation to
-implementation-grade (file inventory, scripts, workflow YAML), plan approval,
-and a mandatory `/security-review-deep` before landing. Two decisions ride in
-that plan's §5: admission controller (policy-controller vs Kyverno) and whether
-to adopt Rekor identity monitoring now.
+2026-08-10) and awaiting review. **Scope widened 2026-08-10 (user):** the plan
+now covers the repository's full CI pipeline (no CI exists today) — build+test
+stages, static analysis (SAST + style; assessed tool baseline in the plan's
+§7.3), dependency/secrets/container scanning, image publishing to
+`ghcr.io`, and the original signing/verification stages. Implementation
+requires elevation to implementation-grade (file inventory, scripts, workflow
+YAML), plan approval, and a mandatory `/security-review-deep` before landing.
+Open decisions ride in the plan's §5 (admission controller; Rekor monitoring)
+and §7.5 (custom-rule mechanism; compiler-flag hardening; trigger
+granularity).
 
 ---
 

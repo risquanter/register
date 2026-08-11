@@ -17,7 +17,7 @@ import com.risquanter.register.http.support.TestSafeUrls
 import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
-import com.risquanter.register.services.{RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService, ScenarioServiceNotSupported, ScenarioMergeServiceNotSupported, SimulationSemaphore}
+import com.risquanter.register.services.{RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService, ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioMergeServiceNotSupported, SimulationSemaphore}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
@@ -62,25 +62,33 @@ object HttpTestHarness:
     workspace: WorkspaceConfig = defaultWorkspaceConfig
   )
 
+  /** Full test backend: the tree repository plus the two scenario services.
+    * In-memory omits scenario support (scenarios are an Irmin-branch feature);
+    * the Irmin backend wires the real services from a single shared client. */
+  private type BackendLayer = ZLayer[Any, Throwable, RiskTreeRepository & ScenarioService & ScenarioMergeService]
+
   /** In-memory HTTP server (useful for lightweight component tests). */
   def inMemoryServer(cfg: HarnessConfig = HarnessConfig()): ZLayer[Scope, Throwable, RunningServer] =
-    serverWithRepo(RiskTreeRepositoryInMemory.layer, cfg)
+    serverWithBackend(
+      RiskTreeRepositoryInMemory.layer ++ ScenarioServiceNotSupported.layer ++ ScenarioMergeServiceNotSupported.layer,
+      cfg
+    )
 
   /** Irmin-backed HTTP server (default for integration tests). */
   def irminServer(
       irminConfigLayer: ZLayer[Any, Throwable, IrminConfig],
       cfg: HarnessConfig = HarnessConfig()
   ): ZLayer[Scope, Throwable, RunningServer] =
-    serverWithRepo(irminRepoLayer(irminConfigLayer), cfg)
+    serverWithBackend(irminBackendLayer(irminConfigLayer), cfg)
 
-  private def serverWithRepo(
-      repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
+  private def serverWithBackend(
+      backendLayer: BackendLayer,
       cfg: HarnessConfig
   ): ZLayer[Scope, Throwable, RunningServer] =
     ZLayer.scoped {
       for
         port <- randomPort
-        envLayer = applicationLayer(port, repoLayer, cfg)
+        envLayer = applicationLayer(port, backendLayer, cfg)
         env     <- envLayer.build
         corsCfg  = env.get[CorsConfig]
         endpoints <- HttpApi.endpointsZIO.provideEnvironment(env)
@@ -112,7 +120,7 @@ object HttpTestHarness:
 
   private def applicationLayer(
       port: Int,
-      repoLayer: ZLayer[Any, Throwable, RiskTreeRepository],
+      backendLayer: BackendLayer,
       cfg: HarnessConfig
   ): ZLayer[Any, Throwable, Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController] =
     ZLayer.make[
@@ -129,7 +137,7 @@ object HttpTestHarness:
       TracingLive.console,
       MetricsLive.console,
       SimulationSemaphore.layer,
-      repoLayer,
+      backendLayer,
       RiskTreeServiceLive.layer,
       ChangedNodesServiceLive.layer,
       ZLayer.succeed(TreeHistoryService.empty),
@@ -142,12 +150,8 @@ object HttpTestHarness:
       AuthorizationServiceNoOp.layer,
       BootstrapProvisionerNoOp.layer,
       ZLayer.succeed(UserContextExtractor.noOp),
-      // Stub only — this harness doesn't wire ScenarioController/IrminClient,
-      // so a test exercising X-Active-Branch against an Irmin-backed repoLayer
-      // would get 501 here rather than a working scenario. Fine for today's
-      // suites (none exercise that path); revisit if/when one does.
-      ScenarioServiceNotSupported.layer,
-      ScenarioMergeServiceNotSupported.layer,
+      // ScenarioService / ScenarioMergeService come from the backend layer:
+      // real (Irmin) for the Irmin server, NotSupported for the in-memory one.
       ZLayer.fromZIO(SystemController.makeZIO),
       ZLayer.fromZIO(WorkspaceLifecycleController.makeZIO),
       ZLayer.fromZIO(WorkspaceTreeController.makeZIO),
@@ -179,13 +183,15 @@ object HttpTestHarness:
 
     probe.retry(Schedule.recurs(10) && Schedule.spaced(200.millis))
 
-  private def irminRepoLayer(
+  private def irminBackendLayer(
       irminConfigLayer: ZLayer[Any, Throwable, IrminConfig]
-  ): ZLayer[Any, Throwable, RiskTreeRepository] =
-    ZLayer.make[RiskTreeRepository](
+  ): BackendLayer =
+    ZLayer.make[RiskTreeRepository & ScenarioService & ScenarioMergeService](
       irminConfigLayer,
       IrminClientLive.layer >>> irminHealthCheck,
-      RiskTreeRepositoryIrmin.layer
+      RiskTreeRepositoryIrmin.layer,
+      ScenarioServiceLive.layer,
+      ScenarioMergeServiceLive.layer
     )
 
   // Same startup readiness gate as Application (ADR-031) — no duplicated retry

@@ -6,7 +6,7 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision, CommitHash}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -25,25 +25,30 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
   private def service[A](f: RiskTreeService => ZIO[Any, Throwable, A]): ZIO[RiskTreeService, Throwable, A] =
     ZIO.serviceWithZIO[RiskTreeService](f)
 
-  // Stub repository factory - creates fresh instance per test
+  // Stub repository factory - creates fresh instance per test.
+  // Keyed by (WorkspaceId, BranchRef, TreeId): writes land on the branch they
+  // target and reads resolve a branch head only. A scenario branch starts empty
+  // here — this stub does not model Irmin's fork-time inheritance from main, so
+  // the unit tests below exercise only post-divergence cases; fork inheritance
+  // is covered by the HTTP-level integration test.
   private def makeStubRepo = new RiskTreeRepository {
-    private val db = collection.mutable.Map[(WorkspaceId, TreeId), RiskTree]()
-    
+    private val db = collection.mutable.Map[(WorkspaceId, BranchRef, TreeId), RiskTree]()
+
     override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree] = ZIO.succeed {
-      db += ((wsId, riskTree.id) -> riskTree)
+      db += ((wsId, branch, riskTree.id) -> riskTree)
       riskTree
     }
 
     override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
-      val riskTree = db((wsId, id))
+      val riskTree = db((wsId, branch, id))
       val updated = op(riskTree)
-      db += ((wsId, id) -> updated)
+      db += ((wsId, branch, id) -> updated)
       updated
     }
 
     override def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree] = ZIO.attempt {
-      val riskTree = db((wsId, id))
-      db -= ((wsId, id))
+      val riskTree = db((wsId, branch, id))
+      db -= ((wsId, branch, id))
       riskTree
     }
 
@@ -51,10 +56,14 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
 
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
-      ZIO.succeed(db.get((wsId, id)))
+      rev match
+        case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)))
+        case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
 
     override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
-      ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)
+      rev match
+        case Revision.Head(branch) => ZIO.succeed(db.collect { case ((wid, b, _), tree) if wid == wsId && b == branch => Right(tree) }.toList)
+        case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
   }
   
   private val stubWsId: WorkspaceId = WorkspaceId(safeId("test-workspace-live"))
@@ -126,6 +135,35 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         minLoss = Some(1000L), maxLoss = Some(50000L)
       )
     )
+
+  // ── Per-branch uniqueness helpers ───────────────────────────────────
+
+  private val scenarioBranch: BranchRef =
+    BranchRef.scenario(stubWsId, ScenarioName.fromString("test-scenario").toOption.get).toOption.get
+
+  /** Rename a `seedTreeRequest`-shaped tree, keeping its "Seed Root" portfolio
+    * and "Cyber Attack"/"Fraud" leaves unchanged. */
+  private def renameOnly(tree: RiskTree, newName: String): RiskTreeUpdateRequest =
+    RiskTreeUpdateRequest(
+      name = newName,
+      portfolios = Seq(portfolioUpd(tree, "Seed Root")),
+      leaves = Seq(
+        leafUpd(leafIdByName(tree, "Cyber Attack"), "Cyber Attack", "Seed Root"),
+        leafUpd(leafIdByName(tree, "Fraud"), "Fraud", "Seed Root")
+      ),
+      newPortfolios = Seq.empty,
+      newLeaves = Seq.empty
+    )
+
+  private def isDuplicateName(exit: Exit[Throwable, Any]): Boolean =
+    exit match
+      case Exit.Failure(cause) =>
+        cause.failureOption.exists {
+          case ValidationFailed(errors) =>
+            errors.exists(e => e.field == "name" && e.code == ValidationErrorCode.DUPLICATE_VALUE)
+          case _ => false
+        }
+      case Exit.Success(_) => false
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
     suite("RiskTreeServiceLive")(
@@ -565,7 +603,46 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
             newId != freedId &&
             after.seedVarHighWater.value == newId
         }
-      }
+      },
+
+      // ========================================
+      // Per-branch uniqueness (§C1)
+      // ========================================
+      suite("Per-branch uniqueness")(
+        test("same tree name on two branches is allowed") {
+          val program = for {
+            _  <- service(_.create(stubWsId, validRequest.copy(name = "Shared Name"), BranchRef.Main))
+            t2 <- service(_.create(stubWsId, validRequest.copy(name = "Shared Name"), scenarioBranch))
+          } yield t2
+          program.assert(_.name == SafeName.SafeName("Shared Name".refineUnsafe))
+        },
+
+        test("duplicate tree name within a scenario branch is rejected") {
+          val program = for {
+            _    <- service(_.create(stubWsId, validRequest.copy(name = "Dup Name"), scenarioBranch))
+            exit <- service(_.create(stubWsId, validRequest.copy(name = "Dup Name"), scenarioBranch)).exit
+          } yield exit
+          program.assert(exit => isDuplicateName(exit))
+        },
+
+        test("update rename to a name taken on the same branch is rejected") {
+          val program = for {
+            _    <- service(_.create(stubWsId, seedTreeRequest("Name A"), BranchRef.Main))
+            b    <- service(_.create(stubWsId, seedTreeRequest("Name B"), BranchRef.Main))
+            exit <- service(_.update(stubWsId, b.id, renameOnly(b, "Name A"), BranchRef.Main)).exit
+          } yield exit
+          program.assert(exit => isDuplicateName(exit))
+        },
+
+        test("update rename to a name held only on another branch is allowed") {
+          val program = for {
+            _       <- service(_.create(stubWsId, seedTreeRequest("Name N"), BranchRef.Main))
+            t       <- service(_.create(stubWsId, seedTreeRequest("Name T"), scenarioBranch))
+            renamed <- service(_.update(stubWsId, t.id, renameOnly(t, "Name N"), scenarioBranch))
+          } yield renamed
+          program.assert(_.name == SafeName.SafeName("Name N".refineUnsafe))
+        }
+      )
     ).provide(
       RiskTreeServiceLive.layer,
       stubRepoLayer,

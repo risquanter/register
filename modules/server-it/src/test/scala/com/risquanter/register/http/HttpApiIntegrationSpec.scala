@@ -5,9 +5,11 @@ import zio.test.*
 import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.ziojson.*
-import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest}
-import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
+import sttp.model.StatusCode
+import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, CreateScenarioRequest, ScenarioSourceDto}
+import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse, ScenarioResponse}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskTree}
+import com.risquanter.register.domain.data.iron.{ScenarioName, BranchChoice}
 import com.risquanter.register.http.support.SttpClientFixture
 import com.risquanter.register.testcontainers.IrminCompose
 import io.github.iltotore.iron.*
@@ -188,6 +190,65 @@ object HttpApiIntegrationSpec extends ZIOSpecDefault:
         yield assertTrue(summaryResp.code.isSuccess) &&
           assertTrue(summary.exists(_.id == treeId)) &&
           assertTrue(summary.exists(_.name == request.name))
+      },
+      test("tree-name uniqueness is checked against the write branch, honouring fork inheritance (§C1)") {
+        val treeName     = "Shared Risk Tree"
+        val bootstrapReq = sampleRequest().copy(name = treeName)   // tree N on main
+        val dupReq       = sampleRequest().copy(name = treeName)   // same name, re-used for each scenario create
+        val scenarioName = "c1-scenario"
+        for
+          client <- ZIO.service[SttpClientFixture.Client]
+
+          // Bootstrap workspace on main with tree N.
+          bootstrapResp <- basicRequest.header("X-Branch", "main")
+            .post(uri"${client.baseUrl}/workspaces")
+            .body(bootstrapReq)
+            .response(asJson[WorkspaceBootstrapResponse])
+            .send(client.backend)
+          bootstrap <- ZIO.fromEither(bootstrapResp.body)
+          key             = bootstrap.workspaceKey.reveal
+          inheritedTreeId = bootstrap.tree.id
+
+          // Fork a scenario from main — it inherits tree N.
+          scenarioResp <- basicRequest
+            .post(uri"${client.baseUrl}/w/$key/scenarios")
+            .body(CreateScenarioRequest(
+              name = ScenarioName.fromString(scenarioName).toOption.get,
+              source = ScenarioSourceDto.Branch(BranchChoice.Main)
+            ))
+            .response(asJson[ScenarioResponse])
+            .send(client.backend)
+          _ <- ZIO.fromEither(scenarioResp.body)
+
+          // Creating N on the scenario is rejected while the inherited tree exists.
+          dupWhileInheritedResp <- basicRequest.header("X-Branch", scenarioName)
+            .post(uri"${client.baseUrl}/w/$key/risk-trees")
+            .body(dupReq)
+            .send(client.backend)
+
+          // Delete the inherited tree on the scenario, freeing the name there.
+          deleteResp <- basicRequest.header("X-Branch", scenarioName)
+            .delete(uri"${client.baseUrl}/w/$key/risk-trees/${inheritedTreeId.value}")
+            .send(client.backend)
+
+          // N is now free on the scenario → create succeeds.
+          freedCreateResp <- basicRequest.header("X-Branch", scenarioName)
+            .post(uri"${client.baseUrl}/w/$key/risk-trees")
+            .body(dupReq)
+            .response(asJson[SimulationResponse])
+            .send(client.backend)
+          freedCreated <- ZIO.fromEither(freedCreateResp.body)
+
+          // A second N on the scenario is rejected again.
+          dupAgainResp <- basicRequest.header("X-Branch", scenarioName)
+            .post(uri"${client.baseUrl}/w/$key/risk-trees")
+            .body(dupReq)
+            .send(client.backend)
+        yield assertTrue(dupWhileInheritedResp.code == StatusCode.BadRequest) &&
+          assertTrue(deleteResp.code.isSuccess) &&
+          assertTrue(freedCreateResp.code.isSuccess) &&
+          assertTrue(freedCreated.name == treeName) &&
+          assertTrue(dupAgainResp.code == StatusCode.BadRequest)
       }
     ).provideLayerShared(harnessLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock
 
