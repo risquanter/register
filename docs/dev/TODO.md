@@ -1867,3 +1867,53 @@ a per-workspace limit analogous to `REGISTER_WORKSPACE_MAX_CREATES_PER_IP`.
 
 **Status:** open (moved here from the code-quality-review skill's known-gap
 note, 2026-08-10).
+
+---
+
+## 43. Design-view history — slider, read-only pinned mode, fork-from-history, revert (needs deeper design)
+
+Moved here from Phase E (`DONE-PLAN-PHASE-E-HISTORY.md`, "Slice E-B") on
+2026-08-11: Phase E is closed with this slice carried out for its own design
+pass rather than built as-specced. The rest of Phase E (backend history/revert,
+the Analyze slider, per-branch tree uniqueness) landed.
+
+**Feature.** Bring the history/time-travel affordances to the Design view, plus
+the write actions that belong there. `HistorySlider` is currently wired only
+into `AnalyzeView`; `DesignView` has no slider, no read-only pinned mode, and
+no fork/revert UI.
+
+**Reusable pieces already landed (Slice E-A).** `HistorySlider` component,
+`TreeHistoryState` (history endpoint + `LoadState`, per (tree, branch)), and
+`SlotCoordinate.at: Option[CommitHash]` (`None` = live head, `Some(hash)` =
+rewound) exist and work in Analyze. The backend is complete: `getHistory`
+(oldest-first ancestry, pinned by `RiskTreeRepositoryIrminSpec`), pinned reads
+via the `at` revision, revert, and scenario create with `source = Commit(hash)`.
+
+**What Slice E-B originally specified (context, not a locked design):**
+- Design gains the same slider under its tree selection. Rewinding pins
+  `DesignView` read-only: tree detail + forms show the pinned state, all edit
+  affordances disabled, a pinned banner names timestamp + short commit hash.
+  Reuses the existing `selectionLocked`/read-only mechanism.
+- A selected node absent at the pinned commit is dropped with a transient
+  "not present at this point in time" notice (no greyed placeholder).
+- **Fork button** in Design next to the slider — greyed at head, active when
+  rewound; prompts for a `ScenarioName`, creates with `source = Commit(hash)`,
+  switches the tab's branch to the new scenario, leaves the user editing in
+  Design at the inspected state. (This supersedes the earlier "fork lives in
+  Analyze" placement, which only existed to avoid building a read-only Design
+  mode — that mode now has independent value for inspection.)
+- **Revert** stays in Design: BranchBar scenario-menu item "↩ Revert this
+  branch…"; NEW `TreeRevertState` + NEW `RevertModal` (destructive confirm
+  naming branch + target commit, MergeModal pattern).
+
+**Files it would touch (from the plan's inventory):**
+`modules/app/src/main/scala/app/views/DesignView.scala`, plus new
+`TreeRevertState` and `RevertModal` under `app/state` / `app/components`, and
+the BranchBar scenario menu.
+
+**Why "deeper design," not just build.** The read-only-pinned Design
+interaction, the fork-from-rewind placement, and the revert-confirm flow are UI
+decisions worth revisiting before implementation rather than lifting the plan's
+provisional spec verbatim. Redo the interaction design, then plan the slice.
+
+**Status:** open — design first.

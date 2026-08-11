@@ -1,7 +1,6 @@
-# PLAN — Milestone-2b Phase E: History / Time Travel (Scope 2)
+# DONE — Milestone-2b Phase E: History / Time Travel (Scope 2)
 
-Status: PARTIALLY IMPLEMENTED — most of the plan has landed; one item remains.
-Prerequisites landed: `DONE-PLAN-C-REFACTOR.md` (Scope 1) and
+Status: COMPLETE. Prerequisites landed: `DONE-PLAN-C-REFACTOR.md` (Scope 1) and
 `DONE-PLAN-COMPARE-UI-REDESIGN.md` (slot-card Analyze layout §8 builds on). All
 Phase E decisions are ruled (E1–E8 below, H1–H6 in §8).
 
@@ -14,12 +13,12 @@ revert, history; commit `1a69dec`, 0.10.0), Slice E-A (Analyze history slider,
 and `update` now check tree-ID and tree-name uniqueness against the head of the
 branch being written; unit tests plus one HTTP-level fork-inheritance IT cover it.
 
-**Outstanding — exactly what is missing:**
-
-- **Slice E-B — Design-view history (§7 "Slice E-B — Design", §8b).** The
-  history slider and read-only pinned mode in the Design view are not built:
-  `HistorySlider` is wired only into `AnalyzeView`, never `DesignView`. The
-  fork/revert UI that §8 places next to the Design slider is unbuilt with it.
+**Carried out of this plan for its own design pass:** Slice E-B — Design-view
+history (the §7 "Slice E-B — Design" slider, read-only pinned mode, and
+fork/revert UI). It is not built here; it moved to `TODO.md` §43 to be
+redesigned before implementation. The §7/§8 material below is its provisional
+spec, kept for reference by that TODO item. Closing Phase E does not depend on
+it.
 
 **Slice 0 (backend, §1–§7) IMPLEMENTED 2026-07-27 (committed, `1a69dec`).** All modules
 compile (`sbt compile` green); `server/test` and `app/test` pass. The 3 new IT
@@ -52,7 +51,7 @@ the baseline `TreeHistoryState` is a new `AnalyzeView.apply` param (built in
 changed-node diff gate now fires for same-branch-different-`at` (past-vs-current
 on one branch when a stop is rewound), not only cross-branch — a direct
 consequence of `at` joining pair identity (decision 2). Slice E-B (Design slider
-+ fork/revert UI) remains.
++ fork/revert UI) moved to `TODO.md` §43 for its own design pass.
 
 ## Rulings (2026-07-25, user)
 

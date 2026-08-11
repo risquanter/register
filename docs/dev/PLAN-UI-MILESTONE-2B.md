@@ -14,7 +14,7 @@
 > **Outstanding — exactly what is missing:**
 > - **Phase E Design-view history** — the history slider + read-only pinned mode
 >   in Design (and the fork/revert UI beside it) are not built. Tracked in
->   `PLAN-PHASE-E-HISTORY.md` as Slice E-B.
+>   `DONE-PLAN-PHASE-E-HISTORY.md` as Slice E-B.
 > - **Phase F merge-conflict resolution UI** — the one-click `[keep main]` /
 >   `[keep scenario]` buttons (§8) and semantic (param-average) resolution are
 >   NOT built; deferred to Phase F and tracked in the scratch tracker

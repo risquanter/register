@@ -230,7 +230,7 @@ per-tool facts.
 
 ### 7.4 Custom-rule obligation: branch-identity invariant guard
 
-The §C1 fix (PLAN-PHASE-E-HISTORY.md, Continuation §C1) removes the last
+The §C1 fix (DONE-PLAN-PHASE-E-HISTORY.md, Continuation §C1) removes the last
 hardcoded `Revision.Head(BranchRef.Main)` read from the service write path.
 The guard that keeps the bug class out — no constant branch coordinate in
 per-branch service operations — is implemented as a custom rule in the

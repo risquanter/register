@@ -1583,7 +1583,7 @@ Phase D uses. Captured now as to-be-planned requirements, not yet designed.
    (`scen-1`, `scen-2`, `main`) before committing the merge. Semi-automated
    creation of this merge-preview model for comparison.
 4. **Tree-name collision detection and resolution at merge.** Per-branch
-   tree-name uniqueness (`PLAN-PHASE-E-HISTORY.md` §C1, Option A, ruled
+   tree-name uniqueness (`DONE-PLAN-PHASE-E-HISTORY.md` §C1, Option A, ruled
    2026-07-27) lets two branches independently create trees with the same name
    but different ULIDs. The byte-level Irmin merge keys on ULID storage paths,
    so both trees survive the merge and main ends with two trees of the same

@@ -4,9 +4,9 @@ Status: DONE — both tasks landed. Task A (read-path consistency, server)
 shipped at 0.7.1 (commit `546da66`, `RiskTreeReadConsistencySpec`). Task B
 (compare-slot coordinate work, app) landed and was folded into the compare-UI
 redesign (`DONE-PLAN-COMPARE-UI-REDESIGN.md`); its review follow-ups live in
-`DONE-PLAN-C-TASKB-FIXES.md`. `PLAN-PHASE-E-HISTORY.md` records this plan as a
+`DONE-PLAN-C-TASKB-FIXES.md`. `DONE-PLAN-PHASE-E-HISTORY.md` records this plan as a
 landed prerequisite. Scope 1 of the milestone-2b close-out; companion (Scope 2):
-`PLAN-PHASE-E-HISTORY.md`. Decision context, rulings E1–E7, and fixed security
+`DONE-PLAN-PHASE-E-HISTORY.md`. Decision context, rulings E1–E7, and fixed security
 constraints live in the companion document.
 
 Two self-contained, independently landable and revertable tasks. Disjoint
@@ -18,7 +18,7 @@ modules (A: server, B: app); either order; both precede Scope 2.
 
 ### Problem
 
-Recorded in `PLAN-PHASE-E-HISTORY.md` → "Problem class on record": a tree
+Recorded in `DONE-PLAN-PHASE-E-HISTORY.md` → "Problem class on record": a tree
 load is several independent GraphQL queries (meta `get`, node `list`,
 per-node `get`s), each dereferencing the mutable branch head independently.
 A commit landing mid-load produces a torn read (meta from one commit, nodes

@@ -11,7 +11,7 @@ import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
 
 /** Commit-pinned reads are scoped to the authenticated workspace's Irmin paths,
-  * NOT to the commit's provenance (fixed constraint in PLAN-PHASE-E-HISTORY §
+  * NOT to the commit's provenance (fixed constraint in DONE-PLAN-PHASE-E-HISTORY §
   * "path scoping, not commit provenance"). All workspaces share one Irmin store,
   * so any commit physically contains every workspace's subtree; a pinned read
   * must still only surface the reading workspace's own data. */
