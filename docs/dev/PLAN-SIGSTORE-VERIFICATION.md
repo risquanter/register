@@ -4,7 +4,7 @@ Status: design-level draft — awaiting review. **Scope widened (user
 directive 2026-08-10): this plan now covers the repository's full CI
 pipeline** — signature verification/signing (§1–§6) is one stage of it; the
 pipeline stages, static-analysis tooling, and image publishing are §7. Open
-decisions await the user's ruling at plan review (§5 and §7.5).
+decisions await the user's ruling at plan review (§5 and §7.6).
 Implementation requires elevation to implementation-grade (exact file
 inventory, scripts, workflow YAML) and plan approval. **User mandate
 2026-08-10: the implementation undergoes a mandatory
@@ -24,8 +24,8 @@ Rulings (2026-08-10):
   it contains the same data a Rekor lookup would return (signature, Fulcio
   certificate, Rekor entry + inclusion proof), obtained deterministically
   and offline-capable. Authenticity = the bundle verifies against a pinned
-  **certificate-identity policy** (the publishing repo's release workflow
-  via GitHub's OIDC issuer). Rekor remains the transparency anchor: the
+  **certificate-identity policy** (the publishing repo's CI build workflow
+  via GitHub's OIDC issuer — the exact strings are in §3.1). Rekor remains the transparency anchor: the
   bundle's inclusion proof is checked, and log monitoring (§6) watches for
   signatures claiming our identities that our CI never produced.
 - **One verification component, reused everywhere** (user requirement:
@@ -63,12 +63,28 @@ verified subject with its expected identity:
 
 ```yaml
 # subject → who may sign it (certificate identity + OIDC issuer)
+#
+# The libraries sign artifacts in ci-build.yml on push to main (cosign
+# sign-blob), NOT in a tagged release workflow. The Fulcio identity in the
+# published bundles is therefore ci-build.yml@refs/heads/main. Pin that exact
+# string (Decision 1A in hdr-rng PLAN-SIGSTORE-EXPECTATIONS.md). If a library
+# ever moves signing into a tagged release.yml, that identity change must be
+# coordinated with a bump here BEFORE it lands, or verification fails closed.
 maven:
   com.risquanter:vql-engine:
     issuer: https://token.actions.githubusercontent.com
-    identity: https://github.com/risquanter/vql-engine/.github/workflows/release.yml@refs/tags/*
-  com.risquanter:metalog-distribution: { ... }
-  com.risquanter:hdr-rng: { ... }
+    identity: https://github.com/risquanter/vql-engine/.github/workflows/ci-build.yml@refs/heads/main
+  com.risquanter:metalog-distribution:
+    issuer: https://token.actions.githubusercontent.com
+    identity: https://github.com/risquanter/metalog-distribution/.github/workflows/ci-build.yml@refs/heads/main
+  com.risquanter:hdr-rng:
+    issuer: https://token.actions.githubusercontent.com
+    identity: https://github.com/risquanter/hdr-rng/.github/workflows/ci-build.yml@refs/heads/main
+# Each maven subject also ships a SLSA build-provenance attestation next to its
+# main jar on Central, as `<artifact>-<version>.jar.intoto.jsonl` (library-side
+# Decision 7B). It is signed with the SAME ci-build.yml@refs/heads/main identity
+# pinned above — no separate identity entry is needed; the verify component
+# (§3.2) checks the provenance file against the subject's existing identity.
 images:
   ghcr.io/risquanter/register-server:
     issuer: https://token.actions.githubusercontent.com
@@ -87,6 +103,16 @@ invocations — no custom cryptography anywhere:
   --certificate-identity <id> --certificate-oidc-issuer <issuer> <jar>`;
   compare the verified jar's SHA-256 against what coursier resolved into
   the local cache (ties the verified bytes to the build input).
+- Maven build provenance (SLSA): the publishers ship a build-provenance
+  attestation next to each main jar as `<artifact>-<version>.jar.intoto.jsonl`
+  (library-side Decision 7B). After the bundle check, fetch that file and run
+  `cosign verify-blob-attestation --bundle
+  <artifact>-<version>.jar.intoto.jsonl --new-bundle-format
+  --certificate-identity <id> --certificate-oidc-issuer <issuer>
+  --type slsaprovenance <jar>` against the SAME pinned identity. This is
+  additive to the `.sigstore` check, not a replacement; a missing or
+  non-verifying provenance file fails closed. One attestation covers every
+  variant's jar, so the same file verifies each variant by its own digest.
 - Images: `cosign verify --certificate-identity <id>
   --certificate-oidc-issuer <issuer> <ref@digest>`.
 - Reads its subjects and identities from the policy file; exits non-zero on
@@ -118,10 +144,28 @@ in sync at elevation). Open decision §5-1 picks the controller.
 
 The publishing repos (`vql-engine`, `metalog-distribution`, `hdr-rng`)
 release via GitHub Actions with Sigstore bundle publication for **all**
-artifact classifiers. Partially true already: Central hosts `.sigstore`
-bundles for vql-engine 0.10.2's sources/javadoc jars; the main jar bundle
-must be confirmed/added in the release workflows. This is sibling-repo
+artifact classifiers. Satisfied — verified against `repo1.maven.org`
+2026-08-11: every consumed version (vql-engine 0.10.2 and 0.11.0,
+metalog-distribution 0.9.0, hdr-rng 0.1.0), every classifier (main,
+sources, javadoc, pom) and every cross-build (`_3`, `_sjs1_3`) carries a
+spec-format v0.3 `.sigstore.json` bundle plus a `.asc` signature. The
+library-side pipeline hardening (exact identity check, SHA-pinned actions,
+completeness checks, real provenance, signed release tags) is governed by
+`PLAN-SIGSTORE-EXPECTATIONS.md` in the hdr-rng repository — sibling-repo
 work, coordinated but not part of register's inventory.
+
+The same release pipelines also produce a SLSA build-provenance attestation
+and ship it next to each main jar as `<artifact>-<version>.jar.intoto.jsonl`
+(library-side Decision 7B, applied in the three ci-build.yml workflows). Two
+coordination points before register relies on it: (1) confirm Maven Central
+accepts the extra `.intoto.jsonl` file alongside each jar on the first release
+that carries it — it already tolerates the unchecksummed `.sigstore.json`/`.asc`
+files, so this is expected but unproven; if Central requires a checksum for
+every bundle entry, the library side adds `<file>.md5`/`.sha1` for the
+provenance file. (2) The `.intoto.jsonl` filename and the
+`cosign verify-blob-attestation` recipe in §3.2 are a first-party convention,
+not a Central standard; any change to either must be coordinated between the
+publishers and this plan.
 
 ## 5. Open decisions
 
@@ -142,8 +186,10 @@ work, coordinated but not part of register's inventory.
 - Positive path: pinned versions verify at all four points.
 - Negative paths (each must fail closed): tampered jar bytes; bundle for a
   different artifact; certificate identity from a different repo/workflow;
-  unsigned image rejected by the admission controller in a k3d test
-  cluster; local (unsigned) image rejected.
+  missing or non-verifying SLSA provenance file (`.intoto.jsonl`), or one
+  whose attested identity differs from the pinned one; unsigned image rejected
+  by the admission controller in a k3d test cluster; local (unsigned) image
+  rejected.
 - Full register suite green (all sbt tiers + BATS C/A/B — image pipeline
   changes are release-validation scope).
 - **Mandatory `/security-review-deep` on the implementation diff** (user
@@ -165,7 +211,7 @@ policy, and signature verification where the ecosystem supports it.
 1. **Build + test** — every sbt tier (`commonJVM`/`server`/`app` unit,
    `serverIt` integration) on every push; BATS suites on release.
 2. **Static analysis** — SAST + code style (tool baseline §7.3; final
-   selection: open decision §7.5-3). Includes `scalafmtCheckAll` (config
+   selection: open decision §7.6-3). Includes `scalafmtCheckAll` (config
    already in-repo) and the custom project rule pack (§7.4).
 3. **Dependency + secrets scanning** — `scalacenter/sbt-dependency-submission`
    feeds the GitHub dependency graph so Dependabot alerts cover Maven
@@ -177,7 +223,8 @@ policy, and signature verification where the ecosystem supports it.
    secrets); SBOM generation (CycloneDX via Trivy) feeding the §3.3
    provenance attestation.
 5. **Publish + sign** — push images to `ghcr.io` by digest, keyless
-   `cosign sign` + SLSA provenance `cosign attest` (§3.3 row 3).
+   `cosign sign` + SLSA provenance `cosign attest` (§3.3 row 3). Gated by
+   the release authorization controls in §7.5.
 6. **Verification gates** — the §3.3 verify script at dependency resolution
    (Maven subjects) and pre-deploy (image subjects).
 
@@ -207,13 +254,13 @@ review memory. Candidate rule pack:
 - `.now()` inside `modules/app` rendering pipelines (ADR-019)
 - `asInstanceOf` / `Schema.any` outside sanctioned interop files (G2 #2)
 
-### 7.3 Tool baseline (assessed 2026-08-10; selection = open decision §7.5-3)
+### 7.3 Tool baseline (assessed 2026-08-10; selection = open decision §7.6-3)
 
 Assessment of the candidate list (external agent output, corrected):
 
 | Tool | Verdict | Basis |
 |---|---|---|
-| Compiler flags | **Adopt** (hardening scope: §7.5-4) | Cheapest, highest signal. Current set lacks `-Wunused:all`, `-Wvalue-discard`, `-Wnonunit-statement`; warnings-as-errors in CI. |
+| Compiler flags | **Adopt** (hardening scope: §7.6-4) | Cheapest, highest signal. Current set lacks `-Wunused:all`, `-Wvalue-discard`, `-Wnonunit-statement`; warnings-as-errors in CI. |
 | scalafmt check | **Adopt** | `.scalafmt.conf` already in-repo; `scalafmtCheckAll` is a zero-design CI step. |
 | Semgrep CE | **Adopt as custom-rule engine** | Engine LGPL; polyglot (Scala + Dockerfile + YAML + JS in one tool); no build coupling. Caveats vs. the agent claim: registry Scala rules are thin, cross-file taint analysis is the paid tier — the free value here is OUR rule pack (§7.2), not out-of-box vulnerability detection. Registry rules carry the Semgrep Rules License (internal CI use permitted). |
 | Scalafix | **Evaluate** (rides §7.5-3) | Scala 3 support good; semantic (symbol-accurate) custom rules; sbt-integrated so devs get it locally. Cost: SemanticDB compilation overhead + a rules sub-project to maintain. |
@@ -234,13 +281,47 @@ The §C1 fix (DONE-PLAN-PHASE-E-HISTORY.md, Continuation §C1) removes the last
 hardcoded `Revision.Head(BranchRef.Main)` read from the service write path.
 The guard that keeps the bug class out — no constant branch coordinate in
 per-branch service operations — is implemented as a custom rule in the
-§7.5-3 mechanism (Semgrep pattern or Scalafix semantic rule), scoped to
+§7.6-3 mechanism (Semgrep pattern or Scalafix semantic rule), scoped to
 `modules/server/**/services/` with an explicit allow-list for the services
 whose business IS main (e.g. `ScenarioMergeService`). A unit test asserting
 the same by text search was considered and rejected: the rule engine gives
 the same regression protection without a brittle self-grepping spec.
 
-### 7.5 Open decisions (additions to §5)
+### 7.5 Release authorization gate (ruled 2026-08-12)
+
+The publish + sign stage (§7.1 stage 5) requires three independent
+human-authorization controls, layered so each covers the others' bypass
+path:
+
+1. **TOTP possession proof.** The release workflow is `workflow_dispatch`
+   with a `totp_code` input, verified against the org-level secret
+   `TOTP_ORG` (oathtool, 60-second period) before any publish step runs —
+   the same gate the three library repos use. The matching credential is a
+   YubiKey OATH slot, so triggering a release proves hardware possession,
+   independent of GitHub account credentials.
+2. **GitHub environment protection.** The publish job runs in a protected
+   environment (required reviewer), so a workflow edit that removes the
+   TOTP check cannot reach the publish credentials without a second
+   account-level approval.
+3. **Signed release tag precondition** (library Decision 9 pattern,
+   hdr-rng `PLAN-SIGSTORE-EXPECTATIONS.md`). The maintainer creates the
+   release tag locally, signed with the hardware-backed SSH key
+   (`git tag -s vX.Y.Z <commit>`), and pushes it. The release workflow
+   does not create tags; it asserts the pushed tag exists, points at the
+   exact commit being released, and verifies the tag signature with
+   `git tag -v` against a committed `allowed_signers` file — failing
+   closed before any image is pushed. A full CI + org-secret compromise
+   therefore still cannot publish without the human-signed tag.
+
+Coherence note for elevation: the §3.1 image identity pins
+`release-images.yml@refs/tags/*`, so the release workflow must run on the
+tag ref (dispatch with `--ref vX.Y.Z`) — the signed tag is then both the
+workflow's ref (giving the pinned identity) and the verified
+human-approval artifact. The TOTP gate authorizes *runs*; it is not a
+substitute for artifact verification (§3) or the admission policy (§3.4),
+and per-push CI stages run unattended without it.
+
+### 7.6 Open decisions (additions to §5)
 
 3. **Custom-rule mechanism** for §7.2/§7.4: (A) Semgrep CE only —
    polyglot, no build coupling, textual matching (an aliased import could

@@ -1818,9 +1818,10 @@ stages, static analysis (SAST + style; assessed tool baseline in the plan's
 `ghcr.io`, and the original signing/verification stages. Implementation
 requires elevation to implementation-grade (file inventory, scripts, workflow
 YAML), plan approval, and a mandatory `/security-review-deep` before landing.
-Open decisions ride in the plan's §5 (admission controller; Rekor monitoring)
-and §7.5 (custom-rule mechanism; compiler-flag hardening; trigger
-granularity).
+The release authorization gate is ruled (plan §7.5, 2026-08-12: TOTP +
+protected environment + signed release tag). Open decisions ride in the
+plan's §5 (admission controller; Rekor monitoring) and §7.6 (custom-rule
+mechanism; compiler-flag hardening; trigger granularity).
 
 ---
 
