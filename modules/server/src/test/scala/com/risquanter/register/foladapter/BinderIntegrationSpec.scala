@@ -11,10 +11,10 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
-import fol.parser.VagueQueryParser
-import fol.semantics.VagueSemantics
-import fol.sampling.{SamplingParams, HDRConfig}
-import fol.typed.{FolModel, QueryBinder, TypeCheckError, TypeId, Value}
+import vql.parser.VagueQueryParser
+import vql.semantics.VagueSemantics
+import vql.sampling.{SamplingParams, HDRConfig}
+import vql.typed.{FolModel, QueryBinder, TypeCheckError, TypeId, Value}
 
 /** Integration tests for the parse → bind path against a register-side
   * [[RiskTreeKnowledgeBase]] populated with quoted node-name literals.

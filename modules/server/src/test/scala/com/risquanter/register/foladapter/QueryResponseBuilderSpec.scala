@@ -5,10 +5,10 @@ import zio.test.*
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.testutil.TestHelpers
 
-import fol.result.{EvaluationOutput, VagueQueryResult}
-import fol.typed.{Value, TypeId}
-import fol.quantifier.AtLeast
-import fol.sampling.{SamplingParams, ProportionEstimate}
+import vql.result.{EvaluationOutput, VagueQueryResult}
+import vql.typed.{Value, TypeId}
+import vql.quantifier.AtLeast
+import vql.sampling.{SamplingParams, ProportionEstimate}
 
 /** Tests for [[QueryResponseBuilder]] — maps fol-engine `EvaluationOutput[Value]`
   * to register's `QueryResponse`.

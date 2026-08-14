@@ -5,13 +5,13 @@ import zio.*
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.http.responses.QueryResponse
 
-import fol.logic.ParsedQuery
+import vql.logic.ParsedQuery
 
 /** Service layer for vague quantifier query evaluation (ADR-028).
   *
   * Accepts a pre-parsed `ParsedQuery` (parsed at the HTTP boundary via
   * `QueryRequest.resolve()`) and evaluates it against a risk tree's
-  * structural and simulation data using the `fol.typed` many-sorted pipeline.
+  * structural and simulation data using the `vql.typed` many-sorted pipeline.
   *
   * No parsing or raw-string validation happens here — ADR-001 §4:
   * "No validation in service methods".

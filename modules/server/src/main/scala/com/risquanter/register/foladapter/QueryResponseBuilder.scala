@@ -3,8 +3,8 @@ package com.risquanter.register.foladapter
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.responses.QueryResponse
 
-import fol.result.EvaluationOutput
-import fol.typed.{Value, TypeId}
+import vql.result.EvaluationOutput
+import vql.typed.{Value, TypeId}
 
 /** Constructs [[QueryResponse]] from typed vql-engine evaluation results.
   *

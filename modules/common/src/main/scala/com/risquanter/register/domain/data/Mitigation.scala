@@ -7,35 +7,24 @@ import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, Node
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
 /**
- * What a mitigation applies to. Targets resolve to and store stable node ids,
- * never names (survives renames; ADR-017 identity preservation). The VQL
- * `Predicate` variant is added in M3 as an additive sealed-trait extension —
- * exhaustive matches surface every site that must then handle it.
+ * What a mitigation applies to: a targeting predicate that resolves,
+ * server-side, to the scoped node set. Single-variant sealed trait — the
+ * override anchor is a separate `overrideAnchor` field on
+ * `MitigationSpec.LeafStage`, not a target variant.
  */
 sealed trait MitigationTarget
 
 object MitigationTarget {
 
-  /** Explicit stable-id set (non-empty — enforced in `Mitigation.create`). */
-  final case class Nodes(ids: Set[NodeId]) extends MitigationTarget
+  final case class Predicate(predicate: TargetingPredicate) extends MitigationTarget
 
   given Equal[MitigationTarget] = Equal.default
 
-  private case class Raw(kind: String, ids: List[String])
-  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
-
-  given codec: JsonCodec[MitigationTarget] = JsonCodec(
-    JsonEncoder[Raw].contramap { case Nodes(ids) =>
-      Raw("nodes", ids.map(_.value).toList.sorted)
-    },
-    JsonDecoder[Raw].mapOrFail {
-      case Raw("nodes", rawIds) =>
-        val (errors, ids) = rawIds.partitionMap(NodeId.fromString)
-        if (errors.nonEmpty) Left(errors.flatten.map(_.message).mkString("; "))
-        else Right(Nodes(ids.toSet))
-      case other => Left(s"invalid mitigation target kind '${other.kind}'")
-    }
-  )
+  /** Wire format is the predicate source string (see `TargetingPredicate`);
+    * decode re-runs `TargetingPredicate.create`, so a stored predicate is
+    * re-validated on every read. */
+  given codec: JsonCodec[MitigationTarget] =
+    summon[JsonCodec[TargetingPredicate]].transform(Predicate(_), { case Predicate(p) => p })
 }
 
 /**
@@ -62,9 +51,9 @@ object MitigationPrecedence {
  *
  * - `LeafStage` — param-stage (`RiskLeafTransform`), leaves only. When either
  *   component is an Override, `overrideBaseStamp` carries the `ContentHash` of
- *   the target leaf's `LeafSimContent` (DD-16 projection) at authoring time —
- *   staleness layer 1's comparison basis; renames/reparents do not change it
- *   by construction. Stamp presence iff an Override component is a
+ *   the target leaf's `LeafSimContent` (DD-16 projection) at authoring time,
+ *   and `overrideAnchor` names the single leaf the override asserts against
+ *   (rename-stable). Both are present iff a component is an Override — a
  *   `Mitigation.create` cross-field rule.
  * - `ResultStage` — ordered `TransformPipeline` on `TrialOutcomes`, any node.
  */
@@ -74,7 +63,8 @@ object MitigationSpec {
 
   final case class LeafStage(
     transform: RiskLeafTransform,
-    overrideBaseStamp: Option[ContentHash]
+    overrideBaseStamp: Option[ContentHash],
+    overrideAnchor: Option[NodeId]
   ) extends MitigationSpec
 
   final case class ResultStage(pipeline: TransformPipeline) extends MitigationSpec
@@ -85,25 +75,31 @@ object MitigationSpec {
     stage: String,
     transform: Option[RiskLeafTransform],
     overrideBaseStamp: Option[String],
+    overrideAnchor: Option[String],
     pipeline: Option[TransformPipeline]
   )
   private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
 
   given codec: JsonCodec[MitigationSpec] = JsonCodec(
     JsonEncoder[Raw].contramap {
-      case LeafStage(t, stamp)  => Raw("leaf", Some(t), stamp.map(_.value), None)
-      case ResultStage(p)       => Raw("result", None, None, Some(p))
+      case LeafStage(t, stamp, anchor) => Raw("leaf", Some(t), stamp.map(_.value), anchor.map(_.value), None)
+      case ResultStage(p)              => Raw("result", None, None, None, Some(p))
     },
     JsonDecoder[Raw].mapOrFail {
-      case Raw("leaf", Some(t), stamp, None) =>
-        stamp match {
-          case None => Right(LeafStage(t, None))
-          case Some(s) =>
-            ContentHash.fromString(s, "overrideBaseStamp")
-              .map(h => LeafStage(t, Some(h)))
-              .left.map(_.map(_.message).mkString("; "))
-        }
-      case Raw("result", None, None, Some(p)) => Right(ResultStage(p))
+      case Raw("leaf", Some(t), stamp, anchor, None) =>
+        for {
+          h <- stamp match {
+            case None    => Right(None)
+            case Some(s) => ContentHash.fromString(s, "overrideBaseStamp")
+              .map(Some(_)).left.map(_.map(_.message).mkString("; "))
+          }
+          a <- anchor match {
+            case None    => Right(None)
+            case Some(s) => NodeId.fromString(s)
+              .map(Some(_)).left.map(_.map(_.message).mkString("; "))
+          }
+        } yield LeafStage(t, h, a)
+      case Raw("result", None, None, None, Some(p)) => Right(ResultStage(p))
       case other => Left(s"invalid mitigation spec: stage '${other.stage}' with mismatched fields")
     }
   )
@@ -125,10 +121,22 @@ final case class Mitigation private (
 
 object Mitigation {
 
+  /** Upper bound on the length of a single ResultStage pipeline — the count of
+    * atomic result-stage operations (`ResultTransformSpec`: deductible, cap,
+    * scale, threshold, insurance-policy) chained inside one mitigation, not the
+    * number of mitigations (that is `RiskTree.mitigations` ≤ 1000). A guard-rail
+    * ceiling, not a modeling maximum: a realistic pipeline stacks at most one of
+    * each of the five op types, so 10 leaves headroom while still rejecting an
+    * abusive or malformed pipeline. A persisted-content bound, re-checked on
+    * every read via decode == create. */
+  private val MaxPipelineSteps = 10
+
   /** Cross-field rules (accumulated):
-    *  - target node set non-empty
-    *  - LeafStage with an Override component ⇒ single-node target AND overrideBaseStamp defined
-    *  - LeafStage without an Override component ⇒ overrideBaseStamp empty
+    *  - LeafStage with an Override component ⇒ overrideBaseStamp AND
+    *    overrideAnchor both defined; without an Override ⇒ both empty;
+    *  - a ResultStage pipeline has at most `MaxPipelineSteps` steps.
+    * Predicate validity is enforced when the `TargetingPredicate` is built, so
+    * the target needs no further check here.
     */
   def create(
     id: MitigationId,
@@ -138,46 +146,44 @@ object Mitigation {
     precedence: MitigationPrecedence,
     fieldPrefix: String = "mitigation"
   ): Validation[ValidationError, Mitigation] = {
-    val targetIds = target match { case MitigationTarget.Nodes(ids) => ids }
-
-    val nonEmptyTargetV: Validation[ValidationError, Unit] =
-      Validation.fromPredicateWith[ValidationError, Set[NodeId]](
-        ValidationError(
-          field = s"$fieldPrefix.target",
-          code = ValidationErrorCode.REQUIRED_FIELD,
-          message = "Mitigation target must name at least one node"
-        )
-      )(targetIds)(_.nonEmpty).map(_ => ())
 
     val overrideRulesV: Validation[ValidationError, Unit] = spec match {
-      case MitigationSpec.LeafStage(transform, stamp) =>
-        val overriding = hasOverrideComponent(transform)
-        (overriding, stamp) match {
-          case (true, None) =>
+      case MitigationSpec.LeafStage(transform, stamp, anchor) =>
+        (hasOverrideComponent(transform), stamp, anchor) match {
+          case (true, Some(_), Some(_)) => Validation.succeed(())
+          case (false, None, None)      => Validation.succeed(())
+          case (true, _, _) =>
+            val missing = List(
+              Option.when(stamp.isEmpty)("base stamp"),
+              Option.when(anchor.isEmpty)("override anchor")
+            ).flatten
             Validation.fail(ValidationError(
-              field = s"$fieldPrefix.overrideBaseStamp",
+              field = s"$fieldPrefix.spec",
               code = ValidationErrorCode.REQUIRED_FIELD,
-              message = "An Override mitigation must carry the base stamp it was authored against"
+              message = s"An Override mitigation must carry its ${missing.mkString(" and ")}"
             ))
-          case (false, Some(_)) =>
+          case (false, _, _) =>
             Validation.fail(ValidationError(
-              field = s"$fieldPrefix.overrideBaseStamp",
+              field = s"$fieldPrefix.spec",
               code = ValidationErrorCode.INVALID_COMBINATION,
-              message = "Only an Override mitigation may carry a base stamp"
+              message = "Only an Override mitigation may carry a base stamp or override anchor"
             ))
-          case (true, Some(_)) if targetIds.size != 1 =>
-            Validation.fail(ValidationError(
-              field = s"$fieldPrefix.target",
-              code = ValidationErrorCode.INVALID_COMBINATION,
-              message = "An Override mitigation targets exactly one node (one absolute statement cannot fit a set)"
-            ))
-          case _ => Validation.succeed(())
         }
       case MitigationSpec.ResultStage(_) => Validation.succeed(())
     }
 
+    val stepsV: Validation[ValidationError, Unit] = spec match {
+      case MitigationSpec.ResultStage(pipeline) if pipeline.steps.sizeIs > MaxPipelineSteps =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.spec",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = s"result-stage pipeline has too many steps: ${pipeline.steps.size} exceeds the limit of $MaxPipelineSteps"
+        ))
+      case _ => Validation.succeed(())
+    }
+
     Validation
-      .validateWith(nonEmptyTargetV, overrideRulesV) { (_, _) => () }
+      .validateWith(overrideRulesV, stepsV) { (_, _) => () }
       .map(_ => new Mitigation(id, name, target, spec, precedence))
   }
 

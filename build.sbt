@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.10.16"
+ThisBuild / version      := "0.10.17"
 ThisBuild / scalaVersion := "3.7.4"
 
 ThisBuild / scalacOptions ++= Seq(
@@ -32,7 +32,11 @@ val zioUlidVersion    = "1.3.1"
 val zioTelemetryVersion = "3.1.13"
 val openTelemetryVersion = "1.57.0"
 val metalogVersion    = "0.9.0"   // com.risquanter:metalog-distribution (Java)
-val vqlEngineVersion  = "0.10.2"  // com.risquanter:vql-engine (cross-compiled)
+// First-party artifact (com.risquanter) — cooldown-exempt per ADR-020 §10
+// (first-party waiver, user-approved 2026-08-09). 0.13.1 carries formula
+// ranges + satisfyingSet (0.11.0), the fragment-membership API (0.12.0), and
+// the fol.* → vql.* package rename (0.13.0), adopted in one bump.
+val vqlEngineVersion  = "0.13.1"  // com.risquanter:vql-engine (cross-compiled)
 
 // Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(

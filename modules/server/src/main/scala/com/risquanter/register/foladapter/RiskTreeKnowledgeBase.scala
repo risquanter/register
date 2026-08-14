@@ -6,9 +6,9 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.common.FolSymbols
 
-import fol.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, Value}
-import fol.typed.extract
-import fol.typed.MapDispatcher
+import vql.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, Value}
+import vql.typed.extract
+import vql.typed.MapDispatcher
 
 /** Bridges the register domain (RiskTree + simulation results) to the vql-engine
   * typed evaluation pipeline.

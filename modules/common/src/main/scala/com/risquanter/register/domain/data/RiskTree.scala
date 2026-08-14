@@ -148,18 +148,22 @@ object RiskTree {
                   message = s"rootId '${rootId.value}' not found in nodes"
                 )
               )(index)((idx: TreeIndex) => idx.nodes.contains(rootId)),
-            validateMitigations(index, mitigations)
+            validateMitigations(mitigations)
           ) { (_, _) => () }
           .as(RiskTree(id, name, nodes, rootId, index, highWater, mitigations))
       }
   }
 
-  /** Tree-level mitigation invariants: unique ids and names; every target id
-    * resolves in the index; LeafStage (param-stage) mitigations target leaves
-    * only. Result-stage mitigations may target any node.
+  /** Persisted-content bound on the mitigation collection (M1R-D1 validator). */
+  private val MaxMitigations = 1000
+
+  /** Tree-level mitigation invariants: unique ids and names, and a bound on the
+    * collection size. Predicate validity is enforced when each
+    * `TargetingPredicate` is built; resolving a predicate to a node set, and
+    * the stage-domain scope restriction, are server-side concerns
+    * (`MitigationScopeResolver`), not tree invariants.
     */
   private def validateMitigations(
-    index: TreeIndex,
     mitigations: Seq[Mitigation]
   ): Validation[ValidationError, Unit] = {
     val duplicateIds = mitigations.groupBy(_.id).collect { case (mid, ms) if ms.sizeIs > 1 => mid }
@@ -181,31 +185,15 @@ object RiskTree {
         message = s"duplicate mitigation name(s): ${duplicateNames.toList.sorted.mkString(", ")}"
       ))
 
-    val perMitigationV = Validation.validateAll(mitigations.toList.map { m =>
-      val MitigationTarget.Nodes(targetIds) = m.target: @unchecked
-      val dangling = targetIds.filterNot(index.nodes.contains)
-      val danglingV =
-        if (dangling.isEmpty) Validation.succeed(())
-        else Validation.fail(ValidationError(
-          field = s"mitigations[id=${m.id.value}].target",
-          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = s"target node(s) not in tree: ${dangling.map(_.value).toList.sorted.mkString(", ")}"
-        ))
-      val leafOnlyV = m.spec match {
-        case MitigationSpec.LeafStage(_, _) =>
-          val nonLeaves = targetIds.filter(tid => index.nodes.get(tid).exists(!_.isInstanceOf[RiskLeaf]))
-          if (nonLeaves.isEmpty) Validation.succeed(())
-          else Validation.fail(ValidationError(
-            field = s"mitigations[id=${m.id.value}].target",
-            code = ValidationErrorCode.INVALID_COMBINATION,
-            message = s"param-stage mitigation targets must be leaves; not leaves: ${nonLeaves.map(_.value).toList.sorted.mkString(", ")}"
-          ))
-        case MitigationSpec.ResultStage(_) => Validation.succeed(())
-      }
-      Validation.validateWith(danglingV, leafOnlyV) { (_, _) => () }
-    })
+    val countV =
+      if (mitigations.sizeIs <= MaxMitigations) Validation.succeed(())
+      else Validation.fail(ValidationError(
+        field = "mitigations",
+        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"too many mitigations: ${mitigations.size} exceeds the limit of $MaxMitigations"
+      ))
 
-    Validation.validateWith(distinctIdsV, distinctNamesV, perMitigationV) { (_, _, _) => () }
+    Validation.validateWith(distinctIdsV, distinctNamesV, countV) { (_, _, _) => () }
   }
 
   /** Resolve and validate the tree's seed watermark (see fromNodes scaladoc). */

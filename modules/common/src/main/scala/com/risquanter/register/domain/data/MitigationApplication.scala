@@ -86,7 +86,6 @@ object MitigationSelection {
  *   combine's operand or finished aggregate, never the summation step
  *   (ADR-009 associativity invariant).
  * - `applicationRecords` — the D-4 provenance layer for one resolution.
- * - `worseningOverrides` — nonsense-check diagnostic (staleness layer 4).
  *
  * Scope-disjoint mitigations commute (trace-monoid property); order matters
  * only where scopes overlap, where the precedence key decides.
@@ -98,8 +97,14 @@ object MitigationSelection {
 object MitigationApplication {
 
   /** Per-node applicable mitigations, ascending precedence key, MitigationId
-    * tiebreak. Target ids that don't resolve in this tree's index no-op. */
-  def scoped(tree: RiskTree, selection: MitigationSelection): Map[NodeId, List[Mitigation]] = {
+    * tiebreak. Each mitigation's node set comes from `resolvedScopes` (the
+    * server-computed predicate resolution); a mitigation absent from the map
+    * has an empty scope and applies nowhere. */
+  def scoped(
+    tree: RiskTree,
+    selection: MitigationSelection,
+    resolvedScopes: Map[MitigationId, Set[NodeId]]
+  ): Map[NodeId, List[Mitigation]] = {
     val enabled: List[(Mitigation, Option[Set[NodeId]])] = selection match {
       case MitigationSelection.None => Nil
       case MitigationSelection.All =>
@@ -115,8 +120,7 @@ object MitigationApplication {
 
     val pairs: List[(NodeId, Mitigation)] = for {
       (m, restriction) <- enabled
-      targetIds = m.target match { case MitigationTarget.Nodes(ids) => ids }
-      resolved  = targetIds.filter(tree.index.nodes.contains)
+      resolved  = resolvedScopes.getOrElse(m.id, Set.empty[NodeId])
       effective = restriction.fold(resolved)(r => resolved.intersect(r))
       nodeId <- effective
     } yield nodeId -> m
@@ -129,14 +133,15 @@ object MitigationApplication {
     * result revalidates through `RiskTree.fromNodes` (errors accumulate). */
   def effectiveTree(
     tree: RiskTree,
-    selection: MitigationSelection
+    selection: MitigationSelection,
+    resolvedScopes: Map[MitigationId, Set[NodeId]]
   ): Validation[ValidationError, RiskTree] = {
-    val perNode = scoped(tree, selection)
+    val perNode = scoped(tree, selection, resolvedScopes)
 
     val newNodesV: Validation[ValidationError, List[RiskNode]] =
       Validation.validateAll(tree.nodes.toList.map {
         case leaf: RiskLeaf =>
-          perNode.get(leaf.id).map(_.collect { case Mitigation(_, _, _, MitigationSpec.LeafStage(t, _), _) => t }) match {
+          perNode.get(leaf.id).map(_.collect { case Mitigation(_, _, _, MitigationSpec.LeafStage(t, _, _), _) => t }) match {
             case Some(transforms) if transforms.nonEmpty =>
               transforms.foldLeft(Validation.succeed(leaf): Validation[ValidationError, RiskLeaf]) {
                 (accV, t) => accV.flatMap(l => RiskLeafTransform.applyTo(t, l))
@@ -169,61 +174,16 @@ object MitigationApplication {
     * application actually touched under this tree version and selection. */
   def applicationRecords(
     tree: RiskTree,
-    selection: MitigationSelection
+    selection: MitigationSelection,
+    resolvedScopes: Map[MitigationId, Set[NodeId]]
   ): List[MitigationApplicationRecord] = {
-    val perNode = scoped(tree, selection)
+    val perNode = scoped(tree, selection, resolvedScopes)
     perNode.toList
       .flatMap { case (nodeId, ms) => ms.map(_ -> nodeId) }
       .groupMap(_._1)(_._2)
       .map { case (m, nodes) => MitigationApplicationRecord(m.id, m.spec, nodes.toSet, m.precedence) }
       .toList
       .sortBy(r => (r.precedence.key, r.mitigationId.value))
-  }
-
-  /** Staleness layer 4 (nonsense check): Override mitigations whose asserted
-    * post-mitigation state is not better than the target leaf's current base —
-    * higher occurrence probability, or a stochastically-not-lower loss
-    * distribution of the same representation (both lognormal bounds, or every
-    * expert quantile over identical percentiles, at or above the base with at
-    * least one strictly above). Cross-representation overrides are not
-    * comparable and are never flagged. */
-  def worseningOverrides(tree: RiskTree): Set[MitigationId] =
-    tree.mitigations.collect {
-      case m @ Mitigation(_, _, MitigationTarget.Nodes(ids), MitigationSpec.LeafStage(t, _), _)
-          if ids.size == 1 =>
-        tree.index.nodes.get(ids.head) match {
-          case Some(leaf: RiskLeaf) if overrideWorsens(t, leaf) => Some(m.id)
-          case _                                                => None
-        }
-    }.flatten.toSet
-
-  private def overrideWorsens(t: RiskLeafTransform, leaf: RiskLeaf): Boolean = {
-    val likelihoodWorse = t.likelihood match {
-      case LikelihoodTransform.Override(p) => (p: Double) > (leaf.probability: Double)
-      case _                               => false
-    }
-    val distributionWorse = t.distribution match {
-      case DistributionTransform.Override(p) if p.distributionType.toString == leaf.distributionType.toString =>
-        p.distributionType.toString match {
-          case "lognormal" =>
-            (p.minLoss, p.maxLoss, leaf.minLoss, leaf.maxLoss) match {
-              case (Some(nMin), Some(nMax), Some(bMin), Some(bMax)) =>
-                (nMin: Long) >= (bMin: Long) && (nMax: Long) >= (bMax: Long) &&
-                  ((nMin: Long) > (bMin: Long) || (nMax: Long) > (bMax: Long))
-              case _ => false
-            }
-          case _ =>
-            (p.percentiles, p.quantiles, leaf.percentiles, leaf.quantiles) match {
-              case (Some(nP), Some(nQ), Some(bP), Some(bQ))
-                  if nP.sameElements(bP) && nQ.length == bQ.length =>
-                val pairs = nQ.toSeq.lazyZip(bQ.toSeq).toSeq
-                pairs.forall { case (n, b) => n >= b } && pairs.exists { case (n, b) => n > b }
-              case _ => false
-            }
-        }
-      case _ => false
-    }
-    likelihoodWorse || distributionWorse
   }
 
   private def inPrecedenceOrder(ms: List[Mitigation]): List[Mitigation] =

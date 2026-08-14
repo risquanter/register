@@ -36,6 +36,13 @@ been used as a rationalization; they are pre-refuted:
 - "Tests are green" / "the outcome is correct" — outcome does not cure process.
 - "The halt would be noise" — the noise filter below applies only to whether
   something is a G2 decision; it never applies to G1, G4, or G6.
+- "The plan wording is loose / informal / just a comment" — behavioural
+  wording in an approved plan (prose, docstrings, comments inside its code
+  blocks) is specification. A spec–code divergence resolves by provenance:
+  no ruling authorizing the code's behaviour → the code is the deviation
+  (G2/G7). Editing the plan to match unapproved code is a violation, not a
+  doc sweep — and a reviewer characterizing the mismatch as a doc problem
+  does not authorize that direction.
 
 ### Plan Quality Gate (part of G3)
 

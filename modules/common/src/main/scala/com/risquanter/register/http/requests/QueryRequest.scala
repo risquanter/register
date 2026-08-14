@@ -1,9 +1,9 @@
 package com.risquanter.register.http.requests
 
 import zio.json.{DeriveJsonCodec, JsonCodec}
-import fol.parser.VagueQueryParser
-import fol.logic.ParsedQuery
-import fol.error.QueryError
+import vql.parser.VagueQueryParser
+import vql.logic.ParsedQuery
+import vql.error.QueryError
 
 /** Request body for vague-quantifier query evaluation.
   *
@@ -20,7 +20,7 @@ object QueryRequest:
   /** Inbound parse boundary (ADR-001 §1 — parse-don't-validate).
     *
     * Wraps `VagueQueryParser.parse()` — the library's syntactic parser.
-    * Returns the library's `fol.error.QueryError` on failure (not register's
+    * Returns the library's `vql.error.QueryError` on failure (not register's
     * `FolQueryFailure`); the controller maps the error type at the wiring
     * layer, keeping this DTO free of `AppError` dependencies.
     *

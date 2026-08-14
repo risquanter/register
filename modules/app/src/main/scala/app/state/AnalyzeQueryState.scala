@@ -9,8 +9,8 @@ import com.risquanter.register.domain.errors.FolQueryFailure.*
 import com.risquanter.register.http.endpoints.WorkspaceQueryEndpoints
 import com.risquanter.register.http.requests.QueryRequest
 import com.risquanter.register.http.responses.QueryResponse
-import fol.error.QueryError
-import fol.parser.VagueQueryParser
+import vql.error.QueryError
+import vql.parser.VagueQueryParser
 
 /** Reactive state for the Analyze view query pane (ADR-028).
   *
@@ -54,7 +54,7 @@ final class AnalyzeQueryState(
   /** When true, parse validation runs on every keystroke (debounced 300ms). */
   val instantValidate: Var[Boolean] = Var(false)
 
-  val parseResult: Var[Option[Either[QueryError, fol.logic.ParsedQuery]]] = Var(None)
+  val parseResult: Var[Option[Either[QueryError, vql.logic.ParsedQuery]]] = Var(None)
 
   /** Run the parser against the current input and update parseResult. */
   def validateNow(): Unit =

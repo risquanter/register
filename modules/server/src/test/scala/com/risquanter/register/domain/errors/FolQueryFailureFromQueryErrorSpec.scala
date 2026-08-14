@@ -2,8 +2,7 @@ package com.risquanter.register.domain.errors
 
 import zio.test.*
 
-import fol.error.QueryError as QE
-import fol.datastore.RelationName
+import vql.error.QueryError as QE
 
 /** Tests for [[FolQueryFailure.fromQueryError]] — the centralised mapping
   * from fol-engine's `QueryError` algebra to register's error hierarchy.
@@ -53,28 +52,11 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
   // ── Schema/symbol errors → FolUnknownSymbol ─────────────────────────
 
   private val unknownSymbolSuite = suite("→ FolUnknownSymbol")(
-    test("RelationNotFoundError preserves relation name and available list") {
-      val err = QE.RelationNotFoundError(
-        RelationName("foo"),
-        Set(RelationName("leaf"), RelationName("portfolio"))
-      )
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolUnknownSymbol(sym, avail) =>
-          assertTrue(sym == "foo", avail.toSet == Set("leaf", "portfolio"))
-        case other => throw MatchError(other)
-    },
     test("UninterpretedSymbolError preserves symbol name") {
       val err = QE.UninterpretedSymbolError("predicate", "unknown_pred", Set("leaf", "portfolio"))
       FolQueryFailure.fromQueryError(err) match
         case FolQueryFailure.FolUnknownSymbol(sym, avail) =>
           assertTrue(sym == "unknown_pred", avail.toSet == Set("leaf", "portfolio"))
-        case other => throw MatchError(other)
-    },
-    test("SchemaError maps to FolUnknownSymbol with empty available") {
-      val err = QE.SchemaError("Arity mismatch", RelationName("leaf"), expectedArity = 1, actualArity = 2)
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolUnknownSymbol(sym, avail) =>
-          assertTrue(sym == "leaf", avail.isEmpty)
         case other => throw MatchError(other)
     }
   )
@@ -208,20 +190,6 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
       FolQueryFailure.fromQueryError(err) match
         case FolQueryFailure.FolEvaluationFailure(_, phase) =>
           assertTrue(phase == "resource")
-        case other => throw MatchError(other)
-    },
-    test("DataStoreError maps with phase 'data_store'") {
-      val err = QE.DataStoreError("Read failed", "lookup")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "data_store")
-        case other => throw MatchError(other)
-    },
-    test("PositionOutOfBoundsError maps with phase 'position_bounds'") {
-      val err = QE.PositionOutOfBoundsError("Out of bounds", RelationName("leaf"), arity = 1, position = 5)
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "position_bounds")
         case other => throw MatchError(other)
     },
     test("UnboundVariableError maps with phase 'unbound_variable'") {

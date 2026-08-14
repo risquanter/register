@@ -16,6 +16,12 @@ type SafeShortStr = String :| (Not[Blank] & MaxLength[50])
 // Extra short strings (e.g., for tags, codes)
 type SafeExtraShortStr = String :| (Not[Blank] & MaxLength[20])
 
+// Targeting predicate source text: a bare single-free-variable FOL formula.
+// The 256 ceiling bounds parser work on stored and wire text; full validity
+// (parse, targeting-fragment membership, exactly one free variable, no
+// mitigation-state predicates) is enforced by TargetingPredicate.create.
+type TargetingSource = String :| (MinLength[1] & MaxLength[256])
+
 // Email with format validation (whitelist regex: local-part, @, domain with TLD)
 type ValidEmail = String :| (Not[Blank] & MaxLength[50] & Match["^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,}$"])
 

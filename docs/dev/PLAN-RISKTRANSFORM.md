@@ -387,7 +387,7 @@ changes**.
 | **M1** | Domain model: renames, reified transform specs, `Mitigation` entity, tree-level collection + codecs, pure application algebra | `common` (+ tests) | nothing |
 | **M2** | Persistence + resolution: Irmin storage paths, resolver-edge wiring (effective tree, result-stage application), mitigation-application record, override staleness detection | `server` (+ tests, server-it) | M1 |
 | **M3** | VQL targeting & analytics: `Predicate` target variant, targeting-sublanguage validation, scope resolution via `satisfyingSet`, KB schema (`Mitigation` sort, `mitigate`, precomputed `mitigated`/`unmitigated`), KB memoization (P-2/P-3), engine version bump | `common`, `server`, `build.sbt` | M1, M2, engine AC-1…AC-10 delivered |
-| **M4** | API surface + frontend: tree-PUT mitigation buckets, LEC endpoint selection parameter + mitigation-provenance layer in responses, mitigation selection UI (see OD-3), two-tier badges, override edit-popup + stale badge + nonsense check | `common`, `server`, `app` | M1–M3 (badges/selection UI need only M1–M2; predicate-scope UI needs M3) |
+| **M4** | API surface + frontend: tree-PUT mitigation buckets, LEC endpoint selection parameter + mitigation-provenance layer in responses, mitigation selection UI (see OD-3), two-tier badges, override edit-popup + stale badge | `common`, `server`, `app` | M1–M3 (badges/selection UI need only M1–M2; predicate-scope UI needs M3) |
 | **M5** | Mitigation-aware change visibility: problem space recorded in §7.7 — **no design yet, planned only after M1–M4 have landed** (user ruling on OD-4, 2026-08-08) | TBD | M1–M4 landed |
 
 **Staging superseded for targeting (2026-08-10):** §8.2 is the
@@ -660,7 +660,7 @@ final case class RiskTree(
 
 New file `domain/data/MitigationApplication.scala` — the monoid action
 `Mits × Tree → Tree`, in `common` so the frontend can later preview
-effective parameters and run the nonsense check client-side:
+effective parameters client-side:
 
 ```scala
 /** Which mitigations to apply, each optionally restricted to a subset of its scope
@@ -699,11 +699,6 @@ object MitigationApplication {
   /** Applications performed for a resolution — the D-4 records (resolvedScope = the
     * target sets as resolved against this tree version). */
   def applicationRecords(tree: RiskTree, selection: MitigationSelection): List[MitigationApplicationRecord]
-
-  /** Staleness layer 4 (nonsense check): overrides that make the node's expected severity
-    * or likelihood strictly worse than its current base. Diagnostic predicate (not part of
-    * the action); platform-neutral inputs, so it stays here. */
-  def worseningOverrides(tree: RiskTree): Set[MitigationId]
 }
 ```
 
@@ -748,7 +743,7 @@ private[data] def validateModeFields(
   accumulation paths); codec round-trip; precedence ordering incl. tiebreak.
 - New `MitigationApplicationSpec`: `scoped` ordering; `effectiveTree` closure +
   Override absorption + baseline/final preset semantics; `resultTransformFor`
-  composition order; `worseningOverrides`. (Staleness tests are M2 —
+  composition order. (Staleness tests are M2 —
   `MitigationStaleness` lives server-side, OD-6.)
 - `RiskTree` codec: old-format JSON (no `mitigations` key) decodes to `Nil`;
   round-trip with mitigations; `fromNodes` rejects dangling target ids,
@@ -908,7 +903,7 @@ memoization into M2; the remaining M3 scope is listed in §8.2.
   variant only, baseline shows raw);
   toggle↔curve colour consistency; two-tier badges (directly-scoped solid,
   affected-by-descendant faint + tooltip); override edit-popup flow (ADR-019
-  Pattern 6 state machine) + stale badge + nonsense check surfacing; ADR-019
+  Pattern 6 state machine) + stale badge surfacing; ADR-019
   ownership rules throughout.
 - **Semantic diff**: `ChangedNodesService` compares node domain hashes only —
   a mitigation edit changes results without changing any node hash. Ruled
@@ -1065,6 +1060,22 @@ M1/M2 files (M3/M4 files are appended here when §7.5/§7.6 are approved):
 - `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala`
 - `build.sbt`
 
+M1R adds (engine adoption + predicate targeting, §8.6):
+
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/TargetingPredicate.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/TargetingPredicateSpec.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/QueryRequest.scala`
+- `modules/app/src/main/scala/app/state/AnalyzeQueryState.scala`
+- `modules/server/src/main/scala/com/risquanter/register/foladapter/QueryResponseBuilder.scala`
+- `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryService.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
+- `modules/server/src/test/scala/com/risquanter/register/domain/errors/FolQueryFailureFromQueryErrorSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/BinderIntegrationSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/QueryResponseBuilderSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala`
+
 ### Open decisions
 
 Status after the 2026-08-08 review session:
@@ -1159,8 +1170,7 @@ Status after the 2026-08-08 review session:
      diagnostic predicate `Tree → Set[MitigationId]` comparing a stored
      fingerprint with a recomputed one. Moving it severs no algebraic
      structure; `MitigationApplication` keeps the complete action
-     (`scoped`/`effectiveTree`/`resultTransformFor`/`applicationRecords`)
-     plus the platform-neutral `worseningOverrides`.
+     (`scoped`/`effectiveTree`/`resultTransformFor`/`applicationRecords`).
   4. **Its only caller is server-side by architecture.** Staleness is
      computed in HTTP handlers (ADR-030 orchestration boundary) and shipped
      as `staleMitigationIds` in payloads; the client renders, never computes.
@@ -1203,7 +1213,9 @@ one authorized deviation: AC-9 superseded — untyped backend retired). It
 supersedes §7.1's `MitigationTarget.Nodes` design and absorbs most of the
 former M3 targeting scope.
 
-**Delivered contract assumed (vql-engine 0.11.0):**
+**Delivered contract (vql-engine 0.13.1 — see §8.6 for the exact surface and
+the single 0.10.2 → 0.13.1 pin bump; the 0.11.0 baseline below is retained as
+the design-time assumption):**
 
 - Typed path only; cross-compiled (JVM + Scala.js) — the parser and
   free-variable utilities are available in `common`/browser.
@@ -1232,8 +1244,10 @@ client-supplied node enumeration.
   *    fragment membership, §8.4-3 — auxiliary-sort quantifiers become
   *    admissible at M3 via the P-1 bind-time sort rule)
   *  - predicate whitelist: structural/attribute predicates only — the
-  *    mitigation-state predicates (`mitigate`, `mitigated`) are rejected
-  *    (self-reference/fixpoint exclusion, §6)
+  *    mitigation-state predicates (`mitigate`, `mitigated`, `unmitigated`)
+  *    are rejected case-insensitively (self-reference/fixpoint exclusion, §6).
+  *    At M3 the KB is the authority — it marks its own predicates
+  *    non-targetable, superseding this hardcoded set.
   * Wire format: the source string. The parsed formula is derived state,
   * never serialized. */
 final case class TargetingPredicate private (source: TargetingSource)
@@ -1400,8 +1414,10 @@ apply-at-anchor, ruled (§8.4-4).
 **Size bounds (F4 residue, absorbed here).** With enumeration gone, the
 remaining wire bounds are small and land with the rework:
 `TargetingSource` MaxLength 256; `RiskTree.mitigations` max 1000;
-`TransformPipeline.steps` max 100 — all three as Iron literals (values +
-vehicle ruled 2026-08-10, §8.4-2). `ScopeRestriction.NodesOnly` (selection,
+`TransformPipeline.steps` max 10 (revised from 100, user 2026-08-14: a
+realistic pipeline stacks at most one of each of the five op types, so 10 is
+a guard-rail ceiling with headroom, not a modeling maximum) — values ruled
+2026-08-10, §8.4-2; count bounds enforced in validators per M1R-D1. `ScopeRestriction.NodesOnly` (selection,
 request-scoped display state, M4) gets its bound in the M4 elevation.
 
 ### 8.2 Phase rework map
@@ -1444,7 +1460,7 @@ and D5 (§4) remain open by design (decided at first mitigation wiring /
 M4 elevation respectively).
 
 1. **Override target anchoring.** The 4-layer staleness stack (stamp /
-   edit popup / stale badge / nonsense check) and the stamp's meaning
+   edit popup / stale badge) and the stamp's meaning
    (ContentHash of the target leaf's DD-16 projection at authoring time —
    renames excluded by construction) are DECIDED and not reopened here.
    The only new question predicate-first targeting introduces is how the
@@ -1505,7 +1521,7 @@ M4 elevation respectively).
    anchor at the moment of writing.
 2. **Bounds numbers** (§8.1). **RULED (user, 2026-08-10): values
    confirmed (`RiskTree.mitigations` max 1000, `TransformPipeline.steps`
-   max 100), enforced as Iron literals** — the codebase's uniform vehicle
+   max 10 — revised from 100, user 2026-08-14), enforced as Iron literals** — the codebase's uniform vehicle
    for persisted-content and wire validity bounds (every `MaxLength`
    refinement in `iron/OpaqueTypes.scala`; the 256-char `TargetingSource`
    bound is already Iron by the same ruling). Runtime configuration (the
@@ -1601,4 +1617,292 @@ path. The fragment-membership API (§8.4-3, ruled engine-side) is a second
 sibling deliverable: a small engine release after 0.11.0 (0.11.x), needed
 by the register write-path validation at M2/M3 — not on the M1R critical
 path, but its engine-plan slot should be scheduled alongside the 0.11.0
-work.
+work. **DELIVERED — see §8.6:** the fragment API shipped in vql 0.12.0 as
+`vql.fragment.FragmentCheck`; M1R uses it in `TargetingPredicate.create`.
+
+### 8.6 M1R implementation-grade elevation (2026-08-13)
+
+**Engine delivered — supersedes the "0.11.0 assumed" header above.**
+vql-engine **0.13.1** is on Maven Central (first-party; cooldown-exempt,
+ADR-020 §10). One release now carries the whole accumulated delta: formula
+ranges + `satisfyingSet` (0.11.0), the fragment-membership API (0.12.0), and
+the `fol.* → vql.*` package rename (0.13.0). Register adopts it in a **single
+pin bump 0.10.2 → 0.13.1** (Decision 1 "absorb"; Decision 2 "target the
+`vql.*` layout" — both ruled by the user 2026-08-13, so M1R is written against
+the final package names, no intermediate `fol.*` pin). The engine surface M1R
+consumes:
+
+- Foundation (unchanged by the rename — top-level packages, cross-compiled to
+  JS): `parser.FOLParser.parse(s: String): Either[parser.ParseError,
+  Formula[FOL]]`; `logic.{Formula, FOL, Term}`;
+  `logic.FOLUtil.fvFOL(fm: Formula[FOL]): List[String]`.
+- Vague layer (now under `vql.*`): `vql.fragment.{Fragment, FragmentCheck,
+  FragmentViolation}` with `FragmentCheck.check(formula: Formula[FOL],
+  fragment: Fragment): Either[FragmentViolation, Unit]`;
+  `vql.semantics.VagueSemantics.satisfyingSet` (M2 resolver, not M1R);
+  `vql.error.QueryError`; `vql.typed.*`; `vql.parser.VagueQueryParser`;
+  `vql.logic.ParsedQuery`.
+
+**M1R lands as two green steps.** Each closes with the full suite green
+(commonJVM + server + app + serverIt + BATS C); Step A is green before Step B
+begins.
+
+#### Step A — Engine adoption (pin bump + migration; no behaviour change)
+
+- `build.sbt`: `vqlEngineVersion` `"0.10.2"` → `"0.13.1"`; project version
+  PATCH bump; first-party cooldown-waiver comment at the pin site (ADR-020 §10,
+  `vql-engine`, user-approved 2026-08-09). `APP_VERSION` mirrored to `.env` and
+  `.env.irmin`.
+- `import fol.* → import vql.*` across the 11-file foladapter surface (map
+  below). Foundation imports (`parser`, `logic`) are untouched.
+- `AppError.fromQueryError`: change `import fol.error.QueryError as QE` →
+  `import vql.error.QueryError as QE`, and delete the four arms for variants
+  removed in 0.11.0 — `RelationNotFoundError`, `SchemaError`, `DataStoreError`,
+  `PositionOutOfBoundsError`. The remaining 18 arms are unchanged and the match
+  stays exhaustive (verified against `vql.error.QueryError` at 0.13.1).
+- `FolQueryFailureFromQueryErrorSpec`: drop `import fol.datastore.RelationName`
+  (package deleted in 0.11.0), remove the cases constructing the four deleted
+  variants, rewrite remaining imports to `vql.*`.
+
+| File | Rewrite |
+|---|---|
+| `modules/app/src/main/scala/app/state/AnalyzeQueryState.scala` | fol.error→vql.error; fol.parser→vql.parser |
+| `modules/common/src/main/scala/com/risquanter/register/http/requests/QueryRequest.scala` | fol.parser→vql.parser; fol.logic→vql.logic; fol.error→vql.error |
+| `modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala` | fol.error→vql.error (+ prune 4 arms) |
+| `modules/server/src/main/scala/com/risquanter/register/foladapter/QueryResponseBuilder.scala` | fol.result→vql.result; fol.typed→vql.typed |
+| `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala` | fol.typed→vql.typed |
+| `modules/server/src/main/scala/com/risquanter/register/services/QueryService.scala` | fol.logic→vql.logic |
+| `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala` | fol.logic/semantics/sampling/typed→vql.* |
+| `modules/server/src/test/scala/com/risquanter/register/domain/errors/FolQueryFailureFromQueryErrorSpec.scala` | prune + vql.*; drop fol.datastore |
+| `modules/server/src/test/scala/com/risquanter/register/foladapter/BinderIntegrationSpec.scala` | fol.parser/semantics/sampling/typed→vql.* |
+| `modules/server/src/test/scala/com/risquanter/register/foladapter/QueryResponseBuilderSpec.scala` | fol.result/typed/quantifier/sampling→vql.* |
+| `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala` | fol.typed→vql.typed |
+
+#### Step B — Predicate-targeting domain rework (§8.1 signatures made exact)
+
+`iron/OpaqueTypes.scala` — new refined type:
+```scala
+type TargetingSource = String :| (MinLength[1] & MaxLength[256])
+```
+
+`domain/data/TargetingPredicate.scala` (NEW):
+```scala
+final case class TargetingPredicate private (source: TargetingSource)
+object TargetingPredicate:
+  /** Boundary validation (cross-compiled — runs in browser and server), two
+    * phases (M1R-D2 RULED user 2026-08-14: gate short-circuits, formula checks
+    * accumulate):
+    *  - GATE (short-circuit, each step needs the prior's output):
+    *    1. length-refine `source` into `TargetingSource` (also bounds the parser input);
+    *    2. `parser.FOLParser.parse(source)` (Either-returning) — parse failure → ValidationError;
+    *  - FORMULA CHECKS (accumulate via `Validation.validateWith`, independent walks over the parsed formula):
+    *    3. `FragmentCheck.check(formula, Fragment.Targeting)` — no quantifiers, no function terms;
+    *    4. `logic.FOLUtil.fvFOL(formula)` — exactly one free variable;
+    *    5. no `mitigate` / `mitigated` atom predicate (self-reference exclusion, §6).
+    * The parsed `Formula` is derived state; only `source` is stored/serialized. */
+  def create(source: String): Validation[ValidationError, TargetingPredicate]
+  given JsonCodec[TargetingPredicate]   // decode = create (boundary validation)
+  given Schema[TargetingPredicate]
+```
+
+`domain/data/Mitigation.scala` — `MitigationTarget` rework and the override anchor:
+```scala
+sealed trait MitigationTarget
+object MitigationTarget:
+  final case class Predicate(predicate: TargetingPredicate) extends MitigationTarget
+  // Nodes(Set[NodeId]) REMOVED (§8.4-1 = C)
+
+final case class LeafStage(               // in object MitigationSpec
+  transform: RiskLeafTransform,
+  overrideBaseStamp: Option[ContentHash],
+  overrideAnchor: Option[NodeId]          // required iff `transform` has an Override component
+) extends MitigationSpec
+```
+`Mitigation.create` (signature unchanged) cross-field rules become:
+LeafStage + Override component ⇒ `overrideBaseStamp` AND `overrideAnchor` both
+defined; LeafStage without an Override ⇒ both empty. The former "target
+non-empty" and "Override ⇒ single-node target" rules are deleted (targeting is
+a predicate; the single leaf is `overrideAnchor`).
+
+`domain/data/MitigationApplication.scala` — the algebra takes resolved scopes
+as a lookup table instead of reading ids off the mitigation:
+```scala
+def scoped(tree: RiskTree, selection: MitigationSelection,
+           resolvedScopes: Map[MitigationId, Set[NodeId]]): Map[NodeId, List[Mitigation]]
+def effectiveTree(tree: RiskTree, selection: MitigationSelection,
+                  resolvedScopes: Map[MitigationId, Set[NodeId]]): Validation[ValidationError, RiskTree]
+def resultTransformFor(nodeId: NodeId, scoped: Map[NodeId, List[Mitigation]]): RiskResultTransform  // unchanged
+def applicationRecords(tree: RiskTree, selection: MitigationSelection,
+                       resolvedScopes: Map[MitigationId, Set[NodeId]]): List[MitigationApplicationRecord]
+```
+`scoped` reads each enabled mitigation's node set from
+`resolvedScopes.getOrElse(m.id, Set.empty)` (was `m.target match { Nodes(ids) => ids }`);
+the `ScopeRestriction.NodesOnly` intersect is unchanged.
+
+`domain/data/RiskTree.scala` — `validateMitigations` drops the
+target-resolves-in-index and LeafStage-targets-leaves checks (resolution is
+server-side now; the §8.1 stage-domain definition supersedes the write-time
+leaf rule); keeps unique ids/names; predicate parse-level validity is already
+enforced by `TargetingPredicate.create` at decode. Collection-count bound: see
+M1R-D1.
+
+**8.6.1 ADR alignment (M1R delta).**
+- ADR-020 — pin exact; first-party cooldown waiver comment at the pin site.
+  Engine bump triggers the graalvm-builder rebuild + BATS revalidation
+  (ADR-026); "done" includes green BATS C.
+- ADR-029 — the targeting predicate is a new parser boundary; **its table row
+  lands in this pass** (parsed once by `FOLParser`, never interpolated;
+  fragment-membership + single-free-var + `mitigate`/`mitigated` exclusion
+  enforced at the boundary).
+- ADR-001/010 — `TargetingPredicate.create` validates at the boundary
+  (decode = create), errors accumulated; server receives validated types;
+  storage re-parse on read is the same boundary (§8.1).
+- ADR-033 — parse + fragment check are `Either`-returning; no new catches.
+- ADR-018 — `MitigationId` wrapper unchanged; `TargetingSource` is an Iron
+  opaque refinement (ADR-001). No new deviations.
+
+**8.6.2 Decisions (M1R) — all ruled.**
+- **M1R-D1 — vehicle for the collection-count bounds** (`RiskTree.mitigations`
+  ≤ 1000, `TransformPipeline.steps` ≤ 10). **RULED (2026-08-13): validator.**
+  The mitigations bound is enforced in `RiskTree.validateMitigations` (already
+  the materialization boundary, re-run on every read). The steps bound is
+  enforced in `Mitigation.create` (user ruling 2026-08-14: keep the current
+  design), the sole materialization boundary for a result-stage pipeline — a
+  `ResultStage` exists only inside a `Mitigation`, so every persisted/wire
+  pipeline passes through `create`. It is NOT in a `TransformPipeline` smart
+  constructor: `TransformPipeline` is a monoid whose `combine` (`l.steps ++
+  r.steps`) must stay total, so a validating constructor there would need an
+  unsafe internal path that partly negates the guarantee. The fields stay plain
+  `Seq`/`List`. Reifying the bound as
+  an Iron `MaxLength` field type is **deferred to §9 Lever 2**, where it is
+  applied uniformly across all tree collections (never mitigations-only). The
+  "unbypassable" property §8.4-2 cares about is delivered by §9 Lever 1
+  (private aggregate constructor), not by the field type — reifying before the
+  constructor is closed buys little, and a mitigations-only refinement would be
+  a half-refined domain.
+- **M1R-D2 — error-reporting shape of `TargetingPredicate.create`.** **RULED
+  (user, 2026-08-14): gate short-circuits, formula checks accumulate.** Length
+  and parse form a short-circuit gate (each needs the prior's output, and the
+  length refine bounds the string the parser sees); once parsed, the three
+  independent formula checks (fragment membership, single free variable, no
+  mitigation-state predicate) accumulate via `Validation.validateWith`, so an
+  authoring form surfaces every formula-level problem in one round. Conforms to
+  ADR-010 (accumulate independent, sequence dependent). The earlier plan
+  wording "errors accumulated" was imprecise about the gate; this ruling is the
+  precise form.
+
+No other open decisions in M1R; plan-wide D4/D5 remain open by design.
+
+**8.6.3 Verification plan (M1R).** Full suite green (the commands under
+"Verification plan" above) at the end of BOTH Step A and Step B. New/changed
+tests:
+- `TargetingPredicateSpec` (NEW): accept a well-formed predicate; reject blank
+  and > 256 chars; reject a quantifier; reject a function term; reject > 1 free
+  variable; reject `mitigate` / `mitigated`.
+- `MitigationEntitySpec`: retargeted from `Nodes` to `Predicate` +
+  `overrideAnchor` cross-field rules.
+- `MitigationApplicationSpec`: `scoped` / `effectiveTree` driven by a
+  `resolvedScopes` lookup table.
+- `FolQueryFailureFromQueryErrorSpec`: four deleted-variant cases removed;
+  remainder green under `vql.error`.
+- BATS C after the engine bump.
+
+**8.6.4 Review findings & dispositions (routine + scoped complex review, 2026-08-14).**
+Both review tiers ran on the M1R diff. Dispositions:
+- **Done in M1R:**
+  - *Finding 6 (free-var message):* the "more than one free variable" rejection
+    now hints that unquoted words are variables and literal values must be
+    quoted. Test added.
+  - *Finding 1 + Finding 4 (`unmitigated` gap, case-sensitivity) — user ruling
+    2026-08-14:* `reservedPredicates` now includes `unmitigated`, matched
+    case-insensitively, so `unmitigated(x)` / `Mitigated(x)` are rejected at
+    authoring alongside `mitigate`/`mitigated`. This completes the correctness
+    of M1R's own reserved-name check (it was arbitrary while `mitigated` was
+    reserved but its complement was not). The general mechanism lives at M3:
+    the KB marks its own predicates non-targetable and supersedes this
+    hardcoded set. Tests added.
+- **Resolved by deletion (user ruling 2026-08-14):** Findings 2 and 5 both
+  concerned the worsening-override diagnostic; it is deleted in full (code,
+  tests, plan/doc references). `overrideAnchor` is retained for M2 staleness.
+- **Deferred to M2/M4 — REQUIRED, not optional (user ruling 2026-08-14):**
+  - *Finding 3 → M2/M4:* `MitigationApplicationRecord`'s derived codec
+    re-validates nothing, so a tampered record (e.g. an 11-step pipeline)
+    decodes cleanly. Latent today — nothing decodes these records from an
+    untrusted source; they are display/provenance only. **Required deliverable
+    of whichever phase first gives the record an inbound decode path (client
+    resubmit or persist-and-reload):** a validating decoder (`mapOrFail`
+    re-running the two spec rules — step limit and Override stamp/anchor).
+    Landing that decode path without this re-check is a defect, not a choice.
+- **No change (ruled design) — user ruling 2026-08-14, D1 = Option A:** the
+  targeting boundary stays structural; typeless atoms (`x = x` select-all,
+  `x > 5`, `x = "Ransomware"`) are accepted at authoring, and sort errors are
+  caught by the typed bind at M3 resolution — which reuses the existing
+  `satisfyingSet` + KB path, no new checker (§8.4-3 enforcement-locus ruling;
+  P-1 bind-time sort rule). Early authoring-time feedback, if wanted, is an M3
+  server-side validate round-trip (the form asks the server), never a
+  client-side duplicate of the KB. Confirmed by the scoped review: the fragment
+  grammar already excludes every function/arithmetic term.
+
+## 9. Domain-invariant hardening (immediate follow-up to M1R)
+
+**Motivation (surfaced by M1R's bounds work, 2026-08-13).** Two gaps, both
+pre-existing, neither introduced by M1R:
+1. `RiskTree` and `TreeIndex` are the **only two aggregate types with public
+   constructors** — `RiskLeaf`, `RiskPortfolio`, `Mitigation`,
+   `ResultTransformSpec`, `RiskLeafTransform`, `LossDistribution` all use
+   `private` + a smart constructor. So every invariant `RiskTree.fromNodes` /
+   `TreeIndex.fromNodes` validates (unique ids, root-exists, and the new
+   mitigation/step counts) is **bypassable** via `apply` / `.copy`.
+2. **No HTTP request body-size limit is configured** (none found in
+   `modules/server/src/main`), so an oversized payload is fully decoded and
+   allocated *before* any bound check runs — the field-level bound (Iron or
+   validator) rejects it only post-allocation.
+
+Three levers, in descending value. This is a **new phase with its own
+implementation-grade elevation, file inventory, and hook token** — it does NOT
+ride M1R's approval. Sequenced immediately after M1R.
+
+**Lever 1 — Close the aggregate constructors (highest value).** Make
+`RiskTree` and `TreeIndex` `final case class … private`, matching the rest of
+the domain. `fromNodes` / `fromNodesUnsafe` become the sole gates, so ALL their
+invariants — including the M1R count bounds sitting in `validateMitigations` —
+become unbypassable at every construction site (`apply`, `.copy`, internal
+builders, merges). Route the direct `RiskTree(...)` / `TreeIndex(...)`
+construction sites (the ~7 in tests) through the smart constructors /
+`fromNodesUnsafe`. **Compile-verification gate:** confirm the tapir `Schema`
+auto-derivation (`generic.auto.*`) + zio-json codec still compile with a private
+primary constructor; if they do not, switch `RiskTree`/`TreeIndex` to an
+explicit `Schema` (`Schema.any` or hand-derived) — the pattern `Mitigation`
+already uses. Verify green before committing the lever (convention-vs-hygiene
+rule).
+
+**Lever 2 — Reify tree-level collection bounds as Iron `MaxLength` types
+(defense-in-depth; uniform or not at all).** Introduce `MaxLength`-refined
+collection types for EVERY tree-level collection in one pass — `RiskTree.nodes`
+and the `TreeIndex` maps, `RiskTree.mitigations`, `TransformPipeline.steps`,
+`RiskPortfolio.children`, `RiskLeaf.percentiles`/`quantiles` — never a subset
+(a half-refined domain is worse than a uniformly validated one). With Lever 1
+in, the marginal value is defense through `fromNodesUnsafe` and internal
+builders. Empty defaults become named safe-empty constants. First collection
+refinement in the codebase — verify Iron collection `MaxLength` + zio-json +
+Scala.js compile. Lowest-value lever; adopt only if the type-advertised bound is
+judged worth the friction over Levers 1+3.
+
+**Lever 3 — Bound the pre-allocation DoS at the transport boundary (the real
+attacker-facing control).** Configure an HTTP request body-size limit in the
+zio-http / tapir server so an oversized payload is rejected before the decoder
+allocates it. This is the ONLY lever that addresses the decode-time allocation
+vector, and it is independent of the type/validator layer. Locate the server
+options (appears unset — verify) and set a limit.
+
+**Open sub-decisions (resolve at elevation):**
+- Max values per collection: `nodes`, `children`, `percentiles`/`quantiles`
+  array length, body-size limit (bytes). (`mitigations` = 1000, `steps` = 10
+  already set by §8.4-2, `steps` revised 2026-08-14.)
+- Whether Lever 2 is adopted at all, or Levers 1 + 3 suffice.
+- Whether to codify "aggregate types have private constructors" as an ADR
+  (correct-by-construction rule), and add the body-size row to ADR-029.
+
+**ADR bearing:** strengthens ADR-001 / ADR-010 correct-by-construction; ADR-029
+(input/DoS defence) gains the body-size-limit control. A dedicated
+aggregate-constructor-privacy ADR is a candidate.

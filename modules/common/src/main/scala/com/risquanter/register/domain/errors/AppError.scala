@@ -226,7 +226,7 @@ case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = Non
 // ============================================================================
 
 /** Errors originating from fol-engine interaction or query preconditions.
-  * The `Fol` prefix identifies types mapped from `fol.error.QueryError`
+  * The `Fol` prefix identifies types mapped from `vql.error.QueryError`
   * (the library's error algebra); the `Failure` suffix follows the
   * `RepositoryFailure` / `SimulationFailure` naming convention (D13).
   *
@@ -235,7 +235,7 @@ case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = Non
 sealed trait FolQueryFailure extends AppError
 
 object FolQueryFailure:
-  /** Maps from `fol.error.QueryError.ParseError` / `LexicalError`.
+  /** Maps from `vql.error.QueryError.ParseError` / `LexicalError`.
     *
     * Syntactic parse failure — the query string is not well-formed FOL syntax.
     * The parser rejected the input before any semantic analysis.
@@ -250,8 +250,7 @@ object FolQueryFailure:
     override def getMessage: String =
       position.fold(message)(p => s"$message (at position $p)")
 
-  /** Maps from `fol.error.QueryError.RelationNotFoundError` /
-    * `UninterpretedSymbolError` / `SchemaError`.
+  /** Maps from `vql.error.QueryError.UninterpretedSymbolError`.
     *
     * The query is syntactically valid but references a predicate or function
     * name that does not exist in the `TypeCatalog`.
@@ -266,7 +265,7 @@ object FolQueryFailure:
     override def getMessage: String =
       s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}"
 
-  /** Maps from `fol.error.QueryError.UnknownConstantOrLiteralError`.
+  /** Maps from `vql.error.QueryError.UnknownConstantOrLiteralError`.
     *
     * The query is syntactically valid but contains a constant (e.g. a quoted
     * node name) that is not present in the `TypeCatalog` constants set. This
@@ -282,7 +281,7 @@ object FolQueryFailure:
     override def getMessage: String =
       s"Unknown reference: '$name'"
 
-  /** Maps from `fol.error.QueryError.BindError`.
+  /** Maps from `vql.error.QueryError.BindError`.
     *
     * The query is syntactically valid and all symbols are known, but the
     * typed bind phase (type-checking variable sorts against the catalog)
@@ -301,7 +300,7 @@ object FolQueryFailure:
     override def getMessage: String =
       s"Query type-checking failed: ${errors.mkString("; ")}"
 
-  /** Maps from `fol.error.QueryError.ModelValidationError`.
+  /** Maps from `vql.error.QueryError.ModelValidationError`.
     *
     * The `RuntimeModel` does not satisfy the `TypeCatalog` contract:
     * a declared function or predicate has no dispatcher implementation,
@@ -321,7 +320,7 @@ object FolQueryFailure:
     override def getMessage: String =
       s"Runtime model validation failed: ${errors.mkString("; ")}"
 
-  /** Maps from `fol.error.QueryError.DomainNotFoundError` (D14).
+  /** Maps from `vql.error.QueryError.DomainNotFoundError` (D14).
     *
     * The query attempts to quantify over a type that has no registered
     * domain in the `RuntimeModel`. In a correctly wired system this is
@@ -342,7 +341,7 @@ object FolQueryFailure:
       s"The type '$typeName' cannot be enumerated. " +
       s"Available quantifiable types: ${availableTypes.mkString(", ")}"
 
-  /** Maps from `fol.error.QueryError.EvaluationError` /
+  /** Maps from `vql.error.QueryError.EvaluationError` /
     * `ScopeEvaluationError` / `TypeMismatchError` / `TimeoutError` / etc.
     *
     * Catch-all for unexpected evaluation-phase failures that occur after
@@ -374,22 +373,20 @@ object FolQueryFailure:
     override def getMessage: String =
       s"Simulation not cached for tree ${treeId.value}"
 
-  /** Centralised mapping from library `fol.error.QueryError` to register's
+  /** Centralised mapping from library `vql.error.QueryError` to register's
     * `FolQueryFailure` hierarchy. Used by both the controller (parse errors)
     * and the service layer (evaluation errors).
     *
     * @see T2.3b mapping table in IMPLEMENTATION-PLAN-QUERY-PANE.md
     */
-  def fromQueryError(err: fol.error.QueryError): FolQueryFailure =
-    import fol.error.QueryError as QE
+  def fromQueryError(err: vql.error.QueryError): FolQueryFailure =
+    import vql.error.QueryError as QE
     err match
       // ── Parse-phase errors → 400 ────────────────────────────────
       case e: QE.ParseError               => FolParseFailure(e.message, e.position)
       case e: QE.LexicalError             => FolParseFailure(e.message, Some(e.position))
       // ── Symbol-resolution errors → 400 ──────────────────────────
-      case e: QE.RelationNotFoundError    => FolUnknownSymbol(e.relationName.value, e.availableRelations.map(_.value).toList)
       case e: QE.UninterpretedSymbolError => FolUnknownSymbol(e.symbolName, e.availableSymbols.toList)
-      case e: QE.SchemaError              => FolUnknownSymbol(e.relationName.value, Nil)
       // ── Unknown constant/literal reference → 400 ────────────────
       case e: QE.UnknownConstantOrLiteralError => FolUnknownReference(e.name)
       // ── Bind-phase type errors → 400 ────────────────────────────
@@ -407,8 +404,6 @@ object FolQueryFailure:
       case e: QE.ValidationError          => FolEvaluationFailure(e.message, "validation")
       // ── Remaining subtypes → 500 (each explicit for exhaustiveness) ─
       case e: QE.QueryStructureError      => FolEvaluationFailure(e.message, "query_structure")
-      case e: QE.DataStoreError           => FolEvaluationFailure(e.message, "data_store")
-      case e: QE.PositionOutOfBoundsError => FolEvaluationFailure(e.message, "position_bounds")
       case e: QE.UnboundVariableError     => FolEvaluationFailure(e.message, "unbound_variable")
       case e: QE.ResourceError            => FolEvaluationFailure(e.message, "resource")
       case e: QE.ConnectionError          => FolEvaluationFailure(e.message, "connection")

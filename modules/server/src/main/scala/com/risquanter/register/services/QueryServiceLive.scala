@@ -12,12 +12,12 @@ import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.cache.RiskResultResolver
 
-import fol.logic.ParsedQuery
-import fol.semantics.VagueSemantics
-import fol.sampling.{SamplingParams, HDRConfig}
-import fol.typed.FolModel
+import vql.logic.ParsedQuery
+import vql.semantics.VagueSemantics
+import vql.sampling.{SamplingParams, HDRConfig}
+import vql.typed.FolModel
 
-/** Live implementation of [[QueryService]] using the `fol.typed` many-sorted pipeline.
+/** Live implementation of [[QueryService]] using the `vql.typed` many-sorted pipeline.
   *
   * Dependencies:
   *   - `RiskTreeRepository` for tree lookups
@@ -79,7 +79,7 @@ class QueryServiceLive private (
         ).tapError(e => ZIO.logWarning(s"FolModel validation failed for tree ${treeId.value}: ${e.formatted}"))
          .mapError(e => FolQueryFailure.fromQueryError(e))
 
-        // 5. Evaluate via fol.typed pipeline
+        // 5. Evaluate via vql.typed pipeline
         queryText = parsed.toString
         _ <- tracing.setAttribute("query.text", queryText)
 

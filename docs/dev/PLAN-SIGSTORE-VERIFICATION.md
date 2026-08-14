@@ -155,17 +155,17 @@ completeness checks, real provenance, signed release tags) is governed by
 work, coordinated but not part of register's inventory.
 
 The same release pipelines also produce a SLSA build-provenance attestation
-and ship it next to each main jar as `<artifact>-<version>.jar.intoto.jsonl`
-(library-side Decision 7B, applied in the three ci-build.yml workflows). Two
-coordination points before register relies on it: (1) confirm Maven Central
-accepts the extra `.intoto.jsonl` file alongside each jar on the first release
-that carries it — it already tolerates the unchecksummed `.sigstore.json`/`.asc`
-files, so this is expected but unproven; if Central requires a checksum for
-every bundle entry, the library side adds `<file>.md5`/`.sha1` for the
-provenance file. (2) The `.intoto.jsonl` filename and the
-`cosign verify-blob-attestation` recipe in §3.2 are a first-party convention,
-not a Central standard; any change to either must be coordinated between the
-publishers and this plan.
+and ship it next to each main jar as `<artifact>-<version>.jar.intoto.jsonl`,
+applied in the ci-build.yml workflows. Two coordination points govern how
+register relies on it: (1) Maven Central rejects a bare `.intoto.jsonl` —
+unlike `.sigstore.json`/`.asc`, which it tolerates unchecksummed, the Portal
+requires `<file>.md5`, `<file>.sha1`, and a GPG `<file>.asc` for the provenance
+file or the deployment fails validation. The library side generates all three
+next to each provenance file; landed in `vql-engine` ci-build.yml, pending
+backport to `metalog-distribution` and `hdr-rng`. (2) The `.intoto.jsonl`
+filename and the `cosign verify-blob-attestation` recipe in §3.2 are a
+first-party convention, not a Central standard; any change to either must be
+coordinated between the publishers and this plan.
 
 ## 5. Open decisions
 
