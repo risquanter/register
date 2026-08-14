@@ -235,7 +235,7 @@ case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = Non
 sealed trait FolQueryFailure extends AppError
 
 object FolQueryFailure:
-  /** Maps from `vql.error.QueryError.ParseError` / `LexicalError`.
+  /** Maps from `vql.error.QueryError.ParseError`.
     *
     * Syntactic parse failure — the query string is not well-formed FOL syntax.
     * The parser rejected the input before any semantic analysis.
@@ -250,10 +250,12 @@ object FolQueryFailure:
     override def getMessage: String =
       position.fold(message)(p => s"$message (at position $p)")
 
-  /** Maps from `vql.error.QueryError.UninterpretedSymbolError`.
+  /** Retained for the `ErrorResponse` wire round-trip; no longer produced by
+    * `fromQueryError` (the library dropped its unknown-symbol variant, folding
+    * that condition into bind-phase checks).
     *
-    * The query is syntactically valid but references a predicate or function
-    * name that does not exist in the `TypeCatalog`.
+    * Signals a query that is syntactically valid but references a predicate or
+    * function name that does not exist in the `TypeCatalog`.
     *
     * Example: `"Q[>=]^{2/3} x (leaf(x), gt_loss(p96(x), 5000))"` —
     * `p96` is not a declared function; available functions are `p95`, `p99`, `lec`.
@@ -341,8 +343,8 @@ object FolQueryFailure:
       s"The type '$typeName' cannot be enumerated. " +
       s"Available quantifiable types: ${availableTypes.mkString(", ")}"
 
-  /** Maps from `vql.error.QueryError.EvaluationError` /
-    * `ScopeEvaluationError` / `TypeMismatchError` / `TimeoutError` / etc.
+  /** Maps from `vql.error.QueryError.EvaluationError` / `ValidationError` /
+    * `UnboundVariableError`.
     *
     * Catch-all for unexpected evaluation-phase failures that occur after
     * binding succeeds. These indicate internal errors (dispatcher bugs,
@@ -384,9 +386,6 @@ object FolQueryFailure:
     err match
       // ── Parse-phase errors → 400 ────────────────────────────────
       case e: QE.ParseError               => FolParseFailure(e.message, e.position)
-      case e: QE.LexicalError             => FolParseFailure(e.message, Some(e.position))
-      // ── Symbol-resolution errors → 400 ──────────────────────────
-      case e: QE.UninterpretedSymbolError => FolUnknownSymbol(e.symbolName, e.availableSymbols.toList)
       // ── Unknown constant/literal reference → 400 ────────────────
       case e: QE.UnknownConstantOrLiteralError => FolUnknownReference(e.name)
       // ── Bind-phase type errors → 400 ────────────────────────────
@@ -397,14 +396,5 @@ object FolQueryFailure:
       case e: QE.ModelValidationError     => FolModelValidationFailure(e.errors)
       // ── Evaluation-phase errors → 500 ───────────────────────────
       case e: QE.EvaluationError          => FolEvaluationFailure(e.message, e.phase)
-      case e: QE.ScopeEvaluationError     => FolEvaluationFailure(e.message, "scope")
-      case e: QE.TypeMismatchError        => FolEvaluationFailure(e.message, "type_check")
-      case e: QE.TimeoutError             => FolEvaluationFailure(e.message, e.operation)
-      case e: QE.QuantifierError          => FolEvaluationFailure(e.message, "quantifier")
       case e: QE.ValidationError          => FolEvaluationFailure(e.message, "validation")
-      // ── Remaining subtypes → 500 (each explicit for exhaustiveness) ─
-      case e: QE.QueryStructureError      => FolEvaluationFailure(e.message, "query_structure")
       case e: QE.UnboundVariableError     => FolEvaluationFailure(e.message, "unbound_variable")
-      case e: QE.ResourceError            => FolEvaluationFailure(e.message, "resource")
-      case e: QE.ConnectionError          => FolEvaluationFailure(e.message, "connection")
-      case e: QE.ConfigError              => FolEvaluationFailure(e.message, "config")

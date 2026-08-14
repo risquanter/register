@@ -15,7 +15,6 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
     suite("FolQueryFailure.fromQueryError")(
       parseSuite,
-      unknownSymbolSuite,
       bindSuite,
       domainNotFoundSuite,
       modelValidationSuite,
@@ -38,25 +37,6 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
       FolQueryFailure.fromQueryError(err) match
         case FolQueryFailure.FolParseFailure(_, pos) =>
           assertTrue(pos.isEmpty)
-        case other => throw MatchError(other)
-    },
-    test("LexicalError wraps position in Some") {
-      val err = QE.LexicalError("Invalid character", '#', 5)
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolParseFailure(_, pos) =>
-          assertTrue(pos == Some(5))
-        case other => throw MatchError(other)
-    }
-  )
-
-  // ── Schema/symbol errors → FolUnknownSymbol ─────────────────────────
-
-  private val unknownSymbolSuite = suite("→ FolUnknownSymbol")(
-    test("UninterpretedSymbolError preserves symbol name") {
-      val err = QE.UninterpretedSymbolError("predicate", "unknown_pred", Set("leaf", "portfolio"))
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolUnknownSymbol(sym, avail) =>
-          assertTrue(sym == "unknown_pred", avail.toSet == Set("leaf", "portfolio"))
         case other => throw MatchError(other)
     }
   )
@@ -138,34 +118,6 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
           assertTrue(msg == "Division by zero", phase == "scope_eval")
         case other => throw MatchError(other)
     },
-    test("ScopeEvaluationError maps with phase 'scope'") {
-      val err = QE.ScopeEvaluationError("Scope failed", "some_formula", "some_element")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "scope")
-        case other => throw MatchError(other)
-    },
-    test("TypeMismatchError maps with phase 'type_check'") {
-      val err = QE.TypeMismatchError("Expected Int, got String", "Int", "String", "arg0")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "type_check")
-        case other => throw MatchError(other)
-    },
-    test("TimeoutError preserves operation field") {
-      val err = QE.TimeoutError("evaluation", 5000L)
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "evaluation")
-        case other => throw MatchError(other)
-    },
-    test("QuantifierError maps with phase 'quantifier'") {
-      val err = QE.QuantifierError("k must be <= n", 5, 3, 0.0)
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "quantifier")
-        case other => throw MatchError(other)
-    },
     test("fol ValidationError maps with phase 'validation'") {
       val err = QE.ValidationError("Invalid field", "query")
       FolQueryFailure.fromQueryError(err) match
@@ -178,39 +130,11 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
   // ── Catch-all for remaining subtypes ────────────────────────────────
 
   private val catchAllSuite = suite("remaining subtypes → FolEvaluationFailure")(
-    test("QueryStructureError maps with phase 'query_structure'") {
-      val err = QE.QueryStructureError("Bad structure", "range")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "query_structure")
-        case other => throw MatchError(other)
-    },
-    test("ResourceError maps with phase 'resource'") {
-      val err = QE.ResourceError("Out of memory", "thread_pool")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "resource")
-        case other => throw MatchError(other)
-    },
     test("UnboundVariableError maps with phase 'unbound_variable'") {
       val err = QE.UnboundVariableError("x", Set("y", "z"))
       FolQueryFailure.fromQueryError(err) match
         case FolQueryFailure.FolEvaluationFailure(_, phase) =>
           assertTrue(phase == "unbound_variable")
-        case other => throw MatchError(other)
-    },
-    test("ConnectionError maps with phase 'connection'") {
-      val err = QE.ConnectionError("Refused", "localhost:8080")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "connection")
-        case other => throw MatchError(other)
-    },
-    test("ConfigError maps with phase 'config'") {
-      val err = QE.ConfigError("Missing key", "timeout")
-      FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolEvaluationFailure(_, phase) =>
-          assertTrue(phase == "config")
         case other => throw MatchError(other)
     }
   )

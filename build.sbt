@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.10.17"
+ThisBuild / version      := "0.10.18"
 ThisBuild / scalaVersion := "3.7.4"
 
 ThisBuild / scalacOptions ++= Seq(
@@ -36,7 +36,7 @@ val metalogVersion    = "0.9.0"   // com.risquanter:metalog-distribution (Java)
 // (first-party waiver, user-approved 2026-08-09). 0.13.1 carries formula
 // ranges + satisfyingSet (0.11.0), the fragment-membership API (0.12.0), and
 // the fol.* → vql.* package rename (0.13.0), adopted in one bump.
-val vqlEngineVersion  = "0.13.1"  // com.risquanter:vql-engine (cross-compiled)
+val vqlEngineVersion  = "0.14.0"  // com.risquanter:vql-engine (cross-compiled)
 
 // Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(

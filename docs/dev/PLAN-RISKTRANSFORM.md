@@ -1678,6 +1678,19 @@ begins.
 | `modules/server/src/test/scala/com/risquanter/register/foladapter/QueryResponseBuilderSpec.scala` | fol.result/typed/quantifier/sampling→vql.* |
 | `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala` | fol.typed→vql.typed |
 
+**Engine follow-on — 0.13.1 → 0.14.0 (published 2026-08-14, user-directed).**
+0.14.0 prunes 10 more dead `QueryError` variants (`LexicalError`,
+`UninterpretedSymbolError`, `ScopeEvaluationError`, `TypeMismatchError`,
+`TimeoutError`, `QuantifierError`, `QueryStructureError`, `ResourceError`,
+`ConnectionError`, `ConfigError`). Register adaptation: `build.sbt` pin
+`"0.13.1"` → `"0.14.0"`; `AppError.fromQueryError` drops those 10 arms, leaving
+8 surviving mappings (`ParseError`, `UnknownConstantOrLiteralError`,
+`BindError`, `DomainNotFoundError`, `ModelValidationError`, `EvaluationError`,
+`ValidationError`, `UnboundVariableError`) — match stays exhaustive;
+`FolUnknownSymbol` retained (its `UninterpretedSymbolError` source is gone, but
+it still round-trips through `ErrorResponse`); `FolQueryFailureFromQueryErrorSpec`
+drops the 10 matching cases. Landed in the same 0.10.18 PATCH as Step B.
+
 #### Step B — Predicate-targeting domain rework (§8.1 signatures made exact)
 
 `iron/OpaqueTypes.scala` — new refined type:
@@ -1803,8 +1816,9 @@ tests:
   `overrideAnchor` cross-field rules.
 - `MitigationApplicationSpec`: `scoped` / `effectiveTree` driven by a
   `resolvedScopes` lookup table.
-- `FolQueryFailureFromQueryErrorSpec`: four deleted-variant cases removed;
-  remainder green under `vql.error`.
+- `FolQueryFailureFromQueryErrorSpec`: covers only the surviving `QueryError`
+  variants (8 after the 0.14.0 prune — see the engine follow-on note below);
+  green under `vql.error`.
 - BATS C after the engine bump.
 
 **8.6.4 Review findings & dispositions (routine + scoped complex review, 2026-08-14).**

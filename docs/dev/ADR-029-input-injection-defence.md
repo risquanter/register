@@ -63,6 +63,7 @@ val result = catalog.constants.get(userInput)  // Set.contains / Map.get only
 | Boundary | Current guard |
 |---|---|
 | FOL `VagueQueryParser.parse` | Query text is user-typed; node names enter via `catalog.constants` lookup (`Map.get`), never interpolated |
+| FOL `TargetingPredicate.create` | Mitigation targeting text is user-typed; length-bounded (1–256) then parsed via `FOLParser`, then restricted to the targeting fragment (no quantifiers, no function terms), a single free variable, and no mitigation-state predicate. `decode == create`, so no `TargetingPredicate` exists whose source was not validated; the parsed formula is derived state, never re-serialised or interpolated |
 | JDBC / Quill | Parameterised queries via typed DSL; no hand-rolled SQL |
 | zio-json encode/decode | Codecs handle escaping; no manual string construction |
 | Laminar DOM | `textContent` / typed setters; `innerHTML` is never called |
