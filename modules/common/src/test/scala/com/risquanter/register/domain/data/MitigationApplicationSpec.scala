@@ -9,7 +9,7 @@ import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId
  * MitigationApplication — the action's decomposition: per-node scoping with
  * precedence order and restrictions, the param-stage effective tree (closure,
  * Override absorption, baseline/final presets), the composed result-stage
- * transform, application records, and the worsening-override diagnostic.
+ * transform, and application records.
  *
  * Targeting is a predicate resolved server-side, so each test supplies the
  * resolved node scope explicitly via `scopes(...)` — the lookup table the

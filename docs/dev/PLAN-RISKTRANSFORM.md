@@ -320,7 +320,10 @@ and keeping only a metadata trace is rejected.
   functions). An asset / company-configuration graph is additive — a second KB
   source joined to risks by type/instance — and needs no engine change. The
   explicit-mitigation + VQL-targeting model transfers directly, with targeting
-  predicates ranging over asset attributes instead of tree structure; keeping
+  predicates ranging over asset-graph relations instead of tree structure —
+  asset attributes would be modelled as relational predicates (the same atom
+  shape as today's `leaf(x)` / `child_of(x, …)`), since the targeting fragment
+  admits predicate atoms but no attribute-access or function terms; keeping
   mitigation explicit is precisely what makes that future join possible. Node
   identity should move from name-based to stable-id-based before this.
 
@@ -751,6 +754,20 @@ private[data] def validateModeFields(
 
 ### 7.2 M2 — Persistence and resolution (`server`)
 
+> **⚠️ This section (2026-08-08) predates §8.6/§8.7 (M1R, 2026-08-13/14) and
+> the M2 resolver-edge rulings in §8.8 (2026-08-15). Its signatures are stale
+> and are reconciled at the pending M2 implementation-grade elevation:** the
+> algebra now takes `resolvedScopes: Map[MitigationId, Set[NodeId]]` (§8.6), not
+> `selection` alone; scope is produced by a new `MitigationScopeResolver`
+> (§8.2, §8.8 M2-D1), not by passing `MitigationSelection` straight into
+> `ensureCached`; the resolver's per-mitigation output is a `ScopeOutcome`
+> coproduct (§8.8 M2-D2); and `RiskResultResolver` is renamed
+> `CachedResultResolver` (§8.8 M2-D4). Unaffected and still current: the storage
+> shape (§7.2.1), the D3-stands caching rule (§7.2.2 step 2 — raw simulations
+> cached, result-stage transforms applied at the edge), and the override
+> staleness function (§7.2.2a, OD-6). This box prevents misreading until the
+> elevation rewrites the signatures.
+
 #### 7.2.1 Storage (ADR-004a mapping extended)
 
 One Irmin path per mitigation, mirroring the per-node convention — this is
@@ -938,14 +955,19 @@ existing docs when the feature ships:
 
 **Seed text — dynamic predicate scope, worked example:**
 
-Say Firewall has the targeting predicate "all leaves whose name starts with
-`srv-`" instead of an explicit node list.
+Say Firewall has the targeting predicate `leaf(x) /\ descendant_of(x, "Servers")`
+— every leaf under the `Servers` portfolio — instead of an explicit node list.
+Structural targeting is what makes scope dynamic; prefix or substring matching on
+names is **not** expressible in the targeting fragment (no function terms), so
+"all `srv-*` leaves" is spelled as membership under a parent. (The KB domain
+elements are node ids, so the concrete constant is the `Servers` portfolio's id,
+filled by the node picker; the name is shown here only for readability.)
 
 - Tree version 1 has leaves `srv-web` and `srv-db`. The predicate resolves to
   `{srv-web, srv-db}`. Firewall is enabled globally (full scope): both leaves
   are mitigated; the LEC's provenance layer records
   `resolvedScope = {srv-web, srv-db}`.
-- You add a leaf `srv-mail` (tree version 2). Scope re-resolves per tree
+- You add a leaf `srv-mail` under `Servers` (tree version 2). Scope re-resolves per tree
   version, so `srv-mail` enters Firewall's scope automatically. Because the
   enablement is full-scope, `srv-mail` is mitigated with no further action,
   and the next LEC's provenance records the three-node set. The version-1
@@ -1327,8 +1349,8 @@ tree's typed model — which exist only on the server — while the application
 algebra stays a pure function in `common`. So the server computes the
 answer once (`MitigationScopeResolver`) and hands it to the same pure
 functions as a lookup table. Example: Firewall stores the predicate
-`name starts with "srv-"`; the resolver evaluates it against the current
-tree and produces `{firewall → {srv-web, srv-db}}`; `effectiveTree` then
+`leaf(x) /\ descendant_of(x, "Servers")`; the resolver evaluates it against the
+current tree and produces `{firewall → {srv-web, srv-db}}`; `effectiveTree` then
 transforms exactly those two leaves. This is a new consequence of the
 predicate-first ruling (2026-08-10), not a previously discussed design —
 its layering follows the OD-6 precedent (pure algebra in `common`,
@@ -1469,10 +1491,12 @@ M4 elevation respectively).
    rename can silently re-point the predicate at a *different* leaf; the
    stamp then mismatches, but the signal reads as "content changed" when
    the truth is "target changed" — two distinct drifts, one indicator.
-   Worked example: override authored on `srv-db` via predicate
-   `name starts with "srv-"` ∧ …; `srv-db` is renamed `db-main`; the
-   predicate now resolves to `srv-web` alone, and the override applies to
-   the wrong leaf with only a stamp-mismatch badge as the clue. (B)
+   Worked example: override authored on the leaf named `primary-db` via
+   the name-equality predicate `x = "primary-db"`; `primary-db` is renamed
+   `db-main`, so the predicate resolves to the empty set and the override
+   silently applies to nothing; worse, if another leaf is later renamed
+   `primary-db`, the predicate re-points at *that* leaf and the override
+   applies to the wrong node with only a stamp-mismatch badge as the clue. (B)
    `SingleNode(NodeId)` variant reserved for Override: node ids are
    rename-stable, so the override follows its leaf through renames with no
    false staleness (stamp fires only on genuine content edits — exactly
@@ -1488,9 +1512,11 @@ M4 elevation respectively).
    signal**, separate from the stamp's content-drift signal — the
    conflation that motivated B disappears, without forking the target ADT.
    Default authoring path: the UI emits a stable-id equality predicate for
-   the picked leaf, which (ids being rename-stable) never diverges from
-   the anchor unless the node is deleted; a hand-written name-based
-   predicate is allowed and its drift is flagged precisely as scope drift.
+   the picked leaf — `x = "<nodeId>"`, an ordinary quoted-constant equality
+   atom (founded in the targeting fragment) — which (ids being rename-stable)
+   never diverges from the anchor unless the node is deleted; a hand-written
+   name-based predicate is allowed and its drift is flagged precisely as scope
+   drift.
 
    **UI authoring mechanism (user-elaborated 2026-08-10):** the user never
    types or pastes a node id — a node picker fills a fixed client-side
@@ -1594,7 +1620,11 @@ M4 elevation respectively).
    workspace/tree/branch, replaced on head advance; historic reads
    resolve uncached. Cost analysis behind the ruling: at realistic tree
    shapes (hundreds of nodes, depth < 10) a KB rebuild plus
-   quantifier-free resolution is single-digit milliseconds — below the
+   quantifier-free resolution is single-digit milliseconds **per predicate**
+   (`satisfyingSet` scans the node domain once per predicate; total resolution
+   is O(mitigations × nodes) cheap evaluations, memoized per tree version — the
+   override subset barely contributes, since overrides resolve by their stored
+   `overrideAnchor`, not a re-scan) — below the
    uncached portfolio re-aggregation a scrub step performs anyway, and
    orders of magnitude below fresh simulation (leaves × nTrials,
    default 10k) — while a retained entry is large; cheap-to-rebuild +
@@ -1856,6 +1886,189 @@ Both review tiers ran on the M1R diff. Dispositions:
   server-side validate round-trip (the form asks the server), never a
   client-side duplicate of the KB. Confirmed by the scoped review: the fragment
   grammar already excludes every function/arithmetic term.
+
+### 8.7 Carried-forward rulings and cleanups (2026-08-14)
+
+Rulings made in session 2026-08-14 that bind later phases of this plan; each
+is incorporated at the named elevation and must not be re-derived or reopened
+there.
+
+1. **KB identity carrier — binds the M2 elevation.** RULED (user,
+   2026-08-14): the §6 stable-id reconciliation carries the node id through
+   the engine as the **typed `NodeId`** — domain elements become
+   `Value(Asset, nodeId)` and register provides `given Extract[NodeId]` —
+   not as the raw ULID String. Not in tension with engine ADR-015's
+   rejection of typed carriers: that rejection fixed the ENGINE's container
+   (`Value.raw` stays `Any`); this ruling decides only which JVM object
+   register stores in that field, via the consumer extension mechanism
+   ADR-015 itself defines. Engine ADR-016 (Carrier witness) is unimplemented
+   in vql 0.13.1 and is NOT a prerequisite. (Confirmed settled — no timing
+   decision — as §8.8 M2-D3a.)
+2. **`QueryResponseBuilder` payload projection — folds into the same M2
+   rework.** The current projection matches `v.raw` against `String` and
+   duplicates the `Asset` sort declaration held by `RiskTreeKnowledgeBase`.
+   The id reconciliation supersedes both: project by sort filter +
+   `extract[NodeId]`, with one shared sort declaration. No standalone fix
+   before M2.
+3. **`Mitigation` sort identity carrier — binds the M3 elevation.** The M3
+   KB schema's `Mitigation` sort follows the item-1 pattern by convention:
+   typed `MitigationId` payload + register-provided
+   `given Extract[MitigationId]`. Convention application, not a new
+   decision.
+4. **Probability-type naming cleanup — boyscout scope of the first phase
+   whose file inventory covers `iron/OpaqueTypes.scala`,
+   `iron/ValidationUtil.scala`, `RiskNode.scala` (the §9 hardening phase is
+   the natural host).** RULED (user, 2026-08-14): rename the open-interval
+   metalog-only type `Probability` → **`MetalogPercentile`** (with
+   `ValidationUtil.refineProbability`; it has no production caller — decide
+   rename vs delete at that pass); fix the stale `RiskNode` scaladoc that
+   documents the leaf field as `Probability (0<p<1)` when the field is
+   `OccurrenceProbability` [0,1]; reword `OccurrenceProbability`'s
+   "semantically distinct from Probability" comment to describe the interval
+   difference. Explicitly ruled OUT (do not reopen): a general
+   `EventProbability` rename, nominal occurrence-vs-exceedance separation,
+   and typing `probOfExceedance` (stays `Double`) — occurrence and
+   exceedance probability are the same semantic type; roles live in
+   field/method names.
+
+### 8.8 M2 resolver-edge rulings (2026-08-15)
+
+Decisions from the M2 scope-resolution session. Labelled `M2-D*` to avoid
+collision with §4's `D*` and §8.6's `M1R-D*`. They bind the pending M2
+implementation-grade elevation; exact signatures are written there, not here.
+
+- **M2-D1 — scope-resolution placement. RULED (user, 2026-08-15): Option 1 —
+  the service resolves scope.** A new `MitigationScopeResolver` turns each
+  mitigation's targeting predicate into a `Set[NodeId]` via the engine's
+  `satisfyingSet` over a **results-free KB** (targeting references structure
+  and identity only, never simulation output, so resolution runs before any
+  simulation). Resolution is selection-independent, so it is memoized on tree
+  version identity `(WorkspaceId, TreeId, BranchRef, CommitHash)` — head-only
+  per §8.4-5. The resolved `Map[MitigationId, Set[NodeId]]` is consumed at the
+  resolver edge (§8.2) and is exactly what `MitigationApplication.scoped` /
+  `effectiveTree` already take as of §8.6.
+
+- **M2-D2 — resolver output shape. RULED (user, 2026-08-15): a `ScopeOutcome`
+  coproduct; `toEither` + wrapper projections only (no `map`/`flatMap`).**
+  Per-mitigation success/failure isolation (security-review F3): one
+  mitigation's unresolvable predicate does not fail the whole resolution. The
+  service partitions the outcome into resolved scopes before calling the §8.6
+  algebra, so `MitigationApplication`'s signatures do not change.
+
+- **M2-D3a — Asset identity carrier. SETTLED (not a decision): id-based.** The
+  KB carries the typed `NodeId` (`Value(Asset, nodeId)` + `given
+  Extract[NodeId]`), per §6's stable-id requirement and §8.7 item 1 — both
+  already ruled id-based, so there was never a name-vs-id choice. Predicates
+  reference node ids by construction, so name-based scope drift is not a
+  representable state. There is no timing choice: the plan ships as one
+  delivery, so "carrier at M2 vs later" is not a ruling — the carrier is built
+  wherever it fits best for testability, naturally alongside the resolver
+  (its first consumer).
+
+- **M2-D3b — duplicate-node-name merge guard. RULED (user, 2026-08-15): A + B**
+  (built with §9 Lever 1 — see below). Byte-level Irmin merge is per storage path and cannot see
+  a cross-path invariant like global node-name uniqueness, so two branches can
+  each add a differently-pathed node with the same name and the merge succeeds
+  silently. The guard lives register-side (Irmin cannot host it): **A** — a
+  pre-merge scan over the already-fetched branch blobs rejects with a
+  descriptive `MergeConflict` when the union would duplicate a name; **B** — a
+  post-merge validate-and-revert that runs the merged tree through
+  `RiskTree.fromNodes` and reverts on failure. B is the general net for any
+  cross-path invariant `fromNodes` enforces, so its completeness tracks
+  `fromNodes`' invariant set — which is why node-name uniqueness must be
+  *added* to `fromNodes`, and why B rides **§9 Lever 1** (fromNodes as the sole
+  construction gate). A is the fast, specific early reject.
+
+- **M2-D4 — resolver rename. RULED (user, 2026-08-15): `RiskResultResolver` →
+  `CachedResultResolver`**, a separate mechanical change. `Simulator` is the
+  Monte-Carlo engine that produces `RiskResult`; this type is the
+  content-addressed cache + tree recursion + portfolio aggregation layer over
+  it, and the new name says so. §7.2.2's use of the old name is stale pending
+  the rename.
+
+- **M2-D5 — engine carrier mechanism for the node sort. RECORDED (2026-08-15):
+  the concrete registration, so the M2 elevation builds it rather than
+  re-deriving it.** The KB carries each node as `Value(nodeSort, nodeId)` — the
+  engine's `raw: Any` field holds the register `NodeId` object (M2-D3a / §8.7
+  item 1), never a bare string. Three register-supplied pieces make it work,
+  all reusing existing engine hooks (no engine change):
+  1. **Domain.** `model.domains(nodeSort) =
+     tree.index.nodes.keys.map(id => Value(nodeSort, id)).toSet` — one
+     `NodeId`-carrying element per node.
+  2. **Constant/literal path (ids AND names, one validator).** Register a
+     node-sort literal validator
+     `nodeSort -> (s => NodeId.fromString(s).toOption.orElse(nameToId.get(s)))`
+     in the `TypeCatalog`
+     (`literalValidators: Map[TypeId, String => Option[Any]]` — the same hook
+     that turns `"1000000"` into a typed `Loss`). Both a quoted id
+     (`x = "<ulid>"`) and a quoted node name (`descendant_of(x, "Servers")`)
+     bind through `LiteralRef` to `Value(nodeSort, nodeId)` — a `NodeId`, not a
+     string: the validator parses the token as a ULID first, then falls back to
+     a name lookup (so a name that is itself ULID-shaped reads as an id — a
+     non-issue for human names). The name lookup is deterministic because node
+     names are unique (M2-D3b adds that invariant to `RiskTree.fromNodes`), so a
+     name resolves to exactly one id. A token that is neither a valid id nor a
+     known node name fails at BIND (`TypeCheckError.UnparseableConstant` → 400),
+     not silently as an empty scope. Neither ids nor names are registered as
+     `catalog.constants` (that path yields a string-carried `ConstRef`); the
+     validator is the sole node-constant path.
+  3. **Equality predicate.** Register `=` on the node sort —
+     `SymbolName("=") -> PredicateSig(List(nodeSort, nodeSort))` with dispatcher
+     impl `for { a <- args(0).extract[NodeId]; b <- args(1).extract[NodeId] } yield a == b`,
+     backed by a register-provided `given Extract[NodeId]` (ADR-015 §2 consumer
+     extension). Ordering operators (`< <= > >=`) are NOT registered on the node
+     sort — nodes have identity, not order; ordering stays on the scalar sorts
+     (`gt_loss`/`gt_prob` already cover it). `=` is the only new operator
+     targeting needs.
+
+  **Structural predicates re-key id-native (simplification).** The
+  `leaf`/`child_of`/`descendant_of`/`leaf_descendant_of` dispatchers currently
+  back their predicates with name-keyed sets built by translating the id-keyed
+  `TreeIndex` down to names (`leafNames`, `childrenByName`, `descendantsByName`).
+  With the id carrier they key on `NodeId` directly — which `TreeIndex` already
+  holds natively (`leafIds`, `children`, `descendants`) — so this rework DELETES
+  the name-translation layer rather than adding one. Node-constant arguments
+  (`descendant_of(x, "…")`) arrive as `NodeId` via the point-2 validator, so the
+  comparison is id-to-id.
+
+  **Open-world consistency (no engine type knowledge added).** The engine never
+  holds a register type: `Value.raw` is `Any`, the literal validator returns
+  `Any`, and all interpretation (`=` implementation, `Extract[NodeId]`) is
+  injected by register. Engine-internal domain-set dedup relies only on `NodeId`'s
+  universal `equals`/`hashCode`, never on knowing the type. So "storing NodeId in
+  the engine" is the intended use of ADR-015's carrier/extract mechanism, not a
+  breach of the open-world design — it adds nothing to the engine's own type
+  vocabulary.
+
+  **Sort rename `Asset` → `Node` (user-approved 2026-08-15).** Internal-only label
+  (no wire/DTO/user surface): the sort holds risk nodes — leaves AND portfolios —
+  and §6 reserves "asset" for the future asset-graph concept, so the current label
+  is a borrowed misnomer. Applied in the same KB rework; the plan's
+  `Value(Asset, …)` wording (§8.7 item 1, M2-D3a) reads `Value(Node, …)` after it.
+
+  **Name-constant reconciliation (RESOLVED — required for screening, not only
+  targeting).** The id carrier is not targeting-only: §8.7 item 2 flips the
+  screening output builder (`QueryResponseBuilder`) to `extract[NodeId]`, so the
+  screening KB's domain is id-carried too, and screening's existing "quoted
+  node-name literal" feature (`child_of(x, "IT Risk")`) would break unless names
+  resolve to ids. The id-or-name validator in point 2 above closes this for both
+  paths uniformly; M2-D3b's node-name uniqueness is therefore load-bearing for
+  the screening query path, not only for merge safety. Screening users type names
+  (there is no picker), so this reconciliation is mandatory, not optional.
+
+**Merge-control finding (2026-08-15) — context for M2-D3b and §8.4-4.** Register
+does not define Irmin's merge resolution: the patched backend
+(`irmin-graphql-3.11.0-merge-conflict.patch`) only *surfaces* a conflict as a
+typed error; the 3-way merge itself is per-path server-side OCaml. A conflict
+Irmin reports (both branches touched one path) is refused fail-closed with the
+target head untouched — safe even for an unanticipated conflict. A cross-path
+invariant violation (duplicate names) is the opposite: Irmin reports success,
+so register must detect it (M2-D3b A/B). Defining a custom Irmin merge function
+is possible but still per-value, so it cannot enforce a whole-tree invariant;
+it is not pursued. The richer interactive conflict-resolution UI (one-click
+keep-main/keep-scenario, parameter-average) is a deferred convenience item of
+the **milestone-2b** merge workstream (PLAN-UI-MILESTONE-2B §8 / its scratch
+tracker), not of this plan, and does not bear on M2.
 
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 
