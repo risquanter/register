@@ -23,7 +23,11 @@ user's to resolve**.
 an existing codebase convention conflicts with code hygiene, clean code, or a best
 practice, raise it (decision-guide format) with an explicit **code-cleanup scope**
 option — fix the convention across all its occurrences now, or schedule it — so
-inherited (bad) convention is never silently perpetuated. But first VERIFY the
+inherited (bad) convention is never silently perpetuated. "Schedule it" here means
+routing the cleanup to a properly-scoped plan or TODO item by an explicit user
+decision — it is the G8 foreign-discovery carve-out, not license to defer work
+that belongs to the current plan's scope (working-protocol skill, "Plan = epic;
+ship whole"). But first VERIFY the
 cleaner alternative actually builds and passes tests: an apparent bad convention
 often encodes a real constraint (e.g. bare `catch _: Throwable` at the Scala.js JS
 boundary is deliberate — `NonFatal` does not catch `UndefinedBehaviorError`). Never

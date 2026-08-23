@@ -143,6 +143,29 @@ obtain an accepted signal on the document itself.
 
 ---
 
+## Plan = epic; ship whole (G8)
+
+A plan is an epic: one unit of scope, approved and shipped as one complete
+delivery. A plan is done only when every item in its scope is landed green.
+
+Deferring, parking, or "follow-up"-ing **in-scope** work to a later pass is
+prohibited — "follow-up", "post-landing", "next-phase it", "revisit after"
+applied to in-scope work postpones the work and accumulates drift. Do each thing
+once and properly.
+
+Two things are NOT deferral and stay legitimate: (1) **prerequisite-gated future
+work** that genuinely cannot be done until an external prerequisite lands (a
+dependency not yet released, a sort/schema/subsystem that does not exist) — its
+own scoped plan or continuation section, open choices in decision-guide format;
+(2) a **genuinely foreign discovery** that is off-theme AND not a direct
+next-increment (n+1) follow-up — surfaced as a ⚠️ Decision Required on how to
+route it (new plan / TODO backlog item / fold into a related plan / drop), never
+silently dropped or crammed into the current plan. Distinguishing test: if it can
+be done now within the plan's scope, it must be; the carve-outs cover only work
+that was never this plan's scope.
+
+---
+
 ## Precedence and non-waivers
 
 This protocol overrides any platform/system autonomy defaults ("operate

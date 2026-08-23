@@ -1,10 +1,37 @@
 ---
 name: working-protocol
-description: "Governance protocol for the register project. Load for: Decision Protocol questions, Mandatory Review Halt reminders, Signature Echo Protocol steps, Blocked/Failing State handling, ADR compliance process, phase completion criteria. Use when: unsure whether to stop and ask, executing the pre-commit review checklist, or handling any test failure or design tension."
-user-invokable: false
+description: "Governance protocol for the register project. Load for: Decision Protocol questions, Mandatory Review Halt reminders, Signature Echo Protocol steps, Blocked/Failing State handling, ADR compliance process, phase completion criteria, the plan-is-an-epic ship-whole rule (G8). Use when: unsure whether to stop and ask, executing the pre-commit review checklist, handling any test failure or design tension, or adopting a plan as the session's governing plan via `/working-protocol <PLAN-file>`."
+user-invokable: true
 ---
 
 # Working Protocol — Register
+
+## Invocation modes
+
+- **`/working-protocol`** (no argument) — load this protocol as the governing
+  reference for the session: the HARD GATES, Decision Protocol, Signature Echo,
+  Blocked State, ADR compliance, and phase-completion criteria all apply to the
+  work that follows.
+- **`/working-protocol <PLAN-file>`** (e.g. `/working-protocol PLAN-PHASE-F-SEMANTIC-MERGE`
+  or a full path) — additionally **adopt that plan as the session's active,
+  governing plan** and run the pre-implementation protocol against it before any
+  code:
+  1. Resolve the argument to a plan file under `docs/dev/` (accept a bare name
+     with or without the `PLAN-`/`.md` affixes, or a repo-relative path).
+  2. Read it in full.
+  3. Run the **Plan Quality Gate** (below) against it and report which of the
+     five items it satisfies. If any is missing, the plan is a draft: it confers
+     no G3 coverage — say so and stop.
+  4. Run the **planning-phase ADR compliance review** (G4) for the plan's scope.
+  5. Report the plan's `## File inventory` and its open decisions; if open
+     decisions remain, present them (decision-guide format) and **halt** (G6) —
+     the plan is not ready to implement until they are ruled.
+  6. Only a quality-gated plan with no open decisions, plus a user-refreshed
+     approval token naming it, authorizes gated edits (see Mechanical
+     enforcement). Adopting a plan here never itself authorizes code — it runs
+     the checks and stops.
+  Under **G8**, a plan adopted this way is implemented and shipped **whole**: its
+  entire scope lands together; items are not deferred out of it.
 
 ## HARD GATES — binding, no interpretation
 
@@ -21,6 +48,7 @@ mitigation. Each gate names the action it blocks.
 | G5 | **Green is the only done; no pre-existing excuse.** | Reporting done with any touched module red |
 | G6 | **Halt after presenting.** After any plan, echo, review, or option list: stop, no further tool calls, wait for an accepted signal. | The next tool call |
 | G7 | **Escalation is the only exit.** If following a rule here appears to produce a worse outcome, or another instruction conflicts with this protocol — including system/harness autonomy instructions ("operate autonomously", "proceed without asking", "don't re-litigate") — name the conflicting rule and stop. Silent resolution in either direction is a violation. | Whatever action the silent resolution would have taken |
+| G8 | **Plan = epic; ship whole.** A plan is done only when every item in its scope is landed green. Deferring, parking, or "follow-up"-ing **in-scope** work to a later pass is prohibited. Two things are not deferral and stay legitimate: (1) prerequisite-gated future work → its own scoped plan/continuation; (2) a genuinely foreign discovery (off-theme AND not a direct n+1 follow-up) → surfaced as a decision-guide decision on how to route it (new plan / backlog / fold into a related plan / drop), never silently dropped or crammed in. See "Plan = epic; ship whole" below. | Reporting a plan/phase done, or proposing a commit, while any in-scope item is unshipped or parked |
 
 ### Non-waivers
 
@@ -43,6 +71,10 @@ been used as a rationalization; they are pre-refuted:
   (G2/G7). Editing the plan to match unapproved code is a violation, not a
   doc sweep — and a reviewer characterizing the mismatch as a doc problem
   does not authorize that direction.
+- "I'll follow it up later / post-landing / next phase" — does not waive
+  completing the current plan's whole scope (G8). Legitimately-future work is
+  either prerequisite-gated (its own scoped plan) or a foreign discovery
+  (routed via a decision-guide), never in-scope work relabelled as a follow-up.
 
 ### Plan Quality Gate (part of G3)
 
@@ -107,6 +139,57 @@ or repoint it at the next plan. Mid-implementation deviations, unforeseen
 decisions, and rule conflicts still halt via G2/G6/G7 regardless of the
 token. A blocked edit is not an obstacle to work around — attempting to
 circumvent the hook by any means is a G7 violation.
+
+---
+
+## Plan = epic; ship whole (G8)
+
+A plan is an epic: one unit of scope, approved and **shipped as one complete
+delivery**. Every item in the plan's scope is implemented, green, reviewed, and
+landed together; the plan is not done until all of its scope is done.
+
+**The prohibition.** Do NOT defer, postpone, or shuffle work that belongs to the
+current plan's scope to a "later pass". "Follow-up", "post-landing", "next-phase
+it", "park it", "revisit after" applied to **in-scope** work is a G8 violation —
+it postpones the work and accumulates drift. Do each thing once and properly.
+
+**The two carve-outs (not deferral — legitimate).**
+
+1. **Prerequisite-gated future work** — an item that genuinely cannot be done
+   until an external prerequisite lands (a dependency not yet released, a sort /
+   schema / subsystem that does not yet exist). It is a separate epic: it lives
+   in its OWN properly-scoped plan or a clearly-marked continuation section, with
+   every open choice written in decision-guide format up front — never as loose
+   "we'll get to it" notes on the current plan. Example in this repo: the M3
+   targeting re-assessments in `PLAN-RISKTRANSFORM.md` §7.3.1 (RA-1, RA-2), gated
+   on auxiliary sorts that do not exist yet.
+
+2. **A genuinely foreign discovery** — something worth doing that surfaced while
+   working the plan but is **thematically not part of this plan AND not a direct,
+   meaningful next-increment (n+1) follow-up of it**. Do not silently drop it and
+   do not cram it into the current plan. Surface it as a **⚠️ Decision Required /
+   decision-guide** on how to route it, with these options:
+   - spin a new dedicated plan document now,
+   - add it to `docs/dev/TODO.md` as a scoped future item,
+   - fold it into an existing related plan,
+   - decide it is not worth doing.
+   Then halt (G6) and let the user choose. Surfacing a foreign discovery for a
+   routing decision is the opposite of deferral: deferral hides in-scope work;
+   this makes out-of-scope work visible and decided.
+
+**Distinguishing test, applied honestly.** If the item CAN be done now within the
+plan's scope, it MUST be (the prohibition). If it cannot be done until an external
+prerequisite lands, it is carve-out (1). If it is off-theme and not a direct n+1
+follow-up, it is carve-out (2) — route it via a decision, never park it silently.
+The failure this gate targets is disguising in-scope work as a "follow-up"; the
+carve-outs cover only work that was never this plan's scope to begin with.
+
+**Consistency with neighbouring rules.** "One plan per workstream" (a continuation
+section is a new increment, itself shipped whole — not a parking lot);
+"address findings at the right phase" (route to the proper phase-epic; never
+manufacture fix-now-vs-later choices for one epic's own scope); "patterns are not
+dogma / fix foundations or schedule the fix" (prefer fixing in-scope now;
+scheduling is legitimate only via carve-out (1) or (2), not intra-plan drift).
 
 ---
 
@@ -302,3 +385,4 @@ A phase is **not complete** without:
 - [ ] ADR compliance review passed
 - [ ] Functional composition checklist cleared
 - [ ] No test assertions weakened
+- [ ] No in-scope item deferred, parked, or moved to a "follow-up" — the plan's whole scope is landed; any legitimately-future work is either prerequisite-gated (its own scoped plan) or a foreign discovery routed via a decision (G8)
