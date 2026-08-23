@@ -11,7 +11,7 @@ callers (verified 2026-07-17).
 Code audit completed 2026-06-18; A.1 Option 1 decided 2026-07-16 (see A.1).
 Scope: Internal implementation only (no API change intended). API implications flagged where relevant.
 Related: ADR-003 (provenance), ADR-014/ADR-015 (RiskResult as cache/runtime state, cache-aside),
-`docs/scratch/milestone-2b-cache-and-decisions.md` (Leaf-as-aggregate semantic smell;
+`docs/archive/milestone-2b-cache-and-decisions.md` (Leaf-as-aggregate semantic smell;
 DD-18 cache value type — decided with A.1 Option 1; DD-19 provenance record shape — closed
 2026-07-18 → (c)+(d) + A′, see milestone-2b Closed table).
 
@@ -177,7 +177,7 @@ fix. Both are correct; Option 1 is better long-term. The choice between them is 
 gate (new type on a shared domain module → trigger #4/#5).
 
 > **Decided 2026-07-16 — Option 1.** The cache value type decision in
-> `docs/scratch/milestone-2b-cache-and-decisions.md` (DD-18) fixes the
+> `docs/archive/milestone-2b-cache-and-decisions.md` (DD-18) fixes the
 > `ContentCache` value as a named case class of `TrialOutcomes` plus a
 > content-only provenance record, which requires the explicit type. The
 > trigger #4 gate was resolved by that user decision. The provenance
@@ -190,7 +190,7 @@ gate (new type on a shared domain module → trigger #4/#5).
 
 1. **Documented semantic smell**: aggregated portfolios are currently represented as a Leaf-type
    `RiskResult` rather than a proper group/aggregate type
-   (`docs/scratch/milestone-2b-cache-and-decisions.md`). A lawful monoid gives a single,
+   (`docs/archive/milestone-2b-cache-and-decisions.md`). A lawful monoid gives a single,
    principled `combineAll`-style aggregation instead of ad-hoc Leaf reuse.
 
 2. **Safe parallel subtree reduction**. The resolver currently aggregates children sequentially
@@ -610,8 +610,9 @@ cannot cover a transform that has no representation. It works only if a transfor
 making the JSON the reified spec. If B.7 decision 3 lands on caching post-mitigation results,
 a `sealed trait TransformSpec` (data) with an interpreter to `RiskTransform` (function) is the
 likely shape — new type in a shared module → **trigger #4**, and it subsumes defect 4.
-See `docs/scratch/milestone-2b-cache-and-decisions.md` §A4 review (DD-15) for the cache-side
-analysis, including why portfolios cannot carry a `RiskTransform` at all under B3 (gap 5).
+See the **DD-15 portfolio-caching follow-up** in this plan (Part A, "Follow-up
+(post-landing) — portfolio result caching") for the full cache-side analysis,
+including why portfolios cannot carry a `RiskTransform` at all under B3 (gap 5).
 
 ---
 
@@ -623,7 +624,7 @@ Surfaced from the review; each is **informational**, none approved.
 The sequential `ZIO.foreach` child traversal in `RiskResultResolverLive` is the main performance
 gap. **Do not parallelize it independently** — its correctness depends on the Part A associativity
 law. Treat C.1 as the *payoff* of Part A, not a separate task. (Cross-ref:
-`docs/scratch/milestone-2b-cache-and-decisions.md`.)
+`docs/archive/milestone-2b-cache-and-decisions.md`.)
 
 ### C.2 Aggregate type vs. `RiskResult` reuse — Leaf-as-aggregate smell
 
@@ -701,13 +702,51 @@ purely to close the door.
 7. Load `adr-constraints` before any implementation phase.
 8. End with mandatory `code-quality-review`.
 
-**Follow-up (post-landing, joint with milestone-2b DD-15):** after Part A here
-and milestone-2b Phase A have both landed, re-examine portfolio result caching
-(milestone-2b DD-15 alternatives A/C′; DD-15 closed 2026-07-16 → Option B,
-leaf results only). Goal: judge the alternative against the landed system's
-measured behaviour — re-aggregation cost on real trees, `RiskResultGroup` in
-the resolver, the DD-18 cache value type. Analysis to start from: the
-milestone-2b A4 re-examination.
+**Follow-up (post-landing) — portfolio result caching (DD-15). This section is
+the final home of the analysis** (formerly in the milestone-2b scratch tracker,
+now archived). After Part A here and the content-addressed cache Phase A have
+both landed, re-examine whether portfolio results should be cached.
+
+**Ruling to date: Option B (cache leaf results only; portfolios re-aggregate on
+read), closed 2026-07-16.** The live options and why B won:
+
+- **Aggregation is cheap.** Portfolio aggregation is a per-trial sparse-map sum,
+  no sampling. `reduce(combine)` over *k* children and the variadic
+  `LossDistribution.merge(d*)` are **both O(U·k)** (U = trial-id union size); the
+  pairwise form only costs a ~2× constant and allocation churn, not a complexity
+  class. Full re-aggregation of an *n*-node tree ≈ O(U·(n−1)) — sub-millisecond
+  on small trees, tens of milliseconds at n=100, U=10K: linear, predictable, and
+  **still unmeasured**. B pays this modest cost on every read.
+- **Option A (cache portfolios, key = `sha256(sort(childKeys))`).** Once cached
+  values are identity-free (`TrialOutcomes` + content-only provenance — the DD-18
+  value type, no `nodeId`/`riskId`), an A-key collision is **correct dedupe, not a
+  wrong-ID defect**: equal child keys ⇒ equal child results (per-workspace scope)
+  ⇒ equal commutative sum ⇒ equal provenance content, and the resolver stamps the
+  reading node's id on the value. The earlier "identity-free portfolio key returns
+  the wrong node's result" objection was formulated while values still carried
+  `nodeId`; the identity-free value dissolves it.
+- **Option C (key includes the portfolio's own JSON hash) over-covers.** A
+  portfolio's own record (`id`, `name`, `childIds`) influences no figure, so
+  hashing it in contradicts the DD-16 projection principle and buys spurious
+  misses (a rename would invalidate). The consistent form is **C′**: prepend the
+  portfolio's *simulation-relevant projection* to the child keys. Today that
+  projection has **no fields**, so **C′ degenerates to A**. If portfolios ever
+  gain simulation-relevant attributes (e.g. reified transform specs), C′ is the
+  shape the key must take — A is C′ with an empty projection.
+- **Why B despite A/C′ being sound.** B is the smaller Phase A: it decouples the
+  cache from the resolver refactor, shrinks the cross-tenant shared-key surface,
+  and dissolves the identity question by not having portfolio entries. It reduces
+  caching below the prior `TreeCacheManager` behaviour, so the change is a
+  behaviour trigger. The two traps that motivated caution are handled: portfolios
+  cannot *carry* a transform under the B3 stage decision (transforms apply at the
+  resolver edge per D3, so transform parameters never enter any cache key), and
+  ordered/weighted aggregation is speculative and unplanned.
+
+**What the follow-up decides:** whether to add A/C′ portfolio caching behind a
+`CacheScope`, judged against the landed system's measured behaviour —
+re-aggregation cost on real trees, `RiskResultGroup` in the resolver, and the
+DD-18 cache value type. This is a genuinely prerequisite-gated future item (needs
+the landed system's measurements), not deferred current-plan scope.
 
 **MUST FIX before rollout — `RiskTransform` defects (gap 7, detail in [B.8](#b8-risktransform-defects--must-fix-before-any-production-wiring)) — ✅ ALL FIXED 2026-07-17:**
 

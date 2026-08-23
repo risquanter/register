@@ -7,7 +7,7 @@ explicitly approved — see [Approval checklist](#approval-checklist) at the end
 ## 1. Origin
 
 While picking the `Permission` case for milestone-2b Phase B's `ScenarioService`
-(`docs/scratch/milestone-2b-cache-and-decisions.md`, DD-9-adjacent work), the review
+(`docs/archive/milestone-2b-cache-and-decisions.md`, DD-9-adjacent work), the review
 surfaced a broader question: the app's role/permission model was originally meant to
 serve three purposes at once —
 

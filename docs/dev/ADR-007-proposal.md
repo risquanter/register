@@ -162,7 +162,7 @@ quota. A scenario left untouched inside a still-live workspace is not
 cleaned up automatically — it persists until the user explicitly deletes
 it, or the whole workspace is torn down (expiry or explicit delete cascades
 every scenario branch via `ScenarioService.cascadeDeleteScenarios`).
-See `docs/scratch/milestone-2b-cache-and-decisions.md` DD-23.
+See `docs/archive/milestone-2b-cache-and-decisions.md` DD-23.
 
 ---
 

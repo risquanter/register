@@ -7,7 +7,7 @@
 > Proposed 2026-01-16; accepted 2026-07-20 with text aligned to the implemented
 > system. Where implementation refined a proposed mechanism without changing the
 > decision, the refinement is marked **[Refined → DD-n]**, pointing into the
-> milestone-2b decision log (`docs/scratch/milestone-2b-cache-and-decisions.md`).
+> milestone-2b decision log (`docs/archive/milestone-2b-cache-and-decisions.md`).
 > Tree terminology and the exact domain-to-storage mapping:
 > [ADR-004a-appendix](ADR-004a-appendix.md). ADR-004b (WebSocket variant) is
 > unadopted; its trigger would be multi-user collaborative editing.
@@ -156,4 +156,4 @@ es.onmessage = e => refetch(e.data.nodeIds)   // request carries X-Branch
 - [Irmin Documentation](https://irmin.org/)
 - [Tapir Streaming Support](https://tapir.softwaremill.com/en/latest/endpoint/streaming.html)
 - [ADR-004a-appendix](ADR-004a-appendix.md) — tree terminology, domain-to-storage mapping
-- `docs/scratch/milestone-2b-cache-and-decisions.md` — decision log (DD-5, DD-7, DD-8, DD-15…DD-19, DD-21, DD-22)
+- `docs/archive/milestone-2b-cache-and-decisions.md` — decision log (DD-5, DD-7, DD-8, DD-15…DD-19, DD-21, DD-22)

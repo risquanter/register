@@ -2050,7 +2050,7 @@ the value (reverts become zero-cost cache hits).
 
 **Estimated effort:** 3–5 days (backend: 1–2 days, frontend: 2–3 days).
 
-**Reference:** Design analysis in `docs/scratch/milestone-2b-cache-and-decisions.md`
+**Reference:** Design analysis in `docs/archive/milestone-2b-cache-and-decisions.md`
 (Phase E, UC4 walkthrough). Irmin schema capabilities documented in
 `dev/irmin-schema.graphql`.
 

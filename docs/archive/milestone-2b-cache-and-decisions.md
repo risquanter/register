@@ -1,4 +1,16 @@
-# Milestone 2b: Cache & Branching Design
+# Milestone 2b: Cache & Branching Design — ARCHIVED
+
+> **ARCHIVED.** Phases A–E are implemented and shipped; all DD decisions are
+> closed. The two things this doc used to be the live home for have been
+> rehomed:
+> - **Phase F (semantic / domain-level merge conflict resolution)** →
+>   `docs/dev/PLAN-PHASE-F-SEMANTIC-MERGE.md` (status: needs review).
+> - **DD-15 portfolio-caching follow-up** → the self-contained analysis now
+>   lives in `docs/dev/PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` (Part A,
+>   "Follow-up (post-landing) — portfolio result caching").
+>
+> This file is retained as the decision-rationale record only; it is not live
+> guidance.
 
 > Empirical validation: `dev/test-irmin-hashes.sh` (9/9 tests passed).
 >

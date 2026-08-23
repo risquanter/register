@@ -957,7 +957,7 @@ The one gap it leaves — two branches can independently create same-name /
 different-ULID trees, and a later merge brings both to main undetected (the
 byte-level merge sees disjoint ULID paths) — is a merge-time concern no
 write-time check can close. Captured as a to-be-planned Phase F requirement:
-`docs/scratch/milestone-2b-cache-and-decisions.md`, "Deferred: Phase D Option-2
+`docs/archive/milestone-2b-cache-and-decisions.md`, "Deferred: Phase D Option-2
 conflict resolution", requirement 4.
 
 (Rejected: Option B, workspace-wide uniqueness — it makes the false-block bug

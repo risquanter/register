@@ -5,7 +5,7 @@ before implementing (DD-19, closed 2026-07-18 → (c)+(d) + A′):** `NodeProven
 loses `riskId` and provenance moves to `RiskResult` only, so the response becomes
 an attributed `Map[NodeId, NodeProvenance]` assembled at the resolver edge
 (structural walk over `RiskResultGroup.children`) — not the flat list keyed by
-`riskId` this plan sketches. See `docs/scratch/milestone-2b-cache-and-decisions.md`
+`riskId` this plan sketches. See `docs/archive/milestone-2b-cache-and-decisions.md`
 DD-19 (Closed table).  
 **Date:** 2026-05-12  
 **ADR reference:** ADR-003 (Provenance & Reproducibility)

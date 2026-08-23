@@ -1,4 +1,28 @@
-# Mitigation — pre-planning notes (scratch)
+# Mitigation — pre-planning notes (scratch) — ARCHIVED
+
+> **ARCHIVED.** This pre-planning scratch has been superseded by the live plan
+> `docs/dev/PLAN-RISKTRANSFORM.md` (§6 concept, §7 build plan, §8 targeting re-plan)
+> and the design history in `docs/dev/PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B.
+> Everything durable has been folded there. The annotations below record how each
+> pre-planning position compares to what was ruled and built, so the doc can be read
+> for context without being mistaken for current guidance:
+>
+> - **P-1 parser mechanism — matches as-built.** The live boundary parses with the
+>   engine's FOL `FOLParser` (not `VagueQueryParser`) and then checks fragment
+>   membership; `Q[...]`/answer variables cannot be produced by that grammar. See
+>   `TargetingPredicate.create`.
+> - **P-1 check *location* — DIVERGED; open for re-assessment.** P-1 placed the
+>   post-parse checks in the `QueryBinder` binding phase (`server`). The as-built code
+>   runs them in the cross-compiled `common` boundary constructor
+>   (`TargetingPredicate.create`), not `QueryBinder`. Preserved as a **mandatory M3
+>   re-assessment** in `PLAN-RISKTRANSFORM.md` §7.3.
+> - **P-1 bounded auxiliary quantifiers — DIVERGED; open for re-assessment.** P-1
+>   admitted bounded auxiliary quantifiers (`∃a:Mitigation`, `∃r:RiskType`) over
+>   non-`x` sorts. The as-built targeting fragment rejects ALL quantifiers, ruled
+>   correct pre-M3 (§8.4-3) because the node sort is the only sort today. Preserved as
+>   a **mandatory M3 re-assessment** in `PLAN-RISKTRANSFORM.md` §7.3.
+> - **P-2 memoization key — WRONG as written.** See the annotation on P-2 below.
+> - **P-5 untyped backend — OBSOLETE.** See the annotation on P-5 below.
 
 Scratch pre-planning for the mitigation feature. **Not a plan.** Plan scope is still
 open; these are essential parts to fold into the plan when it is written. The plan
@@ -115,6 +139,19 @@ mitigation predicates in range and scope). The restriction applies only to targe
 
 ## P-2 — Memoize `RiskTreeKnowledgeBase` by tree-version
 
+> **WRONG as written — the key phrasing is a defect.** P-2 says "keyed on the tree
+> version (Irmin revision / content hash)" as if those were interchangeable. They are
+> not, and picking the domain content hash would be a correctness bug. The KB resolves
+> scope, names (`descendantsByName`), and structure, so it depends on the FULL tree
+> including names and reparents. The DD-16 domain content hash deliberately EXCLUDES
+> name and reparent (it is the simulation-relevant projection), so keying the KB on it
+> would fail to invalidate on a rename or reparent and serve a stale scope resolution.
+> The KB memoization key must be the **tree-version / byte-level revision identity**
+> (per-workspace/tree/branch content identity), never the DD-16 domain hash. The live
+> plan settles this: `PLAN-RISKTRANSFORM.md` §7.3 keys KB memoization on
+> "workspace/tree/branch content identity", and §8.4-5 rules head-only memoization. See
+> also the two-hash distinction (domain hash vs Irmin blob byte-hash).
+
 `RiskTreeKnowledgeBase(tree, results)` is rebuilt **inline per query** in `QueryServiceLive`
 with no memoization; it is a pure function of `(tree, results)` and O(N)+ to build
 (`descendantsByName` is heavier on deep trees). Memoize it keyed on the tree version (Irmin
@@ -208,6 +245,11 @@ The untyped `RangeExtractor.buildPattern` atom-only limit is **irrelevant to reg
 does not use the untyped backend). This is a sibling-repo (vql-engine) change.
 
 ## P-5 — Untyped backend is candidate dead code (sibling)
+
+> **OBSOLETE for register.** This is a sibling-repo (vql-engine) concern, tracked there
+> as `docs/TODOS.md` T-006, and register consumes only the typed path (`evaluateTyped`).
+> It is not a register work item and does not belong in register planning. Nothing to
+> carry forward; recorded here only as context.
 
 The vql-engine's untyped evaluation backend (`VagueSemantics.holds`/`evaluate`,
 `RangeExtractor`/`buildPattern`, `KnowledgeSource`/`DomainExtraction`) has **no production

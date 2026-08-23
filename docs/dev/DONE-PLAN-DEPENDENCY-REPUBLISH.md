@@ -205,7 +205,7 @@ build prerequisites removed (siblings are no longer needed to build images):
 Not touched (historical records, deliberately):
 `docs/dev/DONE_PLAN-DISTRIBUTION-PREVIEW.md`,
 `docs/dev/DONE-PLAN-STRING-PARAM-SWEEP.md`, decision-log passages inside
-`docs/dev/PLAN-RISKTRANSFORM.md`, `docs/scratch/MITIGATION-PRE-PLANNING.md`.
+`docs/dev/PLAN-RISKTRANSFORM.md`, `docs/archive/MITIGATION-PRE-PLANNING.md`.
 Path references to `../vague-quantifier-logic` stay valid per the user's
 note and are not rewritten.
 

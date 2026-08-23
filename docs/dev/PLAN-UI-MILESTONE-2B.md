@@ -19,7 +19,7 @@
 >   `[keep scenario]` buttons (§8) and semantic (param-average) resolution are
 >   NOT built; deferred to Phase F and tracked in the scratch tracker
 >   ("Deferred: Phase D Option-2 conflict resolution").
-> Companion: `docs/scratch/milestone-2b-cache-and-decisions.md` (decisions
+> Companion: `docs/archive/milestone-2b-cache-and-decisions.md` (decisions
 > DD-5/7/8/9/11 and phase outline). Rendered mockups (open locally in a
 > browser): v1 (neutral) and v2 (`--scenario` role token) are **superseded
 > by the 2026-07-19 neutral-semantics decision (§0)** and kept as record;
