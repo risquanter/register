@@ -376,9 +376,11 @@ container, and this machine's daemon runs with user-namespace remapping):
 - `-e HOME=/tmp` — the Docker CLI writes `$HOME/.docker`; the image's baked-in
   home is not writable under the remap.
 - Mount the repo's **parent** directory at its **identical host path** (not
-  `/workspace`) — compose build contexts (`..` for frontend/builder images)
-  are resolved by the host daemon, so every path the runner passes must mean
-  the same thing on the host. A `/workspace` mount fails with errors like
+  `/workspace`) — build contexts and compose paths are resolved by the **host**
+  daemon, so every path the runner passes must resolve to the same file on the
+  host. Build contexts are all within the repo (`.` and `containers/*`), so
+  mounting just the repo root at its identical path also works; the parent mount
+  is the safe superset. A `/workspace` mount fails with errors like
   `lstat /register: no such file or directory`.
 
 | Scenario | Suite |
