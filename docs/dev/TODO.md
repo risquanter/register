@@ -968,7 +968,7 @@ reparent-plus-param-change case — exactly the hole.
    result doesn't depend on the parent) but harmless — decide whether to keep
    that optimisation.
 2. Longer-term (milestone-2b Phase A, designed but unimplemented): move to the
-   content-addressed cache per `docs/scratch/milestone-2b-cache-and-decisions.md`,
+   content-addressed cache per `docs/archive/milestone-2b-cache-and-decisions.md`,
    which makes this whole bug class structurally impossible — see that doc's
    Review Addendum (2026-07-12) for the audited status, a recommended
    leaf-only-caching lean-down, and why it is the required substrate for
@@ -987,7 +987,7 @@ the leaf cache key is recomputed from the leaf's stored content
 (`sha256(LeafSimContent)`), so a param change *is* a different key — no
 hand-written diff decides invalidation, hence nothing to get wrong.
 Consequences, now explicit Phase A deliverables in
-`docs/scratch/milestone-2b-cache-and-decisions.md` (Phase Outline):
+`docs/archive/milestone-2b-cache-and-decisions.md` (Phase Outline):
 
 1. **End-to-end regression test** replicating this item's live repro at service
    level (create tree → LEC → one update combining reparent + param change →
@@ -1415,7 +1415,7 @@ before reporting it done). Questions to resolve before choosing:
 **Origin (2026-07-21):** surfaced as one of three options for covering
 milestone-2b Phase B's "create scenario, switch, edit, switch back"
 end-to-end item (the other two: item 24's browser automation, or a live
-manual round-trip — see `docs/scratch/milestone-2b-cache-and-decisions.md`,
+manual round-trip — see `docs/archive/milestone-2b-cache-and-decisions.md`,
 Phase Outline, Phase B). Every current `app/test` spec is a pure state/logic
 test (`TreeBuilderStateSpec`, `TreePreviewSpec`, etc.) — none exercise
 `ScenarioState`/`TreeViewState` against a fake backend. The server module has
@@ -1918,3 +1918,63 @@ decisions worth revisiting before implementation rather than lifting the plan's
 provisional spec verbatim. Redo the interaction design, then plan the slice.
 
 **Status:** open — design first.
+
+---
+
+## 44. `descendant_of` / `leaf_descendant_of` predicates walk the subtree instead of the ancestor chain — efficiency
+
+**Observed.** The `descendant_of(desc, ancestor)` predicate in
+`RiskTreeKnowledgeBase` is a boolean membership test but is implemented by
+building the ancestor's entire descendant set and checking membership:
+`(index.descendants(ancestor) - ancestor).contains(desc)`. Cost is O(size of the
+ancestor's subtree) per call. `leaf_descendant_of` does the same plus a leaf
+check. The set is not cached, so nothing is amortized across calls.
+
+**Cheaper primitive already exists.** `TreeIndex.isAncestor` /
+`ancestorPath` walk the single-parent chain upward — O(depth). Since
+`descendant_of(desc, ancestor)` is logically `isAncestor(ancestor, desc)`, the
+predicate could be `desc != ancestor && index.isAncestor(ancestor, desc)`
+(`leaf_descendant_of` adds `leafIdSet.contains(desc)`). Depth is bounded by
+subtree size and usually far smaller, so the upward check wins or ties for a
+membership test and never loses. The gap is largest under quantification:
+`forall x. descendant_of(x, root)` is O(n²) with the current subtree build vs
+O(n · depth) walking up.
+
+**Scope.** Behaviour-preserving — same results, better complexity. The `desc !=
+ancestor` guard preserves the current strict/irreflexive semantics
+(`isAncestor` is reflexive; `descendant_of` is not). `TreeIndex.descendants`
+itself stays — it is the right tool when the whole set is genuinely needed (e.g.
+change fan-out); this is only about the two boolean predicates using a
+set-builder where a path-check suffices.
+
+**Files it would touch.**
+`modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`
+(two predicate bodies). No signature, DTO, or wire change.
+
+**Status:** open — backlog; clean win with existing test coverage.
+
+## 45. Asset knowledge graph — future epic (placeholder; collects two parked threads)
+
+**Not scheduled. Not designed.** A future, separate epic gated on a prerequisite
+that does not exist yet: an asset/knowledge-graph domain where assets carry risks
+and risks carry mitigations (`has_risk`, `has_mitigation`), beyond today's
+single-node-sort risk tree. This item exists only so the two threads already
+parked for it are not orphaned; it is deliberately a pointer, not a spec.
+
+**Threads to pick up when this epic is drafted:**
+
+- **Dependence-concept applicability.** `docs/scratch/DEPENDENCE.md` (b) explicit
+  dependence modelling and (c) alternative comparison metrics are marked "needs
+  further consideration" precisely because dependence is premature until the
+  asset graph exists. Revisit their applicability and approach then. (Today the
+  tool models no cross-risk dependence; with-vs-without portfolio comparison is
+  the sensible influence-tracking.)
+- **Asset-scope mitigation targeting.** `docs/archive/MITIGATION-PRE-PLANNING.md`
+  "Follow-ups (future / asset-scope)": the precomputed unary predicate
+  `has_unmitigated_risk(x) ≝ ∃r. (has_risk(x, r) ∧ ¬∃m. has_mitigation(r, m))`
+  and D5 (client-facing mitigation API, own ADR). These need the auxiliary sorts
+  (`RiskType`, `Mitigation`) the asset graph introduces.
+- **M3 targeting-fragment re-assessments** (`PLAN-RISKTRANSFORM.md` §7.3.1 RA-1,
+  RA-2) also unblock once auxiliary sorts exist — same prerequisite.
+
+**Status:** open — future epic, prerequisite-gated (no asset-graph domain yet).
