@@ -2,7 +2,6 @@ package com.risquanter.register.foladapter
 
 import zio.test.*
 
-import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.testutil.TestHelpers
 
 import vql.result.{EvaluationOutput, VagueQueryResult}
@@ -14,24 +13,24 @@ import vql.sampling.{SamplingParams, ProportionEstimate}
   * to register's `QueryResponse`.
   *
   * Covers:
-  *   - Asset-value projection via Value.as[String]
-  *   - Non-Asset values are filtered out (Loss, Probability)
-  *   - Unknown node names are filtered out
+  *   - Node-value projection via `extract[NodeId]`
+  *   - Non-node sorts are filtered out (Loss, Probability)
+  *   - A node-sorted value whose carrier is not a `NodeId` is filtered out
   *   - All scalar fields pass through correctly
   *   - Empty evaluation output
   */
 object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
 
-  private val assetSort = TypeId("Asset")
-  private val lossSort  = TypeId("Loss")
+  private val nodeSort = RiskTreeKnowledgeBase.NodeSort
+  private val lossSort = TypeId("Loss")
 
   private val cyberId    = nodeId("cyber")
   private val hardwareId = nodeId("hardware")
+  private val aId        = nodeId("a")
+  private val bId        = nodeId("b")
 
-  private val nodeLookup: Map[String, NodeId] = Map(
-    "Cyber"    -> cyberId,
-    "Hardware" -> hardwareId
-  )
+  private def nodeVal(id: com.risquanter.register.domain.data.iron.NodeId): Value =
+    Value(nodeSort, id)
 
   private def makeEstimate(proportion: Double, successes: Int, sampleSize: Int): ProportionEstimate =
     ProportionEstimate(
@@ -62,13 +61,13 @@ object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
     suite("QueryResponseBuilder")(
-      test("maps satisfying Asset values to NodeIds") {
+      test("maps satisfying Node values to NodeIds") {
         val output = EvaluationOutput(
           result = makeResult(satisfied = true, proportion = 1.0, rangeSize = 2, satisfyingCount = 2),
-          rangeElements = Set(Value(assetSort, "Cyber"), Value(assetSort, "Hardware")),
-          satisfyingElements = Set(Value(assetSort, "Cyber"), Value(assetSort, "Hardware"))
+          rangeElements = Set(nodeVal(cyberId), nodeVal(hardwareId)),
+          satisfyingElements = Set(nodeVal(cyberId), nodeVal(hardwareId))
         )
-        val response = QueryResponseBuilder.from(output, nodeLookup, "test query")
+        val response = QueryResponseBuilder.from(output, "test query")
         assertTrue(
           response.satisfied == true,
           response.proportion == 1.0,
@@ -78,25 +77,25 @@ object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
           response.queryEcho == "test query"
         )
       },
-      test("filters out non-Asset values from satisfying elements") {
+      test("filters out non-node sorts from satisfying elements") {
         val output = EvaluationOutput(
           result = makeResult(satisfied = true, proportion = 1.0, rangeSize = 3, satisfyingCount = 3),
-          rangeElements = Set(Value(assetSort, "Cyber"), Value(assetSort, "Hardware"), Value(lossSort, 5000L)),
-          satisfyingElements = Set(Value(assetSort, "Cyber"), Value(lossSort, 5000L))
+          rangeElements = Set(nodeVal(cyberId), nodeVal(hardwareId), Value(lossSort, 5000L)),
+          satisfyingElements = Set(nodeVal(cyberId), Value(lossSort, 5000L))
         )
-        val response = QueryResponseBuilder.from(output, nodeLookup, "q")
-        // Only "Cyber" should resolve — the Loss value should be filtered
+        val response = QueryResponseBuilder.from(output, "q")
+        // Only the node value should resolve — the Loss value is filtered by sort
         assertTrue(
           response.satisfyingNodeIds == List(cyberId)
         )
       },
-      test("filters out unknown names not in nodeLookup") {
+      test("filters out a node-sorted value whose carrier is not a NodeId") {
         val output = EvaluationOutput(
           result = makeResult(satisfied = true, proportion = 1.0, rangeSize = 1, satisfyingCount = 1),
-          rangeElements = Set(Value(assetSort, "Unknown")),
-          satisfyingElements = Set(Value(assetSort, "Unknown"))
+          rangeElements = Set(Value(nodeSort, "not-an-id")),
+          satisfyingElements = Set(Value(nodeSort, "not-an-id"))
         )
-        val response = QueryResponseBuilder.from(output, nodeLookup, "q")
+        val response = QueryResponseBuilder.from(output, "q")
         assertTrue(response.satisfyingNodeIds.isEmpty)
       },
       test("empty evaluation output produces empty response") {
@@ -105,7 +104,7 @@ object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
           rangeElements = Set.empty[Value],
           satisfyingElements = Set.empty[Value]
         )
-        val response = QueryResponseBuilder.from(output, nodeLookup, "empty")
+        val response = QueryResponseBuilder.from(output, "empty")
         assertTrue(
           response.satisfied == false,
           response.proportion == 0.0,
@@ -118,10 +117,10 @@ object QueryResponseBuilderSpec extends ZIOSpecDefault with TestHelpers:
       test("sampleSize equals rangeSize in exact mode") {
         val output = EvaluationOutput(
           result = makeResult(satisfied = true, proportion = 0.5, rangeSize = 4, satisfyingCount = 2),
-          rangeElements = Set(Value(assetSort, "Cyber"), Value(assetSort, "Hardware"), Value(assetSort, "A"), Value(assetSort, "B")),
-          satisfyingElements = Set(Value(assetSort, "Cyber"), Value(assetSort, "Hardware"))
+          rangeElements = Set(nodeVal(cyberId), nodeVal(hardwareId), nodeVal(aId), nodeVal(bId)),
+          satisfyingElements = Set(nodeVal(cyberId), nodeVal(hardwareId))
         )
-        val response = QueryResponseBuilder.from(output, nodeLookup, "q")
+        val response = QueryResponseBuilder.from(output, "q")
         assertTrue(response.sampleSize == response.rangeSize)
       }
     )

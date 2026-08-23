@@ -14,15 +14,18 @@ package com.risquanter.register.common
   */
 object FolSymbols:
 
-  /** Union of all predicate and function symbol names declared in the
-    * `RiskTreeKnowledgeBase` catalog. Must be kept in sync with the symbol
-    * declarations in `RiskTreeKnowledgeBase` — the C4 test in
-    * `RiskTreeKnowledgeBaseSpec` asserts that `reservedFolNames` equals this set.
+  /** A manually maintained mirror of the predicate and function symbol names
+    * declared in the `RiskTreeKnowledgeBase` catalog. This literal lives in
+    * `common` because the DTO-boundary gate needs it here, where the
+    * `server`-side catalog is not on the dependency graph and its symbol union
+    * cannot be computed. The C4 test in `RiskTreeKnowledgeBaseSpec` guards the
+    * mirror against drift — it asserts `reservedFolNames` equals the catalog's
+    * function ∪ predicate symbol names.
     */
   val reservedNames: Set[String] = Set(
     // predicates
     "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
-    "gt_loss", "gt_prob",
+    "gt_loss", "gt_prob", "=",
     // functions
     "p95", "p99", "lec"
   )

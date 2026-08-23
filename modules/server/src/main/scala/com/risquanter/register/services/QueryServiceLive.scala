@@ -100,7 +100,7 @@ class QueryServiceLive private (
         _ <- tracing.setAttribute("query.satisfied", output.satisfied)
         _ <- tracing.setAttribute("query.proportion", output.proportion)
 
-        response = QueryResponseBuilder.from(output, kb.nameToNodeId, queryText)
+        response = QueryResponseBuilder.from(output, queryText)
       yield response
     }
 

@@ -4,7 +4,7 @@ import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.http.responses.QueryResponse
 
 import vql.result.EvaluationOutput
-import vql.typed.{Value, TypeId}
+import vql.typed.{Value, extract}
 
 /** Constructs [[QueryResponse]] from typed vql-engine evaluation results.
   *
@@ -15,28 +15,25 @@ import vql.typed.{Value, TypeId}
   */
 object QueryResponseBuilder:
 
-  private val assetSort: TypeId = TypeId("Asset")
+  import RiskTreeKnowledgeBase.given
 
   /** Builds a response from vql-engine typed evaluation output.
     *
     * Satisfying and range elements arrive as `Set[Value]` — sort-tagged
-    * runtime values from the typed pipeline. Asset-sorted values are
-    * projected to String by matching on `Value.raw`, then resolved to
-    * `NodeId` via `nodeIdLookup`. Non-Asset values (Loss, Probability)
-    * are filtered out since they do not represent tree nodes.
+    * runtime values from the typed pipeline. Node-sorted values are projected
+    * to `NodeId` via `extract[NodeId]`; non-node values (Loss, Probability) are
+    * filtered out since they do not represent tree nodes.
     *
-    * @param output        Evaluation output containing result, range, and satisfying elements
-    * @param nodeIdLookup  Maps node names back to typed node IDs
-    * @param queryEcho     Original query text for echo-back
+    * @param output    Evaluation output containing result, range, and satisfying elements
+    * @param queryEcho Original query text for echo-back
     */
   def from(
     output: EvaluationOutput[Value],
-    nodeIdLookup: Map[String, NodeId],
     queryEcho: String
   ): QueryResponse =
-    val matchingIds = output.satisfyingElements.toList.flatMap { v =>
-      (v.raw match { case s: String => Some(s); case _ => None }).flatMap(nodeIdLookup.get)
-    }
+    val matchingIds = output.satisfyingElements.toList
+      .filter(_.sort == RiskTreeKnowledgeBase.NodeSort)
+      .flatMap(_.extract[NodeId].toOption)
     QueryResponse(
       satisfied       = output.satisfied,
       proportion      = output.proportion,

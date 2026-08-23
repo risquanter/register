@@ -3,6 +3,7 @@ package com.risquanter.register.domain.errors
 import zio.test.*
 
 import vql.error.QueryError as QE
+import vql.error.BindErrorDetail
 
 /** Tests for [[FolQueryFailure.fromQueryError]] — the centralised mapping
   * from fol-engine's `QueryError` algebra to register's error hierarchy.
@@ -41,28 +42,48 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
     }
   )
 
-  // ── Bind errors → FolBindFailure ──────────────────────────────────
+  // ── Bind errors → classification (UNKNOWN_REFERENCE vs BIND_FAILED) ──
 
-  private val bindSuite = suite("→ FolBindFailure")(
-    test("BindError with single error preserves message") {
-      val err = QE.BindError(List("type 'Loss' is not a domain type and cannot be quantified over"))
+  /** A bind-phase unparseable-constant detail with a synthetic rendered message. */
+  private def unparseable(name: String, sortName: String): BindErrorDetail =
+    BindErrorDetail.UnparseableConstant(
+      name, sortName, sourceText = s""""$name"""",
+      rendered = s"Unknown $sortName reference: '$name'"
+    )
+
+  private val bindSuite = suite("BindError classification")(
+    test("all-node-unresolved → FolUnknownReference carrying the rendered messages") {
+      val err = QE.BindError(List(
+        unparseable("Foo", FolQueryFailure.NodeSortName),
+        unparseable("Bar", FolQueryFailure.NodeSortName)
+      ))
       FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolBindFailure(errors) =>
-          assertTrue(errors.size == 1, errors.head.contains("Loss"))
+        case FolQueryFailure.FolUnknownReference(messages) =>
+          assertTrue(messages == err.messages, messages.exists(_.contains("Foo")))
         case other => throw MatchError(other)
     },
-    test("BindError with multiple errors preserves all") {
+    test("node-unresolved mixed with a genuine type error → FolBindFailure") {
       val err = QE.BindError(List(
-        "unknown predicate: foo",
-        "arity mismatch for 'leaf': expected 1, actual 2"
+        unparseable("Foo", FolQueryFailure.NodeSortName),
+        BindErrorDetail.Other("arity mismatch for 'leaf': expected 1, actual 2")
       ))
       FolQueryFailure.fromQueryError(err) match
         case FolQueryFailure.FolBindFailure(errors) =>
-          assertTrue(errors.size == 2, errors.head == "unknown predicate: foo")
+          assertTrue(errors == err.messages, errors.exists(_.contains("arity mismatch")))
         case other => throw MatchError(other)
     },
-    test("BindError getMessage joins errors with semicolons") {
-      val err = QE.BindError(List("error A", "error B"))
+    test("homogeneous non-node unparseable constant → FolBindFailure") {
+      val err = QE.BindError(List(unparseable("notaloss", "Loss")))
+      FolQueryFailure.fromQueryError(err) match
+        case FolQueryFailure.FolBindFailure(errors) =>
+          assertTrue(errors.size == 1, errors.head.contains("notaloss"))
+        case other => throw MatchError(other)
+    },
+    test("BindError getMessage joins rendered messages with semicolons") {
+      val err = QE.BindError(List(
+        BindErrorDetail.Other("error A"),
+        BindErrorDetail.Other("error B")
+      ))
       val mapped = FolQueryFailure.fromQueryError(err)
       assertTrue(mapped.getMessage.contains("error A; error B"))
     }

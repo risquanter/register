@@ -1,5 +1,5 @@
-ThisBuild / version      := "0.10.18"
-ThisBuild / scalaVersion := "3.7.4"
+ThisBuild / version      := "0.10.19"
+ThisBuild / scalaVersion := "3.8.4"
 
 ThisBuild / scalacOptions ++= Seq(
   "-unchecked",
@@ -33,10 +33,11 @@ val zioTelemetryVersion = "3.1.13"
 val openTelemetryVersion = "1.57.0"
 val metalogVersion    = "0.9.0"   // com.risquanter:metalog-distribution (Java)
 // First-party artifact (com.risquanter) — cooldown-exempt per ADR-020 §10
-// (first-party waiver, user-approved 2026-08-09). 0.13.1 carries formula
-// ranges + satisfyingSet (0.11.0), the fragment-membership API (0.12.0), and
-// the fol.* → vql.* package rename (0.13.0), adopted in one bump.
-val vqlEngineVersion  = "0.14.0"  // com.risquanter:vql-engine (cross-compiled)
+// (first-party waiver, user-approved 2026-08-09). 0.16.0 exposes each bind
+// error's sort name (BindErrorDetail.UnparseableConstant.sortName), letting
+// register classify an unresolved node reference as UNKNOWN_REFERENCE rather
+// than BIND_FAILED.
+val vqlEngineVersion  = "0.16.0"  // com.risquanter:vql-engine (cross-compiled)
 
 // Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(

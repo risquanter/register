@@ -1,13 +1,13 @@
 package com.risquanter.register.foladapter
 
-import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio, LossDistribution}
+import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LossDistribution}
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.common.FolSymbols
 
 import vql.typed.{TypeCatalog, TypeDecl, TypeId, SymbolName, FunctionSig, PredicateSig, RuntimeModel, Value}
-import vql.typed.extract
+import vql.typed.{Extract, extract}
 import vql.typed.MapDispatcher
 
 /** Bridges the register domain (RiskTree + simulation results) to the vql-engine
@@ -20,56 +20,47 @@ import vql.typed.MapDispatcher
   *
   * == Sort System ==
   *
-  * | Sort        | Scala type | Description |
-  * |-------------|------------|-------------|
-  * | Asset       | String     | Node names (domain elements) |
-  * | Loss        | Long       | Monetary loss values |
-  * | Probability | Double     | Exceedance probabilities |
-  * | Bool        | Boolean    | Truth values (range of predicates) |
+  * | Sort        | Scala carrier | Description |
+  * |-------------|---------------|-------------|
+  * | Node        | `NodeId`      | Tree node identity (leaves and portfolios) |
+  * | Loss        | Long          | Monetary loss values |
+  * | Probability | Double        | Exceedance probabilities |
+  * | Bool        | Boolean       | Truth values (range of predicates) |
   *
   * == Functions ==
   *
   * | Name | Signature | Backed by |
   * |------|-----------|-----------|
-  * | p95  | Asset → Loss | 95th percentile from `outcomeCount` |
-  * | p99  | Asset → Loss | 99th percentile from `outcomeCount` |
-  * | lec  | (Asset, Loss) → Probability | `probOfExceedance(threshold)` |
+  * | p95  | Node → Loss | 95th percentile from `outcomeCount` |
+  * | p99  | Node → Loss | 99th percentile from `outcomeCount` |
+  * | lec  | (Node, Loss) → Probability | `probOfExceedance(threshold)` |
   *
   * == Predicates ==
   *
   * | Name | Signature | Backed by |
   * |------|-----------|-----------|
-  * | leaf | (Asset) | `TreeIndex.leafIds` |
-  * | portfolio | (Asset) | node is `RiskPortfolio` |
-  * | child_of | (Asset, Asset) | `TreeIndex.children` |
-  * | descendant_of | (Asset, Asset) | `TreeIndex.descendants` |
-  * | leaf_descendant_of | (Asset, Asset) | descendants ∩ leafIds |
+  * | leaf | (Node) | `TreeIndex.leafIds` |
+  * | portfolio | (Node) | node is `RiskPortfolio` |
+  * | child_of | (Node, Node) | `TreeIndex.children` |
+  * | descendant_of | (Node, Node) | `TreeIndex.descendants` |
+  * | leaf_descendant_of | (Node, Node) | descendants ∩ leafIds |
   * | gt_loss | (Loss, Loss) | `a > b` (Long) |
   * | gt_prob | (Probability, Probability) | `a > b` (Double) |
+  * | = | (Node, Node) | `NodeId` equality |
   *
   * @param tree    Risk tree providing structure (TreeIndex) and node metadata
-  * @param results Simulation results indexed by NodeId (from RiskResultResolver.ensureCachedAll)
+  * @param results Simulation results indexed by NodeId (from CachedResultResolver.ensureCachedAll)
   */
 class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistribution]):
 
+  import RiskTreeKnowledgeBase.given
+
   // ── Sort declarations ──────────────────────────────────────────────
 
-  val assetSort: TypeId       = TypeId("Asset")
+  val nodeSort: TypeId        = RiskTreeKnowledgeBase.NodeSort
   val lossSort: TypeId        = TypeId("Loss")
   val probabilitySort: TypeId = TypeId("Probability")
   val boolSort: TypeId        = TypeId("Bool")
-
-  // ── Name → NodeId bidirectional lookup ─────────────────────────────
-
-  /** Maps node name → NodeId for reverse lookups from evaluation output. */
-  val nameToNodeId: Map[String, NodeId] =
-    tree.index.nodes.map { case (nodeId, node) => node.name.value -> nodeId }
-
-  /** Maps node name → LossDistribution for simulation dispatch. */
-  private val nameToResult: Map[String, LossDistribution] =
-    results.flatMap { case (nodeId, result) =>
-      tree.index.nodes.get(nodeId).map(_.name.value -> result)
-    }
 
   // ── Percentile computation ─────────────────────────────────────────
 
@@ -92,25 +83,25 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
   /** Names that, if used as node names, would shadow this catalog's own
     * function or predicate symbols. Bare references to these names go through
     * the formula/term parser's symbol arms (e.g. `p95(x)` → `Fn("p95",[x])`),
-    * so a constant binding for the same name would only be reachable via the
-    * quoted-literal path (`"p95"`). Allowing it would silently bind the asset
-    * with that name in `catalog.constants` and produce surprising behaviour.
+    * so a name binding for the same symbol would only be reachable via the
+    * quoted-literal path (`"p95"`). Allowing it would silently bind the node
+    * with that name through the node-sort literal validator and produce
+    * surprising behaviour.
     *
-    * Per PLAN-QUERY-NODE-NAME-LITERALS §F3 + §6 (D-2.b), this is an
-    * **alarm-on-bypass** safety net: the supported flow is for the DTO
+    * This is an **alarm-on-bypass** safety net: the supported flow is for the DTO
     * validators to reject such names at create-tree time. If a tree carrying
     * a colliding name reaches the KB anyway (direct repo write, migration,
-    * Irmin merge), we skip the entry and surface it via [[nameCollisions]]
-    * for the orchestrating service to log.
+    * Irmin merge), we exclude the entry from [[nameToId]] and surface it via
+    * [[nameCollisions]] for the orchestrating service to log.
     *
     * The set is the union of this catalog's own function and predicate symbol
-    * names — see PLAN §5.4 C4 for the expected baseline.
+    * names.
     */
   val reservedFolNames: Set[String] = FolSymbols.reservedNames
 
   /** Diagnostic record of node names that were skipped (reserved-symbol
     * collision) or coalesced (duplicate name, last-write-wins) when building
-    * `catalog.constants`. Empty in the supported flow — the DTO validators
+    * [[nameToId]]. Empty in the supported flow — the DTO validators
     * (`requireUniqueNames`, `requireNoReservedNames`) gate at create-tree time.
     *
     * Surfaced for the orchestrating service (e.g. `QueryServiceLive`) to log
@@ -127,49 +118,44 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
       .map(n => s"duplicate:$n")
     reserved ++ duplicates
 
-  /** Tree node names registered as `Asset`-sorted constants, enabling
-    * quoted-literal node references in queries (e.g. `child_of(x, "IT Risk")`).
-    *
-    * Boundary note: vql-engine's `TypeCatalog.constants` is `Map[String, TypeId]`;
-    * the `SafeName` Iron refinement is established at `RiskNode.parse` and the
-    * property travels with the immutable `String` value, so unwrapping at this
-    * boundary discards the type-level proof but not the property. The dispatcher
-    * uses `Set.contains` / `Map.get` only — no interpolation — so an unwrapped
-    * `String` cannot widen the attack surface (PLAN §10).
-    *
-    * Reserved-name collisions are skipped here (not in the resulting map).
-    * Duplicate names are deterministically last-write-wins via `.toMap`.
+  /** Node name → `NodeId`, backing the name branch of the node-sort literal
+    * validator so a quoted node name (`child_of(x, "IT Risk")`) resolves to a
+    * node id. Reserved-symbol names are excluded (see [[reservedFolNames]] /
+    * [[nameCollisions]]); duplicate names are last-write-wins until
+    * `RiskTree.fromNodes` enforces node-name uniqueness. The validator returns
+    * a `NodeId`, never a raw string, so the engine carries node identity, not
+    * a name.
     */
-  private val nodeNameConstants: Map[String, TypeId] =
-    tree.index.nodes.values.iterator
-      .map(_.name.value)
-      .filterNot(reservedFolNames.contains)
-      .map(_ -> assetSort)
-      .toMap
+  val nameToId: Map[String, NodeId] =
+    tree.index.nodes.iterator.collect {
+      case (id, node) if !reservedFolNames.contains(node.name.value) => node.name.value -> id
+    }.toMap
 
   val catalog: TypeCatalog = TypeCatalog.unsafe(
     types = Set(
-      TypeDecl.DomainType(assetSort),
+      TypeDecl.DomainType(nodeSort),
       TypeDecl.ValueType(lossSort),
       TypeDecl.ValueType(probabilitySort),
       TypeDecl.ValueType(boolSort)
     ),
-    constants = nodeNameConstants,
+    constants = Map.empty,
     functions = Map(
-      SymbolName("p95") -> FunctionSig(List(assetSort), lossSort),
-      SymbolName("p99") -> FunctionSig(List(assetSort), lossSort),
-      SymbolName("lec") -> FunctionSig(List(assetSort, lossSort), probabilitySort)
+      SymbolName("p95") -> FunctionSig(List(nodeSort), lossSort),
+      SymbolName("p99") -> FunctionSig(List(nodeSort), lossSort),
+      SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort), probabilitySort)
     ),
     predicates = Map(
-      SymbolName("leaf")               -> PredicateSig(List(assetSort)),
-      SymbolName("portfolio")          -> PredicateSig(List(assetSort)),
-      SymbolName("child_of")           -> PredicateSig(List(assetSort, assetSort)),
-      SymbolName("descendant_of")      -> PredicateSig(List(assetSort, assetSort)),
-      SymbolName("leaf_descendant_of") -> PredicateSig(List(assetSort, assetSort)),
+      SymbolName("leaf")               -> PredicateSig(List(nodeSort)),
+      SymbolName("portfolio")          -> PredicateSig(List(nodeSort)),
+      SymbolName("child_of")           -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("descendant_of")      -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("leaf_descendant_of") -> PredicateSig(List(nodeSort, nodeSort)),
       SymbolName("gt_loss")            -> PredicateSig(List(lossSort, lossSort)),
-      SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort))
+      SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort)),
+      SymbolName("=")                  -> PredicateSig(List(nodeSort, nodeSort))
     ),
     literalValidators = Map(
+      nodeSort        -> ((s: String) => NodeId.fromString(s).toOption.orElse(nameToId.get(s))),
       lossSort        -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
       probabilitySort -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0))
     )
@@ -179,84 +165,62 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
 
   private val index: TreeIndex = tree.index
 
-  private val leafNames: Set[String] =
-    index.leafIds.flatMap(id => index.nodes.get(id).map(_.name.value))
+  private val leafIdSet: Set[NodeId] = index.leafIds
 
-  private val portfolioNames: Set[String] =
-    index.nodes.collect { case (_, p: RiskPortfolio) => p.name.value }.toSet
+  private val portfolioIds: Set[NodeId] =
+    index.nodes.collect { case (id, _: RiskPortfolio) => id }.toSet
 
-  /** Pre-computed children lookup: parent name → Set[child name]. */
-  private val childrenByName: Map[String, Set[String]] =
-    index.children.map { case (parentId, childIds) =>
-      val parentName = index.nodes.get(parentId).map(_.name.value).getOrElse("")
-      val childNames = childIds.flatMap(id => index.nodes.get(id).map(_.name.value.toString)).toSet
-      parentName -> childNames
-    }
-
-  /** Pre-computed strict descendants lookup: ancestor name → Set[descendant name].
-    *
-    * Uses standard graph-theory / FOL semantics: the descendant relation is
-    * '''irreflexive''' — a node is never its own descendant.  `TreeIndex.descendants`
-    * includes the node itself, so we subtract it here.
-    */
-  private val descendantsByName: Map[String, Set[String]] =
-    index.nodes.map { case (nodeId, node) =>
-      val descIds = index.descendants(nodeId) - nodeId  // strict (irreflexive)
-      val descNames = descIds.flatMap(id => index.nodes.get(id).map(_.name.value.toString))
-      node.name.value.toString -> descNames
-    }
-
-  private def lookupResult(assetName: String, ctx: String): Either[String, LossDistribution] =
-    nameToResult.get(assetName).toRight(s"$ctx: no simulation result for asset '$assetName'")
+  private def lookupResult(id: NodeId, ctx: String): Either[String, LossDistribution] =
+    results.get(id).toRight(s"$ctx: no simulation result for node '${id.value}'")
 
   val dispatcher: MapDispatcher = MapDispatcher(
     functions = Map(
       SymbolName("p95") -> { args =>
         for
-          assetName <- args(0).extract[String]
-          result    <- lookupResult(assetName, "p95")
+          id     <- args(0).extract[NodeId]
+          result <- lookupResult(id, "p95")
         yield percentile(result, 0.95)
       },
       SymbolName("p99") -> { args =>
         for
-          assetName <- args(0).extract[String]
-          result    <- lookupResult(assetName, "p99")
+          id     <- args(0).extract[NodeId]
+          result <- lookupResult(id, "p99")
         yield percentile(result, 0.99)
       },
       SymbolName("lec") -> { args =>
         for
-          assetName <- args(0).extract[String]
+          id        <- args(0).extract[NodeId]
           threshold <- args(1).extract[Long]
-          result    <- lookupResult(assetName, "lec")
+          result    <- lookupResult(id, "lec")
         yield result.probOfExceedance(threshold)
       }
     ),
     predicates = Map(
       SymbolName("leaf") -> { args =>
-        args(0).extract[String].map(leafNames.contains)
+        args(0).extract[NodeId].map(leafIdSet.contains)
       },
       SymbolName("portfolio") -> { args =>
-        args(0).extract[String].map(portfolioNames.contains)
+        args(0).extract[NodeId].map(portfolioIds.contains)
       },
       SymbolName("child_of") -> { args =>
         for
-          child  <- args(0).extract[String]
-          parent <- args(1).extract[String]
-        yield childrenByName.getOrElse(parent, Set.empty).contains(child)
+          child  <- args(0).extract[NodeId]
+          parent <- args(1).extract[NodeId]
+        yield index.children.getOrElse(parent, Nil).contains(child)
       },
       SymbolName("descendant_of") -> { args =>
         for
-          desc     <- args(0).extract[String]
-          ancestor <- args(1).extract[String]
-        yield descendantsByName.getOrElse(ancestor, Set.empty).contains(desc)
+          desc     <- args(0).extract[NodeId]
+          ancestor <- args(1).extract[NodeId]
+        yield (index.descendants(ancestor) - ancestor).contains(desc)
       },
       SymbolName("leaf_descendant_of") -> { args =>
         for
-          desc     <- args(0).extract[String]
-          ancestor <- args(1).extract[String]
+          desc     <- args(0).extract[NodeId]
+          ancestor <- args(1).extract[NodeId]
         yield
-          val descs = descendantsByName.getOrElse(ancestor, Set.empty)
-          descs.contains(desc) && leafNames.contains(desc)
+          val descs = index.descendants(ancestor) - ancestor  // strict (irreflexive)
+          descs.contains(desc) && leafIdSet.contains(desc)
       },
       SymbolName("gt_loss") -> { args =>
         for
@@ -269,19 +233,41 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
           a <- args(0).extract[Double]
           b <- args(1).extract[Double]
         yield a > b
+      },
+      SymbolName("=") -> { args =>
+        for
+          a <- args(0).extract[NodeId]
+          b <- args(1).extract[NodeId]
+        yield a == b
       }
     )
   )
 
   // ── RuntimeModel ───────────────────────────────────────────────────
 
-  /** Domain elements: one `Value(Asset, nodeName)` per tree node. */
-  private val assetDomain: Set[Value] =
-    tree.index.nodes.values.map(node => Value(assetSort, node.name.value)).toSet
+  /** Domain elements: one `Value(Node, nodeId)` per tree node. */
+  private val nodeDomain: Set[Value] =
+    tree.index.nodes.keys.map(id => Value(nodeSort, id)).toSet
 
   val model: RuntimeModel = RuntimeModel(
-    domains = Map(assetSort -> assetDomain),
+    domains = Map(nodeSort -> nodeDomain),
     dispatcher = dispatcher
   )
 
 end RiskTreeKnowledgeBase
+
+object RiskTreeKnowledgeBase:
+
+  /** Canonical sort id for tree nodes (leaves and portfolios). Shared with
+    * [[QueryResponseBuilder]] so the id projection uses one declaration. */
+  val NodeSort: TypeId = TypeId("Node")
+
+  /** Consumer carrier for the node sort (ADR-015 §2): the engine holds the
+    * register `NodeId` opaquely in `Value.raw`; this lifts it back out. A
+    * well-formed query never hits the left case (sort correctness is proven at
+    * bind time) — it signals a carrier mismatch, not a user error. */
+  given Extract[NodeId] with
+    def apply(v: Value): Either[String, NodeId] = v.raw match
+      case id: NodeId => Right(id)
+      case other      =>
+        Left(s"Extract[NodeId]: expected NodeId carrier for sort '${v.sort.value}', got $other")

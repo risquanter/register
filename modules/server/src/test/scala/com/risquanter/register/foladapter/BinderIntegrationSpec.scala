@@ -14,14 +14,14 @@ import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 import vql.parser.VagueQueryParser
 import vql.semantics.VagueSemantics
 import vql.sampling.{SamplingParams, HDRConfig}
-import vql.typed.{FolModel, QueryBinder, TypeCheckError, TypeId, Value}
+import vql.typed.{FolModel, QueryBinder, TypeCheckError}
 
 /** Integration tests for the parse → bind path against a register-side
   * [[RiskTreeKnowledgeBase]] populated with quoted node-name literals.
   *
   * Covers PLAN-QUERY-NODE-NAME-LITERALS §5.5 cases B1–B3:
-  *   - B1: end-to-end parse + bind + evaluate; range projects to leaf names
-  *   - B2: unknown literal rejected by binder with `UnknownConstantOrLiteral`
+  *   - B1: end-to-end parse + bind + evaluate; range projects to node ids
+  *   - B2: unknown literal rejected by binder with `UnparseableConstant`
   *   - B3: injection-shaped node name does not feed the binder error path
   */
 object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
@@ -92,7 +92,8 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
 
   private val kb = RiskTreeKnowledgeBase(tree, results)
 
-  private val assetSort = TypeId("Asset")
+  private val idToName: Map[NodeId, String] =
+    allNodes.map { case (id, n) => id -> n.name.value }
 
   // ── Direct bypass-tree builder (mirrors RiskTreeKnowledgeBaseSpec.bypassTree) ─
 
@@ -112,10 +113,10 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
     suite("BinderIntegrationSpec — parse + bind against RiskTreeKnowledgeBase")(
 
       test("B1: quoted-literal scope query parses, binds, and evaluates with satisfying = {Cyber, Hardware}") {
-        // PLAN-QUERY-NODE-NAME-LITERALS §5.5. Node names registered as catalog.constants
-        // (Phase 4), so "IT Risk" binds to ConstRef("IT Risk", assetSort) which evaluates
-        // to Value(assetSort, "IT Risk"). Both leaf descendants of IT Risk satisfy
-        // gt_loss(p95(x), 1000) with the 5-trial fixture.
+        // PLAN-QUERY-NODE-NAME-LITERALS §5.5. The quoted node name "IT Risk" binds via
+        // the node-sort literal validator to Value(Node, itId) — a NodeId, not a string.
+        // Both leaf descendants of IT Risk satisfy gt_loss(p95(x), 1000) with the
+        // 5-trial fixture; satisfying elements carry their NodeIds.
         val text   = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 1000))"""
         val parsed = VagueQueryParser.parse(text).toOption.get
         val result = for
@@ -123,7 +124,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
           output   <- VagueSemantics.evaluateTyped(parsed, folModel)
         yield output
         val satisfyingNames = result.toOption.map { out =>
-          out.satisfyingElements.flatMap(v => v.raw match { case s: String => Some(s); case _ => None })
+          out.satisfyingElements.flatMap(v => v.raw match { case id: NodeId => idToName.get(id); case _ => None })
         }
         assertTrue(
           result.isRight,
@@ -131,13 +132,19 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
         )
       },
 
-      test("B2: unknown quoted node name → Left(UnknownConstantOrLiteral)") {
+      test("B2: unknown quoted node name → Left(UnparseableConstant)") {
+        // The node-sort literal validator is present, so a token that is neither a
+        // valid NodeId nor a known node name fails as UnparseableConstant (a validator
+        // rejected it) rather than UnknownConstantOrLiteral (no validator at all).
         val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "Nonexistent"), gt_loss(p95(x), 1000))"""
         val parsed = VagueQueryParser.parse(text).toOption.get
         val bound  = QueryBinder.bind(parsed, kb.catalog)
         assertTrue(
           bound.isLeft,
-          bound.left.toOption.exists(_.contains(TypeCheckError.UnknownConstantOrLiteral("Nonexistent")))
+          bound.left.toOption.exists(_.exists {
+            case TypeCheckError.UnparseableConstant(name, _, _) => name == "Nonexistent"
+            case _                                              => false
+          })
         )
       },
 

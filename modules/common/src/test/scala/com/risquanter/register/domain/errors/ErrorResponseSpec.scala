@@ -443,6 +443,15 @@ object ErrorResponseSpec extends ZIOSpecDefault {
           case other =>
             assertTrue(other.isInstanceOf[FolQueryFailure.FolBindFailure])
       },
+      test("FolUnknownReference roundtrip preserves list losslessly") {
+        val messages = List("Unknown reference: 'Foo'", "Unknown reference: 'Bar'")
+        val original = FolQueryFailure.FolUnknownReference(messages)
+        ErrorResponse.decode(ErrorResponse.encode(original)) match
+          case f: FolQueryFailure.FolUnknownReference =>
+            assertTrue(f.messages == messages)
+          case other =>
+            assertTrue(other.isInstanceOf[FolQueryFailure.FolUnknownReference])
+      },
       test("FolDomainNotQuantifiable roundtrip preserves type") {
         val original = FolQueryFailure.FolDomainNotQuantifiable("Loss", Set("Asset"))
         val decoded = ErrorResponse.decode(ErrorResponse.encode(original))

@@ -10,7 +10,7 @@ consumer; the trait was later renamed `ResultTransformSpec` — §7 OD-2 ruling
 build or the first mitigation wiring) and D5 (after D1's build) remain open.
 Source material: `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B (B.0–B.8, which
 remains the historical record and scoring of the design space),
-`docs/scratch/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
+`docs/archive/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
 ADR-001 (correct-by-construction), ADR-003 (provenance).
 Purpose: a single pickup point for mitigation work. Every decision below follows
 the decision-guide format: goal and context, options, recommendation (labelled).
@@ -298,7 +298,7 @@ and keeping only a metadata trace is rejected.
   versioned blob; on-node is only the degenerate single-node mapping. **Range
   expressiveness decided (B):** extend the *typed* range to full formulas
   (`∧`/`¬`/`∃`, closed-world negation) rather than adapter-derived predicates — a
-  sibling vql-engine change (`docs/scratch/MITIGATION-PRE-PLANNING.md` §P-4). A
+  sibling vql-engine change (`docs/archive/MITIGATION-PRE-PLANNING.md` §P-4). A
   mitigation's targeting predicate is a **restricted** sublanguage (closed in `x`,
   no answer variables, bounded auxiliary quantifiers, no mitigation-state
   predicates; §P-1 — pre-M3 the targeting fragment admits no quantifiers at
@@ -377,7 +377,7 @@ Consequences that follow from this framing:
 ## 7. Build plan (continuation, 2026-08-08)
 
 Implements the §6 concept and the rulings recorded in
-`docs/scratch/MITIGATION-PRE-PLANNING.md` ("Decisions (ruled)"). The sibling
+`docs/archive/MITIGATION-PRE-PLANNING.md` ("Decisions (ruled)"). The sibling
 vql-engine work is delegated under the contract
 `../vague-quantifier-logic/PROMPT-VQL-RANGE-AND-TARGETING.md` (AC-1…AC-10);
 this plan designs against those acceptance criteria and contains **no engine
@@ -878,13 +878,16 @@ memoization into M2; the remaining M3 scope is listed in §8.2.
 - **Engine bump**: `vql-engine` to the AC-1…AC-10 release (exact pin in
   `build.sbt`; breaking `ParsedQuery.range` widening absorbed at the register
   HTTP boundary).
-- **`MitigationTarget.Predicate`**: validated targeting predicate — parsed by
-  the engine's FOL formula parser at the boundary (fails at parse time for
-  `Q[...]`/answer variables by construction), then binding-phase checks
-  (closed in the node variable, bounded auxiliary quantifiers, no
-  mitigation-state predicates — pre-planning P-1). New parser boundary → row
-  added to ADR-029 §3's table (no interpolation; length-capped source;
-  parse-don't-re-parse).
+- **`MitigationTarget.Predicate`** (as-built, per §8): the targeting predicate
+  is validated in the cross-compiled `common` boundary constructor
+  `TargetingPredicate.create` — length-refine → `FOLParser.parse` (the FOL
+  formula grammar has no vague-quantifier or answer-variable production, so
+  `Q[...]`/answer variables fail at parse by construction) → then three
+  accumulated checks on the parsed formula: targeting-fragment membership via
+  `FragmentCheck.check(formula, Fragment.Targeting)` (no quantifier nodes, no
+  function terms), exactly one free variable, and no `mitigate`/`mitigated`/
+  `unmitigated` predicate. New parser boundary → row in ADR-029 §3's table (no
+  interpolation; length-capped source; parse-don't-re-parse).
 - **Scope resolution** via the engine's `satisfyingSet` (AC-5), resolved per
   tree-version, memoized; resolved sets feed `MitigationApplicationRecord.resolvedScope`.
 - **KB schema**: `Mitigation` sort; binary `mitigate(node, mitigation)`;
@@ -896,6 +899,64 @@ memoization into M2; the remaining M3 scope is listed in §8.2.
   ("model built per-query") must be amended in the same change** (doc sweep).
 - **Range use**: analytics over mitigated/unmitigated populations arrive free
   with AC-1/AC-2 once the KB predicates exist; register-side work is KB-only.
+
+#### 7.3.1 M3 mandatory re-assessments (decision-guide-ready) — prerequisite: auxiliary sorts exist
+
+These two questions are **deliberately deferred to M3, not dropped**, because
+each depends on a prerequisite that does not exist yet (a second sort beyond
+the node sort). They are M3 scope and MUST be ruled when M3 is built — they are
+not open sub-questions of the current milestone. Both are written here in
+decision-guide form so the ruling can be made directly with no re-request.
+They originate as pre-planning P-1 divergences (check location; bounded
+auxiliary quantifiers) between the scratch notes and the as-built M1R code.
+
+**RA-1 — Where the targeting checks run (fragment membership, single free
+variable, mitigation-state ban).**
+- *Why it matters now-at-M3:* today the checks live in the cross-compiled
+  `common` boundary constructor `TargetingPredicate.create`, so the browser
+  and server share one validation and no invalid `TargetingPredicate` value
+  can exist. Pre-planning P-1 instead placed them in the `server`-side
+  `QueryBinder` binding phase. When auxiliary sorts arrive, a sort-dependent
+  rule (RA-2) needs sort information that only typing/binding has — which
+  reopens where each check belongs.
+- *Option A — keep all checks in `common` (`TargetingPredicate.create`).* Pros:
+  one boundary, correct-by-construction on both platforms, no invalid value
+  ever exists; matches the current shipped design. Cons: any sort-dependent
+  rule must be expressible without a bound sort environment, or must move
+  server-side, splitting targeting validation across two layers. Plays out:
+  the sort rule (RA-2) is either encoded structurally in the fragment spec or
+  the whole targeting-validation stays in `common` only if the sort catalog is
+  available there.
+- *Option B — split: fragment/free-var/ban in `common`, sort-dependent rule in
+  `QueryBinder`.* Pros: the sort rule sits where sorts are known (P-1's
+  original placement); each check runs where its information lives. Cons: two
+  validation loci for one concept; a `TargetingPredicate` can exist in `common`
+  that a later server bind rejects, weakening the correct-by-construction
+  guarantee.
+- *Trade-off only the user weighs:* the single-boundary correct-by-construction
+  guarantee (ADR-001) against putting the sort rule where sort information
+  naturally lives.
+
+**RA-2 — Whether the targeting fragment admits bounded auxiliary quantifiers.**
+- *Why it matters now-at-M3:* today `Fragment.Targeting` rejects ALL quantifiers,
+  ruled correct pre-M3 (§8.4-3) precisely because the node sort is the only
+  sort, so there is nothing to quantify over and the P-1 sort rule and the
+  no-quantifier rule coincide with zero expressiveness loss. At M3 auxiliary
+  sorts (`Mitigation`, `RiskType`) arrive, and bounded auxiliary quantifiers
+  (`∃a:Mitigation`, `∃r:RiskType`) become genuinely expressive — this is the
+  point §8.4-3 records as the moment to revisit.
+- *Option A — keep rejecting all quantifiers.* Pros: simplest fragment; no
+  bind-time sort rule needed; smallest attack surface. Cons: targeting cannot
+  express "nodes with some mitigation of kind K" or similar auxiliary-sort
+  conditions; expressiveness ceiling.
+- *Option B — admit bounded auxiliary quantifiers over non-node sorts only
+  (P-1's rule), never over the node variable `x`.* Pros: recovers the P-1
+  expressiveness; the bind-time sort rule (built at M3 regardless — syntax
+  cannot know a variable's sort) enforces the "non-`x` sort only" boundary.
+  Cons: needs the sort-aware rule and its placement settled (RA-1); larger
+  fragment to validate and secure.
+- *Trade-off only the user weighs:* targeting expressiveness over auxiliary
+  sorts against fragment simplicity and validation/security surface.
 
 ### 7.4 M4 — API surface + frontend (work items; elevate before build)
 
@@ -1087,6 +1148,7 @@ M1R adds (engine adoption + predicate targeting, §8.6):
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/TargetingPredicate.scala`
 - `modules/common/src/test/scala/com/risquanter/register/domain/data/TargetingPredicateSpec.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala`
+- `modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala`
 - `modules/common/src/main/scala/com/risquanter/register/http/requests/QueryRequest.scala`
 - `modules/app/src/main/scala/app/state/AnalyzeQueryState.scala`
 - `modules/server/src/main/scala/com/risquanter/register/foladapter/QueryResponseBuilder.scala`
@@ -1097,6 +1159,12 @@ M1R adds (engine adoption + predicate targeting, §8.6):
 - `modules/server/src/test/scala/com/risquanter/register/foladapter/BinderIntegrationSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/foladapter/QueryResponseBuilderSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala`
+
+§8.11 adds (bind-error → UNKNOWN_REFERENCE classification + vql 0.16.0 re-pin):
+
+- `modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorResponse.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/errors/ErrorResponseSpec.scala`
+- `project/plugins.sbt` (Scala.js toolchain bump — see §8.11 D1 below; not hook-gated)
 
 ### Open decisions
 
@@ -2069,6 +2137,467 @@ it is not pursued. The richer interactive conflict-resolution UI (one-click
 keep-main/keep-scenario, parameter-average) is a deferred convenience item of
 the **milestone-2b** merge workstream (PLAN-UI-MILESTONE-2B §8 / its scratch
 tracker), not of this plan, and does not bear on M2.
+
+### 8.9 M2 KB id-carrier elevation (Asset → Node) — implementation-grade (2026-08-15)
+
+First buildable, testable slice of M2: turn the `RiskTreeKnowledgeBase` sort
+that currently carries node **names as `String`** into one that carries the
+typed **`NodeId`**, rename the sort `Asset` → `Node`, register `=` on it, and
+flip the screening output projection to the id carrier. This makes the exact
+code for §8.7 items 1–2 and §8.8 M2-D3a / M2-D5. No new decisions — every shape
+here is already ruled; this section only writes it verbatim so it is G1-covered.
+Remaining M2 (resolver `MitigationScopeResolver`, `ScopeOutcome`, storage,
+staleness, `CachedResultResolver` rename, M2-D3b `fromNodes` guard) is elevated
+in a later continuation; it is not in this slice's scope.
+
+**Files (all already in the M2 File inventory — no inventory change):**
+`RiskTreeKnowledgeBase.scala`, `QueryResponseBuilder.scala`, `QueryServiceLive.scala`
+(main); `RiskTreeKnowledgeBaseSpec.scala`, `QueryResponseBuilderSpec.scala`,
+`BinderIntegrationSpec.scala` (test). `QueryService.scala` is unchanged (its
+`evaluate` signature does not move).
+
+**Companion object (new) — carrier + shared sort declaration.** Home for the
+one `given Extract[NodeId]` and the single `NodeSort` declaration both the KB
+and `QueryResponseBuilder` reference (removes the duplicate sort literal §8.7
+item 2 flagged). Imports add `vql.typed.Extract`.
+
+```scala
+object RiskTreeKnowledgeBase:
+
+  /** Canonical sort id for tree nodes (leaves and portfolios). Shared with
+    * `QueryResponseBuilder` so the id projection uses one declaration. */
+  val NodeSort: TypeId = TypeId("Node")
+
+  /** Consumer carrier for the node sort (ADR-015 §2): the engine holds the
+    * register `NodeId` opaquely in `Value.raw`; this lifts it back out. */
+  given Extract[NodeId] with
+    def apply(v: Value): Either[String, NodeId] = v.raw match
+      case id: NodeId => Right(id)
+      case other      =>
+        Left(s"Extract[NodeId]: expected NodeId carrier for sort '${v.sort.value}', got $other")
+```
+
+**Class members — replacements.** `import RiskTreeKnowledgeBase.given` at the
+top of the class body. `assetSort` becomes `nodeSort` sourced from the companion:
+
+```scala
+  val nodeSort: TypeId        = RiskTreeKnowledgeBase.NodeSort
+  val lossSort: TypeId        = TypeId("Loss")
+  val probabilitySort: TypeId = TypeId("Probability")
+  val boolSort: TypeId        = TypeId("Bool")
+```
+
+`nameToNodeId` (public, unfiltered, name→id) is **removed** — its only consumer
+was the old `QueryResponseBuilder` reverse lookup. It is replaced by `nameToId`,
+the reserved-filtered map the node-sort literal validator's name branch uses.
+This preserves today's behaviour: reserved-symbol names stay unbindable as node
+constants, and `nameCollisions` still reports them. Placed after
+`reservedFolNames` / `nameCollisions` (which are unchanged), so its use of
+`reservedFolNames` is initialised first.
+
+```scala
+  /** Node name → NodeId for the node-sort literal validator's name branch.
+    * Excludes reserved-symbol names (see `nameCollisions`); last-write-wins on
+    * duplicate names until `RiskTree.fromNodes` enforces uniqueness (M2-D3b). */
+  val nameToId: Map[String, NodeId] =
+    tree.index.nodes.iterator.collect {
+      case (id, node) if !reservedFolNames.contains(node.name.value) => node.name.value -> id
+    }.toMap
+```
+
+`nameToResult` (name-keyed result map) and `nodeNameConstants` (the
+`Map[String, TypeId]` constants) are **removed**: results dispatch by `NodeId`
+directly (the `results` param is already `Map[NodeId, LossDistribution]`), and
+node constants now bind through the literal validator, not `catalog.constants`.
+
+**Catalog.** `constants` empties; every `assetSort` becomes `nodeSort`; `=` is
+added on the node sort; the node-sort literal validator is added (id first, then
+name fallback — a name that is itself ULID-shaped reads as an id, a non-issue for
+human names; a token that is neither fails at bind → 400, not a silent empty
+scope).
+
+```scala
+  val catalog: TypeCatalog = TypeCatalog.unsafe(
+    types = Set(
+      TypeDecl.DomainType(nodeSort),
+      TypeDecl.ValueType(lossSort),
+      TypeDecl.ValueType(probabilitySort),
+      TypeDecl.ValueType(boolSort)
+    ),
+    constants = Map.empty,
+    functions = Map(
+      SymbolName("p95") -> FunctionSig(List(nodeSort), lossSort),
+      SymbolName("p99") -> FunctionSig(List(nodeSort), lossSort),
+      SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort), probabilitySort)
+    ),
+    predicates = Map(
+      SymbolName("leaf")               -> PredicateSig(List(nodeSort)),
+      SymbolName("portfolio")          -> PredicateSig(List(nodeSort)),
+      SymbolName("child_of")           -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("descendant_of")      -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("leaf_descendant_of") -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("gt_loss")            -> PredicateSig(List(lossSort, lossSort)),
+      SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort)),
+      SymbolName("=")                  -> PredicateSig(List(nodeSort, nodeSort))
+    ),
+    literalValidators = Map(
+      nodeSort        -> ((s: String) => NodeId.fromString(s).toOption.orElse(nameToId.get(s))),
+      lossSort        -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
+      probabilitySort -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0))
+    )
+  )
+```
+
+Covariance widens each `Option[NodeId]` / `Option[Long]` / `Option[Double]` to
+the declared `String => Option[Any]`; if inference balks on the mixed map, the
+node lambda is annotated `: Option[Any]` (fallback only).
+
+**Dispatcher — id-native.** The name-keyed sets (`leafNames`, `portfolioNames`,
+`childrenByName`, `descendantsByName`) are **deleted**; predicates key on `NodeId`
+via `TreeIndex`'s native `leafIds` / `children` / `descendants`. `lookupResult`
+keys on `NodeId`:
+
+```scala
+  private val leafIdSet: Set[NodeId] = index.leafIds
+  private val portfolioIds: Set[NodeId] =
+    index.nodes.collect { case (id, _: RiskPortfolio) => id }.toSet
+
+  private def lookupResult(id: NodeId, ctx: String): Either[String, LossDistribution] =
+    results.get(id).toRight(s"$ctx: no simulation result for node '${id.value}'")
+
+  val dispatcher: MapDispatcher = MapDispatcher(
+    functions = Map(
+      SymbolName("p95") -> { args =>
+        for id <- args(0).extract[NodeId]; result <- lookupResult(id, "p95")
+        yield percentile(result, 0.95)
+      },
+      SymbolName("p99") -> { args =>
+        for id <- args(0).extract[NodeId]; result <- lookupResult(id, "p99")
+        yield percentile(result, 0.99)
+      },
+      SymbolName("lec") -> { args =>
+        for
+          id        <- args(0).extract[NodeId]
+          threshold <- args(1).extract[Long]
+          result    <- lookupResult(id, "lec")
+        yield result.probOfExceedance(threshold)
+      }
+    ),
+    predicates = Map(
+      SymbolName("leaf")      -> { args => args(0).extract[NodeId].map(leafIdSet.contains) },
+      SymbolName("portfolio") -> { args => args(0).extract[NodeId].map(portfolioIds.contains) },
+      SymbolName("child_of") -> { args =>
+        for child <- args(0).extract[NodeId]; parent <- args(1).extract[NodeId]
+        yield index.children.getOrElse(parent, Nil).contains(child)
+      },
+      SymbolName("descendant_of") -> { args =>
+        for desc <- args(0).extract[NodeId]; ancestor <- args(1).extract[NodeId]
+        yield (index.descendants(ancestor) - ancestor).contains(desc)
+      },
+      SymbolName("leaf_descendant_of") -> { args =>
+        for desc <- args(0).extract[NodeId]; ancestor <- args(1).extract[NodeId]
+        yield
+          val descs = index.descendants(ancestor) - ancestor
+          descs.contains(desc) && leafIdSet.contains(desc)
+      },
+      SymbolName("gt_loss") -> { args =>
+        for a <- args(0).extract[Long]; b <- args(1).extract[Long] yield a > b
+      },
+      SymbolName("gt_prob") -> { args =>
+        for a <- args(0).extract[Double]; b <- args(1).extract[Double] yield a > b
+      },
+      SymbolName("=") -> { args =>
+        for a <- args(0).extract[NodeId]; b <- args(1).extract[NodeId] yield a == b
+      }
+    )
+  )
+```
+
+**Model.** Domain elements carry `NodeId`:
+
+```scala
+  private val nodeDomain: Set[Value] =
+    tree.index.nodes.keys.map(id => Value(nodeSort, id)).toSet
+
+  val model: RuntimeModel = RuntimeModel(
+    domains = Map(nodeSort -> nodeDomain),
+    dispatcher = dispatcher
+  )
+```
+
+**`QueryResponseBuilder`.** The `nodeIdLookup` parameter is removed; node values
+are projected by sort filter + `extract[NodeId]`. Imports drop the now-unused
+local `TypeId`/`assetSort` and add `vql.typed.extract`.
+
+```scala
+object QueryResponseBuilder:
+  import RiskTreeKnowledgeBase.given
+
+  def from(output: EvaluationOutput[Value], queryEcho: String): QueryResponse =
+    val matchingIds = output.satisfyingElements.toList
+      .filter(_.sort == RiskTreeKnowledgeBase.NodeSort)
+      .flatMap(_.extract[NodeId].toOption)
+    QueryResponse(
+      satisfied         = output.satisfied,
+      proportion        = output.proportion,
+      rangeSize         = output.rangeElements.size,
+      sampleSize        = output.rangeElements.size,
+      satisfyingCount   = output.satisfyingElements.size,
+      satisfyingNodeIds = matchingIds,
+      queryEcho         = queryEcho
+    )
+```
+
+**`QueryServiceLive`.** One call-site change; the `kb.nameToNodeId` argument is
+gone:
+
+```scala
+        response = QueryResponseBuilder.from(output, queryText)
+```
+
+The `nameCollisions` diagnostic block (lines ~68–74) is unchanged.
+
+**Doc/comment sweep (in the same edit):** the KB class scaladoc sort table
+(`Asset | String` → `Node | NodeId`, "node identity (leaves and portfolios)"),
+the function/predicate signature tables (`Asset` → `Node`, add a `= | (Node,
+Node) | NodeId equality` row), the `reservedFolNames` scaladoc (it now filters
+`nameToId`, not `catalog.constants`), the `nameCollisions` scaladoc ("building
+`nameToId`" not "building `catalog.constants`"), and the `QueryResponseBuilder`
+scaladoc ("Node-sorted values projected to `NodeId` via `extract[NodeId]`").
+
+**ADR alignment.** ADR-015 §2 — compliant (consumer `given Extract[NodeId]`, no
+engine change). ADR-018 — compliant (carrier is the nominal `NodeId`). ADR-001 —
+improved: `=` and structural predicates compare typed `NodeId`, the only raw
+`String` is the literal-validator parse input (the sanctioned boundary). ADR-010
+— unchanged (`Extract` returns `Either`). ADR-029 — improved: node constants are
+whitelist-constrained to real ids / known names at bind. No deviations.
+
+**Reserved-name sync (`=`).** `reservedFolNames` is defined as the union of the
+catalog's function and predicate symbol names (`FolSymbols.reservedNames`, the
+single source of truth also used by the DTO gate `requireNoReservedNames`); the
+C4 test asserts that equality. Registering `=` adds it to `catalog.predicates`,
+so `=` is added to `FolSymbols.reservedNames` too — keeping the two sets equal
+and C4 passing untouched. Consequence: a node literally named `=` is excluded
+from `nameToId` / rejected by the DTO gate, same as any other symbol name (no
+real node carries that name). `FolSymbols.scala` is in the File inventory for
+this slice.
+
+**Decision-trigger check.** #4/#5 (the `QueryResponseBuilder.from` signature and
+the KB behaviour rework) are covered verbatim by §8.7 items 1–2 and §8.8
+M2-D3a/M2-D5 — plan execution, not an unplanned trigger. #8: the three specs are
+rewritten to assert on `NodeId` instead of `String`; same behaviours, no
+assertion weakened or removed. No open decisions.
+
+**Determinism note.** The name→id branch is last-write-wins on duplicate names
+until M2-D3b adds node-name uniqueness to `RiskTree.fromNodes` (later M2 slice) —
+identical to today's `nameToNodeId`, so this slice introduces no regression.
+
+**Verification plan.**
+
+```bash
+sbt server/compile
+sbt server/test                 # RiskTreeKnowledgeBaseSpec, QueryResponseBuilderSpec,
+                                # BinderIntegrationSpec green
+sbt 'commonJVM/test; server/test'
+sbt serverIt/test               # unaffected by this slice; must stay green
+run_bats tests/bats/suite-c-in-memory.bats   # fast gate after code change
+```
+
+New/updated test cases: `=` node equality binds and evaluates
+(`x = "<ulid>"` true for that node, false for others); a quoted node-name
+literal resolves to its id (`child_of(x, "IT Risk")`); a reserved name stays
+unbindable (`nameCollisions` non-empty, bind fails); structural predicates
+(`leaf`/`child_of`/`descendant_of`/`leaf_descendant_of`) return the same sets as
+before over the id carrier; `p95`/`p99`/`lec` dispatch by id; the response
+builder projects node values to `NodeId` and drops non-node sorts.
+
+### 8.10 M2 slice status & pickup map (2026-08-15)
+
+M2 ships as one delivery; the slices below are internal testability sequencing,
+not separate releases. This is the resume list for a cold session: what is
+elevated to exact signatures, what is only ruled, and where each lives. Update
+the status column as slices land.
+
+| # | Slice | Status | Elevation / ruling anchor |
+|---|-------|--------|---------------------------|
+| 1 | **KB id-carrier (Asset → Node)** — sort rename, `NodeId` carrier, `given Extract[NodeId]`, `=` on the node sort, id-or-name literal validator, id-native structural dispatchers, `QueryResponseBuilder`/`QueryServiceLive` flip | **Implementation-grade (§8.9); building** | §8.9 (exact code); §8.7 items 1–2; §8.8 M2-D3a, M2-D5 |
+| 2 | **`MitigationScopeResolver` + `ScopeOutcome`** — results-free KB; `satisfyingSet` turns each targeting predicate into `Set[NodeId]`; per-mitigation success/failure isolation; memoized on `(WorkspaceId, TreeId, BranchRef, CommitHash)`; output `Map[MitigationId, Set[NodeId]]` | Ruled; **exact signatures pending** | §8.8 M2-D1, M2-D2; §8.2 resolver edge |
+| 3 | **`RiskResultResolver` → `CachedResultResolver` rename + resolver-edge wiring** — edge takes `resolvedScopes: Map[MitigationId, Set[NodeId]]` (not `MitigationSelection`); result-stage transforms applied at the edge, never cached (D3) | Ruled; **exact signatures pending** (§7.2.2 stale box reconciled here) | §8.8 M2-D4; §7.2.2; §8.6 algebra |
+| 4 | **Storage — one Irmin path per mitigation** — `WorkspaceStoragePaths.treeMitigations`; `RiskTreeRepositoryIrmin` read/write; whole-subtree replacement (DD-7); byte-level conflict pre-check (ADR-032) | Ruled; **exact signatures pending** | §7.2.1 |
+| 5 | **`MitigationStaleness.staleOverrides`** — diagnostic-only override-staleness set (frozen-opinion semantics; resolution ignores it); stamp writing on the tree-PUT path | Ruled; **exact signatures pending** | §7.2.2a (OD-6) |
+| 6 | **M2-D3b duplicate-node-name merge guard (A + B)** — pre-merge scan (A) + post-merge `fromNodes` validate-and-revert (B); **adds node-name uniqueness to `RiskTree.fromNodes`**, which also makes slice 1's name→id branch deterministic (removes its last-write-wins caveat) | Ruled; **rides §9 Lever 1**, exact signatures pending | §8.8 M2-D3b; §9 Lever 1; §8.4-4 |
+
+Cross-slice dependency to remember: slice 1 ships with a last-write-wins name→id
+map (matching today's behaviour); slice 6 tightens it to deterministic by adding
+the `fromNodes` uniqueness invariant. Slice 1 does not block on slice 6 — the
+caveat is documented in §8.9's determinism note.
+
+Files for slices 2–6 are already in the M2 File inventory. Each pending slice
+gets its own §8.x implementation-grade elevation (exact signatures, per the Plan
+Quality Gate) presented before its first source edit, exactly as §8.9 was.
+
+### 8.11 M2 bind-error → UNKNOWN_REFERENCE classification + vql 0.16.0 re-pin — implementation-grade (2026-08-19)
+
+Elevates the last piece of the M2 KB id-carrier workstream: collapse the
+two-tier bind-error handling into the single `fromQueryError` mapper now that
+vql-engine 0.16.0 exposes each bind error's sort name. An unknown quoted node
+name maps to HTTP 400 `UNKNOWN_REFERENCE` (was `BIND_FAILED`), which turns the
+serverIt `QueryEndpointSpec` H3 test green. **Option A (ruled 2026-08-18):** the
+widened `FolUnknownReference` carries the engine's rendered messages and
+round-trips through the existing `ErrorDetail` **message** slot, mirroring
+`FolBindFailure` — no wire-contract redesign (PLAN-ERROR-REFACTORING §5 A/B/C is
+NOT adopted). The cleanup this creates is recorded in PLAN-ERROR-REFACTORING §11.
+
+**Engine facts (vql 0.16.0, `vql/error/QueryError.scala`):**
+`QueryError.BindError(details: List[BindErrorDetail])`, with
+`messages: List[String] = details.map(_.rendered)`. `BindErrorDetail` is an enum
+in `vql.error` (primitives only — the error layer must not depend on `vql.typed`):
+`UnparseableConstant(name, sortName, sourceText, rendered)` and `Other(rendered)`.
+An unresolved quoted node name binds to
+`UnparseableConstant(name, sortName = "Node", …)`. `TypeCheckError.UnparseableConstant`
+(the typed layer) is unchanged at 3 fields, so `BinderIntegrationSpec` B2 is untouched.
+
+#### Exact signatures
+
+```scala
+// build.sbt
+val vqlEngineVersion = "0.16.0"        // was "0.14.0" (line 39)
+// ThisBuild / version := "0.10.19"    // PATCH on landing (bug fix + step)
+
+// modules/common/.../domain/errors/AppError.scala  — object FolQueryFailure
+
+/** Node-sort discriminator: the TypeId.value the engine crosses in
+  * BindErrorDetail.UnparseableConstant.sortName when a quoted token failed the
+  * node-sort literal validator. The catalog declares TypeId(NodeSortName)
+  * indirectly via RiskTreeKnowledgeBase.NodeSort = TypeId("Node"); a drift-guard
+  * assertion in RiskTreeKnowledgeBaseSpec binds the two, matching the
+  * FolSymbols mirror-plus-drift convention. */
+val NodeSortName: String = "Node"
+
+/** Widened from a single name to the engine's rendered messages, one per
+  * unresolved node reference. Mirrors FolBindFailure so decode round-trips
+  * losslessly through the ErrorDetail message slot. */
+final case class FolUnknownReference(messages: List[String])
+  extends FolQueryFailure:
+  override def getMessage: String =
+    s"Unknown reference(s): ${messages.mkString("; ")}"
+
+// fromQueryError — new import + two changed arms
+import vql.error.BindErrorDetail
+
+case e: QE.UnknownConstantOrLiteralError =>            // unreachable for register, kept correct
+  FolUnknownReference(List(e.message))
+
+case e: QE.BindError =>
+  val allNodeUnresolved =
+    e.details.nonEmpty && e.details.forall {
+      case BindErrorDetail.UnparseableConstant(_, sortName, _, _) => sortName == NodeSortName
+      case _                                                      => false
+    }
+  if allNodeUnresolved then FolUnknownReference(e.messages)
+  else                      FolBindFailure(e.messages)   // e.errors accessor is gone at 0.16.0
+
+// modules/common/.../domain/errors/ErrorResponse.scala
+
+// encode dispatch (was: case FolUnknownReference(name) => makeFolUnknownReferenceResponse(name))
+case FolUnknownReference(messages) => makeFolUnknownReferenceResponse(messages)
+
+// decode UNKNOWN_REFERENCE arm (was: FolUnknownReference(firstField) — the "query" bug)
+case ValidationErrorCode.UNKNOWN_REFERENCE =>
+  FolUnknownReference(details.map(_.message))
+
+// builder — now one detail per message, mirroring makeFolBindFailureResponse
+def makeFolUnknownReferenceResponse(
+  messages: List[String], domain: String = "query", requestId: Option[String] = None
+): (StatusCode, ErrorResponse) =
+  val details = messages.map(m => ErrorDetail(domain, "query", ValidationErrorCode.UNKNOWN_REFERENCE, m, requestId))
+  val message = s"Unknown reference(s): ${messages.mkString("; ")}"
+  (StatusCode.BadRequest, ErrorResponse(JsonHttpError(StatusCode.BadRequest.code, message, details)))
+```
+
+#### Test changes
+
+```scala
+// FolQueryFailureFromQueryErrorSpec (server test) — bindSuite rewritten for the
+// 0.16.0 BindError(details) shape (the List[String] constructor is gone) and
+// extended with classification cases:
+import vql.error.BindErrorDetail
+//  (a) all node-unresolved            → FolUnknownReference(messages)
+//  (b) node-unresolved + Other(...)   → FolBindFailure (genuine type error dominates)
+//  (c) homogeneous non-node (sort "Loss") UnparseableConstant → FolBindFailure
+//  existing message-preservation tests re-expressed over details/messages
+
+// ErrorResponseSpec (common test) — add the missing arm, mirroring FolBindFailure:
+test("FolUnknownReference roundtrip preserves list losslessly") {
+  val messages = List("Unknown reference: 'Foo'", "Unknown reference: 'Bar'")
+  val original = FolQueryFailure.FolUnknownReference(messages)
+  ErrorResponse.decode(ErrorResponse.encode(original)) match
+    case f: FolQueryFailure.FolUnknownReference => assertTrue(f.messages == messages)
+    case other => assertTrue(other.isInstanceOf[FolQueryFailure.FolUnknownReference])
+}
+
+// RiskTreeKnowledgeBaseSpec (server test) — drift guard for the discriminator:
+test("NodeSort.value matches the classifier's NodeSortName") {
+  assertTrue(RiskTreeKnowledgeBase.NodeSort.value == FolQueryFailure.NodeSortName)
+}
+```
+
+#### File inventory (delta)
+
+Already listed in `## File inventory`: `build.sbt`, `AppError.scala`,
+`FolQueryFailureFromQueryErrorSpec.scala`, `RiskTreeKnowledgeBaseSpec.scala`.
+Added by §8.11: `ErrorResponse.scala`, `ErrorResponseSpec.scala` (both under the
+inventory heading above). `AnalyzeQueryState.scala` matches `FolUnknownReference`
+by type only — **not** touched. `QueryEndpointSpec.scala` (serverIt H3) asserts
+the wire code and goes green unmodified — **not** touched.
+
+#### ADR alignment
+
+- **ADR-028** (VQL query evaluation): classification lives in the single
+  `fromQueryError` mapper; no `QueryBinder.bind` bypass. Compliant.
+- **ADR-020 §10** (supply chain): 0.16.0 re-pin under the first-party cooldown
+  waiver already naming `vql-engine` (user-approved 2026-08-09); exact pin. Compliant.
+- **ADR-001 / ADR-010** (validate at the boundary, typed errors): error mapping
+  stays at the HTTP edge; unchanged. Compliant.
+- **Trigger #4** (case-class field change): `FolUnknownReference` `name: String`
+  → `messages: List[String]` — specified verbatim here; approval of this section
+  is its echo. **Trigger #8** (test assertions): the `bindSuite` rewrite is forced
+  by the 0.16.0 `BindError` shape change and specified verbatim; the roundtrip and
+  drift-guard tests are additive. Both covered by this plan — no separate halt.
+
+#### Open decisions
+
+One design note (not a user decision): `NodeSortName` lives in the
+`FolQueryFailure` object (common), the catalog keeps `TypeId("Node")`, and a
+drift-guard test binds them — matching the existing `FolSymbols` mirror-plus-drift
+convention rather than coupling the catalog to the errors package.
+
+Two blockers surfaced at implementation and were ruled 2026-08-21:
+
+- **D1 — Scala.js toolchain mismatch.** vql-engine 0.16.0's Scala.js artifact is
+  built with Scala.js 1.22 (`scalajs-library 1.22.0`, IR 1.22); register's linker
+  was `sbt-scalajs 1.20.0` (IR up to 1.20), so the `app` module could not link.
+  ✅ RULED **Option B**: bump register's `sbt-scalajs` to `1.22.0` in
+  `project/plugins.sbt`. Supply chain: 1.22.0 is the latest (`org.scala-js`,
+  established publisher), published 2026-06-20 — past the 14-day cooldown; exact
+  pin. `sbt-scalajs-crossproject` stays at `1.3.2` unless the link fails.
+- **D2 — Maven Central availability.** 0.16.0 was published to Maven Central
+  2026-08-21 (both `vql-engine_3` and `vql-engine_sjs1_3`), so the GraalVM/frontend
+  Docker builds and CI resolve it. The earlier note that 0.16.0 was already on
+  Central was premature; corrected here.
+
+#### Verification plan
+
+```
+sbt 'commonJVM/test; server/test'                 # classification + roundtrip + drift guard
+sbt app/test                                       # frontend unaffected (type-only match)
+sbt "serverIt/testOnly *QueryEndpointSpec"         # H3 → 400 UNKNOWN_REFERENCE
+sbt "serverIt/test"                                # full IT tier
+run_bats tests/bats/suite-c-in-memory.bats         # smoke
+```
+Then: version bump PATCH (`0.10.18` → `0.10.19`), mirror `APP_VERSION` into
+`.env` and `.env.irmin`; doc-consistency sweep (the `FolUnknownReference` /
+`FolBindFailure` doc-comments in `AppError.scala`; PLAN-ERROR-REFACTORING §11).
 
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 

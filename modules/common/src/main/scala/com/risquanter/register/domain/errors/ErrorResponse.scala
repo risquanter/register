@@ -50,7 +50,7 @@ object ErrorResponse {
         case ValidationErrorCode.BIND_FAILED =>
           FolBindFailure(details.map(_.message))
         case ValidationErrorCode.UNKNOWN_REFERENCE =>
-          FolUnknownReference(firstField)
+          FolUnknownReference(details.map(_.message))
         case ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE =>
           FolDomainNotQuantifiable(firstField, Set.empty)
         case _ =>
@@ -203,7 +203,7 @@ object ErrorResponse {
   private def encodeFolQueryFailure(error: FolQueryFailure): (StatusCode, ErrorResponse) = error match {
     case FolParseFailure(message, position)          => makeFolParseFailureResponse(message, position)
     case FolUnknownSymbol(symbol, available)          => makeFolUnknownSymbolResponse(symbol, available)
-    case FolUnknownReference(name)                   => makeFolUnknownReferenceResponse(name)
+    case FolUnknownReference(messages)               => makeFolUnknownReferenceResponse(messages)
     case FolBindFailure(errors)                       => makeFolBindFailureResponse(errors)
     case FolDomainNotQuantifiable(typeName, available) => makeFolDomainNotQuantifiableResponse(typeName, available)
     case FolModelValidationFailure(errors)            => makeFolModelValidationFailureResponse(errors)
@@ -343,9 +343,13 @@ object ErrorResponse {
     response(StatusCode.BadRequest, "query", ValidationErrorCode.UNKNOWN_SYMBOL,
       s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}", domain, requestId)
 
-  def makeFolUnknownReferenceResponse(name: String, domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.BadRequest, "query", ValidationErrorCode.UNKNOWN_REFERENCE,
-      s"Unknown constant or literal reference: '$name'", domain, requestId)
+  /** One `ErrorDetail` per rendered message (mirroring `makeFolBindFailureResponse`),
+    * so `decode` reconstructs the full `FolUnknownReference` list losslessly.
+    */
+  def makeFolUnknownReferenceResponse(messages: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val details = messages.map(m => ErrorDetail(domain, "query", ValidationErrorCode.UNKNOWN_REFERENCE, m, requestId))
+    val message = s"Unknown reference(s): ${messages.mkString("; ")}"
+    (StatusCode.BadRequest, ErrorResponse(JsonHttpError(StatusCode.BadRequest.code, message, details)))
 
   def makeFolBindFailureResponse(errors: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     val details = errors.map(e => ErrorDetail(domain, "query", ValidationErrorCode.BIND_FAILED, e, requestId))

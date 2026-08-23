@@ -235,6 +235,15 @@ case class AuthServiceUnavailable(reason: String, cause: Option[Throwable] = Non
 sealed trait FolQueryFailure extends AppError
 
 object FolQueryFailure:
+  /** Node-sort discriminator: the `TypeId.value` the engine crosses in
+    * `BindErrorDetail.UnparseableConstant.sortName` when a quoted token failed
+    * the node-sort literal validator. `RiskTreeKnowledgeBase.NodeSort` declares
+    * the catalog's `TypeId("Node")`; a drift-guard assertion in
+    * `RiskTreeKnowledgeBaseSpec` binds the two, matching the `FolSymbols`
+    * mirror-plus-drift convention. The catalog is server-side and off `common`'s
+    * dependency graph, so this literal cannot be derived from it here.
+    */
+  val NodeSortName: String = "Node"
   /** Maps from `vql.error.QueryError.ParseError`.
     *
     * Syntactic parse failure — the query string is not well-formed FOL syntax.
@@ -267,21 +276,25 @@ object FolQueryFailure:
     override def getMessage: String =
       s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}"
 
-  /** Maps from `vql.error.QueryError.UnknownConstantOrLiteralError`.
+  /** Maps from a bind-phase failure whose every error is an unresolved node
+    * reference — a quoted constant (e.g. a node name) that is not present in the
+    * `TypeCatalog` node domain. A user-level query error: the named node does not
+    * exist in the tree. Also maps from `UnknownConstantOrLiteralError`.
     *
-    * The query is syntactically valid but contains a constant (e.g. a quoted
-    * node name) that is not present in the `TypeCatalog` constants set. This
-    * is a user-level query error — the named node does not exist in the tree.
+    * Carries the engine's rendered messages, one per unresolved reference, so a
+    * query naming several missing nodes reports them all. Mirrors `FolBindFailure`
+    * so `ErrorResponse.decode` round-trips the list losslessly through the
+    * per-detail message slot.
     *
     * Example: `leaf_descendant_of(x, "NoSuchNode")` where `"NoSuchNode"` is
     * not a registered node name.
     *
     * HTTP 400 — `UNKNOWN_REFERENCE`.
     */
-  final case class FolUnknownReference(name: String)
+  final case class FolUnknownReference(messages: List[String])
     extends FolQueryFailure:
     override def getMessage: String =
-      s"Unknown reference: '$name'"
+      s"Unknown reference(s): ${messages.mkString("; ")}"
 
   /** Maps from `vql.error.QueryError.BindError`.
     *
@@ -383,13 +396,24 @@ object FolQueryFailure:
     */
   def fromQueryError(err: vql.error.QueryError): FolQueryFailure =
     import vql.error.QueryError as QE
+    import vql.error.BindErrorDetail
     err match
       // ── Parse-phase errors → 400 ────────────────────────────────
       case e: QE.ParseError               => FolParseFailure(e.message, e.position)
       // ── Unknown constant/literal reference → 400 ────────────────
-      case e: QE.UnknownConstantOrLiteralError => FolUnknownReference(e.name)
-      // ── Bind-phase type errors → 400 ────────────────────────────
-      case e: QE.BindError                => FolBindFailure(e.errors)
+      // Unreachable for register (the binder folds this into BindError), kept correct.
+      case e: QE.UnknownConstantOrLiteralError => FolUnknownReference(List(e.message))
+      // ── Bind-phase errors → 400 ─────────────────────────────────
+      // Every error an unresolved node reference → UNKNOWN_REFERENCE; any genuine
+      // type error (arity, sort conflict, non-node constant) dominates → BIND_FAILED.
+      case e: QE.BindError                =>
+        val allNodeUnresolved =
+          e.details.nonEmpty && e.details.forall {
+            case BindErrorDetail.UnparseableConstant(_, sortName, _, _) => sortName == NodeSortName
+            case _                                                      => false
+          }
+        if allNodeUnresolved then FolUnknownReference(e.messages)
+        else                      FolBindFailure(e.messages)
       // ── Domain-not-found → 400 (D14, defensive fallback) ───────
       case e: QE.DomainNotFoundError      => FolDomainNotQuantifiable(e.typeName, e.availableTypes)
       // ── Model-validation → 500 (wiring error) ──────────────────

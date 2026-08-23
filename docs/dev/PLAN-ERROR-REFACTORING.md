@@ -24,7 +24,13 @@
 > fundamental abstraction mismatch between JSON-validation and VQL error
 > reporting.
 > **Owner decision pending**: choice of solution path (A / B / C below) for
-> Bugs 1 + 4 and the abstraction work.
+> Bugs 1 + 4 and the abstraction work — **for the two sibling arms only**.
+> **Partial resolution scheduled (2026-08-19)**: PLAN-RISKTRANSFORM §8.11
+> (Option A) repairs Bugs 1 + 4 + 3 for the `FolUnknownReference` arm by reusing
+> the existing message-slot mechanism (no §5 redesign adopted). The remaining
+> scope of THIS plan is the two sibling arms (`FolUnknownSymbol`,
+> `FolDomainNotQuantifiable`, both still routing on `firstField`) plus the A/B/C
+> abstraction decision. See §11.
 
 ---
 
@@ -400,8 +406,46 @@ memory if/when work begins so the abstraction analysis survives.
 
 ## 10. Decision Log (to be filled in by owner)
 
-- [ ] Solution path chosen: **A / B / C**
-- [ ] SF-4 disposition: **keep `firstField`** / **revert to `.message`**
+- [ ] Solution path chosen: **A / B / C** — *for the two sibling arms; the
+      `FolUnknownReference` arm took the message-slot repair via §8.11.*
+- [x] SF-4 disposition: **revert to `.message`** — decided for the
+      `FolUnknownReference` arm via PLAN-RISKTRANSFORM §8.11 (its `decode` arm
+      reads `details.map(_.message)`). Still open for the sibling arms.
 - [ ] Bug 2 scope: same commit as wire fix / separate commit
 - [ ] Bug 3 scope: precede wire fix (tests fail red) / accompany wire fix
+
+---
+
+## 11. Partial resolution via PLAN-RISKTRANSFORM §8.11 (Option A) — 2026-08-19
+
+M2's bind-error classification (PLAN-RISKTRANSFORM §8.11) widens
+`FolUnknownReference` to carry the engine's rendered messages and routes its
+`decode` arm through the **message** slot, mirroring `FolBindFailure`. That
+reuses the existing wire mechanism for one arm; it does **not** adopt any §5
+option (no opaque envelope, no `Diagnostic` type, no name-in-`field` encoding).
+State as of §8.11 landing (2026-08-21):
+
+**Fixed for the `FolUnknownReference` arm (leaves this plan's scope):**
+- **Bug 1 / Bug 4** — `decode` no longer reconstructs `firstField == "query"`;
+  the `UNKNOWN_REFERENCE` arm reads `details.map(_.message)` and round-trips
+  losslessly. `makeFolUnknownReferenceResponse` emits one detail per message.
+- **Bug 3** — a `FolUnknownReference roundtrip preserves list losslessly` test
+  is added to `ErrorResponseSpec`, asserting `f.messages == messages`.
+
+**Still open here (unchanged — this plan's remaining scope):**
+- **Bug 1 / Bug 3 for the two sibling arms** that still route on `firstField`:
+  - `decode` `UNKNOWN_SYMBOL` → `FolUnknownSymbol(firstField, Nil)` —
+    reconstructs `"query"` as the symbol and drops `available`
+    (`ErrorResponse.scala`, ~line 49).
+  - `decode` `DOMAIN_NOT_QUANTIFIABLE` → `FolDomainNotQuantifiable(firstField,
+    Set.empty)` — reconstructs `"query"` as the type name (~line 55).
+  - Neither has a payload-asserting roundtrip test.
+- The **§5 abstraction decision (A / B / C)** for the full wire redesign.
+
+**Resulting decode inconsistency to close here:** after §8.11,
+`UNKNOWN_REFERENCE` and `BIND_FAILED` read the message slot (correct);
+`UNKNOWN_SYMBOL` and `DOMAIN_NOT_QUANTIFIABLE` still read `firstField` (broken).
+The minimal remaining cleanup is to bring the two sibling arms onto the message
+slot the same way, which closes Bug 1 / Bug 3 entirely; the larger §5 redesign
+stays optional on top of that.
 - [ ] Frontend coordination needed: yes / no (Option B only)
