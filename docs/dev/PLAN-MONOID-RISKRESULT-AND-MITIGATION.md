@@ -511,6 +511,12 @@ children).
 
 **API impact**: likely new surface (portfolio-level mitigation is a distinct concept).
 
+**Realized by ADR-034 (Mitigation Valuation Model), Option F.** The "separate
+endomorphism applied after `combineAll`, outside the monoid" is exactly F's
+decorated fold `mitigated(P) = f_P(⊕ mitigated(children))` — the raw combine
+stays the cached monoid fold, the portfolio transform is the post-combine
+endomorphism computed at the read edge. Wiring: PLAN-RISKTRANSFORM §8.14.
+
 ---
 
 ### B.5 Comparative summary

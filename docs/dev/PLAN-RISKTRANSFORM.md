@@ -3433,6 +3433,232 @@ Then: PATCH bump `0.10.21` → `0.10.22`, mirror `APP_VERSION` into `.env` and
 scaladoc that now also describes the resolver consumer. No `common` / wire / ADR
 doc changes (server-internal slice).
 
+### 8.14 M2 slice 3 — `CachedResultResolver` rename + resolver-edge mitigation wiring — implementation-grade (2026-08-28)
+
+Third buildable slice of M2. Consumes slice 2's `Map[MitigationId, Set[NodeId]]`
+at the resolver edge: param-stage transforms change the cache-key content;
+result-stage transforms are applied at the edge and never cached (D3). This
+section reconciles the stale §7.2.2 signature box against the §8.6 algebra.
+
+Two parts of very unequal weight:
+
+- **Rename (mechanical).** `RiskResultResolver` → `CachedResultResolver` (M2-D4).
+  A pure symbol rename the compiler proves; no signature ceremony — only the
+  ripple-site list below, because several ripple files are not yet in the
+  File inventory and the hook would deny them.
+- **Edge wiring (the substance).** Two provenance-determined pieces (edge
+  signature; leaf-path + cache-key wiring) plus one genuine open decision
+  (portfolio-level result-stage transform).
+
+#### Rename — ripple sites (mechanical)
+
+`trait RiskResultResolver` + its accessor `object` + `RiskResultResolverLive`
+become `CachedResultResolver` / `CachedResultResolverLive`. Every reference
+updates; the compiler enforces completeness. Sites (verified by grep
+2026-08-28):
+
+- **main:** `RiskResultResolver.scala`, `RiskResultResolverLive.scala`,
+  `Application.scala` (layer reference), `QueryServiceLive.scala` (env type),
+  `RiskTreeServiceLive.scala` (env type + call sites), `RiskTreeService.scala`
+  (doc comment). `RiskTreeKnowledgeBase.scala` already names
+  `CachedResultResolver` in a scaladoc line — no edit needed.
+- **test:** `RiskResultResolverSpec.scala`, `CacheTransparencySpec.scala`,
+  `Item17RegressionSpec.scala`, `SeedStabilitySpec.scala`, `ProvenanceSpec.scala`;
+  serverIt `SeedReproducibilityItSpec.scala`.
+
+Files are renamed to match the type (`CachedResultResolver.scala`,
+`CachedResultResolverLive.scala`, `CachedResultResolverSpec.scala`) — see the
+minor sub-decision below.
+
+#### Edge signature (determined — provenance: §8.6 algebra + M2-D1)
+
+The §7.2.2 box (`mitigations: MitigationSelection = None`) predates the §8.6
+algebra split. `MitigationApplication.scoped` / `effectiveTree` take **both**
+`selection: MitigationSelection` and `resolvedScopes: Map[MitigationId,
+Set[NodeId]]`, so the §8.10 row's "resolvedScopes, not `MitigationSelection`" is
+a compression: the edge threads both, with no-op defaults so every existing
+caller compiles unchanged.
+
+```scala
+trait CachedResultResolver:
+  def ensureCached(
+    tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean = false,
+    selection: MitigationSelection = MitigationSelection.None,
+    resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
+  ): Task[LossDistribution]
+
+  def ensureCachedAll(
+    tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean = false,
+    selection: MitigationSelection = MitigationSelection.None,
+    resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
+  ): Task[Map[NodeId, LossDistribution]]
+```
+
+Accessor `object` methods mirror the added parameters. `selection = None` makes
+`scoped` return the empty map, so the whole mitigation path is identity — the
+existing callers (`QueryServiceLive`, `RiskTreeServiceLive`) are
+behaviour-unchanged.
+
+#### Internal wiring — determined parts (`CachedResultResolverLive`)
+
+1. **Effective tree drives the cache keys.** Once per resolution, before
+   hashing, and the recursion runs over the effective tree so leaf content
+   matches its key:
+
+   ```scala
+   effective <- ZIO.fromEither(
+     MitigationApplication.effectiveTree(tree, selection, resolvedScopes).toEither
+   ).mapError(errs => ValidationFailed(errs.toList))
+   hashes = ContentHashIndex.build(effective)
+   // resolveWithIndex(effective, hashes, …); node ids are stable across
+   // effectiveTree, so the requested nodeId still resolves.
+   ```
+
+   For `selection = None`, `effectiveTree` returns the input nodes revalidated
+   through `RiskTree.fromNodes` — identical leaf content, identical hashes — so
+   raw leaf simulations are shared with the un-mitigated path (§7.2.2 "cheap by
+   design"). ADR-010: a validation failure becomes typed `ValidationFailed`, no
+   exception crosses the edge.
+
+2. **Scoped map computed once, threaded through `resolveNode`:**
+
+   ```scala
+   scoped = MitigationApplication.scoped(tree, selection, resolvedScopes)  // Map[NodeId, List[Mitigation]]
+   ```
+
+3. **Result-stage transform at each node's return — leaf arm (determined):**
+
+   ```scala
+   val t = MitigationApplication.resultTransformFor(leaf.id, scoped)   // identity when unscoped
+   RiskResult.fromTrialOutcomes(leaf.id, t.run(result.trialOutcomes), result.provenances)
+   ```
+
+   `resultTransformFor` is `identityTransform` when nothing result-stage scopes
+   the leaf, so this is a no-op on the un-mitigated path. ADR-009: the transform
+   acts on the finished leaf operand before it enters any parent combine.
+
+#### Portfolio-level result-stage transform — RULED: F (2026-08-28)
+
+The valuation model is **ADR-034 (Mitigation Valuation Model)**; this section is
+its result-resolver-edge realization. A `ResultStage` mitigation may scope a
+portfolio, and `domain(ResultStage) = all nodes` (2026-08-10) is **preserved** —
+F keeps portfolios in scope, so slice-2's `MitigationScopeResolverLive.resolveOne`
+(`ResultStage → tree.index.nodes.keySet`) and its spec are unchanged.
+
+**The ruling.** A portfolio's result transform is a compositional decorated
+fold: `mitigated(P) = f_P(⊕ mitigated(children))` (ADR-034 Decisions 1–3). It
+folds into ancestors — a parent aggregates its children's *mitigated* values.
+The raw commutative fold `raw(P) = ⊕ raw(children)` is untouched and stays the
+cached, content-addressed value (ADR-034 Decision 4); `RiskResultGroup` keeps its
+private constructor with **no** sanctioned exception. Withdrawn: Option A
+(mutating the canonical aggregate — it would have needed that exception), Option E
+(terminal projection that does not fold), and the old A/B/C framing built on the
+retired "aggregate ≠ sum(children)" premise.
+
+**Why the raw aggregate cannot carry it (provenance for the edge-fold).**
+Result-stage transforms are never cached (D3), so a portfolio's cached aggregate
+is `⊕ raw(children)`, *not* `⊕ mitigated(children)`. Applying `f_P` to the cached
+raw aggregate would give `f_P(⊕ raw(children))`, which differs from F whenever a
+child carries its own result transform. So the mitigated value is a **separate
+fold computed at the edge** (ADR-034 Decision 1): at each node, combine the
+children's mitigated values, then apply that node's `resultTransformFor`. The leaf
+arm above is the base case of exactly this fold (`resultTransformFor(leaf.id,
+scoped)` applied to the raw leaf outcomes); the portfolio arm applies
+`resultTransformFor(portfolio.id, scoped)` to the combined mitigated children.
+`resultTransformFor` is `identityTransform` off-scope, so an un-mitigated
+subtree's mitigated fold equals its raw fold and the two coincide.
+
+**Implementation-grade item finalized at the code echo.** Whether the edge runs
+the mitigated fold as a second traversal or threads a `(raw, mitigated)` pair
+through the existing one — and the exact `CachedResultResolverLive` return shape
+that carries the mitigated aggregate alongside the cached raw value — is a
+signature decision presented at the code step's Signature Echo. It touches
+`CachedResultResolverLive`'s recursion, not the public trait parameter list fixed
+above; it changes no `common` wire type and adds no `LossDistribution` API.
+
+**Resolver file renames — RULED: rename to match the type.**
+`CachedResultResolver.scala`, `CachedResultResolverLive.scala`,
+`CachedResultResolverSpec.scala` (`git mv` + internal rename). The name is swept
+consistent across every reference — scaladoc and the ADR/plan corpus
+(ADR-002/003/005/009/014/015, ARCHITECTURE.md, IMPLEMENTATION-PLAN.md,
+PLAN-PROVENANCE-ENDPOINT.md, PLAN-MONOID, SENSITIVITY-ANALYSIS-PLAN.md, TODO.md)
+— in the same pass as the code rename, as that change's doc-consistency sweep,
+not a separate decision.
+
+#### ADR alignment
+
+- **ADR-034** (mitigation valuation model): this slice is the result-resolver-edge
+  realization of F — the separate mitigated fold, raw kept pristine. Compliant.
+- **ADR-009** (associativity): each node's transform acts on its finished
+  (combined) operand before it enters the parent combine. Compliant.
+- **ADR-010**: `effectiveTree` failure → typed `ValidationFailed`. Compliant.
+- **ADR-015** (cache-aside): unchanged; keys are effective-content, misses
+  simulate. Compliant.
+- **D3**: result-stage transforms applied post-cache at the edge, never stored.
+  Compliant.
+- **Correct-by-construction / §9 aggregate-privacy**: F needs no exception —
+  `RiskResultGroup` stays private (ADR-034 Decision 4). No `common` domain-type
+  API change.
+
+#### Open decisions
+
+None. Both ruled 2026-08-28: portfolio-level result-stage transform → **F**
+(ADR-034); resolver file renames → **rename to match the type**. The only item
+remaining is the `CachedResultResolverLive` edge-fold return shape, which is a
+provenance-determined signature presented at the code step's Signature Echo, not
+an open design choice.
+
+#### Verification plan
+
+- **Rename:** the whole suite compiles and is green — `sbt 'commonJVM/test;
+  server/test'`, `sbt app/test`, `sbt serverIt/test`. Green *is* the proof for a
+  rename.
+- **New/added resolver cases (`CachedResultResolverSpec`):**
+  - un-mitigated (`selection = None`) resolution returns byte-identical results
+    to today — the regression guard for the no-op defaults.
+  - a `LeafStage` mitigation scoping a leaf changes that leaf's cache key and
+    figures; a content-identical unmitigated leaf still shares the cache.
+  - a `ResultStage` mitigation scoping a leaf transforms that leaf's outcomes
+    (identity elsewhere).
+  - a `ResultStage` mitigation scoping a portfolio: the **raw** aggregate still
+    equals `⊕ raw(children)` (cache invariant preserved), while the **mitigated**
+    aggregate equals `f_P(⊕ mitigated(children))` and differs from the raw one at
+    a binding cap.
+  - compositional fold (ADR-034 Decision 3): a `ResultStage` on a child *and* on
+    its ancestor compose by tree position — the ancestor's transform sees the
+    child's already-mitigated total — and the result is independent of the order
+    the two mitigations were authored.
+- **Bump:** PATCH on landing; mirror `APP_VERSION` into `.env` and `.env.irmin`.
+
+#### File inventory (delta)
+
+Rename ripple — **add** (not currently listed; hook would otherwise deny):
+
+- `modules/server/src/main/scala/com/risquanter/register/Application.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/Item17RegressionSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala`
+
+Renamed paths (`git mv` of the three old files; the new paths carry the internal
+type rename and the edge-fold wiring, so they must be inventoried for the hook):
+
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala`
+
+F carries no `common` domain-type change — no `LossDistribution.scala` /
+`LossDistributionSpec.scala` entry (that was conditional on the withdrawn Option
+A).
+
+Already in the inventory and unchanged in listing: `MitigationApplication.scala`,
+`QueryServiceLive.scala`, `CacheTransparencySpec.scala`,
+`RiskTreeKnowledgeBase.scala`.
+
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 
 **Motivation (surfaced by M1R's bounds work, 2026-08-13).** Two gaps, both
@@ -3491,8 +3717,12 @@ options (appears unset — verify) and set a limit.
   already set by §8.4-2, `steps` revised 2026-08-14.)
 - Whether Lever 2 is adopted at all, or Levers 1 + 3 suffice.
 - Whether to codify "aggregate types have private constructors" as an ADR
-  (correct-by-construction rule), and add the body-size row to ADR-029.
+  (correct-by-construction rule), and add the body-size row to ADR-029. ADR-034
+  Decision 4 already fixes this for `RiskResultGroup` (stays private, no
+  exception); a dedicated ADR would generalize that to `RiskTree` / `TreeIndex`.
 
 **ADR bearing:** strengthens ADR-001 / ADR-010 correct-by-construction; ADR-029
 (input/DoS defence) gains the body-size-limit control. A dedicated
-aggregate-constructor-privacy ADR is a candidate.
+aggregate-constructor-privacy ADR is a candidate — it would lift ADR-034
+Decision 4's `RiskResultGroup` rule to the remaining public-constructor
+aggregates (`RiskTree`, `TreeIndex`).
