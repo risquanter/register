@@ -105,6 +105,41 @@ it into an implementation-grade plan document, present that document (G6
 halt), and obtain an accepted signal on the document itself. Only then does
 G3 coverage exist.
 
+### Review-driven hygiene fix — inline echo, no standalone plan
+
+A small, behaviour-preserving fix that falls out of a code-quality or feature
+review does NOT need its own implementation-grade PLAN document. Writing a plan
+to correct a poor implementation is ceremony this gate does not ask for — the
+review that surfaced the fix is its context, and the before/after diff is its
+specification. Such fixes are the normal product of a review; they are presented
+and done, not planned.
+
+A change qualifies as a review-driven hygiene fix only if **all** hold:
+
+- observable behaviour is unchanged — same results, same errors, same wire
+  shape; it is a clearer or cheaper implementation of what the code already does,
+  not new behaviour;
+- no signature, type, endpoint, DTO, or serialization shape changes;
+- it stays within file(s) the review already read in full;
+- existing tests cover it, or it adds only a guard test that pins the current
+  behaviour, and no Decision Trigger (G2) fires.
+
+The path — present, halt, implement — instead of a plan:
+
+1. Present the exact before/after diff inline. **This is the G1 signature echo**,
+   in its own turn, naming the file(s) touched and the verify command.
+2. Halt for an accepted signal (G6, unchanged).
+3. On approval, implement directly and bring the touched module(s) green (G5).
+
+What is waived is only the five-section PLAN document (G3) for this narrow class.
+What is **not** waived: the inline echo (G1), the halt before editing (G6),
+green-is-the-only-done (G5), and the mechanical token — the user still authorizes
+the gated edit by pointing the token at the plan or short fix-note whose
+`## File inventory` lists the touched file(s). The token is the approval act, not
+extra ceremony. The instant the fix would change a signature, DTO, endpoint, or
+behaviour, spread beyond the reviewed file(s), or trip a Decision Trigger, it
+stops qualifying and needs a real plan.
+
 ### Mechanical enforcement — plan-bound approval
 
 A PreToolUse hook (`.claude/hooks/protocol-gate.sh`, wired in
@@ -153,7 +188,7 @@ current plan's scope to a "later pass". "Follow-up", "post-landing", "next-phase
 it", "park it", "revisit after" applied to **in-scope** work is a G8 violation —
 it postpones the work and accumulates drift. Do each thing once and properly.
 
-**The two carve-outs (not deferral — legitimate).**
+**The two exceptions (not deferral — legitimate).**
 
 1. **Prerequisite-gated future work** — an item that genuinely cannot be done
    until an external prerequisite lands (a dependency not yet released, a sort /
@@ -179,17 +214,17 @@ it postpones the work and accumulates drift. Do each thing once and properly.
 
 **Distinguishing test, applied honestly.** If the item CAN be done now within the
 plan's scope, it MUST be (the prohibition). If it cannot be done until an external
-prerequisite lands, it is carve-out (1). If it is off-theme and not a direct n+1
-follow-up, it is carve-out (2) — route it via a decision, never park it silently.
+prerequisite lands, it is exception (1). If it is off-theme and not a direct n+1
+follow-up, it is exception (2) — route it via a decision, never park it silently.
 The failure this gate targets is disguising in-scope work as a "follow-up"; the
-carve-outs cover only work that was never this plan's scope to begin with.
+exceptions cover only work that was never this plan's scope to begin with.
 
 **Consistency with neighbouring rules.** "One plan per workstream" (a continuation
 section is a new increment, itself shipped whole — not a parking lot);
 "address findings at the right phase" (route to the proper phase-epic; never
 manufacture fix-now-vs-later choices for one epic's own scope); "patterns are not
 dogma / fix foundations or schedule the fix" (prefer fixing in-scope now;
-scheduling is legitimate only via carve-out (1) or (2), not intra-plan drift).
+scheduling is legitimate only via exception (1) or (2), not intra-plan drift).
 
 ---
 
@@ -237,7 +272,7 @@ A "decision" is only real if there are **two or more viable options with genuine
 - **No genuine argument exists for the option you'd reject.** Before raising anything, try to state a real pro for it — one a reasonable engineer could hold, not "it's technically possible" or "it's less typing." If you can't produce that argument, there is no second option, only a strawman next to the one correct answer. Do the correct thing; don't stage a choice around it.
 - **Every comparable existing case in the codebase already does it one way, and deviating would itself need justification you don't have.** That is a specification, not a judgment call. State "doing X, matching existing convention Y" and proceed — do not gate conformance to an already-uniform pattern behind a formal ask.
 
-**Carve-out — a standing convention vs. code hygiene / clean-code / best practice IS a real decision.** When the established convention itself conflicts with code hygiene, clean code, or a best practice, the "just conform" clause above does NOT apply: do not silently perpetuate the inherited convention, and do not silently "clean it up" either. Surface it in decision-guide format with an explicit **code-cleanup scope** option — fix the convention now across all its occurrences (name them), or schedule it — so we are never quietly bogged down by inherited (bad) convention. Two conditions on doing this well:
+**Exception — a standing convention vs. code hygiene / clean-code / best practice IS a real decision.** When the established convention itself conflicts with code hygiene, clean code, or a best practice, the "just conform" clause above does NOT apply: do not silently perpetuate the inherited convention, and do not silently "clean it up" either. Surface it in decision-guide format with an explicit **code-cleanup scope** option — fix the convention now across all its occurrences (name them), or schedule it — so we are never quietly bogged down by inherited (bad) convention. Two conditions on doing this well:
 
 - **Verify the cleaner alternative actually holds before offering it.** Compile and run the tests, and check platform semantics, first. An apparent "bad convention" often encodes a real constraint. Concrete example from this codebase: bare `catch case _: Throwable` at the Scala.js JS boundary is deliberate, not sloppy — `scala.util.control.NonFatal` does NOT catch `org.scalajs.linker.runtime.UndefinedBehaviorError` (raised by `asInstanceOf`/`undefined`→`Int` casts under fastLinkJS), so a `NonFatal` "cleanup" silently breaks the guard. Never recommend a hygiene change you have not verified builds green.
 - **Cleanup scope stays consistent, never piecemeal.** If you change the convention at one site, either change every occurrence in the same pass or schedule the rest — a half-migrated convention is worse than the original uniform one (matches the holistic-improvement protocol in the code-quality-review skill).

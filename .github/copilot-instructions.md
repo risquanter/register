@@ -161,7 +161,7 @@ own scoped plan or continuation section, open choices in decision-guide format;
 next-increment (n+1) follow-up — surfaced as a ⚠️ Decision Required on how to
 route it (new plan / TODO backlog item / fold into a related plan / drop), never
 silently dropped or crammed into the current plan. Distinguishing test: if it can
-be done now within the plan's scope, it must be; the carve-outs cover only work
+be done now within the plan's scope, it must be; the exceptions cover only work
 that was never this plan's scope.
 
 ---

@@ -25,14 +25,14 @@ practice, raise it (decision-guide format) with an explicit **code-cleanup scope
 option — fix the convention across all its occurrences now, or schedule it — so
 inherited (bad) convention is never silently perpetuated. "Schedule it" here means
 routing the cleanup to a properly-scoped plan or TODO item by an explicit user
-decision — it is the G8 foreign-discovery carve-out, not license to defer work
+decision — it is the G8 foreign-discovery exception, not license to defer work
 that belongs to the current plan's scope (working-protocol skill, "Plan = epic;
 ship whole"). But first VERIFY the
 cleaner alternative actually builds and passes tests: an apparent bad convention
 often encodes a real constraint (e.g. bare `catch _: Throwable` at the Scala.js JS
 boundary is deliberate — `NonFatal` does not catch `UndefinedBehaviorError`). Never
 recommend a hygiene change you have not verified green. Full rule: working-protocol
-skill, noise-filter carve-out.
+skill, noise-filter exception.
 
 Three binding rules on the report itself (working-protocol G6):
 
