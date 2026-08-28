@@ -1170,6 +1170,18 @@ M1R adds (engine adoption + predicate targeting, §8.6):
 `RiskTreeKnowledgeBase.scala`, `FolSymbols.scala`, `RiskTreeKnowledgeBaseSpec.scala`,
 and `build.sbt`, all already listed above.
 
+§8.13 (slice 2: `MitigationScopeResolver` + `ScopeOutcome`) adds **four new
+server-only files** (the resolver contract, its live impl, the per-workspace
+registry mirroring `CacheScope`, and the spec — none pre-existed; the M1/M2
+inventory above holds only the *renamed* resolver `RiskResultResolver.scala` and
+`MitigationStaleness.scala`, not these):
+
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/ScopeResolverScope.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationScopeResolverSpec.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CacheScope.scala` (boyscout: its doc comments carried plan-provenance references cleaned in the same pass as the new files)
+
 ### Open decisions
 
 Status after the 2026-08-08 review session:
@@ -2442,8 +2454,8 @@ the status column as slices land.
 
 | # | Slice | Status | Elevation / ruling anchor |
 |---|-------|--------|---------------------------|
-| 1 | **KB id-carrier (Asset → Node)** — sort rename, `NodeId` carrier, `given Extract[NodeId]`, node-reference predicates (`eq` / `named` / `has_id`, §8.12; `=` and the id-or-name guessing validator retired), name-only `Node` literal validator, id-native structural dispatchers, `QueryResponseBuilder`/`QueryServiceLive` flip | **Implementation-grade (§8.9, amended §8.12); building** | §8.9 + §8.12 (exact code); §8.7 items 1–2; §8.8 M2-D3a, M2-D5 |
-| 2 | **`MitigationScopeResolver` + `ScopeOutcome`** — results-free KB; `satisfyingSet` turns each targeting predicate into `Set[NodeId]`; per-mitigation success/failure isolation; memoized on `(WorkspaceId, TreeId, BranchRef, CommitHash)`; output `Map[MitigationId, Set[NodeId]]` | Ruled; **exact signatures pending** | §8.8 M2-D1, M2-D2; §8.2 resolver edge |
+| 1 | **KB id-carrier (Asset → Node)** — sort rename, `NodeId` carrier, `given Extract[NodeId]`, node-reference predicates (`eq` / `named` / `has_id`, §8.12; `=` and the id-or-name guessing validator retired), name-only `Node` literal validator, id-native structural dispatchers, `QueryResponseBuilder`/`QueryServiceLive` flip | **Landed — §8.11 (0.10.19) + §8.12 (0.10.21)** | §8.9 + §8.12 (exact code); §8.7 items 1–2; §8.8 M2-D3a, M2-D5 |
+| 2 | **`MitigationScopeResolver` + `ScopeOutcome`** — results-free KB; `satisfyingSet` turns each targeting predicate into `Set[NodeId]`; per-mitigation success/failure isolation; memoized on `(WorkspaceId, TreeId, BranchRef, CommitHash)`; output `Map[MitigationId, Set[NodeId]]` | **Landed — §8.13 (0.10.22)** | §8.8 M2-D1, M2-D2; §8.2 resolver edge; §8.13 |
 | 3 | **`RiskResultResolver` → `CachedResultResolver` rename + resolver-edge wiring** — edge takes `resolvedScopes: Map[MitigationId, Set[NodeId]]` (not `MitigationSelection`); result-stage transforms applied at the edge, never cached (D3) | Ruled; **exact signatures pending** (§7.2.2 stale box reconciled here) | §8.8 M2-D4; §7.2.2; §8.6 algebra |
 | 4 | **Storage — one Irmin path per mitigation** — `WorkspaceStoragePaths.treeMitigations`; `RiskTreeRepositoryIrmin` read/write; whole-subtree replacement (DD-7); byte-level conflict pre-check (ADR-032) | Ruled; **exact signatures pending** | §7.2.1 |
 | 5 | **`MitigationStaleness.staleOverrides`** — diagnostic-only override-staleness set (frozen-opinion semantics; resolution ignores it); stamp writing on the tree-PUT path | Ruled; **exact signatures pending** | §7.2.2a (OD-6) |
@@ -2454,9 +2466,11 @@ map (matching today's behaviour); slice 6 tightens it to deterministic by adding
 the `fromNodes` uniqueness invariant. Slice 1 does not block on slice 6 — the
 caveat is documented in §8.9's determinism note.
 
-Files for slices 2–6 are already in the M2 File inventory. Each pending slice
-gets its own §8.x implementation-grade elevation (exact signatures, per the Plan
-Quality Gate) presented before its first source edit, exactly as §8.9 was.
+Files for slices 3–6 are already in the M2 File inventory (they edit or rename
+existing files). Slice 2 is the exception: its resolver, per-workspace registry,
+and spec are genuinely new files, added to the inventory by §8.13. Each pending
+slice gets its own §8.x implementation-grade elevation (exact signatures, per the
+Plan Quality Gate) presented before its first source edit, exactly as §8.9 was.
 
 ### 8.11 M2 bind-error → UNKNOWN_REFERENCE classification + vql 0.16.0 re-pin — implementation-grade (2026-08-19)
 
@@ -3024,6 +3038,400 @@ Then: PATCH bump `0.10.20` → `0.10.21`, mirror `APP_VERSION` into `.env` and
 → `eq`, add `named` / `has_id` rows), the `AppError.scala` classifier
 doc-comments (`NodeNameLiteralSortName` / `NodeReferenceSortNames`), the two
 ADR-029 §3 edits above, and the ADR-028 predicate-vocabulary rows.
+
+### 8.13 M2 slice 2 — `MitigationScopeResolver` + `ScopeOutcome` — implementation-grade (2026-08-28)
+
+Second buildable slice of M2. Turns each mitigation's stored targeting predicate
+into the set of node ids it scopes, against a specific tree version, with
+per-mitigation failure isolation and per-tree-version memoization. Server-only
+(the engine is a `server` dependency, ADR-028 §1); **no `common` DTO or wire
+change** — the resolver's output projects to the `Map[MitigationId, Set[NodeId]]`
+the already-landed `MitigationApplication.scoped` / `effectiveTree` take (§8.6).
+Every decision is ruled: §8.8 M2-D1 (service resolves scope), M2-D2 (`ScopeOutcome`
+coproduct, `toEither` + wrapper projections only); §8.1 (stage-domain restriction,
+per-workspace memoization on the byte-level revision, F3 per-mitigation isolation);
+and 2026-08-28 (`NonEmptyChunk` failure collection, granular `ScopeResolutionFailure`).
+This section writes the exact signatures so they are G1-covered.
+
+**Engine surface used (vql-engine 0.16.0, verified in the sources jar).** The
+resolver calls the binder and the satisfying-set evaluator directly, not the
+screening `VagueSemantics` path, so it receives the full typed error list:
+
+```scala
+QueryBinder.bindSatisfyingFormula(
+  formula: Formula[FOL], variable: String, catalog: TypeCatalog
+): Either[List[TypeCheckError], (BoundFormula, BoundVar)]
+
+TypedSemantics.satisfyingSet(
+  formula: BoundFormula, variable: BoundVar, model: RuntimeModel
+): Either[QueryError, Set[Value]]
+```
+
+`List[TypeCheckError]` (11 typed variants, each carrying the real `TypeId` of the
+offending sort) is the fidelity that makes the granular failure classification
+below possible without routing through the lossy `BindErrorDetail` the HTTP
+classifier flattens to.
+
+#### Contract — `MitigationScopeResolver.scala`
+
+```scala
+package com.risquanter.register.services.cache
+
+import zio.{UIO, NonEmptyChunk}
+import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, MitigationId}
+
+/** Names the tree version whose scopes are resolved. The owning workspace is NOT
+  * a field: one resolver instance exists per workspace (`ScopeResolverScope`, the
+  * DD-17 `CacheScope` precedent), so the workspace IS the instance and the memo
+  * key inside it is exactly (treeId, branch, revision). `revision` is the
+  * byte-level Irmin commit hash, never the DD-16 domain hash — predicates
+  * reference node names, which the domain hash omits, so a rename changes
+  * resolution but not the domain hash (§8.1 cache-identity ruling). */
+final case class ScopeResolutionContext(treeId: TreeId, branch: BranchRef, revision: CommitHash)
+
+/** Why one mitigation's predicate did not resolve against this tree version.
+  * Granularity preserved (ruled 2026-08-28): the user-actionable distinctions —
+  * a renamed/deleted node, a malformed id, a type error — stay separate; the
+  * structural and internal faults a create-validated predicate should never
+  * reach are collapsed, because they carry no end-user action. */
+enum ScopeResolutionFailure:
+  case UnknownNode(reference: String)      // a `named`/`Node`-slot node name no longer resolves
+  case MalformedNodeId(reference: String)  // a `has_id` literal is not a well-formed node id
+  case TypeError(detail: String)           // a symbol used at an incompatible / conflicting sort
+  case MalformedPredicate(detail: String)  // structural mismatch vs the current catalog vocabulary
+  case InternalError(detail: String)       // re-parse or eval fault a bound predicate should never reach
+
+/** Per-mitigation resolution outcome (M2-D2: a coproduct with `toEither` and
+  * wrapper projections only — no `map`/`flatMap`; it is a result, not a pipeline).
+  * `Failed` still contributes an empty applied scope (§8.1 F3: a stale predicate
+  * is a no-op for that mitigation, never a whole-request failure), so
+  * `scopeOrEmpty` is what the application algebra consumes and `failures` is the
+  * per-mitigation drift signal. */
+enum ScopeOutcome:
+  case Resolved(scope: Set[NodeId])
+  case Failed(errors: NonEmptyChunk[ScopeResolutionFailure])   // field `errors`; the `failures` projection below is the Option view
+
+  def toEither: Either[NonEmptyChunk[ScopeResolutionFailure], Set[NodeId]] = this match
+    case Resolved(scope) => Right(scope)
+    case Failed(errs)    => Left(errs)
+
+  def scopeOrEmpty: Set[NodeId] = this match
+    case Resolved(scope) => scope
+    case Failed(_)       => Set.empty
+
+  def failures: Option[NonEmptyChunk[ScopeResolutionFailure]] = this match
+    case Resolved(_)  => None
+    case Failed(errs) => Some(errs)
+
+/** The per-mitigation outcome map for one tree version. Total over
+  * `tree.mitigations`: every mitigation has an entry (its `MitigationTarget` is
+  * always a `Predicate`, §8.4-1 = C). */
+final case class ResolvedScopes(outcomes: Map[MitigationId, ScopeOutcome]):
+  /** Success projection consumed by `MitigationApplication.scoped` /
+    * `effectiveTree` (§8.6): each mitigation's applied scope, empty for a failed
+    * one. This is the `Map[MitigationId, Set[NodeId]]` the resolver edge (slice 3)
+    * passes into the pure algebra. */
+  def appliedScopes: Map[MitigationId, Set[NodeId]] =
+    outcomes.view.mapValues(_.scopeOrEmpty).toMap
+  def failures: Map[MitigationId, NonEmptyChunk[ScopeResolutionFailure]] =
+    outcomes.collect { case (id, ScopeOutcome.Failed(errs)) => id -> errs }
+
+trait MitigationScopeResolver:
+  /** Resolve every mitigation's predicate to its applied node-id scope against
+    * `tree`, memoized per tree version. `tree` must be the tree at
+    * `context.revision`; the context names which version for cache identity.
+    * No error channel (`UIO`): every per-mitigation failure is isolated into the
+    * outcome map (F3), and the results-free KB build plus the in-memory memo
+    * cannot fault — see the signature-review note on the error channel. */
+  def resolve(context: ScopeResolutionContext, tree: RiskTree): UIO[ResolvedScopes]
+```
+
+#### Implementation — `MitigationScopeResolverLive.scala`
+
+```scala
+package com.risquanter.register.services.cache
+
+import zio.*
+import com.risquanter.register.domain.data.{RiskTree, Mitigation, MitigationTarget, MitigationSpec, TargetingPredicate}
+import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash}
+import com.risquanter.register.domain.errors.FolQueryFailure   // NodeReferenceSortNames (single source of truth, §8.12)
+import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
+import com.risquanter.register.foladapter.RiskTreeKnowledgeBase.given   // Extract[NodeId]
+import vql.typed.{QueryBinder, TypedSemantics, TypeCheckError, Value}
+import vql.error.QueryError
+import parser.FOLParser
+import logic.{Formula, FOL, FOLUtil}
+
+/** Memoizes the resolved scopes of one tree version. Head-only (§8.4-5): one
+  * entry per (treeId, branch) holds a revision and its scopes, and any resolve
+  * at a different revision overwrites it, so revisions never accumulate. The memo
+  * read and write are not atomic (last-writer-wins) — see "Memo write policy".
+  * In-memory `Ref` → `UIO`. One instance per workspace (`ScopeResolverScope`). */
+final case class MitigationScopeResolverLive(
+  memo: Ref[Map[(TreeId, BranchRef), (CommitHash, ResolvedScopes)]]
+) extends MitigationScopeResolver:
+
+  override def resolve(context: ScopeResolutionContext, tree: RiskTree): UIO[ResolvedScopes] =
+    val slot = (context.treeId, context.branch)
+    memo.get.map(_.get(slot)).flatMap {
+      case Some((rev, cached)) if rev == context.revision => ZIO.succeed(cached)
+      case _ =>
+        val resolved = computeAll(tree)
+        memo.update(_ + (slot -> (context.revision, resolved))).as(resolved)
+    }
+
+  /** Results-free KB (§8.1): the targeting sublanguage admits no simulation
+    * symbol, so an empty result map is correct and makes the resolved scopes a
+    * pure function of the tree version. */
+  private def computeAll(tree: RiskTree): ResolvedScopes =
+    val kb = RiskTreeKnowledgeBase(tree, Map.empty)
+    ResolvedScopes(tree.mitigations.map(m => m.id -> resolveOne(m, tree, kb)).toMap)
+
+  private def resolveOne(m: Mitigation, tree: RiskTree, kb: RiskTreeKnowledgeBase): ScopeOutcome =
+    val predicate = m.target match { case MitigationTarget.Predicate(p) => p }
+    val domain: Set[NodeId] = m.spec match          // §8.1 stage-domain restriction
+      case _: MitigationSpec.LeafStage   => tree.index.leafIds
+      case _: MitigationSpec.ResultStage => tree.index.nodes.keySet
+    satisfyingIds(predicate, kb) match
+      case Right(ids)     => ScopeOutcome.Resolved(ids intersect domain)
+      case Left(failures) => ScopeOutcome.Failed(failures)
+
+  /** Re-parse (source is the only stored form) → bind against this tree version's
+    * catalog → evaluate to the exact satisfying set → lift each `Value` to its
+    * `NodeId`. Bind is the tree-version-relative check that fails when a quoted
+    * node was renamed/deleted (F3); parse and extract cannot fail for a
+    * create-validated predicate over the node sort, so their failure arms are
+    * `InternalError`. */
+  private def satisfyingIds(
+    predicate: TargetingPredicate, kb: RiskTreeKnowledgeBase
+  ): Either[NonEmptyChunk[ScopeResolutionFailure], Set[NodeId]] =
+    FOLParser.parse(predicate.source) match
+      case Left(pe) =>
+        Left(NonEmptyChunk(ScopeResolutionFailure.InternalError(s"re-parse failed: ${pe.message}")))
+      case Right(formula) =>
+        FOLUtil.fvFOL(formula).distinct match
+          case variable :: Nil =>
+            QueryBinder.bindSatisfyingFormula(formula, variable, kb.catalog) match
+              case Left(errs) =>
+                Left(
+                  NonEmptyChunk
+                    .fromIterableOption(errs.map(fromTypeCheckError))
+                    .getOrElse(NonEmptyChunk(ScopeResolutionFailure.InternalError("empty bind-error list")))
+                )
+              case Right((bound, boundVar)) =>
+                TypedSemantics.satisfyingSet(bound, boundVar, kb.model) match
+                  case Left(qe)      => Left(NonEmptyChunk(fromQueryError(qe)))
+                  case Right(values) => Right(values.flatMap(_.extract[NodeId].toOption))
+          case _ =>
+            // create guarantees exactly one free variable — unreachable
+            Left(NonEmptyChunk(ScopeResolutionFailure.InternalError(
+              "targeting predicate free-variable invariant violated")))
+
+  /** Engine bind error → register failure. The three user-actionable variants
+    * stay distinct; every structural fault a create-validated predicate cannot
+    * legitimately reach collapses to `MalformedPredicate`. */
+  private def fromTypeCheckError(e: TypeCheckError): ScopeResolutionFailure = e match
+    case TypeCheckError.UnparseableConstant(name, sort, _) =>
+      sort.value match
+        case s if s == RiskTreeKnowledgeBase.NodeIdLiteralSort.value  => ScopeResolutionFailure.MalformedNodeId(name)
+        case s if FolQueryFailure.NodeReferenceSortNames.contains(s)  => ScopeResolutionFailure.UnknownNode(name)
+        case s                                                        => ScopeResolutionFailure.MalformedPredicate(s"unparseable literal '$name' for sort '$s'")
+    case TypeCheckError.TypeMismatch(expected, actual, ctx)           => ScopeResolutionFailure.TypeError(s"$ctx: expected ${expected.value}, got ${actual.value}")
+    case TypeCheckError.ConflictingTypes(name, l, r)                  => ScopeResolutionFailure.TypeError(s"variable '$name' used at ${l.value} and ${r.value}")
+    case TypeCheckError.UnknownPredicate(name)                        => ScopeResolutionFailure.MalformedPredicate(s"unknown predicate '$name'")
+    case TypeCheckError.UnknownFunction(name)                         => ScopeResolutionFailure.MalformedPredicate(s"unknown function '$name'")
+    case TypeCheckError.ArityMismatch(sym, exp, act)                  => ScopeResolutionFailure.MalformedPredicate(s"arity mismatch for '$sym': expected $exp, got $act")
+    case TypeCheckError.UnknownConstantOrLiteral(name)                => ScopeResolutionFailure.MalformedPredicate(s"unknown constant or literal '$name'")
+    case TypeCheckError.UnconstrainedVar(name)                        => ScopeResolutionFailure.MalformedPredicate(s"unconstrained variable '$name'")
+    case TypeCheckError.UnexpectedFreeVar(name)                       => ScopeResolutionFailure.MalformedPredicate(s"unexpected free variable '$name'")
+    case TypeCheckError.TypeNotQuantifiable(name)                     => ScopeResolutionFailure.MalformedPredicate(s"non-quantifiable target sort '$name'")
+    case TypeCheckError.UnboundAnswerVar(name)                        => ScopeResolutionFailure.MalformedPredicate(s"unbound answer variable '$name'")
+
+  /** Evaluation-phase `QueryError` is an internal wiring fault for a bound
+    * targeting predicate (no domain gap, no unbound var possible once bound), so
+    * it is `InternalError`, not a user-facing drift reason. */
+  private def fromQueryError(e: QueryError): ScopeResolutionFailure =
+    ScopeResolutionFailure.InternalError(e.formatted)
+```
+
+Full `TypeCheckError` → `ScopeResolutionFailure` mapping (the observable contract
+for the granularity ruling):
+
+| Engine `TypeCheckError` | → `ScopeResolutionFailure` | User meaning |
+|---|---|---|
+| `UnparseableConstant`, sort `Node` / `NodeNameLiteral` | `UnknownNode(name)` | the node this predicate names was renamed or deleted |
+| `UnparseableConstant`, sort `NodeIdLiteral` | `MalformedNodeId(name)` | a `has_id("…")` literal is not a valid id |
+| `UnparseableConstant`, other sort | `MalformedPredicate` | a non-node literal (e.g. loss/probability) is malformed |
+| `TypeMismatch`, `ConflictingTypes` | `TypeError(detail)` | a symbol used at the wrong / two conflicting sorts |
+| `UnknownPredicate`, `UnknownFunction`, `ArityMismatch`, `UnknownConstantOrLiteral`, `UnconstrainedVar`, `UnexpectedFreeVar`, `TypeNotQuantifiable`, `UnboundAnswerVar` | `MalformedPredicate(detail)` | structural — the predicate does not fit the current catalog (only reachable if the catalog vocabulary changed under a stored predicate) |
+| any evaluation-phase `QueryError` | `InternalError(detail)` | a wiring fault; should not occur for a bound predicate |
+
+#### Per-workspace registry — `ScopeResolverScope.scala` (mirrors `CacheScope`)
+
+```scala
+package com.risquanter.register.services.cache
+
+import zio.*
+import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, CommitHash}
+
+/** Per-workspace `MitigationScopeResolver` resolution (§8.1 cache-identity, the
+  * DD-17 `CacheScope` precedent). One resolver instance per workspace makes
+  * cross-workspace scope contamination structurally impossible; the memo key
+  * inside each instance is (treeId, branch, revision). */
+trait ScopeResolverScope:
+  def resolverFor(workspaceId: WorkspaceId): UIO[MitigationScopeResolver]
+
+object ScopeResolverScope:
+  val layer: ZLayer[Any, Nothing, ScopeResolverScope] =
+    ZLayer.fromZIO(
+      Ref.make(Map.empty[WorkspaceId, MitigationScopeResolver]).map(ScopeResolverScopeLive(_))
+    )
+
+  def resolverFor(workspaceId: WorkspaceId): URIO[ScopeResolverScope, MitigationScopeResolver] =
+    ZIO.serviceWithZIO[ScopeResolverScope](_.resolverFor(workspaceId))
+
+final case class ScopeResolverScopeLive(
+  resolvers: Ref[Map[WorkspaceId, MitigationScopeResolver]]
+) extends ScopeResolverScope:
+  override def resolverFor(workspaceId: WorkspaceId): UIO[MitigationScopeResolver] =
+    resolvers.get.map(_.get(workspaceId)).flatMap {
+      case Some(r) => ZIO.succeed(r)
+      case None =>
+        for
+          memo     <- Ref.make(Map.empty[(TreeId, BranchRef), (CommitHash, ResolvedScopes)])
+          candidate = MitigationScopeResolverLive(memo)
+          // modify picks the winner atomically if two fibers race on first access
+          resolver <- resolvers.modify { m =>
+                        m.get(workspaceId) match
+                          case Some(existing) => (existing, m)
+                          case None           => (candidate, m + (workspaceId -> candidate))
+                      }
+        yield resolver
+    }
+```
+
+#### Signature-review points (call out; these set what §8.1 deferred to "exact shape at M2 elevation")
+
+1. **`resolve` returns `UIO[ResolvedScopes]`, not `IO[AppError, ResolvedScopes]`
+   (§8.1 sketch).** F3 isolation puts every per-mitigation failure into the
+   outcome map, and the results-free KB build (total) plus the in-memory memo
+   (`Ref`) cannot fault, so there is no whole-request error to raise. The §8.1
+   text explicitly deferred the shape here; this is that decision, not a silent
+   deviation.
+2. **The memo caches `ResolvedScopes` only, not the KB.** §8.1 says the cache
+   entry "holds the KB plus the resolved scope map." The stated purpose — not
+   recomputing scopes per request — is met by caching the resolved scopes alone;
+   the KB is transient (rebuilt once per tree-version miss). Retaining the KB
+   itself is an M3 analytics concern (KB reuse across analytic queries), out of
+   slice-2 scope. Flagged rather than swept because it narrows the §8.1 wording.
+3. **Per-workspace partition key is `WorkspaceId`, not `SeedEntityId`.**
+   `CacheScope` keys by `SeedEntityId` because simulation figures depend on the
+   HDR entity axis; scope resolution has no seed relationship, so `WorkspaceId`
+   is the honest authority identity. Structurally identical isolation.
+4. **`ScopeResolutionContext` carries `(treeId, branch, revision)`, not the
+   workspace.** The workspace is the instance (exactly as `ContentCache.get`'s
+   key omits `seedEntityId`), matching §8.1's "keyed inside the instance by
+   (TreeId, branch, revision)."
+
+#### Memo write policy — last-writer-wins (accepted trade-off, complex review 2026-08-28)
+
+`resolve` reads the memo slot and, on a miss or revision change, computes and
+writes it as two separate `Ref` operations (`memo.get` then `memo.update`), not
+one atomic step. This is deliberate.
+
+- **Verified constructible.** Head revA is edited to head revB; request R1 read
+  the tree at revA, R2 at revB; both enter `resolve` on the same (treeId, branch)
+  slot concurrently. R2 misses, computes, writes (revB, scopesB) — slot at head.
+  R1, whose `get` already returned a miss, then writes (revA, scopesA)
+  unconditionally — the slot now holds the older revA. Two resolves at the same
+  revision likewise both compute and both write the identical value.
+- **Why it is not a correctness problem.** A hit requires `rev == context.revision`
+  (exact equality on a content-addressed commit hash), so a displaced older entry
+  is never returned for a newer request — it only makes the next head request miss
+  and recompute, which rewrites the head. No wrong scope is ever served; the slot
+  self-heals on the next head request. The sole cost is bounded redundant
+  computation (a parse + bind over a ≤256-char predicate) under concurrency.
+- **Why not the heavy fix.** `CommitHash` is a content hash with no ordering, so
+  "keep only the newer revision" is not definable — last-writer-wins is the
+  correct-by-necessity policy, and a single `memo.modify` would not help because
+  `computeAll` runs before any atomic section. Removing the redundant compute
+  needs per-slot single-flight (a `Promise` stored in the memo, plus
+  revision-change replacement and interrupted-producer handling) —
+  disproportionate to a cheap, self-healing miss. Revisit only if slice-3
+  profiling shows the KB build is hot on the simulation path.
+
+Decision: **accept last-writer-wins as-is; record the trade-off in the class
+scaladoc.** (Option A of the complex-review decision, 2026-08-28.)
+
+#### ADR alignment
+
+- **ADR-028 §1** — compliant: engine stays a `server` dependency; the resolver
+  and all its types are server-side; no engine change.
+- **ADR-015 §2** — compliant: node ids recovered via the consumer `Extract[NodeId]`
+  (reused from `RiskTreeKnowledgeBase.given`), no engine carrier change.
+- **ADR-001 / decode == create** — compliant: the predicate re-parses and
+  re-binds at resolution against the current tree version; a stored predicate
+  that went stale fails to bind and becomes a per-mitigation `Failed`, never an
+  exception or a silent wrong scope.
+- **ADR-010** — compliant: errors are values (`Either` from the engine, the
+  `ScopeOutcome` coproduct out of the resolver); no exceptions for domain
+  conditions.
+- **ADR-006 / M2-D2** — compliant: `ScopeOutcome` and `ScopeResolutionFailure`
+  are `enum`s; `ScopeOutcome` exposes `toEither` + wrapper projections only, no
+  `map`/`flatMap` (it is a result, not a transform pipeline).
+- **ADR-018** — compliant: `NodeId`, `TreeId`, `WorkspaceId`, `MitigationId`,
+  `BranchRef`, `CommitHash` are the existing nominal wrappers; no raw primitive
+  carries a domain value across any signature.
+- **Concurrency** — the per-workspace registry resolves a first-access race to
+  one winner via atomic `Ref.modify` (the `CacheScope` pattern). The per-instance
+  memo write is a non-atomic get-then-update with last-writer-wins semantics — a
+  reviewed, accepted trade-off that never serves a wrong scope; see "Memo write
+  policy" above.
+
+No deviations beyond the four signature-review points above.
+
+#### Open decisions
+
+None. The one substantive shape (failure-arm collection and granularity) is
+ruled (2026-08-28); the four points above are exact-signature settlements of what
+§8.1 deferred, presented for the accepted signal, not open questions.
+
+#### Verification plan
+
+New spec `MitigationScopeResolverSpec` (server, `zio-test`), cases:
+
+- **resolve — happy path:** a predicate `leaf(x) /\ descendant_of(x, "Servers")`
+  resolves to exactly the matching leaf ids; `ScopeOutcome.Resolved`.
+- **stage-domain restriction:** a `ResultStage` predicate matching a portfolio
+  keeps it (domain = all nodes); the same predicate on a `LeafStage` mitigation
+  drops the portfolio (domain = leaves) — applied scope is the intersection.
+- **F3 isolation + granularity:** a tree with one stale predicate (quoted node
+  renamed) and one valid predicate → the stale one is `Failed(UnknownNode(...))`
+  with an empty applied scope, the valid one `Resolved(...)`; `resolve` succeeds.
+- **malformed id vs unknown name:** `has_id("not-an-id")` → `MalformedNodeId`;
+  `named("Gone")` / `child_of(x, "Gone")` → `UnknownNode`.
+- **memoization:** two `resolve` calls at the same `(treeId, branch, revision)`
+  build the KB once (assert via a resolve count / instrumented tree); a call at a
+  new `revision` recomputes and the old entry is gone (head-only).
+- **per-workspace isolation:** `ScopeResolverScope.resolverFor` returns the same
+  instance for one `WorkspaceId` and distinct instances for different ones.
+- **projection:** `ResolvedScopes.appliedScopes` equals the `Map[MitigationId,
+  Set[NodeId]]` `MitigationApplication.scoped` consumes; `Failed` maps to `∅`.
+
+```bash
+sbt server/compile              # zero new warnings
+sbt server/test                 # MitigationScopeResolverSpec + existing green
+sbt 'commonJVM/test; server/test'
+sbt app/test                    # unaffected — must stay green
+sbt serverIt/test               # unaffected — must stay green
+run_bats tests/bats/suite-c-in-memory.bats   # fast gate after code change
+```
+
+Then: PATCH bump `0.10.21` → `0.10.22`, mirror `APP_VERSION` into `.env` and
+`.env.irmin`; doc sweep — the §8.10 slice-2 status row (done above) and any KB
+scaladoc that now also describes the resolver consumer. No `common` / wire / ADR
+doc changes (server-internal slice).
 
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 

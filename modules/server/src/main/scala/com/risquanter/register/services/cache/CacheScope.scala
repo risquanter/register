@@ -4,7 +4,7 @@ import zio.*
 import com.risquanter.register.domain.data.iron.SeedEntityId
 
 /**
-  * Per-workspace `ContentCache` resolution (DD-17, closed 2026-07-16).
+  * Per-workspace `ContentCache` resolution.
   *
   * The workspace's `seedEntityId` (HDR Entity axis) determines simulated
   * figures but appears in no leaf's bytes — so it cannot be part of the
@@ -15,7 +15,7 @@ import com.risquanter.register.domain.data.iron.SeedEntityId
   *
   * Keyed by `seedEntityId` (unique per workspace — assigned at workspace
   * creation). Cache lifecycle = workspace lifecycle; a deleted workspace's
-  * cache lingers until restart (NoOp eviction, Phase A).
+  * cache lingers until restart (NoOp eviction).
   *
   * Replaces `TreeCacheManager` as the resolver's cache entry point.
   */
@@ -27,7 +27,7 @@ trait CacheScope {
 
 object CacheScope {
 
-  /** Live layer: NoOp eviction (Phase A — restart clears; see EvictionStrategy). */
+  /** Live layer: NoOp eviction (restart clears; see EvictionStrategy). */
   val layer: ZLayer[Any, Nothing, CacheScope] =
     ZLayer.fromZIO {
       Ref.make(Map.empty[SeedEntityId.SeedEntityId, ContentCache])
