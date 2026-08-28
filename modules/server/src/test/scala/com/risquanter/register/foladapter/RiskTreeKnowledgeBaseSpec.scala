@@ -11,7 +11,9 @@ import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
-import vql.typed.{Value, TypeId}
+import vql.parser.VagueQueryParser
+import vql.semantics.VagueSemantics
+import vql.typed.{Value, TypeId, FolModel, QueryBinder, TypeCheckError}
 
 /** Tests for [[RiskTreeKnowledgeBase]] — the bridge between register's domain
   * model and the fol-engine typed evaluation pipeline.
@@ -142,9 +144,11 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   private val kb = RiskTreeKnowledgeBase(tree, results)
 
-  private val nodeSort  = RiskTreeKnowledgeBase.NodeSort
-  private val lossSort  = TypeId("Loss")
-  private val probSort  = TypeId("Probability")
+  private val nodeSort            = RiskTreeKnowledgeBase.NodeSort
+  private val lossSort            = TypeId("Loss")
+  private val probSort            = TypeId("Probability")
+  private val nodeNameLiteralSort = RiskTreeKnowledgeBase.NodeNameLiteralSort
+  private val nodeIdLiteralSort   = RiskTreeKnowledgeBase.NodeIdLiteralSort
 
   /** A node-sorted `Value` carrying the fixture node's `NodeId`, looked up by
     * name. An unknown name yields a `NodeId` that is not in the tree. */
@@ -171,7 +175,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       functionSuite,
       domainSuite,
       catalogSuite,
-      constantsSuite
+      constantsSuite,
+      nodeReferenceQuerySuite
     )
 
   // ── Percentile suite ───────────────────────────────────────────────
@@ -439,13 +444,13 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         assertTrue(r == Right(false))
       }
     ),
-    suite("= (node identity)")(
+    suite("eq (node identity)")(
       test("same node id returns true") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("="), List(nodeVal("Cyber"), nodeVal("Cyber")))
+        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("eq"), List(nodeVal("Cyber"), nodeVal("Cyber")))
         assertTrue(r == Right(true))
       },
       test("different node ids return false") {
-        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("="), List(nodeVal("Cyber"), nodeVal("Hardware")))
+        val r = kb.dispatcher.evalPredicate(vql.typed.SymbolName("eq"), List(nodeVal("Cyber"), nodeVal("Hardware")))
         assertTrue(r == Right(false))
       }
     )
@@ -501,11 +506,12 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   // ── Catalog structure suite ────────────────────────────────────────
 
   private val catalogSuite = suite("catalog structure")(
-    test("catalog declares four sorts") {
-      // TypeCatalog.unsafe checks are pass-through — verify dispatcher coverage
+    test("catalog declares five sorts") {
+      // TypeCatalog.unsafe checks are pass-through — verify sort and dispatcher coverage
       assertTrue(
+        kb.catalog.typeIds.size == 5,
         kb.dispatcher.functionSymbols.size == 3,
-        kb.dispatcher.predicateSymbols.size == 8
+        kb.dispatcher.predicateSymbols.size == 10
       )
     },
     test("nameToId maps names to correct NodeIds") {
@@ -538,14 +544,20 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     )
 
   private val constantsSuite = suite("node constants via literal validator (PLAN §5.4)")(
-    test("C1: 4-node fixture — no catalog constants; nameToId carries the names; validator resolves name and id; no collisions") {
-      val validate = kb.catalog.literalValidators(nodeSort)
+    test("C1: 4-node fixture — no catalog constants; nameToId carries the names; per-sort validators resolve name vs id; no collisions") {
+      val nodeV = kb.catalog.literalValidators(nodeSort)
+      val nameV = kb.catalog.literalValidators(nodeNameLiteralSort)
+      val idV   = kb.catalog.literalValidators(nodeIdLiteralSort)
       assertTrue(
         kb.catalog.constants.isEmpty,
         kb.nameToId.keySet == Set("Root", "IT Risk", "Cyber", "Hardware"),
-        validate("Cyber") == Some(cyberId),          // quoted node name → its id
-        validate(cyberId.value) == Some(cyberId),    // quoted ulid → the same id
-        validate("Nonexistent") == None,             // neither id nor known name → unbindable
+        nodeV("Cyber")       == Some(cyberId),   // Node slot: quoted node name → its id
+        nodeV(cyberId.value) == None,            // Node slot is name-only: an id no longer binds
+        nodeV("Nonexistent") == None,            // unknown name → unbindable
+        nameV("Cyber")       == Some(cyberId),   // named: name → id
+        nameV(cyberId.value) == None,            // named rejects an id
+        idV(cyberId.value)   == Some(cyberId),   // has_id: id → id
+        idV("Cyber")         == None,            // has_id rejects a name
         kb.nameCollisions.isEmpty
       )
     },
@@ -609,20 +621,81 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         kb.catalog.functions.keySet.map(_.value) ++ kb.catalog.predicates.keySet.map(_.value)
       val baseline = Set(
         "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
-        "gt_loss", "gt_prob", "p95", "p99", "lec"
+        "gt_loss", "gt_prob", "eq", "named", "has_id", "p95", "p99", "lec"
       )
       assertTrue(
         kb.reservedFolNames == symbolStrings,
         baseline.subsetOf(kb.reservedFolNames)
       )
     },
-    test("NodeSort.value matches the classifier's NodeSortName") {
-      // Drift guard for FolQueryFailure.NodeSortName, the "Node" literal the
-      // bind-error classifier in `common` compares against sortName. The catalog
-      // is server-side and off `common`'s dependency graph, so the literal is a
-      // manual mirror of NodeSort held here where both are visible — change one
-      // without the other and this goes red.
-      assertTrue(RiskTreeKnowledgeBase.NodeSort.value == FolQueryFailure.NodeSortName)
+    test("node-reference sort discriminators match the classifier's names") {
+      // Drift guard for the bind-error classifier's sort-name literals in
+      // `common` (FolQueryFailure.NodeSortName / NodeNameLiteralSortName), which
+      // it compares against UnparseableConstant.sortName to classify a
+      // nonexistent-node reference as UNKNOWN_REFERENCE. The catalog is
+      // server-side and off `common`'s dependency graph, so those literals are
+      // manual mirrors of the catalog sorts, held here where both are visible —
+      // change one without the other and this goes red.
+      assertTrue(
+        RiskTreeKnowledgeBase.NodeSort.value            == FolQueryFailure.NodeSortName,
+        RiskTreeKnowledgeBase.NodeNameLiteralSort.value == FolQueryFailure.NodeNameLiteralSortName
+      )
+    }
+  )
+
+  // ── Node-reference predicate queries (§8.12: named / has_id) ────────
+
+  private val idToName: Map[NodeId, String] =
+    allNodes.map { case (id, n) => id -> n.name.value }
+
+  /** Parse + bind + evaluate a full query against this KB; returns the set of
+    * satisfying node names, or None if parse/eval failed. */
+  private def satisfyingNames(text: String): Option[Set[String]] =
+    val parsed = VagueQueryParser.parse(text).toOption.get
+    val result = for
+      folModel <- FolModel(kb.catalog, kb.model)
+      output   <- VagueSemantics.evaluateTyped(parsed, folModel)
+    yield output
+    result.toOption.map { out =>
+      out.satisfyingElements.flatMap(v => v.raw match { case id: NodeId => idToName.get(id); case _ => None })
+    }
+
+  private val nodeReferenceQuerySuite = suite("node-reference predicate queries (§8.12: named / has_id)")(
+    test("named(x, \"IT Risk\") pins that node") {
+      // named's 2nd arg is the NodeNameLiteral sort; "IT Risk" resolves via
+      // nameToId.get to itId, so the satisfying set is exactly {IT Risk}.
+      val names = satisfyingNames("""Q[>=]^{1/1} x (named(x, "IT Risk"), portfolio(x))""")
+      assertTrue(names.contains(Set("IT Risk")))
+    },
+    test("has_id(x, <cyberId>) pins Cyber") {
+      // has_id's 2nd arg is the NodeIdLiteral sort; the ulid parses via
+      // NodeId.fromString to cyberId, so the satisfying set is exactly {Cyber}.
+      val names = satisfyingNames(s"""Q[>=]^{1/1} x (has_id(x, "${cyberId.value}"), leaf(x))""")
+      assertTrue(names.contains(Set("Cyber")))
+    },
+    test("has_id(x, \"IT Risk\") → UnparseableConstant on the NodeIdLiteral sort") {
+      // A name in an id slot: NodeId.fromString("IT Risk") = None → malformed id.
+      val parsed = VagueQueryParser.parse("""Q[>=]^{1/1} x (has_id(x, "IT Risk"), leaf(x))""").toOption.get
+      val bound  = QueryBinder.bind(parsed, kb.catalog)
+      assertTrue(
+        bound.isLeft,
+        bound.left.toOption.exists(_.exists {
+          case TypeCheckError.UnparseableConstant(name, sort, _) => name == "IT Risk" && sort == nodeIdLiteralSort
+          case _                                                 => false
+        })
+      )
+    },
+    test("named(x, <cyberId>) → UnparseableConstant on the NodeNameLiteral sort") {
+      // An id in a name slot: nameToId.get(<ulid>) = None → no such node name.
+      val parsed = VagueQueryParser.parse(s"""Q[>=]^{1/1} x (named(x, "${cyberId.value}"), leaf(x))""").toOption.get
+      val bound  = QueryBinder.bind(parsed, kb.catalog)
+      assertTrue(
+        bound.isLeft,
+        bound.left.toOption.exists(_.exists {
+          case TypeCheckError.UnparseableConstant(name, sort, _) => name == cyberId.value && sort == nodeNameLiteralSort
+          case _                                                 => false
+        })
+      )
     }
   )
 

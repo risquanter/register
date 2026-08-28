@@ -72,6 +72,39 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
           assertTrue(errors == err.messages, errors.exists(_.contains("arity mismatch")))
         case other => throw MatchError(other)
     },
+    test("homogeneous NodeNameLiteral unparseable constant → FolUnknownReference") {
+      // named(x, "Nonexistent") fails on the NodeNameLiteral sort — the same
+      // nonexistent-node error as a Node-slot name, so it classifies as
+      // UNKNOWN_REFERENCE, not BIND_FAILED (Option B).
+      val err = QE.BindError(List(
+        unparseable("Nonexistent", FolQueryFailure.NodeNameLiteralSortName)
+      ))
+      FolQueryFailure.fromQueryError(err) match
+        case FolQueryFailure.FolUnknownReference(messages) =>
+          assertTrue(messages == err.messages, messages.exists(_.contains("Nonexistent")))
+        case other => throw MatchError(other)
+    },
+    test("Node and NodeNameLiteral mixed unresolved → FolUnknownReference") {
+      // A query naming a nonexistent node in both a structural slot and via
+      // named still classifies wholly as UNKNOWN_REFERENCE.
+      val err = QE.BindError(List(
+        unparseable("Foo", FolQueryFailure.NodeSortName),
+        unparseable("Bar", FolQueryFailure.NodeNameLiteralSortName)
+      ))
+      FolQueryFailure.fromQueryError(err) match
+        case FolQueryFailure.FolUnknownReference(messages) =>
+          assertTrue(messages == err.messages)
+        case other => throw MatchError(other)
+    },
+    test("homogeneous NodeIdLiteral unparseable constant → FolBindFailure") {
+      // A malformed id (has_id(x, "not-an-id")) is genuine bind failure, not a
+      // nonexistent-node reference — NodeIdLiteral is excluded from the set.
+      val err = QE.BindError(List(unparseable("not-an-id", "NodeIdLiteral")))
+      FolQueryFailure.fromQueryError(err) match
+        case FolQueryFailure.FolBindFailure(errors) =>
+          assertTrue(errors.size == 1, errors.head.contains("not-an-id"))
+        case other => throw MatchError(other)
+    },
     test("homogeneous non-node unparseable constant → FolBindFailure") {
       val err = QE.BindError(List(unparseable("notaloss", "Loss")))
       FolQueryFailure.fromQueryError(err) match

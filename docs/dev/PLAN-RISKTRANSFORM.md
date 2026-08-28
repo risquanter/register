@@ -1166,6 +1166,10 @@ M1R adds (engine adoption + predicate targeting, §8.6):
 - `modules/common/src/test/scala/com/risquanter/register/domain/errors/ErrorResponseSpec.scala`
 - `project/plugins.sbt` (Scala.js toolchain bump — see §8.11 D1 below; not hook-gated)
 
+§8.12 (retire `=`; add `eq`/`named`/`has_id`) adds **no new files** — it edits
+`RiskTreeKnowledgeBase.scala`, `FolSymbols.scala`, `RiskTreeKnowledgeBaseSpec.scala`,
+and `build.sbt`, all already listed above.
+
 ### Open decisions
 
 Status after the 2026-08-08 review session:
@@ -1560,7 +1564,7 @@ M4 elevation respectively).
    stamp then mismatches, but the signal reads as "content changed" when
    the truth is "target changed" — two distinct drifts, one indicator.
    Worked example: override authored on the leaf named `primary-db` via
-   the name-equality predicate `x = "primary-db"`; `primary-db` is renamed
+   the name predicate `named(x, "primary-db")` (§8.12); `primary-db` is renamed
    `db-main`, so the predicate resolves to the empty set and the override
    silently applies to nothing; worse, if another leaf is later renamed
    `primary-db`, the predicate re-points at *that* leaf and the override
@@ -1579,12 +1583,13 @@ M4 elevation respectively).
    `{overrideAnchor}`. Divergence is a **distinct scope-drift staleness
    signal**, separate from the stamp's content-drift signal — the
    conflation that motivated B disappears, without forking the target ADT.
-   Default authoring path: the UI emits a stable-id equality predicate for
-   the picked leaf — `x = "<nodeId>"`, an ordinary quoted-constant equality
-   atom (founded in the targeting fragment) — which (ids being rename-stable)
+   Default authoring path: the UI emits a stable-id predicate for
+   the picked leaf — `has_id(x, "<nodeId>")` (§8.12; was `x = "<nodeId>"`
+   before `=` was retired), a node-reference atom over the id-literal sort
+   (founded in the targeting fragment) — which (ids being rename-stable)
    never diverges from the anchor unless the node is deleted; a hand-written
-   name-based predicate is allowed and its drift is flagged precisely as scope
-   drift.
+   name-based predicate (`named(x, "<name>")`) is allowed and its drift is
+   flagged precisely as scope drift.
 
    **UI authoring mechanism (user-elaborated 2026-08-10):** the user never
    types or pastes a node id — a node picker fills a fixed client-side
@@ -1946,8 +1951,8 @@ Both review tiers ran on the M1R diff. Dispositions:
     re-running the two spec rules — step limit and Override stamp/anchor).
     Landing that decode path without this re-check is a defect, not a choice.
 - **No change (ruled design) — user ruling 2026-08-14, D1 = Option A:** the
-  targeting boundary stays structural; typeless atoms (`x = x` select-all,
-  `x > 5`, `x = "Ransomware"`) are accepted at authoring, and sort errors are
+  targeting boundary stays structural; typeless atoms (`eq(x, x)` select-all,
+  `x > 5`, `named(x, "Ransomware")`) are accepted at authoring, and sort errors are
   caught by the typed bind at M3 resolution — which reuses the existing
   `satisfyingSet` + KB path, no new checker (§8.4-3 enforcement-locus ruling;
   P-1 bind-time sort rule). Early authoring-time feedback, if wanted, is an M3
@@ -2063,7 +2068,14 @@ implementation-grade elevation; exact signatures are written there, not here.
   1. **Domain.** `model.domains(nodeSort) =
      tree.index.nodes.keys.map(id => Value(nodeSort, id)).toSet` — one
      `NodeId`-carrying element per node.
-  2. **Constant/literal path (ids AND names, one validator).** Register a
+  2. **Constant/literal path (superseded by §8.12 — the single id-then-name
+     "guessing" validator described below is retired; the `Node` sort now has a
+     name-only validator, and node-by-id / node-by-name are the explicit
+     `has_id` / `named` predicates over dedicated value sorts. The claims that
+     still hold: node references bind through `LiteralRef` to
+     `Value(nodeSort, nodeId)` — a `NodeId`, not a string — via literal
+     validators, never as registered constants; an unresolvable token fails at
+     BIND → 400, never a silent empty scope).** Register a
      node-sort literal validator
      `nodeSort -> (s => NodeId.fromString(s).toOption.orElse(nameToId.get(s)))`
      in the `TypeCatalog`
@@ -2080,13 +2092,16 @@ implementation-grade elevation; exact signatures are written there, not here.
      not silently as an empty scope. Neither ids nor names are registered as
      `catalog.constants` (that path yields a string-carried `ConstRef`); the
      validator is the sole node-constant path.
-  3. **Equality predicate.** Register `=` on the node sort —
-     `SymbolName("=") -> PredicateSig(List(nodeSort, nodeSort))` with dispatcher
-     impl `for { a <- args(0).extract[NodeId]; b <- args(1).extract[NodeId] } yield a == b`,
+  3. **Node-identity predicate (renamed `=` → `eq` by §8.12).** Register the
+     node-identity relation — `SymbolName("eq") -> PredicateSig(List(nodeSort,
+     nodeSort))` with dispatcher impl
+     `for { a <- args(0).extract[NodeId]; b <- args(1).extract[NodeId] } yield a == b`,
      backed by a register-provided `given Extract[NodeId]` (ADR-015 §2 consumer
-     extension). Ordering operators (`< <= > >=`) are NOT registered on the node
-     sort — nodes have identity, not order; ordering stays on the scalar sorts
-     (`gt_loss`/`gt_prob` already cover it). `=` is the only new operator
+     extension). (§8.12 replaces the infix `=` symbol with the prefix `eq` and
+     adds `named` / `has_id` for node-by-name / node-by-id references; see §8.12
+     for the current catalog.) Ordering operators (`< <= > >=`) are NOT
+     registered on the node sort — nodes have identity, not order; ordering stays
+     on the scalar sorts (`gt_loss`/`gt_prob` already cover it). `eq` is the only new operator
      targeting needs.
 
   **Structural predicates re-key id-native (simplification).** The
@@ -2139,6 +2154,13 @@ the **milestone-2b** merge workstream (PLAN-UI-MILESTONE-2B §8 / its scratch
 tracker), not of this plan, and does not bear on M2.
 
 ### 8.9 M2 KB id-carrier elevation (Asset → Node) — implementation-grade (2026-08-15)
+
+> **Amended by §8.12 (2026-08-25):** this section's `=` predicate and the
+> id-or-name "guessing" node-sort literal validator are superseded — `=` is
+> retired for prefix `eq`, node-by-name and node-by-id become the explicit
+> `named` / `has_id` predicates, and the `Node` validator is narrowed to
+> name-only. The id-carrier / `Asset → Node` rename and the response-builder
+> projection below are unchanged. Read §8.12 for the current catalog shape.
 
 First buildable, testable slice of M2: turn the `RiskTreeKnowledgeBase` sort
 that currently carries node **names as `String`** into one that carries the
@@ -2420,7 +2442,7 @@ the status column as slices land.
 
 | # | Slice | Status | Elevation / ruling anchor |
 |---|-------|--------|---------------------------|
-| 1 | **KB id-carrier (Asset → Node)** — sort rename, `NodeId` carrier, `given Extract[NodeId]`, `=` on the node sort, id-or-name literal validator, id-native structural dispatchers, `QueryResponseBuilder`/`QueryServiceLive` flip | **Implementation-grade (§8.9); building** | §8.9 (exact code); §8.7 items 1–2; §8.8 M2-D3a, M2-D5 |
+| 1 | **KB id-carrier (Asset → Node)** — sort rename, `NodeId` carrier, `given Extract[NodeId]`, node-reference predicates (`eq` / `named` / `has_id`, §8.12; `=` and the id-or-name guessing validator retired), name-only `Node` literal validator, id-native structural dispatchers, `QueryResponseBuilder`/`QueryServiceLive` flip | **Implementation-grade (§8.9, amended §8.12); building** | §8.9 + §8.12 (exact code); §8.7 items 1–2; §8.8 M2-D3a, M2-D5 |
 | 2 | **`MitigationScopeResolver` + `ScopeOutcome`** — results-free KB; `satisfyingSet` turns each targeting predicate into `Set[NodeId]`; per-mitigation success/failure isolation; memoized on `(WorkspaceId, TreeId, BranchRef, CommitHash)`; output `Map[MitigationId, Set[NodeId]]` | Ruled; **exact signatures pending** | §8.8 M2-D1, M2-D2; §8.2 resolver edge |
 | 3 | **`RiskResultResolver` → `CachedResultResolver` rename + resolver-edge wiring** — edge takes `resolvedScopes: Map[MitigationId, Set[NodeId]]` (not `MitigationSelection`); result-stage transforms applied at the edge, never cached (D3) | Ruled; **exact signatures pending** (§7.2.2 stale box reconciled here) | §8.8 M2-D4; §7.2.2; §8.6 algebra |
 | 4 | **Storage — one Irmin path per mitigation** — `WorkspaceStoragePaths.treeMitigations`; `RiskTreeRepositoryIrmin` read/write; whole-subtree replacement (DD-7); byte-level conflict pre-check (ADR-032) | Ruled; **exact signatures pending** | §7.2.1 |
@@ -2598,6 +2620,410 @@ run_bats tests/bats/suite-c-in-memory.bats         # smoke
 Then: version bump PATCH (`0.10.18` → `0.10.19`), mirror `APP_VERSION` into
 `.env` and `.env.irmin`; doc-consistency sweep (the `FolUnknownReference` /
 `FolBindFailure` doc-comments in `AppError.scala`; PLAN-ERROR-REFACTORING §11).
+
+### 8.12 Retire node-`=`; add `eq` / `named` / `has_id` with specialized node-reference sorts — implementation-grade (2026-08-25)
+
+**Summary.** Three changes to the `RiskTreeKnowledgeBase` catalog, all
+register-only (zero vql-engine change): (1) retire the infix `=` predicate and
+replace it with the prefix `eq: (Node, Node)` — same relation (node identity
+between two variables), renamed to obey the "every predicate is a written-out
+prefix symbol" discipline; (2) add two explicit node-reference predicates,
+`named(x, "IT Risk")` and `has_id(x, "01BX…")`, each backed by its own value
+sort with a dedicated literal validator, so a node can be pinned by name or by
+id unambiguously in both the screening and targeting sublanguages; (3) narrow
+the `Node`-sort literal validator to **name-only** — a quoted literal in a
+structural-predicate node slot (`child_of(x, "IT Risk")`) resolves as a node
+name; an id in such a slot no longer binds and must be written `has_id`.
+
+Because `named`'s literal lives in its own `NodeNameLiteral` value sort, the
+§8.11 bind-error classifier is extended (Option B, ruled 2026-08-25) so a
+nonexistent node named through `named` still reports as HTTP 400
+`UNKNOWN_REFERENCE`, not `BIND_FAILED` — the same category `child_of(x,
+"Nonexistent")` already returns for the identical user mistake.
+
+This supersedes §8.9's two catalog decisions (registering `=`, and the
+id-or-name "guessing" node validator) and the §8.10 slice-1 row's `=` / literal
+mention; both are amended here. The engine-side rationale (a literal carries no
+sort of its own; its sort is decided by the argument slot at bind time; the
+engine deliberately withholds a `String` `LiteralParser`, so a String-backed
+sort is an explicit per-sort consumer choice — engine T-012) was settled in the
+2026-08-23/25 design discussion. No new engine capability is required: `named` /
+`has_id` are ordinary registered predicates whose second argument is a
+consumer-declared value sort.
+
+**Why three identical dispatcher bodies are correct.** `eq`, `named`, and
+`has_id` all reduce at eval time to `NodeId` equality, because by the time an
+argument reaches the dispatcher the bind-time literal validator has already
+resolved the quoted string to a `NodeId` carrier. The three predicates differ
+**only** at bind time, in which validator accepts the literal and how: `eq` and
+`named` accept a known node name (`nameToId.get`), `has_id` accepts a
+well-formed id (`NodeId.fromString`). An unresolvable literal fails the bind
+(`UnparseableConstant` → HTTP 400), never a silent empty result. This is the
+"specialized per-slot validator" design: the predicate's meaning lives in the
+argument sort and its validator, not in a runtime branch.
+
+**Consequence recorded (not a defect).** Under the name-only `Node` validator,
+`named`'s value sort validator (`nameToId.get`) is identical to the `Node`
+sort's own literal validator, so `named(x, "IT Risk")` and `eq(x, "IT Risk")`
+are equivalent in the screening language. Both are kept deliberately: `named` /
+`has_id` are the canonical, explicit node-pinning predicates the targeting
+sublanguage and the UI node-picker emit; `eq` is node-to-node identity between
+two variables (its sole non-redundant use — e.g. "two distinct leaves under a
+portfolio": `leaf_descendant_of(a,p) /\ leaf_descendant_of(b,p) /\ not eq(a,b)`).
+
+#### Exact signatures
+
+**Companion object — two new value-sort declarations** (beside `NodeSort`):
+
+```scala
+object RiskTreeKnowledgeBase:
+
+  val NodeSort: TypeId = TypeId("Node")
+
+  /** Value sort for a node reference written as a quoted node NAME literal
+    * (`named(x, "IT Risk")`). Carrier: NodeId — the name is resolved to the
+    * node's id at bind time by the literal validator (`nameToId.get`). A
+    * ValueType (ADR-014): it flows through an argument slot and is never
+    * quantified over. */
+  val NodeNameLiteralSort: TypeId = TypeId("NodeNameLiteral")
+
+  /** Value sort for a node reference written as a quoted node ID literal
+    * (`has_id(x, "01BX…")`). Carrier: NodeId — the id string is parsed by
+    * `NodeId.fromString` at bind time. */
+  val NodeIdLiteralSort: TypeId = TypeId("NodeIdLiteral")
+
+  given Extract[NodeId] with            // unchanged — carrier is NodeId for all three sorts
+    def apply(v: Value): Either[String, NodeId] = v.raw match
+      case id: NodeId => Right(id)
+      case other      =>
+        Left(s"Extract[NodeId]: expected NodeId carrier for sort '${v.sort.value}', got $other")
+```
+
+**Class members — sort declarations** (`boolSort` removed — OD-A, ruled remove):
+
+```scala
+  val nodeSort: TypeId            = RiskTreeKnowledgeBase.NodeSort
+  val lossSort: TypeId            = TypeId("Loss")
+  val probabilitySort: TypeId     = TypeId("Probability")
+  val nodeNameLiteralSort: TypeId = RiskTreeKnowledgeBase.NodeNameLiteralSort
+  val nodeIdLiteralSort: TypeId   = RiskTreeKnowledgeBase.NodeIdLiteralSort
+```
+
+`nameToId` is unchanged (reserved-filtered name → `NodeId`).
+
+**Catalog** — `=` gone; `eq` / `named` / `has_id` added; `Node` validator
+name-only; two value sorts with their validators:
+
+```scala
+  val catalog: TypeCatalog = TypeCatalog.unsafe(
+    types = Set(
+      TypeDecl.DomainType(nodeSort),
+      TypeDecl.ValueType(lossSort),
+      TypeDecl.ValueType(probabilitySort),
+      TypeDecl.ValueType(nodeNameLiteralSort),
+      TypeDecl.ValueType(nodeIdLiteralSort)
+    ),
+    constants = Map.empty,
+    functions = Map(
+      SymbolName("p95") -> FunctionSig(List(nodeSort), lossSort),
+      SymbolName("p99") -> FunctionSig(List(nodeSort), lossSort),
+      SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort), probabilitySort)
+    ),
+    predicates = Map(
+      SymbolName("leaf")               -> PredicateSig(List(nodeSort)),
+      SymbolName("portfolio")          -> PredicateSig(List(nodeSort)),
+      SymbolName("child_of")           -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("descendant_of")      -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("leaf_descendant_of") -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("gt_loss")            -> PredicateSig(List(lossSort, lossSort)),
+      SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort)),
+      SymbolName("eq")                 -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("named")              -> PredicateSig(List(nodeSort, nodeNameLiteralSort)),
+      SymbolName("has_id")             -> PredicateSig(List(nodeSort, nodeIdLiteralSort))
+    ),
+    literalValidators = Map(
+      nodeSort            -> ((s: String) => nameToId.get(s)),                 // name-only (Option B)
+      nodeNameLiteralSort -> ((s: String) => nameToId.get(s)),                // named's 2nd arg
+      nodeIdLiteralSort   -> ((s: String) => NodeId.fromString(s).toOption),   // has_id's 2nd arg
+      lossSort          -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
+      probabilitySort   -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0))
+    )
+  )
+```
+
+**Dispatcher** — the single `=` lambda is replaced by one shared node-identity
+lambda mapped under all three symbols (no duplication):
+
+```scala
+    // shared: all three reduce to NodeId identity; differentiation is bind-time
+    val nodeIdentity: List[Value] => Either[String, Boolean] = args =>
+      for a <- args(0).extract[NodeId]; b <- args(1).extract[NodeId] yield a == b
+    // …
+    predicates = Map(
+      // leaf, portfolio, child_of, descendant_of, leaf_descendant_of, gt_loss, gt_prob — unchanged
+      SymbolName("eq")     -> nodeIdentity,
+      SymbolName("named")  -> nodeIdentity,
+      SymbolName("has_id") -> nodeIdentity
+    )
+```
+
+**Bind-time behaviour table** (the observable contract):
+
+| Query fragment | Binds to | Result |
+|---|---|---|
+| `eq(a, b)` (two vars) | node identity | true iff same node |
+| `named(x, "IT Risk")` | `nameToId.get("IT Risk")` | pins that node |
+| `named(x, "01BX…ulid")` | `nameToId.get(ulid)` = None | 400 `UnparseableConstant` (unless a node is literally so named) |
+| `has_id(x, "01BX…ulid")` | `NodeId.fromString` | pins that node |
+| `has_id(x, "IT Risk")` | `NodeId.fromString("IT Risk")` = None | 400 `UnparseableConstant` |
+| `child_of(x, "IT Risk")` | `Node` validator = name | pins by name (unchanged from today) |
+| `child_of(x, "01BX…ulid")` | `Node` validator (name-only) = None | 400 (was: bound by id under §8.9) — use `has_id` + `eq`/structural bind |
+
+The 400 category differs by sort: a failed `Node` or `NodeNameLiteral` literal
+is a nonexistent node → `UNKNOWN_REFERENCE`; a failed `NodeIdLiteral` literal is
+malformed id syntax → `BIND_FAILED` (next subsection).
+
+#### Error classification — extend the §8.11 `named`-unresolved mapping (Option B, ruled 2026-08-25)
+
+Introducing `named` over its own `NodeNameLiteral` value sort changes what
+`FolQueryFailure.fromQueryError` ([AppError.scala](../../modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala))
+sees for a nonexistent node named through `named`. §8.11 classifies a bind
+failure as HTTP 400 `UNKNOWN_REFERENCE` (rather than `BIND_FAILED`) only when
+**every** failed literal carries sort `"Node"`. A failed `named(x,
+"Nonexistent")` now carries sort `"NodeNameLiteral"`, so without this amendment
+it would fall through to `BIND_FAILED` — a different, misleading category for
+the same user mistake ("that node does not exist") that `child_of(x,
+"Nonexistent")` already reports as `UNKNOWN_REFERENCE`.
+
+Fix: the node-reference discriminator becomes a **set** of both name-resolving
+sorts. `NodeIdLiteral` is deliberately excluded — a failed id literal is
+malformed id syntax (a genuine parse/bind error, `"cannot parse '…' as
+NodeIdLiteral"`), and a well-formed-but-absent id parses and simply evaluates
+false, so `has_id` has no unresolved-reference failure mode.
+
+```scala
+// modules/common/.../domain/errors/AppError.scala — object FolQueryFailure
+// (amends the §8.11 single-name discriminator)
+
+val NodeSortName: String = "Node"
+
+/** The name-literal value sort (`named(x, "…")`). A failed name literal here is
+  * the same user error as a failed Node-slot name — a nonexistent node — so it
+  * classifies as UNKNOWN_REFERENCE too. NodeIdLiteral is excluded: a failed id
+  * literal is malformed syntax, and a well-formed-but-absent id evaluates false. */
+val NodeNameLiteralSortName: String = "NodeNameLiteral"
+
+/** Sorts whose failed literal means "no such node" → UNKNOWN_REFERENCE. */
+val NodeReferenceSortNames: Set[String] = Set(NodeSortName, NodeNameLiteralSortName)
+
+case e: QE.BindError =>
+  val allNodeUnresolved =
+    e.details.nonEmpty && e.details.forall {
+      case BindErrorDetail.UnparseableConstant(_, sortName, _, _) =>
+        NodeReferenceSortNames.contains(sortName)
+      case _ => false
+    }
+  if allNodeUnresolved then FolUnknownReference(e.messages)
+  else                      FolBindFailure(e.messages)
+```
+
+Drift guard (`RiskTreeKnowledgeBaseSpec`) — bind both discriminator strings to
+their catalog sorts, extending §8.11's single-sort guard:
+
+```scala
+test("node-reference sort discriminators match the classifier's names") {
+  assertTrue(
+    RiskTreeKnowledgeBase.NodeSort.value            == FolQueryFailure.NodeSortName,
+    RiskTreeKnowledgeBase.NodeNameLiteralSort.value == FolQueryFailure.NodeNameLiteralSortName
+  )
+}
+```
+
+Classifier test (`FolQueryFailureFromQueryErrorSpec`) — add one case to the
+§8.11 `bindSuite`:
+
+```scala
+//  (d) homogeneous NodeNameLiteral UnparseableConstant → FolUnknownReference
+//      (named(x, <nonexistent>) is a nonexistent-node error, like child_of)
+```
+
+#### `MitigationTarget` emission amendment (§8.4-1, authorized 2026-08-25)
+
+§8.4-1 (RULED C) is unchanged in substance — single-variant `MitigationTarget`,
+`overrideAnchor: NodeId`, server-side resolution-equals-`{overrideAnchor}`. Only
+the concrete predicate the UI node-picker emits changes, from the retired `=`
+form to `has_id`:
+
+- Default authoring emission: `x = "<nodeId>"` → **`has_id(x, "<nodeId>")`**.
+- The §8.4-1 item-1 worked example's hand-written name predicate
+  `x = "primary-db"` → **`named(x, "primary-db")`** (illustrates name-based
+  drift; unchanged meaning).
+
+Both edits are made to §8.4-1 in this document as part of this section (the user
+authorized the emission wording 2026-08-25). The injection-safety argument is
+unchanged: `NodeId`'s refinement (`^[0-9A-HJKMNP-TV-Z]{26}$`) admits no quotes,
+spaces, or operator characters, and the controlling check remains server-side
+(`has_id`'s `NodeId.fromString` validator rejects any non-conforming token at
+bind).
+
+#### Test changes (`RiskTreeKnowledgeBaseSpec`)
+
+```scala
+// catalog structure suite
+//   "catalog declares four sorts" → "five sorts"; add typeIds.size == 5
+//   predicateSymbols.size == 8 → == 10
+
+// "= (node identity)" suite → "eq (node identity)"; SymbolName("=") → SymbolName("eq") (both cases)
+
+// C1 validator suite — Node validator is now name-only; add the two new validators:
+val nodeV = kb.catalog.literalValidators(nodeSort)
+val nameV = kb.catalog.literalValidators(nodeNameLiteralSort)
+val idV   = kb.catalog.literalValidators(nodeIdLiteralSort)
+assertTrue(
+  nodeV("Cyber")        == Some(cyberId),   // name → id (unchanged)
+  nodeV(cyberId.value)  == None,            // WAS Some(cyberId): id no longer binds in a Node slot
+  nameV("Cyber")        == Some(cyberId),   // named: name → id
+  nameV(cyberId.value)  == None,            // named rejects an id
+  idV(cyberId.value)    == Some(cyberId),   // has_id: id → id
+  idV("Cyber")          == None             // has_id rejects a name
+)
+
+// C4 drift-guard baseline gains "eq", "named", "has_id"; the `==` assertion holds
+//   once FolSymbols.reservedNames is synced (below).
+
+// New query-level cases (via QueryBinder + evaluate over the 4-node fixture):
+//   named(x, "IT Risk")  binds and its satisfying set is that node
+//   has_id(x, "<cyberId>") binds and pins Cyber
+//   has_id(x, "IT Risk") → BindError/UnparseableConstant (sort "NodeIdLiteral")
+//   named(x, "<cyberId>") → BindError/UnparseableConstant (sort "NodeNameLiteral")
+```
+
+`BinderIntegrationSpec` B1/B2/B4 use `leaf_descendant_of(x, "IT Risk")` /
+`"Nonexistent"` — name literals in a structural node slot, resolved by the
+retained name branch — so they stay green **unmodified** and are not touched.
+
+#### `FolSymbols.reservedNames` sync
+
+Drop `"="`; add `"eq"`, `"named"`, `"has_id"`. The set stays equal to the
+catalog's function ∪ predicate symbol union, so the C4 drift-guard passes:
+
+```scala
+  val reservedNames: Set[String] = Set(
+    // predicates
+    "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
+    "gt_loss", "gt_prob", "eq", "named", "has_id",
+    // functions
+    "p95", "p99", "lec"
+  )
+```
+
+A node literally named `eq` / `named` / `has_id` is excluded from `nameToId`
+and rejected by the DTO gate `requireNoReservedNames`, exactly as for any
+symbol name — no real node carries these names.
+
+#### File inventory (delta)
+
+All files this section edits are **already in `## File inventory`** — no
+inventory change:
+
+- `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala` (M1R list)
+- `modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala` (M1R list)
+- `modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala` (§8.11 list — Option B classifier extension)
+- `modules/server/src/test/scala/com/risquanter/register/domain/errors/FolQueryFailureFromQueryErrorSpec.scala` (§8.11 list — classifier case)
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala` (M1R list)
+- `build.sbt` (version PATCH)
+
+Not touched: `QueryResponseBuilder.scala` (projects by `NodeSort` filter +
+`extract[NodeId]`, unaffected), `QueryServiceLive.scala`, `BinderIntegrationSpec.scala`,
+`ErrorResponse.scala` (the `UNKNOWN_REFERENCE` wire arm from §8.11 already
+carries the widened message list — no shape change).
+
+#### ADR alignment
+
+- **ADR-014** (DomainType vs ValueType): `NodeNameLiteral` / `NodeIdLiteral` are
+  `ValueType`s — scalar, flow through argument slots, never quantified over.
+  Compliant.
+- **ADR-015 §2** (consumer carrier): unchanged single `given Extract[NodeId]`;
+  all three node-reference sorts carry `NodeId`. No engine change. Compliant.
+- **ADR-018** (nominal id wrapper): the carrier is the nominal `NodeId`
+  throughout; the only raw `String` is each validator's parse input (the
+  sanctioned boundary). Compliant.
+- **ADR-001 / ADR-010** (validate at boundary, typed errors): improved —
+  node-by-name and node-by-id are now two disjoint, whitelist-constrained
+  validators; an unresolvable literal is a typed bind error, not a silent
+  empty set.
+- **ADR-028 §4** (query validation before evaluation): the `named`-unresolved
+  classification stays inside the single `fromQueryError` mapper (no
+  `QueryBinder.bind` bypass); the discriminator widens from one sort name to a
+  set. **Trigger #5** (behaviour change): the HTTP category for a failed
+  `named` literal changes from `BIND_FAILED` to `UNKNOWN_REFERENCE` — specified
+  verbatim in the classifier subsection above; approval of this section is its
+  echo. **Trigger #8** (test assertions): the added classifier case and the
+  extended drift guard are additive; the existing §8.11 cases are unchanged.
+- **ADR-029** (input-injection defence): improved. Two ADR-029 edits land
+  **with this slice's implementation** (doc sweep, below), because §8.12 is the
+  first change to rewrite exactly the mechanism ADR-029 §3 describes:
+  - §3 row "FOL `VagueQueryParser.parse`" currently reads "node names enter
+    via `catalog.constants` lookup (`Map.get`)". This has been **stale since
+    §8.9** (`constants = Map.empty`); correct it to: "node references resolve
+    at bind time through per-sort literal validators — `nameToId.get` for a
+    name (`Node` / `NodeNameLiteral` sorts), `NodeId.fromString` for an id
+    (`NodeIdLiteral`) — whitelist-constrained, never interpolated."
+  - §5 injection-inventory row for the KB dispatcher stays correct
+    (`Map.get` / `Set.contains`; no interpolation).
+- **ADR-028 / ADR-028-appendix** (query-pane predicate vocabulary): the
+  relational-predicate tables list `leaf` / `child_of` / `descendant_of` /
+  `leaf_descendant_of` but not the node-reference predicates (they also never
+  listed `=`). Add `eq(x, y)`, `named(x, "name")`, `has_id(x, "id")` rows with
+  the doc sweep when this slice lands (behaviour-descriptive tables kept
+  current). No decision content in ADR-028 changes.
+- **ADR-028 (main)**: the `code-quality-review` / query-pane autocomplete
+  vocabulary, if it enumerates predicate names, gains `eq` / `named` /
+  `has_id` and drops `=` in the same sweep.
+
+No ADR decision is reversed; the edits are descriptive-currency only and land in
+the same commit as the code.
+
+#### Open decisions
+
+Both resolved (user, 2026-08-25):
+
+- **OD-A — remove the vestigial `Bool` sort. RULED: remove.** `boolSort =
+  TypeId("Bool")` was declared as a `ValueType` but referenced by no signature
+  and had no validator (predicates return `Boolean` natively through the
+  `MapDispatcher`, `List[Value] => Either[String, Boolean]`); verified no
+  consumer anywhere in `modules/` (only its own two lines). The exact signatures
+  above omit it.
+- **OD-B — TypeId names for the two value sorts. RULED: `NodeNameLiteral` /
+  `NodeIdLiteral`.** Both are `…Literal`-suffixed value sorts, symmetric. The
+  sort string is not part of query input — the sort is inferred from the
+  argument slot, so a user writes `named(x, "…")` / `has_id(x, "…")`, never a
+  sort name — but it does surface in a failed-literal bind message (`"cannot
+  parse '…' as NodeIdLiteral"`) and is the string the classifier branches on
+  (classifier subsection above), so both names are chosen to read correctly in
+  that message and to avoid colliding with the Scala carrier type `NodeId`.
+
+No other open decisions: the substance (`eq` rename, `named` / `has_id`,
+Option B name-only `Node` validator, `has_id` emission, and the classifier
+extension for `named`-unresolved) is ruled (user, 2026-08-23/25).
+
+#### Verification plan
+
+```bash
+sbt server/compile
+sbt server/test                 # RiskTreeKnowledgeBaseSpec (catalog, eq, C1/C4, new named/has_id cases)
+sbt 'commonJVM/test; server/test'
+sbt app/test                    # unaffected — must stay green
+sbt serverIt/test               # unaffected — must stay green
+run_bats tests/bats/suite-c-in-memory.bats   # fast gate after code change
+```
+
+Then: PATCH bump `0.10.20` → `0.10.21`, mirror `APP_VERSION` into `.env` and
+`.env.irmin`; doc sweep — the KB class scaladoc (sort table: drop `Bool`, add
+`NodeNameLiteral` / `NodeIdLiteral` carrying `NodeId`; predicate table: `=` row
+→ `eq`, add `named` / `has_id` rows), the `AppError.scala` classifier
+doc-comments (`NodeNameLiteralSortName` / `NodeReferenceSortNames`), the two
+ADR-029 §3 edits above, and the ADR-028 predicate-vocabulary rows.
 
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 

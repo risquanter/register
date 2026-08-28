@@ -20,12 +20,13 @@ import vql.typed.MapDispatcher
   *
   * == Sort System ==
   *
-  * | Sort        | Scala carrier | Description |
-  * |-------------|---------------|-------------|
-  * | Node        | `NodeId`      | Tree node identity (leaves and portfolios) |
-  * | Loss        | Long          | Monetary loss values |
-  * | Probability | Double        | Exceedance probabilities |
-  * | Bool        | Boolean       | Truth values (range of predicates) |
+  * | Sort            | Scala carrier | Description |
+  * |-----------------|---------------|-------------|
+  * | Node            | `NodeId`      | Tree node identity (leaves and portfolios) |
+  * | NodeNameLiteral | `NodeId`      | A node named by a quoted name literal (`named`) |
+  * | NodeIdLiteral   | `NodeId`      | A node named by a quoted id literal (`has_id`) |
+  * | Loss            | Long          | Monetary loss values |
+  * | Probability     | Double        | Exceedance probabilities |
   *
   * == Functions ==
   *
@@ -46,7 +47,9 @@ import vql.typed.MapDispatcher
   * | leaf_descendant_of | (Node, Node) | descendants ∩ leafIds |
   * | gt_loss | (Loss, Loss) | `a > b` (Long) |
   * | gt_prob | (Probability, Probability) | `a > b` (Double) |
-  * | = | (Node, Node) | `NodeId` equality |
+  * | eq | (Node, Node) | `NodeId` equality (node identity between two variables) |
+  * | named | (Node, NodeNameLiteral) | pins a node by name; `NodeId` equality |
+  * | has_id | (Node, NodeIdLiteral) | pins a node by id; `NodeId` equality |
   *
   * @param tree    Risk tree providing structure (TreeIndex) and node metadata
   * @param results Simulation results indexed by NodeId (from CachedResultResolver.ensureCachedAll)
@@ -57,10 +60,11 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
 
   // ── Sort declarations ──────────────────────────────────────────────
 
-  val nodeSort: TypeId        = RiskTreeKnowledgeBase.NodeSort
-  val lossSort: TypeId        = TypeId("Loss")
-  val probabilitySort: TypeId = TypeId("Probability")
-  val boolSort: TypeId        = TypeId("Bool")
+  val nodeSort: TypeId            = RiskTreeKnowledgeBase.NodeSort
+  val lossSort: TypeId            = TypeId("Loss")
+  val probabilitySort: TypeId     = TypeId("Probability")
+  val nodeNameLiteralSort: TypeId = RiskTreeKnowledgeBase.NodeNameLiteralSort
+  val nodeIdLiteralSort: TypeId   = RiskTreeKnowledgeBase.NodeIdLiteralSort
 
   // ── Percentile computation ─────────────────────────────────────────
 
@@ -136,8 +140,12 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
       TypeDecl.DomainType(nodeSort),
       TypeDecl.ValueType(lossSort),
       TypeDecl.ValueType(probabilitySort),
-      TypeDecl.ValueType(boolSort)
+      TypeDecl.ValueType(nodeNameLiteralSort),
+      TypeDecl.ValueType(nodeIdLiteralSort)
     ),
+    // No constant symbols: node names resolve on demand through the node-sort
+    // literal validator below, not as pre-registered constants. This is where a
+    // constant (a fixed named value in the query vocabulary) would be declared.
     constants = Map.empty,
     functions = Map(
       SymbolName("p95") -> FunctionSig(List(nodeSort), lossSort),
@@ -152,12 +160,18 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
       SymbolName("leaf_descendant_of") -> PredicateSig(List(nodeSort, nodeSort)),
       SymbolName("gt_loss")            -> PredicateSig(List(lossSort, lossSort)),
       SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort)),
-      SymbolName("=")                  -> PredicateSig(List(nodeSort, nodeSort))
+      SymbolName("eq")                 -> PredicateSig(List(nodeSort, nodeSort)),
+      SymbolName("named")              -> PredicateSig(List(nodeSort, nodeNameLiteralSort)),
+      SymbolName("has_id")             -> PredicateSig(List(nodeSort, nodeIdLiteralSort))
     ),
     literalValidators = Map(
-      nodeSort        -> ((s: String) => NodeId.fromString(s).toOption.orElse(nameToId.get(s))),
-      lossSort        -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
-      probabilitySort -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0))
+      // Node slots resolve a quoted literal by NAME only: an id in a structural
+      // node slot (`child_of(x, "01BX…")`) no longer binds — use `has_id`.
+      nodeSort            -> ((s: String) => nameToId.get(s)),
+      nodeNameLiteralSort -> ((s: String) => nameToId.get(s)),                // named's 2nd arg
+      nodeIdLiteralSort   -> ((s: String) => NodeId.fromString(s).toOption),  // has_id's 2nd arg
+      lossSort            -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
+      probabilitySort     -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0))
     )
   )
 
@@ -172,6 +186,18 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
 
   private def lookupResult(id: NodeId, ctx: String): Either[String, LossDistribution] =
     results.get(id).toRight(s"$ctx: no simulation result for node '${id.value}'")
+
+  /** Shared node-identity relation backing `eq`, `named`, and `has_id`. By the
+    * time an argument reaches the dispatcher its literal validator has already
+    * resolved the quoted string to a `NodeId`, so all three reduce to `NodeId`
+    * equality; they differ only at bind time, in which validator accepts the
+    * literal (`nameToId.get` for `eq` / `named`, `NodeId.fromString` for
+    * `has_id`). */
+  private val nodeIdentity: List[Value] => Either[String, Boolean] = args =>
+    for
+      a <- args(0).extract[NodeId]
+      b <- args(1).extract[NodeId]
+    yield a == b
 
   val dispatcher: MapDispatcher = MapDispatcher(
     functions = Map(
@@ -234,12 +260,9 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
           b <- args(1).extract[Double]
         yield a > b
       },
-      SymbolName("=") -> { args =>
-        for
-          a <- args(0).extract[NodeId]
-          b <- args(1).extract[NodeId]
-        yield a == b
-      }
+      SymbolName("eq")     -> nodeIdentity,
+      SymbolName("named")  -> nodeIdentity,
+      SymbolName("has_id") -> nodeIdentity
     )
   )
 
@@ -261,6 +284,21 @@ object RiskTreeKnowledgeBase:
   /** Canonical sort id for tree nodes (leaves and portfolios). Shared with
     * [[QueryResponseBuilder]] so the id projection uses one declaration. */
   val NodeSort: TypeId = TypeId("Node")
+
+  /** Value sort for a node reference written as a quoted node NAME literal
+    * (`named(x, "IT Risk")`). Carrier: `NodeId` — the name is resolved to the
+    * node's id at bind time by the literal validator (`nameToId.get`). A
+    * `ValueType` (ADR-014): it flows through an argument slot and is never
+    * quantified over. The sort string surfaces in a failed-literal bind message
+    * and is a node-reference discriminator in [[FolQueryFailure.fromQueryError]]. */
+  val NodeNameLiteralSort: TypeId = TypeId("NodeNameLiteral")
+
+  /** Value sort for a node reference written as a quoted node ID literal
+    * (`has_id(x, "01BX…")`). Carrier: `NodeId` — the id string is parsed by
+    * `NodeId.fromString` at bind time. A failed id literal is malformed syntax,
+    * classified `BIND_FAILED` (unlike a failed name, which is a nonexistent
+    * node). */
+  val NodeIdLiteralSort: TypeId = TypeId("NodeIdLiteral")
 
   /** Consumer carrier for the node sort (ADR-015 §2): the engine holds the
     * register `NodeId` opaquely in `Value.raw`; this lifts it back out. A

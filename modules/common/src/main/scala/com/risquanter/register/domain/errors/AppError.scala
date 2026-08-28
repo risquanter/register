@@ -244,6 +244,23 @@ object FolQueryFailure:
     * dependency graph, so this literal cannot be derived from it here.
     */
   val NodeSortName: String = "Node"
+
+  /** The `TypeId.value` of the `named` predicate's name-literal argument sort.
+    * A `named(x, "Nonexistent")` whose literal fails the name validator crosses
+    * this sort in `UnparseableConstant.sortName`, not `NodeSortName`, so it must
+    * join the set below to keep classifying as `UNKNOWN_REFERENCE`. Bound to the
+    * catalog by the same drift-guard assertion as `NodeSortName`.
+    */
+  val NodeNameLiteralSortName: String = "NodeNameLiteral"
+
+  /** Sorts whose unresolved quoted literal means "no such node", not a type
+    * error: a bare node slot (`Node`) and the `named` name literal
+    * (`NodeNameLiteral`). Both carry a node name that simply is not in the tree,
+    * so a bind failure homogeneous in these sorts is `UNKNOWN_REFERENCE`. The
+    * `has_id` id-literal sort is excluded: a malformed id is a genuine
+    * `BIND_FAILED`, and a well-formed-but-absent id parses and evaluates false.
+    */
+  val NodeReferenceSortNames: Set[String] = Set(NodeSortName, NodeNameLiteralSortName)
   /** Maps from `vql.error.QueryError.ParseError`.
     *
     * Syntactic parse failure — the query string is not well-formed FOL syntax.
@@ -409,7 +426,8 @@ object FolQueryFailure:
       case e: QE.BindError                =>
         val allNodeUnresolved =
           e.details.nonEmpty && e.details.forall {
-            case BindErrorDetail.UnparseableConstant(_, sortName, _, _) => sortName == NodeSortName
+            case BindErrorDetail.UnparseableConstant(_, sortName, _, _) =>
+              NodeReferenceSortNames.contains(sortName)
             case _                                                      => false
           }
         if allNodeUnresolved then FolUnknownReference(e.messages)

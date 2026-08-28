@@ -108,6 +108,9 @@ pre-computes tree relationships during KB construction:
 | `leaf_descendant_of(x, y)` | 2 | x is a leaf descendant of y |
 | `leaf(x)` | 1 | x is a RiskLeaf |
 | `portfolio(x)` | 1 | x is a RiskPortfolio |
+| `eq(x, y)` | 2 | x and y are the same node (node identity between two variables) |
+| `named(x, "name")` | 2 | x is the node with that name (name resolved to its id at bind time) |
+| `has_id(x, "id")` | 2 | x is the node with that id (id parsed at bind time) |
 
 This sidesteps the transitive closure limitation and prevents
 double-counting: the query author chooses the appropriate range

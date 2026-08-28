@@ -55,6 +55,9 @@ Count satisfying / total → proportion → check quantifier threshold
 | `child_of(x, y)` | 2 | Direct parent-child edges | `child_of(cyber, ops_risk)` |
 | `descendant_of(x, y)` | 2 | Transitive closure (pre-computed) | `descendant_of(cyber, root)` |
 | `leaf_descendant_of(x, y)` | 2 | Transitive, leaves only | `leaf_descendant_of(cyber, root)` |
+| `eq(x, y)` | 2 | Node identity between two variables | `not eq(a, b)` |
+| `named(x, "name")` | 2 | Node pinned by name (`nameToId.get`, name-literal sort) | `named(x, "IT Risk")` |
+| `has_id(x, "id")` | 2 | Node pinned by id (`NodeId.fromString`, id-literal sort) | `has_id(x, "01BX…")` |
 
 ### Simulation-Backed Functions (via `Interpretation` augmentation)
 

@@ -25,7 +25,7 @@ object FolSymbols:
   val reservedNames: Set[String] = Set(
     // predicates
     "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
-    "gt_loss", "gt_prob", "=",
+    "gt_loss", "gt_prob", "eq", "named", "has_id",
     // functions
     "p95", "p99", "lec"
   )

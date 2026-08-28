@@ -54,15 +54,15 @@ concatenation followed by a second parse.
 // Wrong: string interpolation into a FOL query that will be re-parsed
 val query = s"""leaf(x) /\\ gt_loss(p95(x), ${userInput})"""
 
-// Correct: user string looked up via Map.get — never re-parsed
-val result = catalog.constants.get(userInput)  // Set.contains / Map.get only
+// Correct: user string resolved via a per-sort literal validator — never re-parsed
+val result = nameToId.get(userInput)  // Set.contains / Map.get only
 ```
 
 ### 3. Parser boundaries in this codebase
 
 | Boundary | Current guard |
 |---|---|
-| FOL `VagueQueryParser.parse` | Query text is user-typed; node names enter via `catalog.constants` lookup (`Map.get`), never interpolated |
+| FOL `VagueQueryParser.parse` | Query text is user-typed; node references resolve at bind time through per-sort literal validators — `nameToId.get` for a name (`Node` / `NodeNameLiteral` sorts), `NodeId.fromString` for an id (`NodeIdLiteral`) — whitelist-constrained, never interpolated |
 | FOL `TargetingPredicate.create` | Mitigation targeting text is user-typed; length-bounded (1–256) then parsed via `FOLParser`, then restricted to the targeting fragment (no quantifiers, no function terms), a single free variable, and no mitigation-state predicate. `decode == create`, so no `TargetingPredicate` exists whose source was not validated; the parsed formula is derived state, never re-serialised or interpolated |
 | JDBC / Quill | Parameterised queries via typed DSL; no hand-rolled SQL |
 | zio-json encode/decode | Codecs handle escaping; no manual string construction |
