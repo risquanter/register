@@ -1,6 +1,6 @@
 # ADR-028: Vague Quantifier Query Pane
 
-**Status:** Accepted (awaiting implementation)  
+**Status:** Accepted (implemented)  
 **Date:** 2026-03-14  
 **Tags:** query-language, simulation, fol, integration
 
@@ -9,9 +9,10 @@
 > `gt_prob(Probability,Probability)`) rather than untyped infix `>`/`<`.
 > Available simulation-backed functions are `p95`, `p99`, `lec` (the
 > earlier `p50`/`p90` listing was never implemented). All examples in
-> this document and the appendix have been updated. The three open bugs
-> blocking node-name literals (`"IT Risk"` etc.) remain — see
-> `docs/dev/PLAN-QUERY-NODE-NAME-LITERALS.md`.
+> this document and the appendix have been updated. Node-name and node-id
+> literals are delivered: a quoted literal binds through the `named(x, "…")`
+> predicate (name) or `has_id(x, "…")` predicate (id), each over a dedicated
+> node-reference sort with its own bind-time literal validator.
 
 ---
 

@@ -43,8 +43,8 @@ import vql.typed.MapDispatcher
   * | leaf | (Node) | `TreeIndex.leafIds` |
   * | portfolio | (Node) | node is `RiskPortfolio` |
   * | child_of | (Node, Node) | `TreeIndex.children` |
-  * | descendant_of | (Node, Node) | `TreeIndex.descendants` |
-  * | leaf_descendant_of | (Node, Node) | descendants ∩ leafIds |
+  * | descendant_of | (Node, Node) | `TreeIndex.isAncestor` (strict) |
+  * | leaf_descendant_of | (Node, Node) | `isAncestor` (strict) ∩ leafIds |
   * | gt_loss | (Loss, Loss) | `a > b` (Long) |
   * | gt_prob | (Probability, Probability) | `a > b` (Double) |
   * | eq | (Node, Node) | `NodeId` equality (node identity between two variables) |
@@ -238,15 +238,16 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
         for
           desc     <- args(0).extract[NodeId]
           ancestor <- args(1).extract[NodeId]
-        yield (index.descendants(ancestor) - ancestor).contains(desc)
+        // Walk desc's parent chain upward (O(depth)) rather than building
+        // ancestor's whole subtree. isAncestor is reflexive; the desc != ancestor
+        // guard keeps descendant_of strict (irreflexive).
+        yield desc != ancestor && index.isAncestor(ancestor, desc)
       },
       SymbolName("leaf_descendant_of") -> { args =>
         for
           desc     <- args(0).extract[NodeId]
           ancestor <- args(1).extract[NodeId]
-        yield
-          val descs = index.descendants(ancestor) - ancestor  // strict (irreflexive)
-          descs.contains(desc) && leafIdSet.contains(desc)
+        yield desc != ancestor && index.isAncestor(ancestor, desc) && leafIdSet.contains(desc)
       },
       SymbolName("gt_loss") -> { args =>
         for

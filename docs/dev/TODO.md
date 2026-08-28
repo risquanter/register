@@ -286,11 +286,23 @@ explaining the layering:
 
 ---
 
-## 8. vql-engine typed vs. untyped pipeline mismatch — equality predicate not reachable
+## ✅ 8. vql-engine typed vs. untyped pipeline mismatch — equality predicate not reachable — RESOLVED 2026-08-28
+
+**Resolution:** register's typed dispatcher now registers node-reference
+predicates directly — `eq(x, y)` (node identity between two variables),
+`named(x, "name")` (node by name), `has_id(x, "id")` (node by id) — retiring the
+infix `=` symbol (`PLAN-RISKTRANSFORM.md` §8.12, 0.10.21; the companion
+bind-error → HTTP 400 `UNKNOWN_REFERENCE` classifier is §8.11, 0.10.19). The
+single-leaf-identity query below is now `named(x, "Cyber Breach")`. The four
+investigation questions are answered: the untyped `fol.bridge` / `FOLSemantics`
+`=` path was an earlier OCaml-faithful port, never wired into register, and is
+being retired library-side (`vague-quantifier-logic` T-006 — typed path is
+canonical); equality lands as sort-specific register-side node-reference
+predicates (the original option (a)), not polymorphic `=`. Original
+investigation note below.
 
 **Observed (2026-05-01).** A motivating query for the post-fix demo
-set of [docs/PLAN-QUERY-NODE-NAME-LITERALS.md](docs/PLAN-QUERY-NODE-NAME-LITERALS.md)
-is single-leaf identity:
+set of `PLAN-QUERY-NODE-NAME-LITERALS.md` is single-leaf identity:
 
 ```
 Q[>=]^{1} x (eq(x, "Cyber Breach"), gt_loss(p95(x), 5000000))
@@ -475,11 +487,9 @@ Blocked on App-Side Changes" → register-db / workspace-store-postgres wiring).
 **Observed:** The test
 `"reaper cascade-deletes trees across multiple expired workspaces"` in
 `modules/server/src/test/scala/.../WorkspaceReaperSpec.scala` fails
-intermittently. The failure pre-dates the
-`PLAN-QUERY-NODE-NAME-LITERALS.md` work — it surfaced again during the
-`server/test` run that followed the F3 implementation but is unrelated
-to any code touched by that plan (only `RiskTreeKnowledgeBase`,
-`QueryServiceLive` and one new spec were modified).
+intermittently. The failure is a pre-existing `TestClock` race,
+unrelated to the FOL query-predicate work that touched only
+`RiskTreeKnowledgeBase`, `QueryServiceLive` and one new spec.
 
 **Current understanding:**
 - The reaper is a ZIO scheduled fiber that fires on a `Schedule` driven
@@ -1951,7 +1961,9 @@ set-builder where a path-check suffices.
 `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`
 (two predicate bodies). No signature, DTO, or wire change.
 
-**Status:** open — backlog; clean win with existing test coverage.
+**Status:** done (0.10.20) — both predicates now walk the parent chain via
+`TreeIndex.isAncestor` (strict, `desc != ancestor` guard); behaviour-preserving,
+existing suites green. Plan: `docs/dev/PLAN-PREDICATE-EFFICIENCY.md`.
 
 ## 45. Asset knowledge graph — future epic (placeholder; collects two parked threads)
 

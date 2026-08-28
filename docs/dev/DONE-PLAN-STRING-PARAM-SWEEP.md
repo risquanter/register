@@ -86,7 +86,7 @@ and pass `basePath` (delete passes it to `irmin.setTree` directly). Inside
   (verified in the sibling repo) — so the foreign API cannot carry Iron types
   through; register's `SafeName` proof is necessarily discarded when the
   catalog/domain is built and recovered as `String` by `extract`. The
-  in-file boundary note (from PLAN-QUERY-NODE-NAME-LITERALS §10) documents
+  in-file boundary note documents
   why this is safe: the property travels with the value, and the dispatcher
   uses only `Map.get`/`Set.contains` — no interpolation. Re-refining inside
   the dispatcher would add per-evaluation cost to re-prove a property that
