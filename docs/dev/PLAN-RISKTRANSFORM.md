@@ -817,11 +817,12 @@ trait RiskResultResolver:
    untouched; a param-mitigated leaf is simply different content. D3 stands:
    the cache stores raw simulations; result-stage transforms are applied at
    the edge on every read and never cached.
-3. In `resolveNode`, after a node's result exists (leaf hit/miss or portfolio
-   aggregate), apply `resultTransformFor(node.id, scoped).run` to its
-   `trialOutcomes` **before returning it to the parent** — the transform acts
-   on the combine's operand or finished aggregate, never inside the combine
-   (ADR-009 associativity honoured).
+3. In `distributionOf`, after a node's result exists (leaf hit/miss or portfolio
+   aggregate), match `resultTransformFor(node.id, scoped)`: `None` returns the
+   node's outcomes unchanged, `Some(t)` applies `t.run` to its `trialOutcomes`
+   **before returning it to the parent** — the transform acts on the combine's
+   operand or finished aggregate, never inside the combine (ADR-009 associativity
+   honoured).
 4. Tracing: `mitigation.selection` and per-resolution applied-count attributes
    (ADR-002).
 
@@ -3536,7 +3537,7 @@ behaviour-unchanged.
      MitigationApplication.effectiveTree(tree, selection, resolvedScopes).toEither
    ).mapError(errs => ValidationFailed(errs.toList))
    hashes = ContentHashIndex.build(effective)
-   // resolveWithIndex(effective, hashes, …); node ids are stable across
+   // distributionForId(effective, hashes, …); node ids are stable across
    // effectiveTree, so the requested nodeId still resolves.
    ```
 
@@ -3546,7 +3547,7 @@ behaviour-unchanged.
    design"). ADR-010: a validation failure becomes typed `ValidationFailed`, no
    exception crosses the edge.
 
-2. **Scoped map computed once, threaded through `resolveNode`:**
+2. **Scoped map computed once, threaded through `distributionOf`:**
 
    ```scala
    scoped = MitigationApplication.scoped(tree, selection, resolvedScopes)  // Map[NodeId, List[Mitigation]]
@@ -3555,13 +3556,16 @@ behaviour-unchanged.
 3. **Result-stage transform at each node's return — leaf arm (determined):**
 
    ```scala
-   val t = MitigationApplication.resultTransformFor(leaf.id, scoped)   // identity when unscoped
-   RiskResult.fromTrialOutcomes(leaf.id, t.run(result.trialOutcomes), result.provenances)
+   MitigationApplication.resultTransformFor(leaf.id, scoped) match {   // None when unscoped
+     case None    => raw
+     case Some(t) => RiskResult.fromTrialOutcomes(leaf.id, t.run(raw.trialOutcomes), raw.provenances)
+   }
    ```
 
-   `resultTransformFor` is `identityTransform` when nothing result-stage scopes
-   the leaf, so this is a no-op on the un-mitigated path. ADR-009: the transform
-   acts on the finished leaf operand before it enters any parent combine.
+   `resultTransformFor` is `None` when nothing result-stage scopes the leaf, so
+   the raw cached value passes through unchanged on the un-mitigated path. ADR-009:
+   the transform acts on the finished leaf operand before it enters any parent
+   combine.
 
 #### Portfolio-level result-stage transform — RULED: F (2026-08-28)
 
@@ -3591,8 +3595,8 @@ children's mitigated values, then apply that node's `resultTransformFor`. The le
 arm above is the base case of exactly this fold (`resultTransformFor(leaf.id,
 scoped)` applied to the raw leaf outcomes); the portfolio arm applies
 `resultTransformFor(portfolio.id, scoped)` to the combined mitigated children.
-`resultTransformFor` is `identityTransform` off-scope, so an un-mitigated
-subtree's mitigated fold equals its raw fold and the two coincide.
+`resultTransformFor` is `None` off-scope, so an un-mitigated subtree's mitigated
+fold equals its raw fold and the two coincide.
 
 **Implementation-grade item finalized at the code echo.** Whether the edge runs
 the mitigated fold as a second traversal or threads a `(raw, mitigated)` pair

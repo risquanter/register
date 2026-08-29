@@ -186,16 +186,15 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val scoped = MitigationApplication.scoped(t, MitigationSelection.All,
           scopes(dFirst -> Set("cyber"), scale -> Set("cyber")))
         val composed = MitigationApplication.resultTransformFor(nodeId("cyber"), scoped)
-        assertTrue(composed.run(outcomes).outcomeOf(1) == 45000L) // (100K − 10K) × 0.5, not 40K
+        assertTrue(composed.map(_.run(outcomes).outcomeOf(1)) == Some(45000L)) // (100K − 10K) × 0.5, not 40K
       },
-      test("identity when nothing result-stage scopes the node") {
+      test("None when nothing result-stage scopes the node") {
         val m = leafScale("m-scale", 0.5)
         val t = mkTree(m)
         val scoped = MitigationApplication.scoped(t, MitigationSelection.All, scopes(m -> Set("cyber")))
-        val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
         assertTrue(
-          MitigationApplication.resultTransformFor(nodeId("cyber"), scoped).run(outcomes) == outcomes,
-          MitigationApplication.resultTransformFor(nodeId("flood"), scoped).run(outcomes) == outcomes
+          MitigationApplication.resultTransformFor(nodeId("cyber"), scoped) == None,
+          MitigationApplication.resultTransformFor(nodeId("flood"), scoped) == None
         )
       }
     ),

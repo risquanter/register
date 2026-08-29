@@ -81,7 +81,7 @@ object MitigationSelection {
  *   transformed selves. Output is a normal `RiskTree` revalidated through
  *   `RiskTree.fromNodes` — closure by construction.
  * - `resultTransformFor` — the result-stage half for one node: the composed
- *   pipeline of every ResultStage mitigation scoping it (identity when none).
+ *   pipeline of every ResultStage mitigation scoping it (None when none).
  *   The resolver applies it to a node's finished `TrialOutcomes` — the
  *   combine's operand or finished aggregate, never the summation step
  *   (ADR-009 associativity invariant).
@@ -159,16 +159,16 @@ object MitigationApplication {
     }
   }
 
-  /** Composed result-stage transform for one node, precedence order; identity
+  /** Composed result-stage transform for one node, precedence order; None
     * when nothing result-stage scopes it. */
   def resultTransformFor(
     nodeId: NodeId,
     scoped: Map[NodeId, List[Mitigation]]
-  ): RiskResultTransform =
+  ): Option[RiskResultTransform] =
     scoped.getOrElse(nodeId, Nil)
       .collect { case Mitigation(_, _, _, MitigationSpec.ResultStage(pipeline), _) => pipeline }
-      .foldLeft(RiskResultTransform.identityTransform)((acc, p) =>
-        acc.andThen(TransformPipeline.toTransform(p)))
+      .map(TransformPipeline.toTransform)
+      .reduceOption(_.andThen(_))
 
   /** D-4 records for one resolution: per applied mitigation, the node set the
     * application actually touched under this tree version and selection. */
