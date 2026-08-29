@@ -170,7 +170,7 @@ values. No cache, no `Ref`, no invalidation, no restore.
 
 > **`baseline` is not a new data structure.** `Map[NodeId, RiskResult]` is already the
 > return type of
-> [`RiskResultResolver.ensureCachedAll`](../../modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolver.scala)
+> [`CachedResultResolver.ensureCachedAll`](../../modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala)
 > and is already consumed elsewhere (e.g.
 > [`RiskTreeKnowledgeBase`](../../modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala),
 > `QueryServiceLive`). The baseline map is obtained by calling `ensureCachedAll(tree,

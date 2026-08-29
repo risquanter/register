@@ -101,18 +101,18 @@ object CacheTransparencySpec extends ZIOSpecDefault {
         })
     })
 
-  private def resolverWith(scope: ULayer[CacheScope]): ZLayer[Any, Throwable, RiskResultResolver & CacheScope] =
-    ZLayer.make[RiskResultResolver & CacheScope](
+  private def resolverWith(scope: ULayer[CacheScope]): ZLayer[Any, Throwable, CachedResultResolver & CacheScope] =
+    ZLayer.make[CachedResultResolver & CacheScope](
       scope,
       ZLayer.succeed(TestConfigs.simulation),
       TestConfigs.telemetryLayer >>> TracingLive.console,
       TestConfigs.telemetryLayer >>> MetricsLive.console,
-      RiskResultResolverLive.layer
+      CachedResultResolverLive.layer
     )
 
   /** Run the full edit sequence, collecting every node's figures at every step. */
-  private val runSequence: ZIO[RiskResultResolver & CacheScope, Throwable, List[Map[NodeId, Map[TrialId, Loss]]]] =
-    ZIO.serviceWithZIO[RiskResultResolver] { resolver =>
+  private val runSequence: ZIO[CachedResultResolver & CacheScope, Throwable, List[Map[NodeId, Map[TrialId, Loss]]]] =
+    ZIO.serviceWithZIO[CachedResultResolver] { resolver =>
       ZIO.foreach(editSequence) { t =>
         ZIO.foreach(t.index.nodes.keys.toList.sortBy(_.value)) { nid =>
           resolver.ensureCached(t, nid, testEntity).map(r => nid -> r.outcomes)

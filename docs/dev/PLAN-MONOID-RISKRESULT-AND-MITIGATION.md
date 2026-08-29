@@ -66,7 +66,7 @@ Audit of `modules/common/src/main/scala/.../domain/data/` and
 ### What is NOT wired into production
 
 - **`RiskResultGroup`** is used in tests only (`LossDistributionSpec`, `PreludeOrdUsageSpec`).
-  `RiskResultResolverLive` still does `childResults.reduce(RiskResult.combine).withNodeId(portfolio.id)`,
+  `CachedResultResolverLive` still does `childResults.reduce(RiskResult.combine).withNodeId(portfolio.id)`,
   producing a `LossDistributionType.Leaf` result for portfolio nodes — the smell is still live.
 - **`RiskTransform`** is used in tests only (`RiskTransformSpec`). No production call path
   invokes it. The transforms do **not** append to `RiskResult.provenances`.
@@ -194,7 +194,7 @@ gate (new type on a shared domain module → trigger #4/#5).
    principled `combineAll`-style aggregation instead of ad-hoc Leaf reuse.
 
 2. **Safe parallel subtree reduction**. The resolver currently aggregates children sequentially
-   (`ZIO.foreach` in `RiskResultResolverLive`). **Associativity is exactly the law that licenses
+   (`ZIO.foreach` in `CachedResultResolverLive`). **Associativity is exactly the law that licenses
    reordering / parallel reduction.** Making the combine lawful means the parallelism we want
    becomes *correct by construction*, not asserted.
 
@@ -270,7 +270,7 @@ This must be in place before any call site switches to `RiskResultGroup`.
 - `RiskResultCache.get/put` signature: `LossDistribution` (from `RiskResult`) — interim only;
   superseded by milestone-2b's `ContentCache` with the identity-free DD-18 value type
   (see the gap 3 correction); void if milestone-2b Phase A lands first
-- `RiskResultResolver.ensureCached/ensureCachedAll` return type: `LossDistribution`
+- `CachedResultResolver.ensureCached/ensureCachedAll` return type: `LossDistribution`
 - `LECGenerator` method signatures: `LossDistribution` (from `RiskResult`)
 - `RiskTreeKnowledgeBase` constructor and field: `Map[NodeId, LossDistribution]`
 
@@ -298,7 +298,7 @@ cache value type decision (milestone-2b DD-18).
 
 **Step 1 — Strengthen existing resolver test BEFORE making any change (gate)**
 
-`RiskResultResolverSpec` currently has:
+`CachedResultResolverSpec` currently has:
 ```scala
 // THIS IS VACUOUS — always true, verifies nothing:
 rootResult.outcomes.size >= 0
@@ -627,7 +627,7 @@ including why portfolios cannot carry a `RiskTransform` at all under B3 (gap 5).
 Surfaced from the review; each is **informational**, none approved.
 
 ### C.1 Resolver parallelism — but gated on Part A
-The sequential `ZIO.foreach` child traversal in `RiskResultResolverLive` is the main performance
+The sequential `ZIO.foreach` child traversal in `CachedResultResolverLive` is the main performance
 gap. **Do not parallelize it independently** — its correctness depends on the Part A associativity
 law. Treat C.1 as the *payoff* of Part A, not a separate task. (Cross-ref:
 `docs/archive/milestone-2b-cache-and-decisions.md`.)
@@ -639,7 +639,7 @@ law. Treat C.1 as the *payoff* of Part A, not a separate task. (Cross-ref:
 > the combined `outcomes: Map[TrialId, Loss]`. The design decision (introduce a distinct
 > aggregate type) is **already made in code**.
 
-**The smell, precisely**: `RiskResultResolverLive.simulateNode` aggregates portfolio children via
+**The smell, precisely**: `CachedResultResolverLive.simulateNode` aggregates portfolio children via
 `childResults.reduce[RiskResult]((a, b) => RiskResult.combine(a, b)).withNodeId(portfolio.id)`.
 This produces a `RiskResult` whose type is `Leaf` (the subtype), despite carrying a portfolio's
 `nodeId`. Children are discarded. Downstream code cannot distinguish a simulated leaf from an
@@ -654,7 +654,7 @@ change → trigger #5.**
 See A.7 gate 4.
 
 ### C.3 `includeProvenance` flag honesty
-`RiskResultResolver` exposes `includeProvenance`, but the live implementation always captures
+`CachedResultResolver` exposes `includeProvenance`, but the live implementation always captures
 provenance in leaf simulation (see `docs/dev/PLAN-PROVENANCE-ENDPOINT.md`). Either honor the flag
 or remove it. ⚠️ Changing/removing a public method parameter is **trigger #4**.
 

@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, Se
   * 
   * Separation of Concerns:
   * - Config CRUD: Persists risk tree structure only (no execution)
-  * - LEC Query APIs: Node-based queries composing on RiskResultResolver.ensureCached
+  * - LEC Query APIs: Node-based queries composing on CachedResultResolver.ensureCached
   * 
   * Design Pattern (ADR-015):
   * - Tree Manipulation: POST/PUT/DELETE → synchronous, fast (config only)

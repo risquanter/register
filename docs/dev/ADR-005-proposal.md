@@ -81,11 +81,11 @@ def invalidate(nodeId: NodeId): UIO[List[NodeId]] =
 
 ### 4. Lazy Recomputation
 
-Recompute results only when requested (cache-aside via `RiskResultResolver`):
+Recompute results only when requested (cache-aside via `CachedResultResolver`):
 
 ```scala
-// Actual implementation: RiskResultResolver
-trait RiskResultResolver:
+// Actual implementation: CachedResultResolver
+trait CachedResultResolver:
   def ensureCached(tree: RiskTree, nodeId: NodeId, includeProvenance: Boolean = false): Task[RiskResult]
   def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], includeProvenance: Boolean = false): Task[Map[NodeId, RiskResult]]
 
@@ -190,7 +190,7 @@ def onNodeChanged(nodeId: NodeId): Task[Unit] =
 | `TreeIndex` | `domain/tree/TreeIndex.scala` | Parent-pointer navigation | ✅ Implemented |
 | `RiskResultCache` | `services/cache/RiskResultCache.scala` | Per-node result storage | ✅ Implemented |
 | `TreeCacheManager` | `services/cache/TreeCacheManager.scala` | Per-tree cache lifecycle + invalidation | ✅ Implemented |
-| `RiskResultResolverLive` | `services/cache/RiskResultResolverLive.scala` | Lazy recomputation logic | ✅ Implemented |
+| `CachedResultResolverLive` | `services/cache/CachedResultResolverLive.scala` | Lazy recomputation logic | ✅ Implemented |
 | `InvalidationHandler` | `services/cache/InvalidationHandler.scala` | Handles Irmin change notifications | ✅ Implemented |
 
 ---

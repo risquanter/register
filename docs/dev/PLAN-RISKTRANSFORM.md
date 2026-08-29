@@ -1133,11 +1133,11 @@ M1/M2 files (M3/M4 files are appended here when §7.5/§7.6 are approved):
 - `modules/server/src/main/scala/com/risquanter/register/infra/irmin/WorkspaceStoragePaths.scala`
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala`
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala`
-- `modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolver.scala`
-- `modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolverLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationStaleness.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationStalenessSpec.scala`
-- `modules/server/src/test/scala/com/risquanter/register/services/cache/RiskResultResolverSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/CacheTransparencySpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala`
@@ -1159,6 +1159,26 @@ M1R adds (engine adoption + predicate targeting, §8.6):
 - `modules/server/src/test/scala/com/risquanter/register/foladapter/BinderIntegrationSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/foladapter/QueryResponseBuilderSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala`
+
+§8.14 (`CachedResultResolver` rename + resolver-edge mitigation wiring) edits
+these existing files (rename ripple + edge wiring); the three resolver files
+themselves are the renamed bullets above (`CachedResultResolver.scala`,
+`CachedResultResolverLive.scala`, `CachedResultResolverSpec.scala`), and
+`QueryServiceLive.scala` / `CacheTransparencySpec.scala` are already listed:
+
+- `modules/server/src/main/scala/com/risquanter/register/Application.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/Item17RegressionSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RouteSecurityRegressionSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala`
 
 §8.11 adds (bind-error → UNKNOWN_REFERENCE classification + vql 0.16.0 re-pin):
 
@@ -3463,8 +3483,12 @@ updates; the compiler enforces completeness. Sites (verified by grep
   (doc comment). `RiskTreeKnowledgeBase.scala` already names
   `CachedResultResolver` in a scaladoc line — no edit needed.
 - **test:** `RiskResultResolverSpec.scala`, `CacheTransparencySpec.scala`,
-  `Item17RegressionSpec.scala`, `SeedStabilitySpec.scala`, `ProvenanceSpec.scala`;
-  serverIt `SeedReproducibilityItSpec.scala`.
+  `Item17RegressionSpec.scala`, `SeedStabilitySpec.scala`, `ProvenanceSpec.scala`,
+  `RiskTreeServiceLiveSpec.scala`, `RiskTreeControllerSpec.scala`,
+  `RouteSecurityRegressionSpec.scala`, `WorkspaceLifecycleControllerSpec.scala`
+  (the last four update `RiskResultResolverLive.layer` in ZLayer wiring);
+  serverIt `SeedReproducibilityItSpec.scala`, `HttpTestHarness.scala`,
+  `support/StubHttpTestHarness.scala`.
 
 Files are renamed to match the type (`CachedResultResolver.scala`,
 `CachedResultResolverLive.scala`, `CachedResultResolverSpec.scala`) — see the
@@ -3642,7 +3666,13 @@ Rename ripple — **add** (not currently listed; hook would otherwise deny):
 - `modules/server/src/test/scala/com/risquanter/register/services/Item17RegressionSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RouteSecurityRegressionSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala`
 
 Renamed paths (`git mv` of the three old files; the new paths carry the internal
 type rename and the edge-fold wiring, so they must be inventoried for the hook):

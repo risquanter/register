@@ -6,24 +6,31 @@ import zio.telemetry.opentelemetry.metrics.{Meter, Histogram, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.{LossDistribution, RiskResult, RiskResultGroup, RiskNode, RiskLeaf, RiskPortfolio, RiskTree, TrialOutcomes}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId}
+import com.risquanter.register.domain.data.{LossDistribution, RiskResult, RiskResultGroup, RiskNode, RiskLeaf, RiskPortfolio, RiskTree, TrialOutcomes, Mitigation, MitigationApplication, MitigationSelection, NodeProvenance, RiskResultTransform}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
 
 /**
-  * Live implementation of RiskResultResolver (ADR-015), content-addressed
+  * Live implementation of CachedResultResolver (ADR-015), content-addressed
   * (milestone 2b Phase A).
   *
   * Resolution pipeline per request:
-  * 1. `ContentHashIndex.build(tree)` — pure, O(n): leaf keys hash the
+  * 1. `effectiveTree` bakes every param-stage (LeafStage) mitigation into the
+  *    tree so it changes the cache-key content; `selection = None` returns the
+  *    input tree revalidated (identical content, identical hashes).
+  * 2. `ContentHashIndex.build(effective)` — pure, O(n): leaf keys hash the
   *    DD-16 projection; portfolio Merkle hashes ride along for diffing.
-  * 2. Leaf: look up `ContentCache` by content hash — hit returns the cached
+  * 3. Leaf: look up `ContentCache` by content hash — hit returns the cached
   *    identity-free content with the requested node's ID attached at this
-  *    edge (DD-16/DD-18); miss simulates and stores.
-  * 3. Portfolio: never cached (DD-15 → B) — child results are aggregated
-  *    with `RiskResultGroup.create` on every read.
+  *    edge (DD-16/DD-18); miss simulates and stores. The result-stage transform
+  *    (`resultTransformFor`) is applied to the finished leaf outcomes at the
+  *    edge and never cached (ADR-034 Decision 4 / D3).
+  * 4. Portfolio: never cached (DD-15 → B) — the mitigated children are combined
+  *    with `RiskResultGroup.create` on every read, then this node's result-stage
+  *    transform is applied to the combined total (ADR-034 F:
+  *    `mitigated(P) = f_P(⊕ mitigated(children))`).
   *
   * There is no invalidation path: an edited leaf hashes to a new key and
   * simply misses; the old entry becomes an unreachable orphan for the
@@ -36,13 +43,13 @@ import io.github.iltotore.iron.refineUnsafe
   * - Spans: ensureCached; simulateLeaf on miss (with duration + trials metrics)
   * - Cache stats (entries/hits/misses) logged at debug after each resolution
   */
-final case class RiskResultResolverLive(
+final case class CachedResultResolverLive(
     cacheScope: CacheScope,
     config: SimulationConfig,
     tracing: Tracing,
     simulationDuration: Histogram[Double],
     trialsCounter: Counter[Long]
-) extends RiskResultResolver {
+) extends CachedResultResolver {
 
   private given SimulationConfig = config
 
@@ -53,35 +60,67 @@ final case class RiskResultResolverLive(
   private val seed3: Long = config.defaultSeed3
   private val seed4: Long = config.defaultSeed4
 
-  override def ensureCached(tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[LossDistribution] =
+  override def ensureCached(
+    tree: RiskTree,
+    nodeId: NodeId,
+    seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean = false,
+    selection: MitigationSelection = MitigationSelection.None,
+    resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
+  ): Task[LossDistribution] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
       for {
-        _      <- tracing.setAttribute("tree_id", tree.id.value)
-        _      <- tracing.setAttribute("node_id", nodeId.value)
-        _      <- tracing.setAttribute("include_provenance", includeProvenance)
-        cache  <- cacheScope.cacheFor(seedEntityId)
-        result <- resolveWithIndex(tree, ContentHashIndex.build(tree), cache, nodeId, seedEntityId)
-        stats  <- cache.stats
-        _      <- ZIO.logDebug(s"ContentCache stats: entries=${stats.entries}, hits=${stats.hits}, misses=${stats.misses}, evicted=${stats.evictedTotal}")
+        _         <- tracing.setAttribute("tree_id", tree.id.value)
+        _         <- tracing.setAttribute("node_id", nodeId.value)
+        _         <- tracing.setAttribute("include_provenance", includeProvenance)
+        effective <- effectiveTreeOf(tree, selection, resolvedScopes)
+        scoped     = MitigationApplication.scoped(tree, selection, resolvedScopes)
+        cache     <- cacheScope.cacheFor(seedEntityId)
+        result    <- resolveWithIndex(effective, ContentHashIndex.build(effective), cache, nodeId, seedEntityId, scoped)
+        stats     <- cache.stats
+        _         <- ZIO.logDebug(s"ContentCache stats: entries=${stats.entries}, hits=${stats.hits}, misses=${stats.misses}, evicted=${stats.evictedTotal}")
       } yield result
     }
 
-  override def ensureCachedAll(tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean = false): Task[Map[NodeId, LossDistribution]] =
+  override def ensureCachedAll(
+    tree: RiskTree,
+    nodeIds: Set[NodeId],
+    seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean = false,
+    selection: MitigationSelection = MitigationSelection.None,
+    resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
+  ): Task[Map[NodeId, LossDistribution]] =
     for {
-      cache  <- cacheScope.cacheFor(seedEntityId)
+      effective <- effectiveTreeOf(tree, selection, resolvedScopes)
+      scoped     = MitigationApplication.scoped(tree, selection, resolvedScopes)
+      cache     <- cacheScope.cacheFor(seedEntityId)
       // One tree fingerprint serves the whole batch
-      hashes  = ContentHashIndex.build(tree)
-      results <- ZIO.foreach(nodeIds.toList)(id =>
-        resolveWithIndex(tree, hashes, cache, id, seedEntityId).map(id -> _)
+      hashes     = ContentHashIndex.build(effective)
+      results   <- ZIO.foreach(nodeIds.toList)(id =>
+        resolveWithIndex(effective, hashes, cache, id, seedEntityId, scoped).map(id -> _)
       )
     } yield results.toMap
+
+  /** Param-stage half of the mitigation action: LeafStage transforms baked into
+    * the tree so they drive the cache keys. `selection = None` yields the input
+    * tree revalidated through `RiskTree.fromNodes` — identical content, identical
+    * hashes — so raw leaf simulations are shared with the un-mitigated path.
+    * ADR-010: a validation failure becomes typed `ValidationFailed`. */
+  private def effectiveTreeOf(
+    tree: RiskTree,
+    selection: MitigationSelection,
+    resolvedScopes: Map[MitigationId, Set[NodeId]]
+  ): Task[RiskTree] =
+    ZIO.fromEither(MitigationApplication.effectiveTree(tree, selection, resolvedScopes).toEither)
+      .mapError(errs => ValidationFailed(errs.toList))
 
   private def resolveWithIndex(
     tree: RiskTree,
     hashes: Map[NodeId, ContentHash],
     cache: ContentCache,
     nodeId: NodeId,
-    seedEntityId: SeedEntityId.SeedEntityId
+    seedEntityId: SeedEntityId.SeedEntityId,
+    scoped: Map[NodeId, List[Mitigation]]
   ): Task[LossDistribution] =
     ZIO.fromOption(tree.index.nodes.get(nodeId))
       .orElseFail(ValidationFailed(List(ValidationError(
@@ -89,18 +128,25 @@ final case class RiskResultResolverLive(
         code = ValidationErrorCode.CONSTRAINT_VIOLATION,
         message = s"Node not found in tree index: $nodeId"
       ))))
-      .flatMap(node => resolveNode(tree, hashes, cache, node, seedEntityId))
+      .flatMap(node => resolveNode(tree, hashes, cache, node, seedEntityId, scoped))
 
   private def resolveNode(
     tree: RiskTree,
     hashes: Map[NodeId, ContentHash],
     cache: ContentCache,
     node: RiskNode,
-    seedEntityId: SeedEntityId.SeedEntityId
+    seedEntityId: SeedEntityId.SeedEntityId,
+    scoped: Map[NodeId, List[Mitigation]]
   ): Task[LossDistribution] =
     node match {
       case leaf: RiskLeaf =>
-        resolveLeaf(hashes, cache, leaf, seedEntityId)
+        resolveLeaf(hashes, cache, leaf, seedEntityId).map { raw =>
+          // Result-stage transform on the finished leaf operand (ADR-009), applied
+          // post-cache and never stored (D3). Identity when nothing result-stage
+          // scopes the leaf, so the raw cached value passes through unchanged.
+          val t = MitigationApplication.resultTransformFor(leaf.id, scoped)
+          RiskResult.fromTrialOutcomes(leaf.id, t.run(raw.trialOutcomes), raw.provenances)
+        }
 
       case portfolio: RiskPortfolio =>
         for {
@@ -115,7 +161,7 @@ final case class RiskResultResolverLive(
                 code = ValidationErrorCode.CONSTRAINT_VIOLATION,
                 message = s"Child node not found in tree index: $childId"
               ))))
-              .flatMap(childNode => resolveNode(tree, hashes, cache, childNode, seedEntityId))
+              .flatMap(childNode => resolveNode(tree, hashes, cache, childNode, seedEntityId, scoped))
           }
           _ <- ZIO.when(childResults.isEmpty) {
             ZIO.fail(ValidationFailed(List(ValidationError(
@@ -124,10 +170,32 @@ final case class RiskResultResolverLive(
               message = s"RiskPortfolio '${portfolio.id}' has no children"
             ))))
           }
-          // Portfolios are never cached (DD-15 → B): re-aggregate every read
+          // ⊕ mitigated(children): the commutative fold over already-mitigated
+          // children. Portfolios are never cached (DD-15 → B); this is the raw
+          // aggregate shape kept pristine by ADR-034 Decision 4.
           combined <- ZIO.fromEither(RiskResultGroup.create(portfolio.id, childResults*).toEither)
             .mapError(errors => ValidationFailed(errors.toList))
-        } yield combined
+        } yield {
+          // F (ADR-034): mitigated(P) = f_P(⊕ mitigated(children)). When no
+          // result-stage mitigation scopes P, f_P is identity and the group is
+          // returned unchanged — child structure and drill-down preserved,
+          // byte-identical to the un-mitigated path. A binding transform cannot be
+          // a RiskResultGroup (its aggregate is pinned to combine(children)), so it
+          // collapses to a flat RiskResult carrying the transformed outcomes and the
+          // descendants' provenances.
+          val t = MitigationApplication.resultTransformFor(portfolio.id, scoped)
+          if (t eq RiskResultTransform.identityTransform) combined
+          else RiskResult.fromTrialOutcomes(portfolio.id, t.run(combined.trialOutcomes), descendantProvenances(combined))
+        }
+    }
+
+  /** Every descendant leaf's provenance, in traversal order. A collapsed
+    * transformed portfolio already carries its own descendants' provenances, so
+    * matching `RiskResult` returns them directly without recursing further. */
+  private def descendantProvenances(dist: LossDistribution): List[NodeProvenance] =
+    dist match {
+      case r: RiskResult      => r.provenances
+      case g: RiskResultGroup => g.children.flatMap(descendantProvenances)
     }
 
   private def resolveLeaf(
@@ -186,7 +254,7 @@ final case class RiskResultResolverLive(
   }
 }
 
-object RiskResultResolverLive {
+object CachedResultResolverLive {
 
   /** Metric names */
   private object MetricNames {
@@ -200,10 +268,10 @@ object RiskResultResolverLive {
   }
 
   /**
-    * Create ZLayer for RiskResultResolver with telemetry.
+    * Create ZLayer for CachedResultResolver with telemetry.
     * Uses CacheScope for per-workspace content-addressed cache access (DD-17).
     */
-  val layer: ZLayer[CacheScope & SimulationConfig & Tracing & Meter, Throwable, RiskResultResolver] =
+  val layer: ZLayer[CacheScope & SimulationConfig & Tracing & Meter, Throwable, CachedResultResolver] =
     ZLayer.fromZIO {
       for {
         cacheScope <- ZIO.service[CacheScope]
@@ -222,6 +290,6 @@ object RiskResultResolverLive {
           Some(MetricNames.trialsUnit),
           Some(MetricNames.trialsDesc)
         )
-      } yield RiskResultResolverLive(cacheScope, config, tracing, simDuration, trials)
+      } yield CachedResultResolverLive(cacheScope, config, tracing, simDuration, trials)
     }
 }

@@ -22,7 +22,7 @@ import com.risquanter.register.http.requests.{DistributionShapeRequest, RiskLeaf
 import com.risquanter.register.http.responses.{SimulationResponse, WorkspaceBootstrapResponse}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.services.{CascadeTestStubs, RiskTreeService, RiskTreeServiceLive, ScenarioService, ScenarioServiceNotSupported, ScenarioSummary}
-import com.risquanter.register.services.cache.{RiskResultResolverLive, CacheScope}
+import com.risquanter.register.services.cache.{CachedResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.{RateLimiterLive, WorkspaceStoreLive}
@@ -97,7 +97,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         SimulationSemaphore.layer,
         RiskTreeServiceLive.layer,
         CacheScope.layer,
-        RiskResultResolverLive.layer,
+        CachedResultResolverLive.layer,
         SSEHub.live,
         InvalidationHandler.live,
         WorkspaceStoreLive.layer,

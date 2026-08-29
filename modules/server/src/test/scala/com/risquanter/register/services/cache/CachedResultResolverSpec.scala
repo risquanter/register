@@ -6,21 +6,22 @@ import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
-import com.risquanter.register.domain.data.{RiskResult, RiskNode, RiskLeaf, RiskPortfolio, RiskTree}
+import com.risquanter.register.domain.data.{RiskResult, RiskResultGroup, RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationSelection, MitigationPrecedence, TargetingPredicate, TransformPipeline, ResultTransformSpec, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
 import com.risquanter.register.domain.tree.TreeIndex
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, TreeId, NodeId, SeedEntityId}
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, TreeId, NodeId, SeedEntityId, MitigationId, ValidationUtil}
 import com.risquanter.register.testutil.TestHelpers.*
 
 /**
- * Tests for RiskResultResolverLive (ADR-015), content-addressed since
+ * Tests for CachedResultResolverLive (ADR-015), content-addressed since
  * milestone 2b Phase A.
  *
  * Verifies cache-aside behavior over ContentHash keys (DD-16), per-workspace
  * cache isolation via CacheScope (DD-17), leaf-only caching (DD-15), orphan
  * semantics (a param edit strands the old entry; the new content misses),
- * and error handling.
+ * error handling, and the resolver-edge mitigation fold (ADR-034 F: param-stage
+ * transforms change the cache key, result-stage transforms apply post-cache).
  */
-object RiskResultResolverSpec extends ZIOSpecDefault {
+object CachedResultResolverSpec extends ZIOSpecDefault {
 
   private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
@@ -79,23 +80,62 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
   val risk1Key = ContentHashIndex.hashOf(risk1Leaf)
   val risk2Key = ContentHashIndex.hashOf(risk2Leaf)
 
+  // ── Mitigation fixtures ──────────────────────────────────────────────
+  // Targeting resolves server-side, so each test supplies the resolved scope
+  // explicitly via `scopes(...)`; the predicate here is a well-formed stand-in.
+  private val pred: MitigationTarget =
+    MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get)
+
+  private def mitName(s: String): SafeName.SafeName = SafeName.fromString(s).toOption.get
+
+  private def scopes(pairs: (Mitigation, Set[NodeId])*): Map[MitigationId, Set[NodeId]] =
+    pairs.iterator.map { case (m, ns) => m.id -> ns }.toMap
+
+  private def treeWith(mits: Mitigation*): RiskTree = unsafeGet(
+    RiskTree.fromNodes(
+      id = testTreeId,
+      name = SafeName.SafeName("Test Tree".refineUnsafe),
+      nodes = allNodes,
+      rootId = rootId,
+      mitigations = mits.toList
+    ),
+    "Mitigated fixture has invalid RiskTree"
+  )
+
+  private def resultCap(label: String, cap: Long,
+                        precedence: MitigationPrecedence = MitigationPrecedence.default): Mitigation =
+    Mitigation.create(
+      mitigationId(label), mitName(label), pred,
+      MitigationSpec.ResultStage(TransformPipeline(List(
+        ResultTransformSpec.CapLosses(ValidationUtil.refineNonNegativeLong(cap).toOption.get)))),
+      precedence).toEither.toOption.get
+
+  private def leafScaleSeverity(label: String, factor: Double): Mitigation =
+    Mitigation.create(
+      mitigationId(label), mitName(label), pred,
+      MitigationSpec.LeafStage(
+        RiskLeafTransform(LikelihoodTransform.Keep,
+          DistributionTransform.ScaleSeverity(ValidationUtil.refineNonNegativeDouble(factor).toOption.get)),
+        None, None),
+      MitigationPrecedence.default).toEither.toOption.get
+
   // Test layer with all dependencies
-  val testLayer: ZLayer[Any, Throwable, RiskResultResolver & CacheScope] =
-    ZLayer.make[RiskResultResolver & CacheScope](
+  val testLayer: ZLayer[Any, Throwable, CachedResultResolver & CacheScope] =
+    ZLayer.make[CachedResultResolver & CacheScope](
       CacheScope.layer,
       ZLayer.succeed(TestConfigs.simulation),
       TestConfigs.telemetryLayer >>> TracingLive.console,
       TestConfigs.telemetryLayer >>> MetricsLive.console,
-      RiskResultResolverLive.layer
+      CachedResultResolverLive.layer
     )
 
-  def spec = suite("RiskResultResolverSpec")(
+  def spec = suite("CachedResultResolverSpec")(
 
     suite("ensureCached - content-addressed cache behavior")(
 
       test("cache miss: simulates and caches the identity-free content under the content hash") {
         for {
-          resolver   <- ZIO.service[RiskResultResolver]
+          resolver   <- ZIO.service[CachedResultResolver]
           cacheScope <- ZIO.service[CacheScope]
           cache      <- cacheScope.cacheFor(testEntity)
 
@@ -120,7 +160,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
 
       test("cache hit: returns cached content and counts a hit") {
         for {
-          resolver   <- ZIO.service[RiskResultResolver]
+          resolver   <- ZIO.service[CachedResultResolver]
           cacheScope <- ZIO.service[CacheScope]
           cache      <- cacheScope.cacheFor(testEntity)
 
@@ -140,7 +180,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
 
       test("simulates portfolio by aggregating children — portfolio results are never cached (DD-15)") {
         for {
-          resolver   <- ZIO.service[RiskResultResolver]
+          resolver   <- ZIO.service[CachedResultResolver]
           cacheScope <- ZIO.service[CacheScope]
           cache      <- cacheScope.cacheFor(testEntity)
 
@@ -188,7 +228,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
         val editedKey = ContentHashIndex.hashOf(editedLeaf)
 
         for {
-          resolver   <- ZIO.service[RiskResultResolver]
+          resolver   <- ZIO.service[CachedResultResolver]
           cacheScope <- ZIO.service[CacheScope]
           cache      <- cacheScope.cacheFor(testEntity)
 
@@ -236,7 +276,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
         )
 
         for {
-          resolver   <- ZIO.service[RiskResultResolver]
+          resolver   <- ZIO.service[CachedResultResolver]
           cacheScope <- ZIO.service[CacheScope]
           cache      <- cacheScope.cacheFor(testEntity)
 
@@ -257,7 +297,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
 
       test("caches multiple nodes in one call") {
         for {
-          resolver   <- ZIO.service[RiskResultResolver]
+          resolver   <- ZIO.service[CachedResultResolver]
           cacheScope <- ZIO.service[CacheScope]
           cache      <- cacheScope.cacheFor(testEntity)
 
@@ -279,14 +319,14 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
 
       test("handles empty set") {
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           results <- resolver.ensureCachedAll(testTree, Set.empty, testEntity)
         } yield assertTrue(results.isEmpty)
       },
 
       test("mix of cached and uncached nodes") {
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
 
           // Pre-cache risk1
           _ <- resolver.ensureCached(testTree, risk1Id, testEntity)
@@ -308,7 +348,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
       test("different seedEntityIds resolve to separate caches") {
         val otherEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(2L).toOption.get
         for {
-          resolver   <- ZIO.service[RiskResultResolver]
+          resolver   <- ZIO.service[CachedResultResolver]
           cacheScope <- ZIO.service[CacheScope]
 
           _      <- resolver.ensureCached(testTree, risk1Id, testEntity)
@@ -325,7 +365,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
         val invalidId = nodeId("nonexistent")
 
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           result <- resolver.ensureCached(testTree, invalidId, testEntity).exit
 
         } yield assertTrue(
@@ -341,7 +381,7 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
         // Note: This is a basic test. Full telemetry testing would require
         // test doubles or inspecting the telemetry backend.
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
 
           // This should trigger simulation and record metrics
           _ <- resolver.ensureCached(testTree, risk1Id, testEntity)
@@ -350,7 +390,130 @@ object RiskResultResolverSpec extends ZIOSpecDefault {
           // In a full implementation, we would assert on captured spans/metrics
         } yield assertCompletes
       }
+    ),
+
+    suite("mitigation edge-fold (§8.14, ADR-034 F)")(
+
+      test("un-mitigated: a tree carrying a mitigation still resolves raw under selection None, group preserved") {
+        val cap = resultCap("cap-root", 1L)   // would bind hard if applied
+        val tree = treeWith(cap)
+        for {
+          resolver <- ZIO.service[CachedResultResolver]
+          raw  <- resolver.ensureCached(testTree, rootId, testEntity)  // mitigation-free tree
+          none <- resolver.ensureCached(tree, rootId, testEntity)      // mitigation present, selection defaults to None
+        } yield assertTrue(
+          // Not collapsed — the result-stage transform was not applied
+          none.isInstanceOf[RiskResultGroup],
+          // Byte-identical to the mitigation-free resolution
+          none.outcomes == raw.outcomes,
+          none.nodeId == rootId
+        )
+      },
+
+      test("ResultStage cap on a leaf: caps that leaf's outcomes; an unscoped leaf is identity") {
+        for {
+          resolver <- ZIO.service[CachedResultResolver]
+          raw   <- resolver.ensureCached(testTree, risk1Id, testEntity)
+          rawMax = raw.outcomes.values.maxOption.getOrElse(2L)
+          cap    = math.max(1L, rawMax / 2)      // derived from the raw run → guaranteed to bind
+          m      = resultCap("cap-leaf", cap)
+          tree   = treeWith(m)
+          mit   <- resolver.ensureCached(tree, risk1Id, testEntity, selection = MitigationSelection.All, resolvedScopes =scopes(m -> Set(risk1Id)))
+          raw2  <- resolver.ensureCached(tree, risk2Id, testEntity)
+          mit2  <- resolver.ensureCached(tree, risk2Id, testEntity, selection = MitigationSelection.All, resolvedScopes =scopes(m -> Set(risk1Id)))
+        } yield assertTrue(
+          // Every trial: mitigated = min(raw, cap)
+          raw.outcomes.forall { case (t, loss) => mit.outcomes.getOrElse(t, 0L) == math.min(loss, cap) },
+          mit.outcomes.values.forall(_ <= cap),
+          mit.outcomes != raw.outcomes,          // the cap bound
+          // identity for a leaf the mitigation does not scope
+          mit2.outcomes == raw2.outcomes
+        )
+      },
+
+      test("ResultStage cap on a portfolio: raw aggregate = sum(children); mitigated = cap(sum), collapsed to a flat result") {
+        for {
+          resolver <- ZIO.service[CachedResultResolver]
+          rawRoot <- resolver.ensureCached(testTree, rootId, testEntity)
+          raw1    <- resolver.ensureCached(testTree, risk1Id, testEntity)
+          raw2    <- resolver.ensureCached(testTree, risk2Id, testEntity)
+          rawMax   = rawRoot.outcomes.values.maxOption.getOrElse(2L)
+          cap      = math.max(1L, rawMax / 2)
+          m        = resultCap("cap-root", cap)
+          tree     = treeWith(m)
+          mitRoot <- resolver.ensureCached(tree, rootId, testEntity, selection = MitigationSelection.All, resolvedScopes =scopes(m -> Set(rootId)))
+        } yield assertTrue(
+          // Raw aggregate stays the pristine commutative sum of children (ADR-034 Decision 4)
+          rawRoot.isInstanceOf[RiskResultGroup],
+          rawRoot.outcomes.forall { case (t, loss) =>
+            loss == raw1.outcomes.getOrElse(t, 0L) + raw2.outcomes.getOrElse(t, 0L)
+          },
+          // Mitigated aggregate = f_P applied to the combined (here raw) total
+          rawRoot.outcomes.forall { case (t, loss) =>
+            mitRoot.outcomes.getOrElse(t, 0L) == math.min(loss, cap)
+          },
+          mitRoot.outcomes.values.forall(_ <= cap),
+          mitRoot.outcomes != rawRoot.outcomes,
+          // A binding portfolio transform cannot be a group → flat RiskResult
+          mitRoot.isInstanceOf[RiskResult]
+        )
+      },
+
+      test("compositional fold: caps on a child and its ancestor compose by position, order-independent") {
+        for {
+          resolver <- ZIO.service[CachedResultResolver]
+          raw1    <- resolver.ensureCached(testTree, risk1Id, testEntity)
+          raw2    <- resolver.ensureCached(testTree, risk2Id, testEntity)
+          rawRoot <- resolver.ensureCached(testTree, rootId, testEntity)
+          capChild = math.max(1L, raw1.outcomes.values.maxOption.getOrElse(2L) / 2)
+          capRoot  = math.max(1L, rawRoot.outcomes.values.maxOption.getOrElse(2L) * 2 / 3)
+          mc       = resultCap("cap-child", capChild)
+          mr       = resultCap("cap-root", capRoot)
+          treeAB   = treeWith(mc, mr)
+          treeBA   = treeWith(mr, mc)
+          sel      = scopes(mc -> Set(risk1Id), mr -> Set(rootId))
+          rootAB  <- resolver.ensureCached(treeAB, rootId, testEntity, selection = MitigationSelection.All, resolvedScopes =sel)
+          rootBA  <- resolver.ensureCached(treeBA, rootId, testEntity, selection = MitigationSelection.All, resolvedScopes =sel)
+        } yield assertTrue(
+          // Authoring order of the two mitigations does not change the result
+          rootAB.outcomes == rootBA.outcomes,
+          // Positional fold: cap the child first, add the untouched sibling, then cap the total
+          (raw1.outcomes.keySet ++ raw2.outcomes.keySet).forall { t =>
+            rootAB.outcomes.getOrElse(t, 0L) ==
+              math.min(math.min(raw1.outcomes.getOrElse(t, 0L), capChild) + raw2.outcomes.getOrElse(t, 0L), capRoot)
+          },
+          rootAB.isInstanceOf[RiskResult]
+        )
+      },
+
+      test("LeafStage mitigation changes the leaf's cache key and figures; the raw entry is untouched") {
+        val scale = leafScaleSeverity("scale-leaf", 0.5)
+        val tree  = treeWith(scale)
+        val effTree = effectiveTreeFor(tree, scale)
+        val effKey  = ContentHashIndex.hashOf(effTree.index.nodes(risk1Id).asInstanceOf[RiskLeaf])
+        for {
+          resolver   <- ZIO.service[CachedResultResolver]
+          cacheScope <- ZIO.service[CacheScope]
+          cache      <- cacheScope.cacheFor(testEntity)
+          raw   <- resolver.ensureCached(testTree, risk1Id, testEntity)
+          mit   <- resolver.ensureCached(tree, risk1Id, testEntity, selection = MitigationSelection.All, resolvedScopes =scopes(scale -> Set(risk1Id)))
+          rawEntry <- cache.get(risk1Key)
+          effEntry <- cache.get(effKey)
+        } yield assertTrue(
+          effKey != risk1Key,             // param-stage changed the content hash
+          mit.outcomes != raw.outcomes,   // and the simulated figures
+          rawEntry.isDefined,             // raw entry present and untouched
+          effEntry.isDefined              // mitigated entry cached under the new key
+        )
+      }
     )
 
   ).provide(testLayer) @@ TestAspect.sequential
+
+  /** The effective (param-stage-baked) tree for one LeafStage mitigation scoping
+    * `risk1`, used to derive the mitigated leaf's content hash. */
+  private def effectiveTreeFor(tree: RiskTree, m: Mitigation): RiskTree =
+    com.risquanter.register.domain.data.MitigationApplication
+      .effectiveTree(tree, MitigationSelection.All, scopes(m -> Set(risk1Id)))
+      .toEither.toOption.get
 }

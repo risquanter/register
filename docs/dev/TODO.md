@@ -942,7 +942,7 @@ after the PUT — subsequent lec-multi results are correct (root exceedance
 then … else if nodeData changed then Set(nid)`). A node that is **both
 reparented and content-changed in the same PUT** takes the reparent branch:
 its old and new parents' ancestor paths are invalidated, but the node's own
-cache entry is **not**. Because `RiskResultResolverLive.simulateNode` composes
+cache entry is **not**. Because `CachedResultResolverLive.simulateNode` composes
 portfolio results from cached child entries (`cache.get(childId)`), the stale
 leaf result is folded into every "fresh" ancestor re-simulation — and **no
 amount of ancestor/root invalidation can fix it**; only invalidating the leaf

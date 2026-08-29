@@ -5,7 +5,7 @@ import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLo
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
-import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, CacheScope}
+import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, CacheScope}
 import com.risquanter.register.simulation.SeedDerivation
 import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId}
 import zio.*
@@ -20,7 +20,7 @@ import io.github.iltotore.iron.*
  * 
  * Verifies:
  * - JSON serialization/deserialization
- * - Provenance capture during simulation via RiskResultResolver
+ * - Provenance capture during simulation via CachedResultResolver
  * - Reproduction from provenance metadata
  */
 object ProvenanceSpec extends ZIOSpecDefault {
@@ -28,13 +28,13 @@ object ProvenanceSpec extends ZIOSpecDefault {
   private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
   // Test layer with all dependencies for provenance tests
-  val testLayer: ZLayer[Any, Throwable, RiskResultResolver & CacheScope] =
-    ZLayer.make[RiskResultResolver & CacheScope](
+  val testLayer: ZLayer[Any, Throwable, CachedResultResolver & CacheScope] =
+    ZLayer.make[CachedResultResolver & CacheScope](
       CacheScope.layer,
       ZLayer.succeed(TestConfigs.simulation),
       TestConfigs.telemetryLayer >>> TracingLive.console,
       TestConfigs.telemetryLayer >>> MetricsLive.console,
-      RiskResultResolverLive.layer
+      CachedResultResolverLive.layer
     )
 
   /** DD-19 structural attribution: a leaf's records sit on its RiskResult,
@@ -167,7 +167,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("test-risk"), testEntity, includeProvenance = true)
         } yield {
           // Structural attribution (DD-19): the record carries no riskId —
@@ -199,7 +199,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("test-risk"), testEntity, includeProvenance = false)
         } yield assertTrue(leafProvenances(result).nonEmpty)
       },
@@ -229,7 +229,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
 
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           result <- resolver.ensureCached(testTree, nodeId(riskIdLabel), testEntity, includeProvenance = true)
         } yield {
           val nodeProv = leafProvenances(result).head
@@ -262,7 +262,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("lognormal-risk"), testEntity, includeProvenance = true)
         } yield {
           val nodeProv = leafProvenances(result).head
@@ -316,7 +316,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           // Simulate portfolio (which aggregates children)
           result <- resolver.ensureCached(testTree, nodeId("portfolio"), testEntity, includeProvenance = true)
         } yield {
@@ -362,7 +362,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           // First simulation with provenance
           firstResult <- resolver.ensureCached(testTree1, nodeId("deterministic-risk"), testEntity, includeProvenance = true)
           // Second simulation with same parameters (different tree to avoid cache)
@@ -391,7 +391,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         )
         
         for {
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("test-reconstruction"), testEntity, includeProvenance = true)
         } yield {
           val nodeProv = leafProvenances(result).head

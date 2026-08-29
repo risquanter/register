@@ -10,7 +10,7 @@ import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.services.cache.RiskResultResolver
+import com.risquanter.register.services.cache.CachedResultResolver
 
 import vql.logic.ParsedQuery
 import vql.semantics.VagueSemantics
@@ -21,12 +21,12 @@ import vql.typed.FolModel
   *
   * Dependencies:
   *   - `RiskTreeRepository` for tree lookups
-  *   - `RiskResultResolver` for cache-aside simulation results
+  *   - `CachedResultResolver` for cache-aside simulation results
   *   - `Tracing` for OpenTelemetry spans
   */
 class QueryServiceLive private (
   repo: RiskTreeRepository,
-  resolver: RiskResultResolver,
+  resolver: CachedResultResolver,
   tracing: Tracing
 ) extends QueryService:
 
@@ -108,10 +108,10 @@ end QueryServiceLive
 
 object QueryServiceLive:
 
-  val layer: ZLayer[RiskTreeRepository & RiskResultResolver & Tracing, Nothing, QueryService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & Tracing, Nothing, QueryService] = ZLayer {
     for
       repo     <- ZIO.service[RiskTreeRepository]
-      resolver <- ZIO.service[RiskResultResolver]
+      resolver <- ZIO.service[CachedResultResolver]
       tracing  <- ZIO.service[Tracing]
     yield QueryServiceLive(repo, resolver, tracing)
   }

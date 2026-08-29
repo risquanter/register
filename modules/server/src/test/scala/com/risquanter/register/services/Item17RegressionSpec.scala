@@ -7,7 +7,7 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPor
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
-import com.risquanter.register.services.cache.RiskResultResolver
+import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.testutil.TestHelpers.safeId
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
@@ -31,7 +31,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 object Item17RegressionSpec extends ZIOSpecDefault {
   private given Checked[Permission] = TestChecked.value
 
-  private type Env = RiskTreeService & RiskResultResolver
+  private type Env = RiskTreeService & CachedResultResolver
 
   private val wsId: WorkspaceId = WorkspaceId(safeId("item17-ws"))
   private val entity1: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
@@ -101,7 +101,7 @@ object Item17RegressionSpec extends ZIOSpecDefault {
 
         for
           created <- service(_.create(wsId, createReq, BranchRef.Main))
-          resolver <- ZIO.service[RiskResultResolver]
+          resolver <- ZIO.service[CachedResultResolver]
 
           // Simulate the whole tree BEFORE the edit (warm every cache path —
           // this is what made the live bug bite)
@@ -137,7 +137,7 @@ object Item17RegressionSpec extends ZIOSpecDefault {
       RiskTreeServiceLive.layer,
       RiskTreeRepositoryInMemory.layer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
-      com.risquanter.register.services.cache.RiskResultResolverLive.layer,
+      com.risquanter.register.services.cache.CachedResultResolverLive.layer,
       com.risquanter.register.services.cache.CacheScope.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,

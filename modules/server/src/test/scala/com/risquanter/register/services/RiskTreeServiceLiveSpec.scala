@@ -647,7 +647,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       RiskTreeServiceLive.layer,
       stubRepoLayer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
-      com.risquanter.register.services.cache.RiskResultResolverLive.layer,
+      com.risquanter.register.services.cache.CachedResultResolverLive.layer,
       com.risquanter.register.services.cache.CacheScope.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,

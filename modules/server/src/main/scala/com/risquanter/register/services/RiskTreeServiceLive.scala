@@ -17,7 +17,7 @@ import com.risquanter.register.domain.errors.ValidationExtensions.*
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.simulation.LECGenerator
-import com.risquanter.register.services.cache.RiskResultResolver
+import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.services.helper.SeedVarIdAssigner
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.util.IdGenerators
@@ -33,7 +33,7 @@ import com.risquanter.register.util.IdGenerators
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   config: SimulationConfig,
-  resolver: RiskResultResolver,
+  resolver: CachedResultResolver,
   invalidationHandler: InvalidationHandler,
   tracing: Tracing,
   semaphore: SimulationSemaphore,
@@ -434,7 +434,7 @@ class RiskTreeServiceLive private (
         // Fetch requested tree and ensure node exists within it
         (tree, _) <- lookupNodeInTree(wsId, treeId, nodeId, rev)
         
-        // Ensure result is cached (cache-aside pattern via RiskResultResolver)
+        // Ensure result is cached (cache-aside pattern via CachedResultResolver)
         result <- resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
         _ <- tracing.setAttribute("cache_resolved", true)
         
@@ -514,11 +514,11 @@ object RiskTreeServiceLive {
     val operationsDesc = "Number of risk tree operations"
   }
   
-  val layer: ZLayer[RiskTreeRepository & SimulationConfig & RiskResultResolver & InvalidationHandler & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & SimulationConfig & CachedResultResolver & InvalidationHandler & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
       config <- ZIO.service[SimulationConfig]
-      resolver <- ZIO.service[RiskResultResolver]
+      resolver <- ZIO.service[CachedResultResolver]
       invalidationHandler <- ZIO.service[InvalidationHandler]
       tracing <- ZIO.service[Tracing]
       semaphore <- ZIO.service[SimulationSemaphore]

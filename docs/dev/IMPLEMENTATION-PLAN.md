@@ -81,7 +81,7 @@ Authorization layers beyond workspace capability are documented in [AUTHORIZATIO
 │  │                   ZIO Backend                            │   │
 │  │  • Computes LEC via Identity[RiskResult].combine         │   │
 │  │  • Caches per-node RiskResult (ADR-005/014/015)         │   │
-│  │  • RiskResultResolver: cache-aside simulation           │   │
+│  │  • CachedResultResolver: cache-aside simulation           │   │
 │  │  • TreeCacheManager: per-tree cache lifecycle            │   │
 │  │  • SSEHub: publishes CacheInvalidated events            │   │
 │  │  • InvalidationHandler: cache + SSE bridge              │   │
@@ -226,7 +226,7 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 | Service | Status | Notes |
 |---------|--------|-------|
 | `RiskTreeService` | ✅ | Full CRUD with validation |
-| `RiskResultResolver` | ✅ | Cache-aside simulation (ADR-015) |
+| `CachedResultResolver` | ✅ | Cache-aside simulation (ADR-015) |
 | `TreeCacheManager` | ✅ | Per-tree cache lifecycle |
 | `InvalidationHandler` | ✅ | Cache invalidation + SSE notification, returns `InvalidationResult` |
 | `SSEHub` | ✅ | Fan-out broadcasting with subscriber tracking |
@@ -2524,7 +2524,7 @@ These items are not blocking for Tier 3 launch but become higher-value once cont
 
 #### Risk-Level Simulation Parallelism
 
-`RiskResultResolverLive` simulates portfolio children sequentially (`ZIO.foreach`). Only trial-level parallelism exists (inside `Simulator.performTrials`). A `Simulator.simulate` method with `ZIO.collectAllPar` exists but is not wired into the cache-aware resolver.
+`CachedResultResolverLive` simulates portfolio children sequentially (`ZIO.foreach`). Only trial-level parallelism exists (inside `Simulator.performTrials`). A `Simulator.simulate` method with `ZIO.collectAllPar` exists but is not wired into the cache-aware resolver.
 
 With content-addressed caching, this optimisation has higher relative payoff: cross-branch sharing produces fewer cache misses on branch switch, so remaining misses should resolve as fast as possible. Independent sibling subtrees can be simulated in parallel.
 
@@ -2860,7 +2860,7 @@ final case class LECCurveResponse(
 | ADR-011 | Import Conventions | Accepted | Top-level imports |
 | ADR-012 | Service Mesh Strategy | Accepted | Istio Ambient Mode, no app-level retries |
 | ADR-014 | Code Quality & Caching Strategy | Accepted | `RiskResultCache`, `TreeCacheManager` |
-| ADR-015 | Cache-Aside Pattern | Accepted | `RiskResultResolver` lazy computation |
+| ADR-015 | Cache-Aside Pattern | Accepted | `CachedResultResolver` lazy computation |
 | ADR-017 | Tree API Design | Accepted | Phase 1 CRUD ✅, Phase 2 batch `TreeOp` pending |
 | ADR-018 | Nominal Wrappers | Accepted | `NodeId`, `TreeId` opaque types |
 | ADR-019 | Frontend Component Architecture | Accepted | Composable function pattern, tree builder |

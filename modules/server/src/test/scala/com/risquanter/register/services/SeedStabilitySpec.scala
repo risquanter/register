@@ -7,7 +7,7 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPor
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, TrialId, Loss}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, SeedEntityId, BranchRef}
 import com.risquanter.register.repositories.RiskTreeRepositoryInMemory
-import com.risquanter.register.services.cache.RiskResultResolver
+import com.risquanter.register.services.cache.CachedResultResolver
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.testutil.TestHelpers.safeId
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
@@ -27,7 +27,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 object SeedStabilitySpec extends ZIOSpecDefault {
   private given Checked[Permission] = TestChecked.value
 
-  private type Env = RiskTreeService & RiskResultResolver
+  private type Env = RiskTreeService & CachedResultResolver
 
   private val wsId: WorkspaceId = WorkspaceId(safeId("seed-stability-ws"))
   private def entity(v: Long): SeedEntityId.SeedEntityId = SeedEntityId.fromLong(v).toOption.get
@@ -45,7 +45,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
 
   /** Resolve every leaf's and the root's outcomes, keyed by leaf name / RootKey. */
   private def figures(tree: RiskTree, entity: SeedEntityId.SeedEntityId): ZIO[Env, Throwable, Map[String, Map[TrialId, Loss]]] =
-    ZIO.serviceWithZIO[RiskResultResolver] { resolver =>
+    ZIO.serviceWithZIO[CachedResultResolver] { resolver =>
       val leaves = tree.nodes.collect { case l: RiskLeaf => l }
       for
         leafFigs <- ZIO.foreach(leaves)(l => resolver.ensureCached(tree, l.id, entity).map(r => l.name.value -> r.outcomes))
@@ -219,7 +219,7 @@ object SeedStabilitySpec extends ZIOSpecDefault {
       RiskTreeServiceLive.layer,
       RiskTreeRepositoryInMemory.layer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
-      com.risquanter.register.services.cache.RiskResultResolverLive.layer,
+      com.risquanter.register.services.cache.CachedResultResolverLive.layer,
       com.risquanter.register.services.cache.CacheScope.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,

@@ -104,7 +104,7 @@ successfulTrials.par.map(computeLoss).toVector
 val appLayer = ZLayer.make[RiskTreeController & Server](
   Server.default,
   RiskTreeRepositoryInMemory.layer,
-  RiskResultResolverLive.layer,
+  CachedResultResolverLive.layer,
   CacheScope.layer,
   RiskTreeServiceLive.layer,
   ZLayer.fromZIO(RiskTreeController.makeZIO)
@@ -302,7 +302,7 @@ See [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogr
 ┌─────────────────────────────────────────────────┐
 │ Service Layer (modules/server)                  │
 │  - RiskTreeService: Business logic              │
-│  - RiskResultResolver: Simulation orchestration │
+│  - CachedResultResolver: Simulation orchestration │
 │  - CacheScope/ContentCache: content-addressed   │
 │    result caching (per workspace)               │
 └─────────────────────────────────────────────────┘
@@ -362,7 +362,7 @@ GET /risk-trees/:treeId/nodes/:nodeId/lec
 
 Load RiskTree from Repository
   ↓
-RiskResultResolver.ensureCached(tree, nodeId)
+CachedResultResolver.ensureCached(tree, nodeId)
   │
   ├─→ Cache hit: Return cached RiskResult
   │

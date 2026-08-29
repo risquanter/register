@@ -76,7 +76,7 @@ union of all leaf provenances in its subtree — the guarantee this plan relies 
 
 The Monte Carlo engine lives in `modules/server`:
 - `Simulator.scala` — `performTrials`, `createSamplerFromLeaf` (returns `(RiskSampler, NodeProvenance)`)
-- `RiskResultResolverLive.scala` — `simulateLeaf` always does:
+- `CachedResultResolverLive.scala` — `simulateLeaf` always does:
   ```scala
   (sampler, provenance) <- Simulator.createSamplerFromLeaf(leaf, seed3, seed4)
   trials <- Simulator.performTrials(sampler, nTrials, parallelism)
@@ -89,7 +89,7 @@ leaf. `Nil` only appears in test data and the `withOutcomes` helper.
 
 ### `ensureCached` semantics
 
-`RiskResultResolver.ensureCached(tree, nodeId)` is a **synchronous cache-aside read**:
+`CachedResultResolver.ensureCached(tree, nodeId)` is a **synchronous cache-aside read**:
 - Cache hit → return cached `RiskResult` immediately (provenance already inside)
 - Cache miss → simulate subtree inline → write to cache → return result (provenance inside)
 
@@ -157,8 +157,8 @@ The parameter exists in 6 files and is threaded through but does nothing:
 | Service trait | `RiskTreeService.scala` | default param on `probOfExceedance` and `getLECCurvesMulti` |
 | Service impl | `RiskTreeServiceLive.scala` | param on both overrides + one `tracing.setAttribute("include_provenance", ...)` per method |
 | Controller | `WorkspaceAnalysisController.scala` | in destructure pattern + forwarded to service |
-| Resolver trait | `RiskResultResolver.scala` | default param on `ensureCached`, `ensureCachedAll`, and their accessor objects |
-| Resolver impl | `RiskResultResolverLive.scala` | param on both overrides + `simulateSubtree` + one `tracing.setAttribute("include_provenance", ...)` |
+| Resolver trait | `CachedResultResolver.scala` | default param on `ensureCached`, `ensureCachedAll`, and their accessor objects |
+| Resolver impl | `CachedResultResolverLive.scala` | param on both overrides + `simulateSubtree` + one `tracing.setAttribute("include_provenance", ...)` |
 
 The parameter also appears in **tests** that will need updating (see Phase 1 test section).
 
@@ -254,14 +254,14 @@ case (maybeUserId, key, treeId, nodeIds) =>
 
 ---
 
-**`modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolver.scala`**
+**`modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala`**
 
 Remove `includeProvenance: Boolean = false` from `ensureCached`, `ensureCachedAll`, and their
-companion accessor methods in `object RiskResultResolver`.
+companion accessor methods in `object CachedResultResolver`.
 
 ---
 
-**`modules/server/src/main/scala/com/risquanter/register/services/cache/RiskResultResolverLive.scala`**
+**`modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala`**
 
 Remove `includeProvenance: Boolean = false` from `ensureCached` and `ensureCachedAll` overrides.
 Remove `includeProvenance` from the `simulateSubtree(tree, nodeId, includeProvenance)` call and
@@ -428,7 +428,7 @@ override val routes: List[ServerEndpoint[Any, Task]] =
 **Unit — `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala`**
 
 This spec uses a shared `provide` block at suite level. The test layer already includes
-`RiskResultResolverLive.layer` and `TreeCacheManager.layer` — simulation runs live in these tests.
+`CachedResultResolverLive.layer` and `TreeCacheManager.layer` — simulation runs live in these tests.
 The same `validRequest` / `hierarchicalRequest` pattern used by existing tests applies here.
 
 Replace the orphaned `// Provenance Filtering (Service Layer)` comment block (lines ~223-225) with

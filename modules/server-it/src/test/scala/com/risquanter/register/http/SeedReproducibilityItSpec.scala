@@ -18,7 +18,7 @@ import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.infra.irmin.IrminClientLive
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeService, RiskTreeServiceLive, SimulationSemaphore}
-import com.risquanter.register.services.cache.{RiskResultResolver, RiskResultResolverLive, CacheScope}
+import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, CacheScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
@@ -47,7 +47,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
 
   // ── Part 1: restart-equivalent persistence (Irmin-backed service stack) ──
 
-  private type Stack = RiskTreeService & RiskResultResolver & RiskTreeRepository
+  private type Stack = RiskTreeService & CachedResultResolver & RiskTreeRepository
 
   /** A complete, independent service stack over the given Irmin instance —
     * building it twice models two server processes sharing one store.
@@ -59,7 +59,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
       RiskTreeRepositoryIrmin.layer,
       RiskTreeServiceLive.layer,
       TestConfigs.simulationLayer,
-      RiskResultResolverLive.layer,
+      CachedResultResolverLive.layer,
       CacheScope.layer,
       InvalidationHandler.live,
       SSEHub.live,
@@ -69,7 +69,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
     )
 
   /** Every leaf's and the root's outcomes, keyed by leaf name / RootKey. */
-  private def figures(resolver: RiskResultResolver)(tree: RiskTree, entity: SeedEntityId.SeedEntityId): Task[Map[String, Map[TrialId, Loss]]] =
+  private def figures(resolver: CachedResultResolver)(tree: RiskTree, entity: SeedEntityId.SeedEntityId): Task[Map[String, Map[TrialId, Loss]]] =
     val leaves = tree.nodes.collect { case l: RiskLeaf => l }
     for
       leafFigs <- ZIO.foreach(leaves)(l => resolver.ensureCached(tree, l.id, entity).map(r => l.name.value -> r.outcomes))
@@ -150,7 +150,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
             freshStack(cfg).build.flatMap { env =>
               for
                 tree <- env.get[RiskTreeService].create(wsId, treeReq("Restart Reload Tree"), BranchRef.Main)
-                figs <- figures(env.get[RiskResultResolver])(tree, entity1)
+                figs <- figures(env.get[CachedResultResolver])(tree, entity1)
               yield (tree.id, figs)
             }
           }
@@ -160,7 +160,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
               for
                 treeOpt <- env.get[RiskTreeRepository].getById(wsId, treeId, Revision.Head(BranchRef.Main))
                 tree    <- ZIO.fromOption(treeOpt).orElseFail(new RuntimeException(s"tree ${treeId.value} not found after reload"))
-                figs    <- figures(env.get[RiskResultResolver])(tree, entity1)
+                figs    <- figures(env.get[CachedResultResolver])(tree, entity1)
               yield figs
             }
           }
