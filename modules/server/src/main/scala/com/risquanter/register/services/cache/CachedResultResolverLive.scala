@@ -13,8 +13,7 @@ import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
 
 /**
-  * Live implementation of CachedResultResolver (ADR-015), content-addressed
-  * (milestone 2b Phase A).
+  * Live implementation of CachedResultResolver (ADR-015), content-addressed.
   *
   * Resolution pipeline per request:
   * 1. `effectiveTree` bakes every param-stage (LeafStage) mitigation into the
@@ -26,7 +25,7 @@ import io.github.iltotore.iron.refineUnsafe
   *    identity-free content with the requested node's ID attached at this
   *    edge (DD-16/DD-18); miss simulates and stores. The result-stage transform
   *    (`resultTransformFor`) is applied to the finished leaf outcomes at the
-  *    edge and never cached (ADR-034 Decision 4 / D3).
+  *    edge and never cached (ADR-034 Decision 1 / D3).
   * 4. Portfolio: never cached (DD-15 → B) — the mitigated children are combined
   *    with `RiskResultGroup.create` on every read, then this node's result-stage
   *    transform is applied to the combined total (ADR-034 F:
@@ -171,8 +170,9 @@ final case class CachedResultResolverLive(
             ))))
           }
           // ⊕ mitigated(children): the commutative fold over already-mitigated
-          // children. Portfolios are never cached (DD-15 → B); this is the raw
-          // aggregate shape kept pristine by ADR-034 Decision 4.
+          // children. Portfolios are never cached (DD-15 → B); the aggregate is
+          // an undecorated combine of its children (mitigated or not), kept that
+          // way by ADR-034 Decision 4's non-mutation invariant.
           combined <- ZIO.fromEither(RiskResultGroup.create(portfolio.id, childResults*).toEither)
             .mapError(errors => ValidationFailed(errors.toList))
         } yield {

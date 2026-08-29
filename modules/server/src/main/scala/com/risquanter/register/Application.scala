@@ -83,7 +83,7 @@ object Application extends ZIOAppDefault {
   // connection/health-check at startup when repository.type=irmin, rather than
   // sharing RiskTreeRepositoryIrmin's client. Simpler and scoped to only what's
   // new here; refactoring chooseRepo to expose a shared IrminClient would touch
-  // already-working wiring beyond this item's scope (milestone-2b Phase B item 6).
+  // already-working wiring beyond this scenario layer's scope.
   private val irminScenarioServiceLayer: ZLayer[Any, Throwable, ScenarioService] =
     ZLayer.make[ScenarioService](
       IrminConfig.layer,
@@ -284,7 +284,7 @@ object Application extends ZIOAppDefault {
       RepositoryConfig.layer >>> chooseRepo,
       RepositoryConfig.layer >>> chooseScenarioService,
       RepositoryConfig.layer >>> chooseScenarioMergeService,
-      // Per-workspace content-addressed cache (milestone 2b Phase A, DD-17)
+      // Per-workspace content-addressed cache (DD-17)
       CacheScope.layer,
       CachedResultResolverLive.layer,  // ADR-015: ensureCached primitive
       SSEHub.live,

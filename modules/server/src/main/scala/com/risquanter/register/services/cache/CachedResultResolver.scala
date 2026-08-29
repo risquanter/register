@@ -40,7 +40,7 @@ trait CachedResultResolver {
   /**
     * Ensure result is cached for a node.
     *
-    * Cache-aside pattern (content-addressed since milestone 2b Phase A):
+    * Cache-aside pattern (content-addressed):
     * 1. Compute the node's content hash from the effective tree (ContentHashIndex)
     * 2. Leaf hit: return cached content with this node's ID attached
     * 3. Leaf miss: simulate, cache under the content hash, return
