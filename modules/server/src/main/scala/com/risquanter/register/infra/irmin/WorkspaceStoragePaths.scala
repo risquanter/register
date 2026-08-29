@@ -4,8 +4,9 @@ import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId}
 
 /** Single owner of the workspace storage-path layout in Irmin (ADR-004a):
   *
-  *   - Tree meta:  workspaces/{wsId}/risk-trees/{treeId}/meta
-  *   - Tree nodes: workspaces/{wsId}/risk-trees/{treeId}/nodes/{nodeId}
+  *   - Tree meta:        workspaces/{wsId}/risk-trees/{treeId}/meta
+  *   - Tree nodes:       workspaces/{wsId}/risk-trees/{treeId}/nodes/{nodeId}
+  *   - Tree mitigations: workspaces/{wsId}/risk-trees/{treeId}/mitigations/{mitigationId}
   *
   * Every server-side construction of an absolute workspace storage path goes
   * through this object; the layout can change in exactly one place.
@@ -26,3 +27,6 @@ private[register] object WorkspaceStoragePaths:
 
   def treeNodes(wsId: WorkspaceId, treeId: TreeId): String =
     s"${treeRoot(wsId, treeId)}/nodes"
+
+  def treeMitigations(wsId: WorkspaceId, treeId: TreeId): String =
+    s"${treeRoot(wsId, treeId)}/mitigations"

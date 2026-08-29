@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, TreeId, NodeId}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, TreeId, NodeId, MitigationId}
 import com.risquanter.register.domain.errors.{MergeConflict, ValidationFailed}
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.infra.irmin.model.IrminPath
@@ -37,6 +37,8 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
   private val treeId: TreeId = TreeId(safeId("merge-it-tree"))
   private val nodeA:  NodeId = NodeId(safeId("merge-it-node-a"))
   private val nodeB:  NodeId = NodeId(safeId("merge-it-node-b"))
+  private val mitM: MitigationId = MitigationId(safeId("merge-it-mit-m"))
+  private val mitN: MitigationId = MitigationId(safeId("merge-it-mit-n"))
 
   private def scenarioName(s: String): ScenarioName.ScenarioName =
     ScenarioName.fromString(s).fold(e => throw new IllegalArgumentException(e.mkString(";")), identity)
@@ -49,6 +51,12 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
 
   private def writeNode(wsId: WorkspaceId, node: NodeId, value: String, branch: BranchRef = BranchRef.Main) =
     IrminClient.set(nodePath(wsId, node), value, s"write ${node.value}", branch)
+
+  private def mitPath(wsId: WorkspaceId, mit: MitigationId): IrminPath =
+    IrminPath.unsafeFrom(s"workspaces/${wsId.value}/risk-trees/${treeId.value}/mitigations/${mit.value}")
+
+  private def writeMit(wsId: WorkspaceId, mit: MitigationId, value: String, branch: BranchRef = BranchRef.Main) =
+    IrminClient.set(mitPath(wsId, mit), value, s"write mit ${mit.value}", branch)
 
   /** Seed a workspace on main (two nodes) and fork a scenario from its head. */
   private def seedAndFork(wsLabel: String, scenario: ScenarioName.ScenarioName) =
@@ -99,6 +107,44 @@ object ScenarioMergeServiceItSpec extends ZIOSpecDefault:
           s"risk-trees/${treeId.value}/nodes/${nodeA.value}", Some(treeId), Some(nodeA)
         ))),
         a.contains("\"a-main\"")
+      ) && assert(mergeExit)(fails(isSubtype[MergeConflict](anything)))
+    },
+
+    test("edits to different mitigations: preview Clean, merge succeeds and folds both sides into main") {
+      val scenario = scenarioName("merge-mit-clean")
+      for
+        (wsId, branch) <- seedAndFork("merge-ws-mit-clean", scenario)
+        _         <- writeMit(wsId, mitM, "\"m-scenario\"", branch)
+        _         <- writeMit(wsId, mitN, "\"n-main\"")
+        svc       <- ZIO.service[ScenarioMergeService]
+        previewed <- svc.preview(wsId, scenario)
+        merged    <- svc.merge(wsId, scenario)
+        mainHead  <- IrminClient.mainBranch.map(_.flatMap(_.head).map(_.hash))
+        m         <- IrminClient.get(mitPath(wsId, mitM))
+        n         <- IrminClient.get(mitPath(wsId, mitN))
+      yield assertTrue(
+        previewed == MergePreviewResult.Clean,
+        mainHead.contains(merged.value),
+        m.contains("\"m-scenario\""),
+        n.contains("\"n-main\"")
+      )
+    },
+
+    test("same mitigation edited differently on both sides: preview names exactly that mitigation path, merge refuses with MergeConflict, main untouched") {
+      val scenario = scenarioName("merge-mit-conflict")
+      for
+        (wsId, branch) <- seedAndFork("merge-ws-mit-conflict", scenario)
+        _         <- writeMit(wsId, mitM, "\"m-scenario\"", branch)
+        _         <- writeMit(wsId, mitM, "\"m-main\"")
+        svc       <- ZIO.service[ScenarioMergeService]
+        previewed <- svc.preview(wsId, scenario)
+        mergeExit <- svc.merge(wsId, scenario).exit
+        m         <- IrminClient.get(mitPath(wsId, mitM))
+      yield assertTrue(
+        previewed == MergePreviewResult.Conflicts(List(MergeConflictPath(
+          s"risk-trees/${treeId.value}/mitigations/${mitM.value}", Some(treeId), None
+        ))),
+        m.contains("\"m-main\"")
       ) && assert(mergeExit)(fails(isSubtype[MergeConflict](anything)))
     },
 

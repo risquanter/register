@@ -1191,6 +1191,15 @@ inventory above holds only the *renamed* resolver `RiskResultResolver.scala` and
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationScopeResolverSpec.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/CacheScope.scala` (boyscout: its doc comments carried plan-provenance references cleaned in the same pass as the new files)
 
+§8.15 (slice 4: override staleness + mitigation persistence, Option A 2026-08-29)
+adds **two files** — the staleness production file + spec and
+`MitigationPersistenceItSpec` were already listed above;
+`WorkspaceStoragePaths.scala` and `RiskTreeRepositoryIrmin.scala` are already
+listed too. New to the inventory (mitigation merge-scan coverage):
+
+- `modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceItSpec.scala`
+
 ### Open decisions
 
 Status after the 2026-08-08 review session:
@@ -3684,6 +3693,354 @@ A).
 Already in the inventory and unchanged in listing: `MitigationApplication.scala`,
 `QueryServiceLive.scala`, `CacheTransparencySpec.scala`,
 `RiskTreeKnowledgeBase.scala`.
+
+### 8.15 M2 slice 4 — override staleness detection + mitigation persistence verification — implementation-grade (2026-08-29)
+
+Fourth and closing slice of M2. Two parts of unequal weight, both closing
+open M2 scope (§7.2.2a, §7.2.3):
+
+- **Override staleness detection (the substance, new production code).** The
+  server-side diagnostic predicate `MitigationStaleness.staleOverrides` — OD-6,
+  already ruled (placement + signature) at `## File inventory` → Open decisions.
+- **Mitigation persistence — production + tests (Option A, ruled 2026-08-29).**
+  The original premise that mitigations already round-trip through Irmin was
+  **false**. `RiskTreeRepositoryIrmin.writeTree` persisted only `meta` +
+  `nodes/{id}`, and `rebuildTree` reconstructed the tree without mitigations, so
+  every override and its base stamp was silently dropped on reload — the whole
+  staleness feature was inert in production. The merge conflict scan
+  (`ScenarioMergeService.pathsOn`) likewise never enumerated a `mitigations/`
+  subtree, so the same mitigation edited on two branches would last-writer-win
+  on merge instead of conflicting. This slice now implements the §7.2.1 storage
+  mapping (mitigations as per-id blobs beside nodes), extends the byte-level
+  merge scan over them, and proves both against real Irmin with serverIt tests.
+  This realizes §7.2.1/§7.2.3 scope that was designed but never built; the
+  "verification surfaced a real gap" halt (G2/G7) fired and was escalated as
+  this decision, not silently grown into the slice.
+
+Stamp *writing* stays out of this slice: `overrideBaseStamp = ContentHashIndex.
+hashOf(targetLeaf)` is computed on the tree-PUT path, which M4 wires. M2 delivers
+the read-side predicate and its tests only (§7.2.2a).
+
+#### Part 1 — what staleness means, from first principles
+
+A `LeafStage` mitigation with an Override component (`LikelihoodTransform.Override`
+or `DistributionTransform.Override`) asserts a fixed probability/distribution
+against a *specific base state* of one leaf. `Mitigation.create` already enforces
+that such a mitigation carries both `overrideBaseStamp` (the `ContentHash` of that
+leaf's `LeafSimContent` at authoring time — the DD-16 simulation-relevant
+projection) and `overrideAnchor` (the `NodeId` of the leaf it asserts against).
+
+An override is **stale** when the anchor leaf's *current* `LeafSimContent` hash no
+longer equals the stored stamp — the base the frozen assertion was written against
+has moved. Because the stamp is a hash of `LeafSimContent` (probability, loss
+distribution parameters — **not** `name` or `parentId`), a rename or reparent
+leaves the hash unchanged and therefore does **not** make an override stale
+(DD-16 projection); only a change to a simulation-relevant field does. Staleness
+is purely diagnostic: resolution ignores it (frozen expert opinion is the ruled
+semantics, OD-6 reason 3), and the predicate participates in no monoid-action law
+— it is a total function `RiskTree → Set[MitigationId]`.
+
+#### Contract — `MitigationStaleness.scala` (determined; OD-6 ruled)
+
+```scala
+// server — services/cache/MitigationStaleness.scala
+package com.risquanter.register.services.cache
+
+import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, Mitigation, MitigationSpec}
+import com.risquanter.register.domain.data.iron.{MitigationId, NodeId, ContentHash}
+
+/** Staleness layer 1: overrides whose stored base stamp no longer matches the
+  * anchor leaf's current LeafSimContent hash. Fires on any edit path (form,
+  * merge, API PUT, time-travel revert) that changes a simulation-relevant leaf
+  * field; renames/reparents do not fire (DD-16 projection — the stamp hashes
+  * LeafSimContent, which excludes name and parentId). Diagnostic only:
+  * resolution ignores staleness (frozen expert opinion is the ruled semantics).
+  * The sole consumers are HTTP handlers that put `staleMitigationIds` into
+  * read/update response payloads (M4); the client renders, never computes. */
+object MitigationStaleness:
+
+  def staleOverrides(tree: RiskTree): Set[MitigationId] =
+    tree.mitigations.iterator.collect {
+      case m @ Mitigation(_, _, _, MitigationSpec.LeafStage(_, Some(stamp), Some(anchor)), _)
+          if isStale(tree, anchor, stamp) =>
+        m.id
+    }.toSet
+
+  private def isStale(tree: RiskTree, anchor: NodeId, stamp: ContentHash): Boolean =
+    tree.index.nodes.get(anchor) match
+      case Some(leaf: RiskLeaf) => ContentHashIndex.hashOf(leaf) != stamp
+      case _                    => true   // anchor gone / no longer a leaf → stale (OD-8 Option A)
+```
+
+Why the pattern selects exactly the right mitigations, with no separate filter:
+`Mitigation.create`'s cross-field rule makes `overrideBaseStamp` present **iff**
+the leaf transform has an Override component, so `LeafStage(_, Some(stamp),
+Some(anchor))` matches every Override leaf-stage mitigation and nothing else — a
+non-Override `LeafStage` carries `None` and fails the match; a `ResultStage`
+carries no stamp and fails the match. The predicate reuses `ContentHashIndex.
+hashOf` (the same JVM SHA-256 over `LeafSimContent.from(leaf).toJson` that keys
+the cache) as the single hash code path — OD-6 reason 1's single-producer
+invariant is preserved: this adds a *reader* of that hash, not a second producer.
+
+`staleOverrides` needs only the tree, not resolved scopes: the leaf an override
+asserts against is the stored `overrideAnchor`, not the mitigation's resolved
+targeting scope, so no `MitigationScopeResolver` output is required.
+
+#### Part 2 — mitigation persistence (production) + verification
+
+Mitigations are stored as one Irmin blob per mitigation under
+`.../mitigations/{mitigationId}`, mirroring the per-node convention (§7.2.1).
+DD-7 whole-subtree replacement keeps holding: an omitted mitigation is deleted
+by the `set_tree` that omits it, exactly as for nodes. Storage is
+byte-for-byte the existing `Mitigation` JSON codec (the same one
+`MitigationEntitySpec` round-trips), so disjoint mitigation edits auto-merge and
+same-mitigation edits fall under the existing byte-level pre-check (ADR-032) —
+no new merge machinery.
+
+**Storage path helper — `WorkspaceStoragePaths.scala`:**
+
+```scala
+def treeMitigations(wsId: WorkspaceId, treeId: TreeId): String =
+  s"${treeRoot(wsId, treeId)}/mitigations"
+```
+
+**Write + read — `RiskTreeRepositoryIrmin.scala`.** `writeTree` gains a
+`mitigations` operand and emits one entry per mitigation beside meta + nodes;
+`create` / `update` / `revert` pass `riskTree.mitigations` /
+`updatedTree.mitigations` / `existing.tree.mitigations`. The read path reads the
+`mitigations/*` prefix at the pinned commit and passes the decoded list into
+`RiskTree.fromNodes`, so every tree invariant (duplicate-id, name-uniqueness,
+count bound) is re-checked on load. Exact signatures:
+
+```scala
+private def writeTree(base: IrminPath, meta: TreeMetadata, nodes: Seq[RiskNode],
+                      mitigations: Seq[Mitigation], message: String, branch: BranchRef): Task[Unit] =
+  val entries =
+    IrminTreeEntry(IrminPath.unsafeFrom("meta"), meta.toJson) ::
+      nodes.toList.map(node => IrminTreeEntry(IrminPath.unsafeFrom(s"nodes/${node.id.value}"), nodeJson(node))) :::
+      mitigations.toList.map(m => IrminTreeEntry(IrminPath.unsafeFrom(s"mitigations/${m.id.value}"), m.toJson))
+  handleIrmin(irmin.setTree(base, entries, message, branch)).unit
+
+private def readMitigationsAt(prefix: IrminPath, at: CommitHash): Task[Seq[Mitigation]] =
+  for
+    childNames <- handleIrmin(irmin.listAtCommit(at, prefix))
+    mits       <- ZIO.foreach(childNames) { child =>
+                    val fullPath = IrminPath.unsafeFrom(s"${prefix.value}/${child.value}")
+                    handleIrmin(irmin.getAtCommit(at, fullPath)).flatMap {
+                      case Some(json) => decodeMitigation(child, json)
+                      case None       => ZIO.fail(RepositoryFailure(s"Missing mitigation value at ${fullPath.value}"))
+                    }
+                  }
+  yield mits
+
+private def decodeMitigation(child: IrminPath, json: String): Task[Mitigation] =
+  ZIO.fromEither(json.fromJson[Mitigation].left.map(err => RepositoryFailure(s"Decode mitigation ${child.value}: $err")))
+
+private def rebuildTree(meta: TreeMetadata, nodes: Seq[RiskNode], mitigations: Seq[Mitigation]): Task[RiskTree] =
+  // unchanged empty-nodes guard, then:
+  //   RiskTree.fromNodes(meta.id, meta.name, nodes, meta.rootId, Some(meta.seedVarHighWater), mitigations.toList)
+```
+
+In `loadTreeAt`, alongside `nodePrefix`, read
+`val mitPrefix = IrminPath.unsafeFrom(WorkspaceStoragePaths.treeMitigations(wsId, id))`
+and thread `readMitigationsAt(mitPrefix, at)` into `rebuildTree`. Mitigations
+may legitimately be empty (a tree with no mitigations), so — unlike nodes —
+there is no non-empty guard on them.
+
+**Merge scan — `ScenarioMergeService.scala`.** `pathsOn` enumerates the
+`mitigations/` subtree in the same pass as `nodes/`, so a mitigation that
+changed on both branches enters the byte-level `findConflicts` comparison;
+`MergeConflictPath.fromRelativePath` gains a case for the mitigation path shape:
+
+```scala
+// pathsOn: per tree, zipPar the nodes and mitigations listings
+irmin.list(IrminPath.unsafeFrom(s"$base/nodes"), branch)
+  .zipPar(irmin.list(IrminPath.unsafeFrom(s"$base/mitigations"), branch))
+  .map { case (nodes, mits) =>
+    s"risk-trees/${treeId.value}/meta" ::
+      nodes.map(n => s"risk-trees/${treeId.value}/nodes/${n.value}") :::
+      mits.map(m => s"risk-trees/${treeId.value}/mitigations/${m.value}")
+  }
+
+// MergeConflictPath.fromRelativePath: new case (OD-9 Option A — no wire field)
+case "risk-trees" :: treeId :: "mitigations" :: _ :: Nil =>
+  MergeConflictPath(rel, TreeId.fromString(treeId).toOption, None)
+```
+
+Enumerating `mitigations/` in the scan is unconditional — it is the correctness
+fix (without it, same-mitigation merges silently last-writer-win). How a
+mitigation conflict is *structured for the UI* is OD-9 below.
+
+**Verification (serverIt).** Round-trip cases go in the new
+`MitigationPersistenceItSpec`; merge cases extend `ScenarioMergeServiceItSpec`
+(reusing its branch/scenario harness, mirroring its node-conflict tests):
+
+- round-trip: a tree created with an override reads back with the override and
+  its `overrideBaseStamp` intact (this is the assertion that fails against
+  today's code).
+- update: replacing the mitigation list persists; a tree written without a
+  previously-stored mitigation reads back without it (omitted = deleted).
+- merge, disjoint: two branches editing *different* mitigations preview `Clean`
+  and merge folds both.
+- merge, conflicting: two branches editing the *same* mitigation preview
+  `Conflicts` naming that mitigation's path, and `merge` refuses with
+  `MergeConflict` (byte-level pre-check, ADR-032), main untouched.
+
+#### ADR alignment
+
+- **OD-6** (staleness placement, ruled 2026-08-09): server-side
+  `MitigationStaleness`, original signature unchanged. Compliant — this slice
+  realizes exactly that ruling.
+- **ADR-010** (errors are values): `staleOverrides` is total — a pure `RiskTree
+  → Set[MitigationId]` with no failure channel and no exception (it never
+  constructs a hash from unvalidated input; `hashOf` operates on an
+  already-validated `RiskLeaf`). Compliant; no typed error added.
+- **DD-14 / DD-16**: reuses `ContentHashIndex.hashOf` (JVM SHA-256 over the
+  `LeafSimContent` projection); rename/reparent invariance is inherited, not
+  re-implemented. Compliant.
+- **ADR-030** (orchestration boundary): the only caller is a server HTTP handler
+  (M4); the domain/`common` layer gains nothing. Compliant.
+- **ADR-004a** (workspace storage layout): the mitigation path
+  `.../mitigations/{mitigationId}` extends the existing per-node mapping through
+  the single owner `WorkspaceStoragePaths`. Compliant — one new helper, no other
+  construction site of the path.
+- **DD-7** (one commit per user action): mitigations ride the same `set_tree`
+  as meta + nodes, so create/update/revert stay exactly one commit; omitted
+  mitigation = deleted by subtree replacement, identical to node semantics.
+  Compliant.
+- **ADR-032** (typed merge conflict): Part 2 brings mitigation paths into the
+  byte-level pre-check (`pathsOn`) so same-mitigation edits conflict instead of
+  last-writer-winning; the comparison and typed-conflict machinery are unchanged.
+  Behaviour change to the scan's candidate set, ruled in (Option A) and tested.
+- **Correct-by-construction**: the read path routes loaded mitigations through
+  `RiskTree.fromNodes`, so tree-level mitigation invariants (duplicate-id,
+  name-uniqueness, count bound) are re-validated on load; no raw primitive
+  crosses a service/repository boundary (`staleOverrides` input is an
+  already-validated `RiskTree`; output is domain `MitigationId`s).
+
+#### Open decisions
+
+**OD-8 — anchor no longer resolves to a leaf. ✅ RULED (2026-08-29, Option A).**
+The anchor `NodeId` is stable
+across rename and reparent (a node's id does not change), so in normal editing it
+still names its original leaf. It stops resolving to a `RiskLeaf` only if that
+leaf is **deleted** (the id assignment is server-side and effectively
+non-reusable, so "the id now names a portfolio" is a defensive-only branch). The
+question: does `staleOverrides` report a mitigation whose anchor leaf is gone?
+
+- **Option A — report as stale (fold "orphaned" into "stale"):** `isStale`
+  returns `true` for a missing/non-leaf anchor (the code above). One diagnostic
+  set in the payload; an override whose base leaf was deleted is surfaced for the
+  user's review alongside one whose base changed. Con: conflates "base changed"
+  with "base gone" — but the payload is a review flag, and both mean "this
+  override needs your attention."
+  - *Concrete case:* you author an override on leaf "cyber", later delete
+    "cyber"; the mitigation still lists in the tree but targets nothing. Its id
+    appears in `staleMitigationIds`, so the UI flags it for review.
+- **Option B — report only a genuine hash mismatch of an existing leaf:**
+  `isStale` returns `false` (or skips) when the anchor is absent; staleness means
+  strictly "the stamp no longer matches an existing leaf." A deleted anchor is a
+  *different* diagnostic ("orphaned") that a later slice/handler adds separately.
+  Con: an override pointing at a deleted leaf is silently absent from this
+  function's output for M2.
+  - *Concrete case:* same deletion of "cyber" → the mitigation's id does **not**
+    appear in `staleMitigationIds`; the UI shows nothing until an orphaned-override
+    diagnostic is added later.
+
+**My recommendation: Option A.** The function answers "which overrides need the
+user's attention"; an override whose base leaf is gone needs attention as much as
+one whose base moved, and folding it in avoids shipping a second near-identical
+id-set in the M2 payload. A dedicated "orphaned" classification can split out
+later if M4/M5 shows the UI needs to distinguish the two states. The one-line
+`case _ => true` above encodes A; choosing B changes it to match `Some(leaf:
+RiskLeaf)` only. Part 1 is implemented on Option A and green.
+
+**OD-9 — how a mitigation merge conflict is structured for the client. ✅ RULED
+(2026-08-29, Option A).** The
+merge-preview response carries, per conflicting path, a `MergeConflictEntry(path,
+treeId, nodeId)` (wire form of the internal `MergeConflictPath`). A node conflict
+fills `treeId` + `nodeId`; a `meta` conflict fills `treeId` only. A mitigation
+conflict is a new path shape. Enumerating `mitigations/` in the scan is settled
+(correctness, above); the open point is only the *structured coordinate*:
+
+- **Option A — no wire change (recommended):** parse the mitigation path to
+  `MergeConflictPath(rel, Some(treeId), None)`; the raw `path` string
+  (`.../mitigations/{id}`) is what distinguishes it from a `meta` conflict. No
+  change to `MergeConflictEntry`, `MergePreviewResponse`, or the controller
+  mapping — no Decision Trigger #1 wire change. The M2 correctness fix lands
+  without touching the response DTO.
+  - *Concrete case:* the preview for a same-mitigation conflict returns
+    `{"path":"risk-trees/t1/mitigations/m1","treeId":"t1","nodeId":null}`; the
+    client reads the `mitigations` segment from `path` to label it.
+- **Option B — typed field now (Decision Trigger #1):** add
+  `mitigationId: Option[MitigationId]` to `MergeConflictPath` and
+  `mitigationId: Option[String]` to the wire `MergeConflictEntry`, and populate
+  it in `toPreviewResponse`. The client gets a typed coordinate without parsing
+  the path. Cost: a response-DTO field added before any consumer renders it
+  (the UI is M4), and it pulls `ScenarioMergeResponse.scala` +
+  `ScenarioController.scala` into this slice's inventory.
+  - *Concrete case:* the same conflict returns an extra
+    `"mitigationId":"m1"` field the M2 client does not yet read.
+
+**My recommendation: Option A.** No consumer exists until M4 renders the
+conflict list, so adding a wire field now has no standalone benefit (phase
+routing) and speculatively widens a response contract; the `path` string already
+carries the mitigation id unambiguously. If M4's UI turns out to want a typed
+coordinate, it adds the field in the same slice that renders it. Either way the
+correctness fix (scan covers `mitigations/`) is unconditional and identical.
+
+#### Verification plan
+
+- **`MitigationStalenessSpec`** (`server/test`, pure — no Docker):
+  - an Override whose anchor leaf's probability (or loss distribution) changed →
+    reported stale.
+  - the same Override after the leaf is renamed or reparented (no
+    simulation-relevant field changed) → **not** reported (DD-16).
+  - re-stamping to the current hash clears the report.
+  - a non-Override `LeafStage` mitigation and a `ResultStage` mitigation → never
+    reported.
+  - anchor-leaf deletion → reported (OD-8 Option A; flips with the ruling).
+  - resolution output (`effectiveTree` / `resultTransformFor`) is identical with
+    and without stale overrides present — staleness never feeds resolution.
+- **`MitigationPersistenceItSpec`** (`serverIt/test`, needs
+  `local/irmin-prod:3.11-p1`; clear leaked `register_it_` networks first): the
+  round-trip cases in Part 2 (create→read with override + stamp intact; update
+  replaces the mitigation list; omitted mitigation deleted).
+- **`ScenarioMergeServiceItSpec`** (`serverIt/test`, same prerequisites): the two
+  merge cases in Part 2 (disjoint mitigation edits → `Clean` + merge folds both;
+  same mitigation edited on both sides → `Conflicts` naming the mitigation path +
+  `merge` refuses, main untouched), mirroring its existing node-conflict tests.
+- **Whole suite green** closes the slice: `sbt 'commonJVM/test; server/test'`,
+  `sbt app/test`, `sbt serverIt/test`; BATS suite-C fast gate after the code
+  change.
+- **Bump:** PATCH on landing (phase step, not plan close) — `0.10.25 → 0.10.26`;
+  mirror `APP_VERSION` into `.env` and `.env.irmin`.
+
+#### File inventory (delta)
+
+Part 1's files and Part 2's `MitigationPersistenceItSpec` were already listed;
+Option A (2026-08-29) adds the two production/test files the merge-scan change
+needs. Files this slice writes:
+
+Already in `## File inventory` (no add):
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationStaleness.scala` (Part 1 production)
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationStalenessSpec.scala` (Part 1 spec)
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/WorkspaceStoragePaths.scala` (Part 2 — `treeMitigations`)
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala` (Part 2 — write/read mitigations)
+- `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala` (Part 2 — round-trip)
+- `build.sbt` (PATCH bump 0.10.25 → 0.10.26)
+
+Added to `## File inventory` by this slice (Option A):
+- `modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala` (Part 2 — `pathsOn` + `fromRelativePath` mitigation shape)
+- `modules/server-it/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceItSpec.scala` (Part 2 — merge cases)
+
+`RiskTreeRepositoryInMemory` stores whole `RiskTree` values and needs no change;
+it is already in the inventory (§7.2.1) in case compilation surfaces one. OD-9
+Option B would additionally add `ScenarioMergeResponse.scala` and
+`ScenarioController.scala`; those are **not** in the inventory under the
+recommended Option A and would be added only if B is ruled. The token stays
+pointed at this plan; the user re-points it after approving this amendment so
+the two new production/test paths are covered.
 
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 

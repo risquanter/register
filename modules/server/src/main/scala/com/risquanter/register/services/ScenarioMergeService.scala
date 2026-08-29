@@ -25,14 +25,18 @@ object MergeConflictRule:
   * `WorkspaceId` (workspace identity must not reach the wire).
   *
   * `treeId`/`nodeId` are parsed out of the known path shapes for the UI;
-  * `nodeId` is empty for a tree's `meta` conflict, both are empty for an
-  * unrecognised path shape (the raw relative path is always carried).
+  * `nodeId` is empty for a tree's `meta` or `mitigations/{id}` conflict, both
+  * are empty for an unrecognised path shape (the raw relative path is always
+  * carried, and for a mitigation conflict it holds the mitigation id segment).
   */
 final case class MergeConflictPath(path: String, treeId: Option[TreeId], nodeId: Option[NodeId])
 
 object MergeConflictPath:
-  /** Parse `risk-trees/{treeId}/meta` and `risk-trees/{treeId}/nodes/{nodeId}`
-    * into structured coordinates; anything else keeps only the raw path.
+  /** Parse `risk-trees/{treeId}/meta`, `risk-trees/{treeId}/nodes/{nodeId}`,
+    * and `risk-trees/{treeId}/mitigations/{mitigationId}` into structured
+    * coordinates; anything else keeps only the raw path. A mitigation conflict
+    * carries its `treeId` and the raw path (which holds the mitigation id
+    * segment); it has no node coordinate.
     */
   def fromRelativePath(rel: String): MergeConflictPath =
     rel.split('/').toList match
@@ -40,6 +44,8 @@ object MergeConflictPath:
         MergeConflictPath(rel, TreeId.fromString(treeId).toOption, None)
       case "risk-trees" :: treeId :: "nodes" :: nodeId :: Nil =>
         MergeConflictPath(rel, TreeId.fromString(treeId).toOption, NodeId.fromString(nodeId).toOption)
+      case "risk-trees" :: treeId :: "mitigations" :: _ :: Nil =>
+        MergeConflictPath(rel, TreeId.fromString(treeId).toOption, None)
       case _ =>
         MergeConflictPath(rel, None, None)
 
@@ -200,10 +206,14 @@ final class ScenarioMergeServiceLive(irmin: IrminClient) extends ScenarioMergeSe
     for
       treeIds <- irmin.list(treesRoot, branch)
       perTree <- ZIO.foreach(treeIds) { treeId =>
-                   irmin.list(IrminPath.unsafeFrom(s"${treesRoot.value}/${treeId.value}/nodes"), branch)
-                     .map(nodes =>
+                   val base = s"${treesRoot.value}/${treeId.value}"
+                   irmin.list(IrminPath.unsafeFrom(s"$base/nodes"), branch)
+                     .zipPar(irmin.list(IrminPath.unsafeFrom(s"$base/mitigations"), branch))
+                     .map { case (nodes, mits) =>
                        s"risk-trees/${treeId.value}/meta" ::
-                         nodes.map(n => s"risk-trees/${treeId.value}/nodes/${n.value}"))
+                         nodes.map(n => s"risk-trees/${treeId.value}/nodes/${n.value}") :::
+                         mits.map(m => s"risk-trees/${treeId.value}/mitigations/${m.value}")
+                     }
                  }
     yield perTree.flatten.toSet
 
