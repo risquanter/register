@@ -131,10 +131,20 @@ object Mitigation {
     * every read via decode == create. */
   private val MaxPipelineSteps = 10
 
+  /** Minimum length of a ResultStage pipeline. A mitigation that transforms
+    * nothing is meaningless, so an empty pipeline is rejected at construction.
+    * `TransformPipeline.empty` stays the identity of the pipeline `Identity`
+    * instance, but that identity is internal to `combine`, which concatenates
+    * and never yields an empty result from non-empty operands; `create` runs
+    * per user-authored mitigation, so rejecting empty here does not touch the
+    * algebra. */
+  private val MinPipelineSteps = 1
+
   /** Cross-field rules (accumulated):
     *  - LeafStage with an Override component ⇒ overrideBaseStamp AND
     *    overrideAnchor both defined; without an Override ⇒ both empty;
-    *  - a ResultStage pipeline has at most `MaxPipelineSteps` steps.
+    *  - a ResultStage pipeline has between `MinPipelineSteps` and
+    *    `MaxPipelineSteps` steps.
     * Predicate validity is enforced when the `TargetingPredicate` is built, so
     * the target needs no further check here.
     */
@@ -173,6 +183,12 @@ object Mitigation {
     }
 
     val stepsV: Validation[ValidationError, Unit] = spec match {
+      case MitigationSpec.ResultStage(pipeline) if pipeline.steps.sizeIs < MinPipelineSteps =>
+        Validation.fail(ValidationError(
+          field = s"$fieldPrefix.spec",
+          code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+          message = s"result-stage pipeline is empty: at least $MinPipelineSteps step is required"
+        ))
       case MitigationSpec.ResultStage(pipeline) if pipeline.steps.sizeIs > MaxPipelineSteps =>
         Validation.fail(ValidationError(
           field = s"$fieldPrefix.spec",

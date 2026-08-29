@@ -97,6 +97,10 @@ object MitigationEntitySpec extends ZIOSpecDefault {
         val steps = List.fill(11)(ResultTransformSpec.CapLosses(1000000L))
         val bigSpec = MitigationSpec.ResultStage(TransformPipeline(steps))
         assertTrue(mk("m-big", bigSpec).toEither.swap.toOption.get.exists(_.code == ValidationErrorCode.CONSTRAINT_VIOLATION))
+      },
+      test("result-stage pipeline that is empty is rejected") {
+        val emptySpec = MitigationSpec.ResultStage(TransformPipeline(Nil))
+        assertTrue(mk("m-empty", emptySpec).toEither.swap.toOption.get.exists(_.code == ValidationErrorCode.CONSTRAINT_VIOLATION))
       }
     ),
 

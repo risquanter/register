@@ -755,18 +755,16 @@ private[data] def validateModeFields(
 ### 7.2 M2 — Persistence and resolution (`server`)
 
 > **⚠️ This section (2026-08-08) predates §8.6/§8.7 (M1R, 2026-08-13/14) and
-> the M2 resolver-edge rulings in §8.8 (2026-08-15). Its signatures are stale
-> and are reconciled at the pending M2 implementation-grade elevation:** the
-> algebra now takes `resolvedScopes: Map[MitigationId, Set[NodeId]]` (§8.6), not
-> `selection` alone; scope is produced by a new `MitigationScopeResolver`
-> (§8.2, §8.8 M2-D1), not by passing `MitigationSelection` straight into
-> `ensureCached`; the resolver's per-mitigation output is a `ScopeOutcome`
-> coproduct (§8.8 M2-D2); and `RiskResultResolver` is renamed
-> `CachedResultResolver` (§8.8 M2-D4). Unaffected and still current: the storage
-> shape (§7.2.1), the D3-stands caching rule (§7.2.2 step 2 — raw simulations
-> cached, result-stage transforms applied at the edge), and the override
-> staleness function (§7.2.2a, OD-6). This box prevents misreading until the
-> elevation rewrites the signatures.
+> the M2 resolver-edge rulings in §8.8 (2026-08-15); its resolver signatures are
+> reconciled in §8.14 (M2 slice 3, implementation-grade), which is the source of
+> truth for the trait shape.** The algebra takes
+> `resolvedScopes: Map[MitigationId, Set[NodeId]]` (§8.6), not `selection` alone;
+> scope is produced by a new `MitigationScopeResolver` (§8.2, §8.8 M2-D1); the
+> resolver's per-mitigation output is a `ScopeOutcome` coproduct (§8.8 M2-D2);
+> and the resolver is `CachedResultResolver` (§8.8 M2-D4). Still current here:
+> the storage shape (§7.2.1), the D3 caching rule (§7.2.2 step 2 — raw
+> simulations cached, result-stage transforms applied at the edge), and the
+> override staleness function (§7.2.2a, OD-6).
 
 #### 7.2.1 Storage (ADR-004a mapping extended)
 
@@ -793,22 +791,12 @@ need no change; it is in the inventory in case compilation surfaces one.
 
 #### 7.2.2 Resolver-edge wiring
 
-```scala
-// services/cache/RiskResultResolver.scala
-trait RiskResultResolver:
-  def ensureCached(
-    tree: RiskTree, nodeId: NodeId, seedEntityId: SeedEntityId.SeedEntityId,
-    includeProvenance: Boolean = false,
-    mitigations: MitigationSelection = MitigationSelection.None
-  ): Task[LossDistribution]
-  def ensureCachedAll(
-    tree: RiskTree, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId,
-    includeProvenance: Boolean = false,
-    mitigations: MitigationSelection = MitigationSelection.None
-  ): Task[Map[NodeId, LossDistribution]]
-```
+The resolver trait and its `ensureCached` / `ensureCachedAll` signatures are
+specified in §8.14 (`CachedResultResolver`, implementation-grade) — the source
+of truth for the trait shape. The wiring below is the behaviour those signatures
+serve.
 
-`RiskResultResolverLive` behaviour for a non-`None` selection:
+`CachedResultResolverLive` behaviour for a non-`None` selection:
 
 1. `MitigationApplication.effectiveTree(tree, selection)` once per resolution;
    validation failure → `ValidationFailed` (typed channel, ADR-010).
@@ -1918,7 +1906,11 @@ M1R-D1.
   enforced in `Mitigation.create` (user ruling 2026-08-14: keep the current
   design), the sole materialization boundary for a result-stage pipeline — a
   `ResultStage` exists only inside a `Mitigation`, so every persisted/wire
-  pipeline passes through `create`. It is NOT in a `TransformPipeline` smart
+  pipeline passes through `create`. `create` enforces both ends of the count:
+  besides the `MaxPipelineSteps` ceiling it rejects an empty pipeline
+  (`MinPipelineSteps = 1`, user ruling 2026-08-29) — an empty ResultStage
+  pipeline is a structurally-lossy no-op, so it is rejected at construction.
+  It is NOT in a `TransformPipeline` smart
   constructor: `TransformPipeline` is a monoid whose `combine` (`l.steps ++
   r.steps`) must stay total, so a validating constructor there would need an
   unsafe internal path that partly negates the guarantee. The fields stay plain
