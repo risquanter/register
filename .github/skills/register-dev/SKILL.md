@@ -82,6 +82,9 @@ Requires `local/irmin-prod:3.11-p1` Docker image (built once — see Image Build
 `docker-compose.server-it.yml` (dynamic host port — multiple specs run concurrently
 without port conflicts).
 
+**Before every run, clear leaked networks first** — see "Leaked network cleanup"
+below. It is a mandatory pre-step, not just crash recovery.
+
 ```bash
 # All integration tests (runs all specs concurrently — safe)
 sbt "serverIt/test"
@@ -95,11 +98,17 @@ sbt 'serverIt/test' 2>&1 | \
   grep -E 'tests passed|tests failed|FAILED|\[error\]|success|Executed in' | head -40
 ```
 
-### Leaked network cleanup (after Ctrl+C / crash)
+### Leaked network cleanup — MANDATORY before every serverIt run
+
+Per-run scoped networks leak and accumulate across runs, crashes, and other
+terminals until Docker's address pool is exhausted (`all predefined address
+pools have been fully subnetted`). Run this cleanup **before** every `serverIt`
+run — not only after a Ctrl+C / crash. That daemon error has this one cause:
+clean and re-run, never re-diagnose it, and never count the run as a real
+failure on its account (it is environmental, not a code failure).
 
 ```bash
-docker ps -a --filter name=register_it_ --format '{{.ID}}' | xargs -r docker rm -f
-docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docker network rm
+docker ps -a --filter name=register_it_ --format '{{.ID}}' | xargs -r docker rm -f; docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docker network rm; echo "--- remaining register_it_ networks ---"; docker network ls --filter name=register_it_ --format '{{.Name}}' | wc -l
 ```
 
 ---
