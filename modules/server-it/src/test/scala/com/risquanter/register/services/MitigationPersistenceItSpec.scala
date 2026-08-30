@@ -103,6 +103,24 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
           _      <- repo.update(wsId, tid, _ => treeWith(tid), BranchRef.Main)
           loaded <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main))
         yield assertTrue(loaded.exists(_.mitigations.isEmpty))
+      },
+
+      test("multiple mitigations all round-trip intact, independent of stored order") {
+        // Resolution is precedence-driven (MitigationApplication.inPrecedenceOrder
+        // re-sorts by (precedence.key, id)), so the stored list order carries no
+        // semantics: the fidelity that matters is that every mitigation survives
+        // with its fields intact. Compared in id-sorted canonical form so the
+        // assertion does not depend on Irmin's child-listing order.
+        val mA = overrideMit("m-alpha", cyberId)
+        val mZ = overrideMit("m-zebra", cyberId)
+        for
+          repo   <- ZIO.service[RiskTreeRepository]
+          tid     = treeId("mit-tree-multi")
+          _      <- repo.create(wsId, treeWith(tid, mA, mZ), BranchRef.Main)
+          loaded <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main))
+        yield assertTrue(
+          loaded.exists(_.mitigations.sortBy(_.id.value) == List(mA, mZ).sortBy(_.id.value))
+        )
       }
 
     ).provideLayerShared(irminLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock
