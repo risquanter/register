@@ -10,93 +10,78 @@
 
 - Authorization decisions ("can user X do Y on resource Z?") are externalized to SpiceDB (ADR-012)
 - Writing authorization data (granting/revoking relationships) is a privileged administrative operation, not a product feature of this application
-- Mixing Policy Enforcement (checking access) with Policy Administration (writing access rules) in the same service increases the attack surface and creates unauditable side-channels
-- The application has no self-service access management UI; access is administered by ops tooling (CI/CD job, `zed` CLI, Keycloak admin)
-- This PEP/PDP/PAP separation is the canonical pattern established in Google Zanzibar (2019), XACML 3.0, and all major zero-trust reference architectures
+- Mixing Policy Enforcement (checking access) with Policy Administration (writing access rules) in one service increases attack surface and creates unauditable side-channels
+- Access is administered by ops tooling (CI/CD job, `zed` CLI, Keycloak admin); the application has no self-service access-management UI
+- PEP/PDP/PAP separation is the canonical pattern established in Google Zanzibar (2019), XACML 3.0, and zero-trust reference architectures
 
 ---
 
 ## Decision
 
-### 1. App is PEP Only
+### 1. App is a Pure PEP — Read-Only, Fail-Closed
 
-The application calls SpiceDB to **read** authorization state. It never writes arbitrary authorization data.
+The application calls SpiceDB to **read** authorization state. It never writes
+authorization data, and it exposes no HTTP route that writes it. Any future
+self-service access management is a separate administrative service (a dedicated
+PAP), distinct from this application's codebase and deployment.
 
 ```scala
 // The complete AuthorizationService interface — no grant(), no revoke()
 trait AuthorizationService:
   def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
-  // Returns Checked[P] proof token on success. Callers bind via `given` in for-comprehensions.
-  // Fails with AuthError.Forbidden if SpiceDB returns false — fail-closed by design.
-  // No grant() / revoke(): app is a pure PEP; tuple writes are ops-path only.
+  // Returns a Checked[P] proof token on success; callers bind it via `given` in for-comprehensions.
+  // Fails with AuthError.Forbidden if SpiceDB returns false, and with
+  // AuthError.ServiceUnavailable on connectivity failure — deny, never allow.
 
   def listAccessible(user: UserId.Authenticated, resourceType: ResourceType, permission: Permission): IO[AuthError, List[ResourceId]]
-  // For listing resources a user can access (e.g. "show my workspaces").
 ```
 
-**Service account write scope** (enforced at K.6 provisioning):
-- Permitted: `owner_user` and `owner_team` on `workspace` only
-- Prohibited: `editor`, `analyst`, `viewer`, all other relations
-- See §7 — these two writes are lifecycle management, not PAP
+`check()` fails the ZIO effect (rather than returning `false`) so a caller
+cannot grant access by ignoring the result — the only way past it is a success:
+
+```scala
+authorizationService.check(user.userId, Permission.DesignWrite, resource)
+  .flatMap(_ => handleRequest(...))   // only reached when check() succeeds (= allowed)
+```
 
 ### 2. PAP is Ops Tooling, Not the App
 
-SpiceDB tuples are written exclusively by external tooling:
+SpiceDB tuples are written exclusively by external tooling. Account-wide
+revocation is a Keycloak operation, not an app endpoint:
 
 | Path | Mechanism | When |
 |------|-----------|------|
-| Org/team provisioning | `AuthzProvisioning` CI/CD job (in-cluster runner — ADR-INFRA-011) | Config change merged to main |
+| Org/team provisioning | `AuthzProvisioning` CI/CD job (in-cluster runner) | Config change merged to main |
 | Individual access changes | `zed` CLI via ops service account | On-demand admin operation with audit log |
 | Emergency bulk revocation | Audited `zed` CLI runbook | Account termination / security incident |
+| Account-wide revocation | Keycloak: disable user | Stops token issuance; existing tokens expire within the ≤ 5 min TTL |
 
-### 3. Keycloak Handles Account-Wide Revocation
+Disabling a user in Keycloak is the primary revocation mechanism: no new tokens
+issue, existing tokens expire within their short TTL, and the SpiceDB tuples
+remain but are unreachable without a valid JWT. For immediate effect, the `zed`
+CLI break-glass runbook deletes tuples directly.
 
-Disabling a user in Keycloak stops token issuance immediately. Combined with short access token TTLs (≤ 5 min), this is the primary revocation mechanism — no app-level revocation endpoint is needed.
+### 3. SpiceDB Receives `userId` Only
 
-```
-Keycloak admin: disable user bob
-  → No new access tokens issued
-  → Existing tokens expire within TTL window
-  → SpiceDB tuples remain but are unreachable (no valid JWT to present)
-  → For immediate effect: zed CLI bulk-delete per ops runbook (M3 break-glass)
-```
-
-### 4. SpiceDB Receives `userId` Only
-
-SpiceDB evaluates the relationship graph. It has no knowledge of JWT role claims and needs none. The only identifier the app passes to `check()` is the `userId` (JWT `sub` claim).
+SpiceDB evaluates the relationship graph and needs no JWT role claims. The only
+identifier `check()` passes is the `userId` (JWT `sub` claim):
 
 ```scala
-// SpiceDB check: userId + permission name + resource reference
-// JWT role claims are NOT an input — the relationship graph is authoritative
 authorizationService.check(
-  user    = userContext.userId,           // ← only this from UserContext
+  user       = userContext.userId,          // ← only this from UserContext
   permission = Permission.DesignWrite,
   resource   = ResourceRef("risk_tree", treeId)
 )
-// userContext.roles is NOT passed here — that is OPA's domain
+// userContext.roles is NOT passed — a role claim without a matching SpiceDB
+// relation on the specific resource is denied. The relationship graph wins.
 ```
 
-JWT role claims (`userContext.roles`) are a coarse signal consumed exclusively by OPA at the mesh layer. If a user has an `editor` role claim but no SpiceDB `editor` relation on a specific resource, they are denied. The relationship graph wins at the instance level.
+### 4. Resource Lifecycle Writes — Not PAP
 
-### 5. Fail-Closed by Default
-
-`check()` fails the ZIO effect with `AuthError.Forbidden` (not returns `false`) so callers cannot accidentally grant access by ignoring the return value. SpiceDB connectivity failure also fails with `AuthError.ServiceUnavailable` — deny, not allow.
-
-```scala
-// Fail-closed: callers simply flatMap — denied and service-unavailable both fail the effect
-authorizationService.check(user.userId, Permission.DesignWrite, resource)
-  .flatMap(_ => handleRequest(...))   // only reached if check() succeeds (= allowed)
-```
-
-### 6. No App Endpoints for Grant/Revoke
-
-No HTTP route in the application exposes tuple write operations. Any future self-service access management capability is a separate administrative service (a dedicated PAP), distinct from this application's codebase and deployment.
-
-### 7. Resource Lifecycle Writes — Not PAP
-
-Recording creator ownership at resource creation is system-initiated, not user-initiated — categorically distinct from PAP (Zanzibar, 2019). Gate: does a _user request_ drive the SpiceDB write?
-- **Yes** (user delegates access) → PAP. Ops tooling only.
-- **No** (system records creator at creation time) → lifecycle write. App is correct.
+Recording creator ownership at resource creation is system-initiated, not
+user-initiated — categorically distinct from PAP. Gate: does a _user request_
+drive the SpiceDB write? Yes (user delegates access) → PAP, ops tooling only.
+No (system records the creator at creation time) → lifecycle write, app is correct.
 
 ```scala
 // BootstrapProvisioner — separate trait, injected only into the bootstrap handler
@@ -104,9 +89,13 @@ for
   ws <- workspaceStore.create(req)
   _  <- bootstrapProvisioner.recordOwnership(userId, ws.id)
   //    writes: workspace:{id}#owner_user@user:{sub}
-  //    AuthorizationService is NOT used here — PEP stays read-only
+  //    AuthorizationService is NOT used here — the PEP stays read-only
 yield ws
 ```
+
+Service-account write scope is enforced at provisioning: `owner_user` and
+`owner_team` on `workspace` only; `editor`, `analyst`, `viewer`, and all other
+relations are prohibited.
 
 ---
 
@@ -119,9 +108,7 @@ yield ws
 trait AuthorizationService:
   def grant(user: UserId, relation: String, resource: ResourceRef): IO[AuthError, Unit]
   def revoke(user: UserId, relation: String, resource: ResourceRef): IO[AuthError, Unit]
-```
 
-```scala
 // GOOD: App reads authorization state only
 trait AuthorizationService:
   def check[P <: Permission](user: UserId.Authenticated, permission: P, resource: ResourceRef): IO[AuthError, Checked[P]]
@@ -137,10 +124,8 @@ object Main extends ZIOAppDefault:
     _ <- authService.grant(adminId, "owner", rootWorkspace)  // App acting as PAP
     _ <- server.start
   yield ()
-```
 
-```scala
-// GOOD: App starts clean — authorization graph is pre-provisioned by CI job
+// GOOD: App starts clean — the authorization graph is pre-provisioned by the CI job
 object Main extends ZIOAppDefault:
   def run = server.start
 ```
@@ -151,9 +136,7 @@ object Main extends ZIOAppDefault:
 // BAD: SpiceDB connectivity failure defaults to allow
 authService.check(user, permission, resource)
   .fold(_ => (), identity)  // error → silently allow
-```
 
-```scala
 // GOOD: Any failure is a deny — check() itself fails the effect
 authService.check(user, permission, resource)
   .flatMap(_ => proceed())  // unreachable on deny or error
@@ -162,13 +145,11 @@ authService.check(user, permission, resource)
 ### ❌ Lifecycle Write on AuthorizationService
 
 ```scala
-// BAD: Resource lifecycle write added to PEP — blurs PAP boundary
+// BAD: Resource lifecycle write added to PEP — blurs the PAP boundary
 trait AuthorizationService:
   def check(...)
   def recordOwnership(userId: UserId, wsId: WorkspaceId): IO[AuthError, Unit]  // ← PAP leak
-```
 
-```scala
 // GOOD: Separate trait scoped to the one handler that needs it
 trait BootstrapProvisioner:
   def recordOwnership(userId: UserId.Authenticated, wsId: WorkspaceId): IO[AuthError, Unit]
@@ -192,8 +173,6 @@ trait BootstrapProvisioner:
 ## References
 
 - [ADR-012: Service Mesh Strategy](./ADR-012.md) — mesh validates JWT; app extracts claims only
-- [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md) — Layer 2 design, SpiceDB provisioning, ops paths
-- [ADR-INFRA-010](../register-infra/docs/adr/ADR-INFRA-010.md) — SpiceDB runtime: Helm chart, fail-closed availability, NetworkPolicy
-- [ADR-INFRA-011](../register-infra/docs/adr/ADR-INFRA-011.md) — Schema lifecycle: in-cluster CI runner applies `schema.zed` via `zed` CLI
+- [AUTHORIZATION-PLAN.md](./plans/AUTHORIZATION-PLAN.md) — Layer 2 design, SpiceDB provisioning, ops paths
 - Google Zanzibar: Google's Consistent, Global Authorization System (2019) — reference for PDP/PAP separation
 - XACML 3.0 (OASIS) — formalizes PEP/PDP/PAP/PIP roles

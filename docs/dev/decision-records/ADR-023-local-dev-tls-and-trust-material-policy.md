@@ -153,5 +153,5 @@ sslmode = disable  # LOCAL DEV ONLY; forbidden in staging/prod
 ## References
 
 - [ADR-012: Service Mesh Strategy](./ADR-012.md)
-- [ADR-022: Secret Handling](./ADR-022-secret-handling.md)
+- [ADR-022: Secret & Credential Handling](./ADR-022-secret-handling.md)
 - [AUTHORIZATION-PLAN.md](./AUTHORIZATION-PLAN.md)

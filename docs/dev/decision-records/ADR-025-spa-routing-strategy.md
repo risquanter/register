@@ -311,5 +311,5 @@ location /w/ {
 ## References
 
 - [ADR-021: Capability URLs](ADR-021-capability-urls.md) — `/w/*` mesh exemption design
-- [ADR-022: Secret Handling](ADR-022-secret-handling.md) — `WorkspaceKeySecret` Iron type
+- [ADR-022: Secret & Credential Handling](ADR-022-secret-handling.md) — `WorkspaceKeySecret` Iron type
 - IMPLEMENTATION-PLAN.md Phase W.6 — original `Router.scala` design (superseded)

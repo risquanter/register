@@ -65,7 +65,7 @@ case class RateLimitExceeded(ip: String, limit: Int, window: String = "1h") exte
 // ============================================================================
 
 /** Workspace not found — maps to opaque 404 (A13).
-  * ADR-022: getMessage omits raw key (zero diagnostic value — request URL identifies workspace).
+  * ADR-035: getMessage omits raw key (zero diagnostic value — request URL identifies workspace).
   */
 case class WorkspaceNotFound(key: WorkspaceKeySecret) extends SimError {
   override def getMessage: String = "Workspace not found"
@@ -80,7 +80,7 @@ case class WorkspaceNotFoundById(id: WorkspaceId) extends SimError {
 }
 
 /** Workspace expired — maps to same opaque 404 as not-found (A13).
-  * ADR-022: getMessage uses createdAt/ttl as diagnostics, not raw key.
+  * ADR-035: getMessage uses createdAt/ttl as diagnostics, not raw key.
   */
 case class WorkspaceExpired(key: WorkspaceKeySecret, createdAt: Instant, ttl: JDuration) extends SimError {
   override def getMessage: String = s"Workspace expired (created: $createdAt, ttl: $ttl)"
@@ -93,7 +93,7 @@ case class WorkspaceExpiredById(id: WorkspaceId, createdAt: Instant, ttl: JDurat
 }
 
 /** Tree not associated with workspace — maps to opaque 404 (A13).
-  * ADR-022: getMessage omits raw key; treeId is the useful diagnostic.
+  * ADR-035: getMessage omits raw key; treeId is the useful diagnostic.
   */
 case class TreeNotInWorkspace(key: WorkspaceKeySecret, treeId: TreeId) extends SimError {
   override def getMessage: String = s"Tree ${treeId.value} not found in workspace"

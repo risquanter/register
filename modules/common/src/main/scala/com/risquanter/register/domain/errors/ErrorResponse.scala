@@ -135,7 +135,7 @@ object ErrorResponse {
     * before errors reach this boundary. See ADR-002 Decision 5.
     * 
     * Dispatches to exhaustive sub-matchers for SimError and IrminError so the
-    * compiler enforces coverage when new subtypes are added (ADR-022 Decision 3).
+    * compiler enforces coverage when new subtypes are added (ADR-035 Decision 1).
     */
   def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
     case e: SimError          => encodeSimError(e)

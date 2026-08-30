@@ -3,7 +3,7 @@
 **Status:** Amended  
 **Date:** 2026-02-12 (amended 2026-02-16)  
 **Tags:** security, capability-url, access-control, ids  
-**Related:** [ADR-012](./ADR-012.md) (Service Mesh Strategy), [ADR-018](./ADR-018-nominal-wrappers.md) (Nominal Wrappers), [ADR-022](./ADR-022-secret-handling.md) (Secret Handling)
+**Related:** [ADR-012](./ADR-012.md) (Service Mesh Strategy), [ADR-018](./ADR-018-nominal-wrappers.md) (Nominal Wrappers), [ADR-022](./ADR-022-secret-handling.md) (Secret & Credential Handling)
 
 ---
 
@@ -21,38 +21,9 @@
 
 ### 1. WorkspaceKeySecret as Capability Credential
 
-A dedicated `WorkspaceKeySecret` type — a 128-bit `SecureRandom` value, base64url encoded to 22 characters — serves as the external-facing capability credential:
-
-```scala
-// Iron-refined type alias — validation proof carried through to the class
-type WorkspaceKeyStr = String :| Match["^[A-Za-z0-9_-]{22}$"]
-
-final class WorkspaceKeySecret private (private val raw: WorkspaceKeyStr):
-  def reveal: String = raw
-  override def toString: String = "WorkspaceKeySecret(***)"
-  override def hashCode: Int = raw.hashCode
-  override def equals(that: Any): Boolean = that match
-    case wk: WorkspaceKeySecret => raw == wk.raw
-    case _                      => false
-
-object WorkspaceKeySecret:
-  def apply(value: WorkspaceKeyStr): WorkspaceKeySecret = new WorkspaceKeySecret(value)
-
-  // Thread-safe shared instance — avoids repeated /dev/urandom seeding per call
-  private val rng: java.security.SecureRandom = new java.security.SecureRandom()
-
-  def generate: UIO[WorkspaceKeySecret] =
-    ZIO.succeed {
-      val bytes = new Array[Byte](16)  // 128 bits
-      rng.nextBytes(bytes)
-      val encoded = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
-      new WorkspaceKeySecret(encoded.refineUnsafe[Match["^[A-Za-z0-9_-]{22}$"]])
-    }
-```
+A dedicated `WorkspaceKeySecret` type — a 128-bit `SecureRandom` value, base64url encoded to 22 characters — serves as the external-facing capability credential. Its type internals — `final class`, Iron-validated, redacted `toString`, the full R1–R8 requirements checklist — are defined in [ADR-022](./ADR-022-secret-handling.md).
 
 `TreeId` remains internal (server-assigned ULID). `WorkspaceKeySecret` is the external-facing capability. This follows **least privilege**: leaking a `WorkspaceKeySecret` exposes one workspace's trees; leaking a `TreeId` could interact with internal APIs.
-
-**Secret handling:** `WorkspaceKeySecret` is a `final class` with Iron-validated internals and redacted `toString` (ADR-022). See [ADR-022](./ADR-022-secret-handling.md) for the full requirements checklist (R1–R8).
 
 ### 2. WorkspaceStore with TTL Eviction
 
@@ -193,4 +164,4 @@ All other routes remain protected by the Keycloak JWT + OPA pipeline defined in 
 - W3C TAG: [Good Practices for Capability URLs](https://www.w3.org/TR/capability-urls/)
 - [ADR-012: Service Mesh Strategy](./ADR-012.md)
 - [ADR-018: Nominal Wrappers](./ADR-018-nominal-wrappers.md)
-- [ADR-022: Secret Handling](./ADR-022-secret-handling.md) — `WorkspaceKeySecret` as `final class` with R1–R8 requirements
+- [ADR-022: Secret & Credential Handling](./ADR-022-secret-handling.md) — `WorkspaceKeySecret` as `final class` with R1–R8 requirements

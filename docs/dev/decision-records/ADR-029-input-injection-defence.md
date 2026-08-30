@@ -146,5 +146,5 @@ val body = s"<p>Node: ${HtmlEncoder.encode(node.name.value)}</p>"
 - OWASP Top 10 A03:2021 — Injection
 - CWE-89 (SQL injection), CWE-79 (XSS), CWE-94 (code injection), CWE-77 (command injection)
 - ADR-001: parse-don't-validate (the same intuition applied to inbound data)
-- ADR-022: Secret Handling & Error Leakage Prevention (outbound counterpart)
+- ADR-035: Error Leakage Prevention (outbound counterpart)
 - ADR-018: nominal wrappers (compile-time distinction between semantically different strings)

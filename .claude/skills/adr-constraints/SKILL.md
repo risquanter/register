@@ -101,7 +101,7 @@ serialization/escaping helpers.
 
 ❌ NEVER include secrets, PII, or internal paths in error messages.
 ✅ INSTEAD: typed error codes (`ValidationErrorCode`) with safe human-readable messages.
-*ADR-010, ADR-022*
+*ADR-010, ADR-035*
 
 ### Frontend
 

@@ -2,7 +2,7 @@
 applyTo: "**/*.scala"
 ---
 
-# Credential Handling & Authorization Boundaries (ADR-022, ADR-024)
+# Credential Handling & Authorization Boundaries (ADR-022, ADR-024, ADR-036)
 
 ## Credential types — apply this checklist before writing the first line
 
@@ -62,9 +62,9 @@ capability identifiers (ADR-021).
 
 Error messages must never contain secrets, PII, or internal paths.
 Typed error channels (`ZIO` error channel, sealed `AppError` hierarchy) over
-`getMessage` string matching (ADR-010).
+`getMessage` string matching (ADR-010, ADR-035).
 
-## Internal identifiers — never accepted as input, never returned as output (hard rule)
+## Internal identifiers — never accepted as input, never returned as output (hard rule, ADR-036)
 
 `WorkspaceId` (and any future internal identifier that participates in a
 storage path, branch name, or other server-side scoping decision) must never

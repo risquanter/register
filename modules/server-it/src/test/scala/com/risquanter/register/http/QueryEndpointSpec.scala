@@ -19,7 +19,7 @@ import io.github.iltotore.iron.*
   *
   * H1 — valid quoted-name query returns 200 with correct satisfyingCount
   * H2 — malformed (unterminated) quoted string returns 400 PARSE_ERROR; response
-  *      body must not contain workspace key or internal identifiers (ADR-022 §4/§6)
+  *      body must not contain workspace key or internal identifiers (ADR-035, ADR-036)
   * H3 — unknown quoted node name returns 400 UNKNOWN_REFERENCE
   */
 object QueryEndpointSpec extends ZIOSpecDefault:

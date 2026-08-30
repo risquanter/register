@@ -1510,7 +1510,7 @@ When upgrading a free-tier deployment to enterprise:
 
 - [ADR-012: Service Mesh Strategy](./ADR-012.md) — Istio + Keycloak + OPA architecture
 - [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — Layer 0 capability model
-- [ADR-022: Secret Handling](./ADR-022-secret-handling.md) — WorkspaceKeySecret credential hardening
+- [ADR-022: Secret & Credential Handling](./ADR-022-secret-handling.md) — WorkspaceKeySecret credential hardening
 - [ADR-023: Local Development TLS and Trust Material Policy](./ADR-023-local-dev-tls-and-trust-material-policy.md) — TLS-by-default local posture, trust material handling
 - [ADR-024: Externalized Authorization — Application as Pure PEP](./ADR-024-externalized-authorization-pep-pattern.md) — no grant/revoke in app; PAP is ops tooling
 - [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) — Tier 1.5 (Layer 0 implementation)
