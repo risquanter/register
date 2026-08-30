@@ -32,6 +32,17 @@
 > `FolDomainNotQuantifiable`, both still routing on `firstField`) plus the A/B/C
 > abstraction decision. See §11.
 
+> **Overall (2026-08-30).** The per-bug "STILL PRESENT" flags in the §0 header
+> above are partly stale; read them against §11 and the code, which supersede
+> them. Solved in the code: Bug 2 (`GlobalError` classifies `FolQueryFailure`),
+> and Bugs 1/3/4 for the `FolUnknownReference` arm (`decode` reads the message
+> slot and round-trips losslessly; a payload roundtrip test exists). The only
+> real remaining code work is Bugs 1/3 for the two sibling arms —
+> `FolUnknownSymbol` and `FolDomainNotQuantifiable` — whose `decode` still routes
+> on `firstField`, plus the §5 (A/B/C) choice that fix requires. This document's
+> class-level bug descriptions are not maintained line-by-line; this note is the
+> current-state summary.
+
 ---
 
 ## 1. Background — Original design intent (verified against code)
@@ -449,3 +460,221 @@ The minimal remaining cleanup is to bring the two sibling arms onto the message
 slot the same way, which closes Bug 1 / Bug 3 entirely; the larger §5 redesign
 stays optional on top of that.
 - [ ] Frontend coordination needed: yes / no (Option B only)
+
+---
+
+## 12. Continuation (2026-08-30): AppError encode/classify exhaustiveness
+
+**Summary.** The `AppError` sealed hierarchy has four direct sub-traits —
+`SimError`, `IrminError`, `AuthError`, `FolQueryFailure` (`AppError.scala`
+lines 8–10, 198, 235). Two dispatch sites classify an incoming error by walking
+those sub-traits, and both match on `Throwable` rather than on the sealed
+`AppError`, so neither is compiler-checked for completeness: a fifth sub-trait
+added later would compile clean and fall silently to a catch-all. That is the
+same class of gap as Bug 2 (a sibling sub-trait missed by a classifier), here
+present structurally rather than as a live bug. This continuation closes it at
+both sites by routing through an intermediate matcher whose scrutinee is the
+sealed `AppError`, which makes a missing sub-trait a compile error
+(`-Wconf:msg=match may not be exhaustive:error`, `build.sbt`). Both changes are
+behaviour-preserving for every error that exists today; the only new mapping is
+a defensive `AuthError` arm on the frontend that no current input reaches. Doc
+corrections bring ADR-010 and ADR-035 from "two sub-traits" to the actual four,
+and make ADR-035's described `encode`/`encodeAppError` structure match the code
+it describes. Ruling: **Option 1** (strengthen the code) plus the frontend
+`GlobalError` narrowing, decided 2026-08-30.
+
+### 12.1 Backend — `ErrorResponse.encode`
+
+`encode(error: Throwable)` currently lists the four sub-traits directly plus a
+`case _`, so the compiler sees a total match on `Throwable` and checks nothing
+about `AppError` coverage. Extract an intermediate matched on the sealed
+`AppError`; the four existing per-family sub-matchers
+(`encodeSimError`/`encodeAuthError`/`encodeIrminError`/`encodeFolQueryFailure`)
+are unchanged.
+
+Before (`ErrorResponse.scala`):
+
+```scala
+def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
+  case e: SimError          => encodeSimError(e)
+  case e: AuthError         => encodeAuthError(e)
+  case e: IrminError        => encodeIrminError(e)
+  case e: FolQueryFailure   => encodeFolQueryFailure(e)
+  // Genuine unknown — already logged at service layer (ADR-002 Decision 5)
+  case _ => makeGeneralResponse()
+}
+```
+
+After:
+
+```scala
+def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
+  case e: AppError => encodeAppError(e)
+  // Genuine unknown — already logged at service layer (ADR-002 Decision 5)
+  case _ => makeGeneralResponse()
+}
+
+/** Exhaustive match on the sealed `AppError` hierarchy: the compiler enforces a
+  * branch for every direct sub-trait (`SimError`, `AuthError`, `IrminError`,
+  * `FolQueryFailure`). A new sub-trait added without a branch is a compile error
+  * (`-Wconf:msg=match may not be exhaustive:error`), so no error family can
+  * silently fall through to the generic response (ADR-035 Decision 1).
+  */
+private def encodeAppError(error: AppError): (StatusCode, ErrorResponse) = error match {
+  case e: SimError          => encodeSimError(e)
+  case e: AuthError         => encodeAuthError(e)
+  case e: IrminError        => encodeIrminError(e)
+  case e: FolQueryFailure   => encodeFolQueryFailure(e)
+}
+```
+
+Behaviour: every `AppError` routes to the same sub-matcher as before; every
+non-`AppError` `Throwable` still reaches `makeGeneralResponse()`. Only the
+compile-time guarantee changes.
+
+New signature: `private def encodeAppError(error: AppError): (StatusCode, ErrorResponse)`.
+
+### 12.2 Frontend — `GlobalError.fromThrowable`
+
+`fromThrowable(e: Throwable)` mixes `SimError` leaf arms (`ValidationFailed`,
+`DataConflict`, `VersionConflict`, `MergeConflict`, the workspace-sentinel
+`RepositoryFailure`) with sub-trait arms (`IrminError`, `SimError`,
+`FolQueryFailure`) and a `case _ => NetworkError` catch-all. `AuthError` has no
+arm today and falls to that catch-all. Split the domain classification into an
+intermediate matched on the sealed `AppError`; the non-domain catch-all
+(browser Fetch/`TypeError`, `IOException`) stays on `fromThrowable`.
+
+Before (`GlobalError.scala`):
+
+```scala
+def fromThrowable(e: Throwable): GlobalError = e match
+  case vf: com.risquanter.register.domain.errors.ValidationFailed =>
+    ValidationFailed(vf.errors)
+  case _: DataConflict    => Conflict(msg(e))
+  case _: VersionConflict => Conflict(msg(e))
+  case _: MergeConflict   => Conflict(msg(e))
+  case rf: RepositoryFailure if RepositoryFailure.isWorkspaceSentinel(rf) =>
+    WorkspaceExpired(
+      "Your previous workspace has expired and its data is no longer available. " +
+      "Creating a new tree will start a fresh workspace.")
+  case _: IrminError      => DependencyError(msg(e))
+  case _: SimError        => ServerError(msg(e))
+  case _: FolQueryFailure => ServerError(msg(e))
+  case _ => NetworkError(msg(e))
+```
+
+After:
+
+```scala
+def fromThrowable(e: Throwable): GlobalError = e match
+  case appErr: AppError => fromAppError(appErr)
+  // Browser Fetch failures (TypeError), IOExceptions, and any other non-domain
+  // throwable. Request-path retries are owned by Istio (ADR-012 §4 + ADR-031);
+  // the SPA fails fast.
+  case _ => NetworkError(msg(e))
+
+/** Exhaustive classification of the sealed `AppError` hierarchy. The compiler
+  * enforces a branch for every direct sub-trait (`SimError`, `IrminError`,
+  * `AuthError`, `FolQueryFailure`); a new sub-trait without a branch is a
+  * compile error, so no error family can silently be reported as a
+  * `NetworkError`.
+  */
+private def fromAppError(e: AppError): GlobalError = e match
+  case vf: com.risquanter.register.domain.errors.ValidationFailed =>
+    ValidationFailed(vf.errors)
+  case _: DataConflict    => Conflict(msg(e))
+  case _: VersionConflict => Conflict(msg(e))
+  case _: MergeConflict   => Conflict(msg(e))
+  case rf: RepositoryFailure if RepositoryFailure.isWorkspaceSentinel(rf) =>
+    WorkspaceExpired(
+      "Your previous workspace has expired and its data is no longer available. " +
+      "Creating a new tree will start a fresh workspace.")
+  case _: SimError        => ServerError(msg(e))
+  case _: IrminError      => DependencyError(msg(e))
+  case _: AuthError       => ServerError(msg(e))
+  case _: FolQueryFailure => ServerError(msg(e))
+```
+
+Behaviour: the guarded `RepositoryFailure` arm precedes `case _: SimError`, so
+non-sentinel `RepositoryFailure` and every other `SimError` reach
+`ServerError` exactly as before; `IrminError`, `FolQueryFailure`, and the
+non-domain catch-all are unchanged. The one new mapping is `AuthError →
+ServerError`. `ErrorResponse.decode` reconstructs HTTP 403 as `AccessDenied`
+(a `SimError`, `ErrorResponse.scala` line 61), never as an `AuthError`, so no
+decoded error reaches the `AuthError` arm; it exists to satisfy compile-time
+exhaustiveness and to force a deliberate mapping if a future `AuthError` ever
+reaches the client. `ServerError` is the neutral default (a generic 5xx-style
+banner); adding a dedicated forbidden `GlobalError` variant for an unreachable
+path is out of scope. No open decision.
+
+New signature: `private def fromAppError(e: AppError): GlobalError`.
+
+### 12.3 Documentation corrections (docs-as-current-state, same pass)
+
+- `ADR-010.md` Decision 1 (lines 28–41): "split into two sub-traits" and the
+  code block listing only `SimError`/`IrminError` → the four current
+  sub-traits, with origin notes (`AuthError` — authorization, ADR-024;
+  `FolQueryFailure` — FOL queries, ADR-028). Decision 5's simplified snippet
+  (lines 95–101) stays as the non-exhaustive baseline it explicitly frames,
+  with its existing hand-off to ADR-035 (lines 104–105).
+- `ADR-035-...md`: the sub-trait tree (lines 25–29) → four sub-traits; the
+  `encodeAppError` code block (lines 40–43) → four branches; the Implementation
+  table entry (line 128) → `encode` + `encodeAppError` + all four per-family
+  matchers. After 12.1 lands, this described structure is exactly the code.
+- `ErrorResponse.scala` `encode` doc comment (lines 137–138): "Dispatches to
+  exhaustive sub-matchers for SimError and IrminError" → dispatches via
+  `encodeAppError` over all four families.
+- `GlobalError.scala` `fromThrowable` doc comment (lines 65–74): keep, and note
+  the completeness is now compiler-enforced over `AppError`.
+
+### 12.4 ADR alignment
+
+- **ADR-010** — hierarchy description corrected to match the code it governs;
+  no behavioural change. Compliant.
+- **ADR-035** — Decision 1's compile-time guarantee becomes real at the
+  top-level dispatch (previously only per-family); the doc's described
+  `encode`/`encodeAppError` structure becomes the actual code. Realized.
+- **ADR-024** — `AuthError` is the authorization error family; the new frontend
+  arm maps it to a neutral banner and reveals nothing about the authorization
+  backend (consistent with the backend collapsing it to an opaque 403). Compliant.
+- **ADR-036** — no identifier or message content changes. Unaffected.
+
+### 12.5 Open decisions
+
+None. The `AuthError → ServerError` frontend mapping is a defensive default for
+a decode-unreachable path, not a value judgement.
+
+### 12.6 Version bump
+
+Shipped code changes (`ErrorResponse.scala`, `GlobalError.scala`) → PATCH:
+`0.10.26` → `0.10.27`. Mirror `APP_VERSION` into both `.env` and `.env.irmin`.
+
+### 12.7 Verification plan
+
+- `sbt commonJVM/test` — `ErrorResponseSpec` stays green (backend encode
+  behaviour unchanged; no spec edit needed).
+- `sbt app/test` — new `GlobalErrorSpec` green: one case per `AppError`
+  sub-trait asserting the mapping (`SimError`/`ValidationFailed` →
+  `ValidationFailed`; `DataConflict` → `Conflict`; sentinel `RepositoryFailure`
+  → `WorkspaceExpired`; non-sentinel `RepositoryFailure` → `ServerError`;
+  `IrminError` → `DependencyError`; `AuthError` → `ServerError`;
+  `FolQueryFailure` → `ServerError`) plus a non-`AppError` throwable →
+  `NetworkError`. This is the per-sub-trait test §8 item 3 names.
+- `sbt server/test` — green (no server-module change; guards against ripple).
+- `sbt serverIt/test` — green (clear leaked `register_it_` networks first).
+- Compilation is the exhaustiveness proof: `encodeAppError`/`fromAppError`
+  match on the sealed `AppError`; deleting any sub-trait branch fails the build.
+
+---
+
+## File inventory
+
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ErrorResponse.scala
+- modules/app/src/main/scala/app/state/GlobalError.scala
+- modules/app/src/test/scala/app/state/GlobalErrorSpec.scala
+- build.sbt
+- .env
+- .env.irmin
+- docs/dev/decision-records/ADR-010.md
+- docs/dev/decision-records/ADR-035-error-leakage-prevention.md
+- docs/dev/decision-records/plans/PLAN-ERROR-REFACTORING.md
