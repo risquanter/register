@@ -2658,6 +2658,41 @@ Then: version bump PATCH (`0.10.18` → `0.10.19`), mirror `APP_VERSION` into
 `.env` and `.env.irmin`; doc-consistency sweep (the `FolUnknownReference` /
 `FolBindFailure` doc-comments in `AppError.scala`; PLAN-ERROR-REFACTORING §11).
 
+#### Outcome (2026-08-31) — spun-off cleanup completed; vql pin advanced to 0.17.0
+
+The cleanup §8.11 deferred to PLAN-ERROR-REFACTORING §11 has landed, and that
+plan is closed (archived at `docs/archive/DONE-PLAN-ERROR-REFACTORING.md`).
+Verified against the code at register `0.10.28`:
+
+- **Sibling `decode` arms brought onto the message slot (that plan §13,
+  Option D).** `FolUnknownSymbol` is retired entirely — no producer, no type,
+  no `UNKNOWN_SYMBOL` wire code remain (zero source references). It was dead
+  end-to-end once vql-engine 0.14.0 pruned its producing variant.
+  `FolDomainNotQuantifiable` is folded from `(typeName, availableTypes)` to a
+  single `message: String` rendered at the `fromQueryError` boundary in
+  `AppError.scala`. Every FOL `decode` arm now reads the per-detail message
+  slot; the §5 `Diagnostic` wire redesign was **not** adopted.
+- **`encode`/`classify` exhaustiveness compile-enforced (that plan §12).**
+  `ErrorResponse.encode` dispatches through `encodeAppError` and
+  `GlobalError.fromThrowable` through `fromAppError`, both matching on the
+  sealed `AppError`, so a missing sub-trait is a compile error rather than a
+  silent fall-through.
+- **vql-engine pin `0.16.0` → `0.17.0` (that plan §14).** `build.sbt`
+  `vqlEngineVersion` is `0.17.0`. 0.17.0 reshapes `BindErrorDetail` into an
+  eleven-case `enum` with **no `Other`** — superseding the two-case
+  `UnparseableConstant(name, sortName, sourceText, rendered)` + `Other(rendered)`
+  shape recorded in the "Engine facts" note above. `UnparseableConstant` keeps
+  its four fields and `BindError.messages` is still `details.map(_.rendered)`,
+  so the reshape required **no change** to the §8.11 bind-error classifier: it
+  still matches `UnparseableConstant` and folds every other detail through
+  `case _ => false`. Only `FolQueryFailureFromQueryErrorSpec` fixture
+  constructors that had built `BindErrorDetail.Other` moved to real variants
+  (`ArityMismatch`, `UnknownPredicate`, `UnknownFunction`); no assertion
+  changed. 0.17.0 is `publishLocal`-only, so the four sbt tiers resolve and
+  pass against it, but the Docker/GraalVM image and BATS builds cannot resolve
+  it until it reaches Maven Central — a vql-engine coordination dependency, not
+  a register code gap.
+
 ### 8.12 Retire node-`=`; add `eq` / `named` / `has_id` with specialized node-reference sorts — implementation-grade (2026-08-25)
 
 **Summary.** Three changes to the `RiskTreeKnowledgeBase` catalog, all
