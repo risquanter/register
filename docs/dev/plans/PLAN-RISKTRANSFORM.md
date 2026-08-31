@@ -1820,9 +1820,10 @@ begins.
 8 surviving mappings (`ParseError`, `UnknownConstantOrLiteralError`,
 `BindError`, `DomainNotFoundError`, `ModelValidationError`, `EvaluationError`,
 `ValidationError`, `UnboundVariableError`) — match stays exhaustive;
-`FolUnknownSymbol` retained (its `UninterpretedSymbolError` source is gone, but
-it still round-trips through `ErrorResponse`); `FolQueryFailureFromQueryErrorSpec`
-drops the 10 matching cases. Landed in the same 0.10.18 PATCH as Step B.
+`FolQueryFailureFromQueryErrorSpec` drops the 10 matching cases. Landed in the
+same 0.10.18 PATCH as Step B. `FolUnknownSymbol` was later retired entirely
+(Option D, PLAN-ERROR-REFACTORING §13): with no producer it was dead
+end-to-end, so the type and its `UNKNOWN_SYMBOL` wire code were removed.
 
 #### Step B — Predicate-targeting domain rework (§8.1 signatures made exact)
 

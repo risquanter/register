@@ -64,15 +64,28 @@ object GlobalError:
 
   /** Classify a Throwable into a GlobalError.
     *
-    * Pattern-matches on the shared `AppError` sealed hierarchy from the
-    * `common` module. Since `ErrorResponse.decode` reconstructs domain
-    * error types (not raw `RuntimeException`), this classifier is
-    * exhaustive over the known error space.
+    * Domain errors reconstructed by `ErrorResponse.decode` are routed through
+    * `fromAppError`, whose match on the sealed `AppError` hierarchy is
+    * compiler-enforced across all four sub-traits — a new family added without a
+    * branch is a compile error rather than a silent `NetworkError`.
     *
-    * For non-HTTP exceptions (e.g. transport-layer failures in the browser),
-    * falls through to JVM exception type matching.
+    * Non-domain throwables (browser Fetch `TypeError`, IOExceptions) fall to the
+    * `NetworkError` catch-all.
     */
   def fromThrowable(e: Throwable): GlobalError = e match
+    case appErr: AppError => fromAppError(appErr)
+    // Browser Fetch failures (TypeError), IOExceptions, and any other non-domain
+    // throwable. Request-path retries are owned by Istio (ADR-012 §4 + ADR-031);
+    // the SPA fails fast.
+    case _ => NetworkError(msg(e))
+
+  /** Exhaustive classification of the sealed `AppError` hierarchy. The compiler
+    * enforces a branch for every direct sub-trait (`SimError`, `IrminError`,
+    * `AuthError`, `FolQueryFailure`); a new sub-trait without a branch is a
+    * compile error, so no error family can silently be reported as a
+    * `NetworkError`.
+    */
+  private def fromAppError(e: AppError): GlobalError = e match
     // ── Shared domain errors (reconstructed by ErrorResponse.decode) ──
     case vf: com.risquanter.register.domain.errors.ValidationFailed =>
       ValidationFailed(vf.errors)
@@ -88,15 +101,10 @@ object GlobalError:
         "Your previous workspace has expired and its data is no longer available. " +
         "Creating a new tree will start a fresh workspace.")
 
-    case _: IrminError      => DependencyError(msg(e))
-
     case _: SimError        => ServerError(msg(e))
-
+    case _: IrminError      => DependencyError(msg(e))
+    case _: AuthError       => ServerError(msg(e))
     case _: FolQueryFailure => ServerError(msg(e))
-
-    // ── Catch-all: browser Fetch failures (TypeError), IOExceptions, and anything else ──
-    // Request-path retries are owned by Istio (ADR-012 §4 + ADR-031); the SPA fails fast.
-    case _ => NetworkError(msg(e))
 
   /** Extract a user-friendly message from a Throwable.
     *

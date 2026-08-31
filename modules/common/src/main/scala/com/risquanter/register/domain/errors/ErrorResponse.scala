@@ -45,14 +45,12 @@ object ErrorResponse {
       case 400 => firstCode match
         case ValidationErrorCode.PARSE_ERROR =>
           FolParseFailure(message, None)
-        case ValidationErrorCode.UNKNOWN_SYMBOL =>
-          FolUnknownSymbol(firstField, Nil)
         case ValidationErrorCode.BIND_FAILED =>
           FolBindFailure(details.map(_.message))
         case ValidationErrorCode.UNKNOWN_REFERENCE =>
           FolUnknownReference(details.map(_.message))
         case ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE =>
-          FolDomainNotQuantifiable(firstField, Set.empty)
+          FolDomainNotQuantifiable(message)
         case _ =>
           ValidationFailed(details.map(d => ValidationError(d.field, d.code, d.message)))
 
@@ -129,21 +127,32 @@ object ErrorResponse {
         RepositoryFailure(s"HTTP ${status.code}: $message")
 
   /** Encode Throwable to error response tuple for HTTP.
-    * 
+    *
     * Note: This is a pure function called by Tapir outside the ZIO runtime.
     * All error logging should happen at the service layer using tapErrorCause
     * before errors reach this boundary. See ADR-002 Decision 5.
-    * 
-    * Dispatches to exhaustive sub-matchers for SimError and IrminError so the
-    * compiler enforces coverage when new subtypes are added (ADR-035 Decision 1).
+    *
+    * Domain errors dispatch via `encodeAppError`, whose match on the sealed
+    * `AppError` is compiler-checked across all four families; any non-`AppError`
+    * throwable falls to the generic response (ADR-035 Decision 1).
     */
   def encode(error: Throwable): (StatusCode, ErrorResponse) = error match {
+    case e: AppError => encodeAppError(e)
+    // Genuine unknown — already logged at service layer (ADR-002 Decision 5)
+    case _ => makeGeneralResponse()
+  }
+
+  /** Exhaustive match on the sealed `AppError` hierarchy: the compiler enforces a
+    * branch for every direct sub-trait (`SimError`, `AuthError`, `IrminError`,
+    * `FolQueryFailure`). A new sub-trait added without a branch is a compile error
+    * (`-Wconf:msg=match may not be exhaustive:error`), so no error family can
+    * silently fall through to the generic response (ADR-035 Decision 1).
+    */
+  private def encodeAppError(error: AppError): (StatusCode, ErrorResponse) = error match {
     case e: SimError          => encodeSimError(e)
     case e: AuthError         => encodeAuthError(e)
     case e: IrminError        => encodeIrminError(e)
     case e: FolQueryFailure   => encodeFolQueryFailure(e)
-    // Genuine unknown — already logged at service layer (ADR-002 Decision 5)
-    case _ => makeGeneralResponse()
   }
 
   /** Exhaustive match on SimError — compiler-enforced coverage.
@@ -202,10 +211,9 @@ object ErrorResponse {
   /** Exhaustive match on FolQueryFailure — compiler-enforced coverage (ADR-028). */
   private def encodeFolQueryFailure(error: FolQueryFailure): (StatusCode, ErrorResponse) = error match {
     case FolParseFailure(message, position)          => makeFolParseFailureResponse(message, position)
-    case FolUnknownSymbol(symbol, available)          => makeFolUnknownSymbolResponse(symbol, available)
     case FolUnknownReference(messages)               => makeFolUnknownReferenceResponse(messages)
     case FolBindFailure(errors)                       => makeFolBindFailureResponse(errors)
-    case FolDomainNotQuantifiable(typeName, available) => makeFolDomainNotQuantifiableResponse(typeName, available)
+    case FolDomainNotQuantifiable(message)            => makeFolDomainNotQuantifiableResponse(message)
     case FolModelValidationFailure(errors)            => makeFolModelValidationFailureResponse(errors)
     case FolEvaluationFailure(message, phase)         => makeFolEvaluationFailureResponse(message, phase)
     case SimulationNotCached(treeId)                  => makeSimulationNotCachedResponse(treeId)
@@ -339,10 +347,6 @@ object ErrorResponse {
     val detail = position.fold(message)(p => s"$message (at position $p)")
     response(StatusCode.BadRequest, "query", ValidationErrorCode.PARSE_ERROR, detail, domain, requestId)
 
-  def makeFolUnknownSymbolResponse(symbol: String, available: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.BadRequest, "query", ValidationErrorCode.UNKNOWN_SYMBOL,
-      s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}", domain, requestId)
-
   /** One `ErrorDetail` per rendered message (mirroring `makeFolBindFailureResponse`),
     * so `decode` reconstructs the full `FolUnknownReference` list losslessly.
     */
@@ -356,9 +360,8 @@ object ErrorResponse {
     val message = s"Query type-checking failed: ${errors.mkString("; ")}"
     (StatusCode.BadRequest, ErrorResponse(JsonHttpError(StatusCode.BadRequest.code, message, details)))
 
-  def makeFolDomainNotQuantifiableResponse(typeName: String, availableTypes: Set[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    response(StatusCode.BadRequest, "query", ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE,
-      s"Type '$typeName' cannot be quantified over. Available domain types: ${availableTypes.mkString(", ")}", domain, requestId)
+  def makeFolDomainNotQuantifiableResponse(message: String, domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    response(StatusCode.BadRequest, "query", ValidationErrorCode.DOMAIN_NOT_QUANTIFIABLE, message, domain, requestId)
 
   def makeFolModelValidationFailureResponse(errors: List[String], domain: String = "query", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     val details = errors.map(e => ErrorDetail(domain, "query", ValidationErrorCode.MODEL_VALIDATION_FAILED, e, requestId))

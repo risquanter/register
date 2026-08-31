@@ -429,11 +429,6 @@ object ErrorResponseSpec extends ZIOSpecDefault {
           decoded.getMessage.contains("Unexpected token")
         )
       },
-      test("FolUnknownSymbol roundtrip preserves type") {
-        val original = FolQueryFailure.FolUnknownSymbol("p96", List("p95", "p99", "lec"))
-        val decoded = ErrorResponse.decode(ErrorResponse.encode(original))
-        assertTrue(decoded.isInstanceOf[FolQueryFailure.FolUnknownSymbol])
-      },
       test("FolBindFailure roundtrip preserves error list losslessly") {
         val errors = List("type 'Loss' is not quantifiable", "arity mismatch; for 'leaf'")
         val original = FolQueryFailure.FolBindFailure(errors)
@@ -452,10 +447,14 @@ object ErrorResponseSpec extends ZIOSpecDefault {
           case other =>
             assertTrue(other.isInstanceOf[FolQueryFailure.FolUnknownReference])
       },
-      test("FolDomainNotQuantifiable roundtrip preserves type") {
-        val original = FolQueryFailure.FolDomainNotQuantifiable("Loss", Set("Asset"))
-        val decoded = ErrorResponse.decode(ErrorResponse.encode(original))
-        assertTrue(decoded.isInstanceOf[FolQueryFailure.FolDomainNotQuantifiable])
+      test("FolDomainNotQuantifiable roundtrip preserves message losslessly") {
+        val original = FolQueryFailure.FolDomainNotQuantifiable(
+          "Queries can only range over tree nodes (type 'Asset'). The type 'Loss' cannot be enumerated. Available quantifiable types: Asset")
+        ErrorResponse.decode(ErrorResponse.encode(original)) match
+          case f: FolQueryFailure.FolDomainNotQuantifiable =>
+            assertTrue(f.message == original.message)
+          case other =>
+            assertTrue(other.isInstanceOf[FolQueryFailure.FolDomainNotQuantifiable])
       },
       test("FolModelValidationFailure roundtrip preserves error list losslessly") {
         val errors = List("Missing function: lec", "Missing domain; for type: Asset")

@@ -65,7 +65,10 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
     test("node-unresolved mixed with a genuine type error → FolBindFailure") {
       val err = QE.BindError(List(
         unparseable("Foo", FolQueryFailure.NodeSortName),
-        BindErrorDetail.Other("arity mismatch for 'leaf': expected 1, actual 2")
+        BindErrorDetail.ArityMismatch(
+          symbol = "leaf", expected = 1, actual = 2,
+          rendered = "arity mismatch for 'leaf': expected 1, actual 2"
+        )
       ))
       FolQueryFailure.fromQueryError(err) match
         case FolQueryFailure.FolBindFailure(errors) =>
@@ -114,8 +117,8 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
     },
     test("BindError getMessage joins rendered messages with semicolons") {
       val err = QE.BindError(List(
-        BindErrorDetail.Other("error A"),
-        BindErrorDetail.Other("error B")
+        BindErrorDetail.UnknownPredicate("A", rendered = "error A"),
+        BindErrorDetail.UnknownFunction("B", rendered = "error B")
       ))
       val mapped = FolQueryFailure.fromQueryError(err)
       assertTrue(mapped.getMessage.contains("error A; error B"))
@@ -125,11 +128,11 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
   // ── Domain-not-found errors → FolDomainNotQuantifiable ──────────────
 
   private val domainNotFoundSuite = suite("→ FolDomainNotQuantifiable")(
-    test("DomainNotFoundError preserves typeName and availableTypes") {
+    test("DomainNotFoundError renders type and Asset into the message") {
       val err = QE.DomainNotFoundError("Loss", Set("Asset"))
       FolQueryFailure.fromQueryError(err) match
-        case FolQueryFailure.FolDomainNotQuantifiable(tn, avail) =>
-          assertTrue(tn == "Loss", avail == Set("Asset"))
+        case FolQueryFailure.FolDomainNotQuantifiable(message) =>
+          assertTrue(message.contains("Loss"), message.contains("Asset"))
         case other => throw MatchError(other)
     },
     test("DomainNotFoundError getMessage mentions type and Asset") {

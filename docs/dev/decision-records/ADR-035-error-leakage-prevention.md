@@ -24,8 +24,10 @@ The error hierarchy (ADR-010) is a sealed `AppError` trait with sealed sub-trait
 
 ```
 sealed trait AppError extends Throwable
-├── sealed trait SimError extends AppError    // domain/service failures
-└── sealed trait IrminError extends AppError  // storage-backend failures
+├── sealed trait SimError extends AppError          // domain/service failures
+├── sealed trait IrminError extends AppError        // storage-backend failures
+├── sealed trait AuthError extends AppError         // authorization failures (ADR-024)
+└── sealed trait FolQueryFailure extends AppError   // FOL query failures (ADR-028)
 ```
 
 `ErrorResponse.encode` dispatches to a typed inner match so the compiler enforces
@@ -38,8 +40,10 @@ def encode(error: Throwable): (StatusCode, ErrorResponse) = error match
 
 // Exhaustive — a new AppError subtype without a branch is a compile error
 private def encodeAppError(error: AppError): (StatusCode, ErrorResponse) = error match
-  case e: SimError   => encodeSimError(e)
-  case e: IrminError => encodeIrminError(e)
+  case e: SimError        => encodeSimError(e)
+  case e: AuthError       => encodeAuthError(e)
+  case e: IrminError      => encodeIrminError(e)
+  case e: FolQueryFailure => encodeFolQueryFailure(e)
 ```
 
 `-Wconf:msg=match may not be exhaustive:error` in `scalacOptions` promotes an
@@ -125,7 +129,7 @@ ZIO.fail(ValidationFailed(List(ValidationError(
 
 | Location | Pattern |
 |----------|---------|
-| `ErrorResponse.encode` | Split into `encode` + `encodeAppError` + `encodeSimError` + `encodeIrminError` — exhaustive inner match |
+| `ErrorResponse.encode` | Split into `encode` + `encodeAppError` + `encodeSimError` + `encodeAuthError` + `encodeIrminError` + `encodeFolQueryFailure` — exhaustive inner match over all four `AppError` families |
 | `build.sbt` | `-Wconf:msg=match may not be exhaustive:error` promotes inexhaustive matches to compile errors |
 | `baseEndpoint` (ADR-001) | `mapErrorOut(ErrorResponse.decode)(ErrorResponse.encode)` — `ErrorResponse` is the only wire type |
 

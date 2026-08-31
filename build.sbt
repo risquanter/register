@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.10.26"
+ThisBuild / version      := "0.10.28"
 ThisBuild / scalaVersion := "3.8.4"
 
 ThisBuild / scalacOptions ++= Seq(
@@ -33,11 +33,12 @@ val zioTelemetryVersion = "3.1.13"
 val openTelemetryVersion = "1.57.0"
 val metalogVersion    = "0.9.0"   // com.risquanter:metalog-distribution (Java)
 // First-party artifact (com.risquanter) — cooldown-exempt per ADR-020 §10
-// (first-party waiver, user-approved 2026-08-09). 0.16.0 exposes each bind
-// error's sort name (BindErrorDetail.UnparseableConstant.sortName), letting
-// register classify an unresolved node reference as UNKNOWN_REFERENCE rather
-// than BIND_FAILED.
-val vqlEngineVersion  = "0.16.0"  // com.risquanter:vql-engine (cross-compiled)
+// (first-party waiver, user-approved 2026-08-09). 0.17.0 (ADR-021) gives each
+// TypeCheckError variant its own BindErrorDetail case and drops the Other
+// catch-all; UnparseableConstant(name, sortName, sourceText, rendered) is
+// unchanged, so register's UNKNOWN_REFERENCE-vs-BIND_FAILED classifier — which
+// reads only sortName plus the rendered messages — is unaffected.
+val vqlEngineVersion  = "0.17.0"  // com.risquanter:vql-engine (cross-compiled)
 
 // Common dependencies (shared between JVM and JS)
 val commonDependencies = Seq(

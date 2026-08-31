@@ -276,23 +276,6 @@ object FolQueryFailure:
     override def getMessage: String =
       position.fold(message)(p => s"$message (at position $p)")
 
-  /** Retained for the `ErrorResponse` wire round-trip; no longer produced by
-    * `fromQueryError` (the library dropped its unknown-symbol variant, folding
-    * that condition into bind-phase checks).
-    *
-    * Signals a query that is syntactically valid but references a predicate or
-    * function name that does not exist in the `TypeCatalog`.
-    *
-    * Example: `"Q[>=]^{2/3} x (leaf(x), gt_loss(p96(x), 5000))"` —
-    * `p96` is not a declared function; available functions are `p95`, `p99`, `lec`.
-    *
-    * HTTP 400 — `UNKNOWN_SYMBOL`.
-    */
-  final case class FolUnknownSymbol(symbol: String, available: List[String])
-    extends FolQueryFailure:
-    override def getMessage: String =
-      s"Unknown symbol '$symbol'. Available: ${available.mkString(", ")}"
-
   /** Maps from a bind-phase failure whose every error is an unresolved node
     * reference — a quoted constant (e.g. a node name) that is not present in the
     * `TypeCatalog` node domain. A user-level query error: the named node does not
@@ -366,12 +349,9 @@ object FolQueryFailure:
     *
     * HTTP 400 — `DOMAIN_NOT_QUANTIFIABLE`.
     */
-  final case class FolDomainNotQuantifiable(typeName: String, availableTypes: Set[String])
+  final case class FolDomainNotQuantifiable(message: String)
     extends FolQueryFailure:
-    override def getMessage: String =
-      s"Queries can only range over tree nodes (type 'Asset'). " +
-      s"The type '$typeName' cannot be enumerated. " +
-      s"Available quantifiable types: ${availableTypes.mkString(", ")}"
+    override def getMessage: String = message
 
   /** Maps from `vql.error.QueryError.EvaluationError` / `ValidationError` /
     * `UnboundVariableError`.
@@ -433,7 +413,11 @@ object FolQueryFailure:
         if allNodeUnresolved then FolUnknownReference(e.messages)
         else                      FolBindFailure(e.messages)
       // ── Domain-not-found → 400 (D14, defensive fallback) ───────
-      case e: QE.DomainNotFoundError      => FolDomainNotQuantifiable(e.typeName, e.availableTypes)
+      case e: QE.DomainNotFoundError      =>
+        FolDomainNotQuantifiable(
+          s"Queries can only range over tree nodes (type 'Asset'). " +
+          s"The type '${e.typeName}' cannot be enumerated. " +
+          s"Available quantifiable types: ${e.availableTypes.mkString(", ")}")
       // ── Model-validation → 500 (wiring error) ──────────────────
       case e: QE.ModelValidationError     => FolModelValidationFailure(e.errors)
       // ── Evaluation-phase errors → 500 ───────────────────────────
