@@ -62,7 +62,7 @@ final class LECChartState(
   val satisfyingNodeIds: Var[Set[NodeId]] = Var(Set.empty)
 
   /** Structured curve data fetched via `lec-multi` endpoint.
-    * Keyed by `NodeId`, matching the domain type end-to-end (ADR-001 §4).
+    * Keyed by `NodeId`, matching the domain type end-to-end (ADR-001 §3).
     *
     * Written only by the trigger pipeline below — `loadCurves`/`clearCurves`/
     * `reset` emit triggers instead of setting this Var, so a new request or a

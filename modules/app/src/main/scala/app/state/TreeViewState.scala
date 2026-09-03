@@ -127,7 +127,7 @@ final class TreeViewState(
     if selectedTree.now() != v then selectedTree.set(v)
   }(using unsafeWindowOwner)
 
-  // ── UI state (uses NodeId per ADR-001 §7) ─────────────────────
+  // ── UI state (uses NodeId per ADR-001 §3) ─────────────────────
   val expandedNodes: Var[Set[NodeId]] = Var(Set.empty)
   val selectedNodeId: Var[Option[NodeId]] = Var(None)
 

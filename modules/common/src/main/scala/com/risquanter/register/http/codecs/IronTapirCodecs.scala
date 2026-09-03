@@ -77,7 +77,7 @@ object IronTapirCodecs {
     * (for OpenAPI documentation). Path/query params derive Schema from Codec,
     * but JSON bodies need explicit Schema for Iron types.
     * 
-    * @see ADR-001 Section "JSON Bodies with Iron Types"
+    * @see ADR-001 §2 — JSON bodies with bare Iron types need an explicit Schema
     */
   given Schema[SafeId.SafeId] = Schema.string
 

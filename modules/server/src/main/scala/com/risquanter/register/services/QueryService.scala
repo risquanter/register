@@ -13,8 +13,8 @@ import vql.logic.ParsedQuery
   * `QueryRequest.resolve()`) and evaluates it against a risk tree's
   * structural and simulation data using the `vql.typed` many-sorted pipeline.
   *
-  * No parsing or raw-string validation happens here — ADR-001 §4:
-  * "No validation in service methods".
+  * No parsing or raw-string validation happens here — ADR-001 §2:
+  * no validation happens in service methods.
   */
 trait QueryService:
 

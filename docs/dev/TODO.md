@@ -1752,7 +1752,61 @@ Smells/Implementation shape).
 timeless-context phrasing, code-first style) and bring each into conformance, or
 split oversized ones per the template's guidance. Keep each ADR's number.
 
-**Status:** scheduled — run right after the error-handling ADR change lands. Not started.
+**Decisions (2026-09-03) — ADR-001 full template conformance rides this item (Option C).**
+ADR-001 ("Validation Strategy with Iron Types and Smart Constructors") is
+~485 lines against the template's 100–200 target, with ~10 Decision patterns
+against the 3–5 ceiling, a broken Decision numbering sequence
+(`1,2,3,4,5,7,5,6,7,8` — duplicate 5 and 7), and two sections the template does
+not define. The full conformance pass is done here (not folded into the
+domain-invariant-hardening plan), because every step of it breaks source
+`§`-anchored citations and so needs its own hook token and file inventory. The
+specific ADR-001 work:
+
+- **Renumber** the Decision section into a single sequential sequence (fixes the
+  duplicate `§5` / `§7`).
+- **Extract to `docs/dev/decision-records/ADR-001-appendix.md`** the two
+  non-template sections ("Executable Validation Checklist", "Red Flags") and the
+  ~80-line §8 "External-System Output Boundary Constraints"
+  (`PrintableAscii` / `SecureUrlConstraint` / `ExternalTokenStr` + the credential
+  token class). Appendix files are an existing pattern (ADR-004a/007/014
+  appendices).
+- **Consolidate** the repeated boundary→codec→service→repository code examples
+  into one to three worked examples, and collapse the three "validation in X"
+  Code Smells into one. Every distinct rule must survive the consolidation.
+- Target 100–200 lines in the main ADR.
+
+**Citation sweep (part of this item's scope).** Renumbering and the §8
+extraction move the `§`-anchors that source and docs cite by number. Every
+citation below must be re-pointed to the new section number or the appendix
+anchor in the same change:
+
+- ADR-001 §1 — `modules/common/src/main/scala/com/risquanter/register/http/requests/QueryRequest.scala:20`
+- ADR-001 §4 — `modules/server/src/main/scala/com/risquanter/register/services/QueryService.scala:16`; `modules/common/.../domain/data/iron/OpaqueTypes.scala:604,625`; `modules/app/src/main/scala/app/state/LECChartState.scala:65`
+- ADR-001 §7 — `modules/app/src/main/scala/app/state/TreeViewState.scala:130`
+- ADR-001 §8 — `modules/server/.../configs/SpiceDbConfig.scala:19,76`; `modules/common/.../domain/data/iron/OpaqueTypes.scala:34,42`; `modules/common/.../domain/data/iron/ValidationUtil.scala:112,129`
+- ADR-001 named anchor "JSON Bodies with Iron Types" — `modules/common/.../http/codecs/IronTapirCodecs.scala:80`
+
+Several of these are under `modules/**` (hook-gated), so **this item, when
+executed, needs its own implementation-grade plan document and hook token** — it
+is not a docs-only change.
+
+**Sequencing with the domain-invariant-hardening plan.** This item runs FIRST;
+then a consistency sweep; then the domain-invariant-hardening plan
+(`docs/dev/plans/PLAN-DOMAIN-INVARIANT-HARDENING.md`, PLAN-RISKTRANSFORM §9)
+adds its new "Aggregate Constructors Are Private" Decision pattern onto the
+already-conformant ADR-001. That plan's implementation section is gated on a
+consistency sweep of this item's output.
+
+**Status:** in progress. ADR-001 (Option C) conformance is complete — ADR-001
+restructured to four sequential Decision patterns (fixing the broken
+`1,2,3,4,5,7,5,6,7,8` sequence), `ADR-001-appendix.md` created (External-System
+Output Boundary Constraints + Executable Validation Checklist + Red Flags),
+examples/Code Smells consolidated, main ADR down to 170 lines. The `§`-anchored
+source citations in the mapping above are applied and verified (only §1/§2/§3
+remain in `modules/**`; six `ADR-001-appendix.md` references in place). All unit
+tiers plus `serverIt` are green. The remaining ADRs in this repo-wide sweep are
+not started; ADR-001 completion unblocks the consistency sweep that gates
+`docs/dev/plans/PLAN-DOMAIN-INVARIANT-HARDENING.md`.
 
 ## 37. LECGenerator single-pass statistics — efficiency
 
@@ -1990,3 +2044,40 @@ parked for it are not orphaned; it is deliberately a pointer, not a spec.
   RA-2) also unblock once auxiliary sorts exist — same prerequisite.
 
 **Status:** open — future epic, prerequisite-gated (no asset-graph domain yet).
+
+---
+
+## 46. Reify tree-level collection bounds as Iron `MaxLength` refined types (Lever 2) — deferred
+
+Reference: `docs/dev/plans/PLAN-RISKTRANSFORM.md` §9, "Lever 2".
+
+**What it is.** Replace the plain collection fields on the domain aggregates —
+`RiskTree.nodes`, `RiskTree.mitigations`, `TransformPipeline.steps`,
+`RiskPortfolio.childIds`, `RiskLeaf.percentiles` / `RiskLeaf.quantiles` — with
+Iron `MaxLength[N]`-refined collection types, so the count ceiling is carried in
+the type and enforced by the compiler at every construction site. This would be
+the codebase's first collection-level Iron refinement (all current Iron uses
+refine a scalar), and §9 scopes it all-or-nothing.
+
+**Finding — no marginal security benefit over a boundary validator.** The
+attacker-facing control against oversized-payload resource exhaustion is the
+runtime rejection at the request boundary: the count validators in
+`RiskTree.fromNodes` (landing in §9) plus the zio-http request body-size limit.
+Both are runtime checks at the point untrusted input enters. An Iron
+`MaxLength` type enforces the same bound at construction, so at the boundary it
+is functionally equivalent to a validator — it rejects the same inputs at the
+same place. Iron's extra guarantee is compile-time: no *internal* code path can
+build an over-limit collection and pass it downstream. That is defence-in-depth
+against a future internal bug, not a new attacker-facing control, because an
+attacker only reaches the domain through the already-guarded boundary.
+Consequently, deferring Lever 2 does not weaken the system's resistance to
+malicious oversized input, provided §9's `fromNodes` count validators land
+(they do — see §9 Lever "collection bounds").
+
+**Why deferred.** First cross-platform (Scala.js + zio-json + tapir `Schema`)
+collection refinement; the churn and round-trip-verification risk are
+disproportionate to a correctness-only (not security) marginal benefit once the
+`fromNodes` validators exist. Revisit as its own scoped change.
+
+**Status:** deferred — enforcement provided at runtime by §9's `fromNodes`
+collection-count validators; Iron typing is a later compile-time hardening.

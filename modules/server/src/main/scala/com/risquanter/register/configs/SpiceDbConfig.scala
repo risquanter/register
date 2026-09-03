@@ -16,7 +16,7 @@ import com.risquanter.register.domain.data.iron.ValidationUtil
 //   R3: toString redacted — prevents accidental log leakage
 //   R4: reveal method — explicit opt-in extraction at call sites
 //   R5: Iron-validated raw type (ExternalTokenStr) — PrintableAscii + MaxLength[2048]
-//       blocks CRLF injection before the value can reach an HTTP header (ADR-001 §8)
+//       blocks CRLF injection before the value can reach an HTTP header (ADR-001-appendix.md, "External-System Output Boundary Constraints")
 //   R6: manual equals / hashCode — structural equality without reflection
 //   R7: fromString companion constructor — validates at config load time
 //   R8: no JSON codec — config-only type; never serialised to or from JSON
@@ -73,7 +73,7 @@ object SpiceDbConsistency:
   * @param consistency    ZedToken cache freshness policy (default: minimize-latency)
   * @param timeoutSeconds Per-request timeout in seconds (default: 10)
   *
-  * @see ADR-001 §8: ExternalTokenStr PrintableAscii injection guard
+  * @see ADR-001-appendix.md, "External-System Output Boundary Constraints": ExternalTokenStr PrintableAscii injection guard
   * @see ADR-022: SpiceDbToken credential class design (R1–R8)
   */
 final case class SpiceDbConfig(

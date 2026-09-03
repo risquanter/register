@@ -31,7 +31,7 @@ type UrlConstraint = Not[Blank] & MaxLength[200] & Match["^(?i)https?://(?:\\[[0
 // HTTPS-only URL constraint — narrows UrlConstraint to TLS-only endpoints.
 // Prevents silent plaintext downgrade for external services that receive credentials in headers.
 // Use for any config-loaded service URL where a credential is transmitted (SpiceDB, Keycloak, etc.).
-// See ADR-001 §8.
+// See ADR-001-appendix.md, "External-System Output Boundary Constraints".
 type SecureUrlConstraint = Not[Blank] & MaxLength[200] &
   Match["^https://(?:\\[[0-9a-fA-F:]+\\]|[^/:#?\\s]+)(?::\\d+)?(?:/[^\\s]*)?$"]
 
@@ -39,7 +39,7 @@ type SecureUrlConstraint = Not[Blank] & MaxLength[200] &
 // Blocks CRLF injection (\r\n), null bytes (\x00), and all ASCII control characters (\x01-\x1F, \x7F).
 // Range: 0x21 (!) through 0x7E (~) — visible US-ASCII only; no space, no non-ASCII bytes.
 // Use: any string sent verbatim as an HTTP header field value or as an external service credential.
-// See ADR-001 §8 for the full application rule.
+// See ADR-001-appendix.md, "External-System Output Boundary Constraints", for the full application rule.
 type PrintableAscii = Match["^[\\x21-\\x7E]+$"]
 
 // External service token string — config-loaded opaque credential sent verbatim as an HTTP header.
@@ -601,7 +601,7 @@ object NodeId:
   given JsonDecoder[NodeId] = JsonDecoder[String].mapOrFail(s =>
     NodeId.fromString(s).left.map(_.mkString(", ")))
 
-  // JSON map-key codecs — required for Map[NodeId, V] serialization (ADR-001 §4)
+  // JSON map-key codecs — required for Map[NodeId, V] serialization (ADR-001 §3)
   given JsonFieldEncoder[NodeId] = JsonFieldEncoder.string.contramap(_.value)
   given JsonFieldDecoder[NodeId] = JsonFieldDecoder.string.mapOrFail(s =>
     NodeId.fromString(s).left.map(_.mkString(", ")))
@@ -622,7 +622,7 @@ object MitigationId:
   given JsonDecoder[MitigationId] = JsonDecoder[String].mapOrFail(s =>
     MitigationId.fromString(s).left.map(_.mkString(", ")))
 
-  // JSON map-key codecs — required for Map[MitigationId, V] serialization (ADR-001 §4)
+  // JSON map-key codecs — required for Map[MitigationId, V] serialization (ADR-001 §3)
   given JsonFieldEncoder[MitigationId] = JsonFieldEncoder.string.contramap(_.value)
   given JsonFieldDecoder[MitigationId] = JsonFieldDecoder.string.mapOrFail(s =>
     MitigationId.fromString(s).left.map(_.mkString(", ")))
