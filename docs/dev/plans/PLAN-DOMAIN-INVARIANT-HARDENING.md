@@ -326,26 +326,24 @@ pre-implementation gate (rides #36).
 
 ## Open decisions
 
-**OD-1 — expert-mode point-count lower bound.** The metalog fitter also throws
-for fewer than 2 points (`terms < 2`). `validateExpertMode` currently requires
-only non-empty (≥ 1). Bounding the upper end at 20 does not close the lower-end
-crash for a 1-point expert leaf.
+**OD-1 — expert-mode point-count lower bound. RESOLVED → Option A** (user ruling).
+The metalog fitter also throws for fewer than 2 points (`terms < 2`);
+`validateExpertMode` previously required only non-empty (≥ 1), so a 1-point
+expert leaf passed validation and then crashed the fitter past the boundary.
 
-- **Option A (recommended, mine):** raise the expert-mode minimum to 2 points in
-  the same validator (`p.length >= 2`), completing the `[2, 20]` fit-validity
-  range this phase already touches. A metalog needs ≥ 2 points to fit; < 2 is a
-  crash today. Verify first that no existing valid data / request-layer check
-  admits a 1-point expert leaf; if one exists, it is already crashing and this
-  fixes it.
-- **Option B:** leave the lower bound out of scope (the user's §9 ruling named
-  only upper bounds); track the `terms < 2` crash as its own TODO.
+The expert-mode validator now requires **≥ 2 points** in the equal-length
+branch, completing the `[2, 20]` fit-validity range this phase already touches.
+Implementation guard (carried from the option's condition): before landing,
+verify no existing valid data or request-layer check admits a 1-point expert
+leaf; if one does, it is already crashing today and this fix closes it. The
+`RiskLeafSpec` lower-bound case (1 point → `CONSTRAINT_VIOLATION`; 2 → succeed)
+is added alongside the upper-bound case.
 
-This is the only open decision. It is raised, not silently decided, because it
-adds a bound the §9 ruling did not name. Everything else is resolved:
-body-size 8 MiB configurable (D1); percentiles/quantiles ≤ 20 (D2); resource-limit
-docs → ADR-017 (D3); node-name uniqueness fold-in (D4); Lever 2 deferred → TODO
-#46; `RiskResultGroup` `final` (Decision A); ADR-001 conformance → TODO #36
-Option C (pre-implementation gate).
+No open decisions remain. Everything is resolved: expert-mode lower bound = 2
+(OD-1, Option A); body-size 8 MiB configurable (D1); percentiles/quantiles ≤ 20
+(D2); resource-limit docs → ADR-017 (D3); node-name uniqueness fold-in (D4);
+Lever 2 deferred → TODO #46; `RiskResultGroup` `final` (Decision A); ADR-001
+conformance → TODO #36 Option C (pre-implementation gate).
 
 ---
 
@@ -354,8 +352,9 @@ Option C (pre-implementation gate).
 New/updated tests:
 
 - **Unit (commonJVM)** —
-  - `RiskLeafSpec`: expert-mode > 20 points → `CONSTRAINT_VIOLATION`; boundary
-    (20 → succeed, 21 → fail); OD-1 lower bound if Option A ruled.
+  - `RiskLeafSpec`: expert-mode point-count bounds — upper (20 → succeed,
+    21 → `CONSTRAINT_VIOLATION`) and lower (1 → `CONSTRAINT_VIOLATION`,
+    2 → succeed), the OD-1 = Option A range `[2, 20]`.
   - `RiskPortfolioSpec`: childIds > 1 000 → `CONSTRAINT_VIOLATION`; 1 000 → succeed.
   - new `RiskTreeBoundsSpec`: nodes > 10 000 → `CONSTRAINT_VIOLATION`; duplicate
     node names → `AMBIGUOUS_REFERENCE`; both valid → succeed.
