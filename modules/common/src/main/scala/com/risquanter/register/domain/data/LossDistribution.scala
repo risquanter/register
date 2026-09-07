@@ -216,7 +216,7 @@ object RiskResult {
  * children for drill-down analysis. The aggregate distribution models the
  * total loss from a portfolio of risks.
  */
-case class RiskResultGroup private (
+final case class RiskResultGroup private (
   children: List[LossDistribution],
   override val nodeId: NodeId,
   override val trialOutcomes: TrialOutcomes

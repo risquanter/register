@@ -85,6 +85,25 @@ store, so each edit is a **new commit on the same path** rather than a delete-an
 Per-node history is therefore queryable, and cache invalidation can target the single
 changed node instead of the whole tree.
 
+### 6. Resource Limits on Tree Size
+
+A tree is bounded so a single request cannot allocate unbounded memory or drive
+downstream fitters past their valid range. The limits are enforced at the
+earliest point that owns the value — the transport layer for the request body,
+the smart constructors for the collections:
+
+| Limit | Value | Where enforced |
+|---|---|---|
+| HTTP request body | 8 MiB (env `REGISTER_MAX_REQUEST_BYTES`) | zio-http `RequestStreaming.Disabled(maxRequestBytes)` — rejected with 413 before any handler runs |
+| Nodes per tree | ≤ 10 000 | `RiskTree.fromNodes` (`validateNodeCount`) |
+| Children per portfolio | ≤ 1 000 | `RiskPortfolio.create` (accumulated with the non-empty rule) |
+| Expert percentile/quantile points | 2 … 20 | `RiskLeaf.create` (`validateExpertMode`) — matches the metalog fitter's valid term range |
+| Mitigations per tree | ≤ 1 000 | `RiskTree.fromNodes` (`validateMitigations`) |
+
+The 8 MiB body cap is sized above the largest valid tree payload (a maximal
+10 000-node expert-leaf tree serialises to ≈ 4.94 MiB). The body-size control is
+a transport-layer DoS defence and is cross-referenced from ADR-029.
+
 ---
 
 ## Code Smells

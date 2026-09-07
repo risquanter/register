@@ -30,7 +30,7 @@ import io.github.iltotore.iron.*
   *        entities scoping nodes by stable id, versioned with the tree content
   *        (PLAN-RISKTRANSFORM §7). Application semantics: MitigationApplication.
   */
-final case class RiskTree(
+final case class RiskTree private (
   id: TreeId,
   name: SafeName.SafeName,
   nodes: Seq[RiskNode],
@@ -112,7 +112,34 @@ object RiskTree {
       nodes.collect { case leaf: RiskLeaf => leaf.name.value -> leaf.seedVarId },
       field = "nodes.seedVarId"
     )
-  
+
+  /** Upper bound on a tree's node count — a resource limit against oversized
+    * trees on merges, store-loads, and programmatic construction. */
+  private val MaxNodes = 10000
+
+  private def validateNodeCount(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
+    if (nodes.sizeIs <= MaxNodes) Validation.succeed(())
+    else Validation.fail(ValidationError(
+      field = "nodes",
+      code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message = s"too many nodes: ${nodes.size} exceeds the limit of $MaxNodes"
+    ))
+
+  /** Node names are unique across the whole tree. The request boundary
+    * (RiskTreeRequests.requireUniqueNames) enforces the same rule on the write
+    * paths; folding it into fromNodes makes it hold for merges, store-loads, and
+    * programmatic construction too (correct-by-construction layering, matching
+    * requireDistinctSeedVarIds). */
+  private def requireDistinctNodeNames(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] = {
+    val dups = nodes.groupBy(_.name.value).collect { case (n, ns) if ns.sizeIs > 1 => n }
+    if (dups.isEmpty) Validation.succeed(())
+    else Validation.fail(ValidationError(
+      field = "nodes.name",
+      code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
+      message = s"duplicate node name(s): ${dups.toList.sorted.mkString(", ")}"
+    ))
+  }
+
   /** Create a RiskTree from a flat list of nodes.
     *
     * Returns accumulated validation errors per ADR-010.
@@ -135,8 +162,10 @@ object RiskTree {
       .validateWith(
         TreeIndex.fromNodeSeq(nodes),
         requireDistinctSeedVarIds(nodes),
-        resolveSeedVarHighWater(nodes, seedVarHighWater)
-      ) { (index, _, highWater) => (index, highWater) }
+        resolveSeedVarHighWater(nodes, seedVarHighWater),
+        validateNodeCount(nodes),
+        requireDistinctNodeNames(nodes)
+      ) { (index, _, highWater, _, _) => (index, highWater) }
       .flatMap { (index, highWater) =>
         Validation
           .validateWith(
@@ -245,24 +274,4 @@ object RiskTree {
     }
   }
   
-  /** Create a RiskTree with a single root node (convenience for tests and simple cases) */
-  def singleNode(
-    id: TreeId,
-    name: SafeName.SafeName,
-    root: RiskNode
-  ): Validation[ValidationError, RiskTree] = {
-    fromNodes(id, name, Seq(root), root.id)
-  }
-  
-  /** Unsafe version of singleNode for tests where validity is guaranteed.
-    * 
-    * @throws IllegalArgumentException if validation fails
-    */
-  def singleNodeUnsafe(
-    id: TreeId,
-    name: SafeName.SafeName,
-    root: RiskNode
-  ): RiskTree = {
-    fromNodesUnsafe(id, name, Seq(root), root.id)
-  }
 }

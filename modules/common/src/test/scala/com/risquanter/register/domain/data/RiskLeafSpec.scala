@@ -3,7 +3,8 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.RiskLeaf
-import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId}
+import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, unsafeGet}
 
 object RiskLeafSpec extends ZIOSpecDefault {
 
@@ -304,6 +305,63 @@ object RiskLeafSpec extends ZIOSpecDefault {
           seedVarId = 24L
         )
         assertTrue(result.isFailure)
+      },
+      // OD-1 (Option A): expert-mode point count must lie in the metalog
+      // fitter's valid range [2, 20]; outside it the fitter throws past the
+      // validation boundary, so the bound is enforced at construction.
+      test("accepts expert mode with 20 points (upper bound)") {
+        val result = RiskLeaf.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some((1 to 20).map(_ * 0.04).toArray),
+          quantiles = Some((1 to 20).map(_.toDouble * 1000).toArray),
+          seedVarId = 25L
+        )
+        assertTrue(result.isSuccess)
+      },
+      test("rejects expert mode with 21 points (above the metalog cap of 20)") {
+        val result = RiskLeaf.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some((1 to 21).map(_ * 0.04).toArray),
+          quantiles = Some((1 to 21).map(_.toDouble * 1000).toArray),
+          seedVarId = 26L
+        )
+        assertTrue(
+          result.toEither.swap.toOption.get.exists(e =>
+            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.field.endsWith("percentiles"))
+        )
+      },
+      test("rejects expert mode with 1 point (below the fitter minimum of 2)") {
+        val result = RiskLeaf.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.5)),
+          quantiles = Some(Array(1000.0)),
+          seedVarId = 27L
+        )
+        assertTrue(
+          result.toEither.swap.toOption.get.exists(e =>
+            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.field.endsWith("percentiles"))
+        )
+      },
+      test("accepts expert mode with 2 points (lower bound)") {
+        val result = RiskLeaf.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          distributionType = "expert",
+          probability = 0.5,
+          percentiles = Some(Array(0.1, 0.9)),
+          quantiles = Some(Array(1000.0, 5000.0)),
+          seedVarId = 28L
+        )
+        assertTrue(result.isSuccess)
       }
     ),
     suite("Lognormal Mode Validation")(
@@ -837,7 +895,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
     suite("SeedVarId JSON")(
       test("encoder writes seedVarId and decoder round-trips it") {
         import zio.json.{EncoderOps, DecoderOps}
-        val leaf = RiskLeaf.unsafeApply(
+        val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("seed-json"),
           name = "Seed JSON",
           distributionType = "lognormal",
@@ -845,7 +903,7 @@ object RiskLeafSpec extends ZIOSpecDefault {
           minLoss = Some(100L),
           maxLoss = Some(1000L),
           seedVarId = 42L
-        )
+        ), "leaf")
         val json = leaf.toJson
         val decoded = json.fromJson[RiskLeaf]
         assertTrue(

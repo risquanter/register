@@ -7,6 +7,7 @@ import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, R
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, SafeName, IronConstants, OccurrenceProbability, SeedVarId}
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.tree.TreeIndex
+import com.risquanter.register.testutil.TestHelpers.unsafeGet
 
 object TreeBuilderStateSpec extends ZIOSpecDefault:
 
@@ -29,18 +30,14 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     val safeName = SafeName.fromString(name).toOption.getOrElse(
       throw new AssertionError(s"Invalid SafeName: $name")
     )
-    val index = TreeIndex.fromNodeSeq(nodes).toEither.fold(
-      errs => throw new AssertionError(s"Invalid tree index: $errs"),
-      identity
-    )
     val highWater = nodes.collect { case l: RiskLeaf => l.seedVarId }.maxByOption(_.value).getOrElse(
       SeedVarId.fromLong(1L).toOption.get
     )
-    RiskTree(treeId, safeName, nodes, rootId, index, highWater)
+    RiskTree.fromNodesUnsafe(treeId, safeName, nodes, rootId, Some(highWater))
 
   // ── Fixture nodes ────────────────────────────────────────────────────
 
-  private val lognormalLeaf = RiskLeaf.unsafeApply(
+  private val lognormalLeaf = unsafeGet(RiskLeaf.create(
     id               = leafUlid,
     name             = "Cyber Risk",
     distributionType = "lognormal",
@@ -49,9 +46,9 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     maxLoss          = Some(50000L),
     parentId         = None,
     seedVarId = 1L
-  )
+  ), "leaf")
 
-  private val expertLeaf = RiskLeaf.unsafeApply(
+  private val expertLeaf = unsafeGet(RiskLeaf.create(
     id               = leafUlid,
     name             = "Expert Risk",
     distributionType = "expert",
@@ -61,23 +58,23 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     terms            = Some(3),
     parentId         = None,
     seedVarId = 2L
-  )
+  ), "leaf")
 
-  private val rootPortfolio = RiskPortfolio.unsafeFromStrings(
+  private val rootPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id       = rootUlid,
     name     = "Operational Risk",
     childIds = Array(leafUlid),
     parentId = None
-  )
+  ), "portfolio")
 
-  private val childPortfolio = RiskPortfolio.unsafeFromStrings(
+  private val childPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id       = childUlid,
     name     = "IT Risk",
     childIds = Array(leafUlid),
     parentId = Some(rootId)
-  )
+  ), "portfolio")
 
-  private val leafUnderChild = RiskLeaf.unsafeApply(
+  private val leafUnderChild = unsafeGet(RiskLeaf.create(
     id               = leafUlid,
     name             = "Hardware Failure",
     distributionType = "lognormal",
@@ -86,14 +83,14 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     maxLoss          = Some(10000L),
     parentId         = Some(childId),
     seedVarId = 3L
-  )
+  ), "leaf")
 
-  private val rootPortfolioWithChild = RiskPortfolio.unsafeFromStrings(
+  private val rootPortfolioWithChild = unsafeGet(RiskPortfolio.createFromStrings(
     id       = rootUlid,
     name     = "Operational Risk",
     childIds = Array(childUlid),
     parentId = None
-  )
+  ), "portfolio")
 
   // ── Spec ─────────────────────────────────────────────────────────────
 
@@ -123,7 +120,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("root portfolio + leaf under root: parent resolved correctly") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -132,7 +129,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 4L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "Root and Leaf", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -158,7 +155,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("round-trip: after loadFromTree, toUpdateRequest() succeeds") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -167,7 +164,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 5L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "Round Trip", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -245,7 +242,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     suite("toUpdateRequest — node identity preservation")(
 
       test("loaded nodes route to the existing buckets carrying their original ids; new buckets empty") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -254,7 +251,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 6L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "Identity", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -271,7 +268,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("a node added after load routes to the new bucket while loaded nodes keep identity") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -280,7 +277,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 7L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "Mixed", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -311,7 +308,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       test("NodeId survives the value/refine round-trip: emitted id strings are valid SafeIds") {
         // Guards the precondition the server relies on: NodeId.value re-refines to the
         // same SafeId, so the existing-bucket id is accepted, not rejected.
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -320,7 +317,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 8L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "RoundTripId", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -340,7 +337,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     suite("updateLeaf")(
 
       test("happy path: replaces draft in leavesVar; old name gone") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -349,7 +346,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 9L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "UpdateLeaf", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -368,7 +365,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("preserves NodeId across rename") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -377,7 +374,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 10L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "LeafIdPreserve", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -392,9 +389,9 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
       test("fails when new name collides with another leaf") {
         val leaf2Ulid = "01HX9ABCDE0000000000000005"
-        val leaf1 = RiskLeaf.unsafeApply(id = leafUlid,  name = "LeafA", distributionType = "lognormal", probability = 0.1, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId), seedVarId = 11L)
-        val leaf2 = RiskLeaf.unsafeApply(id = leaf2Ulid, name = "LeafB", distributionType = "lognormal", probability = 0.2, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId), seedVarId = 12L)
-        val root2 = RiskPortfolio.unsafeFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, leaf2Ulid), parentId = None)
+        val leaf1 = unsafeGet(RiskLeaf.create(id = leafUlid,  name = "LeafA", distributionType = "lognormal", probability = 0.1, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId), seedVarId = 11L), "leaf")
+        val leaf2 = unsafeGet(RiskLeaf.create(id = leaf2Ulid, name = "LeafB", distributionType = "lognormal", probability = 0.2, minLoss = Some(100L), maxLoss = Some(1000L), parentId = Some(rootId), seedVarId = 12L), "leaf")
+        val root2 = unsafeGet(RiskPortfolio.createFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, leaf2Ulid), parentId = None), "portfolio")
         val tree  = mkTree(treeUlid, "Collision", Seq(root2, leaf1, leaf2), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -408,7 +405,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     suite("updatePortfolio")(
 
       test("renames portfolio and cascade-updates leaf parent ref") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -417,7 +414,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 13L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "CascadeRename", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -434,7 +431,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("preserves NodeId across rename") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -443,7 +440,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 14L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "PortIdPreserve", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -480,7 +477,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("updateLeaf: activeForm becomes Locked(Leaf(newName)) on success, replacing whatever mode was active") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -489,7 +486,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 15L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "ClearSel", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -518,7 +515,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("removeNode: clears activeForm to Blank when the removed leaf was the active target") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -527,7 +524,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 16L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "RemoveClearsSel", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -538,7 +535,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("removeNode: leaves activeForm untouched when a different leaf is removed") {
-        val leaf1 = RiskLeaf.unsafeApply(
+        val leaf1 = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -547,8 +544,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 17L
-        )
-        val leaf2 = RiskLeaf.unsafeApply(
+        ), "leaf")
+        val leaf2 = unsafeGet(RiskLeaf.create(
           id               = childUlid,
           name             = "Market Risk",
           distributionType = "lognormal",
@@ -557,8 +554,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(20000L),
           parentId         = Some(rootId),
           seedVarId = 18L
-        )
-        val rootWithTwo = RiskPortfolio.unsafeFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, childUlid), parentId = None)
+        ), "leaf")
+        val rootWithTwo = unsafeGet(RiskPortfolio.createFromStrings(id = rootUlid, name = "Operational Risk", childIds = Array(leafUlid, childUlid), parentId = None), "portfolio")
         val tree  = mkTree(treeUlid, "RemoveOther", Seq(rootWithTwo, leaf1, leaf2), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -570,7 +567,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("loadFromTree resets activeForm to Blank even if a node was selected beforehand (bug fix: stale form after scenario/branch switch)") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Cyber Risk",
           distributionType = "lognormal",
@@ -579,7 +576,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 19L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "ResetOnLoad", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.activeForm.set(FormMode.Editing(FormTarget.Leaf(SafeName.fromString("Stale Leaf").toOption.get)))
@@ -601,7 +598,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     suite("populateLeafForm")(
 
       test("expert mode: percentiles rescaled from 0-1 domain to 0-100 form scale") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Expert Risk",
           distributionType = "expert",
@@ -611,7 +608,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           terms            = Some(3),
           parentId         = Some(rootId),
           seedVarId = 19L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "PopulateExpert", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)
@@ -629,7 +626,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
       },
 
       test("lognormal mode: minLoss and maxLoss fields populated correctly") {
-        val leafUnderRoot = RiskLeaf.unsafeApply(
+        val leafUnderRoot = unsafeGet(RiskLeaf.create(
           id               = leafUlid,
           name             = "Lognormal Risk",
           distributionType = "lognormal",
@@ -638,7 +635,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
           maxLoss          = Some(50000L),
           parentId         = Some(rootId),
           seedVarId = 20L
-        )
+        ), "leaf")
         val tree  = mkTree(treeUlid, "PopulateLognormal", Seq(rootPortfolio, leafUnderRoot), rootId)
         val state = new TreeBuilderState()
         state.loadFromTree(tree)

@@ -28,7 +28,7 @@ object CacheTransparencySpec extends ZIOSpecDefault {
   // ----- fixtures: v1 → v2 (param edit) → v3 (reparent + param edit) -----
 
   private def leaf(id: String, parent: String, prob: Double, seedVar: Long): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = idStr(id),
       name = s"Leaf $id",
       distributionType = "lognormal",
@@ -37,15 +37,15 @@ object CacheTransparencySpec extends ZIOSpecDefault {
       maxLoss = Some(50000L),
       parentId = Some(nodeId(parent)),
       seedVarId = seedVar
-    )
+    ), "leaf")
 
   private def portfolio(id: String, children: Seq[String], parent: Option[String]): RiskPortfolio =
-    RiskPortfolio.unsafeFromStrings(
+    unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr(id),
       name = s"Portfolio $id",
       childIds = children.map(idStr).toArray,
       parentId = parent.map(nodeId)
-    )
+    ), "portfolio")
 
   private val testTreeId: TreeId = treeId("transparency-tree")
 

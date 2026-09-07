@@ -108,35 +108,14 @@ final case class RiskLeaf private (
 object RiskLeaf {
   import zio.prelude.Validation
   import com.risquanter.register.domain.data.iron._
-  
-  // Note: Iron type JSON codecs for SafeId, SafeName, etc. are NOT needed here.
-  // RiskLeaf uses a custom Raw-based codec (RiskLeafRaw) that serializes via
-  // primitives, bypassing direct Iron type encoding/decoding entirely.
-  // TreeId/NodeId codecs live in their companion objects (OpaqueTypes.scala).
-  
-  // Temporary: Unsafe constructor for backward compatibility during migration
-  // Test-only helper: Use fromValidated in production code
-  def unsafeApply(
-    id: String,
-    name: String,
-    distributionType: String,
-    probability: Double,
-    percentiles: Option[Array[Double]] = None,
-    quantiles: Option[Array[Double]] = None,
-    minLoss: Option[Long] = None,
-    maxLoss: Option[Long] = None,
-    parentId: Option[NodeId] = None,
-    terms: Option[Int] = None,
-    seedVarId: Long
-  ): RiskLeaf = {
-    // Unsafe: Assumes valid input (for backward compatibility only)
-    create(id, name, distributionType, probability, percentiles, quantiles, minLoss, maxLoss, parentId = parentId, terms = terms, seedVarId = seedVarId)
-      .toEither
-      .fold(
-        errors => throw new IllegalArgumentException(s"Invalid RiskLeaf: $errors"),
-        identity
-      )
-  }
+
+  /** Expert-mode percentile/quantile point-count bounds, matching the metalog
+    * fitter's valid term range [2, 20]. Fewer than 2 or more than 20 points
+    * makes the fitter throw past the validation boundary. Because
+    * requireTermsWithinPercentiles enforces terms <= percentiles.length, bounding
+    * the point count here transitively bounds the fitted term count. */
+  private val MinPercentiles = 2
+  private val MaxPercentiles = 20
 
   /** Production constructor: accepts already-validated Iron types, bypasses re-validation.
     * Use when domain types are already refined (e.g., from Distribution in buildNodes).
@@ -205,6 +184,9 @@ object RiskLeaf {
       dt.toString match {
         case "expert" =>
           validateExpertMode(percentiles, quantiles, fieldPrefix).flatMap { result =>
+            // The dependent terms-within-percentiles rule applies only when `terms`
+            // itself refined successfully; when it did not, its error is already
+            // carried by the outer validateWith, so skip it here (no double-report).
             termsV match {
               case Validation.Success(_, t) =>
                 requireTermsWithinPercentiles(t, percentiles, fieldPrefix).map(_ => result)
@@ -245,15 +227,28 @@ object RiskLeaf {
     
     (percentiles, quantiles) match {
       case (Some(p), Some(q)) if p.nonEmpty && q.nonEmpty =>
-        Validation
-          .fromPredicateWith[ValidationError, (Array[Double], Array[Double])](
-            ValidationError(
+        (p.length, q.length) match {
+          case (pl, ql) if pl != ql =>
+            Validation.fail(ValidationError(
               field = s"$fieldPrefix.distributionType",
               code = ValidationErrorCode.INVALID_COMBINATION,
-              message = s"Expert mode: percentiles and quantiles must have same length (got ${p.length} vs ${q.length})"
-            )
-          )((p, q)) { case (pArr, qArr) => pArr.length == qArr.length }
-          .as((None, None))
+              message = s"Expert mode: percentiles and quantiles must have same length (got $pl vs $ql)"
+            ))
+          case (pl, _) if pl < MinPercentiles =>
+            Validation.fail(ValidationError(
+              field = s"$fieldPrefix.percentiles",
+              code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+              message = s"Expert mode: requires at least $MinPercentiles percentile/quantile points (got $pl)"
+            ))
+          case (pl, _) if pl > MaxPercentiles =>
+            Validation.fail(ValidationError(
+              field = s"$fieldPrefix.percentiles",
+              code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+              message = s"Expert mode: at most $MaxPercentiles percentile/quantile points (got $pl)"
+            ))
+          case _ =>
+            Validation.succeed((None, None))
+        }
       
       case (None, None) =>
         Validation.fail(ValidationError(
@@ -519,7 +514,11 @@ final case class RiskPortfolio private (
 object RiskPortfolio {
   import zio.prelude.Validation
   import com.risquanter.register.domain.data.iron._
-  
+
+  /** Upper bound on a portfolio's direct child count — a resource limit
+    * against oversized fan-out. */
+  private val MaxChildren = 1000
+
   /** Smart constructor: Validates all fields and returns Validation.
     * 
     * Validation Rules:
@@ -550,16 +549,24 @@ object RiskPortfolio {
     val nameValidation: Validation[ValidationError, SafeName.SafeName] =
       toValidation(ValidationUtil.refineName(name, s"$fieldPrefix.name"))
     
-    // Step 3: Validate childIds array (business rule)
+    // Step 3: Validate childIds array (business rule): non-empty AND count-bounded, accumulated
+    val arr = Option(childIds).getOrElse(Array.empty[NodeId])
+    val nonEmptyV = Validation.fromPredicateWith[ValidationError, Array[NodeId]](
+      ValidationError(
+        field = s"$fieldPrefix.childIds",
+        code = ValidationErrorCode.REQUIRED_FIELD,
+        message = "childIds array must not be empty"
+      )
+    )(arr)(_.nonEmpty)
+    val countV = Validation.fromPredicateWith[ValidationError, Array[NodeId]](
+      ValidationError(
+        field = s"$fieldPrefix.childIds",
+        code = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"too many children: ${arr.length} exceeds the limit of $MaxChildren"
+      )
+    )(arr)(_.length <= MaxChildren)
     val childIdsValidation: Validation[ValidationError, Array[NodeId]] =
-      Validation
-        .fromPredicateWith[ValidationError, Array[NodeId]](
-          ValidationError(
-            field = s"$fieldPrefix.childIds",
-            code = ValidationErrorCode.REQUIRED_FIELD,
-            message = "childIds array must not be empty"
-          )
-        )(Option(childIds).getOrElse(Array.empty[NodeId]))(_.nonEmpty)
+      Validation.validateWith(nonEmptyV, countV)((_, _) => arr)
     
     // Step 4: Combine all validations (parallel error accumulation)
     Validation.validateWith(
@@ -650,24 +657,6 @@ object RiskPortfolio {
   
   given codec: JsonCodec[RiskPortfolio] = JsonCodec(encoder, decoder)
   
-  /** Test-only helper: Use fromValidated in production code.
-    */
-  def unsafeApply(
-    id: String,
-    name: String,
-    childIds: Array[NodeId],
-    parentId: Option[NodeId] = None
-  ): RiskPortfolio = {
-    // Force refinement (throws on failure)
-    val validId = SafeId.fromString(id).getOrElse(
-      throw new IllegalArgumentException(s"Invalid ID: $id")
-    )
-    val validName = SafeName.fromString(name).getOrElse(
-      throw new IllegalArgumentException(s"Invalid name: $name")
-    )
-    new RiskPortfolio(safeId = validId, safeName = validName, parentId = parentId, childIds = childIds)
-  }
-
   /** Production constructor: accepts already-validated Iron types, bypasses re-validation.
     * Use when domain types are already refined (e.g., from Distribution in buildNodes).
     */
@@ -678,19 +667,4 @@ object RiskPortfolio {
     parentId: Option[NodeId]
   ): RiskPortfolio =
     new RiskPortfolio(safeId = id, safeName = name, parentId = parentId, childIds = childIds)
-  
-  /** Helper: Create portfolio from string child IDs (for test convenience) */
-  def unsafeFromStrings(
-    id: String,
-    name: String,
-    childIds: Array[String],
-    parentId: Option[NodeId] = None
-  ): RiskPortfolio = {
-    val validChildIds = childIds.map { cid =>
-      NodeId(SafeId.fromString(cid).getOrElse(
-        throw new IllegalArgumentException(s"Invalid child ID: $cid")
-      ))
-    }
-    unsafeApply(id, name, validChildIds, parentId)
-  }
 }

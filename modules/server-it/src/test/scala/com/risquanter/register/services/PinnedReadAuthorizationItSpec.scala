@@ -25,8 +25,8 @@ object PinnedReadAuthorizationItSpec extends ZIOSpecDefault:
     val root = RiskPortfolio.create(rootId.value, "Root", Array(leafId), None).toEither.toOption.get
     val leaf = RiskLeaf.create(id = leafId.value, name = "Leaf 1", distributionType = "lognormal",
       probability = 0.1, minLoss = Some(1000L), maxLoss = Some(2000L), parentId = Some(rootId), seedVarId = 1L).toEither.toOption.get
-    RiskTree(tid, SafeName.fromString("Pinned Tree").toOption.get, Seq(root, leaf), rootId,
-      TreeIndex.fromNodesUnsafe(Map(rootId -> root, leafId -> leaf)), SeedVarId.fromLong(1L).toOption.get)
+    RiskTree.fromNodesUnsafe(tid, SafeName.fromString("Pinned Tree").toOption.get, Seq(root, leaf), rootId,
+      Some(SeedVarId.fromLong(1L).toOption.get))
 
   private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient] =
     ZLayer.make[RiskTreeRepository & IrminClient](

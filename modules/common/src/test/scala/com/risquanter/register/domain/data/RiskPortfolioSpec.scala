@@ -3,6 +3,7 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.errors.ValidationErrorCode
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
 
 object RiskPortfolioSpec extends ZIOSpecDefault {
@@ -226,6 +227,29 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         )
 
         assertTrue(result.isFailure)
+      },
+
+      test("accept childIds at the count limit of 1000") {
+        val result = RiskPortfolio.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          childIds = Array.tabulate(1000)(i => nodeId(s"leaf-$i"))
+        )
+
+        assertTrue(result.isSuccess)
+      },
+
+      test("reject childIds above the count limit of 1000") {
+        val result = RiskPortfolio.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          childIds = Array.tabulate(1001)(i => nodeId(s"leaf-$i"))
+        )
+
+        assertTrue(
+          result.toEither.swap.toOption.get.exists(e =>
+            e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.field.endsWith("childIds"))
+        )
       }
     ),
 
@@ -378,33 +402,6 @@ object RiskPortfolioSpec extends ZIOSpecDefault {
         )
 
         assertTrue(result.isFailure)
-      }
-    ),
-    
-    suite("unsafeFromStrings convenience method")(
-      
-      test("create portfolio from string IDs") {
-        val portfolio = RiskPortfolio.unsafeFromStrings(
-          id = idStr("portfolio-1"),
-          name = "Test Portfolio",
-          childIds = Array(idStr("leaf-1"), idStr("leaf-2")),
-          parentId = None
-        )
-
-        assertTrue(portfolio.id == nodeId("portfolio-1")) &&
-        assertTrue(portfolio.childIds.length == 2) &&
-        assertTrue(portfolio.childIds(0) == nodeId("leaf-1"))
-      },
-      
-      test("create portfolio with parentId from string") {
-        val portfolio = RiskPortfolio.unsafeFromStrings(
-          id = idStr("child-portfolio"),
-          name = "Child",
-          childIds = Array(idStr("leaf-1")),
-          parentId = Some(nodeId("parent-portfolio"))
-        )
-
-        assertTrue(portfolio.parentId == Some(nodeId("parent-portfolio")))
       }
     )
   )

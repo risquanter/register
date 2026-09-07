@@ -61,17 +61,12 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       seedVarId = 2L
     ).toEither.toOption.get
 
-    val index = TreeIndex.fromNodesUnsafe(
-      Map(rootId -> portfolio, leaf1Id -> leaf1, leaf2Id -> leaf2)
-    )
-
-    RiskTree(
+    RiskTree.fromNodesUnsafe(
       id = tid,
       name = SafeName.fromString(treeName).toOption.get,
       nodes = Seq(portfolio, leaf1, leaf2),
       rootId = rootId,
-      index = index,
-      seedVarHighWater = SeedVarId.fromLong(2L).toOption.get
+      seedVarHighWater = Some(SeedVarId.fromLong(2L).toOption.get)
     )
 
   private def updatedTree(original: RiskTree): RiskTree =
@@ -85,14 +80,12 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       childIds = Array(leaf1Id),
       parentId = None
     ).toEither.toOption.get
-    val newIndex = TreeIndex.fromNodesUnsafe(Map(rootId -> newRoot, leaf1Id -> leaf1))
-    RiskTree(
+    RiskTree.fromNodesUnsafe(
       id = original.id,
       name = original.name,
       nodes = Seq(newRoot, leaf1),
       rootId = rootId,
-      index = newIndex,
-      seedVarHighWater = original.seedVarHighWater
+      seedVarHighWater = Some(original.seedVarHighWater)
     )
 
   /** Identity-preserving edit: change leaf-1's `minLoss` while keeping every NodeId
@@ -114,14 +107,12 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       parentId = Some(rootId),
       seedVarId = 1L               // identity-preserving: same leaf keeps its stream
     ).toEither.toOption.get
-    val newIndex = TreeIndex.fromNodesUnsafe(Map(rootId -> root, leaf1Id -> newLeaf1, leaf2Id -> leaf2))
-    RiskTree(
+    RiskTree.fromNodesUnsafe(
       id = original.id,
       name = original.name,
       nodes = Seq(root, newLeaf1, leaf2),
       rootId = rootId,
-      index = newIndex,
-      seedVarHighWater = original.seedVarHighWater
+      seedVarHighWater = Some(original.seedVarHighWater)
     )
 
   private def positiveInt(n: Int): PositiveInt = n.refineUnsafe

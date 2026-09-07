@@ -4080,6 +4080,12 @@ the two new production/test paths are covered.
 
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 
+**Status:** elevated to the implementation-grade plan
+[PLAN-DOMAIN-INVARIANT-HARDENING.md](PLAN-DOMAIN-INVARIANT-HARDENING.md), which
+supersedes this design-stage sketch — it carries the exact signatures, file
+inventory, hook token, and resolved decisions. The text below is retained as the
+originating design record.
+
 **Motivation (surfaced by M1R's bounds work, 2026-08-13).** Two gaps, both
 pre-existing, neither introduced by M1R:
 1. `RiskTree` and `TreeIndex` are the **only two aggregate types with public
@@ -4088,10 +4094,13 @@ pre-existing, neither introduced by M1R:
    `private` + a smart constructor. So every invariant `RiskTree.fromNodes` /
    `TreeIndex.fromNodes` validates (unique ids, root-exists, and the new
    mitigation/step counts) is **bypassable** via `apply` / `.copy`.
-2. **No HTTP request body-size limit is configured** (none found in
-   `modules/server/src/main`), so an oversized payload is fully decoded and
-   allocated *before* any bound check runs — the field-level bound (Iron or
-   validator) rejects it only post-allocation.
+2. **The HTTP request body-size limit is implicit and wrong-sized.** zio-http's
+   `Server.Config.default` sets `requestStreaming = Disabled(102400)` — a 100 KiB
+   cap the server inherits unchanged, so it is undocumented, unconfigurable, and
+   (if it binds through the tapir interpreter) rejects valid large trees. The
+   original "none found" reading missed the zio-http default; the elevated plan
+   replaces the implicit cap with an explicit, configurable 8 MiB limit so an
+   oversized payload is rejected before the decoder allocates it.
 
 Three levers, in descending value. This is a **new phase with its own
 implementation-grade elevation, file inventory, and hook token** — it does NOT

@@ -42,7 +42,7 @@ import zio.prelude.Validation
   * @param parents Map from child ID to parent ID (no entry for root)
   * @param children Map from parent ID to list of child IDs
   */
-final case class TreeIndex(
+final case class TreeIndex private (
     nodes: Map[NodeId, RiskNode],
     parents: Map[NodeId, NodeId],
     children: Map[NodeId, List[NodeId]]

@@ -37,16 +37,16 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
   private val dbId      = nodeId("db")
   private val edgeId    = nodeId("edge")
 
-  private val servers = RiskPortfolio.unsafeApply(
+  private val servers = unsafeGet(RiskPortfolio.create(
     id = serversId.value, name = "Servers",
-    childIds = Array(appTierId, edgeId), parentId = None)
-  private val appTier = RiskPortfolio.unsafeApply(
+    childIds = Array(appTierId, edgeId), parentId = None), "portfolio")
+  private val appTier = unsafeGet(RiskPortfolio.create(
     id = appTierId.value, name = "AppTier",
-    childIds = Array(webId, dbId), parentId = Some(serversId))
+    childIds = Array(webId, dbId), parentId = Some(serversId)), "portfolio")
   private def leaf(id: NodeId, nm: String, seed: Long, parent: NodeId): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = id.value, name = nm, distributionType = "lognormal", probability = 0.2,
-      minLoss = Some(1000L), maxLoss = Some(50000L), parentId = Some(parent), seedVarId = seed)
+      minLoss = Some(1000L), maxLoss = Some(50000L), parentId = Some(parent), seedVarId = seed), "leaf")
   private val web  = leaf(webId, "Web", 1L, appTierId)
   private val db   = leaf(dbId, "DB", 2L, appTierId)
   private val edge = leaf(edgeId, "Edge", 3L, serversId)
@@ -55,13 +55,12 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
     Map(serversId -> servers, appTierId -> appTier, webId -> web, dbId -> db, edgeId -> edge)
 
   private def mkTree(mitigations: Mitigation*): RiskTree =
-    RiskTree(
+    RiskTree.fromNodesUnsafe(
       id     = treeId("scope-tree"),
       name   = SafeName.fromString("Scope Tree").toOption.get,
       nodes  = allNodes.values.toSeq,
       rootId = serversId,
-      index  = TreeIndex.fromNodesUnsafe(allNodes),
-      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get,
+      seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),
       mitigations = mitigations.toList
     )
 

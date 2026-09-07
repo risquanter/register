@@ -7,7 +7,7 @@ import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, CacheScope}
 import com.risquanter.register.simulation.SeedDerivation
-import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId}
+import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId, unsafeGet}
 import zio.*
 import zio.test.*
 import zio.test.Assertion.*
@@ -150,7 +150,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     
     suite("Provenance Capture")(
       test("ensureCached with includeProvenance=true captures metadata") {
-        val leaf = RiskLeaf.unsafeApply(
+        val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("test-risk"),
           name = "Test Risk",
           distributionType = "lognormal",
@@ -158,13 +158,14 @@ object ProvenanceSpec extends ZIOSpecDefault {
           minLoss = Some(1000L),
           maxLoss = Some(10000L),
           seedVarId = 1L
-        )
-        
-        val testTree = RiskTree.singleNodeUnsafe(
+        ), "leaf")
+
+        val testTree = unsafeGet(RiskTree.fromNodes(
           id = treeId("tree-1"),
           name = SafeName.SafeName("Test Tree".refineUnsafe),
-          root = leaf
-        )
+          nodes = Seq(leaf),
+          rootId = leaf.id
+        ), "tree")
         
         for {
           resolver <- ZIO.service[CachedResultResolver]
@@ -182,7 +183,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       // The cached value embeds the content-only record (DD-18/DD-19), so
       // every hit returns provenance without fragmenting the cache.
       test("resolver always captures provenance regardless of includeProvenance flag") {
-        val leaf = RiskLeaf.unsafeApply(
+        val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("test-risk"),
           name = "Test Risk",
           distributionType = "lognormal",
@@ -190,13 +191,14 @@ object ProvenanceSpec extends ZIOSpecDefault {
           minLoss = Some(1000L),
           maxLoss = Some(10000L),
           seedVarId = 2L
-        )
-        
-        val testTree = RiskTree.singleNodeUnsafe(
+        ), "leaf")
+
+        val testTree = unsafeGet(RiskTree.fromNodes(
           id = treeId("tree-2"),
           name = SafeName.SafeName("Test Tree 2".refineUnsafe),
-          root = leaf
-        )
+          nodes = Seq(leaf),
+          rootId = leaf.id
+        ), "tree")
         
         for {
           resolver <- ZIO.service[CachedResultResolver]
@@ -212,7 +214,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
         val riskIdLabel = "cyber-attack"
         val riskId = nodeId(riskIdLabel)
 
-        val leaf = RiskLeaf.unsafeApply(
+        val leaf = unsafeGet(RiskLeaf.create(
           id = riskId.value,
           name = "Cyber Attack",
           distributionType = "lognormal",
@@ -220,13 +222,14 @@ object ProvenanceSpec extends ZIOSpecDefault {
           minLoss = Some(1000L),
           maxLoss = Some(50000L),
           seedVarId = 3L
-        )
+        ), "leaf")
 
-        val testTree = RiskTree.singleNodeUnsafe(
+        val testTree = unsafeGet(RiskTree.fromNodes(
           id = treeId("tree-3"),
           name = SafeName.SafeName("Test Tree 3".refineUnsafe),
-          root = leaf
-        )
+          nodes = Seq(leaf),
+          rootId = leaf.id
+        ), "tree")
 
         for {
           resolver <- ZIO.service[CachedResultResolver]
@@ -245,7 +248,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance captures distribution parameters for lognormal") {
-        val leaf = RiskLeaf.unsafeApply(
+        val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("lognormal-risk"),
           name = "Lognormal Risk",
           distributionType = "lognormal",
@@ -253,13 +256,14 @@ object ProvenanceSpec extends ZIOSpecDefault {
           minLoss = Some(1000L),
           maxLoss = Some(10000L),
           seedVarId = 4L
-        )
-        
-        val testTree = RiskTree.singleNodeUnsafe(
+        ), "leaf")
+
+        val testTree = unsafeGet(RiskTree.fromNodes(
           id = treeId("tree-4"),
           name = SafeName.SafeName("Test Tree 4".refineUnsafe),
-          root = leaf
-        )
+          nodes = Seq(leaf),
+          rootId = leaf.id
+        ), "tree")
         
         for {
           resolver <- ZIO.service[CachedResultResolver]
@@ -279,7 +283,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance aggregates multiple node provenances in portfolio") {
-        val risk1 = RiskLeaf.unsafeApply(
+        val risk1 = unsafeGet(RiskLeaf.create(
           id = idStr("risk1"),
           name = "Risk 1",
           distributionType = "lognormal",
@@ -288,9 +292,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(5000L),
           parentId = Some(nodeId("portfolio")),
           seedVarId = 5L
-        )
-        
-        val risk2 = RiskLeaf.unsafeApply(
+        ), "leaf")
+
+        val risk2 = unsafeGet(RiskLeaf.create(
           id = idStr("risk2"),
           name = "Risk 2",
           distributionType = "lognormal",
@@ -299,14 +303,14 @@ object ProvenanceSpec extends ZIOSpecDefault {
           maxLoss = Some(8000L),
           parentId = Some(nodeId("portfolio")),
           seedVarId = 6L
-        )
-        
-        val portfolio = RiskPortfolio.unsafeFromStrings(
+        ), "leaf")
+
+        val portfolio = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("portfolio"),
           name = "Test Portfolio",
           childIds = Array(idStr("risk1"), idStr("risk2")),
           parentId = None
-        )
+        ), "portfolio")
         
         val testTree = RiskTree.fromNodesUnsafe(
           id = treeId("tree-5"),
@@ -336,7 +340,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
     
     suite("Reproduction Validation")(
       test("same provenance seeds produce identical results") {
-        val leaf = RiskLeaf.unsafeApply(
+        val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("deterministic-risk"),
           name = "Deterministic Risk",
           distributionType = "lognormal",
@@ -344,22 +348,24 @@ object ProvenanceSpec extends ZIOSpecDefault {
           minLoss = Some(5000L),
           maxLoss = Some(20000L),
           seedVarId = 7L
-        )
+        ), "leaf")
         
         // Two trees, same leaf content: under content addressing the second
         // read is a deliberate cache HIT — identical content must yield
         // identical outcomes either way (simulated or served from cache)
-        val testTree1 = RiskTree.singleNodeUnsafe(
+        val testTree1 = unsafeGet(RiskTree.fromNodes(
           id = treeId("tree-6"),
           name = SafeName.SafeName("Test Tree 6".refineUnsafe),
-          root = leaf
-        )
-        
-        val testTree2 = RiskTree.singleNodeUnsafe(
+          nodes = Seq(leaf),
+          rootId = leaf.id
+        ), "tree")
+
+        val testTree2 = unsafeGet(RiskTree.fromNodes(
           id = treeId("tree-7"),
           name = SafeName.SafeName("Test Tree 7".refineUnsafe),
-          root = leaf
-        )
+          nodes = Seq(leaf),
+          rootId = leaf.id
+        ), "tree")
         
         for {
           resolver <- ZIO.service[CachedResultResolver]
@@ -374,7 +380,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       },
       
       test("provenance contains all information for reconstruction") {
-        val leaf = RiskLeaf.unsafeApply(
+        val leaf = unsafeGet(RiskLeaf.create(
           id = idStr("test-reconstruction"),
           name = "Test Reconstruction",
           distributionType = "lognormal",
@@ -382,13 +388,14 @@ object ProvenanceSpec extends ZIOSpecDefault {
           minLoss = Some(1000L),
           maxLoss = Some(15000L),
           seedVarId = 8L
-        )
-        
-        val testTree = RiskTree.singleNodeUnsafe(
+        ), "leaf")
+
+        val testTree = unsafeGet(RiskTree.fromNodes(
           id = treeId("tree-8"),
           name = SafeName.SafeName("Test Tree 8".refineUnsafe),
-          root = leaf
-        )
+          nodes = Seq(leaf),
+          rootId = leaf.id
+        ), "tree")
         
         for {
           resolver <- ZIO.service[CachedResultResolver]

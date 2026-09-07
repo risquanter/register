@@ -35,30 +35,29 @@ object MitigationStalenessSpec extends ZIOSpecDefault with TestHelpers:
     name: String = "Cyber",
     parent: NodeId = rootId
   ): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = cyberId.value, name = name, distributionType = "lognormal",
       probability = prob, minLoss = Some(1000L), maxLoss = Some(maxLoss),
-      parentId = Some(parent), seedVarId = 1L)
+      parentId = Some(parent), seedVarId = 1L), "leaf")
 
   private val flood: RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = floodId.value, name = "Flood", distributionType = "lognormal",
       probability = 0.3, minLoss = Some(1000L), maxLoss = Some(50000L),
-      parentId = Some(rootId), seedVarId = 2L)
+      parentId = Some(rootId), seedVarId = 2L), "leaf")
 
   private def root(childIds: NodeId*): RiskPortfolio =
-    RiskPortfolio.unsafeApply(
-      id = rootId.value, name = "Root", childIds = childIds.toArray, parentId = None)
+    unsafeGet(RiskPortfolio.create(
+      id = rootId.value, name = "Root", childIds = childIds.toArray, parentId = None), "portfolio")
 
   private def mkTree(root: RiskPortfolio, leaves: Seq[RiskLeaf], mits: Mitigation*): RiskTree =
     val all: Map[NodeId, RiskNode] = (root +: leaves).map(n => n.id -> n).toMap
-    RiskTree(
+    RiskTree.fromNodesUnsafe(
       id     = treeId("stale-tree"),
       name   = SafeName.fromString("Stale Tree").toOption.get,
       nodes  = all.values.toSeq,
       rootId = root.id,
-      index  = TreeIndex.fromNodesUnsafe(all),
-      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get,
+      seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),
       mitigations = mits.toList
     )
 

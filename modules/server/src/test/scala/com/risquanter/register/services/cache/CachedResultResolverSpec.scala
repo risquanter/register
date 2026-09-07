@@ -30,7 +30,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
   private val risk1IdStr = safeId("risk1").value.toString
   private val risk2IdStr = safeId("risk2").value.toString
 
-  val risk1Leaf = RiskLeaf.unsafeApply(
+  val risk1Leaf = unsafeGet(RiskLeaf.create(
     id = risk1IdStr,
     name = "Risk 1",
     distributionType = "lognormal",
@@ -39,9 +39,9 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
     maxLoss = Some(50000L),
     parentId = Some(nodeId("root")),
     seedVarId = 1L
-  )
+  ), "leaf")
 
-  val risk2Leaf = RiskLeaf.unsafeApply(
+  val risk2Leaf = unsafeGet(RiskLeaf.create(
     id = risk2IdStr,
     name = "Risk 2",
     distributionType = "lognormal",
@@ -50,14 +50,14 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
     maxLoss = Some(20000L),
     parentId = Some(nodeId("root")),
     seedVarId = 2L
-  )
+  ), "leaf")
 
-  val rootNode: RiskNode = RiskPortfolio.unsafeFromStrings(
+  val rootNode: RiskNode = unsafeGet(RiskPortfolio.createFromStrings(
     id = rootIdStr,
     name = "Root Portfolio",
     childIds = Array(risk1IdStr, risk2IdStr),
     parentId = None
-  )
+  ), "portfolio")
 
   val allNodes = Seq(rootNode, risk1Leaf, risk2Leaf)
   val rootId = nodeId("root")
@@ -206,7 +206,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
 
       test("param edit strands the old entry (orphan) and the new content misses the old key") {
         // Same leaf identity, changed probability → different content hash
-        val editedLeaf = RiskLeaf.unsafeApply(
+        val editedLeaf = unsafeGet(RiskLeaf.create(
           id = risk1IdStr,
           name = "Risk 1",
           distributionType = "lognormal",
@@ -215,7 +215,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           maxLoss = Some(50000L),
           parentId = Some(nodeId("root")),
           seedVarId = 1L
-        )
+        ), "leaf")
         val editedTree = unsafeGet(
           RiskTree.fromNodes(
             id = testTreeId,
@@ -262,12 +262,12 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
             id = treeId("other-tree"),
             name = SafeName.SafeName("Other Tree".refineUnsafe),
             nodes = Seq(
-              RiskPortfolio.unsafeFromStrings(
+              unsafeGet(RiskPortfolio.createFromStrings(
                 id = rootIdStr,
                 name = "Other Root",
                 childIds = Array(risk1IdStr),
                 parentId = None
-              ),
+              ), "portfolio"),
               risk1Leaf
             ),
             rootId = rootId

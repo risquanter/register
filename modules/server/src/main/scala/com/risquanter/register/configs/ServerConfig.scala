@@ -7,9 +7,15 @@ package com.risquanter.register.configs
   * @param healthPort Dedicated health-probe port (default 8091, mTLS PERMISSIVE in mesh).
   *                   Serves only /health and /ready — no business endpoints, no interceptors.
   *                   @see ADR-012 (service mesh), AUTHORIZATION-PLAN.md Phase K.5
+  * @param maxRequestBytes Maximum accepted request body size in bytes. Sets the
+  *                   main API server's non-streaming body cap explicitly; requests
+  *                   above it are rejected before the handler runs. Sized for the
+  *                   largest valid tree payload (env REGISTER_MAX_REQUEST_BYTES).
+  *                   @see ADR-029 (input/DoS defence), ADR-017 (resource limits)
   */
 final case class ServerConfig(
   host: String,
   port: Int,
-  healthPort: Int
+  healthPort: Int,
+  maxRequestBytes: Int
 )

@@ -29,7 +29,7 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
   private val seedVarIdOf: Map[NodeId, Long] = Map(leaf1Id -> 1L, leaf2Id -> 2L)
 
   private def leaf(id: NodeId, probability: Double): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = id.value.toString,
       name = s"Leaf ${id.value}",
       distributionType = "lognormal",
@@ -38,19 +38,19 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
       maxLoss = Some(50000L),
       parentId = Some(rootId),
       seedVarId = seedVarIdOf(id)
-    )
+    ), "leaf")
 
   private def tree(children: Seq[RiskNode]): RiskTree =
     unsafeGet(
       RiskTree.fromNodes(
         id = treeIdF,
         name = SafeName.SafeName("Diff Tree".refineUnsafe),
-        nodes = RiskPortfolio.unsafeFromStrings(
+        nodes = unsafeGet(RiskPortfolio.createFromStrings(
           id = rootId.value.toString,
           name = "Root",
           childIds = children.map(_.id.value.toString).toArray,
           parentId = None
-        ) +: children,
+        ), "portfolio") +: children,
         rootId = rootId
       ),
       "Test fixture has invalid RiskTree"

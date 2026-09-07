@@ -2071,13 +2071,18 @@ build an over-limit collection and pass it downstream. That is defence-in-depth
 against a future internal bug, not a new attacker-facing control, because an
 attacker only reaches the domain through the already-guarded boundary.
 Consequently, deferring Lever 2 does not weaken the system's resistance to
-malicious oversized input, provided §9's `fromNodes` count validators land
-(they do — see §9 Lever "collection bounds").
+malicious oversized input: §9's `fromNodes` count validators have landed via
+`PLAN-DOMAIN-INVARIANT-HARDENING.md` (node count ≤ 10 000, childIds ≤ 1 000,
+expert points 2 … 20, mitigations ≤ 1 000), alongside the explicit 8 MiB
+request body cap.
 
 **Why deferred.** First cross-platform (Scala.js + zio-json + tapir `Schema`)
 collection refinement; the churn and round-trip-verification risk are
 disproportionate to a correctness-only (not security) marginal benefit once the
 `fromNodes` validators exist. Revisit as its own scoped change.
 
-**Status:** deferred — enforcement provided at runtime by §9's `fromNodes`
-collection-count validators; Iron typing is a later compile-time hardening.
+**Status:** deferred — the runtime bounds have landed
+(`PLAN-DOMAIN-INVARIANT-HARDENING.md`: `RiskTree.fromNodes` node-count +
+node-name-uniqueness, `RiskPortfolio.create` childIds cap, `RiskLeaf.create`
+expert-point range, plus the 8 MiB request body cap). Iron `MaxLength` collection
+typing remains as a later compile-time hardening.

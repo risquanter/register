@@ -36,7 +36,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
   private val headC2: CommitHash = CommitHash.fromString("b" * 40).toOption.get
 
   private def leaf(id: NodeId, probability: Double): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = id.value.toString,
       name = s"Leaf ${id.value}",
       distributionType = "lognormal",
@@ -45,19 +45,19 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       maxLoss = Some(50000L),
       parentId = Some(rootId),
       seedVarId = if id == leaf1Id then 1L else 2L
-    )
+    ), "leaf")
 
   private def tree(id: TreeId, children: Seq[RiskNode]): RiskTree =
     unsafeGet(
       RiskTree.fromNodes(
         id = id,
         name = SafeName.SafeName("Consistency Tree".refineUnsafe),
-        nodes = RiskPortfolio.unsafeFromStrings(
+        nodes = unsafeGet(RiskPortfolio.createFromStrings(
           id = rootId.value.toString,
           name = "Root",
           childIds = children.map(_.id.value.toString).toArray,
           parentId = None
-        ) +: children,
+        ), "portfolio") +: children,
         rootId = rootId
       ),
       "Test fixture has invalid RiskTree"

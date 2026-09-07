@@ -62,7 +62,7 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       case Revision.At(_)   => None
     override def create(wsId: WorkspaceId, t: RiskTree, branch: BranchRef): Task[RiskTree] =
       com.risquanter.register.util.IdGenerators.nextTreeId.map { id =>
-        val tree = t.copy(id = id); db += ((wsId, branch, id) -> tree); tree
+        val tree = RiskTree.fromNodesUnsafe(id, t.name, t.nodes, t.rootId, Some(t.seedVarHighWater), t.mitigations); db += ((wsId, branch, id) -> tree); tree
       }
     override def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree] =
       ZIO.attempt { val t = db((wsId, branch, id)); val u = op(t); db += ((wsId, branch, id) -> u); u }

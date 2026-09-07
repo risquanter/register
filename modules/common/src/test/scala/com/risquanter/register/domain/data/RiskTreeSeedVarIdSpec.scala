@@ -4,7 +4,7 @@ import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, ValidationMessages}
 import com.risquanter.register.domain.errors.ValidationErrorCode
-import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId}
+import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet}
 
 /** Defense-in-depth layer for seed identity (PLAN-SEED-IDENTITY §5.4):
   * RiskTree's smart constructor — and therefore its JSON decoder, which routes
@@ -18,7 +18,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
     SafeName.fromString(s).toOption.get
 
   private def leaf(idLabel: String, leafName: String, seedVarId: Long): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = idStr(idLabel),
       name = leafName,
       distributionType = "lognormal",
@@ -27,14 +27,14 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       maxLoss = Some(1000L),
       parentId = Some(nodeId("root-pf")),
       seedVarId = seedVarId
-    )
+    ), "leaf")
 
   private def tree(leaves: RiskLeaf*) = {
-    val root = RiskPortfolio.unsafeFromStrings(
+    val root = unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr("root-pf"),
       name = "Root Portfolio",
       childIds = leaves.map(_.id.value).toArray
-    )
+    ), "portfolio")
     RiskTree.fromNodes(treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id)
   }
 
@@ -78,10 +78,10 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       },
       test("explicit watermark above the max is preserved (deleted-leaf history)") {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 2L))
-        val root = RiskPortfolio.unsafeFromStrings(
+        val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
           childIds = leaves.map(_.id.value).toArray
-        )
+        ), "portfolio")
         val hw = SeedVarId.fromLong(9L).toOption.get
         val result = RiskTree.fromNodes(
           treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw)
@@ -90,10 +90,10 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       },
       test("explicit watermark below the max is rejected") {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 5L))
-        val root = RiskPortfolio.unsafeFromStrings(
+        val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
           childIds = leaves.map(_.id.value).toArray
-        )
+        ), "portfolio")
         val hw = SeedVarId.fromLong(3L).toOption.get
         val result = RiskTree.fromNodes(
           treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw)
@@ -109,10 +109,10 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       },
       test("JSON round-trip preserves the watermark") {
         val leaves = Seq(leaf("cyber", "Cyber Attack", 1L), leaf("flood", "Flood Risk", 2L))
-        val root = RiskPortfolio.unsafeFromStrings(
+        val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root-pf"), name = "Root Portfolio",
           childIds = leaves.map(_.id.value).toArray
-        )
+        ), "portfolio")
         val hw = SeedVarId.fromLong(42L).toOption.get
         val valid = RiskTree.fromNodes(
           treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw)

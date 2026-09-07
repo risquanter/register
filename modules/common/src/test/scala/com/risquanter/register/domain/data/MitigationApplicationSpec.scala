@@ -3,7 +3,7 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName}
-import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId, treeId}
+import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId, treeId, unsafeGet}
 
 /**
  * MitigationApplication — the action's decomposition: per-node scoping with
@@ -30,17 +30,17 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
 
   private def leaf(label: String, seedVarId: Long, prob: Double = 0.4,
                    min: Long = 1000L, max: Long = 100000L): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = idStr(label), name = label, distributionType = "lognormal",
       probability = prob, minLoss = Some(min), maxLoss = Some(max),
       parentId = Some(nodeId("root-pf")), seedVarId = seedVarId
-    )
+    ), "leaf")
 
   private val cyber = leaf("cyber", 1L)
   private val flood = leaf("flood", 2L)
-  private val root = RiskPortfolio.unsafeFromStrings(
+  private val root = unsafeGet(RiskPortfolio.createFromStrings(
     id = idStr("root-pf"), name = "Root Portfolio",
-    childIds = Array(cyber.id.value, flood.id.value))
+    childIds = Array(cyber.id.value, flood.id.value)), "portfolio")
 
   private def mkTree(mitigations: Mitigation*): RiskTree =
     RiskTree.fromNodes(treeId("act-tree"), name("Action Tree"), Seq(root, cyber, flood), root.id,

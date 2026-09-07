@@ -419,6 +419,23 @@ Plus BATS suite-C fast gate after the change (`register-dev` skill).
 - `modules/server-it/src/test/scala/com/risquanter/register/http/RequestBodyLimitItSpec.scala`
 - `modules/app/src/test/scala/app/state/TreeBuilderStateSpec.scala`
 - `build.sbt`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/LeafSimContentSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationApplicationSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationEntitySpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskLeafTransformSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeSeedVarIdSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/responses/SimulationResponseSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/domain/tree/TreeIndexSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeReadConsistencySpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/ChangedNodesServiceSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CacheTransparencySpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/testutil/TestHelpers.scala`
+
 
 Docs edited (not hook-gated; listed for completeness):
 
@@ -428,3 +445,80 @@ Docs edited (not hook-gated; listed for completeness):
 - `docs/dev/decision-records/ADR-029-input-injection-defence.md` (body-size row)
 - `docs/dev/plans/PLAN-RISKTRANSFORM.md` (§9 → elevated pointer + wording fix)
 - `docs/dev/TODO.md` (#46 status note)
+
+---
+
+## Continuation — single validated construction path (test-only shortcut removal)
+
+This continuation completes the invariant Lever 1 started. Lever 1 privatised the
+aggregate constructors so all production construction goes through a smart constructor.
+The remaining hole is test code: five *construction shortcuts* in `src/main` let tests
+build domain values while bypassing that gate — and `RiskPortfolio.unsafeApply`
+constructs via `new RiskPortfolio(...)`, skipping the `childIds` non-empty and count
+bound this plan's collection-bounds lever adds. Removing the shortcuts closes that
+bypass and makes "all construction is validated" hold in tests too.
+
+### Shortcuts deleted from `src/main`
+
+- `RiskLeaf.unsafeApply` (RiskNode.scala)
+- `RiskPortfolio.unsafeApply` (RiskNode.scala)
+- `RiskPortfolio.unsafeFromStrings` (RiskNode.scala)
+- `RiskTree.singleNode` (RiskTree.scala) — dead: zero call sites
+- `RiskTree.singleNodeUnsafe` (RiskTree.scala)
+
+`RiskPortfolio.fromValidated` (production, already-refined Iron types) is kept.
+
+### Replacement pattern
+
+`TestHelpers.unsafeGet[A](v: Validation[ValidationError, A], label: String): A` already
+exists (`modules/common/src/test/scala/com/risquanter/register/testutil/TestHelpers.scala`)
+and is already used by five server test files. It only unwraps a `Validation`; it
+constructs nothing. No new `src/main` code is introduced. Each shortcut maps to the real
+constructor (the `create` signatures differ only by a defaulted `fieldPrefix = "root"`,
+so any positional mis-map fails to compile):
+
+```scala
+unsafeGet(RiskLeaf.create(id, name, distributionType, probability, …, seedVarId = s), "leaf")
+unsafeGet(RiskPortfolio.create(id, name, childIds, parentId), "portfolio")        // runs the childIds bound
+unsafeGet(RiskPortfolio.createFromStrings(id, name, childIds, parentId), "portfolio")
+unsafeGet(RiskTree.fromNodes(id, name, Seq(root), root.id), "tree")
+```
+
+### build.sbt — reach the helper from `app`
+
+```scala
+// before:  .dependsOn(common.js)
+// after:   .dependsOn(common.js % "compile->compile;test->test")
+```
+
+Matches the arc `server` and `serverIt` already declare on `common.jvm`. `common` is
+`CrossType.Pure`, so `TestHelpers` already cross-compiles to Scala.js; Scala.js
+whole-program DCE keeps `MessageDigest` (used only by `deterministicUlidFromLabel`,
+which no `app` test calls) out of the JS link. `sbt app/test` linking green is the gate
+for this change.
+
+### Ruled Option A, folded in (shares files with the reroute)
+
+- `RiskTreeKnowledgeBaseSpec.bypassTree` rerouted through `RiskTree.fromNodesUnsafe`.
+- Dead `BinderIntegrationSpec.bypassTree` (zero callers) deleted.
+- Two-"Cyber" duplicate-name test (C2) in `RiskTreeKnowledgeBaseSpec` deleted, with its
+  `count(_.startsWith("duplicate:")) == 1` assertion — duplicate node names are now
+  impossible (D4 uniqueness in `RiskTree.fromNodes`), so the case is unreachable.
+- `RiskTreeKnowledgeBase.nameCollisions`: the unreachable `duplicate:` branch removed,
+  leaving only the `reserved:` branch; its scaladoc and the `nameToId` scaladoc updated
+  to state that `fromNodes` enforces node-name uniqueness so only reserved-symbol
+  collisions can reach the knowledge base.
+
+### Test-file rule
+
+A fixture built with a shortcut is rerouted through the real constructor + `unsafeGet`.
+A test whose *subject* is a deleted shortcut is removed (the `"unsafeFromStrings
+convenience method"` suite in `RiskPortfolioSpec`) — a sanctioned assertion removal, as
+it covered a method this plan deletes.
+
+### Landing and verification
+
+Lands as one green set with the rest of this plan; the single PATCH bump
+(0.10.28 → 0.10.29) covers it. The `bypassTree` reroute here is what returns `server`'s
+test compile to green after Lever 1. No new tests are added by this continuation (no new
+behaviour); the existing suite rerouted through the real constructors is the coverage.

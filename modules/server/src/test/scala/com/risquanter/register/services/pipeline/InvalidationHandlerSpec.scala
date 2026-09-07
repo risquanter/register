@@ -27,7 +27,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
   // Test fixtures
   // ========================================
 
-  val cyberLeaf = RiskLeaf.unsafeApply(
+  val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = idStr("cyber"),
     name = "Cyber Attack",
     distributionType = "lognormal",
@@ -36,9 +36,9 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     maxLoss = Some(50000L),
     parentId = Some(nodeId("ops-risk")),
     seedVarId = 1L
-  )
+  ), "leaf")
 
-  val hardwareLeaf = RiskLeaf.unsafeApply(
+  val hardwareLeaf = unsafeGet(RiskLeaf.create(
     id = idStr("hardware"),
     name = "Hardware Failure",
     distributionType = "lognormal",
@@ -47,9 +47,9 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     maxLoss = Some(10000L),
     parentId = Some(nodeId("it-risk")),
     seedVarId = 2L
-  )
+  ), "leaf")
 
-  val softwareLeaf = RiskLeaf.unsafeApply(
+  val softwareLeaf = unsafeGet(RiskLeaf.create(
     id = idStr("software"),
     name = "Software Bug",
     distributionType = "lognormal",
@@ -58,21 +58,21 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     maxLoss = Some(5000L),
     parentId = Some(nodeId("it-risk")),
     seedVarId = 3L
-  )
+  ), "leaf")
 
-  val itPortfolio = RiskPortfolio.unsafeFromStrings(
+  val itPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id = idStr("it-risk"),
     name = "IT Risk",
     childIds = Array(idStr("hardware"), idStr("software")),
     parentId = Some(nodeId("ops-risk"))
-  )
+  ), "portfolio")
 
-  val rootPortfolio = RiskPortfolio.unsafeFromStrings(
+  val rootPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id = idStr("ops-risk"),
     name = "Operational Risk",
     childIds = Array(idStr("cyber"), idStr("it-risk")),
     parentId = None
-  )
+  ), "portfolio")
 
   val allNodes = Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, softwareLeaf)
   val testTreeId: TreeId = treeId("test-tree")
@@ -110,7 +110,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
   def spec = suite("InvalidationHandlerSpec")(
 
     test("param change publishes the node and its full ancestor path") {
-      val changedSoftware = RiskLeaf.unsafeApply(
+      val changedSoftware = unsafeGet(RiskLeaf.create(
         id = idStr("software"),
         name = "Software Bug",
         distributionType = "lognormal",
@@ -119,7 +119,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         maxLoss = Some(5000L),
         parentId = Some(nodeId("it-risk")),
         seedVarId = 3L
-      )
+      ), "leaf")
       val newTree = treeWith(Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, changedSoftware))
       for {
         handler <- ZIO.service[InvalidationHandler]
@@ -134,7 +134,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
 
     test("reparent + param change in ONE mutation includes the node itself (additive union — TODO item 17)") {
       // hardware moves it-risk → ops-risk AND its probability changes in the same PUT
-      val movedChangedHardware = RiskLeaf.unsafeApply(
+      val movedChangedHardware = unsafeGet(RiskLeaf.create(
         id = idStr("hardware"),
         name = "Hardware Failure",
         distributionType = "lognormal",
@@ -143,19 +143,19 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         maxLoss = Some(10000L),
         parentId = Some(nodeId("ops-risk")),  // reparent
         seedVarId = 2L
-      )
-      val newItPortfolio = RiskPortfolio.unsafeFromStrings(
+      ), "leaf")
+      val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("it-risk"),
         name = "IT Risk",
         childIds = Array(idStr("software")),
         parentId = Some(nodeId("ops-risk"))
-      )
-      val newRoot = RiskPortfolio.unsafeFromStrings(
+      ), "portfolio")
+      val newRoot = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("ops-risk"),
         name = "Operational Risk",
         childIds = Array(idStr("cyber"), idStr("it-risk"), idStr("hardware")),
         parentId = None
-      )
+      ), "portfolio")
       val newTree = treeWith(Seq(newRoot, cyberLeaf, newItPortfolio, movedChangedHardware, softwareLeaf))
       for {
         handler <- ZIO.service[InvalidationHandler]
@@ -186,14 +186,14 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       // report every portfolio (and every expert leaf) as changed on every
       // mutation. Includes an expert leaf to cover the array-valued fields.
       def buildExpertTree(): RiskTree = treeWith(Seq(
-        RiskPortfolio.unsafeFromStrings(
+        unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("ops-risk"),
           name = "Operational Risk",
           childIds = Array(idStr("cyber"), idStr("expert-leaf")),
           parentId = None
-        ),
+        ), "portfolio"),
         cyberLeaf,
-        RiskLeaf.unsafeApply(
+        unsafeGet(RiskLeaf.create(
           id = idStr("expert-leaf"),
           name = "Expert Leaf",
           distributionType = "expert",
@@ -203,7 +203,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
           terms = Some(3),
           parentId = Some(nodeId("ops-risk")),
           seedVarId = 4L
-        )
+        ), "leaf")
       ))
       for {
         handler <- ZIO.service[InvalidationHandler]
@@ -213,7 +213,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
 
     test("changing only an expert leaf's quantile VALUES publishes exactly that leaf + ancestors") {
       def expertLeaf(quantiles: Array[Double]): RiskLeaf =
-        RiskLeaf.unsafeApply(
+        unsafeGet(RiskLeaf.create(
           id = idStr("expert-leaf"),
           name = "Expert Leaf",
           distributionType = "expert",
@@ -223,16 +223,16 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
           terms = Some(3),
           parentId = Some(nodeId("it-risk")),
           seedVarId = 4L
-        )
+        ), "leaf")
       def build(quantiles: Array[Double]): RiskTree = treeWith(Seq(
         rootPortfolio,
         cyberLeaf,
-        RiskPortfolio.unsafeFromStrings(
+        unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("it-risk"),
           name = "IT Risk",
           childIds = Array(idStr("hardware"), idStr("software"), idStr("expert-leaf")),
           parentId = Some(nodeId("ops-risk"))
-        ),
+        ), "portfolio"),
         hardwareLeaf,
         softwareLeaf,
         expertLeaf(quantiles)
@@ -251,12 +251,12 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     },
 
     test("removed node is published (browsers must drop it)") {
-      val newItPortfolio = RiskPortfolio.unsafeFromStrings(
+      val newItPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("it-risk"),
         name = "IT Risk",
         childIds = Array(idStr("software")),
         parentId = Some(nodeId("ops-risk"))
-      )
+      ), "portfolio")
       val newTree = treeWith(Seq(rootPortfolio, cyberLeaf, newItPortfolio, softwareLeaf))
       for {
         handler <- ZIO.service[InvalidationHandler]
@@ -279,7 +279,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
     },
 
     test("SSE subscribers are counted when present") {
-      val changedCyber = RiskLeaf.unsafeApply(
+      val changedCyber = unsafeGet(RiskLeaf.create(
         id = idStr("cyber"),
         name = "Cyber Attack",
         distributionType = "lognormal",
@@ -288,7 +288,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         maxLoss = Some(50000L),
         parentId = Some(nodeId("ops-risk")),
         seedVarId = 1L
-      )
+      ), "leaf")
       val newTree = treeWith(Seq(rootPortfolio, changedCyber, itPortfolio, hardwareLeaf, softwareLeaf))
       for {
         handler <- ZIO.service[InvalidationHandler]

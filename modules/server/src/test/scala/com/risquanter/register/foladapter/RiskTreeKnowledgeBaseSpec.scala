@@ -6,7 +6,6 @@ import com.risquanter.register.domain.data.{RiskResult, RiskLeaf, RiskPortfolio,
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.SeedVarId
-import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
@@ -42,48 +41,45 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   //
   // 4 nodes, 2 leaves, 2 portfolios
 
-  private val rootPortfolio = RiskPortfolio.unsafeApply(
+  private val rootPortfolio = unsafeGet(RiskPortfolio.create(
     id   = rootId.value,
     name = "Root",
     childIds = Array(itId),
     parentId = None
-  )
+  ), "portfolio")
 
-  private val itPortfolio = RiskPortfolio.unsafeApply(
+  private val itPortfolio = unsafeGet(RiskPortfolio.create(
     id   = itId.value,
     name = "IT Risk",
     childIds = Array(cyberId, hardwareId),
     parentId = Some(rootId)
-  )
+  ), "portfolio")
 
-  private val cyberLeaf = RiskLeaf.unsafeApply(
+  private val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = cyberId.value, name = "Cyber",
     distributionType = "lognormal", probability = 0.25,
     minLoss = Some(1000L), maxLoss = Some(50000L),
     parentId = Some(itId),
     seedVarId = 1L
-  )
+  ), "leaf")
 
-  private val hardwareLeaf = RiskLeaf.unsafeApply(
+  private val hardwareLeaf = unsafeGet(RiskLeaf.create(
     id = hardwareId.value, name = "Hardware",
     distributionType = "lognormal", probability = 0.10,
     minLoss = Some(500L), maxLoss = Some(10000L),
     parentId = Some(itId),
     seedVarId = 2L
-  )
+  ), "leaf")
 
   private val allNodes: Map[NodeId, RiskNode] =
     Map(rootId -> rootPortfolio, itId -> itPortfolio, cyberId -> cyberLeaf, hardwareId -> hardwareLeaf)
 
-  private val index = TreeIndex.fromNodesUnsafe(allNodes)
-
-  private val tree = RiskTree(
+  private val tree = RiskTree.fromNodesUnsafe(
     id     = treeId("test-tree"),
     name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Test Tree").toOption.get,
     nodes  = allNodes.values.toSeq,
     rootId = rootId,
-    index  = index,
-      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get
+    seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get)
   )
 
   // ── Fixtures: simulation results ───────────────────────────────────
@@ -525,22 +521,19 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
 
   // ── Constants suite (PLAN-QUERY-NODE-NAME-LITERALS §5.4) ───────────
 
-  /** Build a RiskTree directly from a list of nodes, bypassing DTO validation.
-    * Simulates an unsupported path (direct repo write / migration / Irmin merge)
-    * where a malformed tree could reach the KB. The first node is treated as
-    * the root.
+  /** Build a RiskTree from a list of nodes via the domain smart constructor,
+    * without the request/DTO layer — the construction path a direct repo write,
+    * migration, or Irmin merge takes. The first node is the root. The domain
+    * invariants in RiskTree.fromNodes (structure, distinct seedVarIds, unique
+    * node names) still hold; only the request-layer checks are skipped.
     */
   private def bypassTree(nodes: Seq[RiskNode]): RiskTree =
-    val map: Map[NodeId, RiskNode] = nodes.iterator.map(n => n.id -> n).toMap
-    val root: NodeId = nodes.head.id
-    val idx = TreeIndex.fromNodesUnsafe(map)
-    RiskTree(
+    RiskTree.fromNodesUnsafe(
       id     = treeId("bypass-tree"),
       name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Bypass Tree").toOption.get,
       nodes  = nodes,
-      rootId = root,
-      index  = idx,
-      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get
+      rootId = nodes.head.id,
+      seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get)
     )
 
   private val constantsSuite = suite("node constants via literal validator (PLAN §5.4)")(
@@ -561,48 +554,19 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         kb.nameCollisions.isEmpty
       )
     },
-    test("C2: duplicate node names — last-write-wins; collision surfaced") {
-      // Two distinct nodes both named "Cyber" — bypasses DTO requireUniqueNames.
-      val rootIdStr = idStr("root2")
-      val aIdStr    = idStr("a")
-      val bIdStr    = idStr("b")
-      val rootP = RiskPortfolio.unsafeApply(
-        id = rootIdStr, name = "Root2",
-        childIds = Array(NodeId(safeId("a")), NodeId(safeId("b"))), parentId = None
-      )
-      val a = RiskLeaf.unsafeApply(
-        id = aIdStr, name = "Cyber",
-        distributionType = "lognormal", probability = 0.1,
-        minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root2"))),
-        seedVarId = 3L
-      )
-      val b = RiskLeaf.unsafeApply(
-        id = bIdStr, name = "Cyber",
-        distributionType = "lognormal", probability = 0.2,
-        minLoss = Some(3L), maxLoss = Some(4L), parentId = Some(NodeId(safeId("root2"))),
-        seedVarId = 4L
-      )
-      val t = bypassTree(Seq(rootP, a, b))
-      val kb2 = RiskTreeKnowledgeBase(t, Map.empty)
-      assertTrue(
-        kb2.nameToId.keySet == Set("Root2", "Cyber"),
-        kb2.nameCollisions.exists(_.contains("Cyber")),
-        kb2.nameCollisions.count(_.startsWith("duplicate:")) == 1
-      )
-    },
     test("C3: reserved-name collision (\"leaf\") — skipped from constants; predicate retained") {
       val rootIdStr = idStr("root3")
       val cIdStr    = idStr("c")
-      val rootP = RiskPortfolio.unsafeApply(
+      val rootP = unsafeGet(RiskPortfolio.create(
         id = rootIdStr, name = "Root3",
         childIds = Array(NodeId(safeId("c"))), parentId = None
-      )
-      val c = RiskLeaf.unsafeApply(
+      ), "portfolio")
+      val c = unsafeGet(RiskLeaf.create(
         id = cIdStr, name = "leaf",
         distributionType = "lognormal", probability = 0.1,
         minLoss = Some(1L), maxLoss = Some(2L), parentId = Some(NodeId(safeId("root3"))),
         seedVarId = 5L
-      )
+      ), "leaf")
       val t = bypassTree(Seq(rootP, c))
       val kb3 = RiskTreeKnowledgeBase(t, Map.empty)
       assertTrue(

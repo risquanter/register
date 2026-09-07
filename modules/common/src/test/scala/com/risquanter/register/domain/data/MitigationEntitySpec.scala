@@ -5,7 +5,7 @@ import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.autoRefine
 import com.risquanter.register.domain.data.iron.{ContentHash, NodeId, SafeName, ValidationUtil}
 import com.risquanter.register.domain.errors.ValidationErrorCode
-import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId, treeId}
+import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId, treeId, unsafeGet}
 
 /**
  * Mitigation entity: create cross-field rules (override stamp + anchor), wire
@@ -42,18 +42,18 @@ object MitigationEntitySpec extends ZIOSpecDefault {
   ) = Mitigation.create(mitigationId(label), name(label), pred, spec, precedence)
 
   private def leaf(label: String, seedVarId: Long): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = idStr(label), name = label, distributionType = "lognormal",
       probability = 0.4, minLoss = Some(1000L), maxLoss = Some(100000L),
       parentId = Some(nodeId("root-pf")), seedVarId = seedVarId
-    )
+    ), "leaf")
 
   private def tree(mitigations: Mitigation*) = {
     val l1 = leaf("cyber", 1L)
     val l2 = leaf("flood", 2L)
-    val root = RiskPortfolio.unsafeFromStrings(
+    val root = unsafeGet(RiskPortfolio.createFromStrings(
       id = idStr("root-pf"), name = "Root Portfolio",
-      childIds = Array(l1.id.value, l2.id.value))
+      childIds = Array(l1.id.value, l2.id.value)), "portfolio")
     RiskTree.fromNodes(treeId("mit-tree"), name("Mit Tree"), Seq(root, l1, l2), root.id,
       mitigations = mitigations.toList)
   }

@@ -5,7 +5,7 @@ import zio.test.Assertion.*
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio}
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.domain.errors.ValidationErrorCode
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, unsafeGet}
 
 object TreeIndexSpec extends ZIOSpecDefault {
 
@@ -25,7 +25,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
   private val hardwareIdStr = safeId("hardware").value.toString
   private val softwareIdStr = safeId("software").value.toString
 
-  val cyberLeaf = RiskLeaf.unsafeApply(
+  val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = cyberIdStr,
     name = "Cyber Attack",
     distributionType = "lognormal",
@@ -34,9 +34,9 @@ object TreeIndexSpec extends ZIOSpecDefault {
     maxLoss = Some(50000L),
     parentId = Some(nodeId("ops-risk")),
     seedVarId = 1L
-  )
+  ), "leaf")
 
-  val hardwareLeaf = RiskLeaf.unsafeApply(
+  val hardwareLeaf = unsafeGet(RiskLeaf.create(
     id = hardwareIdStr,
     name = "Hardware Failure",
     distributionType = "lognormal",
@@ -45,9 +45,9 @@ object TreeIndexSpec extends ZIOSpecDefault {
     maxLoss = Some(10000L),
     parentId = Some(nodeId("it-risk")),
     seedVarId = 2L
-  )
+  ), "leaf")
 
-  val softwareLeaf = RiskLeaf.unsafeApply(
+  val softwareLeaf = unsafeGet(RiskLeaf.create(
     id = softwareIdStr,
     name = "Software Bug",
     distributionType = "lognormal",
@@ -56,21 +56,21 @@ object TreeIndexSpec extends ZIOSpecDefault {
     maxLoss = Some(5000L),
     parentId = Some(nodeId("it-risk")),
     seedVarId = 3L
-  )
+  ), "leaf")
 
-  val itPortfolio = RiskPortfolio.unsafeFromStrings(
+  val itPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id = itRiskIdStr,
     name = "IT Risk",
     childIds = Array(hardwareIdStr, softwareIdStr),
     parentId = Some(nodeId("ops-risk"))
-  )
+  ), "portfolio")
 
-  val rootPortfolio = RiskPortfolio.unsafeFromStrings(
+  val rootPortfolio = unsafeGet(RiskPortfolio.createFromStrings(
     id = opsRiskIdStr,
     name = "Operational Risk",
     childIds = Array(cyberIdStr, itRiskIdStr),
     parentId = None
-  )
+  ), "portfolio")
   
   // All nodes as flat list for TreeIndex.fromNodeSeq
   val allNodes: Seq[RiskNode] = Seq(rootPortfolio, cyberLeaf, itPortfolio, hardwareLeaf, softwareLeaf)
@@ -217,7 +217,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
     suite("parent-child consistency validation")(
       test("fails when child's parentId doesn't match portfolio's childIds") {
         // Create a child that claims wrong parent
-        val orphanLeaf = RiskLeaf.unsafeApply(
+        val orphanLeaf = unsafeGet(RiskLeaf.create(
           id = idStr("orphan"),
           name = "Orphan Node",
           distributionType = "lognormal",
@@ -226,14 +226,14 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = Some(nodeId("wrong-parent")),  // Points to non-existent parent
           seedVarId = 4L
-        )
-        
-        val root = RiskPortfolio.unsafeFromStrings(
+        ), "leaf")
+
+        val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root"),
           name = "Root",
           childIds = Array(idStr("orphan")),  // Lists orphan as child
           parentId = None
-        )
+        ), "portfolio")
         
         val result = TreeIndex.fromNodeSeq(Seq(root, orphanLeaf))
         
@@ -249,12 +249,12 @@ object TreeIndexSpec extends ZIOSpecDefault {
         )
       },
       test("fails when portfolio lists child that doesn't exist") {
-        val root = RiskPortfolio.unsafeFromStrings(
+        val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root"),
           name = "Root",
           childIds = Array(idStr("ghost-child")),  // References non-existent node
           parentId = None
-        )
+        ), "portfolio")
         
         val result = TreeIndex.fromNodeSeq(Seq(root))
         
@@ -271,7 +271,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       },
       test("fails when node has parentId but parent doesn't list it as child") {
         // Child "lonely" claims root as parent, but root only lists "other-child"
-        val lonely = RiskLeaf.unsafeApply(
+        val lonely = unsafeGet(RiskLeaf.create(
           id = idStr("lonely"),
           name = "Lonely Node",
           distributionType = "lognormal",
@@ -280,9 +280,9 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = Some(nodeId("root")),  // Claims root as parent
           seedVarId = 5L
-        )
-        
-        val otherChild = RiskLeaf.unsafeApply(
+        ), "leaf")
+
+        val otherChild = unsafeGet(RiskLeaf.create(
           id = idStr("other-child"),
           name = "Other Child",
           distributionType = "lognormal",
@@ -291,14 +291,14 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = Some(nodeId("root")),  // Correctly claims root
           seedVarId = 6L
-        )
-        
-        val root = RiskPortfolio.unsafeFromStrings(
+        ), "leaf")
+
+        val root = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("root"),
           name = "Root",
           childIds = Array(idStr("other-child")),  // Only lists other-child, not lonely
           parentId = None
-        )
+        ), "portfolio")
         
         val result = TreeIndex.fromNodeSeq(Seq(root, lonely, otherChild))
         
@@ -314,7 +314,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         )
       },
       test("fails when node has parentId pointing to a leaf (not portfolio)") {
-        val parent = RiskLeaf.unsafeApply(
+        val parent = unsafeGet(RiskLeaf.create(
           id = idStr("parent-leaf"),
           name = "Parent Leaf",
           distributionType = "lognormal",
@@ -323,9 +323,9 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = None,
           seedVarId = 7L
-        )
-        
-        val child = RiskLeaf.unsafeApply(
+        ), "leaf")
+
+        val child = unsafeGet(RiskLeaf.create(
           id = idStr("child"),
           name = "Child",
           distributionType = "lognormal",
@@ -334,7 +334,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = Some(nodeId("parent-leaf")),  // Points to leaf, not portfolio
           seedVarId = 8L
-        )
+        ), "leaf")
         
         val result = TreeIndex.fromNodeSeq(Seq(parent, child))
         
@@ -350,7 +350,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
         )
       },
       test("fails when node has parentId pointing to non-existent node") {
-        val orphan = RiskLeaf.unsafeApply(
+        val orphan = unsafeGet(RiskLeaf.create(
           id = idStr("orphan"),
           name = "Orphan",
           distributionType = "lognormal",
@@ -359,7 +359,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = Some(nodeId("non-existent")),  // Points to missing parent
           seedVarId = 9L
-        )
+        ), "leaf")
         
         val result = TreeIndex.fromNodeSeq(Seq(orphan))
         
@@ -376,7 +376,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       },
       test("accumulates multiple validation errors") {
         // Create multiple inconsistencies
-        val orphan1 = RiskLeaf.unsafeApply(
+        val orphan1 = unsafeGet(RiskLeaf.create(
           id = idStr("orphan1"),
           name = "Orphan 1",
           distributionType = "lognormal",
@@ -385,9 +385,9 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = Some(nodeId("missing1")),
           seedVarId = 10L
-        )
-        
-        val orphan2 = RiskLeaf.unsafeApply(
+        ), "leaf")
+
+        val orphan2 = unsafeGet(RiskLeaf.create(
           id = idStr("orphan2"),
           name = "Orphan 2",
           distributionType = "lognormal",
@@ -396,7 +396,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = Some(nodeId("missing2")),
           seedVarId = 11L
-        )
+        ), "leaf")
         
         val result = TreeIndex.fromNodeSeq(Seq(orphan1, orphan2))
         
@@ -408,7 +408,7 @@ object TreeIndexSpec extends ZIOSpecDefault {
       },
       test("succeeds with valid bidirectional parent-child references") {
         // Valid structure: parent lists child, child points to parent
-        val child = RiskLeaf.unsafeApply(
+        val child = unsafeGet(RiskLeaf.create(
           id = idStr("valid-child"),
           name = "Valid Child",
           distributionType = "lognormal",
@@ -417,14 +417,14 @@ object TreeIndexSpec extends ZIOSpecDefault {
           maxLoss = Some(1000L),
           parentId = Some(nodeId("valid-parent")),
           seedVarId = 12L
-        )
-        
-        val parent = RiskPortfolio.unsafeFromStrings(
+        ), "leaf")
+
+        val parent = unsafeGet(RiskPortfolio.createFromStrings(
           id = idStr("valid-parent"),
           name = "Valid Parent",
           childIds = Array(idStr("valid-child")),
           parentId = None
-        )
+        ), "portfolio")
         
         val result = TreeIndex.fromNodeSeq(Seq(parent, child))
         

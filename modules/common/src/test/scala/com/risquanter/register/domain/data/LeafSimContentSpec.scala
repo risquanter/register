@@ -2,6 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.test.*
 import zio.json.EncoderOps
+import com.risquanter.register.testutil.TestHelpers.unsafeGet
 
 /**
   * Byte-stability snapshot for the leaf cache-key preimage (DD-16).
@@ -17,7 +18,7 @@ object LeafSimContentSpec extends ZIOSpecDefault {
   def spec = suite("LeafSimContentSpec")(
 
     test("lognormal projection JSON is byte-stable (field order, None omitted)") {
-      val leaf = RiskLeaf.unsafeApply(
+      val leaf = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ1",
         name = "cyber",
         distributionType = "lognormal",
@@ -25,14 +26,14 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         minLoss = Some(1000L),
         maxLoss = Some(50000L),
         seedVarId = 7L
-      )
+      ), "leaf")
       val json = LeafSimContent.from(leaf).toJson
       assertTrue(json ==
         """{"seedVarId":7,"probability":0.3,"distributionType":"lognormal","minLoss":1000,"maxLoss":50000}""")
     },
 
     test("expert projection JSON is byte-stable (arrays and terms present)") {
-      val leaf = RiskLeaf.unsafeApply(
+      val leaf = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ2",
         name = "expert-risk",
         distributionType = "expert",
@@ -41,14 +42,14 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         quantiles = Some(Array(1000.0, 5000.0, 25000.0)),
         terms = Some(3),
         seedVarId = 9L
-      )
+      ), "leaf")
       val json = LeafSimContent.from(leaf).toJson
       assertTrue(json ==
         """{"seedVarId":9,"probability":0.25,"distributionType":"expert","percentiles":[0.1,0.5,0.9],"quantiles":[1000.0,5000.0,25000.0],"terms":3}""")
     },
 
     test("name, ULID, and parent do not enter the projection (rename/move preserves the key)") {
-      val a = RiskLeaf.unsafeApply(
+      val a = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ3",
         name = "original name",
         distributionType = "lognormal",
@@ -56,8 +57,8 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         minLoss = Some(1000L),
         maxLoss = Some(50000L),
         seedVarId = 7L
-      )
-      val b = RiskLeaf.unsafeApply(
+      ), "leaf")
+      val b = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ4",
         name = "renamed elsewhere",
         distributionType = "lognormal",
@@ -66,12 +67,12 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         maxLoss = Some(50000L),
         parentId = Some(iron.NodeId(iron.SafeId.fromString("01HZZZZZZZZZZZZZZZZZZZZZZ5").toOption.get)),
         seedVarId = 7L
-      )
+      ), "leaf")
       assertTrue(LeafSimContent.from(a).toJson == LeafSimContent.from(b).toJson)
     },
 
     test("a param change changes the projection bytes") {
-      val a = RiskLeaf.unsafeApply(
+      val a = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ6",
         name = "cyber",
         distributionType = "lognormal",
@@ -79,8 +80,8 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         minLoss = Some(1000L),
         maxLoss = Some(50000L),
         seedVarId = 7L
-      )
-      val b = RiskLeaf.unsafeApply(
+      ), "leaf")
+      val b = unsafeGet(RiskLeaf.create(
         id = "01HZZZZZZZZZZZZZZZZZZZZZZ6",
         name = "cyber",
         distributionType = "lognormal",
@@ -88,7 +89,7 @@ object LeafSimContentSpec extends ZIOSpecDefault {
         minLoss = Some(1000L),
         maxLoss = Some(50000L),
         seedVarId = 7L
-      )
+      ), "leaf")
       assertTrue(LeafSimContent.from(a).toJson != LeafSimContent.from(b).toJson)
     }
   )

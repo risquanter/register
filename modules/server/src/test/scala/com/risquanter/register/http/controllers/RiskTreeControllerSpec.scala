@@ -32,7 +32,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
     
     override def create(wsId: WorkspaceId, riskTree: RiskTree, branch: BranchRef): Task[RiskTree] =
       IdGenerators.nextTreeId.map { nextId =>
-        val newRiskTree = riskTree.copy(id = nextId)
+        val newRiskTree = RiskTree.fromNodesUnsafe(nextId, riskTree.name, riskTree.nodes, riskTree.rootId, Some(riskTree.seedVarHighWater), riskTree.mitigations)
         db += ((wsId, nextId) -> newRiskTree)
         newRiskTree
       }

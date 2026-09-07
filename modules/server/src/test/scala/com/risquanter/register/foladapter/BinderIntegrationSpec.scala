@@ -7,7 +7,6 @@ import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.SafeName
 import com.risquanter.register.domain.data.iron.SeedVarId
-import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
@@ -33,37 +32,36 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
   private val cyberId    = nodeId("cyber")
   private val hardwareId = nodeId("hardware")
 
-  private val rootPortfolio = RiskPortfolio.unsafeApply(
+  private val rootPortfolio = unsafeGet(RiskPortfolio.create(
     id   = rootId.value, name = "Root",
     childIds = Array(itId), parentId = None
-  )
-  private val itPortfolio = RiskPortfolio.unsafeApply(
+  ), "portfolio")
+  private val itPortfolio = unsafeGet(RiskPortfolio.create(
     id   = itId.value, name = "IT Risk",
     childIds = Array(cyberId, hardwareId), parentId = Some(rootId)
-  )
-  private val cyberLeaf = RiskLeaf.unsafeApply(
+  ), "portfolio")
+  private val cyberLeaf = unsafeGet(RiskLeaf.create(
     id = cyberId.value, name = "Cyber",
     distributionType = "lognormal", probability = 0.25,
     minLoss = Some(1000L), maxLoss = Some(50000L), parentId = Some(itId),
     seedVarId = 1L
-  )
-  private val hardwareLeaf = RiskLeaf.unsafeApply(
+  ), "leaf")
+  private val hardwareLeaf = unsafeGet(RiskLeaf.create(
     id = hardwareId.value, name = "Hardware",
     distributionType = "lognormal", probability = 0.10,
     minLoss = Some(500L), maxLoss = Some(10000L), parentId = Some(itId),
     seedVarId = 2L
-  )
+  ), "leaf")
 
   private val allNodes: Map[NodeId, RiskNode] =
     Map(rootId -> rootPortfolio, itId -> itPortfolio, cyberId -> cyberLeaf, hardwareId -> hardwareLeaf)
 
-  private val tree = RiskTree(
+  private val tree = RiskTree.fromNodesUnsafe(
     id     = treeId("test-tree"),
     name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Test Tree").toOption.get,
     nodes  = allNodes.values.toSeq,
     rootId = rootId,
-    index  = TreeIndex.fromNodesUnsafe(allNodes),
-      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get
+    seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get)
   )
 
   // Five-trial outcomes; large enough that gt_loss(p95(x), 1000) is true for both leaves.
@@ -94,20 +92,6 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
 
   private val idToName: Map[NodeId, String] =
     allNodes.map { case (id, n) => id -> n.name.value }
-
-  // ── Direct bypass-tree builder (mirrors RiskTreeKnowledgeBaseSpec.bypassTree) ─
-
-  private def bypassTree(nodes: Seq[RiskNode]): RiskTree =
-    val map: Map[NodeId, RiskNode] = nodes.iterator.map(n => n.id -> n).toMap
-    val root: NodeId = nodes.head.id
-    RiskTree(
-      id     = treeId("bypass-tree"),
-      name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Bypass Tree").toOption.get,
-      nodes  = nodes,
-      rootId = root,
-      index  = TreeIndex.fromNodesUnsafe(map),
-      seedVarHighWater = SeedVarId.fromLong(1000L).toOption.get
-    )
 
   override def spec: Spec[TestEnvironment & zio.Scope, Any] =
     suite("BinderIntegrationSpec — parse + bind against RiskTreeKnowledgeBase")(

@@ -59,7 +59,8 @@ object HttpTestHarness:
     simulation: SimulationConfig = defaultSimulationConfig,
     telemetry: TelemetryConfig = defaultTelemetryConfig,
     cors: CorsConfig = defaultCorsConfig,
-    workspace: WorkspaceConfig = defaultWorkspaceConfig
+    workspace: WorkspaceConfig = defaultWorkspaceConfig,
+    maxRequestBytes: Int = 8388608
   )
 
   /** Full test backend: the tree repository plus the two scenario services.
@@ -126,13 +127,17 @@ object HttpTestHarness:
     ZLayer.make[
       Server & CorsConfig & SystemController & WorkspaceLifecycleController & WorkspaceTreeController & WorkspaceAnalysisController & SSEController & QueryController & DistributionPreviewController & ScenarioController
     ](
-      ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port, healthPort = port + 1)),
+      ZLayer.succeed(ServerConfig(host = "127.0.0.1", port = port, healthPort = port + 1, maxRequestBytes = cfg.maxRequestBytes)),
       ZLayer.succeed(cfg.simulation),
       ZLayer.succeed(cfg.telemetry),
       ZLayer.succeed(cfg.cors),
       ZLayer.succeed(cfg.workspace),
       ZLayer.fromZIO(
-        ZIO.service[ServerConfig].map(sc => Server.Config.default.binding(sc.host, sc.port))
+        ZIO.service[ServerConfig].map(sc =>
+          Server.Config.default
+            .binding(sc.host, sc.port)
+            .requestStreaming(Server.RequestStreaming.Disabled(sc.maxRequestBytes))
+        )
       ) >>> Server.live,
       TracingLive.console,
       MetricsLive.console,

@@ -1,4 +1,4 @@
-ThisBuild / version      := "0.10.28"
+ThisBuild / version      := "0.10.29"
 ThisBuild / scalaVersion := "3.8.4"
 
 ThisBuild / scalacOptions ++= Seq(
@@ -197,7 +197,7 @@ lazy val app = (project in file("modules/app"))
     scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.ESModule) },
     scalaJSUseMainModuleInitializer := true
   )
-  .dependsOn(common.js)
+  .dependsOn(common.js % "compile->compile;test->test")
 
 // Root project
 lazy val root = (project in file("."))

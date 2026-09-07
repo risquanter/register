@@ -4,7 +4,7 @@ import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 import com.risquanter.register.domain.data.iron.{NonNegativeDouble, ShrinkFraction, ValidationUtil}
-import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId}
+import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, unsafeGet}
 
 /**
  * RiskLeafTransform: application closure (output is always a valid RiskLeaf),
@@ -14,20 +14,20 @@ import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId}
 object RiskLeafTransformSpec extends ZIOSpecDefault {
 
   private def lognormalLeaf(prob: Double = 0.4, min: Long = 1000L, max: Long = 100000L): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = idStr("logn-leaf"), name = "Lognormal Leaf", distributionType = "lognormal",
       probability = prob, minLoss = Some(min), maxLoss = Some(max),
       parentId = Some(nodeId("root-pf")), seedVarId = 1L
-    )
+    ), "leaf")
 
   private def expertLeaf(prob: Double = 0.4): RiskLeaf =
-    RiskLeaf.unsafeApply(
+    unsafeGet(RiskLeaf.create(
       id = idStr("exp-leaf"), name = "Expert Leaf", distributionType = "expert",
       probability = prob,
       percentiles = Some(Array(0.1, 0.5, 0.9)),
       quantiles = Some(Array(1000.0, 5000.0, 20000.0)),
       parentId = Some(nodeId("root-pf")), terms = Some(3), seedVarId = 2L
-    )
+    ), "leaf")
 
   private def apply(t: RiskLeafTransform, leaf: RiskLeaf): RiskLeaf =
     RiskLeafTransform.applyTo(t, leaf).toEither.toOption.get

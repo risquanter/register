@@ -267,8 +267,10 @@ object Application extends ZIOAppDefault {
       WorkspaceStoreConfig.layer,
       // Server layer uses ServerConfig
       ZLayer.fromZIO(
-        ZIO.service[ServerConfig].map(cfg => 
-          Server.Config.default.binding(cfg.host, cfg.port)
+        ZIO.service[ServerConfig].map(cfg =>
+          Server.Config.default
+            .binding(cfg.host, cfg.port)
+            .requestStreaming(Server.RequestStreaming.Disabled(cfg.maxRequestBytes))
         )
       ) >>> Server.live,
       // Telemetry - provides Tracing + Meter for observability (requires TelemetryConfig)

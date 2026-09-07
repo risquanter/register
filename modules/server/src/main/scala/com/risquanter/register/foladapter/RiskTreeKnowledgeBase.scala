@@ -103,29 +103,26 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
     */
   val reservedFolNames: Set[String] = FolSymbols.reservedNames
 
-  /** Diagnostic record of node names that were skipped (reserved-symbol
-    * collision) or coalesced (duplicate name, last-write-wins) when building
-    * [[nameToId]]. Empty in the supported flow — the DTO validators
-    * (`requireUniqueNames`, `requireNoReservedNames`) gate at create-tree time.
+  /** Diagnostic record of node names skipped because they collide with a
+    * reserved catalog symbol when building [[nameToId]]. Empty in the supported
+    * flow — the DTO validators (`requireUniqueNames`, `requireNoReservedNames`)
+    * gate at create-tree time. Duplicate names cannot reach the KB at all:
+    * `RiskTree.fromNodes` enforces node-name uniqueness on every construction
+    * path (requests, merges, store-loads), so only reserved-symbol collisions
+    * remain possible here.
     *
     * Surfaced for the orchestrating service (e.g. `QueryServiceLive`) to log
     * via `ZIO.logWarning` so any DTO-bypass path is observable.
     */
   val nameCollisions: List[String] =
-    val allNames = tree.index.nodes.values.map(_.name.value).toList
-    val reserved = allNames.filter(reservedFolNames.contains).distinct.sorted
+    tree.index.nodes.values.map(_.name.value).toList
+      .filter(reservedFolNames.contains).distinct.sorted
       .map(n => s"reserved:$n")
-    val duplicates = allNames
-      .filterNot(reservedFolNames.contains)
-      .groupBy(identity).collect { case (n, xs) if xs.size > 1 => n }
-      .toList.sorted
-      .map(n => s"duplicate:$n")
-    reserved ++ duplicates
 
   /** Node name → `NodeId`, backing the name branch of the node-sort literal
     * validator so a quoted node name (`child_of(x, "IT Risk")`) resolves to a
     * node id. Reserved-symbol names are excluded (see [[reservedFolNames]] /
-    * [[nameCollisions]]); duplicate names are last-write-wins until
+    * [[nameCollisions]]); every remaining name maps to exactly one node, because
     * `RiskTree.fromNodes` enforces node-name uniqueness. The validator returns
     * a `NodeId`, never a raw string, so the engine carries node identity, not
     * a name.

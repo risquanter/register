@@ -69,6 +69,7 @@ val result = nameToId.get(userInput)  // Set.contains / Map.get only
 | Laminar DOM | `textContent` / typed setters; `innerHTML` is never called |
 | ZIO logging | `s"…${treeId.value}…"` — interpolated values are Iron-validated wrappers, not raw user input |
 | HOCON config | Server-side only; not user-supplied |
+| HTTP request body | zio-http `RequestStreaming.Disabled(maxRequestBytes)` — bodies over the configured cap (default 8 MiB, env `REGISTER_MAX_REQUEST_BYTES`) are rejected with 413 before any handler runs, bounding request memory (DoS) and the largest accepted tree payload. Resource-limit table: ADR-017 §6 |
 
 If a new code path introduces a parser boundary not in this table,
 document it here and verify it honours the no-re-parse discipline.
