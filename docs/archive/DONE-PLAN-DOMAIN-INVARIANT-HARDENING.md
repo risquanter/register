@@ -1,6 +1,9 @@
 # PLAN — Domain-invariant hardening (PLAN-RISKTRANSFORM §9)
 
-**Status:** elevated to implementation-grade, awaiting approval (not started).
+**Status:** landed. Levers 1–3, the collection bounds, OD-1, and the
+single-validated-construction continuation shipped in commit `41b3ea6` (0.10.29);
+the WorkspaceKeyCrypto relocation (this plan's file inventory) shipped in
+`ba60ec9` (0.10.30). All tiers green.
 **Lineage:** implements PLAN-RISKTRANSFORM.md §9 ("Domain-invariant hardening,
 immediate follow-up to M1R"). §9 there is the design-stage sketch; this file is
 its implementation-grade elevation, with its own file inventory and hook token,
