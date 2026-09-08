@@ -1,13 +1,10 @@
 package com.risquanter.register.domain.data.iron
 
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.constraint.collection.{MaxLength, MinLength}
 import io.github.iltotore.iron.constraint.string.Match
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
-import zio.{UIO, ZIO}
 import zio.json.{JsonEncoder, JsonDecoder, JsonFieldEncoder, JsonFieldDecoder}
 
 // Base refined type alias used for most short strings:
@@ -627,9 +624,11 @@ object MitigationId:
   given JsonFieldDecoder[MitigationId] = JsonFieldDecoder.string.mapOrFail(s =>
     MitigationId.fromString(s).left.map(_.mkString(", ")))
 
-// WorkspaceKeySecret: 128-bit SecureRandom credential, base64url encoded (22 chars, no padding).
+// WorkspaceKeySecret: 128-bit workspace capability key, base64url encoded (22 chars, no padding).
 // Used as capability URL token for workspace access. Standalone type — NOT a ULID wrapper.
 // Different charset (base64url vs Crockford base32) and length (22 vs 26) from SafeId.
+// Minted by WorkspaceKeyCrypto.generate (server) — generation is JVM-only and lives off the
+// cross-compiled type so this module carries no java.security reference.
 //
 // ADR-022: final class — no compiler-generated unapply, copy, or product serialisation.
 // Raw value accessible only via explicit `reveal` call; toString is redacted.
@@ -648,22 +647,6 @@ object WorkspaceKeySecret:
   /** Construct from an already-validated WorkspaceKeyStr (Iron proof required). */
   def apply(value: WorkspaceKeyStr): WorkspaceKeySecret = new WorkspaceKeySecret(value)
 
-  // Thread-safe: SecureRandom is documented as thread-safe in the JDK.
-  // Shared instance avoids repeated seeding overhead from /dev/urandom on each call.
-  private val rng: java.security.SecureRandom = new java.security.SecureRandom()
-
-  /** Generate a cryptographically random workspace key (128-bit entropy).
-    * refineUnsafe is safe here: SecureRandom(16 bytes) → base64url encoding
-    * always produces exactly 22 chars from [A-Za-z0-9_-].
-    */
-  def generate: UIO[WorkspaceKeySecret] =
-    ZIO.succeed {
-      val bytes = new Array[Byte](16) // 128 bits
-      rng.nextBytes(bytes)
-      val encoded = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
-      new WorkspaceKeySecret(encoded.refineUnsafe[Match["^[A-Za-z0-9_-]{22}$"]])
-    }
-
   /** Smart constructor: validates base64url format, 22 chars. */
   def fromString(s: String): Either[List[ValidationError], WorkspaceKeySecret] =
     ValidationUtil.refineWorkspaceKeySecret(s)
@@ -673,9 +656,11 @@ object WorkspaceKeySecret:
   given JsonDecoder[WorkspaceKeySecret] = JsonDecoder[String].mapOrFail(s =>
     WorkspaceKeySecret.fromString(s).left.map(_.mkString(", ")))
 
-// WorkspaceKeyHash: SHA-256 digest of a workspace capability key.
+// WorkspaceKeyHash: lookup digest of a workspace capability key (64-char lowercase hex).
 // Internal-only durable identifier for workspace-key lookup.
 // Redacted toString avoids accidental correlation/log leakage.
+// Computed by WorkspaceKeyCrypto.hash (server) — SHA-256 is JVM-only and lives off the
+// cross-compiled type so this module carries no java.security reference.
 type WorkspaceKeyHashStr = String :| Match["^[0-9a-f]{64}$"]
 
 final class WorkspaceKeyHash private (private val raw: WorkspaceKeyHashStr):
@@ -692,14 +677,6 @@ object WorkspaceKeyHash:
 
   def fromString(s: String): Either[List[ValidationError], WorkspaceKeyHash] =
     ValidationUtil.refineWorkspaceKeyHash(s)
-
-  def fromSecret(secret: WorkspaceKeySecret): WorkspaceKeyHash =
-    val digest = MessageDigest
-      .getInstance("SHA-256")
-      .digest(secret.reveal.getBytes(StandardCharsets.UTF_8))
-      .map("%02x".format(_))
-      .mkString
-    new WorkspaceKeyHash(digest.refineUnsafe[Match["^[0-9a-f]{64}$"]])
 
 // ============================================================================
 // Auth Identity Types (ADR-012, ADR-024)

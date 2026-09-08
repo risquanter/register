@@ -1,12 +1,10 @@
 package com.risquanter.register.testutil
 
-import zio.test.Gen
 import zio.prelude.Validation
 import com.risquanter.register.domain.errors.ValidationError
 import com.risquanter.register.domain.data.iron.{SafeId, NodeId, TreeId, MitigationId}
-import java.nio.charset.StandardCharsets
-import java.security.MessageDigest
 import scala.annotation.tailrec
+import scala.util.hashing.MurmurHash3
 
 /**
   * Shared test utilities for creating Iron-refined types in tests.
@@ -90,28 +88,6 @@ trait TestHelpers {
     * @see ADR-018 for nominal wrapper pattern
     */
   def mitigationId(s: String): MitigationId = MitigationId(safeId(s))
-    
-  /**
-    * ZIO Test generator for valid SafeId values.
-    *
-    * Generates alpha-numeric labels (1-32 chars) and hashes them to ULIDs,
-    * matching safeId/safeIdStrict expectations.
-    *
-    * Usage:
-    * {{{
-    * import com.risquanter.register.testutil.TestHelpers.genSafeId
-    * 
-    * check(genSafeId) { id =>
-    *   assertTrue(id.value.length >= 3)
-    * }
-    * }}}
-    */
-  val genSafeId: Gen[Any, SafeId.SafeId] =
-    Gen.alphaNumericStringBounded(1, 32).map(label => deterministicUlidFromLabel(label))
-
-  /** ZIO Test generator for valid NodeId values. Wraps genSafeId in NodeId. */
-  val genNodeId: Gen[Any, NodeId] =
-    genSafeId.map(NodeId(_))
 
   /**
     * Extract validated value or throw AssertionError with accumulated messages.
@@ -124,14 +100,26 @@ trait TestHelpers {
     )
 
   /** Deterministically derive a ULID from a human-readable label (for fixtures/tests).
-    * Uses SHA-256(label) -> first 16 bytes -> Crockford base32 encoding.
+    * Fills 16 bytes from a four-round MurmurHash3 chain, then Crockford base32.
+    * Pure Scala — links on both JVM and Scala.js; not cryptographic, intended only
+    * for stable, distinct test-fixture identifiers.
     */
   private def deterministicUlidFromLabel(label: String): SafeId.SafeId =
-    val bytes = MessageDigest.getInstance("SHA-256").digest(label.getBytes(StandardCharsets.UTF_8)).take(16)
-    val ulidString = encodeBase32(bytes)
+    val ulidString = encodeBase32(hash128(label))
     SafeId.fromString(ulidString).getOrElse(
       throw new IllegalStateException(s"Deterministic ULID generation failed for label: $label")
     )
+
+  /** 128-bit deterministic digest of a label as 16 big-endian bytes. */
+  private def hash128(label: String): Array[Byte] =
+    val h0 = MurmurHash3.stringHash(label, 0x9e3779b1)
+    val h1 = MurmurHash3.stringHash(label, h0)
+    val h2 = MurmurHash3.stringHash(label, h1)
+    val h3 = MurmurHash3.stringHash(label, h2)
+    Array(h0, h1, h2, h3).flatMap(intToBytes)
+
+  private def intToBytes(h: Int): Array[Byte] =
+    Array((h >>> 24).toByte, (h >>> 16).toByte, (h >>> 8).toByte, h.toByte)
 
   private val crockfordAlphabet: Array[Char] = "0123456789ABCDEFGHJKMNPQRSTVWXYZ".toCharArray
 

@@ -45,11 +45,11 @@ final class WorkspaceStorePostgres private (
     */
   override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret] =
     for
-      key <- WorkspaceKeySecret.generate
+      key <- WorkspaceKeyCrypto.generate
       sid <- IdGenerators.nextId.orDie
       now <- Clock.instant
       id       = WorkspaceId(sid)
-      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      keyHash  = WorkspaceKeyCrypto.hash(key)
       created  = toOffsetDateTime(now)
       ttlS     = toIntervalString(config.ttl)
       idleS    = toIntervalString(config.idleTimeout)
@@ -179,14 +179,14 @@ final class WorkspaceStorePostgres private (
   override def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret] =
     for
       ws     <- resolveInternal(key)
-      newKey <- WorkspaceKeySecret.generate
+      newKey <- WorkspaceKeyCrypto.generate
       now    <- Clock.instant
       _      <- db(
                   run(
                     query[WorkspaceRow]
                       .filter(_.id == lift(ws.id))
                       .update(
-                        _.keyHash -> lift(WorkspaceKeyHash.fromSecret(newKey)),
+                        _.keyHash -> lift(WorkspaceKeyCrypto.hash(newKey)),
                         _.createdAt -> lift(toOffsetDateTime(now)),
                         _.lastAccess -> lift(toOffsetDateTime(now))
                       )
@@ -206,7 +206,7 @@ final class WorkspaceStorePostgres private (
     yield ws
 
   private def loadWorkspaceRowByHash(key: WorkspaceKeySecret): IO[AppError, WorkspaceRow] =
-    db(run(query[WorkspaceRow].filter(_.keyHash == lift(WorkspaceKeyHash.fromSecret(key))))).flatMap(rows =>
+    db(run(query[WorkspaceRow].filter(_.keyHash == lift(WorkspaceKeyCrypto.hash(key))))).flatMap(rows =>
       ZIO.fromOption(rows.headOption).orElseFail(WorkspaceNotFound(key))
     )
 

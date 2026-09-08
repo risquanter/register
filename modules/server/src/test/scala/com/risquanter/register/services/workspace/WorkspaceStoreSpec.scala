@@ -8,7 +8,7 @@ import java.time.Duration
 import scala.concurrent.duration.*
 
 import com.risquanter.register.configs.{WorkspaceConfig, TestConfigs}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, SeedEntityId}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId}
 import com.risquanter.register.domain.errors.{TreeNotInWorkspace, ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
@@ -31,7 +31,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         store <- mkStore
         key   <- store.create()
         ws    <- store.resolve(key)
-      yield assertTrue(ws.keyHash == WorkspaceKeyHash.fromSecret(key))
+      yield assertTrue(ws.keyHash == WorkspaceKeyCrypto.hash(key))
     },
 
     test("resolveById resolves same workspace") {
@@ -90,7 +90,7 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         treeId <- IdGenerators.nextTreeId
         _      <- store.addTree(key, treeId)
         ws     <- store.resolveTreeWorkspace(key, treeId)
-      yield assertTrue(ws.keyHash == WorkspaceKeyHash.fromSecret(key), ws.trees.contains(treeId))
+      yield assertTrue(ws.keyHash == WorkspaceKeyCrypto.hash(key), ws.trees.contains(treeId))
     },
 
     test("resolveTreeWorkspace fails when tree is not in workspace") {
@@ -152,9 +152,9 @@ object WorkspaceStoreSpec extends ZIOSpecDefault:
         viaKey  <- store.resolve(newKey)
       yield assertTrue(
         ws2.id == ws1.id,
-        ws2.keyHash == WorkspaceKeyHash.fromSecret(newKey),
+        ws2.keyHash == WorkspaceKeyCrypto.hash(newKey),
         viaKey.id == ws1.id,
-        viaKey.keyHash == WorkspaceKeyHash.fromSecret(newKey)
+        viaKey.keyHash == WorkspaceKeyCrypto.hash(newKey)
       )
     },
 

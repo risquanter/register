@@ -7,7 +7,7 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.configs.{TestConfigs, WorkspaceConfig}
-import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, WorkspaceKeyHash, SeedEntityId}
+import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, WorkspaceExpired, WorkspaceExpiredById, WorkspaceNotFound, WorkspaceNotFoundById}
 import com.risquanter.register.infra.persistence.RepositorySpec
 import com.risquanter.register.util.IdGenerators
@@ -30,7 +30,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         store <- ZIO.service[WorkspaceStore]
         key   <- store.create()
         ws    <- store.resolve(key)
-      yield assertTrue(ws.keyHash == WorkspaceKeyHash.fromSecret(key))
+      yield assertTrue(ws.keyHash == WorkspaceKeyCrypto.hash(key))
     },
 
     test("resolveById resolves same workspace") {
@@ -64,7 +64,7 @@ object WorkspaceStorePostgresSpec extends ZIOSpecDefault, RepositorySpec:
         oldExit <- store.resolve(oldKey).exit
       yield assertTrue(
         ws2.id == ws1.id,
-        ws2.keyHash == WorkspaceKeyHash.fromSecret(newKey)
+        ws2.keyHash == WorkspaceKeyCrypto.hash(newKey)
       ) && assert(oldExit)(fails(isSubtype[WorkspaceNotFound](anything)))
     },
 

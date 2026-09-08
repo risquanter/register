@@ -435,6 +435,17 @@ Plus BATS suite-C fast gate after the change (`register-dev` skill).
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala`
 - `modules/common/src/test/scala/com/risquanter/register/testutil/TestHelpers.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceKeyCrypto.scala` (new — server-side generate + hash)
+- `modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStoreLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgres.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceKeyCryptoSpec.scala` (new)
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/iron/WorkspaceKeySecretSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/iron/WorkspaceKeyHashSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceStoreSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/workspace/WorkspaceStorePostgresSpec.scala`
+
+
 
 
 Docs edited (not hook-gated; listed for completeness):

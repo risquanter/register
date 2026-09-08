@@ -77,17 +77,6 @@ object WorkspaceKeySecret:
   // R5: constructor takes WorkspaceKeyStr (Iron proof required)
   def apply(value: WorkspaceKeyStr): WorkspaceKeySecret = new WorkspaceKeySecret(value)
 
-  // Thread-safe shared instance — avoids repeated /dev/urandom seeding per call
-  private val rng: java.security.SecureRandom = new java.security.SecureRandom()
-
-  def generate: UIO[WorkspaceKeySecret] = ZIO.succeed {
-    val bytes = new Array[Byte](16)
-    rng.nextBytes(bytes)
-    val encoded = java.util.Base64.getUrlEncoder.withoutPadding.encodeToString(bytes)
-    // refineUnsafe safe: SecureRandom(16 bytes) → base64url always produces 22 chars from [A-Za-z0-9_-]
-    new WorkspaceKeySecret(encoded.refineUnsafe[Match["^[A-Za-z0-9_-]{22}$"]])
-  }
-
   // R7: canonical validated entry point
   def fromString(s: String): Either[List[ValidationError], WorkspaceKeySecret] =
     ValidationUtil.refineWorkspaceKey(s)
@@ -97,6 +86,12 @@ object WorkspaceKeySecret:
   given JsonDecoder[WorkspaceKeySecret] = JsonDecoder[String].mapOrFail(s =>
     WorkspaceKeySecret.fromString(s).left.map(_.mkString(", ")))
 ```
+
+Key generation (SecureRandom, 128-bit entropy) is JVM-only, so it lives in
+server-side `WorkspaceKeyCrypto.generate` rather than on this companion — the
+type is cross-compiled to Scala.js, and keeping `java.security` off it removes a
+link-time hazard. The hashing counterpart `WorkspaceKeyCrypto.hash` (SHA-256)
+produces the `WorkspaceKeyHash` lookup digest for the same reason.
 
 The `Secret` suffix in the name is deliberate: it signals the special handling properties (no `unapply`, redacted `toString`). Follow the type definition to this ADR for the full rationale.
 

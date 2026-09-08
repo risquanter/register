@@ -1278,8 +1278,9 @@ Status after the 2026-08-08 review session:
      no flow exists where two hash implementations must agree. Precision note:
      `MessageDigest` referenced from `common` (`CrossType.Pure`, one source
      tree) does compile under Scala.js and links as long as no JS code path
-     reaches it — `WorkspaceKeyHash.fromSecret` already relies on exactly that
-     unreachability pattern. A `common`-placed `staleOverrides` would have
+     reaches it — `WorkspaceKeyHash.fromSecret` (since relocated to server
+     `WorkspaceKeyCrypto.hash`, which removed that instance) relied on exactly
+     that unreachability pattern. A `common`-placed `staleOverrides` would have
      been the second such reachability-fragile site, breakable at link time by
      any future JS call; relocation removes the fragility instead of adding
      to it.

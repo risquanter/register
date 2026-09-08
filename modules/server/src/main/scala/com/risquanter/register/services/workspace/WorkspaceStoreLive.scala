@@ -66,10 +66,10 @@ final class WorkspaceStoreLive private (
     */
   override def create(seedEntityId: Option[SeedEntityId.SeedEntityId]): IO[AppError, WorkspaceKeySecret] =
     for
-      key <- WorkspaceKeySecret.generate
+      key <- WorkspaceKeyCrypto.generate
       sid <- IdGenerators.nextId.orDie
       now <- Clock.instant
-      keyHash = WorkspaceKeyHash.fromSecret(key)
+      keyHash = WorkspaceKeyCrypto.hash(key)
       result <- ref.modify { state =>
         resolveSeedEntityId(state, seedEntityId) match
           case Left(err) => (Left(err), state)
@@ -128,7 +128,7 @@ final class WorkspaceStoreLive private (
   override def addTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       _       <- resolveInternal(key)
-      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      keyHash  = WorkspaceKeyCrypto.hash(key)
       _ <- ref.update(state =>
              state.copy(byHash = state.byHash.updatedWith(keyHash)(_.map(w => w.copy(trees = w.trees + treeId))))
            )
@@ -140,7 +140,7 @@ final class WorkspaceStoreLive private (
   override def removeTree(key: WorkspaceKeySecret, treeId: TreeId)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       _       <- resolveInternal(key)
-      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      keyHash  = WorkspaceKeyCrypto.hash(key)
       _ <- ref.update(state =>
              state.copy(byHash = state.byHash.updatedWith(keyHash)(_.map(w => w.copy(trees = w.trees - treeId))))
            )
@@ -158,7 +158,7 @@ final class WorkspaceStoreLive private (
   override def resolve(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
     for
       now     <- Clock.instant
-      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      keyHash  = WorkspaceKeyCrypto.hash(key)
       result <- ref.modify { map =>
         validateWorkspace(map.byHash, keyHash, key, now) match
           case Left(err) => (Left(err), map)
@@ -221,7 +221,7 @@ final class WorkspaceStoreLive private (
   override def delete(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, Unit] =
     for
       ws      <- resolveInternal(key)
-      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      keyHash  = WorkspaceKeyCrypto.hash(key)
       _ <- ref.update(state =>
              state.copy(
                byHash = state.byHash - keyHash,
@@ -236,10 +236,10 @@ final class WorkspaceStoreLive private (
     */
   override def rotate(key: WorkspaceKeySecret)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): IO[AppError, WorkspaceKeySecret] =
     for
-      newKey <- WorkspaceKeySecret.generate
+      newKey <- WorkspaceKeyCrypto.generate
       now    <- Clock.instant
-      oldHash  = WorkspaceKeyHash.fromSecret(key)
-      newHash  = WorkspaceKeyHash.fromSecret(newKey)
+      oldHash  = WorkspaceKeyCrypto.hash(key)
+      newHash  = WorkspaceKeyCrypto.hash(newKey)
       result <- ref.modify { map =>
         validateWorkspace(map.byHash, oldHash, key, now) match
           case Left(err) => (Left(err), map)
@@ -263,7 +263,7 @@ final class WorkspaceStoreLive private (
   private def resolveInternal(key: WorkspaceKeySecret): IO[AppError, WorkspaceRecord] =
     for
       now     <- Clock.instant
-      keyHash  = WorkspaceKeyHash.fromSecret(key)
+      keyHash  = WorkspaceKeyCrypto.hash(key)
       result <- ref.get.map(state => validateWorkspace(state.byHash, keyHash, key, now))
       ws     <- ZIO.fromEither(result).tapError {
                   case _: WorkspaceNotFound =>
