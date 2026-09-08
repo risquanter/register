@@ -82,8 +82,8 @@ Requires `local/irmin-prod:3.11-p1` Docker image (built once — see Image Build
 `docker-compose.server-it.yml` (dynamic host port — multiple specs run concurrently
 without port conflicts).
 
-**Before every run, clear leaked networks first** — see "Leaked network cleanup"
-below. It is a mandatory pre-step, not just crash recovery.
+**Before every run, clear leaked networks first** — see "Leaked Docker state
+cleanup" below (Mechanism 1). It is a mandatory pre-step, not just crash recovery.
 
 ```bash
 # All integration tests (runs all specs concurrently — safe)
@@ -98,18 +98,40 @@ sbt 'serverIt/test' 2>&1 | \
   grep -E 'tests passed|tests failed|FAILED|\[error\]|success|Executed in' | head -40
 ```
 
-### Leaked network cleanup — MANDATORY before every serverIt run
+### Leaked Docker state cleanup — MANDATORY before every serverIt and BATS run
 
-Per-run scoped networks leak and accumulate across runs, crashes, and other
-terminals until Docker's address pool is exhausted (`all predefined address
-pools have been fully subnetted`). Run this cleanup **before** every `serverIt`
-run — not only after a Ctrl+C / crash. That daemon error has this one cause:
-clean and re-run, never re-diagnose it, and never count the run as a real
-failure on its account (it is environmental, not a code failure).
+Two distinct leak mechanisms accumulate scoped Docker state across runs,
+crashes, and other terminals. Both are environmental, not code failures: clean
+and re-run, never re-diagnose them, and never count the run as a real failure on
+their account. Clear the relevant one **before** starting a Docker tier — not
+only after a Ctrl+C / crash.
+
+**Mechanism 1 — `register_it_` per-run networks (serverIt).** `IrminCompose`
+creates a uniquely-named `register_it_<random>` stack per spec. Interrupted runs
+leave these behind until Docker's address pool is exhausted (`all predefined
+address pools have been fully subnetted`). That daemon error has this one cause.
+Run before every `serverIt` run:
 
 ```bash
 docker ps -a --filter name=register_it_ --format '{{.ID}}' | xargs -r docker rm -f; docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docker network rm; echo "--- remaining register_it_ networks ---"; docker network ls --filter name=register_it_ --format '{{.Name}}' | wc -l
 ```
+
+**Mechanism 2 — the fixed `register` compose stack (BATS suites A/C, dev
+Compose).** BATS suites A and C and day-to-day `docker compose up` share the
+default `register` project. An interrupted teardown leaves a container bound to
+a since-removed network, and the next `up` fails with `network <id> not found`.
+Run before every BATS suite A/C run (and any Docker Compose dev tier). This is
+strictly scoped to the `register` project — label-matched, so it cannot touch
+any other project's or manually-created resources — and `-v` **deliberately
+purges the `register_pg-data` volume** so each run starts from a pristine store:
+
+```bash
+docker compose -p register down -v --remove-orphans 2>/dev/null || true
+```
+
+Because `-v` destroys the Irmin/postgres data volume, do not run it while doing
+persistence dev work whose data you want to keep — it is a test-tier pre-step,
+not a general dev command.
 
 ---
 
@@ -353,6 +375,11 @@ rebuild is needed — images resolve the new version from Maven Central.
 ## BATS Smoke Tests
 
 Requires pre-built production images and the `local/bats-runner:1.11` image.
+
+**Before every suite A/C run, clear the leaked `register` compose stack first**
+— see "Leaked Docker state cleanup" above (Mechanism 2:
+`docker compose -p register down -v --remove-orphans`). It is a mandatory
+pre-step, not just crash recovery.
 
 ```bash
 # Build BATS runner (once)
