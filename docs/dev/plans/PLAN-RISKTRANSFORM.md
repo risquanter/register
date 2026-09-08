@@ -299,10 +299,7 @@ and keeping only a metadata trace is rejected.
   expressiveness decided (B):** extend the *typed* range to full formulas
   (`∧`/`¬`/`∃`, closed-world negation) rather than adapter-derived predicates — a
   sibling vql-engine change (`docs/archive/MITIGATION-PRE-PLANNING.md` §P-4). A
-  mitigation's targeting predicate is a **restricted** sublanguage (closed in `x`,
-  no answer variables, bounded auxiliary quantifiers, no mitigation-state
-  predicates; §P-1 — pre-M3 the targeting fragment admits no quantifiers at
-  all, §8.4-3; auxiliary-sort quantifiers arrive with M3's sorts).
+  mitigation's targeting predicate is a **restricted** sublanguage (closed in x, no answer variables, no quantifiers, no mitigation-state predicates; §8.4-3. Targeting ranges over the node sort only, and mitigation-state predicates are permanently barred (self-reference/fixpoint), so there is no other sort to quantify over — the no-quantifier rule costs no expressiveness).
 
 **Open research feeding this concept:**
 
@@ -889,64 +886,6 @@ memoization into M2; the remaining M3 scope is listed in §8.2.
 - **Range use**: analytics over mitigated/unmitigated populations arrive free
   with AC-1/AC-2 once the KB predicates exist; register-side work is KB-only.
 
-#### 7.3.1 M3 mandatory re-assessments (decision-guide-ready) — prerequisite: auxiliary sorts exist
-
-These two questions are **deliberately deferred to M3, not dropped**, because
-each depends on a prerequisite that does not exist yet (a second sort beyond
-the node sort). They are M3 scope and MUST be ruled when M3 is built — they are
-not open sub-questions of the current milestone. Both are written here in
-decision-guide form so the ruling can be made directly with no re-request.
-They originate as pre-planning P-1 divergences (check location; bounded
-auxiliary quantifiers) between the scratch notes and the as-built M1R code.
-
-**RA-1 — Where the targeting checks run (fragment membership, single free
-variable, mitigation-state ban).**
-- *Why it matters now-at-M3:* today the checks live in the cross-compiled
-  `common` boundary constructor `TargetingPredicate.create`, so the browser
-  and server share one validation and no invalid `TargetingPredicate` value
-  can exist. Pre-planning P-1 instead placed them in the `server`-side
-  `QueryBinder` binding phase. When auxiliary sorts arrive, a sort-dependent
-  rule (RA-2) needs sort information that only typing/binding has — which
-  reopens where each check belongs.
-- *Option A — keep all checks in `common` (`TargetingPredicate.create`).* Pros:
-  one boundary, correct-by-construction on both platforms, no invalid value
-  ever exists; matches the current shipped design. Cons: any sort-dependent
-  rule must be expressible without a bound sort environment, or must move
-  server-side, splitting targeting validation across two layers. Plays out:
-  the sort rule (RA-2) is either encoded structurally in the fragment spec or
-  the whole targeting-validation stays in `common` only if the sort catalog is
-  available there.
-- *Option B — split: fragment/free-var/ban in `common`, sort-dependent rule in
-  `QueryBinder`.* Pros: the sort rule sits where sorts are known (P-1's
-  original placement); each check runs where its information lives. Cons: two
-  validation loci for one concept; a `TargetingPredicate` can exist in `common`
-  that a later server bind rejects, weakening the correct-by-construction
-  guarantee.
-- *Trade-off only the user weighs:* the single-boundary correct-by-construction
-  guarantee (ADR-001) against putting the sort rule where sort information
-  naturally lives.
-
-**RA-2 — Whether the targeting fragment admits bounded auxiliary quantifiers.**
-- *Why it matters now-at-M3:* today `Fragment.Targeting` rejects ALL quantifiers,
-  ruled correct pre-M3 (§8.4-3) precisely because the node sort is the only
-  sort, so there is nothing to quantify over and the P-1 sort rule and the
-  no-quantifier rule coincide with zero expressiveness loss. At M3 auxiliary
-  sorts (`Mitigation`, `RiskType`) arrive, and bounded auxiliary quantifiers
-  (`∃a:Mitigation`, `∃r:RiskType`) become genuinely expressive — this is the
-  point §8.4-3 records as the moment to revisit.
-- *Option A — keep rejecting all quantifiers.* Pros: simplest fragment; no
-  bind-time sort rule needed; smallest attack surface. Cons: targeting cannot
-  express "nodes with some mitigation of kind K" or similar auxiliary-sort
-  conditions; expressiveness ceiling.
-- *Option B — admit bounded auxiliary quantifiers over non-node sorts only
-  (P-1's rule), never over the node variable `x`.* Pros: recovers the P-1
-  expressiveness; the bind-time sort rule (built at M3 regardless — syntax
-  cannot know a variable's sort) enforces the "non-`x` sort only" boundary.
-  Cons: needs the sort-aware rule and its placement settled (RA-1); larger
-  fragment to validate and secure.
-- *Trade-off only the user weighs:* targeting expressiveness over auxiliary
-  sorts against fragment simplicity and validation/security surface.
-
 ### 7.4 M4 — API surface + frontend (work items; elevate before build)
 
 - **Tree PUT buckets**: `RiskTreeUpdateRequest`/`RiskTreeDefinitionRequest`
@@ -1366,8 +1305,7 @@ client-supplied node enumeration.
   *  - parses via the engine's Either-returning parse entry
   *  - exactly one free variable (the target variable)
   *  - no answer variables; no quantifiers and no function terms (targeting
-  *    fragment membership, §8.4-3 — auxiliary-sort quantifiers become
-  *    admissible at M3 via the P-1 bind-time sort rule)
+  *    fragment membership, §8.4-3)
   *  - predicate whitelist: structural/attribute predicates only — the
   *    mitigation-state predicates (`mitigate`, `mitigated`, `unmitigated`)
   *    are rejected case-insensitively (self-reference/fixpoint exclusion, §6).
@@ -1694,12 +1632,12 @@ M4 elevation respectively).
    0.11.0 (0.11.x); sibling-repo work, see §8.5.
 
    **Quantifier exclusion RULED (user, 2026-08-10): excluded from the
-   targeting fragment spec pre-M3.** Today the node sort is the only
-   sort, so the exclusion equals the P-1 sort rule with no expressiveness
-   loss. At M3, when auxiliary sorts arrive, the spec line is removed and
-   the P-1 bind-time sort rule (built at M3 regardless — syntax cannot
-   know a variable's sort) takes over; the membership machinery itself is
-   unchanged. No open sub-questions remain on this item.
+   targeting fragment spec.** Targeting ranges over the node sort only and
+   mitigation-state predicates are permanently barred (§6), so there is no
+   sort to quantify over — the exclusion costs no expressiveness. A future
+   asset-graph sort that were both quantifiable and legal in targeting would
+   reopen this — asset-graph-epic scope (TODO §45), not M3. No open
+   sub-questions remain.
 4. **Read-time semantics of a divergent override (security-review F2).**
    Merges (byte-level, domain-blind per ADR-032) and post-write renames
    can produce stored trees where an override's predicate no longer
@@ -1991,7 +1929,7 @@ Both review tiers ran on the M1R diff. Dispositions:
   `x > 5`, `named(x, "Ransomware")`) are accepted at authoring, and sort errors are
   caught by the typed bind at M3 resolution — which reuses the existing
   `satisfyingSet` + KB path, no new checker (§8.4-3 enforcement-locus ruling;
-  P-1 bind-time sort rule). Early authoring-time feedback, if wanted, is an M3
+  typed bind's predicate-argument sort check). Early authoring-time feedback, if wanted, is an M3
   server-side validate round-trip (the form asks the server), never a
   client-side duplicate of the KB. Confirmed by the scoped review: the fragment
   grammar already excludes every function/arithmetic term.

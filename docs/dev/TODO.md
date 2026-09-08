@@ -2040,8 +2040,12 @@ parked for it are not orphaned; it is deliberately a pointer, not a spec.
   `has_unmitigated_risk(x) ≝ ∃r. (has_risk(x, r) ∧ ¬∃m. has_mitigation(r, m))`
   and D5 (client-facing mitigation API, own ADR). These need the auxiliary sorts
   (`RiskType`, `Mitigation`) the asset graph introduces.
-- **M3 targeting-fragment re-assessments** (`PLAN-RISKTRANSFORM.md` §7.3.1 RA-1,
-  RA-2) also unblock once auxiliary sorts exist — same prerequisite.
+- **Bounded-quantifier targeting.** If the asset graph introduces a sort that
+  is both quantifiable and legal in a targeting predicate, whether targeting
+  should admit bounded quantifiers over it (and where the sort-aware check
+  would run) becomes a design question then. Moot until such a sort exists —
+  today the node sort is the only targeting sort, and mitigation-state
+  predicates are permanently barred (self-reference/fixpoint).
 
 **Status:** open — future epic, prerequisite-gated (no asset-graph domain yet).
 
