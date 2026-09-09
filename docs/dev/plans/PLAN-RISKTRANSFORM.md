@@ -970,7 +970,465 @@ filled by the node picker; the name is shown here only for readability.)
   a no-op, not an error. Selections are client-side view state, so nothing
   persistent goes stale.
 
-### 7.5 / 7.6 — reserved for the M3 / M4 implementation-grade continuations.
+### 7.5 M3 implementation-grade elevation — KB `Mitigation` sort + `mitigate` / `mitigated` / `unmitigated` analytics (2026-09-08)
+
+M3 is the analytics extension of `RiskTreeKnowledgeBase`: the query language
+gains a way to talk about mitigations, and the underlying resolved scopes
+(from §8.13 M2 slice 2) plug in as the source of truth. Every other M3 line
+item in §7.3 / §8.2 has already landed:
+
+- M1R (§8.6) landed the vql adoption sweep, the `TargetingPredicate` smart
+  constructor + parser boundary, and the ADR-029 §3 table row.
+- M2 slice 2 (§8.13) landed `MitigationScopeResolver` + `ResolvedScopes` +
+  head-only memoization per `(TreeId, BranchRef, CommitHash)`.
+- M2 slice 3 (§8.14) landed the `CachedResultResolver` rename and
+  resolver-edge mitigation wiring.
+- M2 slice 4 (§8.15) landed override staleness detection.
+- vql-engine is at 0.17.0 already (past the 0.11.0 breaking-adoption pin
+  §8.2 references); no further adoption sweep is needed here.
+
+What genuinely remains for M3 is the KB extension itself and the ADR-028
+amendment that records tree-version memoization retroactively (M2 already
+did the memoization; the ADR text still says "model built per-query").
+
+#### 7.5.1 Scope
+
+1. Extend `RiskTreeKnowledgeBase` with a `Mitigation` sort, `Extract[MitigationId]`,
+   three predicates (`mitigate/2`, `mitigated/1`, `unmitigated/1`), and a new
+   `resolvedScopes` constructor parameter.
+2. Wire `QueryServiceLive` to resolve mitigation scopes via
+   `MitigationScopeResolver` and pass them into the KB.
+3. Extend `FolSymbols.reservedNames` with `mitigate`, `mitigated`,
+   `unmitigated` so the alarm-on-bypass safety net (`nameCollisions`)
+   catches a node name that collides with the new symbols.
+4. Amend ADR-028 Decision 5 to record that the analytics KB's *inputs*
+   (results, resolved scopes) are memoized per tree version even though
+   the KB itself is still constructed per-query.
+
+Explicitly out of scope for M3 (M4 territory):
+- Any DTO or endpoint change for mitigations in query responses.
+- Any projection of `MitigationId` in `QueryResponseBuilder`.
+- Any frontend consumption of the new predicates.
+
+#### 7.5.2 Exact signatures
+
+**Sort declaration + companion additions** —
+`modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`:
+
+```scala
+object RiskTreeKnowledgeBase:
+  val NodeSort: TypeId            = TypeId("Node")
+  val NodeNameLiteralSort: TypeId = TypeId("NodeNameLiteral")
+  val NodeIdLiteralSort: TypeId   = TypeId("NodeIdLiteral")
+  /** Domain sort for tree-level mitigations. Carrier: `MitigationId`.
+    * Quantifiable (`DomainType`) so `∀m mitigate(x, m)` and
+    * `∃m mitigate(x, m)` are well-typed queries. */
+  val MitigationSort: TypeId      = TypeId("Mitigation")
+
+  given Extract[NodeId]        with … // unchanged
+  given Extract[MitigationId] with
+    def apply(v: Value): Either[String, MitigationId] = v.raw match
+      case id: MitigationId => Right(id)
+      case other            =>
+        Left(s"Extract[MitigationId]: expected MitigationId carrier for sort '${v.sort.value}', got $other")
+```
+
+**Extended constructor** — same file:
+
+```scala
+class RiskTreeKnowledgeBase(
+  tree:           RiskTree,
+  results:        Map[NodeId, LossDistribution],
+  resolvedScopes: Map[MitigationId, Set[NodeId]]
+):
+  val mitigationSort: TypeId = RiskTreeKnowledgeBase.MitigationSort
+```
+
+`resolvedScopes` is the caller-supplied projection of `ResolvedScopes` —
+Failed outcomes are excluded (matches `ResolvedScopes.appliedScopes`,
+already the projection every consumer uses).
+
+**Catalog additions** — `types` gains `TypeDecl.DomainType(mitigationSort)`;
+`predicates` gains:
+
+```scala
+SymbolName("mitigate")    -> PredicateSig(List(nodeSort, mitigationSort)),
+SymbolName("mitigated")   -> PredicateSig(List(nodeSort)),
+SymbolName("unmitigated") -> PredicateSig(List(nodeSort))
+```
+
+No new `literalValidators` entry — `Mitigation` is a quantified sort with
+no quoted-literal form in M3 (a `has_mitigation_id(m, "01BX…")` companion
+would be a §7.6 M4 item if the frontend needs it).
+
+**Dispatcher additions** — precomputed `Set[NodeId]` per §6 P-3:
+
+```scala
+private val mitigatedIds: Set[NodeId] =
+  resolvedScopes.valuesIterator.foldLeft(Set.empty[NodeId])(_ union _)
+
+// dispatcher.predicates:
+SymbolName("mitigate") -> { args =>
+  for
+    node <- args(0).extract[NodeId]
+    mid  <- args(1).extract[MitigationId]
+  yield resolvedScopes.getOrElse(mid, Set.empty).contains(node)
+},
+SymbolName("mitigated")   -> { args => args(0).extract[NodeId].map(mitigatedIds.contains) },
+SymbolName("unmitigated") -> { args => args(0).extract[NodeId].map(id => !mitigatedIds.contains(id)) }
+```
+
+**Domain population** — `RuntimeModel.domains` gains one entry per
+`tree.mitigations` element:
+
+```scala
+private val mitigationDomain: Set[Value] =
+  tree.mitigations.iterator.map(m => Value(mitigationSort, m.id)).toSet
+
+val model: RuntimeModel = RuntimeModel(
+  domains    = Map(nodeSort -> nodeDomain, mitigationSort -> mitigationDomain),
+  dispatcher = dispatcher
+)
+```
+
+**Reserved-symbol additions** —
+`modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala`:
+
+```scala
+val reservedNames: Set[String] = Set(
+  "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
+  "gt_loss", "gt_prob", "eq", "named", "has_id",
+  "p95", "p99", "lec",
+  "mitigate", "mitigated", "unmitigated"  // M3 additions
+)
+```
+
+**QueryServiceLive wiring** —
+`modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`.
+The `evaluate` method gains a mitigation-scope resolution step between the
+tree load and the KB construction; the layer picks up `ScopeResolverScope`
+as a dependency — the per-workspace resolver factory that mirrors `CacheScope`,
+**not** a shared `MitigationScopeResolver`. There is no singleton
+`MitigationScopeResolver` service in the environment: one resolver instance
+exists per workspace (cross-workspace scope contamination is structurally
+impossible), obtained inside `evaluate` via `resolverFor(wsId): UIO[MitigationScopeResolver]`.
+Exact shape depends on M3-D3 (below) and M3-D6 (results interpretation); the
+version after resolution looks like:
+
+```scala
+class QueryServiceLive private (
+  repo:          RiskTreeRepository,
+  resolver:      CachedResultResolver,
+  scopeResolver: ScopeResolverScope,        // NEW — per-workspace resolver factory (mirrors CacheScope)
+  tracing:       Tracing
+) extends QueryService:
+
+  override def evaluate(wsId, treeId, parsed, seedEntityId, branch): Task[QueryResponse] =
+    for
+      (tree, commitHash) <- loadTreeAndHead(wsId, treeId, branch)         // shape per M3-D3
+      results            <- resolver.ensureCachedAll(tree, tree.index.nodes.keySet, seedEntityId).mapError(…)  // base results; residual-vs-base per M3-D6
+      mitResolver        <- scopeResolver.resolverFor(wsId)               // UIO[MitigationScopeResolver], one instance per workspace
+      resolved           <- mitResolver.resolve(
+                              ScopeResolutionContext(treeId, branch, commitHash),
+                              tree
+                            )
+      kb                  = RiskTreeKnowledgeBase(tree, results, resolved.appliedScopes)
+      …
+    yield response
+
+object QueryServiceLive:
+  val layer: ZLayer[
+    RiskTreeRepository & CachedResultResolver & ScopeResolverScope & Tracing,
+    Nothing, QueryService
+  ] = ZLayer { … }
+```
+
+`ScopeResolverScope.layer` is not currently in the application's layer graph
+(the resolver was built in M2 but has no live call site yet), so
+`Application.scala` gains `ScopeResolverScope.layer` and updates the
+`QueryServiceLive.layer` requirement comment. That file is in the inventory
+(§7.5.6) and is hook-gated.
+
+**`MitigationScopeResolverLive` internal call site** — the internal KB
+construction on line 42 becomes `RiskTreeKnowledgeBase(tree, Map.empty, Map.empty)`
+so the results-free / scopes-free construction stays correct for the
+targeting-only sublanguage. No signature change.
+
+**ADR-028 Decision 5 amendment** —
+`docs/dev/decision-records/ADR-028-vague-quantifier-query-pane.md`:
+add a rider under Decision 5 recording that the analytics KB is still
+constructed per query, but its `results` (via `CachedResultResolver`) and
+`resolvedScopes` (via `MitigationScopeResolver`) are both memoized per
+tree version upstream — so the per-query construction is a cheap wiring
+step, not the actual work.
+
+#### 7.5.3 Open decisions
+
+**M3-D1 — `RiskTreeKnowledgeBase` constructor signature.**
+- A) Required third parameter `resolvedScopes: Map[MitigationId, Set[NodeId]]`
+  — every caller passes something explicit; `MitigationScopeResolverLive`
+  passes `Map.empty` (matches its results-free convention). Aligns with
+  ADR-001 boundary discipline.
+- B) Defaulted `resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty`
+  — smaller ripple; existing test call sites keep compiling.
+- **Recommendation: A.** The defaulted variant hides a real change
+  (`mitigate` and `mitigated` silently return false for every input) and
+  parallels the results param, which has no default either.
+
+**M3-D2 — `mitigated(x)` semantics with Failed outcomes.**
+- A) Union of *Resolved* scopes only (matches `ResolvedScopes.appliedScopes`,
+  which excludes Failed). A Failed mitigation contributes nothing to
+  `mitigated`; a node covered only by a Failed mitigation reads
+  `unmitigated(x) = true`.
+- B) Distinguish Failed at the query level (new `mitigation_failed(x)`
+  predicate).
+- **Recommendation: A.** The staleness/failure surface belongs on the
+  mitigation panel (ADR-028), not the analytics KB. Query semantics should
+  match every other consumer of resolved scopes.
+
+**M3-D3 — how `QueryServiceLive` obtains the `CommitHash` for
+`ScopeResolutionContext`.** Today `getById(_, _, Revision.Head(branch))`
+resolves the head internally and throws the hash away. Options:
+- A) Add `resolveHead(wsId, id, branch): Task[Option[CommitHash]]` to
+  `RiskTreeRepository` and call it *after* `getById`. Race window: the
+  head can advance between the two calls, so the returned hash may
+  correspond to a newer tree than the one loaded. The memo would then be
+  indexed under the wrong version — a scope set computed for an older tree
+  gets stamped with the newer commit hash.
+- B) Add a companion `getByIdAt(wsId, id, rev): Task[Option[(RiskTree, CommitHash)]]`
+  alongside the existing `getById`. Both callers keep their current
+  method; `QueryServiceLive` uses the new one. The Irmin backend already
+  has `loadTreeAt` — it just needs to plumb the resolved hash through the
+  return type. In-memory returns a deterministic synthetic hash (e.g.
+  a stable digest of the tree state or a monotonic counter).
+- C) *Rejected — unsound, not a viable option.* Keying the memo on a domain
+  content-derived token (e.g. a `tree.mitigations` content hash) instead of
+  the byte-level Irmin `CommitHash` reintroduces the rename-staleness bug the
+  current design exists to avoid. `ScopeResolutionContext.revision` is
+  deliberately the byte-level Irmin commit hash because mitigation predicates
+  reference node *names* (`named(x, "IT Risk")`), and the domain content hash
+  omits names (§8.13; two-hash distinction, DD-16). A pure rename changes which
+  nodes a predicate resolves to but leaves the content hash unchanged, so a
+  content-token memo would serve a stale scope after a rename. This is the
+  storage-relation rule of ADR-032 §3 (§8.13; DD-16). Listed only to record why
+  it is excluded.
+- **Recommendation: B.** No race, no plan-level contract change, one new
+  method with a clear name. The in-memory synthetic hash is a bounded
+  cost — the in-memory backend is dev/test-only.
+
+**M3-D4 — `Mitigation` sort declared `DomainType` vs `ValueType`.**
+- A) `DomainType(mitigationSort)` — quantifiable. Enables
+  `∃m mitigate(x, m)` and `∀m mitigate(x, m) → …` in queries.
+- B) `ValueType(mitigationSort)` — argument-slot only (ADR-014). The `mitigate`
+  predicate's second slot can still accept a bound variable, but the sort
+  is never quantified over.
+- **Recommendation: A.** The whole point of surfacing `Mitigation` in the
+  KB is to let users ask questions across mitigations; `mitigated(x)` is
+  a shortcut for `∃m mitigate(x, m)`, so the quantified form must be
+  legal. `DomainType` matches how `Node` is declared for the same reason.
+
+**M3-D5 — `unmitigated(x)` at all, or leave it to the query author?**
+- A) Include `unmitigated(x)` as a first-class negation. Users write
+  `∀x leaf(x) ∧ unmitigated(x) → …` without touching negation syntax.
+- B) Omit it. Users write `¬ mitigated(x)` (assuming the vql surface
+  supports predicate negation in the position needed). One fewer symbol,
+  one fewer reserved name.
+- **Recommendation: A.** `mitigated`/`unmitigated` are the natural pair
+  and match the KB's existing precomputed-set convention (`leaf`/`portfolio`,
+  no `not_leaf`). The cost is one extra reserved name and one dispatcher
+  line.
+
+**M3-D6 — do query-time simulation results reflect applied mitigations?**
+A query may combine a simulation function with a mitigation predicate, e.g.
+`∀x leaf(x) ∧ mitigated(x) → gt_loss(p95(x), "1000000")` ("every mitigated leaf
+has 95th-percentile loss over 1M"). This decides which loss `p95(x)` /
+`p99(x)` / `lec(x, …)` denote for a mitigated node. The two answers give
+different query results for the same tree, so the choice is user-visible; the
+§7.5.2 `evaluate` sketch currently encodes option A implicitly (it passes only
+the base call to `ensureCachedAll`). ADR-034 already defines both valuations —
+`raw` (cached, mitigation-free) and `mitigated` (derived at the read edge) — so
+this decision picks which ADR-034 valuation the query predicates read; neither
+option builds new machinery.
+- A) Base (un-mitigated) results. `evaluate` calls `ensureCachedAll` with the
+  defaults (`selection = None`, `resolvedScopes = Map.empty`); `p95`/`p99`/`lec`
+  ignore mitigations, and the mitigation predicates are pure membership over
+  `resolved.appliedScopes`. Example: a leaf with base p95 = 1.2M whose applied
+  mitigation cuts residual p95 to 0.4M still satisfies
+  `mitigated(x) ∧ gt_loss(p95(x), "1000000")`. Simplest; matches every other
+  default caller and the "analytics over populations, not residual
+  re-simulation" framing of §7.3. Cost: "loss" in a mitigation-aware query is
+  not residual loss.
+- B) Residual results. Thread `resolved.appliedScopes` (and a `selection`) into
+  `ensureCachedAll` as well, so `p95(x)` reflects applied mitigations; the same
+  leaf then fails the predicate. Matches an intuitive reading of a
+  mitigation-aware query. Cost: entangles the analytics predicates with
+  mitigation-applied simulation (arguably M4 territory) and needs its own test
+  matrix.
+- **Status: open, unresolved — no recommendation; this is a user ruling.** M3
+  cannot be reported complete while this is open: the shape of the
+  `ensureCachedAll` call in §7.5.2 is settled only once this decision is.
+
+#### 7.5.4 ADR alignment (complete sweep — every register ADR checked explicitly)
+
+**Namespace note.** Two ADR namespaces meet in the KB: register's own ADRs
+(`docs/dev/decision-records/`) and vql-engine's ADRs (external artifact, cited
+in the KB scaladoc). The sort-type *mechanism* (`DomainType`/`ValueType`,
+`Extract[_]` consumer carrier) is vql-engine's — the KB comments cite vql
+ADR-014 / vql ADR-015 §2 for it. Those are **not** register ADR-014 (RiskResult
+Caching Strategy) or register ADR-015 (RiskResult Cache Integration); this
+section labels vql-engine references as such to keep them distinct. (The shipped
+KB comment `ValueType (ADR-014)` at `RiskTreeKnowledgeBase.scala:289` is a bare,
+namespace-ambiguous citation — a pre-existing comment-only nit, not an M3
+change; flagged, not fixed here.)
+
+**Bearing on M3:**
+
+- **ADR-001** (Validation / Iron / smart constructors): compliant. `RiskTree`
+  supplies already-validated `MitigationId`; the KB never sees raw strings, and
+  `resolvedScopes` is a projection of validated domain values.
+- **ADR-010** (Error handling — typed channel): compliant. The resolver isolates
+  every per-mitigation failure into `ResolvedScopes` and exposes no error channel
+  (`UIO`); `QueryServiceLive` keeps the existing typed `FolQueryFailure` path. No
+  new error condition is introduced.
+- **ADR-014 / ADR-015 register** (RiskResult caching / cache integration): the KB
+  reads simulation `results` through `CachedResultResolver.ensureCachedAll`
+  exactly as today — content-addressed, no invalidation. M3-D6 decides whether
+  the query reads the *raw* (cached) valuation or the *mitigated* one; this is
+  the point ADR-034 governs (below), consumed through the ADR-015 resolver
+  primitive.
+- **ADR-018** (Nominal wrappers): compliant. `MitigationId` is a nominal wrapper
+  over `SafeId` (`OpaqueTypes.scala`); `Extract[MitigationId]` matches on that
+  distinct runtime type, exactly mirroring `Extract[NodeId]` (vql ADR-015 §2
+  consumer-carrier pattern).
+- **ADR-020** (Supply chain): no dependency change. vql-engine already pinned at
+  0.17.0; no new artifact, no cooldown/pin action.
+- **ADR-028 + appendix** (Vague-quantifier query pane): (a) the sort-catalog
+  design lives here, so declaring `Mitigation` a quantifiable domain sort (M3-D4)
+  is a register-side ADR-028 decision applying vql-engine's sort mechanism —
+  the appendix's predicate/sort table gains the three new rows; (b) Decision 5
+  amendment required — "model *shell* built per-query; inputs (results + resolved
+  scopes) memoized upstream per tree version", included in this slice.
+- **ADR-029** (Input injection — parse, don't re-parse): compliant. The three
+  predicates are registered catalog symbols, not string-interpolated; query
+  source stays a single parse at the endpoint; no new parser boundary or
+  interpolation surface.
+- **ADR-030** (Authz at the orchestration boundary) + **ADR-024** (PEP pattern):
+  compliant, and reinforced. No new endpoint; the query endpoint's existing
+  capability gate is unchanged. `ScopeResolverScope.resolverFor(wsId)` takes a
+  server-derived `WorkspaceId`, and the one-resolver-per-workspace design makes
+  cross-workspace scope contamination structurally impossible — a tenancy
+  isolation property, not just an absence of new surface.
+- **ADR-031** (Startup readiness vs request-path resilience): compliant.
+  `ScopeResolverScope.layer` is a pure `Ref.make` with no external dependency, so
+  it adds no startup-readiness dependency; `resolve` is `UIO`, so it adds no new
+  request-path failure mode.
+- **ADR-032** (Content equality — domain hash vs storage hash): **governs
+  M3-D3.** A mitigation's resolved scope depends on node *names* (`named(x, …)`),
+  and the domain content hash omits names (reports `Identical` on a rename),
+  while the Irmin storage hash changes on any byte edit including a rename.
+  `ScopeResolutionContext.revision` must therefore be the Irmin `CommitHash`
+  (storage relation, ADR-032 §3), never a domain content token — which is
+  exactly why M3-D3 Option C is rejected as unsound.
+- **ADR-034** (Mitigation valuation model): **governs M3-D6.** ADR-034 already
+  defines two valuations — `raw` (mitigation-free, cached, content-addressed)
+  and `mitigated` (derived at the read edge, never stored). M3-D6 is precisely
+  the choice of which of these two the query's `p95`/`p99`/`lec` read; both
+  already exist by design, so neither option invents machinery. (Left unresolved
+  per M3-D6.)
+- **ADR-035** (Error leakage prevention): compliant. M3 adds **no** new
+  `AppError`/`FolQueryFailure` subtype (it reuses `FolQueryFailure.fromQueryError`),
+  so the compile-time exhaustive-`encode` guarantee is undisturbed. The new
+  `Extract[MitigationId]` `Left` message interpolates the carrier and is a
+  server-side carrier-mismatch signal that a well-formed query never reaches; it
+  must not be echoed to the wire (it flows through `ErrorResponse.encode`
+  sanitisation like every other internal message).
+- **ADR-036** (Confidential internal identifiers): checked, no violation.
+  `MitigationId` is a **client-facing** domain identifier — it appears in the
+  `Mitigation` / `MitigationApplication` DTOs in `common` and is decoded from the
+  wire via `MitigationId.fromString` — so it is in the same class as `NodeId` /
+  `TreeId`, not a confined identifier like `WorkspaceId`. Surfacing it in the KB
+  domain is therefore not a boundary crossing that ADR-036 forbids. M3 also does
+  not project it into responses: `QueryResponseBuilder` filters
+  `satisfyingElements` to `NodeSort` before extracting, so a `Mitigation`-sort
+  value is structurally unprojectable. (Consistency note for the verification
+  plan: `satisfyingCount`/`rangeSize` count the raw sets, so they stay equal to
+  `satisfyingNodeIds.size` only while the query's free variable is `Node` — M3's
+  single-free-node-variable shape holds this; an M4 query with a free `Mitigation`
+  variable would diverge and is out of scope here.)
+- **ADR-002** (Logging): minor observability item. The resolver exposes
+  `ResolvedScopes.failures` (per-mitigation drift signals); `QueryServiceLive`
+  should log these the way it already logs `kb.nameCollisions`. Not a blocker;
+  fold into the wiring.
+- **ADR-003** (Provenance/reproducibility): compliant. Resolved scopes and
+  results are reproducible from stored inputs; the per-tree-version memo is a
+  cache, not a provenance log.
+- **ADR-009** (TrialOutcomes monoid aggregation): compliant. M3 changes no
+  aggregation; it bears only transitively through ADR-034's raw fold.
+- **ADR-033** (Exception boundaries): compliant. The KB dispatcher and the
+  resolver are throw-free (`Either` / `UIO`); M3 adds no `catch` and no new
+  Scala.js↔JS boundary.
+
+**No bearing (checked, explicitly):** ADR-004a/004b (persistence SSE/WebSocket
+proposals), ADR-005 (cached subtree aggregates proposal), ADR-006 (real-time
+collaboration proposal), ADR-007 (scenario branching — M3 reads at an existing
+branch head, no branching change), ADR-008 (error/resilience proposal, superseded
+by ADR-010/031), ADR-011 (import conventions — implementation style, not a design
+bearing), ADR-012 (service mesh / JWT at waypoint — no app-code auth change),
+ADR-016 (config management — no config change), ADR-017 (tree API / create-vs-update
+DTOs — M4), ADR-019 (frontend — M4), ADR-021 (capability URLs — unchanged), ADR-022
+(secret handling — `MitigationId` is not a credential; ADR-036 §3 confirms it is
+lighter than a credential), ADR-023 (local dev TLS), ADR-025 (SPA routing), ADR-026
+(container image strategy), ADR-027 (frontend nginx serving), ADR-INFRA-006 (DB
+credentials), ADR-00X (meta template).
+
+#### 7.5.5 Verification plan
+
+Whole-suite-green is the bar (global CLAUDE.md rule).
+
+```bash
+sbt commonJVM/test
+sbt server/test
+sbt app/test
+sbt serverIt/test
+```
+
+New / extended unit-test coverage (spec files listed in §7.5.6):
+- `RiskTreeKnowledgeBaseSpec` gains cases: `mitigate(x, m)` binds and evaluates
+  correctly for every combination of {node in scope, node out of scope, mitigation
+  missing}; `mitigated(x)` matches the union of resolved-scope nodes; a Failed
+  mitigation contributes nothing to `mitigated`; `unmitigated(x)` is the exact
+  complement over the node domain.
+- `FolSymbolsSpec` (if present; otherwise a new inline check) verifies
+  `mitigate`, `mitigated`, `unmitigated` are in `reservedNames`.
+- `QueryServiceLiveSpec` (or an integration spec if unit-level plumbing is
+  too coarse): a query using `mitigated(x)` returns the same node set the
+  `MitigationScopeResolver` reports, end-to-end.
+
+M4 test surface (endpoints, DTOs) stays out of this slice.
+
+#### 7.5.6 File inventory (append to shared `## File inventory` on approval)
+
+New / edited files this slice covers:
+
+- `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/Application.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala`
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala`
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala`
+- `modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala`
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/QueryServiceLiveSpec.scala`
+- `docs/dev/decision-records/ADR-028-vague-quantifier-query-pane.md`
+
+The repository trio (`RiskTreeRepository.scala` + both impls) is touched
+under both remaining M3-D3 options — A adds `resolveHead`, B adds
+`getByIdAt` — so it stays on the list regardless of which is chosen.
+(Option C, which would have left the trio untouched, is rejected as
+unsound; see M3-D3.)
+
+### 7.6 — reserved for the M4 implementation-grade continuation.
 
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 

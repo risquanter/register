@@ -283,3 +283,140 @@ right: don't bake in an opinionated rate.
    (§5, `DEPENDENCE.md` (a)). *Leaning:* yes; this is the only dependence-aware choice
    and it reuses scenario branches. Single-leaf ROI is available but is the frequency-
    dominated, less informative view (§4).
+
+---
+
+## 10. Query evaluation regimes (context: why the ROI reads are cheap to serve)
+
+> **Recorded understanding at the time of writing — not a description of shipped
+> behaviour.** A later task revisiting this must re-verify against **both** codebases —
+> register (the query consumer and the simulation cache) and the query engine library —
+> to see what was actually built and what further insight was gained on the way. Treat
+> the claims here as the state of understanding when the note was written, superseded by
+> whatever the two codebases actually show.
+
+Register runs a screening query language over the live risk tree. A query can call
+functions that read a simulated result — for example `p95(node)`, `p99(node)`,
+`lec(node)` return quantiles or the exceedance curve of a node's loss distribution.
+Producing that loss distribution is the expensive step: it is the Monte Carlo
+simulation, cached. Reading a quantile off an already-produced distribution is cheap.
+
+**The constraint that frames the regimes.** The query evaluation walk is pure and
+synchronous — it computes values, it does not run simulations. It cannot pause
+mid-walk to launch a Monte Carlo run and wait for the answer. So every simulation a
+query needs must already be in the cache before the walk reads it. The whole question
+is: **can we always know, before the walk starts, exactly which simulations it will
+need?**
+
+Call the identity of one needed simulation the **result key**: the pair
+`(node, mitigation selection)` that selects which distribution a function call reads —
+the tree node it is asked about, and which mitigations are applied (none, or a specific
+set). Two regimes follow.
+
+- **Regime 1 — the set of result keys is fixed before evaluation.** Every key a query
+  will read is determined by the query text plus the fixed tree and mitigation domains,
+  with no dependence on any value the walk computes. Register can then list that exact
+  set up front, run those simulations through its own effect system, populate the
+  cache, and hand the pure walk a fully-populated model to read from. No feedback, no
+  change to the query engine.
+
+- **Regime 2 — some result key depends on a value the evaluation itself produces.** The
+  walk computes an intermediate result, and that result decides which simulation to run
+  next. The demand set cannot be enumerated in advance, because part of it is not known
+  until earlier values exist. A pure pre-population pass cannot serve this on its own.
+
+**Why register's queries — including every ROI read conceived above — are Regime 1.**
+Three structural facts, each independently sufficient:
+
+1. **Result-reading functions take their key from fixed domains, never from a computed
+   value.** `p95`/`p99`/`lec` take a node drawn from the tree's pre-materialized node
+   set, and a mitigation selection fixed by the query text or mode. Neither argument is
+   ever a value the walk produced.
+
+2. **Mitigation scope is resolved by a structural pre-pass that cannot read a result.**
+   Which nodes a mitigation applies to is decided by a targeting sublanguage that
+   forbids calling result-reading functions (and forbids quantifiers and function
+   application generally). So a mitigation's scope — and therefore the mitigated result
+   keys — can never depend on a p95 or an LEC. The selection side of every key is
+   structural.
+
+3. **Loss and probability are leaf value types with no path back into a key.** A query
+   can read a loss or a probability out of a distribution, but the language has no
+   symbol that turns a loss back into a node identity or a mitigation selection. A
+   number read out cannot become the thing that picks the next simulation.
+
+Together these guarantee the set of `(node, selection)` keys a query references is
+closed under the query text and the fixed domains. Register enumerates it **exactly** —
+not an over-approximation — pre-runs those simulations, and the pure walk only reads.
+
+**The ROI functionals are all Regime 1 reads.** Everything §2–§8 proposes computes on
+already-produced distributions at fixed keys: the base result is `(node, no
+mitigation)`, the mitigated result is `(node, the given mitigation)`. ΔAAL, ΔVaR,
+ΔTVaR, the saving distribution and its conditional `c = P(saving ≥ cost | fired)` (§4),
+NPV/IRR (§7), and the with-vs-without portfolio LEC overlay (§6) are all read-side
+arithmetic over those two fixed distributions. None of them computes a value that then
+selects a different simulation. Even ranking a fixed list of candidate mitigations by
+ROI stays Regime 1: enumerate every candidate's keys, simulate them, then sort — the
+sort is pure post-processing, not a new simulation demand.
+
+**Current stance (at time of writing).** We have settled, for the time being, on the
+Regime 1 arrangement: register computes the demand set and pre-populates the cache on
+its own side, and the query engine stays a pure synchronous evaluator. The only thing
+that would move ROI — or any register query — into Regime 2 is a **solver**, an
+evaluation whose next simulation is chosen from the results of earlier ones, and the
+only solver candidate raised so far is a **ROI solver** (§11). No such solver is
+planned or specified; until one is, Regime 1 covers all conceived work.
+
+---
+
+## 11. Follow-up: what a ROI solver would be, and why it is the Regime 2 trigger
+
+> **Follow-up discussion, not a proposal.** Nothing here is planned or specified. It
+> records the one shape of ROI work that would break the Regime 1 arrangement, so a
+> future task recognizes it on sight. As in §10, this is the understanding at the time
+> of writing; re-verify both codebases before relying on it.
+
+Everything above **evaluates a given mitigation** (or compares with-vs-without at a
+node). A **solver** does the opposite: it **searches for which mitigations to pick**.
+That difference is exactly what separates the two regimes.
+
+**The criterion for Regime 2, stated precisely.** A workload is Regime 2 when the
+choice of the next simulation to run is computed from the results of simulations
+already run — a feedback loop from produced values back into the demand set. Searching
+a space by pruning it with results is the canonical case.
+
+**The candidate problem.** "Given a budget, which combination of the available
+mitigations most reduces the portfolio's tail loss?" — for example, of twelve available
+mitigations, find the subset whose total cost is within \$500k that minimizes the
+portfolio's 1-in-200 TVaR (§5).
+
+**Where it splits from Regime 1.** The set of candidate mitigation combinations is the
+powerset — `2ⁿ` subsets for `n` mitigations. Two ways to attack it:
+
+- **Exhaustive scoring — still Regime 1.** Simulate every subset's residual portfolio
+  distribution, compute each one's ΔTVaR and cost, keep the best affordable one. The
+  demand set is the whole powerset: large, but fixed up front and enumerable, so the
+  pre-population pass serves it. Regime 1, just expensive (`2ⁿ` simulations).
+
+- **Result-guided search — Regime 2.** Prune using results instead of scoring
+  everything. Greedy: simulate each single mitigation, read each one's marginal ΔTVaR
+  per dollar, add the best, re-simulate the portfolio with it applied, then choose the
+  next addition from *that* residual — repeat until the budget is spent. Or
+  branch-and-bound: use a simulated bound to discard whole branches of the powerset
+  unsimulated. In both, **the next result key — which combination to simulate next — is
+  a function of tail values the search already produced.** The demand set is not known
+  in advance; it unfolds as results arrive. This is the feedback loop a pure
+  pre-population pass cannot serve on its own.
+
+**Why a solver is attractive despite the cost.** Exhaustive scoring is `2ⁿ`
+simulations; a result-guided search visits a small fraction of the powerset to reach a
+near-optimal set, which is the only tractable route once `n` is more than a handful.
+That tractability is the whole reason a solver would ever be built — and it is exactly
+the pruning that makes it Regime 2.
+
+**Recorded conclusion.** No ROI solver is planned or specified anywhere. ROI as
+conceived in §1–§9 is evaluation of given mitigations, fully Regime 1. If a
+budget-constrained mitigation-selection solver ever becomes real work, that is the
+point at which the Regime 1 arrangement no longer suffices and the engine's evaluation
+model has to be revisited — and a task reaching that point must re-verify both
+codebases (see the note at §10) before assuming anything recorded here still holds.
