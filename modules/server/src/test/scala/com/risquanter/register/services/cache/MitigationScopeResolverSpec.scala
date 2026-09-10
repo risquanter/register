@@ -133,9 +133,9 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         )
       },
 
-      test("malformed id vs unknown name — has_id(bad) is MalformedNodeId, named(gone) is UnknownNode") {
-        val mBadId   = mit("m-badid", """has_id(x, "not-an-id")""", resultSpec)
-        val mBadName = mit("m-badname", """named(x, "Gone")""", resultSpec)
+      test("malformed id vs unknown name — risk_id(bad) is MalformedNodeId, named_risk(gone) is UnknownNode") {
+        val mBadId   = mit("m-badid", """risk_id(x, "not-an-id")""", resultSpec)
+        val mBadName = mit("m-badname", """named_risk(x, "Gone")""", resultSpec)
         for
           r   <- newResolver
           out <- r.resolve(ctx(rev1), mkTree(mBadId, mBadName))
@@ -147,7 +147,7 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
 
       test("projection — appliedScopes maps Resolved to its set and Failed to the empty set") {
         val mOk    = mit("m-ok", "leaf(x)", resultSpec)
-        val mStale = mit("m-stale", """named(x, "Gone")""", resultSpec)
+        val mStale = mit("m-stale", """named_risk(x, "Gone")""", resultSpec)
         for
           r   <- newResolver
           out <- r.resolve(ctx(rev1), mkTree(mOk, mStale))

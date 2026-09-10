@@ -51,7 +51,7 @@ trait CachedResultResolver {
     * @param seedEntityId Owning workspace's stochastic identity (HDR Entity axis) —
     *                     threaded explicitly from the controller's resolved workspace
     * @param includeProvenance Whether to capture provenance metadata (default: false)
-    * @param selection Which mitigations to apply (default: None — un-mitigated)
+    * @param selection Which mitigations to apply (default: Inherent — raw, un-mitigated)
     * @param resolvedScopes Server-resolved per-mitigation node sets (default: empty)
     * @return LossDistribution (from cache or freshly simulated)
     */
@@ -60,7 +60,7 @@ trait CachedResultResolver {
     nodeId: NodeId,
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean = false,
-    selection: MitigationSelection = MitigationSelection.None,
+    selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
   ): Task[LossDistribution]
 
@@ -75,7 +75,7 @@ trait CachedResultResolver {
     * @param nodeIds Set of node identifiers
     * @param seedEntityId Owning workspace's stochastic identity (HDR Entity axis)
     * @param includeProvenance Whether to capture provenance metadata (default: false)
-    * @param selection Which mitigations to apply (default: None — un-mitigated)
+    * @param selection Which mitigations to apply (default: Inherent — raw, un-mitigated)
     * @param resolvedScopes Server-resolved per-mitigation node sets (default: empty)
     * @return Map from nodeId to LossDistribution
     */
@@ -84,7 +84,7 @@ trait CachedResultResolver {
     nodeIds: Set[NodeId],
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean = false,
-    selection: MitigationSelection = MitigationSelection.None,
+    selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
   ): Task[Map[NodeId, LossDistribution]]
 }
@@ -97,7 +97,7 @@ object CachedResultResolver {
     nodeId: NodeId,
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean = false,
-    selection: MitigationSelection = MitigationSelection.None,
+    selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
   ): ZIO[CachedResultResolver, Throwable, LossDistribution] =
     ZIO.serviceWithZIO[CachedResultResolver](_.ensureCached(tree, nodeId, seedEntityId, includeProvenance, selection, resolvedScopes))
@@ -107,7 +107,7 @@ object CachedResultResolver {
     nodeIds: Set[NodeId],
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean = false,
-    selection: MitigationSelection = MitigationSelection.None,
+    selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
   ): ZIO[CachedResultResolver, Throwable, Map[NodeId, LossDistribution]] =
     ZIO.serviceWithZIO[CachedResultResolver](_.ensureCachedAll(tree, nodeIds, seedEntityId, includeProvenance, selection, resolvedScopes))

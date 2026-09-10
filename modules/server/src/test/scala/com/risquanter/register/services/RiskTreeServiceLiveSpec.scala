@@ -55,9 +55,9 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
     override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
       rev match
-        case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)))
+        case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
 
     override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =

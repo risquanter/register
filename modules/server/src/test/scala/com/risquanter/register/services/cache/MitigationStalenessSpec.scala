@@ -152,7 +152,7 @@ object MitigationStalenessSpec extends ZIOSpecDefault with TestHelpers:
         val treeFresh = mkTree(root(cyberId, floodId), Seq(authored, flood), m)           // base matches
 
         val probIn = (t: RiskTree) =>
-          MitigationApplication.effectiveTree(t, MitigationSelection.All, scopes)
+          MitigationApplication.effectiveTree(t, MitigationSelection.Residual, scopes)
             .toEither.toOption.get.index.nodes(cyberId) match
               case l: RiskLeaf      => l.probability
               case p: RiskPortfolio => sys.error(s"expected a leaf at $cyberId, got $p")

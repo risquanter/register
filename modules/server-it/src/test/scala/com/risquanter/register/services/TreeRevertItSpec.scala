@@ -65,7 +65,7 @@ object TreeRevertItSpec extends ZIOSpecDefault:
           _       <- repo.update(wsId, tid, _ => treeV2(v1), BranchRef.Main)
           histU   <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
           reverted <- repo.revert(wsId, tid, c1Hash, BranchRef.Main)
-          loaded  <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main))
+          loaded  <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
           histR   <- irmin.getHistory(IrminPath.unsafeFrom(s"${treeRoot(tid)}/meta"), positiveInt(20), BranchRef.Main)
           headAfter <- irmin.mainBranch.map(_.flatMap(_.head))
         yield assertTrue(

@@ -21,7 +21,7 @@ import com.risquanter.register.services.{ScenarioService, ScenarioServiceLive, S
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.pipeline.InvalidationHandler
-import com.risquanter.register.services.cache.{CacheScope, CachedResultResolverLive}
+import com.risquanter.register.services.cache.{CacheScope, CachedResultResolverLive, ScopeResolverScope}
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive, WorkspaceStorePostgres, RateLimiterLive, WorkspaceReaper}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
@@ -289,12 +289,13 @@ object Application extends ZIOAppDefault {
       // Per-workspace content-addressed cache (DD-17)
       CacheScope.layer,
       CachedResultResolverLive.layer,  // ADR-015: ensureCached primitive
+      ScopeResolverScope.layer,        // Per-workspace mitigation scope resolution (M3 analytics VQL)
       SSEHub.live,
       InvalidationHandler.live,     // SSE-only mutation notifications (requires SSEHub)
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + SimulationConfig + Tracing + SimulationSemaphore + Meter
       ChangedNodesServiceLive.layer, // UC5 content-hash changed-nodes — requires RiskTreeService
       RepositoryConfig.layer >>> chooseTreeHistoryService, // E1 per-tree history — Irmin-backed, empty in-memory
-      QueryServiceLive.layer,       // Requires RiskTreeRepository + CachedResultResolver + Tracing
+      QueryServiceLive.layer,       // Requires RiskTreeRepository + CachedResultResolver + ScopeResolverScope + Tracing
       chooseWorkspaceStore,
       chooseFlywayService,
       RateLimiterLive.layer,

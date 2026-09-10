@@ -35,11 +35,12 @@ final case class MitigationScopeResolverLive(
         memo.update(_ + (slot -> (context.revision, resolved))).as(resolved)
     }
 
-  /** Results-free KB: the targeting sublanguage admits no simulation symbol, so
-    * an empty result map is correct and makes the resolved scopes a pure
+  /** Results-free, scopes-free KB: the targeting sublanguage admits no
+    * simulation symbol and no mitigation predicate, so an empty result map and
+    * empty resolved scopes are correct and make the resolved scopes a pure
     * function of the tree version. */
   private def computeAll(tree: RiskTree): ResolvedScopes =
-    val kb = RiskTreeKnowledgeBase(tree, Map.empty)
+    val kb = RiskTreeKnowledgeBase(tree, Map.empty, Map.empty)
     ResolvedScopes(tree.mitigations.map(m => m.id -> resolveOne(m, tree, kb)).toMap)
 
   private def resolveOne(m: Mitigation, tree: RiskTree, kb: RiskTreeKnowledgeBase): ScopeOutcome =

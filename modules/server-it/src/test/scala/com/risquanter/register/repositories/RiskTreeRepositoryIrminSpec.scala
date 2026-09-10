@@ -131,7 +131,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           repo   <- ZIO.service[RiskTreeRepository]
           tree    = sampleTree(treeId("tree-1"), "Tree One")
           _      <- repo.create(wsId, tree, BranchRef.Main)
-          loaded <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main))
+          loaded <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         yield assertTrue(loaded.exists(_.index.nodes.size == tree.index.nodes.size))
       },
 
@@ -141,7 +141,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           tree  = sampleTree(treeId("tree-2"), "Tree Two")
           _    <- repo.create(wsId, tree, BranchRef.Main)
           _    <- repo.update(wsId, tree.id, _ => updatedTree(tree), BranchRef.Main)
-          got  <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main))
+          got  <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main)).map(_.map(_._1))
           leaf2Id = nodeId("leaf-2")
         yield assertTrue(got.exists(!_.index.nodes.contains(leaf2Id)))
       },
@@ -161,7 +161,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           tree  = sampleTree(treeId("tree-4"), "Tree Four")
           _    <- repo.create(wsId, tree, BranchRef.Main)
           _    <- repo.delete(wsId, tree.id, BranchRef.Main)
-          res  <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main))
+          res  <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         yield assertTrue(res.isEmpty)
       },
 
@@ -252,7 +252,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           headC   <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
           _       <- repo.delete(wsId, tree.id, BranchRef.Main)
           headD   <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
-          res     <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main))
+          res     <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main)).map(_.map(_._1))
           residue <- irmin.list(IrminPath.unsafeFrom(base))
         yield assertTrue(
           res.isEmpty,
@@ -281,7 +281,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
           _          <- repo.update(wsId, tree.id, t => editLeaf1MinLoss(t, 1234L), BranchRef.Main)
           after      <- irmin.get(leafPath)
           headAfter  <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
-          reloaded   <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main))
+          reloaded   <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         yield assertTrue(
           before.isDefined,                                 // node was stored at nodes/{id}
           after.isDefined,                                  // STILL at the same path after edit

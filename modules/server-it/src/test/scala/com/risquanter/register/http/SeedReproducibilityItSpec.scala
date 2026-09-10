@@ -158,7 +158,7 @@ object SeedReproducibilityItSpec extends ZIOSpecDefault:
           after <- ZIO.scoped {
             freshStack(cfg).build.flatMap { env =>
               for
-                treeOpt <- env.get[RiskTreeRepository].getById(wsId, treeId, Revision.Head(BranchRef.Main))
+                treeOpt <- env.get[RiskTreeRepository].getById(wsId, treeId, Revision.Head(BranchRef.Main)).map(_.map(_._1))
                 tree    <- ZIO.fromOption(treeOpt).orElseFail(new RuntimeException(s"tree ${treeId.value} not found after reload"))
                 figs    <- figures(env.get[CachedResultResolver])(tree, entity1)
               yield figs

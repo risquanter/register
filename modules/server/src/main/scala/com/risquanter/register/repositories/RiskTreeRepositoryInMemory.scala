@@ -1,6 +1,7 @@
 package com.risquanter.register.repositories
 
 import zio.*
+import zio.json.EncoderOps
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef, CommitHash, Revision}
 import com.risquanter.register.domain.errors.{RepositoryFailure, ValidationFailed, ValidationError, ValidationErrorCode}
@@ -74,8 +75,22 @@ class RiskTreeRepositoryInMemory private () extends RiskTreeRepository {
       message = "revert requires the Irmin backend (point-in-time reads unavailable in memory)"
     ))))
 
-  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
-    requireMainRevision(rev) *> ZIO.succeed(db.get((wsId, id)))
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
+    requireMainRevision(rev) *> ZIO.succeed(db.get((wsId, id)).map(t => (t, syntheticHash(t))))
+
+  /** A deterministic, content-sensitive stand-in for a real Irmin commit hash.
+    * This backend has no commit graph, so the scope-resolution memo key
+    * (`ScopeResolutionContext`) is derived from the tree's serialized content:
+    * SHA-1 of the tree JSON rendered as 40 lowercase hex, matching the Irmin
+    * `CommitHash` format. Content-sensitive, so a mutated tree yields a distinct
+    * key and never serves a stale resolved scope. SHA-1 always produces 20 bytes
+    * → 40 masked hex chars, so the refinement holds by construction. */
+  private def syntheticHash(tree: RiskTree): CommitHash =
+    val digest = java.security.MessageDigest.getInstance("SHA-1")
+      .digest(tree.toJson.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+    val hex = digest.map(b => f"${b & 0xff}%02x").mkString
+    CommitHash.fromString(hex).toOption.getOrElse(
+      throw new IllegalStateException(s"synthetic commit hash not 40 hex: '$hex'"))
 
   override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
     requireMainRevision(rev) *> ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)

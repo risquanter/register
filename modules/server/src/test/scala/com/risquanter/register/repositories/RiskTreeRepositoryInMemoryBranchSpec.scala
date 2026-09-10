@@ -25,7 +25,7 @@ object RiskTreeRepositoryInMemoryBranchSpec extends ZIOSpecDefault {
     test("main head is served") {
       for {
         repo  <- ZIO.service[RiskTreeRepository]
-        rMain <- repo.getById(wsId, someTree, Revision.Head(BranchRef.Main))
+        rMain <- repo.getById(wsId, someTree, Revision.Head(BranchRef.Main)).map(_.map(_._1))
       } yield assertTrue(rMain.isEmpty)
     },
 

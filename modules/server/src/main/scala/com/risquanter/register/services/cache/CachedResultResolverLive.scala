@@ -64,7 +64,7 @@ final case class CachedResultResolverLive(
     nodeId: NodeId,
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean = false,
-    selection: MitigationSelection = MitigationSelection.None,
+    selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
   ): Task[LossDistribution] =
     tracing.span("ensureCached", SpanKind.INTERNAL) {
@@ -86,7 +86,7 @@ final case class CachedResultResolverLive(
     nodeIds: Set[NodeId],
     seedEntityId: SeedEntityId.SeedEntityId,
     includeProvenance: Boolean = false,
-    selection: MitigationSelection = MitigationSelection.None,
+    selection: MitigationSelection = MitigationSelection.Inherent,
     resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty
   ): Task[Map[NodeId, LossDistribution]] =
     for {

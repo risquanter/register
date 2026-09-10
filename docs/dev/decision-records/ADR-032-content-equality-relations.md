@@ -1,7 +1,7 @@
 # ADR-032: Content Equality Strategy — Domain Hash vs Storage Hash
 
-**Status:** Accepted
-**Date:** 2026-07-24
+**Status:** Accepted  
+**Date:** 2026-07-24  
 **Tags:** hashing, caching, diff, merge, irmin
 
 ---

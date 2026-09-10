@@ -48,10 +48,10 @@ object PinnedReadAuthorizationItSpec extends ZIOSpecDefault:
           cb     <- ZIO.fromOption(cbOpt).orElseFail(new RuntimeException("main has no head after B's write"))
           cbHash <- ZIO.fromEither(CommitHash.fromString(cb)).mapError(e => new RuntimeException(e.mkString(", ")))
           // B, reading its own tree pinned to that commit, sees it.
-          bOwn   <- repo.getById(wsB, tB, Revision.At(cbHash))
+          bOwn   <- repo.getById(wsB, tB, Revision.At(cbHash)).map(_.map(_._1))
           // A, reading the SAME commit and the SAME treeId but scoped to A's paths,
           // sees nothing of B's data — path scoping, not commit provenance.
-          bViaA  <- repo.getById(wsA, tB, Revision.At(cbHash))
+          bViaA  <- repo.getById(wsA, tB, Revision.At(cbHash)).map(_.map(_._1))
         yield assertTrue(bOwn.isDefined, bViaA.isEmpty)
       }
     ).provideLayerShared(irminLayer) @@ TestAspect.sequential @@ TestAspect.withLiveClock

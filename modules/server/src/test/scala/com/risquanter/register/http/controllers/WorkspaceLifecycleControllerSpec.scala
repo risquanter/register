@@ -70,8 +70,8 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
       ZIO.attempt { val t = db((wsId, branch, id)); db -= ((wsId, branch, id)); t }
     override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
-      ZIO.succeed(branchOf(rev).flatMap(b => db.get((wsId, b, id))))
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
+      ZIO.succeed(branchOf(rev).flatMap(b => db.get((wsId, b, id))).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
     override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
       ZIO.succeed(branchOf(rev) match
         case Some(b) => db.collect { case ((wid, bb, _), t) if wid == wsId && bb == b => Right(t) }.toList

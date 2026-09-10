@@ -37,7 +37,7 @@ object TargetingPredicateSpec extends ZIOSpecDefault:
         assertTrue(firstCode("forall x . leaf(x)") == Some(ValidationErrorCode.CONSTRAINT_VIOLATION))
       },
       test("a function-application term (targeting fragment)") {
-        assertTrue(firstCode("p95(x) < 5") == Some(ValidationErrorCode.CONSTRAINT_VIOLATION))
+        assertTrue(firstCode("p95(x, inherent) < 5") == Some(ValidationErrorCode.CONSTRAINT_VIOLATION))
       },
       test("more than one free variable") {
         assertTrue(firstCode("child_of(x, y)") == Some(ValidationErrorCode.CONSTRAINT_VIOLATION))

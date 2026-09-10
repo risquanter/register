@@ -418,9 +418,9 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           cap    = math.max(1L, rawMax / 2)      // derived from the raw run → guaranteed to bind
           m      = resultCap("cap-leaf", cap)
           tree   = treeWith(m)
-          mit   <- resolver.ensureCached(tree, risk1Id, testEntity, selection = MitigationSelection.All, resolvedScopes =scopes(m -> Set(risk1Id)))
+          mit   <- resolver.ensureCached(tree, risk1Id, testEntity, selection = MitigationSelection.Residual, resolvedScopes =scopes(m -> Set(risk1Id)))
           raw2  <- resolver.ensureCached(tree, risk2Id, testEntity)
-          mit2  <- resolver.ensureCached(tree, risk2Id, testEntity, selection = MitigationSelection.All, resolvedScopes =scopes(m -> Set(risk1Id)))
+          mit2  <- resolver.ensureCached(tree, risk2Id, testEntity, selection = MitigationSelection.Residual, resolvedScopes =scopes(m -> Set(risk1Id)))
         } yield assertTrue(
           // Every trial: mitigated = min(raw, cap)
           raw.outcomes.forall { case (t, loss) => mit.outcomes.getOrElse(t, 0L) == math.min(loss, cap) },
@@ -441,7 +441,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           cap      = math.max(1L, rawMax / 2)
           m        = resultCap("cap-root", cap)
           tree     = treeWith(m)
-          mitRoot <- resolver.ensureCached(tree, rootId, testEntity, selection = MitigationSelection.All, resolvedScopes =scopes(m -> Set(rootId)))
+          mitRoot <- resolver.ensureCached(tree, rootId, testEntity, selection = MitigationSelection.Residual, resolvedScopes =scopes(m -> Set(rootId)))
         } yield assertTrue(
           // Raw aggregate stays the pristine commutative sum of children (ADR-034 Decision 4)
           rawRoot.isInstanceOf[RiskResultGroup],
@@ -472,8 +472,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           treeAB   = treeWith(mc, mr)
           treeBA   = treeWith(mr, mc)
           sel      = scopes(mc -> Set(risk1Id), mr -> Set(rootId))
-          rootAB  <- resolver.ensureCached(treeAB, rootId, testEntity, selection = MitigationSelection.All, resolvedScopes =sel)
-          rootBA  <- resolver.ensureCached(treeBA, rootId, testEntity, selection = MitigationSelection.All, resolvedScopes =sel)
+          rootAB  <- resolver.ensureCached(treeAB, rootId, testEntity, selection = MitigationSelection.Residual, resolvedScopes =sel)
+          rootBA  <- resolver.ensureCached(treeBA, rootId, testEntity, selection = MitigationSelection.Residual, resolvedScopes =sel)
         } yield assertTrue(
           // Authoring order of the two mitigations does not change the result
           rootAB.outcomes == rootBA.outcomes,
@@ -496,7 +496,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           cacheScope <- ZIO.service[CacheScope]
           cache      <- cacheScope.cacheFor(testEntity)
           raw   <- resolver.ensureCached(testTree, risk1Id, testEntity)
-          mit   <- resolver.ensureCached(tree, risk1Id, testEntity, selection = MitigationSelection.All, resolvedScopes =scopes(scale -> Set(risk1Id)))
+          mit   <- resolver.ensureCached(tree, risk1Id, testEntity, selection = MitigationSelection.Residual, resolvedScopes =scopes(scale -> Set(risk1Id)))
           rawEntry <- cache.get(risk1Key)
           effEntry <- cache.get(effKey)
         } yield assertTrue(
@@ -514,6 +514,6 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
     * `risk1`, used to derive the mitigated leaf's content hash. */
   private def effectiveTreeFor(tree: RiskTree, m: Mitigation): RiskTree =
     com.risquanter.register.domain.data.MitigationApplication
-      .effectiveTree(tree, MitigationSelection.All, scopes(m -> Set(risk1Id)))
+      .effectiveTree(tree, MitigationSelection.Residual, scopes(m -> Set(risk1Id)))
       .toEither.toOption.get
 }

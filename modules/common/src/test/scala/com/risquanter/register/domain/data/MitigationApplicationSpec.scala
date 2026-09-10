@@ -91,17 +91,17 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
   def spec = suite("MitigationApplicationSpec")(
 
     suite("scoped")(
-      test("selection None applies nothing") {
+      test("selection Inherent applies nothing") {
         val m = leafScale("m-scale", 0.5)
         val t = mkTree(m)
-        assertTrue(MitigationApplication.scoped(t, MitigationSelection.None, scopes(m -> Set("cyber"))).isEmpty)
+        assertTrue(MitigationApplication.scoped(t, MitigationSelection.Inherent, scopes(m -> Set("cyber"))).isEmpty)
       },
-      test("All: per-node lists in ascending precedence order with id tiebreak") {
+      test("Residual: per-node lists in ascending precedence order with id tiebreak") {
         val late  = resultCap("m-b-cap", 1000000L, MitigationPrecedence(10))
         val early = resultCap("m-a-cap", 500000L, MitigationPrecedence(-10))
         val tie   = resultCap("m-c-cap", 700000L, MitigationPrecedence(10))
         val t = mkTree(late, early, tie)
-        val ms = MitigationApplication.scoped(t, MitigationSelection.All,
+        val ms = MitigationApplication.scoped(t, MitigationSelection.Residual,
           scopes(late -> Set("cyber"), early -> Set("cyber"), tie -> Set("cyber")))(nodeId("cyber"))
         assertTrue(ms.map(_.id.value) == List(early, late, tie).map(_.id.value))
       },
@@ -133,7 +133,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       test("scoped leaf transformed, out-of-scope leaf and portfolio untouched; mitigations carried") {
         val a = leafScale("m-scale", 0.5)
         val t = mkTree(a)
-        val eff = MitigationApplication.effectiveTree(t, MitigationSelection.All, scopes(a -> Set("cyber"))).toEither.toOption.get
+        val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Residual, scopes(a -> Set("cyber"))).toEither.toOption.get
         assertTrue(
           minOf(eff, "cyber") == 500L,
           minOf(eff, "flood") == 1000L,
@@ -150,7 +150,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
             RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), None, None),
           MitigationPrecedence.default).toEither.toOption.get
         val t = mkTree(base, scale)
-        val eff = MitigationApplication.effectiveTree(t, MitigationSelection.All,
+        val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Residual,
           scopes(base -> Set("cyber"), scale -> Set("cyber"))).toEither.toOption.get
         assertTrue(math.abs(probOf(eff, "cyber") - 0.05) < 1e-9) // 0.1 overridden first, then × 0.5
       },
@@ -162,14 +162,14 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
             RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), None, None),
           MitigationPrecedence.default).toEither.toOption.get
         val t = mkTree(fin, scale)
-        val eff = MitigationApplication.effectiveTree(t, MitigationSelection.All,
+        val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Residual,
           scopes(fin -> Set("cyber"), scale -> Set("cyber"))).toEither.toOption.get
         assertTrue(math.abs(probOf(eff, "cyber") - 0.1) < 1e-9) // × 0.5 first, then asserted to 0.1
       },
-      test("selection None is the identity on the tree") {
+      test("selection Inherent is the identity on the tree") {
         val m = leafScale("m-scale", 0.5)
         val t = mkTree(m)
-        val eff = MitigationApplication.effectiveTree(t, MitigationSelection.None, scopes(m -> Set("cyber"))).toEither.toOption.get
+        val eff = MitigationApplication.effectiveTree(t, MitigationSelection.Inherent, scopes(m -> Set("cyber"))).toEither.toOption.get
         assertTrue(minOf(eff, "cyber") == 1000L)
       }
     ),
@@ -183,7 +183,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
           MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.ScaleLosses(0.5)))),
           MitigationPrecedence(1)).toEither.toOption.get
         val t = mkTree(dFirst, scale)
-        val scoped = MitigationApplication.scoped(t, MitigationSelection.All,
+        val scoped = MitigationApplication.scoped(t, MitigationSelection.Residual,
           scopes(dFirst -> Set("cyber"), scale -> Set("cyber")))
         val composed = MitigationApplication.resultTransformFor(nodeId("cyber"), scoped)
         assertTrue(composed.map(_.run(outcomes).outcomeOf(1)) == Some(45000L)) // (100K − 10K) × 0.5, not 40K
@@ -191,7 +191,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       test("None when nothing result-stage scopes the node") {
         val m = leafScale("m-scale", 0.5)
         val t = mkTree(m)
-        val scoped = MitigationApplication.scoped(t, MitigationSelection.All, scopes(m -> Set("cyber")))
+        val scoped = MitigationApplication.scoped(t, MitigationSelection.Residual, scopes(m -> Set("cyber")))
         assertTrue(
           MitigationApplication.resultTransformFor(nodeId("cyber"), scoped) == None,
           MitigationApplication.resultTransformFor(nodeId("flood"), scoped) == None
@@ -221,8 +221,8 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       test("selection kinds round-trip") {
         import zio.json.{EncoderOps, DecoderOps}
         val selections: List[MitigationSelection] = List(
-          MitigationSelection.None,
-          MitigationSelection.All,
+          MitigationSelection.Inherent,
+          MitigationSelection.Residual,
           MitigationSelection.Selected(Map(
             MitigationId(nodeId("m-scale").toSafeId) -> ScopeRestriction.FullScope,
             MitigationId(nodeId("m-cap").toSafeId)   -> ScopeRestriction.NodesOnly(Set(nodeId("cyber")))

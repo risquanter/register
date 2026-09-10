@@ -63,7 +63,7 @@ object IrminRevertSemanticsSpec extends ZIOSpecDefault:
           // native head-set revert (NOT the production forward-write path)
           _          <- irmin.revert(c1Hash, BranchRef.Main)
           headAfter  <- irmin.mainBranch.map(_.flatMap(_.head).map(_.hash))
-          loaded     <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main))
+          loaded     <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
           // the pre-revert head remains reachable by hash — a head-set repoints, it does not destroy commits
           priorStill <- irmin.getCommit(CommitHash.fromString(headBefore.getOrElse("")).toOption.get)
         yield assertTrue(

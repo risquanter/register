@@ -10,8 +10,8 @@
 > Available simulation-backed functions are `p95`, `p99`, `lec` (the
 > earlier `p50`/`p90` listing was never implemented). All examples in
 > this document and the appendix have been updated. Node-name and node-id
-> literals are delivered: a quoted literal binds through the `named(x, "…")`
-> predicate (name) or `has_id(x, "…")` predicate (id), each over a dedicated
+> literals are delivered: a quoted literal binds through the `named_risk(x, "…")`
+> predicate (name) or `risk_id(x, "…")` predicate (id), each over a dedicated
 > node-reference sort with its own bind-time literal validator.
 
 ---
@@ -94,8 +94,8 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
 ```
 
 **Key property:** Zero changes to the vql-engine library.
-Thresholds live in the query syntax (`gt_loss(p95(x), 5000000)`), making
-queries self-describing.
+Thresholds live in the query syntax (`gt_loss(p95(x, "inherent"), 5000000)`),
+making queries self-describing.
 
 ### 3. Materialised Tree Relations (Transitive Closure)
 
@@ -110,8 +110,13 @@ pre-computes tree relationships during KB construction:
 | `leaf(x)` | 1 | x is a RiskLeaf |
 | `portfolio(x)` | 1 | x is a RiskPortfolio |
 | `eq(x, y)` | 2 | x and y are the same node (node identity between two variables) |
-| `named(x, "name")` | 2 | x is the node with that name (name resolved to its id at bind time) |
-| `has_id(x, "id")` | 2 | x is the node with that id (id parsed at bind time) |
+| `named_risk(x, "name")` | 2 | x is the node with that name (name resolved to its id at bind time) |
+| `risk_id(x, "id")` | 2 | x is the node with that id (id parsed at bind time) |
+| `named_mitigation(m, "name")` | 2 | m is the mitigation with that name (name resolved to its id at bind time) |
+| `mitigation_id(m, "id")` | 2 | m is the mitigation with that id (id parsed at bind time) |
+| `mitigate(x, m)` | 2 | node x is in mitigation m's resolved scope |
+| `mitigated(x)` | 1 | x is in the union of all resolved mitigation scopes |
+| `unmitigated(x)` | 1 | x is in no resolved mitigation scope (complement of `mitigated`) |
 
 This sidesteps the transitive closure limitation and prevents
 double-counting: the query author chooses the appropriate range
@@ -132,10 +137,23 @@ the parsed `VagueQuery` AST before evaluation:
 ### 5. Model Built Per-Query from Current Tree State
 
 `RiskTreeKnowledgeBase` is constructed at query time from the current
-tree and cached simulation results. If the user reshapes the tree
-between queries, the next query reflects the new structure. The server
-enforces that simulations are current (`resolver.ensureCached`) before
-building the model.
+tree, the per-selection simulation results, and the resolved mitigation
+scopes. If the user reshapes the tree between queries, the next query
+reflects the new structure.
+
+The per-query construction is cheap wiring, not the work: the KB's two
+inputs are memoized upstream per tree version.
+
+- **Per-selection results** come from `CachedResultResolver.ensureCachedAll`,
+  which is content-addressed — a query is bound once against the catalog to
+  discover which `MitigationSelection`s it references (`inherent`, `residual`,
+  or a bound `∃m : mitigation`), and one result map is precomputed per
+  selection. Identical effective trees share cache entries by content address.
+- **Resolved mitigation scopes** come from `MitigationScopeResolver`, memoized
+  per `(treeId, branch, commit)` — the commit being the storage-relation
+  revision the repository's `getById` reports (ADR-032 §3).
+
+A query that uses no value function precomputes no results.
 
 ---
 
@@ -152,7 +170,7 @@ POST /query { "query": "Q[>=]^{2/3} x (leaf(x), high_p95(x))",
 
 ```scala
 // GOOD: threshold in query syntax — self-describing, auditable
-POST /query { "query": "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))" }
+POST /query { "query": "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, \"inherent\"), 5000000))" }
 ```
 
 ### ❌ Modifying Library Traits for Register-Specific Concerns
@@ -178,7 +196,7 @@ val augmented = new Interpretation[Any](domain, baseFuncs ++ simFuncs, basePreds
 
 ```scala
 // GOOD: range predicate constrains iteration to valid elements
-"Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))"
+"Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, \"inherent\"), 5000000))"
 // x bound by range predicate leaf(x) — only node IDs
 ```
 
@@ -186,14 +204,14 @@ val augmented = new Interpretation[Any](domain, baseFuncs ++ simFuncs, basePreds
 
 ```scala
 // BAD: node(x) includes portfolios → double-counts aggregated losses
-"Q[>=]^{1/2} x (node(x), gt_loss(p95(x), 5000000))"
+"Q[>=]^{1/2} x (node(x), gt_loss(p95(x, \"inherent\"), 5000000))"
 ```
 
 ```scala
 // GOOD: leaf(x) gives independent, non-overlapping risk units
-"Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))"
+"Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x, \"inherent\"), 5000000))"
 // Or for sub-portfolio analysis:
-"Q[>=]^{2/3} x (leaf_descendant_of(x, portfolio_A), gt_loss(p95(x), 5000000))"
+"Q[>=]^{2/3} x (leaf_descendant_of(x, portfolio_A), gt_loss(p95(x, \"inherent\"), 5000000))"
 ```
 
 ---

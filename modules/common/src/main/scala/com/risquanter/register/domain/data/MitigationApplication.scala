@@ -42,14 +42,21 @@ object ScopeRestriction {
 /**
  * Which mitigations a resolution applies, each optionally scope-restricted
  * (per-(mitigation, node) enablement — OD-3 ruling). Crosses the wire in M4
- * as a request parameter. `None` is the default on every existing read path
- * (OD-5): mitigation is strictly opt-in per request.
+ * as a request parameter. The three cases are the register-code spelling of
+ * ADR-034's valuations: `Inherent` (raw, mitigation-free — the default on every
+ * existing read path, OD-5), `Residual` (every applicable mitigation applied),
+ * and `Selected` (an explicit mitigation subset, each optionally scope-restricted).
  */
 sealed trait MitigationSelection
 
 object MitigationSelection {
-  case object None extends MitigationSelection
-  case object All extends MitigationSelection
+  /** Mitigation-free valuation (ADR-034 raw): no mitigation applied. The default
+    * on every existing read path (OD-5). Named for the domain term (inherent
+    * risk = before controls) and to avoid shadowing `scala.None`. */
+  case object Inherent extends MitigationSelection
+  /** Residual valuation (ADR-034): every applicable mitigation applied
+    * (residual risk = after controls). */
+  case object Residual extends MitigationSelection
   final case class Selected(entries: Map[MitigationId, ScopeRestriction]) extends MitigationSelection
 
   given Equal[MitigationSelection] = Equal.default
@@ -59,13 +66,13 @@ object MitigationSelection {
 
   given codec: JsonCodec[MitigationSelection] = JsonCodec(
     JsonEncoder[Raw].contramap {
-      case None              => Raw("none", scala.None)
-      case All               => Raw("all", scala.None)
+      case Inherent          => Raw("inherent", scala.None)
+      case Residual          => Raw("residual", scala.None)
       case Selected(entries) => Raw("selected", Some(entries))
     },
     JsonDecoder[Raw].mapOrFail {
-      case Raw("none", scala.None)          => Right(None)
-      case Raw("all", scala.None)           => Right(All)
+      case Raw("inherent", scala.None)      => Right(Inherent)
+      case Raw("residual", scala.None)      => Right(Residual)
       case Raw("selected", Some(entries))   => Right(Selected(entries))
       case other => Left(s"invalid mitigation selection kind '${other.kind}'")
     }
@@ -106,8 +113,8 @@ object MitigationApplication {
     resolvedScopes: Map[MitigationId, Set[NodeId]]
   ): Map[NodeId, List[Mitigation]] = {
     val enabled: List[(Mitigation, Option[Set[NodeId]])] = selection match {
-      case MitigationSelection.None => Nil
-      case MitigationSelection.All =>
+      case MitigationSelection.Inherent => Nil
+      case MitigationSelection.Residual =>
         tree.mitigations.map(m => (m, Option.empty[Set[NodeId]])).toList
       case MitigationSelection.Selected(entries) =>
         tree.mitigations.flatMap { m =>

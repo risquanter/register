@@ -1,7 +1,7 @@
 package com.risquanter.register.foladapter
 
-import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LossDistribution}
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LossDistribution, MitigationSelection, ScopeRestriction}
+import com.risquanter.register.domain.data.iron.{NodeId, MitigationId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator
 import com.risquanter.register.common.FolSymbols
@@ -15,26 +15,41 @@ import vql.typed.MapDispatcher
   *
   * Provides a `TypeCatalog` declaring register's many-sorted schema and a
   * `RuntimeModel` containing domain elements and a dispatcher that backs
-  * structural predicates with `TreeIndex` and simulation functions with
-  * `LossDistribution` data.
+  * structural predicates with `TreeIndex`, simulation functions with
+  * per-selection `LossDistribution` data, and mitigation predicates with the
+  * server-computed resolved scopes.
   *
   * == Sort System ==
   *
-  * | Sort            | Scala carrier | Description |
-  * |-----------------|---------------|-------------|
-  * | Node            | `NodeId`      | Tree node identity (leaves and portfolios) |
-  * | NodeNameLiteral | `NodeId`      | A node named by a quoted name literal (`named`) |
-  * | NodeIdLiteral   | `NodeId`      | A node named by a quoted id literal (`has_id`) |
-  * | Loss            | Long          | Monetary loss values |
-  * | Probability     | Double        | Exceedance probabilities |
+  * | Sort                  | Scala carrier  | Description |
+  * |-----------------------|----------------|-------------|
+  * | Node                  | `NodeId`       | Tree node identity (leaves and portfolios) |
+  * | NodeNameLiteral       | `NodeId`       | A node named by a quoted name literal (`named_risk`) |
+  * | NodeIdLiteral         | `NodeId`       | A node named by a quoted id literal (`risk_id`) |
+  * | Mitigation            | `MitigationId` | Tree-level mitigation identity (quantifiable) |
+  * | MitigationNameLiteral | `MitigationId` | A mitigation named by a quoted name literal (`named_mitigation`) |
+  * | MitigationIdLiteral   | `MitigationId` | A mitigation named by a quoted id literal (`mitigation_id`) |
+  * | Loss                  | Long           | Monetary loss values |
+  * | Probability           | Double         | Exceedance probabilities |
+  *
+  * == Constants ==
+  *
+  * | Name     | Sort       | Denotes |
+  * |----------|------------|---------|
+  * | inherent | Mitigation | The mitigation-free (raw) valuation, `MitigationSelection.Inherent` |
+  * | residual | Mitigation | The all-applicable valuation, `MitigationSelection.Residual` |
   *
   * == Functions ==
   *
   * | Name | Signature | Backed by |
   * |------|-----------|-----------|
-  * | p95  | Node → Loss | 95th percentile from `outcomeCount` |
-  * | p99  | Node → Loss | 99th percentile from `outcomeCount` |
-  * | lec  | (Node, Loss) → Probability | `probOfExceedance(threshold)` |
+  * | p95  | (Node, Mitigation) → Loss | 95th percentile of the selection's result |
+  * | p99  | (Node, Mitigation) → Loss | 99th percentile of the selection's result |
+  * | lec  | (Node, Loss, Mitigation) → Probability | `probOfExceedance(threshold)` of the selection's result |
+  *
+  * The trailing `Mitigation` slot names which valuation the function reads: the
+  * `inherent`/`residual` constants, or a bound `∃m : mitigation` variable
+  * denoting a single-mitigation `Selected` valuation.
   *
   * == Predicates ==
   *
@@ -48,23 +63,36 @@ import vql.typed.MapDispatcher
   * | gt_loss | (Loss, Loss) | `a > b` (Long) |
   * | gt_prob | (Probability, Probability) | `a > b` (Double) |
   * | eq | (Node, Node) | `NodeId` equality (node identity between two variables) |
-  * | named | (Node, NodeNameLiteral) | pins a node by name; `NodeId` equality |
-  * | has_id | (Node, NodeIdLiteral) | pins a node by id; `NodeId` equality |
+  * | named_risk | (Node, NodeNameLiteral) | pins a node by name; `NodeId` equality |
+  * | risk_id | (Node, NodeIdLiteral) | pins a node by id; `NodeId` equality |
+  * | named_mitigation | (Mitigation, MitigationNameLiteral) | pins a mitigation by name; `MitigationId` equality |
+  * | mitigation_id | (Mitigation, MitigationIdLiteral) | pins a mitigation by id; `MitigationId` equality |
+  * | mitigate | (Node, Mitigation) | node is in the mitigation's resolved scope |
+  * | mitigated | (Node) | node is in the union of all resolved scopes |
+  * | unmitigated | (Node) | node is in no resolved scope (complement of `mitigated`) |
   *
-  * @param tree    Risk tree providing structure (TreeIndex) and node metadata
-  * @param results Simulation results indexed by NodeId (from CachedResultResolver.ensureCachedAll)
+  * @param tree               Risk tree providing structure (TreeIndex), node metadata, and mitigations
+  * @param resultsBySelection Simulation results per referenced `MitigationSelection` (from `CachedResultResolver.ensureCachedAll`); an empty map is valid when the query uses no value function
+  * @param resolvedScopes     Per-mitigation resolved node scopes (`ResolvedScopes.appliedScopes`; Failed outcomes already excluded)
   */
-class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistribution]):
+class RiskTreeKnowledgeBase(
+  tree:               RiskTree,
+  resultsBySelection: Map[MitigationSelection, Map[NodeId, LossDistribution]],
+  resolvedScopes:     Map[MitigationId, Set[NodeId]]
+):
 
   import RiskTreeKnowledgeBase.given
 
   // ── Sort declarations ──────────────────────────────────────────────
 
-  val nodeSort: TypeId            = RiskTreeKnowledgeBase.NodeSort
-  val lossSort: TypeId            = TypeId("Loss")
-  val probabilitySort: TypeId     = TypeId("Probability")
-  val nodeNameLiteralSort: TypeId = RiskTreeKnowledgeBase.NodeNameLiteralSort
-  val nodeIdLiteralSort: TypeId   = RiskTreeKnowledgeBase.NodeIdLiteralSort
+  val nodeSort: TypeId                  = RiskTreeKnowledgeBase.NodeSort
+  val lossSort: TypeId                  = TypeId("Loss")
+  val probabilitySort: TypeId           = TypeId("Probability")
+  val nodeNameLiteralSort: TypeId       = RiskTreeKnowledgeBase.NodeNameLiteralSort
+  val nodeIdLiteralSort: TypeId         = RiskTreeKnowledgeBase.NodeIdLiteralSort
+  val mitigationSort: TypeId            = RiskTreeKnowledgeBase.MitigationSort
+  val mitigationNameLiteralSort: TypeId = RiskTreeKnowledgeBase.MitigationNameLiteralSort
+  val mitigationIdLiteralSort: TypeId   = RiskTreeKnowledgeBase.MitigationIdLiteralSort
 
   // ── Percentile computation ─────────────────────────────────────────
 
@@ -84,22 +112,26 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
 
   // ── TypeCatalog ────────────────────────────────────────────────────
 
-  /** Names that, if used as node names, would shadow this catalog's own
-    * function or predicate symbols. Bare references to these names go through
-    * the formula/term parser's symbol arms (e.g. `p95(x)` → `Fn("p95",[x])`),
-    * so a name binding for the same symbol would only be reachable via the
-    * quoted-literal path (`"p95"`). Allowing it would silently bind the node
-    * with that name through the node-sort literal validator and produce
-    * surprising behaviour.
+  /** Names that, if used as a node or mitigation name, would shadow this
+    * catalog's own function, predicate, or constant symbols. Functions and
+    * predicates are written bare and parse through the application arm
+    * (`p95(x, "inherent")`, `leaf(x)`); constants are reached only through the
+    * quoted-literal arm (`"inherent"` → `Const("inherent")`), because a bare
+    * word that is not numeric or `nil` parses as a variable, not a constant —
+    * the same quoted-literal path a node- or mitigation-name literal takes. A
+    * node or mitigation named after a symbol therefore collides with it on
+    * that path; allowing it would silently bind the entity with that name and
+    * produce surprising behaviour.
     *
     * This is an **alarm-on-bypass** safety net: the supported flow is for the DTO
     * validators to reject such names at create-tree time. If a tree carrying
     * a colliding name reaches the KB anyway (direct repo write, migration,
-    * Irmin merge), we exclude the entry from [[nameToId]] and surface it via
-    * [[nameCollisions]] for the orchestrating service to log.
+    * Irmin merge), we exclude the entry from [[nameToId]] / [[mitigationNameToId]]
+    * and surface it via [[nameCollisions]] / [[mitigationNameCollisions]] for the
+    * orchestrating service to log.
     *
-    * The set is the union of this catalog's own function and predicate symbol
-    * names.
+    * The set is the union of this catalog's own function, predicate, and constant
+    * symbol names.
     */
   val reservedFolNames: Set[String] = FolSymbols.reservedNames
 
@@ -132,22 +164,48 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
       case (id, node) if !reservedFolNames.contains(node.name.value) => node.name.value -> id
     }.toMap
 
+  /** Mitigation name → `MitigationId`, backing the mitigation-name literal
+    * validator (`named_mitigation(m, "IT Risk mitigation")`). Reserved-symbol
+    * names are excluded and surfaced via [[mitigationNameCollisions]], exactly
+    * mirroring the node `nameToId` / `nameCollisions` pair. */
+  val mitigationNameToId: Map[String, MitigationId] =
+    tree.mitigations.iterator.collect {
+      case m if !reservedFolNames.contains(m.name.value) => m.name.value -> m.id
+    }.toMap
+
+  /** Mitigation names skipped because they collide with a reserved catalog
+    * symbol/constant. Empty in the supported flow; surfaced for the
+    * orchestrating service to log, exactly like [[nameCollisions]] for node
+    * names. */
+  val mitigationNameCollisions: List[String] =
+    tree.mitigations.map(_.name.value).toList
+      .filter(reservedFolNames.contains).distinct.sorted
+      .map(n => s"reserved-mitigation:$n")
+
   val catalog: TypeCatalog = TypeCatalog.unsafe(
     types = Set(
       TypeDecl.DomainType(nodeSort),
+      TypeDecl.DomainType(mitigationSort),
       TypeDecl.ValueType(lossSort),
       TypeDecl.ValueType(probabilitySort),
       TypeDecl.ValueType(nodeNameLiteralSort),
-      TypeDecl.ValueType(nodeIdLiteralSort)
+      TypeDecl.ValueType(nodeIdLiteralSort),
+      TypeDecl.ValueType(mitigationNameLiteralSort),
+      TypeDecl.ValueType(mitigationIdLiteralSort)
     ),
-    // No constant symbols: node names resolve on demand through the node-sort
-    // literal validator below, not as pre-registered constants. This is where a
-    // constant (a fixed named value in the query vocabulary) would be declared.
-    constants = Map.empty,
+    // The two aggregate-valuation constants; a mitigation-sort constant is legal
+    // (only functions returning a domain sort are rejected). They resolve by name
+    // separately from the ∃-domain enumeration, so they are not members of
+    // `∃m : mitigation`. Node/mitigation names resolve on demand through the
+    // literal validators below, not as pre-registered constants.
+    constants = Map(
+      RiskTreeKnowledgeBase.InherentConst -> mitigationSort,
+      RiskTreeKnowledgeBase.ResidualConst -> mitigationSort
+    ),
     functions = Map(
-      SymbolName("p95") -> FunctionSig(List(nodeSort), lossSort),
-      SymbolName("p99") -> FunctionSig(List(nodeSort), lossSort),
-      SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort), probabilitySort)
+      SymbolName("p95") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
+      SymbolName("p99") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
+      SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort, mitigationSort), probabilitySort)
     ),
     predicates = Map(
       SymbolName("leaf")               -> PredicateSig(List(nodeSort)),
@@ -158,17 +216,27 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
       SymbolName("gt_loss")            -> PredicateSig(List(lossSort, lossSort)),
       SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort)),
       SymbolName("eq")                 -> PredicateSig(List(nodeSort, nodeSort)),
-      SymbolName("named")              -> PredicateSig(List(nodeSort, nodeNameLiteralSort)),
-      SymbolName("has_id")             -> PredicateSig(List(nodeSort, nodeIdLiteralSort))
+      SymbolName("named_risk")         -> PredicateSig(List(nodeSort, nodeNameLiteralSort)),
+      SymbolName("risk_id")            -> PredicateSig(List(nodeSort, nodeIdLiteralSort)),
+      SymbolName("named_mitigation")   -> PredicateSig(List(mitigationSort, mitigationNameLiteralSort)),
+      SymbolName("mitigation_id")      -> PredicateSig(List(mitigationSort, mitigationIdLiteralSort)),
+      SymbolName("mitigate")           -> PredicateSig(List(nodeSort, mitigationSort)),
+      SymbolName("mitigated")          -> PredicateSig(List(nodeSort)),
+      SymbolName("unmitigated")        -> PredicateSig(List(nodeSort))
     ),
     literalValidators = Map(
       // Node slots resolve a quoted literal by NAME only: an id in a structural
-      // node slot (`child_of(x, "01BX…")`) no longer binds — use `has_id`.
-      nodeSort            -> ((s: String) => nameToId.get(s)),
-      nodeNameLiteralSort -> ((s: String) => nameToId.get(s)),                // named's 2nd arg
-      nodeIdLiteralSort   -> ((s: String) => NodeId.fromString(s).toOption),  // has_id's 2nd arg
-      lossSort            -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
-      probabilitySort     -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0))
+      // node slot (`child_of(x, "01BX…")`) does not bind — use `risk_id`.
+      nodeSort                  -> ((s: String) => nameToId.get(s)),
+      nodeNameLiteralSort       -> ((s: String) => nameToId.get(s)),                     // named_risk's 2nd arg
+      nodeIdLiteralSort         -> ((s: String) => NodeId.fromString(s).toOption),       // risk_id's 2nd arg
+      lossSort                  -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
+      probabilitySort           -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0)),
+      mitigationNameLiteralSort -> ((s: String) => mitigationNameToId.get(s)),           // named_mitigation's 2nd arg
+      mitigationIdLiteralSort   -> ((s: String) => MitigationId.fromString(s).toOption)  // mitigation_id's 2nd arg
+      // No validator for mitigationSort itself: the value functions' selection
+      // slot accepts only the two constants or a bound variable — a bare quoted
+      // literal there deliberately fails to bind.
     )
   )
 
@@ -181,41 +249,84 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
   private val portfolioIds: Set[NodeId] =
     index.nodes.collect { case (id, _: RiskPortfolio) => id }.toSet
 
-  private def lookupResult(id: NodeId, ctx: String): Either[String, LossDistribution] =
-    results.get(id).toRight(s"$ctx: no simulation result for node '${id.value}'")
+  /** Maps a mitigation-sort argument `Value` to the selection it denotes. The
+    * `inherent`/`residual` constants arrive as their own name string
+    * (`ConstRef` → `Value(sort, name)`); a bound `∃m` carries a `MitigationId`
+    * drawn from the runtime domain, which maps to a single-mitigation
+    * `Selected`. */
+  private def selectionOf(v: Value): Either[String, MitigationSelection] = v.raw match
+    case RiskTreeKnowledgeBase.InherentConst => Right(MitigationSelection.Inherent)
+    case RiskTreeKnowledgeBase.ResidualConst => Right(MitigationSelection.Residual)
+    case id: MitigationId                    =>
+      Right(MitigationSelection.Selected(Map(id -> ScopeRestriction.FullScope)))
+    case other =>
+      Left(s"mitigation selection: unrecognised carrier '$other' in sort '${v.sort.value}'")
 
-  /** Shared node-identity relation backing `eq`, `named`, and `has_id`. By the
-    * time an argument reaches the dispatcher its literal validator has already
-    * resolved the quoted string to a `NodeId`, so all three reduce to `NodeId`
-    * equality; they differ only at bind time, in which validator accepts the
-    * literal (`nameToId.get` for `eq` / `named`, `NodeId.fromString` for
-    * `has_id`). */
+  /** The precomputed result map for a selection. Absent only if
+    * `referencedSelections` failed to enumerate the selection a bound term
+    * denotes — a wiring invariant, surfaced as a dispatcher error. */
+  private def resultsFor(sel: MitigationSelection): Either[String, Map[NodeId, LossDistribution]] =
+    resultsBySelection.get(sel).toRight(
+      s"no precomputed results for selection '$sel' (referencedSelections omitted it)"
+    )
+
+  private def lookupResult(rs: Map[NodeId, LossDistribution], id: NodeId, ctx: String): Either[String, LossDistribution] =
+    rs.get(id).toRight(s"$ctx: no simulation result for node '${id.value}'")
+
+  /** Union of every resolved mitigation scope. `mitigated(x)` reads this set and
+    * `unmitigated(x)` its complement, so `unmitigated ≡ ¬mitigated` holds by
+    * construction (M3-D5). Failed outcomes are already excluded upstream
+    * (`ResolvedScopes.appliedScopes`, M3-D2). */
+  private val mitigatedIds: Set[NodeId] =
+    resolvedScopes.valuesIterator.foldLeft(Set.empty[NodeId])(_ union _)
+
+  /** Shared node-identity relation backing `eq`, `named_risk`, and `risk_id`. By
+    * the time an argument reaches the dispatcher its literal validator has
+    * already resolved the quoted string to a `NodeId`, so all three reduce to
+    * `NodeId` equality; they differ only at bind time, in which validator accepts
+    * the literal (`nameToId.get` for `eq` / `named_risk`, `NodeId.fromString` for
+    * `risk_id`). */
   private val nodeIdentity: List[Value] => Either[String, Boolean] = args =>
     for
       a <- args(0).extract[NodeId]
       b <- args(1).extract[NodeId]
     yield a == b
 
+  /** Shared mitigation-identity relation backing `named_mitigation` and
+    * `mitigation_id`; both reduce to `MitigationId` equality after their literal
+    * validators resolve the quoted string to a `MitigationId`. */
+  private val mitigationIdentity: List[Value] => Either[String, Boolean] = args =>
+    for
+      a <- args(0).extract[MitigationId]
+      b <- args(1).extract[MitigationId]
+    yield a == b
+
   val dispatcher: MapDispatcher = MapDispatcher(
     functions = Map(
       SymbolName("p95") -> { args =>
         for
-          id     <- args(0).extract[NodeId]
-          result <- lookupResult(id, "p95")
-        yield percentile(result, 0.95)
+          id  <- args(0).extract[NodeId]
+          sel <- selectionOf(args(1))
+          rs  <- resultsFor(sel)
+          r   <- lookupResult(rs, id, "p95")
+        yield percentile(r, 0.95)
       },
       SymbolName("p99") -> { args =>
         for
-          id     <- args(0).extract[NodeId]
-          result <- lookupResult(id, "p99")
-        yield percentile(result, 0.99)
+          id  <- args(0).extract[NodeId]
+          sel <- selectionOf(args(1))
+          rs  <- resultsFor(sel)
+          r   <- lookupResult(rs, id, "p99")
+        yield percentile(r, 0.99)
       },
       SymbolName("lec") -> { args =>
         for
           id        <- args(0).extract[NodeId]
           threshold <- args(1).extract[Long]
-          result    <- lookupResult(id, "lec")
-        yield result.probOfExceedance(threshold)
+          sel       <- selectionOf(args(2))
+          rs        <- resultsFor(sel)
+          r         <- lookupResult(rs, id, "lec")
+        yield r.probOfExceedance(threshold)
       }
     ),
     predicates = Map(
@@ -258,9 +369,19 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
           b <- args(1).extract[Double]
         yield a > b
       },
-      SymbolName("eq")     -> nodeIdentity,
-      SymbolName("named")  -> nodeIdentity,
-      SymbolName("has_id") -> nodeIdentity
+      SymbolName("eq")               -> nodeIdentity,
+      SymbolName("named_risk")       -> nodeIdentity,
+      SymbolName("risk_id")          -> nodeIdentity,
+      SymbolName("named_mitigation") -> mitigationIdentity,
+      SymbolName("mitigation_id")    -> mitigationIdentity,
+      SymbolName("mitigate") -> { args =>
+        for
+          node <- args(0).extract[NodeId]
+          mid  <- args(1).extract[MitigationId]
+        yield resolvedScopes.getOrElse(mid, Set.empty).contains(node)
+      },
+      SymbolName("mitigated")   -> { args => args(0).extract[NodeId].map(mitigatedIds.contains) },
+      SymbolName("unmitigated") -> { args => args(0).extract[NodeId].map(id => !mitigatedIds.contains(id)) }
     )
   )
 
@@ -270,8 +391,14 @@ class RiskTreeKnowledgeBase(tree: RiskTree, results: Map[NodeId, LossDistributio
   private val nodeDomain: Set[Value] =
     tree.index.nodes.keys.map(id => Value(nodeSort, id)).toSet
 
+  /** Domain elements: one `Value(Mitigation, mitigationId)` per tree mitigation.
+    * This is what `∃m : mitigation …` ranges over; the `inherent`/`residual`
+    * constants are resolved separately and are not members. */
+  private val mitigationDomain: Set[Value] =
+    tree.mitigations.iterator.map(m => Value(mitigationSort, m.id)).toSet
+
   val model: RuntimeModel = RuntimeModel(
-    domains = Map(nodeSort -> nodeDomain),
+    domains = Map(nodeSort -> nodeDomain, mitigationSort -> mitigationDomain),
     dispatcher = dispatcher
   )
 
@@ -284,19 +411,39 @@ object RiskTreeKnowledgeBase:
   val NodeSort: TypeId = TypeId("Node")
 
   /** Value sort for a node reference written as a quoted node NAME literal
-    * (`named(x, "IT Risk")`). Carrier: `NodeId` — the name is resolved to the
-    * node's id at bind time by the literal validator (`nameToId.get`). A
-    * `ValueType` (ADR-014): it flows through an argument slot and is never
-    * quantified over. The sort string surfaces in a failed-literal bind message
-    * and is a node-reference discriminator in [[FolQueryFailure.fromQueryError]]. */
+    * (`named_risk(x, "IT Risk")`). Carrier: `NodeId` — the name is resolved to
+    * the node's id at bind time by the literal validator (`nameToId.get`). A
+    * `ValueType`: it flows through an argument slot and is never quantified over.
+    * The sort string surfaces in a failed-literal bind message and is a
+    * node-reference discriminator in [[FolQueryFailure.fromQueryError]]. */
   val NodeNameLiteralSort: TypeId = TypeId("NodeNameLiteral")
 
   /** Value sort for a node reference written as a quoted node ID literal
-    * (`has_id(x, "01BX…")`). Carrier: `NodeId` — the id string is parsed by
+    * (`risk_id(x, "01BX…")`). Carrier: `NodeId` — the id string is parsed by
     * `NodeId.fromString` at bind time. A failed id literal is malformed syntax,
     * classified `BIND_FAILED` (unlike a failed name, which is a nonexistent
     * node). */
   val NodeIdLiteralSort: TypeId = TypeId("NodeIdLiteral")
+
+  /** Domain sort for tree-level mitigations. Carrier: `MitigationId`. A
+    * `DomainType` so `∃m : mitigation …` is well-typed and the runtime domain
+    * enumerates the tree's mitigations. */
+  val MitigationSort: TypeId = TypeId("Mitigation")
+
+  /** Value sort for a mitigation reference written as a quoted NAME literal
+    * (`named_mitigation(m, "IT Risk")`). Carrier: `MitigationId`, resolved at
+    * bind time by the name→id validator. */
+  val MitigationNameLiteralSort: TypeId = TypeId("MitigationNameLiteral")
+
+  /** Value sort for a mitigation reference written as a quoted ID literal
+    * (`mitigation_id(m, "01H…")`). Carrier: `MitigationId` via `fromString`. */
+  val MitigationIdLiteralSort: TypeId = TypeId("MitigationIdLiteral")
+
+  /** The two aggregate-valuation constants. Mitigation-sort so they sit in the
+    * value functions' selection slot; reserved names (see `FolSymbols`) because
+    * a constant of this sort used in any other slot binds as a type error. */
+  val InherentConst: String = "inherent"
+  val ResidualConst: String = "residual"
 
   /** Consumer carrier for the node sort (ADR-015 §2): the engine holds the
     * register `NodeId` opaquely in `Value.raw`; this lifts it back out. A
@@ -307,3 +454,12 @@ object RiskTreeKnowledgeBase:
       case id: NodeId => Right(id)
       case other      =>
         Left(s"Extract[NodeId]: expected NodeId carrier for sort '${v.sort.value}', got $other")
+
+  /** Consumer carrier for the mitigation sort, mirroring [[given_Extract_NodeId]]:
+    * the engine holds the register `MitigationId` opaquely in `Value.raw`. A
+    * well-formed query never hits the left case. */
+  given Extract[MitigationId] with
+    def apply(v: Value): Either[String, MitigationId] = v.raw match
+      case id: MitigationId => Right(id)
+      case other            =>
+        Left(s"Extract[MitigationId]: expected MitigationId carrier for sort '${v.sort.value}', got $other")

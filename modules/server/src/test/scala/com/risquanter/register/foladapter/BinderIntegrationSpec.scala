@@ -2,7 +2,7 @@ package com.risquanter.register.foladapter
 
 import zio.test.*
 
-import com.risquanter.register.domain.data.{RiskResult, RiskLeaf, RiskPortfolio, RiskNode}
+import com.risquanter.register.domain.data.{RiskResult, RiskLeaf, RiskPortfolio, RiskNode, LossDistribution, MitigationSelection}
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.SafeName
@@ -64,7 +64,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
     seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get)
   )
 
-  // Five-trial outcomes; large enough that gt_loss(p95(x), 1000) is true for both leaves.
+  // Five-trial outcomes; large enough that gt_loss(p95(x, "inherent"), 1000) is true for both leaves.
   private val cyberResult = withCfg(5) {
     RiskResult(
       nodeId = cyberId,
@@ -88,7 +88,11 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
   private val results: Map[NodeId, RiskResult] =
     Map(rootId -> rootResult, itId -> itResult, cyberId -> cyberResult, hardwareId -> hardwareResult)
 
-  private val kb = RiskTreeKnowledgeBase(tree, results)
+  private val kb = RiskTreeKnowledgeBase(
+    tree,
+    Map(MitigationSelection.Inherent -> results.map { case (k, v) => k -> (v: LossDistribution) }),
+    Map.empty
+  )
 
   private val idToName: Map[NodeId, String] =
     allNodes.map { case (id, n) => id -> n.name.value }
@@ -99,9 +103,9 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
       test("B1: quoted-literal scope query parses, binds, and evaluates with satisfying = {Cyber, Hardware}") {
         // PLAN-QUERY-NODE-NAME-LITERALS §5.5. The quoted node name "IT Risk" binds via
         // the node-sort literal validator to Value(Node, itId) — a NodeId, not a string.
-        // Both leaf descendants of IT Risk satisfy gt_loss(p95(x), 1000) with the
+        // Both leaf descendants of IT Risk satisfy gt_loss(p95(x, "inherent"), 1000) with the
         // 5-trial fixture; satisfying elements carry their NodeIds.
-        val text   = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 1000))"""
+        val text   = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 1000))"""
         val parsed = VagueQueryParser.parse(text).toOption.get
         val result = for
           folModel <- FolModel(kb.catalog, kb.model)
@@ -120,7 +124,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
         // The node-sort literal validator is present, so a token that is neither a
         // valid NodeId nor a known node name fails as UnparseableConstant (a validator
         // rejected it) rather than UnknownConstantOrLiteral (no validator at all).
-        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "Nonexistent"), gt_loss(p95(x), 1000))"""
+        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "Nonexistent"), gt_loss(p95(x, "inherent"), 1000))"""
         val parsed = VagueQueryParser.parse(text).toOption.get
         val bound  = QueryBinder.bind(parsed, kb.catalog)
         assertTrue(
@@ -164,14 +168,14 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
         // is invoked.
         //
         // Attack shape: "IT Risk" is a valid constant; the closing " terminates the
-        // literal, and the characters that follow (`, gt_loss(p95(x), 0)`) would be
+        // literal, and the characters that follow (`, gt_loss(p95(x, "inherent"), 0)`) would be
         // injection candidates. The trailing `""` (empty string literal) in argument
         // position produces either a parse error or an arity mismatch at bind time.
         //
         // If this test fails (assertTrue on a false value), the parser returned a
         // successful evaluation result for injection-shaped input. Stop immediately
         // and consult the user — do not attempt to work around the failure.
-        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 0"))"""
+        val text = """Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 0"))"""
         val rejected = VagueQueryParser.parse(text) match
           case Left(_)       => true
           case Right(parsed) => QueryBinder.bind(parsed, kb.catalog).isLeft

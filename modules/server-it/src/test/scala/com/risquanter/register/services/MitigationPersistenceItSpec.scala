@@ -78,7 +78,7 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
           repo   <- ZIO.service[RiskTreeRepository]
           tree    = treeWith(treeId("mit-tree-rt"), m)
           _      <- repo.create(wsId, tree, BranchRef.Main)
-          loaded <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main))
+          loaded <- repo.getById(wsId, tree.id, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         yield assertTrue(loaded.exists(_.mitigations == List(m)))
       },
 
@@ -90,7 +90,7 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
           tid      = treeId("mit-tree-update")
           _       <- repo.create(wsId, treeWith(tid, m1), BranchRef.Main)
           _       <- repo.update(wsId, tid, _ => treeWith(tid, m2), BranchRef.Main)
-          replaced<- repo.getById(wsId, tid, Revision.Head(BranchRef.Main))
+          replaced<- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         yield assertTrue(replaced.exists(_.mitigations == List(m2)))
       },
 
@@ -101,7 +101,7 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
           tid     = treeId("mit-tree-drop")
           _      <- repo.create(wsId, treeWith(tid, m), BranchRef.Main)
           _      <- repo.update(wsId, tid, _ => treeWith(tid), BranchRef.Main)
-          loaded <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main))
+          loaded <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         yield assertTrue(loaded.exists(_.mitigations.isEmpty))
       },
 
@@ -117,7 +117,7 @@ object MitigationPersistenceItSpec extends ZIOSpecDefault:
           repo   <- ZIO.service[RiskTreeRepository]
           tid     = treeId("mit-tree-multi")
           _      <- repo.create(wsId, treeWith(tid, mA, mZ), BranchRef.Main)
-          loaded <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main))
+          loaded <- repo.getById(wsId, tid, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         yield assertTrue(
           loaded.exists(_.mitigations.sortBy(_.id.value) == List(mA, mZ).sortBy(_.id.value))
         )

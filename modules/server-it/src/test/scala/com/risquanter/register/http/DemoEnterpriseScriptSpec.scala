@@ -261,49 +261,49 @@ object DemoEnterpriseScriptSpec extends ZIOSpecDefault:
           treeId  = boot.tree.id.value
 
           // Q1: ~12/21 leaves have unconditional P99 > $10M — comfortably satisfies >=1/4
-          q1   <- query(client, key, treeId)("""Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 10000000))""")
+          q1   <- query(client, key, treeId)("""Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x, "inherent"), 10000000))""")
           // Q2: ~6/21 leaves have >10% chance of exceeding $1M — satisfies <=1/2
-          q2   <- query(client, key, treeId)("""Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000000), 0.10))""")
+          q2   <- query(client, key, treeId)("""Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000000, "inherent"), 0.10))""")
           // Q3: ~14/21 leaves have unconditional P95 > $1M — typically false (~62% < 75% threshold) but not asserted; boundary unstable
-          q3   <- query(client, key, treeId)("""Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x), 1000000))""")
+          q3   <- query(client, key, treeId)("""Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x, "inherent"), 1000000))""")
           // Q4: ~5-6/21 leaves have unconditional P95 > $5M — far below ~1/2
-          q4   <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))""")
+          q4   <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))""")
           // Q4b: 4-5/21≈19-24% is "about 1/5" — Q[~]^{1/5} showcases vague tolerance; stably satisfied whether 4 or 5 leaves qualify
-          q4b  <- query(client, key, treeId)("""Q[~]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))""")
+          q4b  <- query(client, key, treeId)("""Q[~]^{1/5} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))""")
           // Q5: portfolios with P95 > $50M — p95 is more stable than p99 (5× more MC samples); satisfies <=1/3
-          q5   <- query(client, key, treeId)("""Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x), 50000000))""")
+          q5   <- query(client, key, treeId)("""Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x, "inherent"), 50000000))""")
           // Q6: 2/21 leaves have >5% chance of exceeding $10M — satisfies <=1/4
-          q6   <- query(client, key, treeId)("""Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000), 0.05))""")
+          q6   <- query(client, key, treeId)("""Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000, "inherent"), 0.05))""")
           // Q7: ~7-8/11 portfolios have a child with P95 > $5M — boundary against 3/4 bar
           //      (asserts rangeSize only; satisfied flickers near 0.73)
-          q7   <- query(client, key, treeId)("""Q[>=]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 5000000)))""")
+          q7   <- query(client, key, treeId)("""Q[>=]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))""")
           // Q7b: same proportion satisfies the vague ~2/3 threshold (within tolerance)
-          q7b  <- query(client, key, treeId)("""Q[~]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 5000000)))""")
+          q7b  <- query(client, key, treeId)("""Q[~]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))""")
           // Q8: 10/11 portfolios have ALL direct children with P99 > $1M — satisfies >=1/2
-          q8   <- query(client, key, treeId)("""Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y), 1000000)))""")
+          q8   <- query(client, key, treeId)("""Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y, "inherent"), 1000000)))""")
 
           // Q-A: no Technology and Cyber leaf has unconditional P95 > $5M (0/4) — fails >=2/3
-          qa   <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x), 5000000))""")
+          qa   <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x, "inherent"), 5000000))""")
           // Q-Ab: P99 > $1M — all 4 Cyber leaves clear it (Insider Threat P99 is 80th conditional ≫ $1M; 5%-prob P95 edge gone)
-          qab  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p99(x), 1000000))""")
+          qab  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p99(x, "inherent"), 1000000))""")
           // Q-B: 1/3 Operational Risk children clear the LEC bar — fails >=1/2
-          qb   <- query(client, key, treeId)("""Q[>=]^{1/2} x (child_of(x, "Operational Risk"), gt_prob(lec(x, 10000000), 0.05))""")
+          qb   <- query(client, key, treeId)("""Q[>=]^{1/2} x (child_of(x, "Operational Risk"), gt_prob(lec(x, 10000000, "inherent"), 0.05))""")
           // Q-Bb: scope swap — 4/4 Enterprise Risk children (top-level aggregates) clear the LEC bar
-          qbb  <- query(client, key, treeId)("""Q[>=]^{1/2} x (child_of(x, "Enterprise Risk"), gt_prob(lec(x, 10000000), 0.05))""")
+          qbb  <- query(client, key, treeId)("""Q[>=]^{1/2} x (child_of(x, "Enterprise Risk"), gt_prob(lec(x, 10000000, "inherent"), 0.05))""")
           // Q-C1: 1/5 Financial Risk leaves have P99 > $20M — fails >=2/3
-          qc1  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x), 20000000))""")
+          qc1  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x, "inherent"), 20000000))""")
           // Q-C1b: same data, quantifier flip — 1/5 satisfies <=1/3
-          qc1b <- query(client, key, treeId)("""Q[<=]^{1/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x), 20000000))""")
+          qc1b <- query(client, key, treeId)("""Q[<=]^{1/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x, "inherent"), 20000000))""")
           // Q-C2: 1/10 Operational Risk leaves have P99 > $20M — fails >=2/3 (contrast with Q-C1)
-          qc2  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x), 20000000))""")
+          qc2  <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x, "inherent"), 20000000))""")
           // Q-C2b: scope swap to Compliance + threshold lowered to $5M — 3/3 leaves clear it
-          qc2b <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x), 5000000))""")
+          qc2b <- query(client, key, treeId)("""Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x, "inherent"), 5000000))""")
           // Q-D: 9/21 non-Cyber leaves have P95 > $1M (42.86%) — a full count-step outside
           //      About(1/4,0.1)'s band [0.15,0.35]. A 1/3 quantifier would sit 0.005 inside
           //      the band (knife-edge); 1/4 keeps the verdict margin-assertable.
-          qd   <- query(client, key, treeId)("""Q[~]^{1/4} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))""")
+          qd   <- query(client, key, treeId)("""Q[~]^{1/4} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))""")
           // Q-Db: same proportion IS "about 1/2" — Q[~]^{1/2} showcases around tolerance vs strict Q[<=]
-          qdb  <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))""")
+          qdb  <- query(client, key, treeId)("""Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))""")
 
           // With boundary-assigned seed identities every figure below is deterministic:
           // verdicts re-recorded once (PLAN §11), and the three threshold-straddling

@@ -53,8 +53,8 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
     override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
       ZIO.die(new UnsupportedOperationException("revert not exercised in this stub"))
 
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
-      ZIO.succeed(db.get((wsId, id)))
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
+      ZIO.succeed(db.get((wsId, id)).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
 
     override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
       ZIO.succeed(db.collect { case ((wid, _), tree) if wid == wsId => Right(tree) }.toList)

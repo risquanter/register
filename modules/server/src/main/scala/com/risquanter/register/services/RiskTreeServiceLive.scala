@@ -45,7 +45,7 @@ class RiskTreeServiceLive private (
   
   /** Fetch tree by id or fail with ValidationFailed. */
   private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): Task[RiskTree] =
-    repo.getById(wsId, treeId, rev).flatMap {
+    repo.getById(wsId, treeId, rev).map(_.map(_._1)).flatMap {
       case Some(tree) => ZIO.succeed(tree)
       case None =>
         ZIO.fail(ValidationFailed(List(ValidationError(
@@ -400,7 +400,7 @@ class RiskTreeServiceLive private (
     val operation = for {
       // Head state (for invalidation) — None when the tree was deleted at head;
       // reverting then recreates it, which behaves like create (nothing cached).
-      oldTree  <- repo.getById(wsId, id, Revision.Head(branch))
+      oldTree  <- repo.getById(wsId, id, Revision.Head(branch)).map(_.map(_._1))
       reverted <- repo.revert(wsId, id, toCommit, branch)
       _        <- oldTree match
                     case Some(prev) => invalidationHandler.handleMutation(prev, reverted, clientBranchName(wsId, branch))
@@ -414,7 +414,7 @@ class RiskTreeServiceLive private (
   }
 
   override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]] =
-    repo.getById(wsId, id, rev).tapBoth(
+    repo.getById(wsId, id, rev).map(_.map(_._1)).tapBoth(
       error => logIfUnexpected("getById")(error) *> recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
     )

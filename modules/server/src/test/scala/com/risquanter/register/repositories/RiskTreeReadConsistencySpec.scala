@@ -170,7 +170,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         setup             <- scripted(Some(headC1), advanceTo = Some(headC2),
                                store = Map(headC1 -> storeOf(treeC1), headC2 -> storeOf(treeC2)))
         (repo, calls, queried) = setup
-        result            <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main))
+        result            <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).map(_.map(_._1))
         headResolutions   <- calls.get
         commitsRead       <- queried.get
       yield assertTrue(
@@ -185,7 +185,7 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       for
         setup             <- scripted(initialHead = None, advanceTo = None, store = Map.empty)
         (repo, _, _)       = setup
-        result            <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main))
+        result            <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).map(_.map(_._1))
       yield assertTrue(result.isEmpty)
     },
 

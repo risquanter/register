@@ -76,7 +76,7 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
         case other => throw MatchError(other)
     },
     test("homogeneous NodeNameLiteral unparseable constant → FolUnknownReference") {
-      // named(x, "Nonexistent") fails on the NodeNameLiteral sort — the same
+      // named_risk(x, "Nonexistent") fails on the NodeNameLiteral sort — the same
       // nonexistent-node error as a Node-slot name, so it classifies as
       // UNKNOWN_REFERENCE, not BIND_FAILED (Option B).
       val err = QE.BindError(List(
@@ -89,7 +89,7 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
     },
     test("Node and NodeNameLiteral mixed unresolved → FolUnknownReference") {
       // A query naming a nonexistent node in both a structural slot and via
-      // named still classifies wholly as UNKNOWN_REFERENCE.
+      // named_risk still classifies wholly as UNKNOWN_REFERENCE.
       val err = QE.BindError(List(
         unparseable("Foo", FolQueryFailure.NodeSortName),
         unparseable("Bar", FolQueryFailure.NodeNameLiteralSortName)
@@ -100,7 +100,7 @@ object FolQueryFailureFromQueryErrorSpec extends ZIOSpecDefault:
         case other => throw MatchError(other)
     },
     test("homogeneous NodeIdLiteral unparseable constant → FolBindFailure") {
-      // A malformed id (has_id(x, "not-an-id")) is genuine bind failure, not a
+      // A malformed id (risk_id(x, "not-an-id")) is genuine bind failure, not a
       // nonexistent-node reference — NodeIdLiteral is excluded from the set.
       val err = QE.BindError(List(unparseable("not-an-id", "NodeIdLiteral")))
       FolQueryFailure.fromQueryError(err) match

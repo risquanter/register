@@ -43,7 +43,7 @@ object RouteSecurityRegressionSpec extends ZIOSpecDefault:
       ZIO.fail(RuntimeException("stub"))
     override def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree] =
       ZIO.fail(RuntimeException("stub"))
-    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] = ZIO.succeed(None)
+    override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] = ZIO.succeed(None)
     override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] = ZIO.succeed(Nil)
 
   // ── Shared layer for controller instantiation ────────────────────────

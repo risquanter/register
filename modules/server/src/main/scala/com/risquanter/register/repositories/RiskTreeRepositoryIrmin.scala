@@ -82,10 +82,10 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         yield existing.tree
     }
 
-  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]] =
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
     resolveRevision(rev).flatMap {
       case None       => ZIO.succeed(None)
-      case Some(head) => loadTreeAt(wsId, id, head).map(_.map(_.tree))
+      case Some(head) => loadTreeAt(wsId, id, head).map(_.map(twm => (twm.tree, head)))
     }
 
   override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =

@@ -34,7 +34,7 @@ final class AnalyzeQueryState(
 
   // ── Query input ───────────────────────────────────────────────
   // Default query for development — comment out the next line to start with an empty field
-  private val defaultQuery = "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 50))" //
+  private val defaultQuery = "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, \"inherent\"), 50))" //
   // private val defaultQuery = "" //
   val queryInput: Var[String] = Var(defaultQuery)
 

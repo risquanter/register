@@ -515,7 +515,7 @@ object AnalyzeView:
           label(cls := "form-label", "Query Expression"),
           textArea(
             cls := "form-input form-textarea query-textarea",
-            placeholder := "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x), 5000000))",
+            placeholder := "Q[>=]^{2/3} x (leaf(x), gt_loss(p95(x, \"inherent\"), 5000000))",
             rows := 3,
             controlled(
               value <-- queryState.queryInput.signal,

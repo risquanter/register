@@ -970,62 +970,207 @@ filled by the node picker; the name is shown here only for readability.)
   a no-op, not an error. Selections are client-side view state, so nothing
   persistent goes stale.
 
-### 7.5 M3 implementation-grade elevation — KB `Mitigation` sort + `mitigate` / `mitigated` / `unmitigated` analytics (2026-09-08)
+### 7.5 M3 implementation-grade elevation — analytics VQL: monomorphic mitigation-selection argument + targeting predicates (rewritten 2026-09-10)
 
-M3 is the analytics extension of `RiskTreeKnowledgeBase`: the query language
-gains a way to talk about mitigations, and the underlying resolved scopes
-(from §8.13 M2 slice 2) plug in as the source of truth. Every other M3 line
-item in §7.3 / §8.2 has already landed:
+This rewrite supersedes the 2026-09-08 draft (which kept `p95`/`p99`/`lec`
+mitigation-free and modelled selection as three predicates only). Two rulings
+drive it:
 
-- M1R (§8.6) landed the vql adoption sweep, the `TargetingPredicate` smart
-  constructor + parser boundary, and the ADR-029 §3 table row.
-- M2 slice 2 (§8.13) landed `MitigationScopeResolver` + `ResolvedScopes` +
-  head-only memoization per `(TreeId, BranchRef, CommitHash)`.
-- M2 slice 3 (§8.14) landed the `CachedResultResolver` rename and
-  resolver-edge mitigation wiring.
-- M2 slice 4 (§8.15) landed override staleness detection.
-- vql-engine is at 0.17.0 already (past the 0.11.0 breaking-adoption pin
-  §8.2 references); no further adoption sweep is needed here.
+- **M3 analytics-VQL decisions (2026-09-10):** D6=C (per-call selection
+  argument), OD-1=A (ship both the selection argument *and* the screening
+  predicates), OD-2=C (by-name and by-id are two separate identity predicates),
+  OD-4=A (a what-if bound variable fans out to one precomputed residual per
+  mitigation; unbounded fan-out accepted), OD-5=D (`getById` returns the
+  resolved `CommitHash` in place), M3-D2=A (`mitigated(x)` = union of *Resolved*
+  scopes only), M3-D5 (`unmitigated` ships as the complement of the same set).
+- **Monomorphic per-sort surface syntax (2026-09-10):** register declares a
+  *distinct identity symbol per entity sort* rather than asking the engine for
+  sort polymorphism. Consequence: **the engine needs no change** — vql stays at
+  0.17.0. Node identity predicates are renamed to the uniform scheme
+  (`named_risk`/`risk_id`, Decision 1=A); mitigation identity uses the parallel
+  pair (`named_mitigation`/`mitigation_id`); the scheme extends later to
+  `named_asset`/`asset_id`. The two aggregate valuations are mitigation-sort
+  *constants* `inherent`/`residual` (Decision 2 renamed the ADT cases to match:
+  `MitigationSelection.Inherent`/`.Residual`; no `Raw`/`All`/`None` terminology
+  anywhere — vql surface or Scala).
 
-What genuinely remains for M3 is the KB extension itself and the ADR-028
-amendment that records tree-version memoization retroactively (M2 already
-did the memoization; the ADR text still says "model built per-query").
+Everything upstream of M3 has landed and is exploited here rather than rebuilt:
+
+- M1R (§8.6): vql adoption sweep, `TargetingPredicate` + parser boundary.
+- M2 slice 2 (§8.13): `MitigationScopeResolver` + `ResolvedScopes` + per-`(TreeId,
+  BranchRef, CommitHash)` memoization; `ScopeResolverScope` per-workspace factory.
+- M2 slice 3 (§8.14): `CachedResultResolver.ensureCached`/`ensureCachedAll`
+  already take `selection: MitigationSelection` and `resolvedScopes`;
+  `MitigationApplication.effectiveTree` already bakes a selection into a
+  content-addressed effective tree, so precomputing one result map per selection
+  reuses the existing cache with no new machinery.
+- M2 slice 4 (§8.15): override staleness detection.
+
+What genuinely remains for M3: (1) surface mitigations in the query language —
+the selection argument on the value functions plus the identity and screening
+predicates; (2) wire `QueryServiceLive` to bind once, discover the referenced
+selections, precompute one result set per selection, and resolve scopes; (3) the
+terminology/naming rulings; (4) the ADR-028 memoization rider.
 
 #### 7.5.1 Scope
 
-1. Extend `RiskTreeKnowledgeBase` with a `Mitigation` sort, `Extract[MitigationId]`,
-   three predicates (`mitigate/2`, `mitigated/1`, `unmitigated/1`), and a new
-   `resolvedScopes` constructor parameter.
-2. Wire `QueryServiceLive` to resolve mitigation scopes via
-   `MitigationScopeResolver` and pass them into the KB.
-3. Extend `FolSymbols.reservedNames` with `mitigate`, `mitigated`,
-   `unmitigated` so the alarm-on-bypass safety net (`nameCollisions`)
-   catches a node name that collides with the new symbols.
-4. Amend ADR-028 Decision 5 to record that the analytics KB's *inputs*
-   (results, resolved scopes) are memoized per tree version even though
-   the KB itself is still constructed per-query.
+In scope:
 
-Explicitly out of scope for M3 (M4 territory):
-- Any DTO or endpoint change for mitigations in query responses.
-- Any projection of `MitigationId` in `QueryResponseBuilder`.
-- Any frontend consumption of the new predicates.
+1. `MitigationSelection` case rename `None`→`Inherent`, `All`→`Residual`
+   (Decision 2) across `common` + every server call site + specs + the wire
+   codec kind strings. `Selected(entries: Map[MitigationId, ScopeRestriction])`
+   is unchanged; a specific/what-if mitigation is a single-entry `FullScope`
+   selection.
+2. `RiskTreeKnowledgeBase`: add the `Mitigation` domain sort and the two
+   mitigation literal sorts; the `inherent`/`residual` constants; the identity
+   predicates `named_mitigation`/`mitigation_id`; the screening predicates
+   `mitigate`/`mitigated`/`unmitigated`; the mitigation-sort selection argument
+   on `p95`/`p99`/`lec` (D6=C arity break). Results become keyed by
+   `MitigationSelection`. Node identity predicates renamed `named`→`named_risk`,
+   `has_id`→`risk_id` (Decision 1=A); `eq` unchanged.
+3. `QueryServiceLive`: resolve scopes via the per-workspace `ScopeResolverScope`;
+   bind once against the catalog; walk the bound AST for referenced selections;
+   precompute one result map per selection; build the KB from the
+   selection-keyed results and resolved scopes.
+4. `RiskTreeRepository.getById` returns `(RiskTree, CommitHash)` in place (OD-5=D).
+5. `FolSymbols.reservedNames` gains the renamed/new symbols and the two
+   constants; the mirror definition and its drift test extend to cover constant
+   names (previously functions ∪ predicates only).
+6. ADR-028 Decision 5 memoization rider.
 
-#### 7.5.2 Exact signatures
+Out of scope (M4 territory):
 
-**Sort declaration + companion additions** —
+- DTO/endpoint changes for mitigation-aware queries; projecting `MitigationId`
+  in `QueryResponseBuilder`; frontend consumption.
+- The mitigation create/update API and its DTO-level reserved-name gate for
+  mitigation names — M3 uses a KB-level alarm-on-bypass for mitigation names
+  (`mitigationNameCollisions`), mirroring the existing node pattern.
+- The enumerated-subset selection form `{a,b}` (engine list-valued argument —
+  routed to `../vague-quantifier-logic/docs/PROMPT-SET-VALUED-ARGUMENT-TERM.md`).
+
+#### 7.5.2 Surface syntax and selection semantics
+
+The value functions gain a mitigation-selection *term* in their last argument
+slot; the term's sort is `Mitigation`. Three kinds of term are accepted there,
+and only three (the slot has no quoted-literal validator, so a bare `"…"` in it
+never binds):
+
+| Surface form | Term kind at bind | `MitigationSelection` |
+|---|---|---|
+| `p95(x, "inherent")` | `ConstRef("inherent", Mitigation)` | `Inherent` (raw, mitigation-free) |
+| `p95(x, "residual")` | `ConstRef("residual", Mitigation)` | `Residual` (all applicable) |
+| `∃m : mitigation . … ∧ p95(x, m) …` | `VarRef(m: Mitigation)` | `Selected(Map(mᵢ.id → FullScope))` per every mitigation `mᵢ` |
+
+Specific selection is expressed by *constraining* the bound variable, exactly
+mirroring node identity:
+
+```
+p95(x, "inherent") < 500000                                                    // raw
+p95(x, "residual") < 500000                                                    // all applicable
+∃m : mitigation . named_mitigation(m, "IT Risk mitigation") ∧ p95(x, m) < 500000   // specific, by name
+∃m : mitigation . mitigation_id(m, "01H…")                 ∧ p95(x, m) < 500000   // specific, by id
+∃m : mitigation .                                            p95(x, m) < 500000   // what-if over all
+```
+
+Why the two constants are the *name string* at runtime: the engine evaluates a
+`ConstRef(name, sort)` to `Value(sort, name)` (the IR carries no payload —
+[vql `TypedSemantics`]), while a bound `∃m : mitigation` carries a
+`MitigationId` drawn from the runtime domain. The KB dispatcher discriminates on
+that carrier: the string `"inherent"`/`"residual"` maps to the aggregate cases,
+a `MitigationId` maps to a single-entry `Selected`. Constants are resolved by
+name separately from the `∃`-domain enumeration, so `inherent`/`residual` are
+**not** members of `∃m : mitigation` — a what-if ranges over real mitigations
+only.
+
+Why the specific-by-name and what-if forms are indistinguishable at precompute
+time: `p95(x, m)` carries a `VarRef` regardless of any `named_mitigation`
+constraint elsewhere in the formula. `referencedSelections` therefore fans a
+bound mitigation variable out to a `Selected` per mitigation (OD-4=A). The
+`named_mitigation`/`mitigation_id` constraint narrows *which* bindings satisfy
+the formula at evaluation; it does not narrow what is precomputed. Unbounded
+fan-out over `tree.mitigations` is the accepted cost of OD-4=A.
+
+Each surface case maps to the existing `MitigationSelection` ADT (ADR-034
+valuations): `inherent` → `Inherent` → (raw, ∅); `residual` → `Residual` →
+(mitigated, all applicable); a bound/specific `m` → `Selected(Map(id →
+FullScope))` → (mitigated, {m}).
+
+#### 7.5.3 Exact signatures
+
+**(a) `MitigationSelection` case rename** —
+`modules/common/src/main/scala/com/risquanter/register/domain/data/MitigationApplication.scala`.
+`None`→`Inherent`, `All`→`Residual` (Decision 2); `Selected` unchanged. The
+scaladoc, the `scoped` match arms, and the wire codec kind strings move with the
+names:
+
+```scala
+object MitigationSelection {
+  /** Mitigation-free valuation (ADR-034 raw): no mitigation applied. The default
+    * on every existing read path (OD-5). Named for the domain term (inherent
+    * risk = before controls) and to avoid shadowing `scala.None`. */
+  case object Inherent extends MitigationSelection
+  /** Residual valuation (ADR-034): every applicable mitigation applied
+    * (residual risk = after controls). */
+  case object Residual extends MitigationSelection
+  final case class Selected(entries: Map[MitigationId, ScopeRestriction]) extends MitigationSelection
+
+  given Equal[MitigationSelection] = Equal.default
+  private case class Raw(kind: String, entries: Option[Map[MitigationId, ScopeRestriction]])
+  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+  given codec: JsonCodec[MitigationSelection] = JsonCodec(
+    JsonEncoder[Raw].contramap {
+      case Inherent          => Raw("inherent", scala.None)
+      case Residual          => Raw("residual", scala.None)
+      case Selected(entries) => Raw("selected", Some(entries))
+    },
+    JsonDecoder[Raw].mapOrFail {
+      case Raw("inherent", scala.None)    => Right(Inherent)
+      case Raw("residual", scala.None)    => Right(Residual)
+      case Raw("selected", Some(entries)) => Right(Selected(entries))
+      case other => Left(s"invalid mitigation selection kind '${other.kind}'")
+    }
+  )
+}
+```
+
+The `scoped` match arm `case MitigationSelection.None => Nil` becomes
+`case MitigationSelection.Inherent => Nil`; `case MitigationSelection.All =>`
+becomes `case MitigationSelection.Residual =>`. The wire codec is not yet
+consumed by any endpoint (M4), so changing the kind strings is not a live API
+break; it keeps one vocabulary end-to-end.
+
+Call-site migration (rename only): `CachedResultResolver.scala` and
+`CachedResultResolverLive.scala` defaults `= MitigationSelection.None` →
+`= MitigationSelection.Inherent`; specs `CachedResultResolverSpec`,
+`MitigationStalenessSpec`, `MitigationApplicationSpec`.
+
+**(b) `RiskTreeKnowledgeBase` companion — sorts, constants, `Extract`** —
 `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`:
 
 ```scala
 object RiskTreeKnowledgeBase:
-  val NodeSort: TypeId            = TypeId("Node")
-  val NodeNameLiteralSort: TypeId = TypeId("NodeNameLiteral")
-  val NodeIdLiteralSort: TypeId   = TypeId("NodeIdLiteral")
-  /** Domain sort for tree-level mitigations. Carrier: `MitigationId`.
-    * Quantifiable (`DomainType`) so `∀m mitigate(x, m)` and
-    * `∃m mitigate(x, m)` are well-typed queries. */
-  val MitigationSort: TypeId      = TypeId("Mitigation")
+  val NodeSort: TypeId                  = TypeId("Node")
+  val NodeNameLiteralSort: TypeId       = TypeId("NodeNameLiteral")
+  val NodeIdLiteralSort: TypeId         = TypeId("NodeIdLiteral")
+  /** Domain sort for tree-level mitigations. Carrier: `MitigationId`. A
+    * `DomainType` so `∃m : mitigation …` is well-typed and the runtime domain
+    * enumerates the tree's mitigations. */
+  val MitigationSort: TypeId            = TypeId("Mitigation")
+  /** Value sort for a mitigation reference written as a quoted NAME literal
+    * (`named_mitigation(m, "IT Risk")`). Carrier: `MitigationId`, resolved at
+    * bind time by the name→id validator. */
+  val MitigationNameLiteralSort: TypeId = TypeId("MitigationNameLiteral")
+  /** Value sort for a mitigation reference written as a quoted ID literal
+    * (`mitigation_id(m, "01H…")`). Carrier: `MitigationId` via `fromString`. */
+  val MitigationIdLiteralSort: TypeId   = TypeId("MitigationIdLiteral")
 
-  given Extract[NodeId]        with … // unchanged
+  /** The two aggregate-valuation constants. Mitigation-sort so they sit in the
+    * value functions' selection slot; reserved names (see FolSymbols) because a
+    * constant of this sort in any other slot binds as `TypeMismatch`. */
+  val InherentConst: String = "inherent"
+  val ResidualConst: String = "residual"
+
+  given Extract[NodeId] with … // unchanged
   given Extract[MitigationId] with
     def apply(v: Value): Either[String, MitigationId] = v.raw match
       case id: MitigationId => Right(id)
@@ -1033,42 +1178,152 @@ object RiskTreeKnowledgeBase:
         Left(s"Extract[MitigationId]: expected MitigationId carrier for sort '${v.sort.value}', got $other")
 ```
 
-**Extended constructor** — same file:
+**(c) `RiskTreeKnowledgeBase` constructor — results keyed by selection** — same file:
 
 ```scala
 class RiskTreeKnowledgeBase(
-  tree:           RiskTree,
-  results:        Map[NodeId, LossDistribution],
-  resolvedScopes: Map[MitigationId, Set[NodeId]]
+  tree:               RiskTree,
+  resultsBySelection: Map[MitigationSelection, Map[NodeId, LossDistribution]],
+  resolvedScopes:     Map[MitigationId, Set[NodeId]]
 ):
-  val mitigationSort: TypeId = RiskTreeKnowledgeBase.MitigationSort
+  val mitigationSort: TypeId            = RiskTreeKnowledgeBase.MitigationSort
+  val mitigationNameLiteralSort: TypeId = RiskTreeKnowledgeBase.MitigationNameLiteralSort
+  val mitigationIdLiteralSort: TypeId   = RiskTreeKnowledgeBase.MitigationIdLiteralSort
 ```
 
-`resolvedScopes` is the caller-supplied projection of `ResolvedScopes` —
-Failed outcomes are excluded (matches `ResolvedScopes.appliedScopes`,
-already the projection every consumer uses).
+`resolvedScopes` is the caller's `ResolvedScopes.appliedScopes` projection
+(Failed outcomes already excluded — the projection every consumer uses, M3-D2=A).
+`resultsBySelection` holds one result map per selection the query references
+(precomputed by `QueryServiceLive`); an empty map is valid when the query uses
+no value function.
 
-**Catalog additions** — `types` gains `TypeDecl.DomainType(mitigationSort)`;
-`predicates` gains:
+**(d) Mitigation name→id + alarm-on-bypass** — same file, mirroring the node
+`nameToId`/`nameCollisions`:
 
 ```scala
-SymbolName("mitigate")    -> PredicateSig(List(nodeSort, mitigationSort)),
-SymbolName("mitigated")   -> PredicateSig(List(nodeSort)),
-SymbolName("unmitigated") -> PredicateSig(List(nodeSort))
+val mitigationNameToId: Map[String, MitigationId] =
+  tree.mitigations.iterator.collect {
+    case m if !reservedFolNames.contains(m.name.value) => m.name.value -> m.id
+  }.toMap
+
+/** Mitigation names skipped because they collide with a reserved catalog
+  * symbol/constant. Empty in the supported flow; surfaced for the orchestrating
+  * service to log, exactly like `nameCollisions` for node names. */
+val mitigationNameCollisions: List[String] =
+  tree.mitigations.map(_.name.value)
+    .filter(reservedFolNames.contains).distinct.sorted
+    .map(n => s"reserved-mitigation:$n")
 ```
 
-No new `literalValidators` entry — `Mitigation` is a quantified sort with
-no quoted-literal form in M3 (a `has_mitigation_id(m, "01BX…")` companion
-would be a §7.6 M4 item if the frontend needs it).
-
-**Dispatcher additions** — precomputed `Set[NodeId]` per §6 P-3:
+**(e) Catalog additions / renames** — `types` gains
+`DomainType(mitigationSort)`, `ValueType(mitigationNameLiteralSort)`,
+`ValueType(mitigationIdLiteralSort)`; `constants` gains the two valuation
+constants; the value functions gain the selection slot; the node identity
+predicates are renamed and the mitigation identity/screening predicates added:
 
 ```scala
+constants = Map(
+  InherentConst -> mitigationSort,
+  ResidualConst -> mitigationSort
+),
+functions = Map(
+  SymbolName("p95") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
+  SymbolName("p99") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
+  SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort, mitigationSort), probabilitySort)
+),
+predicates = Map(
+  SymbolName("leaf")               -> PredicateSig(List(nodeSort)),
+  SymbolName("portfolio")          -> PredicateSig(List(nodeSort)),
+  SymbolName("child_of")           -> PredicateSig(List(nodeSort, nodeSort)),
+  SymbolName("descendant_of")      -> PredicateSig(List(nodeSort, nodeSort)),
+  SymbolName("leaf_descendant_of") -> PredicateSig(List(nodeSort, nodeSort)),
+  SymbolName("gt_loss")            -> PredicateSig(List(lossSort, lossSort)),
+  SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort)),
+  SymbolName("eq")                 -> PredicateSig(List(nodeSort, nodeSort)),
+  SymbolName("named_risk")         -> PredicateSig(List(nodeSort, nodeNameLiteralSort)),   // was "named"
+  SymbolName("risk_id")            -> PredicateSig(List(nodeSort, nodeIdLiteralSort)),     // was "has_id"
+  SymbolName("named_mitigation")   -> PredicateSig(List(mitigationSort, mitigationNameLiteralSort)),
+  SymbolName("mitigation_id")      -> PredicateSig(List(mitigationSort, mitigationIdLiteralSort)),
+  SymbolName("mitigate")           -> PredicateSig(List(nodeSort, mitigationSort)),
+  SymbolName("mitigated")          -> PredicateSig(List(nodeSort)),
+  SymbolName("unmitigated")        -> PredicateSig(List(nodeSort))
+),
+literalValidators = Map(
+  // node validators unchanged (comment references named_risk/risk_id):
+  nodeSort                  -> ((s: String) => nameToId.get(s)),
+  nodeNameLiteralSort       -> ((s: String) => nameToId.get(s)),
+  nodeIdLiteralSort         -> ((s: String) => NodeId.fromString(s).toOption),
+  lossSort                  -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
+  probabilitySort           -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0)),
+  mitigationNameLiteralSort -> ((s: String) => mitigationNameToId.get(s)),                 // named_mitigation's 2nd arg
+  mitigationIdLiteralSort   -> ((s: String) => MitigationId.fromString(s).toOption)         // mitigation_id's 2nd arg
+)
+```
+
+No `literalValidator` is registered for `mitigationSort` itself: the value
+functions' selection slot accepts only the two constants or a bound variable — a
+bare quoted literal there deliberately fails to bind.
+
+**(f) Dispatcher — selection extraction, value functions, identity, screening**:
+
+```scala
+// Maps a mitigation-sort argument Value to the selection it denotes. The
+// inherent/residual constants arrive as their own name string (ConstRef →
+// Value(sort, name)); a bound ∃m carries a MitigationId from the domain.
+private def selectionOf(v: Value): Either[String, MitigationSelection] = v.raw match
+  case RiskTreeKnowledgeBase.InherentConst => Right(MitigationSelection.Inherent)
+  case RiskTreeKnowledgeBase.ResidualConst => Right(MitigationSelection.Residual)
+  case id: MitigationId                    =>
+    Right(MitigationSelection.Selected(Map(id -> ScopeRestriction.FullScope)))
+  case other =>
+    Left(s"mitigation selection: unrecognised carrier '$other' in sort '${v.sort.value}'")
+
+private def resultsFor(sel: MitigationSelection): Either[String, Map[NodeId, LossDistribution]] =
+  resultsBySelection.get(sel).toRight(
+    s"no precomputed results for selection '$sel' (referencedSelections omitted it)"
+  )
+
+private def lookupResult(rs: Map[NodeId, LossDistribution], id: NodeId, ctx: String) =
+  rs.get(id).toRight(s"$ctx: no simulation result for node '${id.value}'")
+
+// functions:
+SymbolName("p95") -> { args =>
+  for
+    id  <- args(0).extract[NodeId]
+    sel <- selectionOf(args(1))
+    rs  <- resultsFor(sel)
+    r   <- lookupResult(rs, id, "p95")
+  yield percentile(r, 0.95)
+},
+SymbolName("p99") -> { args => /* args(1) selection, percentile 0.99 */ },
+SymbolName("lec") -> { args =>
+  for
+    id        <- args(0).extract[NodeId]
+    threshold <- args(1).extract[Long]
+    sel       <- selectionOf(args(2))
+    rs        <- resultsFor(sel)
+    r         <- lookupResult(rs, id, "lec")
+  yield r.probOfExceedance(threshold)
+}
+
+// M3-D5 approach (a): unmitigated is the complement of the SAME set mitigated
+// reads, so `unmitigated ≡ ¬mitigated` holds by construction.
 private val mitigatedIds: Set[NodeId] =
   resolvedScopes.valuesIterator.foldLeft(Set.empty[NodeId])(_ union _)
 
-// dispatcher.predicates:
-SymbolName("mitigate") -> { args =>
+private val mitigationIdentity: List[Value] => Either[String, Boolean] = args =>
+  for
+    a <- args(0).extract[MitigationId]
+    b <- args(1).extract[MitigationId]
+  yield a == b
+
+// predicates:
+SymbolName("eq")               -> nodeIdentity,
+SymbolName("named_risk")       -> nodeIdentity,       // was "named"
+SymbolName("risk_id")          -> nodeIdentity,       // was "has_id"
+SymbolName("named_mitigation") -> mitigationIdentity,
+SymbolName("mitigation_id")    -> mitigationIdentity,
+SymbolName("mitigate")         -> { args =>
   for
     node <- args(0).extract[NodeId]
     mid  <- args(1).extract[MitigationId]
@@ -1078,8 +1333,7 @@ SymbolName("mitigated")   -> { args => args(0).extract[NodeId].map(mitigatedIds.
 SymbolName("unmitigated") -> { args => args(0).extract[NodeId].map(id => !mitigatedIds.contains(id)) }
 ```
 
-**Domain population** — `RuntimeModel.domains` gains one entry per
-`tree.mitigations` element:
+**(g) Domain population** — `RuntimeModel.domains` gains the mitigation domain:
 
 ```scala
 private val mitigationDomain: Set[Value] =
@@ -1091,50 +1345,100 @@ val model: RuntimeModel = RuntimeModel(
 )
 ```
 
-**Reserved-symbol additions** —
-`modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala`:
+**(h) Reserved symbols** —
+`modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala`.
+The mirror now covers functions ∪ predicates ∪ constants:
 
 ```scala
 val reservedNames: Set[String] = Set(
+  // predicates
   "leaf", "portfolio", "child_of", "descendant_of", "leaf_descendant_of",
-  "gt_loss", "gt_prob", "eq", "named", "has_id",
+  "gt_loss", "gt_prob", "eq", "named_risk", "risk_id",
+  "named_mitigation", "mitigation_id", "mitigate", "mitigated", "unmitigated",
+  // functions
   "p95", "p99", "lec",
-  "mitigate", "mitigated", "unmitigated"  // M3 additions
+  // mitigation-sort aggregate-valuation constants
+  "inherent", "residual"
 )
 ```
 
-**QueryServiceLive wiring** —
+The C4 drift test in `RiskTreeKnowledgeBaseSpec` currently asserts
+`reservedFolNames == functions ∪ predicates`; it must widen to
+`functions ∪ predicates ∪ constants.keySet`.
+
+**(i) `getById` returns the resolved commit hash (OD-5=D)** —
+`modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala:30`:
+
+```scala
+def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]]
+```
+
+Ripple (from the OD-5=D ruling): `RiskTreeRepositoryIrmin.scala:85` plumbs the
+hash `loadTreeAt`/`TreeWithMeta` already resolved; `RiskTreeRepositoryInMemory.scala:77`
+returns a deterministic synthetic hash (dev/test-only backend);
+`RiskTreeServiceLive.scala:48/:403/:417` add three `.map(_.map(_._1))` discards to
+keep the public `RiskTreeService` and its Tapir endpoints unchanged (the
+signature change is confined to the internal repository trait). Decision
+Trigger #4 — pre-ruled OD-5=D.
+
+**(j) `QueryServiceLive` wiring** —
 `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`.
-The `evaluate` method gains a mitigation-scope resolution step between the
-tree load and the KB construction; the layer picks up `ScopeResolverScope`
-as a dependency — the per-workspace resolver factory that mirrors `CacheScope`,
-**not** a shared `MitigationScopeResolver`. There is no singleton
-`MitigationScopeResolver` service in the environment: one resolver instance
-exists per workspace (cross-workspace scope contamination is structurally
-impossible), obtained inside `evaluate` via `resolverFor(wsId): UIO[MitigationScopeResolver]`.
-Exact shape depends on M3-D3 (below) and M3-D6 (results interpretation); the
-version after resolution looks like:
+Add `ScopeResolverScope` (the per-workspace resolver factory, mirrors
+`CacheScope`; one resolver instance per workspace, so cross-workspace scope
+contamination is structurally impossible). `evaluate` binds once against the
+catalog to discover referenced selections, precomputes one result map per
+selection, then builds the KB:
 
 ```scala
 class QueryServiceLive private (
   repo:          RiskTreeRepository,
   resolver:      CachedResultResolver,
-  scopeResolver: ScopeResolverScope,        // NEW — per-workspace resolver factory (mirrors CacheScope)
+  scopeResolver: ScopeResolverScope,        // NEW
   tracing:       Tracing
 ) extends QueryService:
 
   override def evaluate(wsId, treeId, parsed, seedEntityId, branch): Task[QueryResponse] =
-    for
-      (tree, commitHash) <- loadTreeAndHead(wsId, treeId, branch)         // shape per M3-D3
-      results            <- resolver.ensureCachedAll(tree, tree.index.nodes.keySet, seedEntityId).mapError(…)  // base results; residual-vs-base per M3-D6
-      mitResolver        <- scopeResolver.resolverFor(wsId)               // UIO[MitigationScopeResolver], one instance per workspace
-      resolved           <- mitResolver.resolve(
-                              ScopeResolutionContext(treeId, branch, commitHash),
-                              tree
-                            )
-      kb                  = RiskTreeKnowledgeBase(tree, results, resolved.appliedScopes)
-      …
-    yield response
+    traced("evaluate") {
+      for
+        (tree, commitHash) <- repo.getById(wsId, treeId, Revision.Head(branch)).flatMap {
+                                case Some(t) => ZIO.succeed(t)
+                                case None    => ZIO.fail(treeNotFound(treeId))
+                              }
+        mitResolver <- scopeResolver.resolverFor(wsId)                    // UIO
+        resolved    <- mitResolver.resolve(ScopeResolutionContext(treeId, branch, commitHash), tree)
+        allNodeIds   = tree.index.nodes.keySet
+
+        // Bind once against the (results-independent) catalog to learn which
+        // selections the query references. The catalog is identical to the
+        // eval-time KB's catalog (both built from `tree`), so this bind is sound.
+        // A bind failure here needs no handling: precompute nothing and let
+        // `evaluateTyped` below re-bind and surface the classified error, exactly
+        // as today (no new error path).
+        kbShell      = RiskTreeKnowledgeBase(tree, Map.empty, resolved.appliedScopes)
+        selections   = QueryBinder.bind(parsed, kbShell.catalog)
+                          .map(b => MitigationSelectionScan.referenced(b, tree))
+                          .getOrElse(Set.empty[MitigationSelection])
+
+        // One precompute per selection over that selection's effective tree; the
+        // content-addressed cache dedups identical effective trees, so no new
+        // cache machinery. Inherent → base results; Residual/Selected → residual.
+        resultsBySelection <- ZIO.foreach(selections.toList) { sel =>
+                                resolver.ensureCachedAll(tree, allNodeIds, seedEntityId,
+                                    selection = sel, resolvedScopes = resolved.appliedScopes)
+                                  .mapError(_ => FolQueryFailure.SimulationNotCached(treeId): Throwable)
+                                  .map(sel -> _)
+                              }.map(_.toMap)
+
+        kb           = RiskTreeKnowledgeBase(tree, resultsBySelection, resolved.appliedScopes)
+        _           <- logNameCollisions(kb)          // node + mitigation collisions
+        _           <- logResolutionFailures(resolved) // ResolvedScopes.failures, ADR-002
+        folModel    <- ZIO.fromEither(FolModel(kb.catalog, kb.model)).mapError(FolQueryFailure.fromQueryError)
+        output      <- ZIO.fromEither(VagueSemantics.evaluateTyped(parsed, folModel,
+                          answerTuple = Map.empty, samplingParams = SamplingParams.exact,
+                          hdrConfig = HDRConfig.default)).mapError(FolQueryFailure.fromQueryError)
+        response     = QueryResponseBuilder.from(output, parsed.toString)
+      yield response
+    }
 
 object QueryServiceLive:
   val layer: ZLayer[
@@ -1143,132 +1447,108 @@ object QueryServiceLive:
   ] = ZLayer { … }
 ```
 
-`ScopeResolverScope.layer` is not currently in the application's layer graph
-(the resolver was built in M2 but has no live call site yet), so
-`Application.scala` gains `ScopeResolverScope.layer` and updates the
-`QueryServiceLive.layer` requirement comment. That file is in the inventory
-(§7.5.6) and is hook-gated.
+`evaluateTyped` re-binds `parsed` internally; the referenced-selections bind is a
+second, pure, cheap bind against the same catalog (accepted — no lower-level
+`BoundQuery` eval entry point is used).
 
-**`MitigationScopeResolverLive` internal call site** — the internal KB
-construction on line 42 becomes `RiskTreeKnowledgeBase(tree, Map.empty, Map.empty)`
-so the results-free / scopes-free construction stays correct for the
-targeting-only sublanguage. No signature change.
+**(k) `referencedSelections` walk** — a small register-side helper
+(`MitigationSelectionScan` object in the same file). Walks every `BoundFormula`
+in the bound query (range + scope + any satisfying formula); at each
+`BoundTerm.FnApp("p95"|"p99"|"lec", args, _)` it inspects the mitigation-slot
+term (last arg for `p95`/`p99`, arg index 2 for `lec`):
 
-**ADR-028 Decision 5 amendment** —
-`docs/dev/decision-records/ADR-028-vague-quantifier-query-pane.md`:
-add a rider under Decision 5 recording that the analytics KB is still
-constructed per query, but its `results` (via `CachedResultResolver`) and
-`resolvedScopes` (via `MitigationScopeResolver`) are both memoized per
-tree version upstream — so the per-query construction is a cheap wiring
-step, not the actual work.
+```scala
+object MitigationSelectionScan:
+  def referenced(bound: BoundQuery, tree: RiskTree): Set[MitigationSelection] =
+    // fold over BoundFormula/BoundTerm; at a value-function FnApp:
+    //   ConstRef(InherentConst, _) => + Inherent
+    //   ConstRef(ResidualConst, _) => + Residual
+    //   VarRef(BoundVar(_, MitigationSort)) =>
+    //       ++ tree.mitigations.map(m => Selected(Map(m.id -> FullScope)))   // OD-4=A fan-out
+    //   (LiteralRef here is impossible — no mitigationSort literal validator)
+    …
+```
 
-#### 7.5.3 Open decisions
+**(l) `MitigationScopeResolverLive` internal KB construction** —
+`modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`.
+The targeting-only KB construction becomes
+`RiskTreeKnowledgeBase(tree, Map.empty, Map.empty)` (results-free / scopes-free;
+targeting evaluates predicates only). No signature change.
 
-**M3-D1 — `RiskTreeKnowledgeBase` constructor signature.**
-- A) Required third parameter `resolvedScopes: Map[MitigationId, Set[NodeId]]`
-  — every caller passes something explicit; `MitigationScopeResolverLive`
-  passes `Map.empty` (matches its results-free convention). Aligns with
-  ADR-001 boundary discipline.
-- B) Defaulted `resolvedScopes: Map[MitigationId, Set[NodeId]] = Map.empty`
-  — smaller ripple; existing test call sites keep compiling.
-- **Recommendation: A.** The defaulted variant hides a real change
-  (`mitigate` and `mitigated` silently return false for every input) and
-  parallels the results param, which has no default either.
+**(m) `Application.scala`** —
+`modules/server/src/main/scala/com/risquanter/register/Application.scala` adds
+`ScopeResolverScope.layer` to the layer graph (built in M2, no live call site
+until now) and updates the `QueryServiceLive.layer` requirement.
 
-**M3-D2 — `mitigated(x)` semantics with Failed outcomes.**
-- A) Union of *Resolved* scopes only (matches `ResolvedScopes.appliedScopes`,
-  which excludes Failed). A Failed mitigation contributes nothing to
-  `mitigated`; a node covered only by a Failed mitigation reads
-  `unmitigated(x) = true`.
-- B) Distinguish Failed at the query level (new `mitigation_failed(x)`
-  predicate).
-- **Recommendation: A.** The staleness/failure surface belongs on the
-  mitigation panel (ADR-028), not the analytics KB. Query semantics should
-  match every other consumer of resolved scopes.
+**(n) App default/placeholder query strings** — the arity break makes the
+current `p95(x)` defaults invalid. `modules/app/.../AnalyzeQueryState.scala:37`
+and `modules/app/.../views/AnalyzeView.scala:518` migrate `p95(x)` →
+`p95(x, "inherent")`.
 
-**M3-D3 — how `QueryServiceLive` obtains the `CommitHash` for
-`ScopeResolutionContext`.** Today `getById(_, _, Revision.Head(branch))`
-resolves the head internally and throws the hash away. Options:
-- A) Add `resolveHead(wsId, id, branch): Task[Option[CommitHash]]` to
-  `RiskTreeRepository` and call it *after* `getById`. Race window: the
-  head can advance between the two calls, so the returned hash may
-  correspond to a newer tree than the one loaded. The memo would then be
-  indexed under the wrong version — a scope set computed for an older tree
-  gets stamped with the newer commit hash.
-- B) Add a companion `getByIdAt(wsId, id, rev): Task[Option[(RiskTree, CommitHash)]]`
-  alongside the existing `getById`. Both callers keep their current
-  method; `QueryServiceLive` uses the new one. The Irmin backend already
-  has `loadTreeAt` — it just needs to plumb the resolved hash through the
-  return type. In-memory returns a deterministic synthetic hash (e.g.
-  a stable digest of the tree state or a monotonic counter).
-- C) *Rejected — unsound, not a viable option.* Keying the memo on a domain
-  content-derived token (e.g. a `tree.mitigations` content hash) instead of
-  the byte-level Irmin `CommitHash` reintroduces the rename-staleness bug the
-  current design exists to avoid. `ScopeResolutionContext.revision` is
-  deliberately the byte-level Irmin commit hash because mitigation predicates
-  reference node *names* (`named(x, "IT Risk")`), and the domain content hash
-  omits names (§8.13; two-hash distinction, DD-16). A pure rename changes which
-  nodes a predicate resolves to but leaves the content hash unchanged, so a
-  content-token memo would serve a stale scope after a rename. This is the
-  storage-relation rule of ADR-032 §3 (§8.13; DD-16). Listed only to record why
-  it is excluded.
-- **Recommendation: B.** No race, no plan-level contract change, one new
-  method with a clear name. The in-memory synthetic hash is a bounded
-  cost — the in-memory backend is dev/test-only.
+**(o) ADR-028 Decision 5 amendment** —
+`docs/dev/decision-records/ADR-028-vague-quantifier-query-pane.md`: rider
+recording that the analytics KB shell is built per query, but its `results` (via
+`CachedResultResolver`, per selection) and `resolvedScopes` (via
+`MitigationScopeResolver`) are memoized upstream per tree version — so the
+per-query construction is cheap wiring, not the work.
 
-**M3-D4 — `Mitigation` sort declared `DomainType` vs `ValueType`.**
-- A) `DomainType(mitigationSort)` — quantifiable. Enables
-  `∃m mitigate(x, m)` and `∀m mitigate(x, m) → …` in queries.
-- B) `ValueType(mitigationSort)` — argument-slot only (ADR-014). The `mitigate`
-  predicate's second slot can still accept a bound variable, but the sort
-  is never quantified over.
-- **Recommendation: A.** The whole point of surfacing `Mitigation` in the
-  KB is to let users ask questions across mitigations; `mitigated(x)` is
-  a shortcut for `∃m mitigate(x, m)`, so the quantified form must be
-  legal. `DomainType` matches how `Node` is declared for the same reason.
+#### 7.5.4 Decisions — all ruled (no open decisions)
 
-**M3-D5 — `unmitigated(x)` at all, or leave it to the query author?**
-- A) Include `unmitigated(x)` as a first-class negation. Users write
-  `∀x leaf(x) ∧ unmitigated(x) → …` without touching negation syntax.
-- B) Omit it. Users write `¬ mitigated(x)` (assuming the vql surface
-  supports predicate negation in the position needed). One fewer symbol,
-  one fewer reserved name.
-- **Recommendation: A.** `mitigated`/`unmitigated` are the natural pair
-  and match the KB's existing precomputed-set convention (`leaf`/`portfolio`,
-  no `not_leaf`). The cost is one extra reserved name and one dispatcher
-  line.
+Every M3 decision is ruled; this section records the outcome and its provenance.
+The earlier M3-D1…M3-D6 draft labels are folded in where they map to a ruling.
 
-**M3-D6 — do query-time simulation results reflect applied mitigations?**
-A query may combine a simulation function with a mitigation predicate, e.g.
-`∀x leaf(x) ∧ mitigated(x) → gt_loss(p95(x), "1000000")` ("every mitigated leaf
-has 95th-percentile loss over 1M"). This decides which loss `p95(x)` /
-`p99(x)` / `lec(x, …)` denote for a mitigated node. The two answers give
-different query results for the same tree, so the choice is user-visible; the
-§7.5.2 `evaluate` sketch currently encodes option A implicitly (it passes only
-the base call to `ensureCachedAll`). ADR-034 already defines both valuations —
-`raw` (cached, mitigation-free) and `mitigated` (derived at the read edge) — so
-this decision picks which ADR-034 valuation the query predicates read; neither
-option builds new machinery.
-- A) Base (un-mitigated) results. `evaluate` calls `ensureCachedAll` with the
-  defaults (`selection = None`, `resolvedScopes = Map.empty`); `p95`/`p99`/`lec`
-  ignore mitigations, and the mitigation predicates are pure membership over
-  `resolved.appliedScopes`. Example: a leaf with base p95 = 1.2M whose applied
-  mitigation cuts residual p95 to 0.4M still satisfies
-  `mitigated(x) ∧ gt_loss(p95(x), "1000000")`. Simplest; matches every other
-  default caller and the "analytics over populations, not residual
-  re-simulation" framing of §7.3. Cost: "loss" in a mitigation-aware query is
-  not residual loss.
-- B) Residual results. Thread `resolved.appliedScopes` (and a `selection`) into
-  `ensureCachedAll` as well, so `p95(x)` reflects applied mitigations; the same
-  leaf then fails the predicate. Matches an intuitive reading of a
-  mitigation-aware query. Cost: entangles the analytics predicates with
-  mitigation-applied simulation (arguably M4 territory) and needs its own test
-  matrix.
-- **Status: open, unresolved — no recommendation; this is a user ruling.** M3
-  cannot be reported complete while this is open: the shape of the
-  `ensureCachedAll` call in §7.5.2 is settled only once this decision is.
+- **D6 = C (per-call selection argument).** `p95`/`p99` become 2-ary, `lec`
+  3-ary, with a mitigation-sort selection term. Hard arity break — every
+  existing `p95(x)`/`p99(x)`/`lec(x,l)` migrates (§7.5.6).
+- **Selection surface = monomorphic per-sort (2026-09-10).** Two aggregate
+  constants `inherent`/`residual`; specific selection via `named_mitigation` /
+  `mitigation_id` constraining a bound `∃m : mitigation`; what-if via an
+  unconstrained bound variable (§7.5.2). Supersedes the earlier OD-2 "two
+  literal sub-sorts on the selection argument" framing (now two identity
+  predicates) and the earlier "raw"/"all" reserved-word framing (now `inherent`/
+  `residual` mitigation-sort constants).
+- **OD-1 = A.** Ship both layers: the selection argument on the value functions
+  *and* the screening predicates `mitigate`/`mitigated`/`unmitigated`.
+- **OD-4 = A.** A what-if bound variable fans out to one precomputed residual per
+  mitigation; unbounded fan-out accepted (§7.5.2 rationale).
+- **OD-5 = D.** `getById` returns `Option[(RiskTree, CommitHash)]` in place — one
+  honest method that reports which concrete head it loaded, no second call, no
+  race. Confined to the internal `RiskTreeRepository` trait (§7.5.3 (i)). The
+  memo-keys-on-`CommitHash` half landed at M2 §8.13; OD-5=D only settles how the
+  query path acquires the hash. (Replaces the earlier M3-D3, whose Option B
+  `getByIdAt` companion is rejected as a permanent near-duplicate and whose
+  Option A/C are unsound — the race and the content-token staleness.)
+- **M3-D1 (constructor) = required parameters.** `resultsBySelection` and
+  `resolvedScopes` are both required (no defaults) — a default would silently
+  make `mitigate`/`mitigated` return false and `p95` fail for every input.
+- **M3-D2 = A.** `mitigated(x)` = union of *Resolved* scopes only
+  (`ResolvedScopes.appliedScopes`, Failed excluded). A node covered only by a
+  Failed mitigation reads `unmitigated(x) = true`. The failure surface stays on
+  the mitigation panel (ADR-028), not the analytics KB. Verified against code
+  2026-09-10: general targeting stores source text and re-resolves per tree
+  version (HYBRID dynamic scoping); a rename makes a `named_risk(x,"…")`
+  predicate bind-fail → `ScopeOutcome.Failed`, a by-design drift signal
+  (ADR-016). `risk_id`/`overrideAnchor` are rename-stable but deliberately not
+  the default for name-based targeting.
+- **M3-D4 (sort kind) = `DomainType`.** `Mitigation` is quantifiable so
+  `∃m : mitigation …` is well-typed and the runtime domain enumerates the tree's
+  mitigations. Matches how `Node` is declared.
+- **M3-D5 = ship `unmitigated` first-class, approach (a).** `unmitigated(x)` is
+  the complement of the *same* precomputed `mitigatedIds` set that `mitigated(x)`
+  reads, so `unmitigated ≡ ¬mitigated` holds by construction. (The engine has no
+  formula-level predicate aliasing, so the "not-mitigated" definition lives at
+  the implementation level — one shared set, two dispatcher arms — never a query
+  rewrite.)
+- **Decision 1 = A (node predicate rename).** `named`→`named_risk`,
+  `has_id`→`risk_id`; `eq` unchanged. Uniform `named_<sort>`/`<sort>_id` scheme,
+  extensible to `named_asset`/`asset_id`. Small internal blast radius (3 source +
+  3 test files + demo scripts + reserved-names mirror), no persisted queries yet.
+- **Decision 2 (ADT case names).** `MitigationSelection.None`→`Inherent`,
+  `All`→`Residual`. One vocabulary end-to-end: surface `inherent`/`residual`,
+  ADT `Inherent`/`Residual`, ADR-034 raw/residual valuations. No `Raw`/`All`/
+  `None` terminology in vql or Scala.
 
-#### 7.5.4 ADR alignment (complete sweep — every register ADR checked explicitly)
+#### 7.5.5 ADR alignment (complete sweep — every register ADR checked explicitly)
 
 **Namespace note.** Two ADR namespaces meet in the KB: register's own ADRs
 (`docs/dev/decision-records/`) and vql-engine's ADRs (external artifact, cited
@@ -1292,10 +1572,11 @@ change; flagged, not fixed here.)
   new error condition is introduced.
 - **ADR-014 / ADR-015 register** (RiskResult caching / cache integration): the KB
   reads simulation `results` through `CachedResultResolver.ensureCachedAll`
-  exactly as today — content-addressed, no invalidation. M3-D6 decides whether
-  the query reads the *raw* (cached) valuation or the *mitigated* one; this is
-  the point ADR-034 governs (below), consumed through the ADR-015 resolver
-  primitive.
+  exactly as today — content-addressed, no invalidation — but now once per
+  referenced selection (Inherent → base tree; Residual/Selected → effective
+  tree). Identical effective trees share cache entries by content address, so the
+  per-selection fan-out adds no new cache machinery. Which valuation a query reads
+  is fixed per call by its selection term (D6=C), not a global mode.
 - **ADR-018** (Nominal wrappers): compliant. `MitigationId` is a nominal wrapper
   over `SafeId` (`OpaqueTypes.scala`); `Extract[MitigationId]` matches on that
   distinct runtime type, exactly mirroring `Extract[NodeId]` (vql ADR-015 §2
@@ -1303,11 +1584,15 @@ change; flagged, not fixed here.)
 - **ADR-020** (Supply chain): no dependency change. vql-engine already pinned at
   0.17.0; no new artifact, no cooldown/pin action.
 - **ADR-028 + appendix** (Vague-quantifier query pane): (a) the sort-catalog
-  design lives here, so declaring `Mitigation` a quantifiable domain sort (M3-D4)
-  is a register-side ADR-028 decision applying vql-engine's sort mechanism —
-  the appendix's predicate/sort table gains the three new rows; (b) Decision 5
-  amendment required — "model *shell* built per-query; inputs (results + resolved
-  scopes) memoized upstream per tree version", included in this slice.
+  design lives here, so declaring `Mitigation` a quantifiable domain sort plus the
+  two mitigation literal sorts, renaming the node identity predicates
+  (`named`→`named_risk`, `has_id`→`risk_id`), and adding the two valuation
+  constants and the mitigation identity/screening predicates are register-side
+  ADR-028 decisions applying vql-engine's sort mechanism — the appendix's
+  predicate/sort/constant/function table is updated accordingly, and the value
+  functions gain the selection argument. (b) Decision 5 amendment — "model
+  *shell* built per-query; inputs (per-selection results + resolved scopes)
+  memoized upstream per tree version", included in this slice.
 - **ADR-029** (Input injection — parse, don't re-parse): compliant. The three
   predicates are registered catalog symbols, not string-interpolated; query
   source stays a single parse at the endpoint; no new parser boundary or
@@ -1322,19 +1607,21 @@ change; flagged, not fixed here.)
   `ScopeResolverScope.layer` is a pure `Ref.make` with no external dependency, so
   it adds no startup-readiness dependency; `resolve` is `UIO`, so it adds no new
   request-path failure mode.
-- **ADR-032** (Content equality — domain hash vs storage hash): **governs
-  M3-D3.** A mitigation's resolved scope depends on node *names* (`named(x, …)`),
-  and the domain content hash omits names (reports `Identical` on a rename),
-  while the Irmin storage hash changes on any byte edit including a rename.
-  `ScopeResolutionContext.revision` must therefore be the Irmin `CommitHash`
-  (storage relation, ADR-032 §3), never a domain content token — which is
-  exactly why M3-D3 Option C is rejected as unsound.
-- **ADR-034** (Mitigation valuation model): **governs M3-D6.** ADR-034 already
-  defines two valuations — `raw` (mitigation-free, cached, content-addressed)
-  and `mitigated` (derived at the read edge, never stored). M3-D6 is precisely
-  the choice of which of these two the query's `p95`/`p99`/`lec` read; both
-  already exist by design, so neither option invents machinery. (Left unresolved
-  per M3-D6.)
+- **ADR-032** (Content equality — domain hash vs storage hash): **bears on
+  OD-5=D.** A mitigation's resolved scope depends on node *names*
+  (`named_risk(x, …)`), and the domain content hash omits names (reports
+  `Identical` on a rename), while the Irmin storage hash changes on any byte edit
+  including a rename. `ScopeResolutionContext.revision` is therefore the Irmin
+  `CommitHash` (storage relation, ADR-032 §3; DD-16) — exactly the hash `getById`
+  now returns in place (OD-5=D). A domain content token would serve a stale scope
+  after a rename.
+- **ADR-034** (Mitigation valuation model): **governs the selection argument.**
+  ADR-034 defines two valuations — raw (mitigation-free, cached,
+  content-addressed) and residual (derived at the read edge, never stored). The
+  selection term names which one per call: `inherent` → raw, `residual`/specific
+  → residual. Both already exist by design, so the argument invents no machinery.
+  The ADT case names `Inherent`/`Residual` (Decision 2) are the register-code
+  spelling of ADR-034's two valuations.
 - **ADR-035** (Error leakage prevention): compliant. M3 adds **no** new
   `AppError`/`FolQueryFailure` subtype (it reuses `FolQueryFailure.fromQueryError`),
   so the compile-time exhaustive-`encode` guarantee is undisturbed. The new
@@ -1381,9 +1668,9 @@ lighter than a credential), ADR-023 (local dev TLS), ADR-025 (SPA routing), ADR-
 (container image strategy), ADR-027 (frontend nginx serving), ADR-INFRA-006 (DB
 credentials), ADR-00X (meta template).
 
-#### 7.5.5 Verification plan
+#### 7.5.6 Verification plan
 
-Whole-suite-green is the bar (global CLAUDE.md rule).
+Whole-suite-green is the bar (global CLAUDE.md rule). All four tiers must be green:
 
 ```bash
 sbt commonJVM/test
@@ -1392,41 +1679,94 @@ sbt app/test
 sbt serverIt/test
 ```
 
-New / extended unit-test coverage (spec files listed in §7.5.6):
-- `RiskTreeKnowledgeBaseSpec` gains cases: `mitigate(x, m)` binds and evaluates
-  correctly for every combination of {node in scope, node out of scope, mitigation
-  missing}; `mitigated(x)` matches the union of resolved-scope nodes; a Failed
-  mitigation contributes nothing to `mitigated`; `unmitigated(x)` is the exact
-  complement over the node domain.
-- `FolSymbolsSpec` (if present; otherwise a new inline check) verifies
-  `mitigate`, `mitigated`, `unmitigated` are in `reservedNames`.
-- `QueryServiceLiveSpec` (or an integration spec if unit-level plumbing is
-  too coarse): a query using `mitigated(x)` returns the same node set the
-  `MitigationScopeResolver` reports, end-to-end.
+**Arity-break + rename migration (must land in the same change or nothing
+compiles).** Every existing `p95(x)`/`p99(x)`/`lec(x,l)` occurrence gains the
+selection argument (`inherent` unless the test's intent is residual); every
+`named(`/`has_id(` query string is renamed to `named_risk(`/`risk_id(`.
+Occurrences: `BinderIntegrationSpec`, `QueryEndpointSpec`, `DemoSimpleScriptSpec`,
+`DemoEnterpriseScriptSpec`, `TargetingPredicateSpec`, and the two app
+default/placeholder strings (`AnalyzeQueryState.scala:37`, `AnalyzeView.scala:518`).
 
-M4 test surface (endpoints, DTOs) stays out of this slice.
+New / extended coverage:
 
-#### 7.5.6 File inventory (append to shared `## File inventory` on approval)
+- `RiskTreeKnowledgeBaseSpec`:
+  - `mitigate(x, m)` binds and evaluates for {node in scope, node out of scope,
+    mitigation absent from `resolvedScopes`};
+  - `mitigated(x)` = union of resolved-scope nodes; a Failed mitigation
+    contributes nothing (M3-D2=A); `unmitigated(x)` is the exact complement of
+    that same set over the node domain (M3-D5 approach (a));
+  - `p95(x, "inherent")` reads base results; `p95(x, "residual")` and a bound
+    `p95(x, m)` read the corresponding precomputed residual;
+  - `named_mitigation(m, "…")` / `mitigation_id(m, "…")` bind and reduce to
+    `MitigationId` equality; `named_risk`/`risk_id` behave as `named`/`has_id`
+    did;
+  - `inherent`/`residual` used in a node slot fail to bind (TypeMismatch); a
+    node or mitigation named `inherent`/`residual` is surfaced via the collision
+    diagnostics (`nameCollisions` / `mitigationNameCollisions`);
+  - the C4 drift test widened to `functions ∪ predicates ∪ constants.keySet`.
+- `MitigationSelectionScan` unit test: constant → Inherent/Residual; a bound
+  mitigation variable fans out to one `Selected` per `tree.mitigations` element
+  (OD-4=A); a query with no value function yields the empty set.
+- `QueryServiceLiveSpec` / integration: a `mitigated(x)` query returns the node
+  set `MitigationScopeResolver` reports; `p95(x, "residual") < t` reflects applied
+  mitigations while `p95(x, "inherent") < t` does not, end-to-end; `getById`'s
+  `(RiskTree, CommitHash)` tuple leaves public `RiskTreeService` behaviour
+  unchanged.
+- `MitigationApplicationSpec`, `CachedResultResolverSpec`, `MitigationStalenessSpec`:
+  updated for the `Inherent`/`Residual` rename (behaviour unchanged).
 
-New / edited files this slice covers:
+M4 test surface (endpoints, DTOs, frontend) stays out of this slice.
 
+#### 7.5.7 File inventory (append to shared `## File inventory` on approval)
+
+Sources — `common`:
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/MitigationApplication.scala` (ADT rename + `scoped` arms + codec kinds)
+- `modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala` (reserved-name mirror incl. constants)
+
+Sources — `server`:
 - `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`
-- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala` (wiring + `MitigationSelectionScan`)
 - `modules/server/src/main/scala/com/risquanter/register/Application.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`
-- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala` (default rename)
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala` (default rename)
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala` (getById → tuple)
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala`
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala`
-- `modules/common/src/main/scala/com/risquanter/register/common/FolSymbols.scala`
-- `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala`
-- `modules/server/src/test/scala/com/risquanter/register/services/QueryServiceLiveSpec.scala`
-- `docs/dev/decision-records/ADR-028-vague-quantifier-query-pane.md`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala` (three `.map(_.map(_._1))` discards)
 
-The repository trio (`RiskTreeRepository.scala` + both impls) is touched
-under both remaining M3-D3 options — A adds `resolveHead`, B adds
-`getByIdAt` — so it stays on the list regardless of which is chosen.
-(Option C, which would have left the trio untouched, is rejected as
-unsound; see M3-D3.)
+Sources — `app` (arity-break migration of default query strings):
+- `modules/app/src/main/scala/app/state/AnalyzeQueryState.scala`
+- `modules/app/src/main/scala/app/views/AnalyzeView.scala`
+
+Tests:
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/foladapter/BinderIntegrationSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/QueryServiceLiveSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationApplicationSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/TargetingPredicateSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationStalenessSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/QueryEndpointSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/DemoSimpleScriptSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala`
+
+Docs:
+- `docs/dev/decision-records/ADR-028-vague-quantifier-query-pane.md` (Decision 5 rider + predicate table rename/additions + example arity)
+- `docs/dev/decision-records/ADR-028-appendix-technical-design.md` (schema tables: predicate rename/additions, mitigation constants, value-function selection arg; example arity)
+
+The full repo-relative paths above must be added as bullets under the shared
+top-level `## File inventory` heading before the hook will allow the edits; the
+`QueryServiceLiveSpec.scala` path is created by this slice if absent.
+
+
+Ammendment:
+- `modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeReadConsistencySpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemoryBranchSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminRevertSemanticsSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala`
+
 
 ### 7.6 — reserved for the M4 implementation-grade continuation.
 
@@ -1596,6 +1936,34 @@ listed too. New to the inventory (mitigation merge-scan coverage):
 
 - `modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/ScenarioMergeServiceItSpec.scala`
+
+§7.5 (M3 analytics-VQL: selection argument + targeting predicates, 2026-09-10)
+touches files already listed above (`MitigationApplication.scala`, `FolSymbols.scala`,
+`RiskTreeKnowledgeBase.scala`, `QueryServiceLive.scala`, `Application.scala`,
+`MitigationScopeResolverLive.scala`, `CachedResultResolver.scala`,
+`CachedResultResolverLive.scala`, `RiskTreeRepositoryIrmin.scala`,
+`RiskTreeRepositoryInMemory.scala`, `RiskTreeServiceLive.scala`,
+`AnalyzeQueryState.scala`, `RiskTreeKnowledgeBaseSpec.scala`,
+`BinderIntegrationSpec.scala`, `MitigationApplicationSpec.scala`,
+`TargetingPredicateSpec.scala`, `CachedResultResolverSpec.scala`,
+`MitigationStalenessSpec.scala`). New to the inventory for M3:
+
+- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepository.scala`
+- `modules/app/src/main/scala/app/views/AnalyzeView.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/QueryServiceLiveSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/QueryEndpointSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/DemoSimpleScriptSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/DemoEnterpriseScriptSpec.scala`
+
+OD-5=D `getById` tuple ripple — specs that call the `RiskTreeRepository` trait
+directly or stub it, adjusted with a mechanical `.map(_.map(_._1))` hash-discard
+(assertions unchanged) or the stub's `override def getById` return-type update:
+
+- `modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeReadConsistencySpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemoryBranchSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminRevertSemanticsSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala`
 
 ### Open decisions
 
@@ -4551,3 +4919,40 @@ options (appears unset — verify) and set a limit.
 aggregate-constructor-privacy ADR is a candidate — it would lift ADR-034
 Decision 4's `RiskResultGroup` rule to the remaining public-constructor
 aggregates (`RiskTree`, `TreeIndex`).
+
+## Task — user-documentation stub: targeting semantics under node renames
+
+Create the user-facing documentation stub for mitigation targeting, and include
+in it a **required, explicit note on how a mitigation's targeting behaves when a
+node is renamed or deleted.** This is a mandatory user-facing note, not optional
+background: targeting behaviour under renaming is non-obvious and differs by which
+predicate the author used.
+
+The note must state, in user terms:
+
+- **Name-based targeting re-scopes dynamically.** A targeting predicate written
+  with `named_risk(x, "…")` (or a bare quoted node name in a node slot) is resolved
+  by *name against the current tree* every time the mitigation's scope is computed.
+  A node newly matching that name is auto-included; a node whose name no longer
+  matches — because it was renamed or deleted — silently drops out of scope. When
+  a referenced name resolves to nothing, the mitigation's scope has **drifted**;
+  this is surfaced as a per-mitigation drift signal (the mitigation applies to
+  nothing until the predicate resolves again), not an error.
+- **Id-based targeting is rename-stable.** A predicate written with
+  `risk_id(x, "…")` references the node's stable id, which does not change on
+  rename, so its scope is unaffected by renames.
+- **Guidance for the author.** Use `named_risk(…)` when the scope should track a
+  *name* (and pick up any future node given that name). If stability across renames
+  is wanted — the scope should stay pinned to *this specific node* regardless of
+  what it is later called — phrase the targeting explicitly with `risk_id(…)`.
+
+**Authoring constraint:** every example in this note MUST be written and verified
+against the code as it stands at the time the doc is written (re-run the behaviour;
+do not copy examples forward from this plan). The mechanism recorded here reflects
+`TargetingPredicate` (source-text storage + per-version re-resolution),
+`MitigationScopeResolverLive.satisfyingIds` (bind against the current catalog),
+and the `named_risk`/`eq` → `nameToId.get` vs `risk_id` → `NodeId.fromString`
+literal split in `RiskTreeKnowledgeBase` — verified 2026-09-10, but re-verify at
+doc time.
+
+This composes with the existing user-doc TODO (§7.4.1); it does not replace it.

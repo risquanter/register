@@ -27,6 +27,10 @@ trait RiskTreeRepository {
     * message; no precondition. Absent target (commit or path) → NotFound. */
   def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree]
 
-  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[RiskTree]]
+  /** Loads a tree and reports the concrete commit it was read at. The
+    * `CommitHash` is the storage-relation revision (ADR-032 §3) that scope
+    * resolution memoizes on — one honest read that names the head it resolved,
+    * so no second call and no resolve-then-reload race (OD-5=D). */
+  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]]
   def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]]
 }
