@@ -56,7 +56,7 @@ Count satisfying / total → proportion → check quantifier threshold
 | `descendant_of(x, y)` | 2 | Transitive closure (pre-computed) | `descendant_of(cyber, root)` |
 | `leaf_descendant_of(x, y)` | 2 | Transitive, leaves only | `leaf_descendant_of(cyber, root)` |
 | `eq(x, y)` | 2 | Node identity between two variables | `not eq(a, b)` |
-| `named_risk(x, "name")` | 2 | Node pinned by name (`nameToId.get`, name-literal sort) | `named_risk(x, "IT Risk")` |
+| `named_risk(x, "name")` | 2 | Node pinned by name (`riskNameToId.get`, name-literal sort) | `named_risk(x, "IT Risk")` |
 | `risk_id(x, "id")` | 2 | Node pinned by id (`NodeId.fromString`, id-literal sort) | `risk_id(x, "01BX…")` |
 
 ### Mitigation Relations (from tree mitigations + resolved scopes)

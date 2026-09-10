@@ -42,11 +42,11 @@ class QueryServiceLive private (
     * FOL symbols (the supported flow gates them at the DTO boundary; any bypass
     * is observable here). */
   private def logNameCollisions(kb: RiskTreeKnowledgeBase): UIO[Unit] =
-    ZIO.when(kb.nameCollisions.nonEmpty)(
+    ZIO.when(kb.riskNameCollisions.nonEmpty)(
       ZIO.logWarning(
-        s"RiskTreeKnowledgeBase: ${kb.nameCollisions.size} node name(s) skipped " +
+        s"RiskTreeKnowledgeBase: ${kb.riskNameCollisions.size} node name(s) skipped " +
         s"because they collide with reserved symbols (DTO validators bypassed?): " +
-        kb.nameCollisions.mkString(", ")
+        kb.riskNameCollisions.mkString(", ")
       )
     ) *> ZIO.when(kb.mitigationNameCollisions.nonEmpty)(
       ZIO.logWarning(
@@ -93,13 +93,14 @@ class QueryServiceLive private (
 
         allNodeIds = tree.index.nodes.keySet
 
-        // 3. Bind once against the (results-independent) catalog to learn which
-        //    selections the query references. The catalog is identical to the
-        //    eval-time KB's catalog (both built from `tree`), so this bind is
-        //    sound. A bind failure here needs no handling: precompute nothing and
-        //    let `evaluateTyped` below re-bind and surface the classified error.
-        kbShell    = RiskTreeKnowledgeBase(tree, Map.empty, resolved.appliedScopes)
-        selections = QueryBinder.bind(parsed, kbShell.catalog)
+        // 3. Build the tree-derived schema once and bind against its catalog to
+        //    learn which selections the query references. The same schema drives
+        //    the eval-time KB below, so the pre-bind catalog and the eval-time
+        //    catalog are guaranteed identical by construction. A bind failure
+        //    here needs no handling: precompute nothing and let `evaluateTyped`
+        //    below re-bind and surface the classified error.
+        schema     = RiskTreeKnowledgeBase.schemaFor(tree)
+        selections = QueryBinder.bind(parsed, schema.catalog)
                        .map(b => MitigationSelectionScan.referenced(b, tree))
                        .getOrElse(Set.empty[MitigationSelection])
 
@@ -116,9 +117,9 @@ class QueryServiceLive private (
                               }.map(_.toMap)
         _ <- tracing.setAttribute("query.selections", selections.size.toLong)
 
-        // 5. Build the knowledge base from the selection-keyed results and the
-        //    resolved scopes.
-        kb = RiskTreeKnowledgeBase(tree, resultsBySelection, resolved.appliedScopes)
+        // 5. Build the knowledge base from the shared schema, the selection-keyed
+        //    results, and the resolved scopes.
+        kb = RiskTreeKnowledgeBase(schema, resultsBySelection, resolved.appliedScopes)
         _ <- logNameCollisions(kb)
         _ <- logResolutionFailures(resolved)
 
@@ -180,7 +181,7 @@ object MitigationSelectionScan:
   private val valueFunctions: Set[String] = Set("p95", "p99", "lec")
 
   def referenced(bound: BoundQuery, tree: RiskTree): Set[MitigationSelection] =
-    val everyMitigation: Set[MitigationSelection] =
+    lazy val everyMitigation: Set[MitigationSelection] =
       tree.mitigations
         .map(m => MitigationSelection.Selected(Map(m.id -> ScopeRestriction.FullScope)))
         .toSet

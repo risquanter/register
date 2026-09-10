@@ -71,17 +71,19 @@ import vql.typed.MapDispatcher
   * | mitigated | (Node) | node is in the union of all resolved scopes |
   * | unmitigated | (Node) | node is in no resolved scope (complement of `mitigated`) |
   *
-  * @param tree               Risk tree providing structure (TreeIndex), node metadata, and mitigations
+  * @param schema             Tree-derived schema (catalog, name/id maps, collision diagnostics); built once via [[RiskTreeKnowledgeBase.schemaFor]] and shared across every query bound against the same tree
   * @param resultsBySelection Simulation results per referenced `MitigationSelection` (from `CachedResultResolver.ensureCachedAll`); an empty map is valid when the query uses no value function
   * @param resolvedScopes     Per-mitigation resolved node scopes (`ResolvedScopes.appliedScopes`; Failed outcomes already excluded)
   */
 class RiskTreeKnowledgeBase(
-  tree:               RiskTree,
+  schema:             RiskTreeKnowledgeBase.Schema,
   resultsBySelection: Map[MitigationSelection, Map[NodeId, LossDistribution]],
   resolvedScopes:     Map[MitigationId, Set[NodeId]]
 ):
 
   import RiskTreeKnowledgeBase.given
+
+  export schema.{tree, catalog, riskNameCollisions, riskNameToId, mitigationNameCollisions, mitigationNameToId}
 
   // ── Sort declarations ──────────────────────────────────────────────
 
@@ -126,119 +128,15 @@ class RiskTreeKnowledgeBase(
     * This is an **alarm-on-bypass** safety net: the supported flow is for the DTO
     * validators to reject such names at create-tree time. If a tree carrying
     * a colliding name reaches the KB anyway (direct repo write, migration,
-    * Irmin merge), we exclude the entry from [[nameToId]] / [[mitigationNameToId]]
-    * and surface it via [[nameCollisions]] / [[mitigationNameCollisions]] for the
-    * orchestrating service to log.
+    * Irmin merge), [[RiskTreeKnowledgeBase.schemaFor]] excludes the entry from
+    * [[riskNameToId]] / [[mitigationNameToId]] and surfaces it via
+    * [[riskNameCollisions]] / [[mitigationNameCollisions]] for the orchestrating
+    * service to log.
     *
     * The set is the union of this catalog's own function, predicate, and constant
     * symbol names.
     */
   val reservedFolNames: Set[String] = FolSymbols.reservedNames
-
-  /** Diagnostic record of node names skipped because they collide with a
-    * reserved catalog symbol when building [[nameToId]]. Empty in the supported
-    * flow — the DTO validators (`requireUniqueNames`, `requireNoReservedNames`)
-    * gate at create-tree time. Duplicate names cannot reach the KB at all:
-    * `RiskTree.fromNodes` enforces node-name uniqueness on every construction
-    * path (requests, merges, store-loads), so only reserved-symbol collisions
-    * remain possible here.
-    *
-    * Surfaced for the orchestrating service (e.g. `QueryServiceLive`) to log
-    * via `ZIO.logWarning` so any DTO-bypass path is observable.
-    */
-  val nameCollisions: List[String] =
-    tree.index.nodes.values.map(_.name.value).toList
-      .filter(reservedFolNames.contains).distinct.sorted
-      .map(n => s"reserved:$n")
-
-  /** Node name → `NodeId`, backing the name branch of the node-sort literal
-    * validator so a quoted node name (`child_of(x, "IT Risk")`) resolves to a
-    * node id. Reserved-symbol names are excluded (see [[reservedFolNames]] /
-    * [[nameCollisions]]); every remaining name maps to exactly one node, because
-    * `RiskTree.fromNodes` enforces node-name uniqueness. The validator returns
-    * a `NodeId`, never a raw string, so the engine carries node identity, not
-    * a name.
-    */
-  val nameToId: Map[String, NodeId] =
-    tree.index.nodes.iterator.collect {
-      case (id, node) if !reservedFolNames.contains(node.name.value) => node.name.value -> id
-    }.toMap
-
-  /** Mitigation name → `MitigationId`, backing the mitigation-name literal
-    * validator (`named_mitigation(m, "IT Risk mitigation")`). Reserved-symbol
-    * names are excluded and surfaced via [[mitigationNameCollisions]], exactly
-    * mirroring the node `nameToId` / `nameCollisions` pair. */
-  val mitigationNameToId: Map[String, MitigationId] =
-    tree.mitigations.iterator.collect {
-      case m if !reservedFolNames.contains(m.name.value) => m.name.value -> m.id
-    }.toMap
-
-  /** Mitigation names skipped because they collide with a reserved catalog
-    * symbol/constant. Empty in the supported flow; surfaced for the
-    * orchestrating service to log, exactly like [[nameCollisions]] for node
-    * names. */
-  val mitigationNameCollisions: List[String] =
-    tree.mitigations.map(_.name.value).toList
-      .filter(reservedFolNames.contains).distinct.sorted
-      .map(n => s"reserved-mitigation:$n")
-
-  val catalog: TypeCatalog = TypeCatalog.unsafe(
-    types = Set(
-      TypeDecl.DomainType(nodeSort),
-      TypeDecl.DomainType(mitigationSort),
-      TypeDecl.ValueType(lossSort),
-      TypeDecl.ValueType(probabilitySort),
-      TypeDecl.ValueType(nodeNameLiteralSort),
-      TypeDecl.ValueType(nodeIdLiteralSort),
-      TypeDecl.ValueType(mitigationNameLiteralSort),
-      TypeDecl.ValueType(mitigationIdLiteralSort)
-    ),
-    // The two aggregate-valuation constants; a mitigation-sort constant is legal
-    // (only functions returning a domain sort are rejected). They resolve by name
-    // separately from the ∃-domain enumeration, so they are not members of
-    // `∃m : mitigation`. Node/mitigation names resolve on demand through the
-    // literal validators below, not as pre-registered constants.
-    constants = Map(
-      RiskTreeKnowledgeBase.InherentConst -> mitigationSort,
-      RiskTreeKnowledgeBase.ResidualConst -> mitigationSort
-    ),
-    functions = Map(
-      SymbolName("p95") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
-      SymbolName("p99") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
-      SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort, mitigationSort), probabilitySort)
-    ),
-    predicates = Map(
-      SymbolName("leaf")               -> PredicateSig(List(nodeSort)),
-      SymbolName("portfolio")          -> PredicateSig(List(nodeSort)),
-      SymbolName("child_of")           -> PredicateSig(List(nodeSort, nodeSort)),
-      SymbolName("descendant_of")      -> PredicateSig(List(nodeSort, nodeSort)),
-      SymbolName("leaf_descendant_of") -> PredicateSig(List(nodeSort, nodeSort)),
-      SymbolName("gt_loss")            -> PredicateSig(List(lossSort, lossSort)),
-      SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort)),
-      SymbolName("eq")                 -> PredicateSig(List(nodeSort, nodeSort)),
-      SymbolName("named_risk")         -> PredicateSig(List(nodeSort, nodeNameLiteralSort)),
-      SymbolName("risk_id")            -> PredicateSig(List(nodeSort, nodeIdLiteralSort)),
-      SymbolName("named_mitigation")   -> PredicateSig(List(mitigationSort, mitigationNameLiteralSort)),
-      SymbolName("mitigation_id")      -> PredicateSig(List(mitigationSort, mitigationIdLiteralSort)),
-      SymbolName("mitigate")           -> PredicateSig(List(nodeSort, mitigationSort)),
-      SymbolName("mitigated")          -> PredicateSig(List(nodeSort)),
-      SymbolName("unmitigated")        -> PredicateSig(List(nodeSort))
-    ),
-    literalValidators = Map(
-      // Node slots resolve a quoted literal by NAME only: an id in a structural
-      // node slot (`child_of(x, "01BX…")`) does not bind — use `risk_id`.
-      nodeSort                  -> ((s: String) => nameToId.get(s)),
-      nodeNameLiteralSort       -> ((s: String) => nameToId.get(s)),                     // named_risk's 2nd arg
-      nodeIdLiteralSort         -> ((s: String) => NodeId.fromString(s).toOption),       // risk_id's 2nd arg
-      lossSort                  -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
-      probabilitySort           -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0)),
-      mitigationNameLiteralSort -> ((s: String) => mitigationNameToId.get(s)),           // named_mitigation's 2nd arg
-      mitigationIdLiteralSort   -> ((s: String) => MitigationId.fromString(s).toOption)  // mitigation_id's 2nd arg
-      // No validator for mitigationSort itself: the value functions' selection
-      // slot accepts only the two constants or a bound variable — a bare quoted
-      // literal there deliberately fails to bind.
-    )
-  )
 
   // ── RuntimeDispatcher ──────────────────────────────────────────────
 
@@ -284,7 +182,7 @@ class RiskTreeKnowledgeBase(
     * the time an argument reaches the dispatcher its literal validator has
     * already resolved the quoted string to a `NodeId`, so all three reduce to
     * `NodeId` equality; they differ only at bind time, in which validator accepts
-    * the literal (`nameToId.get` for `eq` / `named_risk`, `NodeId.fromString` for
+    * the literal (`riskNameToId.get` for `eq` / `named_risk`, `NodeId.fromString` for
     * `risk_id`). */
   private val nodeIdentity: List[Value] => Either[String, Boolean] = args =>
     for
@@ -406,14 +304,146 @@ end RiskTreeKnowledgeBase
 
 object RiskTreeKnowledgeBase:
 
+  /** Tree-derived schema shared across every query bound against the same tree.
+    *
+    * Splits the KB's inputs at the natural boundary: this record holds what
+    * depends only on the tree (catalog, name↔id maps, collision diagnostics);
+    * simulation results and resolved mitigation scopes are query-time inputs
+    * on the `RiskTreeKnowledgeBase` class itself.
+    *
+    * A single schema instance is built once via [[schemaFor]] and reused: the
+    * pre-bind pass and the eval-time KB both receive the same `Schema`, which
+    * eliminates the "shell KB / real KB catalog mismatch" invariant burden.
+    * Every field the schema exposes is re-exported by the class, so callers
+    * that already had `kb.catalog` / `kb.riskNameToId` continue to work
+    * unchanged.
+    *
+    * @param tree                     The tree this schema was built for
+    * @param catalog                  Many-sorted type catalog (sorts, constants, signatures, literal validators)
+    * @param riskNameCollisions       Node names skipped for colliding with a reserved catalog symbol
+    * @param riskNameToId             Node name → `NodeId` used by the node-sort and name-literal validators
+    * @param mitigationNameCollisions Mitigation names skipped for colliding with a reserved catalog symbol
+    * @param mitigationNameToId       Mitigation name → `MitigationId` used by the mitigation-name-literal validator
+    */
+  final case class Schema(
+    tree:                     RiskTree,
+    catalog:                  TypeCatalog,
+    riskNameCollisions:       List[String],
+    riskNameToId:             Map[String, NodeId],
+    mitigationNameCollisions: List[String],
+    mitigationNameToId:       Map[String, MitigationId]
+  )
+
+  /** Build a [[Schema]] from a tree. Populates the name→id maps (excluding
+    * names that collide with a reserved catalog symbol), records the excluded
+    * names as diagnostic collisions, and assembles the `TypeCatalog` whose
+    * literal validators close over those maps.
+    *
+    * Reserved-name collisions are an alarm-on-bypass path: the supported flow
+    * is for the DTO validators to reject such names at create-tree time. If
+    * a tree carrying a colliding name reaches this factory (direct repo write,
+    * migration, Irmin merge), the entry is excluded from the name→id map and
+    * surfaced via the collisions list for the orchestrating service to log. */
+  def schemaFor(tree: RiskTree): Schema =
+    val reserved = FolSymbols.reservedNames
+
+    val riskNameCollisions: List[String] =
+      tree.index.nodes.values.map(_.name.value).toList
+        .filter(reserved.contains).distinct.sorted
+        .map(n => s"reserved:$n")
+
+    val riskNameToId: Map[String, NodeId] =
+      tree.index.nodes.iterator.collect {
+        case (id, node) if !reserved.contains(node.name.value) => node.name.value -> id
+      }.toMap
+
+    val mitigationNameToId: Map[String, MitigationId] =
+      tree.mitigations.iterator.collect {
+        case m if !reserved.contains(m.name.value) => m.name.value -> m.id
+      }.toMap
+
+    val mitigationNameCollisions: List[String] =
+      tree.mitigations.map(_.name.value).toList
+        .filter(reserved.contains).distinct.sorted
+        .map(n => s"reserved-mitigation:$n")
+
+    val nodeSort                  = NodeSort
+    val mitigationSort            = MitigationSort
+    val lossSort                  = TypeId("Loss")
+    val probabilitySort           = TypeId("Probability")
+    val nodeNameLiteralSort       = NodeNameLiteralSort
+    val nodeIdLiteralSort         = NodeIdLiteralSort
+    val mitigationNameLiteralSort = MitigationNameLiteralSort
+    val mitigationIdLiteralSort   = MitigationIdLiteralSort
+
+    val catalog: TypeCatalog = TypeCatalog.unsafe(
+      types = Set(
+        TypeDecl.DomainType(nodeSort),
+        TypeDecl.DomainType(mitigationSort),
+        TypeDecl.ValueType(lossSort),
+        TypeDecl.ValueType(probabilitySort),
+        TypeDecl.ValueType(nodeNameLiteralSort),
+        TypeDecl.ValueType(nodeIdLiteralSort),
+        TypeDecl.ValueType(mitigationNameLiteralSort),
+        TypeDecl.ValueType(mitigationIdLiteralSort)
+      ),
+      // The two aggregate-valuation constants; a mitigation-sort constant is legal
+      // (only functions returning a domain sort are rejected). They resolve by name
+      // separately from the ∃-domain enumeration, so they are not members of
+      // `∃m : mitigation`. Node/mitigation names resolve on demand through the
+      // literal validators below, not as pre-registered constants.
+      constants = Map(
+        InherentConst -> mitigationSort,
+        ResidualConst -> mitigationSort
+      ),
+      functions = Map(
+        SymbolName("p95") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
+        SymbolName("p99") -> FunctionSig(List(nodeSort, mitigationSort), lossSort),
+        SymbolName("lec") -> FunctionSig(List(nodeSort, lossSort, mitigationSort), probabilitySort)
+      ),
+      predicates = Map(
+        SymbolName("leaf")               -> PredicateSig(List(nodeSort)),
+        SymbolName("portfolio")          -> PredicateSig(List(nodeSort)),
+        SymbolName("child_of")           -> PredicateSig(List(nodeSort, nodeSort)),
+        SymbolName("descendant_of")      -> PredicateSig(List(nodeSort, nodeSort)),
+        SymbolName("leaf_descendant_of") -> PredicateSig(List(nodeSort, nodeSort)),
+        SymbolName("gt_loss")            -> PredicateSig(List(lossSort, lossSort)),
+        SymbolName("gt_prob")            -> PredicateSig(List(probabilitySort, probabilitySort)),
+        SymbolName("eq")                 -> PredicateSig(List(nodeSort, nodeSort)),
+        SymbolName("named_risk")         -> PredicateSig(List(nodeSort, nodeNameLiteralSort)),
+        SymbolName("risk_id")            -> PredicateSig(List(nodeSort, nodeIdLiteralSort)),
+        SymbolName("named_mitigation")   -> PredicateSig(List(mitigationSort, mitigationNameLiteralSort)),
+        SymbolName("mitigation_id")      -> PredicateSig(List(mitigationSort, mitigationIdLiteralSort)),
+        SymbolName("mitigate")           -> PredicateSig(List(nodeSort, mitigationSort)),
+        SymbolName("mitigated")          -> PredicateSig(List(nodeSort)),
+        SymbolName("unmitigated")        -> PredicateSig(List(nodeSort))
+      ),
+      literalValidators = Map(
+        // Node slots resolve a quoted literal by NAME only: an id in a structural
+        // node slot (`child_of(x, "01BX…")`) does not bind — use `risk_id`.
+        nodeSort                  -> ((s: String) => riskNameToId.get(s)),
+        nodeNameLiteralSort       -> ((s: String) => riskNameToId.get(s)),                 // named_risk's 2nd arg
+        nodeIdLiteralSort         -> ((s: String) => NodeId.fromString(s).toOption),       // risk_id's 2nd arg
+        lossSort                  -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
+        probabilitySort           -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0)),
+        mitigationNameLiteralSort -> ((s: String) => mitigationNameToId.get(s)),           // named_mitigation's 2nd arg
+        mitigationIdLiteralSort   -> ((s: String) => MitigationId.fromString(s).toOption)  // mitigation_id's 2nd arg
+        // No validator for mitigationSort itself: the value functions' selection
+        // slot accepts only the two constants or a bound variable — a bare quoted
+        // literal there deliberately fails to bind.
+      )
+    )
+
+    Schema(tree, catalog, riskNameCollisions, riskNameToId, mitigationNameCollisions, mitigationNameToId)
+
   /** Canonical sort id for tree nodes (leaves and portfolios). Shared with
     * [[QueryResponseBuilder]] so the id projection uses one declaration. */
   val NodeSort: TypeId = TypeId("Node")
 
   /** Value sort for a node reference written as a quoted node NAME literal
     * (`named_risk(x, "IT Risk")`). Carrier: `NodeId` — the name is resolved to
-    * the node's id at bind time by the literal validator (`nameToId.get`). A
-    * `ValueType`: it flows through an argument slot and is never quantified over.
+    * the node's id at bind time by the literal validator (`riskNameToId.get`).
+    * A `ValueType`: it flows through an argument slot and is never quantified over.
     * The sort string surfaces in a failed-literal bind message and is a
     * node-reference discriminator in [[FolQueryFailure.fromQueryError]]. */
   val NodeNameLiteralSort: TypeId = TypeId("NodeNameLiteral")

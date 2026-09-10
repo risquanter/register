@@ -1198,7 +1198,7 @@ class RiskTreeKnowledgeBase(
 no value function.
 
 **(d) Mitigation name→id + alarm-on-bypass** — same file, mirroring the node
-`nameToId`/`nameCollisions`:
+`riskNameToId`/`riskNameCollisions`:
 
 ```scala
 val mitigationNameToId: Map[String, MitigationId] =
@@ -1208,7 +1208,7 @@ val mitigationNameToId: Map[String, MitigationId] =
 
 /** Mitigation names skipped because they collide with a reserved catalog
   * symbol/constant. Empty in the supported flow; surfaced for the orchestrating
-  * service to log, exactly like `nameCollisions` for node names. */
+  * service to log, exactly like `riskNameCollisions` for node names. */
 val mitigationNameCollisions: List[String] =
   tree.mitigations.map(_.name.value)
     .filter(reservedFolNames.contains).distinct.sorted
@@ -1250,8 +1250,8 @@ predicates = Map(
 ),
 literalValidators = Map(
   // node validators unchanged (comment references named_risk/risk_id):
-  nodeSort                  -> ((s: String) => nameToId.get(s)),
-  nodeNameLiteralSort       -> ((s: String) => nameToId.get(s)),
+  nodeSort                  -> ((s: String) => riskNameToId.get(s)),
+  nodeNameLiteralSort       -> ((s: String) => riskNameToId.get(s)),
   nodeIdLiteralSort         -> ((s: String) => NodeId.fromString(s).toOption),
   lossSort                  -> ((s: String) => s.toLongOption.filter(_ >= 0L)),
   probabilitySort           -> ((s: String) => s.toDoubleOption.filter(d => d >= 0.0 && d <= 1.0)),
@@ -1644,7 +1644,7 @@ change; flagged, not fixed here.)
   variable would diverge and is out of scope here.)
 - **ADR-002** (Logging): minor observability item. The resolver exposes
   `ResolvedScopes.failures` (per-mitigation drift signals); `QueryServiceLive`
-  should log these the way it already logs `kb.nameCollisions`. Not a blocker;
+  should log these the way it already logs `kb.riskNameCollisions`. Not a blocker;
   fold into the wiring.
 - **ADR-003** (Provenance/reproducibility): compliant. Resolved scopes and
   results are reproducible from stored inputs; the per-tree-version memo is a
@@ -1702,7 +1702,7 @@ New / extended coverage:
     did;
   - `inherent`/`residual` used in a node slot fail to bind (TypeMismatch); a
     node or mitigation named `inherent`/`residual` is surfaced via the collision
-    diagnostics (`nameCollisions` / `mitigationNameCollisions`);
+    diagnostics (`riskNameCollisions` / `mitigationNameCollisions`);
   - the C4 drift test widened to `functions ∪ predicates ∪ constants.keySet`.
 - `MitigationSelectionScan` unit test: constant → Inherent/Residual; a bound
   mitigation variable fans out to one `Selected` per `tree.mitigations` element

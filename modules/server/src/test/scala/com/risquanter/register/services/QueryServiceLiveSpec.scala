@@ -80,7 +80,7 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   private val resolvedScopes: Map[MitigationId, Set[NodeId]] = Map(mAlphaId -> Set(aId))
 
   private val kb = RiskTreeKnowledgeBase(
-    tree,
+    RiskTreeKnowledgeBase.schemaFor(tree),
     Map(
       MitigationSelection.Inherent -> widen(inherentResults),
       MitigationSelection.Residual -> widen(residualResults)

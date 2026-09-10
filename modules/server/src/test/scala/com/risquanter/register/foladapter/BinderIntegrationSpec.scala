@@ -89,7 +89,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
     Map(rootId -> rootResult, itId -> itResult, cyberId -> cyberResult, hardwareId -> hardwareResult)
 
   private val kb = RiskTreeKnowledgeBase(
-    tree,
+    RiskTreeKnowledgeBase.schemaFor(tree),
     Map(MitigationSelection.Inherent -> results.map { case (k, v) => k -> (v: LossDistribution) }),
     Map.empty
   )

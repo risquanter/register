@@ -40,7 +40,7 @@ final case class MitigationScopeResolverLive(
     * empty resolved scopes are correct and make the resolved scopes a pure
     * function of the tree version. */
   private def computeAll(tree: RiskTree): ResolvedScopes =
-    val kb = RiskTreeKnowledgeBase(tree, Map.empty, Map.empty)
+    val kb = RiskTreeKnowledgeBase(RiskTreeKnowledgeBase.schemaFor(tree), Map.empty, Map.empty)
     ResolvedScopes(tree.mitigations.map(m => m.id -> resolveOne(m, tree, kb)).toMap)
 
   private def resolveOne(m: Mitigation, tree: RiskTree, kb: RiskTreeKnowledgeBase): ScopeOutcome =

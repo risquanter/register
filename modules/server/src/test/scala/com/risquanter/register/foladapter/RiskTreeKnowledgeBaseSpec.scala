@@ -152,7 +152,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   /** Build a KB whose only precomputed valuation is the inherent (base) one and
     * whose resolved-scope set is empty — the shape every pre-M3 test needs. */
   private def kbInherent(t: RiskTree, res: Map[NodeId, RiskResult]): RiskTreeKnowledgeBase =
-    RiskTreeKnowledgeBase(t, Map(MitigationSelection.Inherent -> widen(res)), Map.empty)
+    RiskTreeKnowledgeBase(RiskTreeKnowledgeBase.schemaFor(t), Map(MitigationSelection.Inherent -> widen(res)), Map.empty)
 
   private val kb = kbInherent(tree, results)
 
@@ -235,7 +235,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     Map(mCyberId -> Set(cyberId), mHardwareId -> Set(hardwareId)) // mAbsent omitted
 
   private val mitKb = RiskTreeKnowledgeBase(
-    mitTree,
+    RiskTreeKnowledgeBase.schemaFor(mitTree),
     Map(
       MitigationSelection.Inherent -> widen(results),
       MitigationSelection.Residual -> widen(results.updated(cyberId, residualCyber)),
@@ -603,11 +603,11 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         kb.dispatcher.predicateSymbols.size == 15
       )
     },
-    test("nameToId maps names to correct NodeIds") {
+    test("riskNameToId maps names to correct NodeIds") {
       assertTrue(
-        kb.nameToId("Cyber") == cyberId,
-        kb.nameToId("Root") == rootId,
-        kb.nameToId.size == 4
+        kb.riskNameToId("Cyber") == cyberId,
+        kb.riskNameToId("Root") == rootId,
+        kb.riskNameToId.size == 4
       )
     }
   )
@@ -630,13 +630,13 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     )
 
   private val constantsSuite = suite("node constants via literal validator (PLAN §5.4)")(
-    test("C1: 4-node fixture — only the two mitigation aggregate constants; nameToId carries the names; per-sort validators resolve name vs id; no collisions") {
+    test("C1: 4-node fixture — only the two mitigation aggregate constants; riskNameToId carries the names; per-sort validators resolve name vs id; no collisions") {
       val nodeV = kb.catalog.literalValidators(nodeSort)
       val nameV = kb.catalog.literalValidators(nodeNameLiteralSort)
       val idV   = kb.catalog.literalValidators(nodeIdLiteralSort)
       assertTrue(
         kb.catalog.constants.keySet == Set(RiskTreeKnowledgeBase.InherentConst, RiskTreeKnowledgeBase.ResidualConst),
-        kb.nameToId.keySet == Set("Root", "IT Risk", "Cyber", "Hardware"),
+        kb.riskNameToId.keySet == Set("Root", "IT Risk", "Cyber", "Hardware"),
         nodeV("Cyber")       == Some(cyberId),   // Node slot: quoted node name → its id
         nodeV(cyberId.value) == None,            // Node slot is name-only: an id no longer binds
         nodeV("Nonexistent") == None,            // unknown name → unbindable
@@ -644,7 +644,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         nameV(cyberId.value) == None,            // named_risk rejects an id
         idV(cyberId.value)   == Some(cyberId),   // risk_id: id → id
         idV("Cyber")         == None,            // risk_id rejects a name
-        kb.nameCollisions.isEmpty
+        kb.riskNameCollisions.isEmpty
       )
     },
     test("C3: reserved-name collision (\"leaf\") — skipped from constants; predicate retained") {
@@ -661,11 +661,11 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         seedVarId = 5L
       ), "leaf")
       val t = bypassTree(Seq(rootP, c))
-      val kb3 = RiskTreeKnowledgeBase(t, Map.empty, Map.empty)
+      val kb3 = RiskTreeKnowledgeBase(RiskTreeKnowledgeBase.schemaFor(t), Map.empty, Map.empty)
       assertTrue(
-        !kb3.nameToId.contains("leaf"),
+        !kb3.riskNameToId.contains("leaf"),
         kb3.catalog.predicates.contains(vql.typed.SymbolName("leaf")),
-        kb3.nameCollisions.exists(s => s.startsWith("reserved:") && s.endsWith("leaf"))
+        kb3.riskNameCollisions.exists(s => s.startsWith("reserved:") && s.endsWith("leaf"))
       )
     },
     test("C4: reservedFolNames equals the union of catalog function, predicate & constant symbol names") {
@@ -725,7 +725,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
   private val nodeReferenceQuerySuite = suite("node-reference predicate queries (named_risk / risk_id)")(
     test("named_risk(x, \"IT Risk\") pins that node") {
       // named_risk's 2nd arg is the NodeNameLiteral sort; "IT Risk" resolves via
-      // nameToId.get to itId, so the satisfying set is exactly {IT Risk}.
+      // riskNameToId.get to itId, so the satisfying set is exactly {IT Risk}.
       val names = satisfyingNames("""Q[>=]^{1/1} x (named_risk(x, "IT Risk"), portfolio(x))""")
       assertTrue(names.contains(Set("IT Risk")))
     },
@@ -748,7 +748,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       )
     },
     test("named_risk(x, <cyberId>) → UnparseableConstant on the NodeNameLiteral sort") {
-      // An id in a name slot: nameToId.get(<ulid>) = None → no such node name.
+      // An id in a name slot: riskNameToId.get(<ulid>) = None → no such node name.
       val parsed = VagueQueryParser.parse(s"""Q[>=]^{1/1} x (named_risk(x, "${cyberId.value}"), leaf(x))""").toOption.get
       val bound  = QueryBinder.bind(parsed, kb.catalog)
       assertTrue(
@@ -875,10 +875,10 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
         seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),
         mitigations = List(mResidual)
       )
-      val colKb = RiskTreeKnowledgeBase(t, Map.empty, Map.empty)
+      val colKb = RiskTreeKnowledgeBase(RiskTreeKnowledgeBase.schemaFor(t), Map.empty, Map.empty)
       assertTrue(
-        !colKb.nameToId.contains("inherent"),
-        colKb.nameCollisions.contains("reserved:inherent"),
+        !colKb.riskNameToId.contains("inherent"),
+        colKb.riskNameCollisions.contains("reserved:inherent"),
         !colKb.mitigationNameToId.contains("residual"),
         colKb.mitigationNameCollisions.contains("reserved-mitigation:residual")
       )
