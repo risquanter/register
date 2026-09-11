@@ -17,7 +17,7 @@ import com.risquanter.register.http.support.TestSafeUrls
 import com.risquanter.register.infra.StartupReadiness
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
-import com.risquanter.register.services.{RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService, ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioMergeServiceNotSupported, SimulationSemaphore}
+import com.risquanter.register.services.{RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService, ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioMergeServiceNotSupported}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
 import com.risquanter.register.services.cache.{CachedResultResolverLive, CacheScope, ScopeResolverScope}
@@ -34,11 +34,8 @@ object HttpTestHarness:
 
   private val defaultSimulationConfig = SimulationConfig(
     defaultNTrials = 10.refineUnsafe,
-    maxTreeDepth = 5.refineUnsafe,
     defaultTrialParallelism = 2.refineUnsafe,
     maxConcurrentSimulations = 2.refineUnsafe,
-    maxNTrials = 100.refineUnsafe,
-    maxParallelism = 2.refineUnsafe,
     defaultSeed3 = 0L,
     defaultSeed4 = 0L
   )
@@ -141,7 +138,6 @@ object HttpTestHarness:
       ) >>> Server.live,
       TracingLive.console,
       MetricsLive.console,
-      SimulationSemaphore.layer,
       backendLayer,
       RiskTreeServiceLive.layer,
       ChangedNodesServiceLive.layer,

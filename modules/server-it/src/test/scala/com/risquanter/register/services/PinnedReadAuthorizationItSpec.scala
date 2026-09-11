@@ -11,8 +11,7 @@ import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
 
 /** Commit-pinned reads are scoped to the authenticated workspace's Irmin paths,
-  * NOT to the commit's provenance (fixed constraint in DONE-PLAN-PHASE-E-HISTORY §
-  * "path scoping, not commit provenance"). All workspaces share one Irmin store,
+  * NOT to the commit's provenance. All workspaces share one Irmin store,
   * so any commit physically contains every workspace's subtree; a pinned read
   * must still only surface the reading workspace's own data. */
 object PinnedReadAuthorizationItSpec extends ZIOSpecDefault:
@@ -26,7 +25,7 @@ object PinnedReadAuthorizationItSpec extends ZIOSpecDefault:
     val leaf = RiskLeaf.create(id = leafId.value, name = "Leaf 1", distributionType = "lognormal",
       probability = 0.1, minLoss = Some(1000L), maxLoss = Some(2000L), parentId = Some(rootId), seedVarId = 1L).toEither.toOption.get
     RiskTree.fromNodesUnsafe(tid, SafeName.fromString("Pinned Tree").toOption.get, Seq(root, leaf), rootId,
-      Some(SeedVarId.fromLong(1L).toOption.get))
+      Some(SeedVarId.fromLong(1L).toOption.get), mitigations = Nil)
 
   private val irminLayer: ZLayer[Any, Throwable, RiskTreeRepository & IrminClient] =
     ZLayer.make[RiskTreeRepository & IrminClient](

@@ -18,10 +18,10 @@ import vql.typed.{FolModel, QueryBinder, TypeCheckError}
 /** Integration tests for the parse → bind path against a register-side
   * [[RiskTreeKnowledgeBase]] populated with quoted node-name literals.
   *
-  * Covers PLAN-QUERY-NODE-NAME-LITERALS §5.5 cases B1–B3:
-  *   - B1: end-to-end parse + bind + evaluate; range projects to node ids
-  *   - B2: unknown literal rejected by binder with `UnparseableConstant`
-  *   - B3: injection-shaped node name does not feed the binder error path
+  * Covers three cases:
+  *   - end-to-end parse + bind + evaluate; range projects to node ids
+  *   - unknown literal rejected by binder with `UnparseableConstant`
+  *   - injection-shaped node name does not feed the binder error path
   */
 object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
 
@@ -61,7 +61,8 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
     name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Test Tree").toOption.get,
     nodes  = allNodes.values.toSeq,
     rootId = rootId,
-    seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get)
+    seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),
+    mitigations = Nil
   )
 
   // Five-trial outcomes; large enough that gt_loss(p95(x, "inherent"), 1000) is true for both leaves.
@@ -101,7 +102,7 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
     suite("BinderIntegrationSpec — parse + bind against RiskTreeKnowledgeBase")(
 
       test("B1: quoted-literal scope query parses, binds, and evaluates with satisfying = {Cyber, Hardware}") {
-        // PLAN-QUERY-NODE-NAME-LITERALS §5.5. The quoted node name "IT Risk" binds via
+        // The quoted node name "IT Risk" binds via
         // the node-sort literal validator to Value(Node, itId) — a NodeId, not a string.
         // Both leaf descendants of IT Risk satisfy gt_loss(p95(x, "inherent"), 1000) with the
         // 5-trial fixture; satisfying elements carry their NodeIds.

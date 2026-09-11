@@ -35,7 +35,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
         childIds = Array(l1.id.value, l2.id.value)), "portfolio")
-      val result = RiskTree.fromNodes(treeId("bounds-ok"), name("Bounds OK"), Seq(root, l1, l2), root.id)
+      val result = RiskTree.fromNodes(treeId("bounds-ok"), name("Bounds OK"), Seq(root, l1, l2), root.id, mitigations = Nil)
       assertTrue(result.isSuccess)
     },
 
@@ -46,7 +46,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
       val root = unsafeGet(RiskPortfolio.createFromStrings(
         id = idStr("root-pf"), name = "Root",
         childIds = Array(l1.id.value, l2.id.value)), "portfolio")
-      val result = RiskTree.fromNodes(treeId("bounds-dup"), name("Bounds Dup"), Seq(root, l1, l2), root.id)
+      val result = RiskTree.fromNodes(treeId("bounds-dup"), name("Bounds Dup"), Seq(root, l1, l2), root.id, mitigations = Nil)
       assertTrue(
         result.toEither.swap.toOption.get.exists(e =>
           e.code == ValidationErrorCode.AMBIGUOUS_REFERENCE && e.field == "nodes.name")
@@ -75,7 +75,7 @@ object RiskTreeBoundsSpec extends ZIOSpecDefault {
         id = idStr("root-pf"), name = "Root",
         childIds = subs.map(_._1.id.value).toArray), "portfolio")
       val allNodes = root +: subs.flatMap { case (sub, leaves) => sub +: leaves }
-      val result = RiskTree.fromNodes(treeId("bounds-many"), name("Bounds Many"), allNodes, root.id)
+      val result = RiskTree.fromNodes(treeId("bounds-many"), name("Bounds Many"), allNodes, root.id, mitigations = Nil)
       assertTrue(
         result.toEither.swap.toOption.get.exists(e =>
           e.code == ValidationErrorCode.CONSTRAINT_VIOLATION && e.field == "nodes")

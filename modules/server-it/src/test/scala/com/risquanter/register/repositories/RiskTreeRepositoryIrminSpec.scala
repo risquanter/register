@@ -66,7 +66,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       name = SafeName.fromString(treeName).toOption.get,
       nodes = Seq(portfolio, leaf1, leaf2),
       rootId = rootId,
-      seedVarHighWater = Some(SeedVarId.fromLong(2L).toOption.get)
+      seedVarHighWater = Some(SeedVarId.fromLong(2L).toOption.get),
+      mitigations = Nil
     )
 
   private def updatedTree(original: RiskTree): RiskTree =
@@ -85,7 +86,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       name = original.name,
       nodes = Seq(newRoot, leaf1),
       rootId = rootId,
-      seedVarHighWater = Some(original.seedVarHighWater)
+      seedVarHighWater = Some(original.seedVarHighWater),
+      mitigations = original.mitigations
     )
 
   /** Identity-preserving edit: change leaf-1's `minLoss` while keeping every NodeId
@@ -112,7 +114,8 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
       name = original.name,
       nodes = Seq(root, newLeaf1, leaf2),
       rootId = rootId,
-      seedVarHighWater = Some(original.seedVarHighWater)
+      seedVarHighWater = Some(original.seedVarHighWater),
+      mitigations = original.mitigations
     )
 
   private def positiveInt(n: Int): PositiveInt = n.refineUnsafe
@@ -165,7 +168,7 @@ object RiskTreeRepositoryIrminSpec extends ZIOSpecDefault:
         yield assertTrue(res.isEmpty)
       },
 
-      // DD-7: every repository write action is exactly ONE Irmin commit whose
+      // Every repository write action is exactly ONE Irmin commit whose
       // message names the user action — the commit log IS the user history.
       test("create is one commit covering meta and all nodes, with the action message") {
         for

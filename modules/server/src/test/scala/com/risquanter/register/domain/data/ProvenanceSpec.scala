@@ -37,7 +37,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       CachedResultResolverLive.layer
     )
 
-  /** DD-19 structural attribution: a leaf's records sit on its RiskResult,
+  /** Structural attribution: a leaf's records sit on its RiskResult,
     * whose nodeId is beside them — no riskId inside the record.
     */
   private def leafProvenances(result: LossDistribution): List[NodeProvenance] =
@@ -164,14 +164,15 @@ object ProvenanceSpec extends ZIOSpecDefault {
           id = treeId("tree-1"),
           name = SafeName.SafeName("Test Tree".refineUnsafe),
           nodes = Seq(leaf),
-          rootId = leaf.id
+          rootId = leaf.id,
+          mitigations = Nil
         ), "tree")
         
         for {
           resolver <- ZIO.service[CachedResultResolver]
           result <- resolver.ensureCached(testTree, nodeId("test-risk"), testEntity, includeProvenance = true)
         } yield {
-          // Structural attribution (DD-19): the record carries no riskId —
+          // Structural attribution: the record carries no riskId —
           // the result's own nodeId is the attribution
           assertTrue(leafProvenances(result).nonEmpty) &&
           assertTrue(result.nodeId == nodeId("test-risk"))
@@ -180,7 +181,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
       
       // Resolver always captures provenance for cache consistency.
       // Filtering (based on includeProvenance flag) happens at the service layer.
-      // The cached value embeds the content-only record (DD-18/DD-19), so
+      // The cached value embeds the content-only record, so
       // every hit returns provenance without fragmenting the cache.
       test("resolver always captures provenance regardless of includeProvenance flag") {
         val leaf = unsafeGet(RiskLeaf.create(
@@ -197,7 +198,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           id = treeId("tree-2"),
           name = SafeName.SafeName("Test Tree 2".refineUnsafe),
           nodes = Seq(leaf),
-          rootId = leaf.id
+          rootId = leaf.id,
+          mitigations = Nil
         ), "tree")
         
         for {
@@ -206,10 +208,10 @@ object ProvenanceSpec extends ZIOSpecDefault {
         } yield assertTrue(leafProvenances(result).nonEmpty)
       },
       
-      // PLAN-SEED-IDENTITY §11 Layer 1: recorded var-IDs equal the sampler's
-      // inputs — the single derivation site makes divergence impossible (§6.2
-      // killed bug 2, where provenance recorded different values than the
-      // sampler consumed). ULID has no influence on any recorded seed.
+      // Recorded var-IDs equal the sampler's inputs: both read the same
+      // HdrStreams value from the single derivation site, so what provenance
+      // records cannot diverge from what the sampler consumed. ULID has no
+      // influence on any recorded seed.
       test("provenance records the derived streams: entity from workspace, (2k, 2k+1) from seedVarId") {
         val riskIdLabel = "cyber-attack"
         val riskId = nodeId(riskIdLabel)
@@ -228,7 +230,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           id = treeId("tree-3"),
           name = SafeName.SafeName("Test Tree 3".refineUnsafe),
           nodes = Seq(leaf),
-          rootId = leaf.id
+          rootId = leaf.id,
+          mitigations = Nil
         ), "tree")
 
         for {
@@ -262,7 +265,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           id = treeId("tree-4"),
           name = SafeName.SafeName("Test Tree 4".refineUnsafe),
           nodes = Seq(leaf),
-          rootId = leaf.id
+          rootId = leaf.id,
+          mitigations = Nil
         ), "tree")
         
         for {
@@ -316,7 +320,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           id = treeId("tree-5"),
           name = SafeName.SafeName("Test Tree 5".refineUnsafe),
           nodes = Seq(portfolio, risk1, risk2),
-          rootId = nodeId("portfolio")
+          rootId = nodeId("portfolio"),
+          mitigations = Nil
         )
         
         for {
@@ -324,7 +329,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           // Simulate portfolio (which aggregates children)
           result <- resolver.ensureCached(testTree, nodeId("portfolio"), testEntity, includeProvenance = true)
         } yield {
-          // Portfolio provenance is read structurally (DD-19 A′): walk the
+          // Portfolio provenance is read structurally: walk the
           // group's children and pair each child's nodeId with its records
           // one level above any flattening — never via ids inside the records.
           val attributed = result match {
@@ -357,14 +362,16 @@ object ProvenanceSpec extends ZIOSpecDefault {
           id = treeId("tree-6"),
           name = SafeName.SafeName("Test Tree 6".refineUnsafe),
           nodes = Seq(leaf),
-          rootId = leaf.id
+          rootId = leaf.id,
+          mitigations = Nil
         ), "tree")
 
         val testTree2 = unsafeGet(RiskTree.fromNodes(
           id = treeId("tree-7"),
           name = SafeName.SafeName("Test Tree 7".refineUnsafe),
           nodes = Seq(leaf),
-          rootId = leaf.id
+          rootId = leaf.id,
+          mitigations = Nil
         ), "tree")
         
         for {
@@ -394,7 +401,8 @@ object ProvenanceSpec extends ZIOSpecDefault {
           id = treeId("tree-8"),
           name = SafeName.SafeName("Test Tree 8".refineUnsafe),
           nodes = Seq(leaf),
-          rootId = leaf.id
+          rootId = leaf.id,
+          mitigations = Nil
         ), "tree")
         
         for {
@@ -404,7 +412,7 @@ object ProvenanceSpec extends ZIOSpecDefault {
           val nodeProv = leafProvenances(result).head
 
           // Verify all essential information is captured; attribution is the
-          // result's own nodeId (DD-19 — no identity inside the record)
+          // result's own nodeId — no identity inside the record
           assertTrue(result.nodeId == nodeId("test-reconstruction")) &&
           assertTrue(nodeProv.entityId != 0L) &&
           assertTrue(nodeProv.occurrenceVarId != 0L) &&

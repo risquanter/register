@@ -9,7 +9,7 @@ import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, R
 import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, Revision}
 import com.risquanter.register.testutil.TestHelpers.*
 
-/** Pure service-level tests for `ChangedNodesService` (UC5) — the content-hash
+/** Pure service-level tests for `ChangedNodesService` — the content-hash
   * changed-nodes logic, exercised against a stub `RiskTreeService` keyed by
   * revision, without HTTP/Tapir.
   */
@@ -51,7 +51,8 @@ object ChangedNodesServiceSpec extends ZIOSpecDefault:
           childIds = children.map(_.id.value.toString).toArray,
           parentId = None
         ), "portfolio") +: children,
-        rootId = rootId
+        rootId = rootId,
+        mitigations = Nil
       ),
       "Test fixture has invalid RiskTree"
     )

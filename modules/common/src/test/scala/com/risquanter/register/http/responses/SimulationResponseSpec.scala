@@ -46,7 +46,8 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         id = treeId("sim-1"),
         name = SafeName.SafeName("Risk Assessment".refineUnsafe),
         nodes = Seq(root),
-        rootId = root.id
+        rootId = root.id,
+        mitigations = Nil
       ), "tree")
       
       val response = SimulationResponse.fromRiskTree(riskTree)
@@ -75,7 +76,8 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         id = treeId("sim-3"),
         name = SafeName.SafeName("Test".refineUnsafe),
         nodes = Seq(root),
-        rootId = root.id
+        rootId = root.id,
+        mitigations = Nil
       ), "tree")
       
       val response = SimulationResponse.fromRiskTree(riskTree)
@@ -118,7 +120,8 @@ object SimulationResponseSpec extends ZIOSpecDefault {
         id = treeId("sim-5"),
         name = SafeName.SafeName("Round Trip".refineUnsafe),
         nodes = Seq(root),
-        rootId = root.id
+        rootId = root.id,
+        mitigations = Nil
       ), "tree")
       
       val response1 = SimulationResponse.fromRiskTree(riskTree)

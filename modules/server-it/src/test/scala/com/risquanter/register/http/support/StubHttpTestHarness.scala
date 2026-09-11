@@ -14,7 +14,6 @@ import com.risquanter.register.http.controllers.{SystemController, WorkspaceLife
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService, ScenarioServiceNotSupported, ScenarioMergeServiceNotSupported}
-import com.risquanter.register.services.SimulationSemaphore
 import com.risquanter.register.services.cache.{CachedResultResolverLive, CacheScope, ScopeResolverScope}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.QueryServiceLive
@@ -30,11 +29,8 @@ object StubHttpTestHarness {
 
   private val defaultSimulationConfig = SimulationConfig(
     defaultNTrials = 10.refineUnsafe,
-    maxTreeDepth = 5.refineUnsafe,
     defaultTrialParallelism = 2.refineUnsafe,
     maxConcurrentSimulations = 2.refineUnsafe,
-    maxNTrials = 100.refineUnsafe,
-    maxParallelism = 2.refineUnsafe,
     defaultSeed3 = 0L,
     defaultSeed4 = 0L
   )
@@ -61,7 +57,6 @@ object StubHttpTestHarness {
         ZLayer.succeed(WorkspaceConfig()),
         TracingLive.console,
         MetricsLive.console,
-        SimulationSemaphore.layer,
         repoLayer,
         CacheScope.layer,
         CachedResultResolverLive.layer,

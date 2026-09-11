@@ -6,7 +6,7 @@ import com.risquanter.register.domain.data.iron.{SafeName, SeedVarId, Validation
 import com.risquanter.register.domain.errors.ValidationErrorCode
 import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, treeId, unsafeGet}
 
-/** Defense-in-depth layer for seed identity (PLAN-SEED-IDENTITY §5.4):
+/** Defense-in-depth layer for seed identity:
   * RiskTree's smart constructor — and therefore its JSON decoder, which routes
   * through it — rejects trees where two leaves share a seedVarId. The request
   * boundary enforces the same invariant (SeedVarIdGuardSpec); this layer covers
@@ -35,7 +35,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       name = "Root Portfolio",
       childIds = leaves.map(_.id.value).toArray
     ), "portfolio")
-    RiskTree.fromNodes(treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id)
+    RiskTree.fromNodes(treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, mitigations = Nil)
   }
 
   def spec = suite("RiskTree seedVarId defense in depth")(
@@ -71,7 +71,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
       }.toMap
       assertTrue(seedsByName == Map("Cyber Attack" -> 7L, "Flood Risk" -> 9L))
     },
-    suite("seedVarHighWater (§5.1)")(
+    suite("seedVarHighWater")(
       test("omitted watermark derives the current max seedVarId") {
         val result = tree(leaf("cyber", "Cyber Attack", 3L), leaf("flood", "Flood Risk", 8L))
         assertTrue(result.toOption.get.seedVarHighWater.value == 8L)
@@ -84,7 +84,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         ), "portfolio")
         val hw = SeedVarId.fromLong(9L).toOption.get
         val result = RiskTree.fromNodes(
-          treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw)
+          treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw), mitigations = Nil
         )
         assertTrue(result.toOption.get.seedVarHighWater.value == 9L)
       },
@@ -96,7 +96,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         ), "portfolio")
         val hw = SeedVarId.fromLong(3L).toOption.get
         val result = RiskTree.fromNodes(
-          treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw)
+          treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw), mitigations = Nil
         )
         val errs = result.toEither.swap.toOption.get
         assertTrue(
@@ -115,7 +115,7 @@ object RiskTreeSeedVarIdSpec extends ZIOSpecDefault {
         ), "portfolio")
         val hw = SeedVarId.fromLong(42L).toOption.get
         val valid = RiskTree.fromNodes(
-          treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw)
+          treeId("seed-tree"), name("Seed Tree"), root +: leaves, root.id, Some(hw), mitigations = Nil
         ).toOption.get
         val decoded = valid.toJson.fromJson[RiskTree]
         assertTrue(decoded.toOption.get.seedVarHighWater.value == 42L)

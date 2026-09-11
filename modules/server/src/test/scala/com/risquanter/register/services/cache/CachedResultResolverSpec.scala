@@ -12,11 +12,10 @@ import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, 
 import com.risquanter.register.testutil.TestHelpers.*
 
 /**
- * Tests for CachedResultResolverLive (ADR-015), content-addressed since
- * milestone 2b Phase A.
+ * Tests for CachedResultResolverLive (ADR-015), which is content-addressed.
  *
- * Verifies cache-aside behavior over ContentHash keys (DD-16), per-workspace
- * cache isolation via CacheScope (DD-17), leaf-only caching (DD-15), orphan
+ * Verifies cache-aside behavior over ContentHash keys, per-workspace
+ * cache isolation via CacheScope, leaf-only caching, orphan
  * semantics (a param edit strands the old entry; the new content misses),
  * error handling, and the resolver-edge mitigation fold (ADR-034 F: param-stage
  * transforms change the cache key, result-stage transforms apply post-cache).
@@ -71,7 +70,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       id = testTreeId,
       name = SafeName.SafeName("Test Tree".refineUnsafe),
       nodes = allNodes,
-      rootId = rootId
+      rootId = rootId,
+      mitigations = Nil
     ),
     "Test fixture has invalid RiskTree"
   )
@@ -178,7 +178,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
         )
       },
 
-      test("simulates portfolio by aggregating children — portfolio results are never cached (DD-15)") {
+      test("simulates portfolio by aggregating children — portfolio results are never cached") {
         for {
           resolver   <- ZIO.service[CachedResultResolver]
           cacheScope <- ZIO.service[CacheScope]
@@ -199,7 +199,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
               risk1Result.outcomes.getOrElse(t, 0L) +
               risk2Result.outcomes.getOrElse(t, 0L)
           },
-          // Only the two leaf entries exist — no portfolio entry (DD-15 → B)
+          // Only the two leaf entries exist — portfolios are never cached
           stats.entries == 2
         )
       },
@@ -221,7 +221,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
             id = testTreeId,
             name = SafeName.SafeName("Test Tree".refineUnsafe),
             nodes = Seq(rootNode, editedLeaf, risk2Leaf),
-            rootId = rootId
+            rootId = rootId,
+            mitigations = Nil
           ),
           "Edited fixture has invalid RiskTree"
         )
@@ -270,7 +271,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
               ), "portfolio"),
               risk1Leaf
             ),
-            rootId = rootId
+            rootId = rootId,
+            mitigations = Nil
           ),
           "Other fixture has invalid RiskTree"
         )
@@ -343,7 +345,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("workspace isolation (DD-17)")(
+    suite("workspace isolation")(
 
       test("different seedEntityIds resolve to separate caches") {
         val otherEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(2L).toOption.get
@@ -392,7 +394,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("mitigation edge-fold (§8.14, ADR-034 F)")(
+    suite("mitigation edge-fold (ADR-034)")(
 
       test("un-mitigated: a tree carrying a mitigation still resolves raw under selection None, group preserved") {
         val cap = resultCap("cap-root", 1L)   // would bind hard if applied

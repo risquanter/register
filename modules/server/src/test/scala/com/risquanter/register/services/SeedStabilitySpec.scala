@@ -223,7 +223,6 @@ object SeedStabilitySpec extends ZIOSpecDefault {
       com.risquanter.register.services.cache.CacheScope.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
-      com.risquanter.register.configs.TestConfigs.simulationLayer >>> SimulationSemaphore.layer,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console
     ) @@ TestAspect.sequential @@ TestAspect.withLiveClock

@@ -58,7 +58,8 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
           childIds = children.map(_.id.value.toString).toArray,
           parentId = None
         ), "portfolio") +: children,
-        rootId = rootId
+        rootId = rootId,
+        mitigations = Nil
       ),
       "Test fixture has invalid RiskTree"
     )
@@ -170,12 +171,16 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         setup             <- scripted(Some(headC1), advanceTo = Some(headC2),
                                store = Map(headC1 -> storeOf(treeC1), headC2 -> storeOf(treeC2)))
         (repo, calls, queried) = setup
-        result            <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main)).map(_.map(_._1))
+        result            <- repo.getById(wsId, treeIdF, Revision.Head(BranchRef.Main))
         headResolutions   <- calls.get
         commitsRead       <- queried.get
       yield assertTrue(
         result.isDefined,
-        result.get.nodes.size == 2,            // treeC1 = root + 1 leaf, never treeC2's 3 nodes
+        result.get._1.nodes.size == 2,         // treeC1 = root + 1 leaf, never treeC2's 3 nodes
+        // The reported commit is the one the read resolved to, not the head at
+        // return time: the scripted client advances the head to headC2 after
+        // the first resolution, so reporting the current head would give headC2.
+        result.get._2 == headC1,
         headResolutions == 1,                  // resolved once
         commitsRead == Set(headC1)             // every read pinned to the pre-advance commit
       )

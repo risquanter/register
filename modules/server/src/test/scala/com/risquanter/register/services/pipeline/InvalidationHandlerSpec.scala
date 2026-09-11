@@ -12,14 +12,14 @@ import com.risquanter.register.testutil.TestHelpers.*
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 
 /**
-  * Tests for the SSE-only InvalidationHandler (milestone 2b Phase A).
+  * Tests for the SSE-only InvalidationHandler.
   *
-  * The handler no longer touches any cache — the content-addressed
-  * ContentCache has no invalidation operation. What it must get right is the
-  * SSE node list: every node whose figures changed (nodes + ancestors), with
-  * reparent and content-change contributions unioned ADDITIVELY (TODO item
-  * 17: the old exclusive if/else-if dropped the content change for a node
-  * that was both reparented and param-changed in one mutation).
+  * The handler touches no cache — the content-addressed ContentCache has no
+  * invalidation operation. What it must get right is the SSE node list: every
+  * node whose figures changed (nodes + ancestors), with reparent and
+  * content-change contributions unioned ADDITIVELY. An exclusive if/else-if
+  * would drop the content change for a node that was both reparented and
+  * param-changed in one mutation.
   */
 object InvalidationHandlerSpec extends ZIOSpecDefault {
 
@@ -81,7 +81,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       id = testTreeId,
       name = SafeName.SafeName("Test Tree".refineUnsafe),
       nodes = allNodes,
-      rootId = nodeId("ops-risk")
+      rootId = nodeId("ops-risk"),
+      mitigations = Nil
     ),
     "Test fixture has invalid RiskTree"
   )
@@ -92,7 +93,8 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
         id = testTreeId,
         name = SafeName.SafeName("Test Tree".refineUnsafe),
         nodes = nodes,
-        rootId = nodeId("ops-risk")
+        rootId = nodeId("ops-risk"),
+        mitigations = Nil
       ),
       "Mutated fixture has invalid RiskTree"
     )
@@ -132,7 +134,7 @@ object InvalidationHandlerSpec extends ZIOSpecDefault {
       }
     },
 
-    test("reparent + param change in ONE mutation includes the node itself (additive union — TODO item 17)") {
+    test("reparent + param change in ONE mutation includes the node itself (additive union)") {
       // hardware moves it-risk → ops-risk AND its probability changes in the same PUT
       val movedChangedHardware = unsafeGet(RiskLeaf.create(
         id = idStr("hardware"),

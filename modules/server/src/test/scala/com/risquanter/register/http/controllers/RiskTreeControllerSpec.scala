@@ -66,7 +66,6 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
       RiskTreeServiceLive.layer,
       ZLayer.succeed(makeStubRepo()),
       com.risquanter.register.configs.TestConfigs.simulationLayer,
-      com.risquanter.register.services.SimulationSemaphore.layer,
       com.risquanter.register.services.cache.CacheScope.layer,
       com.risquanter.register.services.cache.CachedResultResolverLive.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
@@ -195,7 +194,7 @@ object RiskTreeControllerSpec extends ZIOSpecDefault {
         } yield result
 
         program.assert { maybeTree =>
-          maybeTree.exists(_.name.value == "Test Tree")
+          maybeTree.exists { case (tree, _) => tree.name.value == "Test Tree" }
         }.provide(serviceLayer)
       }
     ),

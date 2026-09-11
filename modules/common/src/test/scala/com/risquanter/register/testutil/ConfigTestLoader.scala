@@ -36,11 +36,8 @@ object ConfigTestLoader {
     import io.github.iltotore.iron.refineUnsafe
     SimulationConfig(
       defaultNTrials = c.getInt("defaultNTrials").refineUnsafe,
-      maxTreeDepth = c.getInt("maxTreeDepth").refineUnsafe,
       defaultTrialParallelism = c.getInt("defaultTrialParallelism").refineUnsafe,
       maxConcurrentSimulations = c.getInt("maxConcurrentSimulations").refineUnsafe,
-      maxNTrials = c.getInt("maxNTrials").refineUnsafe,
-      maxParallelism = c.getInt("maxParallelism").refineUnsafe,
       defaultSeed3 = c.getLong("defaultSeed3"),
       defaultSeed4 = c.getLong("defaultSeed4")
     )

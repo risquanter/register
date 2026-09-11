@@ -16,6 +16,12 @@ import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskTre
   */
 object CascadeTestStubs:
 
+  /** Stand-in revision paired with every `getById` hit by an in-memory test
+    * double. Cascade tests do not assert on it, which keeps the `onGetById`
+    * hook returning a bare `Option[RiskTree]`; specs that do assert the
+    * service passes the repository's commit through compare against it. */
+  val stubCommit: CommitHash = CommitHash.fromString("0" * 40).toOption.get
+
   def riskTreeService(
     onDelete: (WorkspaceId, TreeId) => Task[RiskTree],
     onGetById: (WorkspaceId, TreeId, Revision) => Task[Option[RiskTree]] = (_, _, _) => ZIO.die(new UnsupportedOperationException)
@@ -24,7 +30,7 @@ object CascadeTestStubs:
     def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using Checked[Permission]): Task[RiskTree] = ZIO.die(new UnsupportedOperationException)
     def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using Checked[Permission]): Task[RiskTree] = onDelete(wsId, id)
     def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using Checked[Permission]): Task[RiskTree] = ZIO.die(new UnsupportedOperationException)
-    def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Permission]): Task[Option[RiskTree]] = onGetById(wsId, id, rev)
+    def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using Checked[Permission]): Task[Option[(RiskTree, CommitHash)]] = onGetById(wsId, id, rev).map(_.map((_, stubCommit)))
     def probOfExceedance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, threshold: Long, seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision): Task[Double] = ZIO.die(new UnsupportedOperationException)
     def getLECCurvesMulti(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], seedEntityId: SeedEntityId.SeedEntityId, includeProvenance: Boolean, rev: Revision, omitAbsent: Boolean): Task[Map[NodeId, LECNodeCurve]] = ZIO.die(new UnsupportedOperationException)
 

@@ -85,7 +85,8 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Test Tree").toOption.get,
     nodes  = allNodes.values.toSeq,
     rootId = rootId,
-    seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get)
+    seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),
+    mitigations = Nil
   )
 
   // ── Fixtures: simulation results ───────────────────────────────────
@@ -612,7 +613,7 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
     }
   )
 
-  // ── Constants suite (PLAN-QUERY-NODE-NAME-LITERALS §5.4) ───────────
+  // ── Constants suite ────────────────────────────────────────────────
 
   /** Build a RiskTree from a list of nodes via the domain smart constructor,
     * without the request/DTO layer — the construction path a direct repo write,
@@ -626,10 +627,11 @@ object RiskTreeKnowledgeBaseSpec extends ZIOSpecDefault with TestHelpers:
       name   = com.risquanter.register.domain.data.iron.SafeName.fromString("Bypass Tree").toOption.get,
       nodes  = nodes,
       rootId = nodes.head.id,
-      seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get)
+      seedVarHighWater = Some(SeedVarId.fromLong(1000L).toOption.get),
+      mitigations = Nil
     )
 
-  private val constantsSuite = suite("node constants via literal validator (PLAN §5.4)")(
+  private val constantsSuite = suite("node constants via literal validator")(
     test("C1: 4-node fixture — only the two mitigation aggregate constants; riskNameToId carries the names; per-sort validators resolve name vs id; no collisions") {
       val nodeV = kb.catalog.literalValidators(nodeSort)
       val nameV = kb.catalog.literalValidators(nodeNameLiteralSort)

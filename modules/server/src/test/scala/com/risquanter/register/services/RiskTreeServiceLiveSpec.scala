@@ -6,12 +6,13 @@ import io.github.iltotore.iron.*
 
 import com.risquanter.register.http.requests.{RiskTreeDefinitionRequest, RiskPortfolioDefinitionRequest, RiskLeafDefinitionRequest, DistributionShapeRequest, RiskTreeUpdateRequest, RiskPortfolioUpdateRequest, RiskLeafUpdateRequest}
 import com.risquanter.register.domain.data.{RiskTree, RiskNode, RiskLeaf, RiskPortfolio}
+import com.risquanter.register.domain.data.{Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLong, NodeId, TreeId, WorkspaceId, SeedEntityId, BranchRef, ScenarioName, Revision, CommitHash}
 import com.risquanter.register.repositories.RiskTreeRepository
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationErrorCode, RepositoryFailure}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.syntax.*
-import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
+import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId, mitigationId, unsafeGet}
 import com.risquanter.register.util.IdGenerators
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
@@ -57,7 +58,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
 
     override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]] =
       rev match
-        case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)).map(t => (t, CommitHash.fromString("0" * 40).toOption.get)))
+        case Revision.Head(branch) => ZIO.succeed(db.get((wsId, branch, id)).map(t => (t, CascadeTestStubs.stubCommit)))
         case Revision.At(_)        => ZIO.die(new UnsupportedOperationException("commit-pinned reads not exercised in this stub"))
 
     override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
@@ -153,6 +154,35 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       ),
       newPortfolios = Seq.empty,
       newLeaves = Seq.empty
+    )
+
+  // ── Mitigation carry-over helpers ───────────────────────────────────
+
+  /** A well-formed mitigation. Scope resolution is a server concern settled
+    * elsewhere, so any member of the targeting fragment serves here; what these
+    * tests exercise is whether the mitigation survives the update path. */
+  private def mitigation(label: String): Mitigation =
+    unsafeGet(
+      Mitigation.create(
+        id = mitigationId(label),
+        name = SafeName.fromString(label).toOption.get,
+        target = MitigationTarget.Predicate(TargetingPredicate.create("leaf(x)").toEither.toOption.get),
+        spec = MitigationSpec.LeafStage(
+          RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), None, None),
+        precedence = MitigationPrecedence.default
+      ),
+      "mitigation"
+    )
+
+  /** Attach mitigations to an already-stored tree. No request can do this — the
+    * request DTOs carry no mitigation field — so writing through the repository
+    * is the only way to reach the state an update has to preserve. */
+  private def seedMitigations(repo: RiskTreeRepository, tree: RiskTree, ms: Mitigation*): Task[RiskTree] =
+    repo.update(
+      stubWsId,
+      tree.id,
+      t => RiskTree.fromNodesUnsafe(t.id, t.name, t.nodes, t.rootId, Some(t.seedVarHighWater), ms.toList),
+      BranchRef.Main
     )
 
   private def isDuplicateName(exit: Exit[Throwable, Any]): Boolean =
@@ -261,16 +291,19 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("getById returns risk tree when exists") {
+      test("getById returns risk tree when exists, and reports the repository's commit unchanged") {
         val program = for {
           created <- service(_.create(stubWsId, validRequest, BranchRef.Main))
           found   <- service(_.getById(stubWsId, created.id, Revision.Head(BranchRef.Main)))
         } yield (created, found)
 
+        // The service passes the repository's commit through: it neither drops
+        // nor mints one of its own.
         program.assert {
-          case (created, Some(found)) =>
+          case (created, Some((found, commit))) =>
             found.id == created.id &&
-              found.name == created.name
+              found.name == created.name &&
+              commit == CascadeTestStubs.stubCommit
           case _ => false
         }
       },
@@ -464,7 +497,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       },
 
       // ========================================
-      // Seed identity assignment (PLAN-SEED-IDENTITY §5)
+      // Seed identity assignment
       // ========================================
 
       test("create assigns seedVarIds 1..n in sorted-name order and sets the watermark") {
@@ -485,7 +518,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("recreating the same tree yields the same seedVarIds (item 12 core property)") {
+      test("recreating the same tree yields the same seedVarIds") {
         val request = seedTreeRequest("Recreate A")
         val program = for {
           first  <- service(_.create(stubWsId, request, BranchRef.Main))
@@ -537,7 +570,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("update: a provided seedVarId clashing with a surviving leaf's ID is rejected (§5.1)") {
+      test("update: a provided seedVarId clashing with a surviving leaf's ID is rejected") {
         val program = for {
           created <- service(_.create(stubWsId, seedTreeRequest("Clash Tree"), BranchRef.Main))
           clashId  = seedsByName(created)("Cyber Attack")
@@ -565,7 +598,7 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
         }
       },
 
-      test("update: a provided seedVarId may deliberately resurrect a freed ID (§5.1)") {
+      test("update: a provided seedVarId may deliberately resurrect a freed ID") {
         val program = for {
           created <- service(_.create(stubWsId, seedTreeRequest("Resurrect Tree"), BranchRef.Main))
           freedId  = seedsByName(created)("Cyber Attack")
@@ -642,6 +675,62 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
           } yield renamed
           program.assert(_.name == SafeName.SafeName("Name N".refineUnsafe))
         }
+      ),
+
+      // ========================================
+      // Mitigation carry-over across an update
+      // ========================================
+      // ADR-017's omission-means-delete governs the node collection, which the
+      // request enumerates. `RiskTreeUpdateRequest` has no mitigation field, so
+      // an update cannot express a mitigation deletion and must not perform one.
+      // The repository writes the whole subtree in one commit, so a tree handed to it
+      // without its mitigations loses them from the store — these tests pin the
+      // service's side of that contract, which the repository-level
+      // MitigationPersistenceItSpec cannot see.
+      suite("Mitigation carry-over")(
+        test("create starts a tree with no mitigations") {
+          service(_.create(stubWsId, validRequest, BranchRef.Main)).assert(_.mitigations.isEmpty)
+        },
+
+        test("update preserves mitigations the request cannot express") {
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Carry Over"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, mitigation("cyber-control"), mitigation("flood-control"))
+            updated <- service(_.update(stubWsId, seeded.id, renameOnly(seeded, "Carried"), BranchRef.Main))
+            reread  <- service(_.getById(stubWsId, seeded.id, Revision.Head(BranchRef.Main)))
+          } yield (updated, reread)
+
+          program.assert { case (updated, reread) =>
+            val expected = Set("cyber-control", "flood-control")
+            updated.mitigations.map(_.name.value).toSet == expected &&
+              updated.name == SafeName.SafeName("Carried".refineUnsafe) &&
+              reread.exists((t, _) => t.mitigations.map(_.name.value).toSet == expected)
+          }
+        },
+
+        test("an update that deletes a node still preserves mitigations") {
+          // Dropping "Fraud" from the request deletes that leaf, because nodes
+          // ARE enumerated. The mitigations, which cannot be enumerated, stay.
+          val program = for {
+            repo    <- ZIO.service[RiskTreeRepository]
+            created <- service(_.create(stubWsId, seedTreeRequest("Node Drop"), BranchRef.Main))
+            seeded  <- seedMitigations(repo, created, mitigation("surviving-control"))
+            dropFraud = RiskTreeUpdateRequest(
+                          name = "Node Drop",
+                          portfolios = Seq(portfolioUpd(seeded, "Seed Root")),
+                          leaves = Seq(leafUpd(leafIdByName(seeded, "Cyber Attack"), "Cyber Attack", "Seed Root")),
+                          newPortfolios = Seq.empty,
+                          newLeaves = Seq.empty
+                        )
+            updated <- service(_.update(stubWsId, seeded.id, dropFraud, BranchRef.Main))
+          } yield updated
+
+          program.assert { updated =>
+            !updated.nodes.exists(_.name.value == "Fraud") &&
+              updated.mitigations.map(_.name.value) == Seq("surviving-control")
+          }
+        }
       )
     ).provide(
       RiskTreeServiceLive.layer,
@@ -652,7 +741,6 @@ object RiskTreeServiceLiveSpec extends ZIOSpecDefault {
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
       // Concurrency control (uses SimulationConfig)
-      com.risquanter.register.configs.TestConfigs.simulationLayer >>> com.risquanter.register.services.SimulationSemaphore.layer,
       // Telemetry layers require TelemetryConfig
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> MetricsLive.console

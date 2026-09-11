@@ -33,7 +33,7 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
     val highWater = nodes.collect { case l: RiskLeaf => l.seedVarId }.maxByOption(_.value).getOrElse(
       SeedVarId.fromLong(1L).toOption.get
     )
-    RiskTree.fromNodesUnsafe(treeId, safeName, nodes, rootId, Some(highWater))
+    RiskTree.fromNodesUnsafe(treeId, safeName, nodes, rootId, Some(highWater), mitigations = Nil)
 
   // ── Fixture nodes ────────────────────────────────────────────────────
 
@@ -174,9 +174,8 @@ object TreeBuilderStateSpec extends ZIOSpecDefault:
 
     ),
 
-    // isDirty used to mean "has any content" — true for every loaded tree,
-    // not just edited ones (loadFromTree populates the fields). Fixed
-    // 2026-07-21: dirty now means "differs from the loaded snapshot".
+    // isDirty means "differs from the loaded snapshot", not "has any content":
+    // loadFromTree populates the fields, and that alone is not an edit.
     suite("isDirty")(
 
       test("false immediately after loadFromTree — loading a tree is not, by itself, an edit") {

@@ -12,7 +12,7 @@ import com.risquanter.register.testcontainers.IrminCompose
 import com.risquanter.register.testutil.TestHelpers.{safeId, nodeId, treeId}
 import io.github.iltotore.iron.*
 
-/** E3/E4/E8 revert against a real Irmin: `RiskTreeRepository.revert` is a
+/** Revert against a real Irmin: `RiskTreeRepository.revert` is a
   * FORWARD write — it restores the tree state at a target commit as one new
   * `:revert` commit, leaving every prior commit (including the superseded
   * state) reachable in history. Contrast the native head-set behaviour probed
@@ -34,14 +34,14 @@ object TreeRevertItSpec extends ZIOSpecDefault:
     val l2 = RiskLeaf.create(id = leaf2Id.value, name = "Leaf 2", distributionType = "lognormal",
       probability = 0.2, minLoss = Some(1500L), maxLoss = Some(3000L), parentId = Some(rootId), seedVarId = 2L).toEither.toOption.get
     RiskTree.fromNodesUnsafe(tid, SafeName.fromString("Revert Tree").toOption.get, Seq(root, l1, l2), rootId,
-      Some(SeedVarId.fromLong(2L).toOption.get))
+      Some(SeedVarId.fromLong(2L).toOption.get), mitigations = Nil)
 
   /** v2: root + one leaf (leaf-2 pruned, 2 nodes). */
   private def treeV2(original: RiskTree): RiskTree =
     val root = RiskPortfolio.create(rootId.value, "Root", Array(leaf1Id), None).toEither.toOption.get
     val l1 = original.index.nodes(leaf1Id)
     RiskTree.fromNodesUnsafe(original.id, original.name, Seq(root, l1), rootId,
-      Some(original.seedVarHighWater))
+      Some(original.seedVarHighWater), mitigations = original.mitigations)
 
   private def treeRoot(id: TreeId): String = s"workspaces/${wsId.value}/risk-trees/${id.value}"
   private def positiveInt(n: Int): PositiveInt = n.refineUnsafe

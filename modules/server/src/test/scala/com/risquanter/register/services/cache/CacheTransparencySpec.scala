@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.iron.{SafeName, TreeId, NodeId, SeedE
 import com.risquanter.register.testutil.TestHelpers.*
 
 /**
-  * Cache-transparency equivalence (milestone 2b Phase A): with fixed seeds,
+  * Cache-transparency equivalence: with fixed seeds,
   * any edit sequence must yield BYTE-IDENTICAL figures with the real
   * ContentCache vs a pass-through (never-hit) cache.
   *
@@ -55,7 +55,8 @@ object CacheTransparencySpec extends ZIOSpecDefault {
         id = testTreeId,
         name = SafeName.SafeName("Transparency Tree".refineUnsafe),
         nodes = nodes,
-        rootId = nodeId("root")
+        rootId = nodeId("root"),
+        mitigations = Nil
       ),
       "Transparency fixture has invalid RiskTree"
     )

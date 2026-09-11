@@ -25,11 +25,8 @@ object PreludeOrdUsageSpec extends ZIOSpecDefault {
   private def simulationConfig(nTrials: Int): SimulationConfig =
     SimulationConfig(
       defaultNTrials = nTrials.refineUnsafe,
-      maxTreeDepth = 5.refineUnsafe,
       defaultTrialParallelism = 8.refineUnsafe,
       maxConcurrentSimulations = 4.refineUnsafe,
-      maxNTrials = 1000000.refineUnsafe,
-      maxParallelism = 16.refineUnsafe,
       defaultSeed3 = 0L,
       defaultSeed4 = 0L
     )

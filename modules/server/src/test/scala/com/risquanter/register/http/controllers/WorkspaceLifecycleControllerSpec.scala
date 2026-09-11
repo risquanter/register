@@ -26,7 +26,6 @@ import com.risquanter.register.services.cache.{CachedResultResolverLive, CacheSc
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.services.workspace.{RateLimiterLive, WorkspaceStoreLive}
-import com.risquanter.register.services.SimulationSemaphore
 import com.risquanter.register.telemetry.{MetricsLive, TracingLive}
 
 /** Unit tests for [[WorkspaceLifecycleController]] bootstrap endpoint (Wave 6).
@@ -94,7 +93,6 @@ object WorkspaceLifecycleControllerSpec extends ZIOSpecDefault:
         TestConfigs.workspaceLayer,
         TestConfigs.telemetryLayer >>> TracingLive.console,
         TestConfigs.telemetryLayer >>> MetricsLive.console,
-        SimulationSemaphore.layer,
         RiskTreeServiceLive.layer,
         CacheScope.layer,
         CachedResultResolverLive.layer,

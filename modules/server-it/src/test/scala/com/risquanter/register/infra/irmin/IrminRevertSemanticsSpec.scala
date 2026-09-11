@@ -31,13 +31,13 @@ object IrminRevertSemanticsSpec extends ZIOSpecDefault:
     val l2 = RiskLeaf.create(id = leaf2Id.value, name = "Leaf 2", distributionType = "lognormal",
       probability = 0.2, minLoss = Some(1500L), maxLoss = Some(3000L), parentId = Some(rootId), seedVarId = 2L).toEither.toOption.get
     RiskTree.fromNodesUnsafe(tid, SafeName.fromString("Native Revert Tree").toOption.get, Seq(root, l1, l2), rootId,
-      Some(SeedVarId.fromLong(2L).toOption.get))
+      Some(SeedVarId.fromLong(2L).toOption.get), mitigations = Nil)
 
   private def treeV2(original: RiskTree): RiskTree =
     val root = RiskPortfolio.create(rootId.value, "Root", Array(leaf1Id), None).toEither.toOption.get
     val l1 = original.index.nodes(leaf1Id)
     RiskTree.fromNodesUnsafe(original.id, original.name, Seq(root, l1), rootId,
-      Some(original.seedVarHighWater))
+      Some(original.seedVarHighWater), mitigations = original.mitigations)
 
   private def treeRoot(id: TreeId): String = s"workspaces/${wsId.value}/risk-trees/${id.value}"
   private def positiveInt(n: Int): PositiveInt = n.refineUnsafe
