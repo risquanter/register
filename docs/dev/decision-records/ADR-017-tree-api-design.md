@@ -164,7 +164,7 @@ PUT /w/{key}/risk-trees/{treeId}   { ...complete node set... }
 | `RiskTreeUpdateRequest` | Update DTO — existing (ULID) + new buckets |
 | `RiskTreeRequests.resolveUpdate` | Existing ids preserved verbatim; new nodes get `newId()` |
 | `RiskTreeServiceLive.buildNodes` | Builds `RiskLeaf`/`RiskPortfolio` keyed by resolved `NodeId` |
-| `RiskTreeRepositoryIrmin.update` | Same path rewritten per node; `obsoleteNodeIds` deletes only omitted nodes |
+| `RiskTreeRepositoryIrmin.update` | One atomic `set_tree` replaces the whole subtree, so an omitted node is deleted by the write that omits it |
 | `TreeBuilderState` (app) | `LeafDraft`/`PortfolioDraft` carry `id: Option[NodeId]`; partition on it |
 
 ### HTTP surface (workspace-capability scoped)

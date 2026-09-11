@@ -888,11 +888,21 @@ memoization into M2; the remaining M3 scope is listed in §8.2.
 
 ### 7.4 M4 — API surface + frontend (work items; elevate before build)
 
-- **Tree PUT buckets**: `RiskTreeUpdateRequest`/`RiskTreeDefinitionRequest`
-  gain mitigation buckets (ADR-017 pattern: identity-preserving `mitigations`
-  + `newMitigations`); Tapir endpoint shape change (Decision Trigger #1 —
-  covered by this plan once §7.6 freezes the DTOs). This is D5's scope: the
-  DTO/endpoint design lands with its own ADR (ADR-034) per D5's ruling.
+- **Tree PUT buckets**: `RiskTreeUpdateRequest` gains both mitigation buckets
+  (ADR-017 pattern: identity-preserving `mitigations` + `newMitigations`).
+  `RiskTreeDefinitionRequest` is the create DTO and by ADR-017 Decision 1
+  carries no id-bearing bucket, so it gains `newMitigations` only. Tapir
+  endpoint shape change (Decision Trigger #1 — covered by this plan once §7.6
+  freezes the DTOs). This is D5's scope; which ADR the DTO/endpoint design
+  lands in is open (§7.6.1 Decision 2 — ADR-034 does not cover it).
+  With the buckets present the mitigation collection follows the node
+  collection's omission-means-delete rule, so one request writes the whole
+  aggregate. That makes the tree PUT a whole-tree PUT again: today the request
+  enumerates the node set, the tree name and `seedVarHighWater` but has no
+  mitigation field at all, which is why `RiskTreeServiceLive.update` carries
+  `mitigations = oldTree.mitigations` over from its own read. Landing the
+  buckets must delete that carry-over and its comment and resolve mitigations
+  from the request instead; left in place it would make the new buckets inert.
 - **LEC endpoints**: `mitigations` selection parameter on the analysis
   endpoints; responses carry raw + selected-mitigated curves and the
   mitigation-provenance layer (`MitigationApplicationRecord`s) beside
@@ -1376,10 +1386,11 @@ def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree
 Ripple (from the OD-5=D ruling): `RiskTreeRepositoryIrmin.scala:85` plumbs the
 hash `loadTreeAt`/`TreeWithMeta` already resolved; `RiskTreeRepositoryInMemory.scala:77`
 returns a deterministic synthetic hash (dev/test-only backend);
-`RiskTreeServiceLive.scala:48/:403/:417` add three `.map(_.map(_._1))` discards to
-keep the public `RiskTreeService` and its Tapir endpoints unchanged (the
-signature change is confined to the internal repository trait). Decision
-Trigger #4 — pre-ruled OD-5=D.
+`RiskTreeServiceLive` threads the hash through its private read helpers
+(`getTreeOrFail`, `lookupNodeInTree`, `lookupNodesInTree`). Per the later F8
+ruling the widening reaches the public `RiskTreeService` trait as well, and the
+hash is discarded at the wire boundary by the three controller call sites; the
+Tapir endpoint shapes are unchanged. Decision Trigger #4 — pre-ruled OD-5=D.
 
 **(j) `QueryServiceLive` wiring** —
 `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`.
@@ -1513,7 +1524,7 @@ The earlier M3-D1…M3-D6 draft labels are folded in where they map to a ruling.
   mitigation; unbounded fan-out accepted (§7.5.2 rationale).
 - **OD-5 = D.** `getById` returns `Option[(RiskTree, CommitHash)]` in place — one
   honest method that reports which concrete head it loaded, no second call, no
-  race. Confined to the internal `RiskTreeRepository` trait (§7.5.3 (i)). The
+  race. The
   memo-keys-on-`CommitHash` half landed at M2 §8.13; OD-5=D only settles how the
   query path acquires the hash. (Replaces the earlier M3-D3, whose Option B
   `getByIdAt` companion is rejected as a permanent near-duplicate and whose
@@ -1767,8 +1778,76 @@ Ammendment:
 - `modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala`
 
-
 ### 7.6 — reserved for the M4 implementation-grade continuation.
+
+#### 7.6.1 Pre-elevation review register
+
+Input to the M4 elevation. Every entry was verified against source, not against
+plan text. Severity and straightforward-fix flags are as assessed at review
+time; the Status column is current.
+
+| # | Finding | Sev | Status |
+|---|---|---|---|
+| F1 | Tree PUT silently deletes every mitigation: `RiskTreeServiceLive.create`/`update` called `RiskTree.fromNodes` without `mitigations`, and `writeTree`'s whole-subtree `set_tree` (DD-7) deletes every `mitigations/{id}` blob the call omits. Latent while no write path creates mitigations; live data loss at M4. `MitigationPersistenceItSpec` exercises the repository, not the service, so it could not catch this | high | **Fixed.** Defaults removed from the `RiskTree` constructor, `fromNodes` and `fromNodesUnsafe` so the compiler forces intent; `create` passes `Nil`, `update` carries `oldTree.mitigations`; service-level regression tests added to `RiskTreeServiceLiveSpec` |
+| F2 | The refetch mechanism §7.4 cites does not exist on the client (the SPA has no SSE consumer at all; SSE lives only under `modules/server/`), and `InvalidationHandler.computeAffectedNodes` diffs node membership and node content hashes only, so it is blind to mitigation-only edits | med | Open → Decision 1 |
+| F3 | D5 is open and its designated ADR does not cover the API: §7.4 points at ADR-034, which explicitly scopes transform definitions out. No ADR covers the client-facing mitigation API. D4 likewise open, with `applicationRecords` built but consumed nowhere | high | Open → Decision 2 |
+| F4 | `overrideBaseStamp` is server-computed by ruling (§8.15) but client-supplied by the `Mitigation` codec, which decodes it straight off the wire | high | **Approved, not implemented.** Fix depends on the M4 DTO design |
+| F5 | The selection payload has no size bound: neither `ScopeRestriction.NodesOnly.ids` nor `MitigationSelection.Selected.entries` is bounded. Derived bounds 10 000 (tree node ceiling) and 1 000 (`MaxMitigations`), both from ADR-017 §6 domain cardinalities; the 8 MiB `RequestStreaming.Disabled(cfg.maxRequestBytes)` cap covers the aggregate | med-high | **Approved, not implemented** |
+| F6 | Where the selection rides is unresolved, and the plan's stated answer does not fit the endpoints | med | Open → Decision 3 |
+| F7 | The response type cannot carry what ADR-034 and OD-3 require: `Map[NodeId, LECNodeCurve]` has no room for two valuations, per-valuation provenance, `staleMitigationIds`, or drift signals | med | Open → Decision 4 |
+| F8 | The scope resolver is not reachable from the LEC path: `ScopeResolverScope` is wired into `QueryServiceLive` only, and `RiskTreeServiceLive` discarded the `CommitHash` | med | **Fixed.** `RiskTreeService.getById` widened to `(RiskTree, CommitHash)`; the three controller callers discard the hash at the wire boundary. Supersedes the confinement formerly recorded in §7.5.3 (i) and §7.5.4, both now corrected |
+| F9 | §8.7 Finding 3's required validating decoder has an unclear trigger: `MitigationApplicationRecord`'s derived codec re-validates nothing, so a tampered record decodes cleanly | med | Open → Decision 5 |
+| F10 | Mitigation selection collides with Compare slot identity: OD-3 wants selection as a slot dimension, but `SlotCoordinate.samePairAs` does not carry it | med | Open → Decision 6 |
+| F11 | The 13-curve cap and the twin-curve encoding are unruled: `LECChartState` caps user-selected nodes at 13 and `ColorAssigner` assigns one colour per node, which raw+mitigated twins break | med | Open → Decision 7 |
+| F12 | New nodes and new mitigations cannot reference each other in one PUT: `overrideAnchor` is a `NodeId` and `risk_id` literals need ids, but ADR-017 create buckets carry no ids — the server mints them | low-med | Open → Decision 8 |
+| F13 | §7.4's create-DTO wording contradicted ADR-017 Decision 1 by giving `RiskTreeDefinitionRequest` an identity-preserving bucket | low | **Fixed** (§7.4 first bullet) |
+| F14 | §7.4.1's user-documentation deliverable has zero coverage and is already due: `docs/user/VQL-QUERY-EXAMPLES.md`, `TERMINOLOGY.md` and `API-TUTORIAL.md` contain no occurrence of "mitigat"; the deliverable is scoped to "M3/M4" and M3 landed at 0.10.31/0.10.32 | low (blocking under G8) | Open — content depends on Decisions 2–4 |
+| F15 | Stale docs and comments to sweep | low | **Fixed.** ADR-034 status → "Accepted (implemented)"; `CachedResultResolver`/`CachedResultResolverLive` `None` → `Inherent` (3 sites); ADR-017 `obsoleteNodeIds` row corrected to the whole-subtree `set_tree` semantics. Not stale after all: `RiskTreeRequests.resolveUpdate`, which exists as a delegating entry point |
+| F16 | The plan's ADR-alignment table predates ADR-034, ADR-035 and ADR-036 | low | **Fixed** (rows added) |
+| F17 | A tree PUT can leave `overrideAnchor` pointing at a node the same request deleted. `validateMitigations` checks duplicate ids, duplicate names and the 1 000 cap only — it does not cross-check `MitigationSpec.LeafStage.overrideAnchor: Option[NodeId]` against the node collection, and its docstring places scope resolution outside the tree invariants. Predicate targets are not references — they are re-resolved per tree version, and a non-binding predicate is a designed per-mitigation no-op drift signal — but `overrideAnchor` is a stored reference to a ULID that, once its node is deleted, can never bind again. F12 is the forward case (a new node and a new mitigation referencing each other before ids are minted); this is the backward case | med | Open → Decision 9 |
+
+Two further items came from the complex-tier review of the F1/F8 change:
+
+| # | Finding | Sev | Status |
+|---|---|---|---|
+| R1 | Lost update in the tree-update path: `RiskTreeServiceLive.update` precomputes a whole replacement tree from its own earlier read, then passes `_ => riskTree` to `repo.update`, which discards the fresh read it just performed. No compare-and-swap anywhere in the write path, so two overlapping PUTs silently drop one client's edit. Pre-existing; predates mitigations and applies equally to node content, tree name and `seedVarHighWater` | should-fix | Ruled: fix properly via optimistic concurrency keyed on `CommitHash`. Scoped out to `PLAN-TREE-WRITE-CONCURRENCY.md` (NEEDS REVIEW, not implementation-grade), whose write-shape ruling is a version token first, then server-side diff-and-merge — options in `PLAN-TREE-WRITE-CONCURRENCY-APPENDIX-WRITE-SHAPE.md` |
+| R2 | `CommitHash` described as "the storage-relation revision (ADR-032 §3)" in two trait scaladocs. ADR-032 §3 is about per-node byte hashing for merge-conflict prediction, not commit identity | note | **Fixed** in both `RiskTreeService` and `RiskTreeRepository` |
+
+**Open decisions from the register.** These are the M4 elevation's decision set;
+recommendations are the reviewer's, none is ruled.
+
+1. **Does M4 make mitigation edits visible to the invalidation channel?** (F2)
+   Recommendation: no — amend §7.7's scope line to name the invalidation
+   channel, and correct §7.4's SSE mis-citation.
+2. **Where does the client-facing mitigation API contract live?** (F3)
+   Recommendation: a new ADR-037.
+3. **How does the selection cross the wire?** (F6) Recommendation: JSON body on
+   both; convert `prob-of-exceedance` to POST.
+4. **What shape does the analysis response take?** (F7) Recommendation: an
+   envelope for `lec-multi`, a small two-field result for `prob-of-exceedance`,
+   provenance per valuation inside `NodeCurves`.
+5. **Does M4's outbound record decode trigger §8.7 Finding 3's required
+   validator?** (F9) Recommendation: yes, ship it.
+6. **Does mitigation selection join `SlotCoordinate`?** (F10) Recommendation:
+   yes, as `at` already does.
+7. **What does the 13-curve cap count, and how is a mitigated twin drawn?**
+   (F11) Recommendation: the cap counts nodes; the twin is distinguished by
+   stroke dash.
+8. **How does a client attach an override to a node created in the same
+   request?** (F12) Recommendation: a name-based anchor resolved server-side.
+9. **What happens to an `overrideAnchor` whose node the same PUT deletes?**
+   (F17) Recommendation: reject the request — add the cross-check to
+   `validateMitigations`, so an accepted update is always an internally
+   consistent tree. Once M4's mitigation buckets land, one request enumerates
+   both collections, so a client deleting a leaf can drop or retarget the
+   override in the same PUT; rejection therefore costs a round trip only when
+   the client is being inconsistent. Silently dropping the mitigation instead
+   is the F1 failure mode again — destroying something the request did not ask
+   to delete.
+
+One question is carried without a decision number: what
+`ScopeResolutionContext` means for a `Revision.At` pinned read, where `branch`
+is in the context but the read is not at the branch head.
 
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 
@@ -1832,6 +1911,9 @@ adr-constraints skill). Per-ADR outcome for this plan:
 | 031 (startup readiness) | — | No bearing |
 | 032 (equality relations) | Diff/merge | Compliant: mitigation blobs join the storage relation automatically; domain relation deliberately blind to mitigations (OD-4 covers the compare-view consequence) |
 | 033 (exception boundaries) | New code | Compliant: throw-free; no new catches |
+| 034 (mitigation valuation model) | The whole plan | Compliant: `raw` is the cached mitigation-free fold, `mitigated` is derived at the read edge and never stored; the Option F portfolio arm is implemented in `CachedResultResolverLive` |
+| 035 (error leakage prevention) | M4 endpoints | Deferred to §7.6: mitigation scope-resolution failures are server-side drift signals (logged, per-mitigation no-op) and must not be echoed to the client; any new error variant needs its sanitisation clause on the sealed hierarchy |
+| 036 (confidential internal identifiers) | M4 request/response shapes | Deferred to §7.6: `WorkspaceId` and `BranchRef` must not cross the client boundary in either direction. `CommitHash` is **not** in this category — it is already client input (`?at=`, `revertTree`) and already returned in `TreeHistoryEntry`, so returning it from a service read introduces no new exposure |
 | INFRA-006 | — | No bearing (DB credentials) |
 
 ## File inventory
@@ -1964,6 +2046,45 @@ directly or stub it, adjusted with a mechanical `.map(_.map(_._1))` hash-discard
 - `modules/server-it/src/test/scala/com/risquanter/register/infra/irmin/IrminRevertSemanticsSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala`
+
+F1 `RiskTree.fromNodes` mandatory-`mitigations` ripple — the remaining
+`commonJVM` call sites that relied on the removed default:
+
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeBoundsSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/responses/SimulationResponseSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala`
+- `modules/app/src/test/scala/app/state/TreeBuilderStateSpec.scala`
+
+F8 `RiskTreeService.getById` widening ripple — service callers and the sole
+test stub of the widened trait; discard the hash at each boundary (mechanical
+`.map(_.map(_._1))` for the `Task[Option[…]]` shape, or destructure in the
+match arm for `ChangedNodesService`):
+
+- `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala`
+- `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleController.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/ChangedNodesService.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/CascadeTestStubs.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/ChangedNodesServiceSpec.scala`
+
+Simulation parallelism cleanup — delete the never-wired `SimulationSemaphore`
+and drive risk-node parallelism from config at the fork point. New to the
+inventory (`Application.scala`, `RiskTreeServiceLive.scala`,
+`CachedResultResolverLive.scala`, `RiskTreeServiceLiveSpec.scala`,
+`Item17RegressionSpec.scala`, `SeedStabilitySpec.scala`,
+`RouteSecurityRegressionSpec.scala`, `RiskTreeControllerSpec.scala`,
+`WorkspaceLifecycleControllerSpec.scala`, `HttpTestHarness.scala` and
+`StubHttpTestHarness.scala` are already listed above):
+
+- `modules/server/src/main/scala/com/risquanter/register/services/SimulationSemaphore.scala` (deleted)
+- `modules/server/src/test/scala/com/risquanter/register/services/SimulationSemaphoreSpec.scala` (deleted)
+- `modules/common/src/main/scala/com/risquanter/register/configs/SimulationConfig.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/helper/Simulator.scala`
+- `modules/server/src/main/resources/application.conf`
+- `modules/server/src/test/scala/com/risquanter/register/services/helper/SimulatorSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/configs/TestConfigs.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/support/DemoSpecSupport.scala`
+- `modules/common/src/test/scala/com/risquanter/register/testutil/ConfigTestLoader.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/PreludeOrdUsageSpec.scala`
 
 ### Open decisions
 

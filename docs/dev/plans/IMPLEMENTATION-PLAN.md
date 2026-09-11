@@ -2540,7 +2540,9 @@ After (parallel):       cyber    ──────┐
 
 **Implementation:** Replace `ZIO.foreach(childIds)(simulateNode)` with `ZIO.foreachPar(childIds)(simulateNode)` in the portfolio branch of `simulateNode`, constrained by a concurrency semaphore.
 
-> **Done (2026-07-17, monoid plan Part A step C.1):** the resolver's portfolio branch now uses `ZIO.foreachPar` over child IDs, licensed by the `TrialOutcomes` monoid laws. No additional semaphore was added — the existing `SimulationSemaphore` bounds concurrent requests, and CPU concurrency is capped by the runtime thread pool (see `SimulationConfig` scaladoc).
+> **Done (2026-07-17, monoid plan Part A step C.1):** the resolver's portfolio branch uses `ZIO.foreachPar` over child IDs, licensed by the `TrialOutcomes` monoid laws — associativity and commutativity make the aggregation order-independent, so parallel reduction cannot change the figures.
+>
+> **The fan-out is unbounded.** No `withParallelism` constrains it, and every portfolio recurses, so one request forks one fiber per risk node in the subtree. The `SimulationSemaphore` this note originally cited as the bound never had a caller and has been deleted. `maxConcurrentSimulations` is the config value that should bound it; wiring it into the resolver's `foreachPar` is the open item. The only real ceiling today is the ZIO runtime thread pool, sized to the core count — which caps CPU use, not fiber count or memory.
 
 #### Name-Change Re-Simulation Avoidance
 

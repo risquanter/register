@@ -1893,8 +1893,8 @@ mechanism; compiler-flag hardening; trigger granularity).
 
 `getWorkspaceLECCurvesMultiEndpoint` accepts `jsonBody[List[NodeId]]` with no
 maximum size — a workspace-key holder can request thousands of curves in one
-call. Add a max-size refinement at the type boundary, consistent with the
-other request bounds (`REGISTER_MAX_NTRIALS` family). Candidate to share the
+call. Add a max-size refinement at the type boundary, consistent with the other
+request bounds: the 10 000-node tree ceiling and the 8 MiB body cap. Candidate to share the
 bounded-input mechanism with the screening-query length cap (TODO 41) — one
 limiting mechanism, not per-endpoint re-implementations.
 

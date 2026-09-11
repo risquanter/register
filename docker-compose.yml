@@ -78,11 +78,8 @@ services:
       
       # Simulation configuration
       REGISTER_DEFAULT_NTRIALS: "10000"
-      REGISTER_MAX_TREE_DEPTH: "5"
       REGISTER_TRIAL_PARALLELISM: "8"
       REGISTER_MAX_CONCURRENT_SIMULATIONS: "4"
-      REGISTER_MAX_NTRIALS: "1000000"
-      REGISTER_MAX_PARALLELISM: "16"
       
       # CORS configuration
       REGISTER_CORS_ORIGINS: "http://localhost:3000,http://localhost:5173"

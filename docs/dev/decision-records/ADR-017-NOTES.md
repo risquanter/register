@@ -34,6 +34,30 @@ conditional** — see "What 3-way merge vs. operation-based collaboration adds" 
 only earns its keep if (a) multi-writer editing is an actual requirement, **and**
 (b) git-native tree merge proves inadequate for structural conflicts.
 
+#### Why the whole-tree shape makes the loss total, not partial
+
+The write is a full replacement: the request carries the complete node set, the server
+rebuilds the tree from it, and a node the request omits is deleted. A writer holding a
+stale copy therefore does not merely lose a race over the one field two editors both
+touched. It overwrites everything the request enumerates — the node set, the tree name,
+`seedVarHighWater` — at whatever values its stale read produced. The damage stops only
+at fields the update DTO cannot express, such as mitigations, which are carried over
+from the server's own read and so survive.
+
+There is no partial write that could merge cleanly, because there are no partial writes.
+The values written come from the request payload, not from the server's read of the
+tree, so a fresh server-side read does not narrow this: the payload can be arbitrarily
+old and still be applied in full.
+
+This is not a defect in the PUT design; it is the direct consequence of target-state
+semantics. It is also the one axis on which the two mechanisms differ despite their
+identical correctness guarantees (see "The correctness-by-construction claim,
+re-examined"): a `TreeOp` addressing one node can damage only that node, while a
+whole-tree PUT composed from a stale read can damage every node in the tree. Narrowing
+that blast radius does not require `TreeOp` — a version token spanning the client's
+read-modify-write cycle, submitted with the write and checked against the branch head,
+makes the overwrite visible and refusable without changing the write shape.
+
 ### 2. Semantic-intent capture for audit (narrow, non-redundant)
 
 An operation records *which kind* of change occurred. A before/after content diff cannot
@@ -54,6 +78,25 @@ argument was weak even then. Note: the *server-side* efficiency argument (Irmin
 round-trips) is not weak — see "Efficiency at realistic tree sizes" below, which
 establishes that TreeOp is genuinely more efficient via fewer persistence operations, not
 via less client uplink traffic.
+
+**If wire size does become the pain, reach for these first — not for `TreeOp`.**
+Concrete evidence would be slow links, mobile clients, or trees in the 10k-node
+range.
+
+- **HTTP transport compression (gzip / brotli) on the endpoint.** Tree JSON compresses
+  very well — typically 10–20×. This gets the payload win without touching the API
+  contract, the invariant model, or the client authoring model.
+- **Client-side diff-and-send (identity-preserving buckets).** Send `existing` (matched
+  by ULID, fields updated in place) and `new` (server mints ULID) separately;
+  unchanged nodes need not be re-sent as long as omission-means-delete is preserved
+  by an explicit reconciliation step. This stays inside the whole-tree PUT model
+  (server still validates the whole graph) and is already the direction the
+  mitigations layer is taking with its `mitigations` + `newMitigations` split.
+
+Neither route retires whole-tree PUT or the invariant model. Both are strictly
+cheaper than adopting an operation algebra, and they compose — a compressed
+diff-shaped payload is the smallest thing you can send while keeping the correctness
+model intact.
 
 ### Undo/redo via in-memory operation inversion
 
@@ -286,6 +329,7 @@ common edit type.
 | `TreeOp` adds value for **intent-level audit** (what *kind* of change) | ✅ True (non-redundant with commit history) |
 | `TreeOp` adds value for **structural-conflict collaboration** | ✅ True (conditional on multi-writer being a requirement) |
 | Whole-tree PUT has an advantage for **atomic complex restructurings** | ✅ True (target-state semantics; multi-step validated as one) |
+| Whole-tree PUT widens the **blast radius** of a stale write to the whole tree | ✅ True — target-state semantics; orthogonal to correctness, addressable by a version token |
 
 **The honest framing:** whole-tree PUT is correct and the right foundation. TreeOp is
 not a correctness improvement — it is an efficiency and expressiveness improvement.

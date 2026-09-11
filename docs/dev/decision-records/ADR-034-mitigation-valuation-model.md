@@ -1,6 +1,6 @@
 # ADR-034: Mitigation Valuation Model
 
-**Status:** Accepted (awaiting implementation)  
+**Status:** Accepted (implemented)  
 **Date:** 2026-08-28  
 **Tags:** mitigation, aggregation, fold, monoid, caching
 
@@ -169,7 +169,7 @@ store.put(treeId, rawTree)   // definitions travel with the tree; mitigated is a
 | Raw fold (cached, mitigation-free) | `RiskResultGroup.create` — combine of children |
 | Leaf-stage mitigated tree | `MitigationApplication.effectiveTree` (drives cache keys) |
 | Result-stage transform on a leaf | `MitigationApplication.resultTransformFor`, applied at the result resolver edge |
-| Result-stage fold onto a portfolio aggregate | PLAN-RISKTRANSFORM §8.14 (Option F wiring) |
+| Result-stage fold onto a portfolio aggregate | `CachedResultResolverLive` — portfolio arm of `distributionOf` |
 | Same-node ordering | `TransformPipeline` step order; `MitigationPrecedence` across mitigations |
 | Non-mutation invariant | `RiskResultGroup` private constructor (aggregate = combine(children), no exception) |
 
