@@ -10,7 +10,7 @@ import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, BranchRef,
   * Every method takes an explicit `wsId: WorkspaceId` as its first parameter
   * so that workspace scoping is visible and compile-time enforced at every call site.
   *
-  * Revision model (E2/E7): writes target a `branch: BranchRef`; reads take a
+  * Revision model: writes target a `branch: BranchRef`; reads take a
   * `Revision` — `Head(branch)` resolves the branch head once, `At(commit)`
   * pins a specific commit for point-in-time access. There is no default: every
   * call names its target explicitly. Only the Irmin backend supports commit
@@ -22,15 +22,16 @@ trait RiskTreeRepository {
   def update(wsId: WorkspaceId, id: TreeId, op: RiskTree => RiskTree, branch: BranchRef): Task[RiskTree]
   def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef): Task[RiskTree]
 
-  /** Revert a tree to `toCommit` as one forward `set_tree` commit (E3/E4/E8).
+  /** Revert a tree to `toCommit` as one forward `set_tree` commit.
     * Reads the tree state at `toCommit` and writes it forward with a `:revert`
     * message; no precondition. Absent target (commit or path) → NotFound. */
   def revert(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef): Task[RiskTree]
 
   /** Loads a tree and reports the concrete commit it was read at. The
-    * `CommitHash` is the storage-relation revision (ADR-032 §3) that scope
-    * resolution memoizes on — one honest read that names the head it resolved,
-    * so no second call and no resolve-then-reload race (OD-5=D). */
+    * `CommitHash` is the Irmin commit the read resolved to — a whole-tree,
+    * byte-level revision, never a domain content hash — and is what scope
+    * resolution memoizes on. One read names the head it resolved, so there is
+    * no second call and no resolve-then-reload race. */
   def getById(wsId: WorkspaceId, id: TreeId, rev: Revision): Task[Option[(RiskTree, CommitHash)]]
   def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]]
 }

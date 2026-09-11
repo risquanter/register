@@ -24,11 +24,11 @@ import io.github.iltotore.iron.*
   * @param index Tree index for O(1) node lookup and O(depth) ancestor path (built from nodes)
   * @param seedVarHighWater Highest seedVarId ever assigned in this tree — never
   *        decreases, so deleted leaves' stream IDs are never reused by
-  *        auto-assignment (PLAN-SEED-IDENTITY §5.1). Merges as max across
+  *        auto-assignment. Merges as max across
   *        branches. Invariant: >= every leaf's seedVarId (checked in fromNodes).
   * @param mitigations Tree-level mitigation collection — explicit first-class
   *        entities scoping nodes by stable id, versioned with the tree content
-  *        (PLAN-RISKTRANSFORM §7). Application semantics: MitigationApplication.
+  *        Application semantics: MitigationApplication.
   */
 final case class RiskTree private (
   id: TreeId,
@@ -37,7 +37,7 @@ final case class RiskTree private (
   rootId: NodeId,
   index: TreeIndex,
   seedVarHighWater: SeedVarId.SeedVarId,
-  mitigations: Seq[Mitigation] = Nil
+  mitigations: Seq[Mitigation]
 ) {
   /** Get the root node */
   def root: RiskNode = index.nodes(rootId)
@@ -105,7 +105,7 @@ object RiskTree {
     * (RiskTreeRequests); the rule itself is defined once on the SeedVarId
     * companion. This layer contributes the domain-scoped field path and covers
     * programmatically-built and store-loaded trees (correct-by-construction
-    * layering, PLAN-SEED-IDENTITY §5.4).
+    * layering).
     */
   private def requireDistinctSeedVarIds(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
     SeedVarId.requireDistinct(
@@ -156,7 +156,7 @@ object RiskTree {
     nodes: Seq[RiskNode],
     rootId: NodeId,
     seedVarHighWater: Option[SeedVarId.SeedVarId] = None,
-    mitigations: Seq[Mitigation] = Nil
+    mitigations: Seq[Mitigation]
   ): Validation[ValidationError, RiskTree] = {
     Validation
       .validateWith(
@@ -183,7 +183,7 @@ object RiskTree {
       }
   }
 
-  /** Persisted-content bound on the mitigation collection (M1R-D1 validator). */
+  /** Persisted-content bound on the mitigation collection. */
   private val MaxMitigations = 1000
 
   /** Tree-level mitigation invariants: unique ids and names, and a bound on the
@@ -263,7 +263,7 @@ object RiskTree {
     nodes: Seq[RiskNode],
     rootId: NodeId,
     seedVarHighWater: Option[SeedVarId.SeedVarId] = None,
-    mitigations: Seq[Mitigation] = Nil
+    mitigations: Seq[Mitigation]
   ): RiskTree = {
     fromNodes(id, name, nodes, rootId, seedVarHighWater, mitigations).toEither match {
       case Right(tree) => tree

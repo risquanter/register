@@ -23,7 +23,6 @@ import com.risquanter.register.services.workspace.WorkspaceStore
   *    is injected via `register.auth.mode=identity`.
   *  - Layer 2: `authzService.check(userId, Permission.*, ResourceRef(RiskTree, treeId))`.
   *
-  * @see AUTHORIZATION-PLAN.md — Layered Model
   * @see ADR-024 — Application as Pure PEP
   */
 class WorkspaceTreeController private (
@@ -43,7 +42,8 @@ class WorkspaceTreeController private (
         given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
-        result <- riskTreeService.getById(ws.id, treeId, Revision.Head(branch)).map(_.map(SimulationResponse.fromRiskTree))
+        result <- riskTreeService.getById(ws.id, treeId, Revision.Head(branch))
+                    .map(_.map { case (tree, _) => SimulationResponse.fromRiskTree(tree) })
       yield result).either
   }
 
@@ -55,7 +55,7 @@ class WorkspaceTreeController private (
         ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
         branch <- ActiveBranch.resolve(ws.id, activeBranch)
         rev     = at.fold[Revision](Revision.Head(branch))(Revision.At(_))
-        result <- riskTreeService.getById(ws.id, treeId, rev)
+        result <- riskTreeService.getById(ws.id, treeId, rev).map(_.map { case (tree, _) => tree })
       yield result).either
   }
 

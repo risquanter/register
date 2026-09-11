@@ -52,7 +52,7 @@ trait RiskTreeService {
     */
   def delete(wsId: WorkspaceId, id: TreeId, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
 
-  /** Revert a tree to `toCommit` as one forward commit (E3/E4/E8). Reads the
+  /** Revert a tree to `toCommit` as one forward commit. Reads the
     * tree state at `toCommit` and writes it forward with a `:revert` message;
     * no precondition (last write wins). Absent target → NotFound.
     * @param wsId Workspace that owns the tree
@@ -63,13 +63,23 @@ trait RiskTreeService {
     */
   def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree]
 
-  /** Retrieve single risk tree configuration by ID (no LEC data)
+  /** Retrieve single risk tree configuration by ID (no LEC data), together with
+    * the concrete commit it was read at.
+    *
+    * `rev` names a read coordinate that may still be ambiguous — `Revision.Head`
+    * resolves to whatever the branch head is at the moment of the read. The
+    * returned `CommitHash` is the Irmin commit that read actually landed on: a
+    * whole-tree, byte-level revision, never a domain content hash. A caller that
+    * needs to key or memoize on the tree version therefore gets it from the same
+    * read, rather than from a second call that could resolve to a different
+    * head. Callers with no such need discard it at their own boundary.
+    *
     * @param wsId Workspace that owns the tree
     * @param id Risk tree ID
     * @param rev Read coordinate — branch head or a pinned commit.
-    * @return Optional risk tree metadata
+    * @return The tree and the commit it resolved to, or `None` when absent
     */
-  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]]
+  def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[(RiskTree, CommitHash)]]
   
   // ========================================
   // LEC Query APIs (ADR-015: compose on ensureCached)

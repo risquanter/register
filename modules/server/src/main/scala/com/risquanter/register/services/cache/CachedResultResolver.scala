@@ -21,9 +21,10 @@ import com.risquanter.register.domain.data.iron.{NodeId, SeedEntityId, Mitigatio
   * `selection` chooses which mitigations a resolution applies and `resolvedScopes`
   * carries the server-resolved per-mitigation node sets. Param-stage transforms
   * are baked into the effective tree so they change the cache-key content;
-  * result-stage transforms are applied at the read edge and never cached (ADR-034,
-  * PLAN-RISKTRANSFORM §8.14). The defaults (`None` / empty) make the whole
-  * mitigation path identity, so every existing caller resolves the raw tree.
+  * result-stage transforms are applied at the read edge and never cached
+  * (ADR-034). The defaults (`Inherent` / empty) make the whole
+  * mitigation path identity, so a caller that passes neither resolves the raw,
+  * un-mitigated tree.
   *
   * == Usage Pattern ==
   * {{{

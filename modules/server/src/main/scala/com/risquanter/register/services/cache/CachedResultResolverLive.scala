@@ -17,16 +17,17 @@ import io.github.iltotore.iron.refineUnsafe
   *
   * Resolution pipeline per request:
   * 1. `effectiveTree` bakes every param-stage (LeafStage) mitigation into the
-  *    tree so it changes the cache-key content; `selection = None` returns the
-  *    input tree revalidated (identical content, identical hashes).
+  *    tree so it changes the cache-key content; `selection = Inherent` returns
+  *    the input tree revalidated (identical content, identical hashes).
   * 2. `ContentHashIndex.build(effective)` — pure, O(n): leaf keys hash the
-  *    DD-16 projection; portfolio Merkle hashes ride along for diffing.
+  *    leaf's simulation-relevant projection only; portfolio Merkle hashes ride
+  *    along for diffing.
   * 3. Leaf: look up `ContentCache` by content hash — hit returns the cached
   *    identity-free content with the requested node's ID attached at this
-  *    edge (DD-16/DD-18); miss simulates and stores. The result-stage transform
+  *    edge; miss simulates and stores. The result-stage transform
   *    (`resultTransformFor`) is applied to the finished leaf outcomes at the
-  *    edge and never cached (ADR-034 Decision 1 / D3).
-  * 4. Portfolio: never cached (DD-15 → B) — the mitigated children are combined
+  *    edge and never cached (ADR-034 Decision 1).
+  * 4. Portfolio: never cached — the mitigated children are combined
   *    with `RiskResultGroup.create` on every read, then this node's result-stage
   *    transform is applied to the combined total (ADR-034 F:
   *    `mitigated(P) = f_P(⊕ mitigated(children))`).
@@ -35,7 +36,7 @@ import io.github.iltotore.iron.refineUnsafe
   * simply misses; the old entry becomes an unreachable orphan for the
   * `EvictionStrategy`.
   *
-  * Cache instances are per-workspace via `CacheScope` (DD-17), keyed by the
+  * Cache instances are per-workspace via `CacheScope`, keyed by the
   * workspace's `seedEntityId`.
   *
   * Telemetry (ADR-002):
@@ -101,7 +102,7 @@ final case class CachedResultResolverLive(
     } yield results.toMap
 
   /** Param-stage half of the mitigation action: LeafStage transforms baked into
-    * the tree so they drive the cache keys. `selection = None` yields the input
+    * the tree so they drive the cache keys. `selection = Inherent` yields the input
     * tree revalidated through `RiskTree.fromNodes` — identical content, identical
     * hashes — so raw leaf simulations are shared with the un-mitigated path.
     * ADR-010: a validation failure becomes typed `ValidationFailed`. */
@@ -172,7 +173,7 @@ final case class CachedResultResolverLive(
             ))))
           }
           // ⊕ mitigated(children): the commutative fold over already-mitigated
-          // children. Portfolios are never cached (DD-15 → B); the aggregate is
+          // children. Portfolios are never cached; the aggregate is
           // an undecorated combine of its children (mitigated or not), kept that
           // way by ADR-034 Decision 4's non-mutation invariant.
           combined <- ZIO.fromEither(RiskResultGroup.create(portfolio.id, childResults*).toEither)
@@ -217,7 +218,7 @@ final case class CachedResultResolverLive(
       result <- cached match {
         case Some(content) =>
           // Hit: identity attached at the edge — the entry may have been
-          // written for any content-identical leaf (DD-16/DD-18)
+          // written for any content-identical leaf
           ZIO.succeed(RiskResult.fromTrialOutcomes(leaf.id, content.outcomes, List(content.provenance)))
         case None =>
           simulateLeaf(cache, key, leaf, seedEntityId)
@@ -271,7 +272,7 @@ object CachedResultResolverLive {
 
   /**
     * Create ZLayer for CachedResultResolver with telemetry.
-    * Uses CacheScope for per-workspace content-addressed cache access (DD-17).
+    * Uses CacheScope for per-workspace content-addressed cache access.
     */
   val layer: ZLayer[CacheScope & SimulationConfig & Tracing & Meter, Throwable, CachedResultResolver] =
     ZLayer.fromZIO {

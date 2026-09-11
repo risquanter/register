@@ -17,7 +17,7 @@ import com.risquanter.register.services.workspace.{ClientIp, RateLimiter, Worksp
   * Owns workspace bootstrap, key rotation, workspace deletion, and workspace-level
   * tree listing/creation routes.
   *
-  * Authorization layers (all three now wired; SpiceDB backend is NoOp until Phase K):
+  * Authorization layers (all three wired; the SpiceDB backend is a NoOp stub):
   *  - Layer 0 (capability-only): [[WorkspaceStore.resolve]] (or `create`/`rotate`)
   *    validates the workspace key. `bootstrapWorkspace` is intentionally unauthenticated
   *    (it creates the credential). `evictExpired` is an internal maintenance route.
@@ -27,9 +27,8 @@ import com.risquanter.register.services.workspace.{ClientIp, RateLimiter, Worksp
   *  - Layer 2 (fine-grained): [[AuthorizationService.check]] enforces per-operation
   *    permissions (`ViewWorkspace`, `DesignWrite`, `AdminWorkspace`) on the resolved
   *    workspace resource. Currently wired with [[AuthorizationServiceNoOp]]
-  *    (always-permit stub); live enforcement activates in Phase K.
+  *    (always-permit stub), so no per-operation permission is denied today.
   *
-  * @see AUTHORIZATION-PLAN.md — Layered Model
   * @see ADR-024 — Application as Pure PEP
   */
 class WorkspaceLifecycleController private (
@@ -76,7 +75,7 @@ class WorkspaceLifecycleController private (
         branch   <- ActiveBranch.resolve(ws.id, activeBranch)
         ids      <- workspaceStore.listTrees(key)
         trees    <- ZIO.foreach(ids)(id => riskTreeService.getById(ws.id, id, Revision.Head(branch)))
-        existing  = trees.collect { case Some(t) => SimulationResponse.fromRiskTree(t) }
+        existing  = trees.collect { case Some((tree, _)) => SimulationResponse.fromRiskTree(tree) }
       yield existing).either
   }
 
@@ -92,7 +91,7 @@ class WorkspaceLifecycleController private (
         // has no CAS precondition and silently vivifies a brand-new, un-forked
         // branch on first write. That would let a scenario-shaped branch come
         // into existence outside ScenarioService.create, bypassing the "creation
-        // always forks at a commit" invariant (DD-5/A9 fact 3) other scenario
+        // always forks at a commit" invariant that other scenario
         // code relies on. So: require the named scenario to already exist before
         // writing to it. Main never needs this check.
         _      <- activeBranch match

@@ -9,27 +9,25 @@ import com.risquanter.register.domain.errors.ValidationError
 
 /** Simulation execution configuration.
   *
+  * Every field here is read by running code. A value that controls nothing does
+  * not belong in this class: it reads as an enforced limit and is not one.
+  *
   * @param defaultNTrials Default number of Monte Carlo trials per simulation
-  * @param maxTreeDepth Maximum allowed depth for risk tree hierarchy
   * @param defaultTrialParallelism Trial-batch parallelism within one leaf simulation.
   *   This bounds fibers per leaf, not per request: the resolver simulates sibling
   *   leaves concurrently (ZIO.foreachPar), so one request may hold up to
   *   (leaves in flight) × defaultTrialParallelism runnable fibers. Actual CPU
   *   concurrency stays capped by the ZIO runtime thread pool (core count).
-  * @param maxConcurrentSimulations Maximum concurrent top-level simulation requests
-  *   admitted by SimulationSemaphore (permits count requests, not fibers)
-  * @param maxNTrials Hard limit on trials per simulation (reject if exceeded)
-  * @param maxParallelism Hard limit on parallelism per simulation (reject if exceeded)
+  * @param maxConcurrentSimulations How many risk nodes of one request resolve
+  *   concurrently. Read by `Simulator.simulate` only; the live resolver path does
+  *   not yet apply it, so its fan-out across sibling nodes is unbounded.
   * @param defaultSeed3 Global seed 3 for HDR random number generation (reproducibility)
   * @param defaultSeed4 Global seed 4 for HDR random number generation (reproducibility)
   */
 final case class SimulationConfig(
   defaultNTrials: PositiveInt,
-  maxTreeDepth: NonNegativeInt,
   defaultTrialParallelism: PositiveInt,
   maxConcurrentSimulations: PositiveInt,
-  maxNTrials: PositiveInt,
-  maxParallelism: PositiveInt,
   defaultSeed3: Long,
   defaultSeed4: Long
 )
@@ -43,12 +41,6 @@ object SimulationConfig {
       ValidationUtil.refinePositiveInt(value).left.map(errorsToString)
     }
 
-  private val nonNegativeIntConfig: Config[NonNegativeInt] =
-    deriveConfig[Int].mapOrFail { value =>
-      ValidationUtil.refineNonNegativeInt(value).left.map(errorsToString)
-    }
-
   given DeriveConfig[PositiveInt] = DeriveConfig(positiveIntConfig)
-  given DeriveConfig[NonNegativeInt] = DeriveConfig(nonNegativeIntConfig)
   given DeriveConfig[SimulationConfig] = DeriveConfig.derived
 }

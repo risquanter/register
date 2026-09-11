@@ -5,7 +5,7 @@ import com.risquanter.register.auth.{Checked, Permission}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, NodeId, ContentHash, Revision}
 import com.risquanter.register.services.cache.ContentHashIndex
 
-/** Per-node content-hash comparison result between two revisions (UC5). */
+/** Per-node content-hash comparison result between two revisions. */
 enum NodeChangeStatus:
   case Identical, Changed, Added, Removed
 
@@ -35,9 +35,8 @@ enum ChangedNodesResult:
   case MissingOnB
   case MissingOnBoth
 
-/** Content-hash changed-nodes comparison (UC5) of a tree between two revisions
-  * — no value-level comparison (DD-6), only whether each node's content hash
-  * matches.
+/** Content-hash changed-nodes comparison of a tree between two revisions —
+  * no value-level comparison, only whether each node's content hash matches.
   *
   * The hashes compared are the *domain* content hashes (`ContentHashIndex`): a
   * leaf's hash covers only its simulation-relevant projection
@@ -58,15 +57,14 @@ enum ChangedNodesResult:
   */
 trait ChangedNodesService:
 
-  /** Changed nodes of `treeId` between revisions `a` and `b` (E2/E6).
-    * Deliberately symmetric (no baseline/comparand asymmetry,
-    * PLAN-UI-MILESTONE-2B.md §0/§6); each side is a branch head or a pinned
-    * commit.
+  /** Changed nodes of `treeId` between revisions `a` and `b`. Deliberately
+    * symmetric — neither side is a baseline; each is a branch head or a
+    * pinned commit.
     *
     * @return `ChangedNodesResult.MissingOnA`/`MissingOnB`/`MissingOnBoth` if
     *         the tree does not exist on one or both sides — e.g. it was deleted
     *         from a scenario branch while surviving on `main`. Not an error
-    *         condition — mirrors `RiskTreeService.getById`'s `Option[RiskTree]`
+    *         condition — mirrors the `Option` in `RiskTreeService.getById`'s
     *         return, just distinguishing which side is missing instead of
     *         collapsing both to one empty value.
     */
@@ -90,7 +88,7 @@ final case class ChangedNodesServiceLive(riskTreeService: RiskTreeService) exten
     riskTreeService.getById(wsId, treeId, a)
       .zipPar(riskTreeService.getById(wsId, treeId, b))
       .map {
-        case (Some(treeA), Some(treeB)) =>
+        case (Some((treeA, _)), Some((treeB, _))) =>
           ChangedNodesResult.Changes(changedHashes(ContentHashIndex.build(treeA), ContentHashIndex.build(treeB)))
         case (None, Some(_)) => ChangedNodesResult.MissingOnA
         case (Some(_), None) => ChangedNodesResult.MissingOnB

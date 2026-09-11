@@ -26,27 +26,23 @@ import com.risquanter.register.util.IdGenerators
  * 
  * Metric instruments (Counter, Histogram) are created once during layer construction
  * and cached for the lifetime of the service, avoiding repeated instrument creation.
- * 
- * Concurrency control: SimulationSemaphore limits concurrent simulation executions
- * to prevent resource exhaustion under high load.
  */
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
-  config: SimulationConfig,
   resolver: CachedResultResolver,
   invalidationHandler: InvalidationHandler,
   tracing: Tracing,
-  semaphore: SimulationSemaphore,
   // Pre-created metric instruments (cached at construction time)
   operationsCounter: Counter[Long]
 ) extends RiskTreeService {
   
   import RiskTreeServiceLive.ErrorContext
   
-  /** Fetch tree by id or fail with ValidationFailed. */
-  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): Task[RiskTree] =
-    repo.getById(wsId, treeId, rev).map(_.map(_._1)).flatMap {
-      case Some(tree) => ZIO.succeed(tree)
+  /** Fetch tree by id, with the commit it resolved to, or fail with
+    * ValidationFailed. */
+  private def getTreeOrFail(wsId: WorkspaceId, treeId: TreeId, rev: Revision): Task[(RiskTree, CommitHash)] =
+    repo.getById(wsId, treeId, rev).flatMap {
+      case Some(loaded) => ZIO.succeed(loaded)
       case None =>
         ZIO.fail(ValidationFailed(List(ValidationError(
           field = "treeId",
@@ -55,24 +51,25 @@ class RiskTreeServiceLive private (
         ))))
     }
 
-  /** Fetch tree and node together or fail with ValidationFailed. */
-  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): Task[(RiskTree, RiskNode)] =
+  /** Fetch tree, its resolved commit, and the node together, or fail with
+    * ValidationFailed. */
+  private def lookupNodeInTree(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId, rev: Revision): Task[(RiskTree, CommitHash, RiskNode)] =
     for
-      tree <- getTreeOrFail(wsId, treeId, rev)
+      (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       node <- ZIO.fromOption(tree.index.nodes.get(nodeId)).orElseFail(ValidationFailed(List(ValidationError(
         field = "nodeId",
         code = ValidationErrorCode.NOT_FOUND,
         message = s"Node ${nodeId.value} not found in tree ${tree.id}"
       ))))
-    yield (tree, node)
+    yield (tree, commit, node)
 
   /** Fetch tree and all requested nodes. With `omitAbsent = false` (the
     * default), fail with aggregated validation errors when any node is missing;
     * with `omitAbsent = true`, absent nodes are simply not in the returned map
     * (the point-in-time read path — a node may not exist at an earlier commit). */
-  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): Task[(RiskTree, Map[NodeId, RiskNode])] =
+  private def lookupNodesInTree(wsId: WorkspaceId, treeId: TreeId, nodeIds: Set[NodeId], rev: Revision, omitAbsent: Boolean): Task[(RiskTree, CommitHash, Map[NodeId, RiskNode])] =
     for
-      tree <- getTreeOrFail(wsId, treeId, rev)
+      (tree, commit) <- getTreeOrFail(wsId, treeId, rev)
       missing = nodeIds.filterNot(tree.index.nodes.contains)
       _ <- if missing.isEmpty || omitAbsent then ZIO.unit else ZIO.fail(ValidationFailed(missing.toList.map(id => ValidationError(
         field = "nodeIds",
@@ -80,7 +77,7 @@ class RiskTreeServiceLive private (
         message = s"Node ${id.value} not found in tree ${tree.id}"
       ))))
       nodes = nodeIds.flatMap(id => tree.index.nodes.get(id).map(id -> _)).toMap
-    yield (tree, nodes)
+    yield (tree, commit, nodes)
 
   private def ensureUniqueTree(wsId: WorkspaceId, treeId: TreeId, treeName: SafeName.SafeName, branch: BranchRef, excludeId: Option[TreeId] = None): Task[Unit] =
     collectAllTrees(wsId, branch).flatMap { trees =>
@@ -182,14 +179,14 @@ class RiskTreeServiceLive private (
         errorField = Some(primaryError.field)
       )
     
-    case RepositoryFailure(reason) =>
+    case RepositoryFailure(_) =>
       ErrorContext(
-        errorType = "RepositoryFailure", 
+        errorType = "RepositoryFailure",
         errorCode = "REPOSITORY_ERROR",
         errorField = None
       )
     
-    case SimulationFailure(id, _) =>
+    case SimulationFailure(_, _) =>
       ErrorContext(
         errorType = "SimulationFailure",
         errorCode = "SIMULATION_ERROR",
@@ -248,7 +245,7 @@ class RiskTreeServiceLive private (
 
   /** seedVarIds of the old tree's leaves that survive the update, keyed by their
     * (possibly renamed) name in the request — matched by stable node id, so
-    * renames preserve stochastic identity (PLAN-SEED-IDENTITY §5.3 immutability).
+    * renames preserve stochastic identity: a leaf's seedVarId is immutable.
     */
   private def carriedOverSeedVarIds(
     oldTree: RiskTree,
@@ -340,7 +337,10 @@ class RiskTreeServiceLive private (
         name = resolved.treeName,
         nodes = nodes,
         rootId = rootId,
-        seedVarHighWater = Some(seedVarHighWater)
+        seedVarHighWater = Some(seedVarHighWater),
+        // A tree is created from its node definition alone; mitigations are
+        // attached afterwards, never at creation.
+        mitigations = Nil
       ).toZIOValidation
       persisted <- repo.create(wsId, riskTree, branch)
     } yield persisted
@@ -353,7 +353,7 @@ class RiskTreeServiceLive private (
 
   override def update(wsId: WorkspaceId, id: TreeId, req: RiskTreeUpdateRequest, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
     val operation = for {
-      oldTree <- getTreeOrFail(wsId, id, Revision.Head(branch))
+      (oldTree, _) <- getTreeOrFail(wsId, id, Revision.Head(branch))
       ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size)
       resolved <- RiskTreeUpdateRequest.resolve(req, idGeneratorFrom(ids)).toZIOValidation
       _ <- ensureUniqueTree(wsId, id, resolved.treeName, branch, excludeId = Some(id))
@@ -362,7 +362,7 @@ class RiskTreeServiceLive private (
       // Carried-over IDs (existing leaves, matched by node id) + caller-provided IDs
       // (new leaves). A provided ID clashing with a carried one survives the merge as
       // two names → one value and is rejected by RiskTree.fromNodes' distinctness
-      // check with the §5.1 "already used by" message.
+      // check with the "already used by" message.
       (seedVarIds, seedVarHighWater) <- ZIO
         .fromEither(SeedVarIdAssigner.assign(
           leafNamesOf(allNodes),
@@ -376,7 +376,14 @@ class RiskTreeServiceLive private (
         name = resolved.treeName,
         nodes = nodes,
         rootId = rootId,
-        seedVarHighWater = Some(seedVarHighWater)
+        seedVarHighWater = Some(seedVarHighWater),
+        // Carried over from the tree being updated. ADR-017's
+        // omission-means-delete covers the node collection, which the request
+        // enumerates; `RiskTreeUpdateRequest` has no mitigation field at all, so
+        // an update cannot express "delete the mitigations" and must not imply
+        // it. The repository writes the whole subtree in one commit, so
+        // anything not passed here is deleted from the store.
+        mitigations = oldTree.mitigations
       ).toZIOValidation
       updated <- repo.update(wsId, id, _ => riskTree, branch)
       _ <- invalidationHandler.handleMutation(oldTree, updated, clientBranchName(wsId, branch))
@@ -400,11 +407,11 @@ class RiskTreeServiceLive private (
     val operation = for {
       // Head state (for invalidation) — None when the tree was deleted at head;
       // reverting then recreates it, which behaves like create (nothing cached).
-      oldTree  <- repo.getById(wsId, id, Revision.Head(branch)).map(_.map(_._1))
+      oldTree  <- repo.getById(wsId, id, Revision.Head(branch))
       reverted <- repo.revert(wsId, id, toCommit, branch)
       _        <- oldTree match
-                    case Some(prev) => invalidationHandler.handleMutation(prev, reverted, clientBranchName(wsId, branch))
-                    case None       => ZIO.unit
+                    case Some((prev, _)) => invalidationHandler.handleMutation(prev, reverted, clientBranchName(wsId, branch))
+                    case None            => ZIO.unit
     } yield reverted
 
     operation.tapBoth(
@@ -413,8 +420,8 @@ class RiskTreeServiceLive private (
     )
   }
 
-  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[RiskTree]] =
-    repo.getById(wsId, id, rev).map(_.map(_._1)).tapBoth(
+  override def getById(wsId: WorkspaceId, id: TreeId, rev: Revision)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[Option[(RiskTree, CommitHash)]] =
+    repo.getById(wsId, id, rev).tapBoth(
       error => logIfUnexpected("getById")(error) *> recordOperation("getById", success = false, Some(extractErrorContext(error))),
       _ => recordOperation("getById", success = true)
     )
@@ -432,7 +439,7 @@ class RiskTreeServiceLive private (
         _ <- tracing.setAttribute("include_provenance", includeProvenance)
 
         // Fetch requested tree and ensure node exists within it
-        (tree, _) <- lookupNodeInTree(wsId, treeId, nodeId, rev)
+        (tree, _, _) <- lookupNodeInTree(wsId, treeId, nodeId, rev)
         
         // Ensure result is cached (cache-aside pattern via CachedResultResolver)
         result <- resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
@@ -462,7 +469,7 @@ class RiskTreeServiceLive private (
         } else {
           lookupNodesInTree(wsId, treeId, nodeIds, rev, omitAbsent)
         }
-        (tree, nodesMap) = treeWithNodes
+        (tree, _, nodesMap) = treeWithNodes
         // With omitAbsent, nodesMap holds only the ids present at this revision;
         // resolve and log against that present set (empty input still failed above).
         presentIds = nodesMap.keySet
@@ -514,14 +521,12 @@ object RiskTreeServiceLive {
     val operationsDesc = "Number of risk tree operations"
   }
   
-  val layer: ZLayer[RiskTreeRepository & SimulationConfig & CachedResultResolver & InvalidationHandler & Tracing & SimulationSemaphore & Meter, Throwable, RiskTreeService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & InvalidationHandler & Tracing & Meter, Throwable, RiskTreeService] = ZLayer {
     for {
       repo <- ZIO.service[RiskTreeRepository]
-      config <- ZIO.service[SimulationConfig]
       resolver <- ZIO.service[CachedResultResolver]
       invalidationHandler <- ZIO.service[InvalidationHandler]
       tracing <- ZIO.service[Tracing]
-      semaphore <- ZIO.service[SimulationSemaphore]
       meter <- ZIO.service[Meter]
       
       // Create metric instruments once at layer construction time
@@ -530,6 +535,6 @@ object RiskTreeServiceLive {
         Some(MetricNames.operationsUnit),
         Some(MetricNames.operationsDesc)
       )
-    } yield new RiskTreeServiceLive(repo, config, resolver, invalidationHandler, tracing, semaphore, opsCounter)
+    } yield new RiskTreeServiceLive(repo, resolver, invalidationHandler, tracing, opsCounter)
   }
 }

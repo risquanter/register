@@ -281,8 +281,6 @@ object Application extends ZIOAppDefault {
       // for actual telemetry export to otel-collector
       TracingLive.console,
       MetricsLive.console,
-      // Concurrency control - limits concurrent simulations (requires SimulationConfig)
-      com.risquanter.register.services.SimulationSemaphore.layer,
       RepositoryConfig.layer >>> chooseRepo,
       RepositoryConfig.layer >>> chooseScenarioService,
       RepositoryConfig.layer >>> chooseScenarioMergeService,
@@ -292,8 +290,8 @@ object Application extends ZIOAppDefault {
       ScopeResolverScope.layer,        // Per-workspace mitigation scope resolution (M3 analytics VQL)
       SSEHub.live,
       InvalidationHandler.live,     // SSE-only mutation notifications (requires SSEHub)
-      RiskTreeServiceLive.layer,    // Requires InvalidationHandler + SimulationConfig + Tracing + SimulationSemaphore + Meter
-      ChangedNodesServiceLive.layer, // UC5 content-hash changed-nodes — requires RiskTreeService
+      RiskTreeServiceLive.layer,    // Requires InvalidationHandler + Tracing + Meter
+      ChangedNodesServiceLive.layer, // Content-hash changed-nodes — requires RiskTreeService
       RepositoryConfig.layer >>> chooseTreeHistoryService, // E1 per-tree history — Irmin-backed, empty in-memory
       QueryServiceLive.layer,       // Requires RiskTreeRepository + CachedResultResolver + ScopeResolverScope + Tracing
       chooseWorkspaceStore,
