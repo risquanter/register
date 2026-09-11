@@ -54,7 +54,7 @@ sbt server/test
 sbt app/test
 
 # Single suite
-sbt "server/testOnly *SimulationSemaphoreSpec"
+sbt "server/testOnly *SimulatorSpec"
 sbt "commonJVM/testOnly *RiskLeafSpec"
 sbt "app/testOnly *TreeBuilderStateSpec"
 
@@ -148,7 +148,7 @@ sbt app/fullLinkJS
 sbt ~app/fastLinkJS
 ```
 
-Output lands in `modules/app/target/scala-3.7.4/`.
+Output lands in `modules/app/target/scala-3.8.4/`.
 
 ---
 

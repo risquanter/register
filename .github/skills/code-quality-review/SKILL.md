@@ -292,9 +292,13 @@ state)? **MUST-FIX** on either direction. (`WorkspaceId` specifically is
 covered by the standalone hard rule above, not just this general check.)
 
 **API4:2023 Unrestricted Resource Consumption.** New endpoints accepting a
-count/size/depth must be bounded at the type boundary (Iron refinement with a
-max), matching `REGISTER_MAX_NTRIALS`/`REGISTER_MAX_PARALLELISM`/
-`REGISTER_WORKSPACE_MAX_TREES`. Flag any new unbounded `List[_]`/`Set[_]`
+count/size/depth must be bounded at the type boundary — an Iron refinement
+carrying the maximum, so the bound is enforced by the decoder before a handler
+runs. A configuration value is not such a bound: an operator setting it is not
+the caller it would have to defend against. The bounds that exist today are the
+10 000-node tree ceiling, the 1 000-mitigation ceiling, the 8 MiB
+`REGISTER_MAX_REQUEST_BYTES` body cap, and `REGISTER_WORKSPACE_MAX_TREES`. Flag
+any new unbounded `List[_]`/`Set[_]`
 request body (e.g. a node-ID list with no max-size constraint) as
 **SHOULD-FIX**. Known accepted gaps are tracked in `docs/dev/TODO.md` —
 report a match against one as pre-existing, not as a new finding.

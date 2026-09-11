@@ -39,7 +39,7 @@ Risquanter Register — a quantitative risk analysis platform. Domain experts de
 
 First-party libraries (`metalog-distribution`, `vql-engine`, `hdr-rng`) are consumed as binary artifacts from Maven Central; sibling checkouts are not needed to build register or its images.
 
-## Modules (sbt, Scala 3.7.4)
+## Modules (sbt, Scala 3.8.4)
 
 | SBT project | What | Path |
 |---|---|---|
@@ -58,7 +58,7 @@ sbt server/compile                       # single module (commonJVM, server, app
 
 sbt 'commonJVM/test; server/test'        # all unit tests (no Docker needed)
 sbt app/test                             # Scala.js tests
-sbt "server/testOnly *SimulationSemaphoreSpec"   # single suite
+sbt "server/testOnly *SimulatorSpec"             # single suite
 
 sbt "serverIt/test"                      # integration tests (needs local/irmin-prod:3.11-p1 image)
 
