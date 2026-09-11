@@ -18,9 +18,10 @@ import com.risquanter.register.domain.errors.ValidationError
   *   leaves concurrently (ZIO.foreachPar), so one request may hold up to
   *   (leaves in flight) × defaultTrialParallelism runnable fibers. Actual CPU
   *   concurrency stays capped by the ZIO runtime thread pool (core count).
-  * @param maxConcurrentSimulations How many risk nodes of one request resolve
-  *   concurrently. Read by `Simulator.simulate` only; the live resolver path does
-  *   not yet apply it, so its fan-out across sibling nodes is unbounded.
+  * @param maxConcurrentSimulations Intended cap on how many risk nodes resolve
+  *   concurrently. No production code reads it yet: the resolver's fan-out across
+  *   sibling nodes is unbounded, and connecting this value to that fork point is
+  *   an open item.
   * @param defaultSeed3 Global seed 3 for HDR random number generation (reproducibility)
   * @param defaultSeed4 Global seed 4 for HDR random number generation (reproducibility)
   */

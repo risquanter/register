@@ -2,59 +2,51 @@ package com.risquanter.register.services.helper
 
 import com.risquanter.register.BuildInfo
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, Distribution, SeedDerivation}
-import com.risquanter.register.domain.data.{RiskResult, TrialId, Loss, RiskNode, RiskLeaf, RiskPortfolio, NodeProvenance, ExpertDistributionParams, LognormalDistributionParams}
+import com.risquanter.register.domain.data.{TrialId, Loss, RiskLeaf, NodeProvenance, ExpertDistributionParams, LognormalDistributionParams}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
-import com.risquanter.register.domain.data.iron.{PositiveInt, Probability}
+import com.risquanter.register.domain.data.iron.PositiveInt
 import io.github.iltotore.iron.refineUnsafe
 import io.github.iltotore.iron.constraint.numeric.{Greater, given}
-import zio.prelude.Identity
 import com.risquanter.register.simulation.LognormalHelper
 import com.risquanter.register.domain.data.iron.ValidationUtil
-import zio.{ZIO, Task, Chunk}
+import zio.{ZIO, Task}
 import java.time.Instant
-import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.data.iron._
 
-// Default parallelism for trial-level computation within a single risk
+/** Trial-batch parallelism used when a caller does not supply one: one fiber
+  * per available processor. */
 private val DefaultTrialParallelism: PositiveInt =
   math.max(1, Runtime.getRuntime.availableProcessors()).refineUnsafe
 
 /**
- * Monte Carlo simulation engine with sparse storage optimization.
- * 
- * Design principles:
- * - Sparse storage: Only stores trials where risk occurred (loss > 0)
- * - Parallelization: Uses ZIO fibers for parallel computation at both:
- *   - Risk level: Multiple risks simulated concurrently
- *   - Trial level: Trials within a risk computed in parallel batches
- * - Determinism: Pure functions guarantee identical results for same seeds
- * - Memory efficiency: Avoids materializing zero-loss trials
- * - Recursive tree simulation: Bottom-up aggregation with lazy evaluation
- * - GraalVM Native Image compatible: No Scala parallel collections
+ * Monte Carlo simulation of a single risk leaf.
+ *
+ * Builds a sampler from a leaf definition and runs its trials, storing only the
+ * trials where the risk occurred. Walking the tree and aggregating portfolios is
+ * the resolver's job, not this object's.
+ *
+ * Properties the callers rely on:
+ * - Sparse storage: zero-loss trials are never materialized.
+ * - Determinism: sampling is a pure function of the HDR stream coordinates, so
+ *   the same seeds give the same outcomes at any parallelism.
+ * - GraalVM Native Image compatible: ZIO fibers, no Scala parallel collections.
  */
 object Simulator {
-  
-  /** 
-   * Run trials for a single risk using sparse storage with ZIO parallelization.
-   * Only stores trials where risk occurred (non-zero loss).
-   * 
-   * Computation strategy:
-   * 1. Filter: Identify successful trials (where risk occurred)
-   * 2. Chunk: Split successful trials into batches for parallel processing
-   * 3. Parallel map: Compute losses across batches using ZIO fibers
-   * 4. Combine: Merge results into final sparse map
-   * 
-   * Why ZIO parallelization vs sequential:
-   * - A single risk with 100K trials benefits from multi-core processing
-   * - GraalVM native image has efficient thread handling (no JIT warm-up)
-   * - ZIO fibers are lightweight and work well with native images
-   * - Risk-level parallelism alone is insufficient for trees with few leaves
-   * 
-   * Thread safety: sampler functions are pure (HDR-based determinism)
-   * 
+
+  /**
+   * Run `nTrials` trials for one risk and return the trials where it occurred.
+   *
+   * Two phases. The occurrence filter runs sequentially over every trial: one
+   * random draw and one comparison each. The loss sampling runs across
+   * `parallelism` fibers, because an inverse-CDF evaluation costs orders of
+   * magnitude more than the occurrence draw. Below 100 successful trials the
+   * fiber overhead outweighs the split, so the loss phase runs sequentially.
+   *
+   * Thread safety: sampler functions are pure (HDR-based determinism).
+   *
    * @param sampler RiskSampler with occurrence + loss distribution
    * @param nTrials Total number of trials to simulate (must be positive)
-   * @param parallelism Number of parallel fibers for trial computation
+   * @param parallelism Number of parallel fibers for loss sampling
    * @return Task of sparse map: trial ID → loss (only non-zero outcomes)
    */
   def performTrials(
@@ -88,91 +80,17 @@ object Simulator {
       }
     }
   }
-  
-  /**
-   * Synchronous version of performTrials for tests and simple use cases.
-   * Uses sequential processing - suitable for small trial counts.
-   */
-  def performTrialsSync(
-    sampler: RiskSampler,
-    nTrials: PositiveInt
-  ): Map[TrialId, Loss] = {
-    val n: Int = nTrials
-    val successfulTrials = (0 until n).view
-      .filter(trial => sampler.sampleOccurrence(trial.toLong))
-      .toVector
-    
-    successfulTrials.map { trial =>
-      (trial, sampler.sampleLoss(trial.toLong))
-    }.toMap
-  }
-  
-  /** 
-   * Simulate multiple risks in parallel using ZIO fibers.
-   * Each risk is computed independently without shared state.
-   * 
-   * Parallelization correctness:
-   * - Fiber isolation: Each sampler operates on independent data
-   * - No race conditions: No shared mutable state between fibers
-   * - Determinism: Same seeds produce identical results regardless of parallelism
-   * 
-   * Two levels of parallelism:
-   * - Risk-level: cfg.maxConcurrentSimulations controls how many risks run concurrently
-   * - Trial-level: cfg.defaultTrialParallelism controls parallelism within each risk's trials
-   * 
-   * @param samplers Vector of risk samplers to simulate
-   * @return Task of RiskResult for each risk
-   */
-  def simulate(
-    samplers: Vector[RiskSampler]
-  )(using cfg: SimulationConfig): Task[Vector[RiskResult]] = {
-    val nTrials: PositiveInt = cfg.defaultNTrials
-    val trialParallelism: PositiveInt = cfg.defaultTrialParallelism
-    val riskParallelism: PositiveInt = cfg.maxConcurrentSimulations
 
-    val trialSets = samplers.map { sampler =>
-      performTrials(sampler, nTrials, trialParallelism).map { trials =>
-        RiskResult(sampler.nodeId, trials, Nil)
-      }
-    }
-
-    ZIO.collectAllPar(trialSets).withParallelism(riskParallelism)
-  }
-  
-  /**
-   * Sequential simulation for small workloads or debugging.
-   * Guaranteed deterministic execution order.
-   * 
-   * @param samplers Vector of risk samplers to simulate
-   * @param nTrials Number of trials per risk (must be positive)
-   * @return Task of RiskResult for each risk
-   */
-  def simulateSequential(
-    samplers: Vector[RiskSampler]
-  )(using cfg: SimulationConfig): Task[Vector[RiskResult]] = {
-    val nTrials: PositiveInt = cfg.defaultNTrials.refineUnsafe
-    val effectivePar: Int = if cfg.defaultTrialParallelism > 0 then cfg.defaultTrialParallelism else DefaultTrialParallelism
-    val _ = effectivePar // keep a consistent read even though sequential ignores it currently
-
-    ZIO.foreach(samplers) { sampler =>
-      // Use sync version for sequential simulation (no parallelism overhead)
-      ZIO.attempt {
-        val trials = performTrialsSync(sampler, nTrials)
-        RiskResult(sampler.nodeId, trials, Nil)
-      }
-    }
-  }
-  
   /**
    * Create RiskSampler from RiskLeaf definition.
    * Validates parameters and builds Metalog distribution.
    * Always captures provenance metadata.
    *
-   * Stochastic identity is assigned data (PLAN-SEED-IDENTITY §1): the streams
-   * derive from the workspace's seedEntityId and the leaf's seedVarId in one
-   * place (SeedDerivation), and the sampler and NodeProvenance consume the
-   * same HdrStreams value — recorded provenance cannot diverge from what was
-   * simulated (§6.2).
+   * Stochastic identity is assigned data: the streams derive from the
+   * workspace's seedEntityId and the leaf's seedVarId in one place
+   * (SeedDerivation), and the sampler and NodeProvenance consume the same
+   * HdrStreams value, so recorded provenance cannot diverge from what was
+   * simulated.
    *
    * Note: leaf.probability is already refined to Probability type at the boundary,
    * so no additional validation is needed here.
@@ -204,8 +122,8 @@ object Simulator {
       )
 
       // Provenance records the very same stream tuple the sampler consumes.
-      // Content-only (DD-19): no node identity — attribution is structural,
-      // via the RiskResult that carries this record.
+      // Content-only: no node identity — attribution is structural, via the
+      // RiskResult that carries this record.
       provenance =
         NodeProvenance(
           entityId = streams.entityId,

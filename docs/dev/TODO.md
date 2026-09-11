@@ -2090,3 +2090,41 @@ disproportionate to a correctness-only (not security) marginal benefit once the
 node-name-uniqueness, `RiskPortfolio.create` childIds cap, `RiskLeaf.create`
 expert-point range, plus the 8 MiB request body cap). Iron `MaxLength` collection
 typing remains as a later compile-time hardening.
+
+---
+
+## 47. `Simulator.performTrials` cuts the loss phase into exactly `parallelism` chunks — investigate a finer partition
+
+**What the code does today.** `performTrials` splits the successful trials into
+`batchSize = successfulTrials.size / parallelism` pieces and then runs them under
+`.withParallelism(parallelism)`. The number of chunks and the number of fibers
+allowed to run are therefore the same number, so every fiber receives exactly one
+chunk and has nothing to pick up when it finishes.
+
+**Why that can waste time.** `sampleLoss` is an inverse-CDF evaluation whose cost
+is not constant per trial — a metalog solve takes a variable number of iterations
+depending on where the trial's draw lands. One chunk that happens to collect
+expensive draws holds the whole leaf open while the other fibers sit idle. With
+8 chunks of 625 trials where one chunk costs twice the others, the leaf finishes
+in 1250 time units against 703 units of perfectly-spread work: the machine runs
+one-eighth busy for the second half.
+
+**The change to evaluate.** Keep the cap at `parallelism`, cut into several times
+as many chunks (four times as many, say). Fibers that finish early take the next
+unclaimed chunk, so an expensive region is absorbed rather than serialised.
+
+**What must be confirmed before making the change — this is why it is an
+investigation and not a fix:**
+
+1. Whether ZIO 2.1.24 implements `foreachPar` under a set parallelism as N
+   workers draining a queue, or as one fiber per element throttled to N. The
+   self-balancing only happens under the first. If it is the second, a finer
+   partition adds fork overhead and makes things slightly worse.
+2. Whether `sampleLoss` cost actually varies enough per trial to produce
+   stragglers. Measure the per-trial time distribution for a fitted metalog and
+   for the lognormal path before assuming it does.
+3. The measured before/after on a realistic leaf, since the change is worth
+   nothing without one.
+
+**Status:** open, investigation only. Ruled 2026-09-11 to leave the current
+partition in place until the two assumptions above are measured.

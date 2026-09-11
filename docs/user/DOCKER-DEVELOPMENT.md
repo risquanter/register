@@ -234,7 +234,7 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `REGISTER_HEALTH_PORT` | `8091` | Health probe port (kubelet liveness/readiness) |
 | `REGISTER_DEFAULT_NTRIALS` | `10000` | Monte Carlo trials run per risk leaf |
 | `REGISTER_TRIAL_PARALLELISM` | `8` | How many trial batches of one leaf run at once |
-| `REGISTER_MAX_CONCURRENT_SIMULATIONS` | `4` | How many risk nodes of one request resolve at once |
+| `REGISTER_MAX_CONCURRENT_SIMULATIONS` | `4` | Intended cap on how many risk nodes resolve at once. Not read by the server yet — setting it changes nothing today |
 | `REGISTER_SEED3` | `0` | HDR histogram seed 3 (0 = random, ADR-003) |
 | `REGISTER_SEED4` | `0` | HDR histogram seed 4 (0 = random, ADR-003) |
 | `REGISTER_CORS_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed CORS origins (comma-separated). `localhost:18080` (nginx) is intentionally absent — in that mode the browser only talks to nginx; API calls are proxied server-side so the browser never issues a cross-origin request to port 8090. |

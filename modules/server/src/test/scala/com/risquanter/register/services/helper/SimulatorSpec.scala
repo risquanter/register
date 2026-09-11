@@ -1,18 +1,59 @@
 package com.risquanter.register.services.helper
 
+import zio.{ZIO, Task}
 import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, SeedDerivation, HdrStreams}
-import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability, SeedEntityId, SeedVarId}
-import com.risquanter.register.domain.data.{RiskLeaf, ExpertDistributionParams}
+import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability, PositiveInt, SeedEntityId, SeedVarId}
+import com.risquanter.register.domain.data.{RiskLeaf, RiskResult, TrialId, Loss, ExpertDistributionParams}
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import io.github.iltotore.iron.autoRefine
 
+/** Multi-risk drivers over `Simulator`, used only by this spec.
+  *
+  * Production resolves a tree, not a flat list: `CachedResultResolverLive`
+  * walks the nodes, consults the content cache, and aggregates portfolios, so
+  * it calls `Simulator.performTrials` per leaf and needs no batch driver. These
+  * two functions exist to give the determinism and parallelism-invariance
+  * assertions below a flat list to run against.
+  */
+private object TestSimulator {
+
+  /** Simulate every sampler, at most `maxConcurrentSimulations` at a time. */
+  def simulate(
+    samplers: Vector[RiskSampler]
+  )(using cfg: SimulationConfig): Task[Vector[RiskResult]] =
+    ZIO.collectAllPar(
+      samplers.map { sampler =>
+        Simulator.performTrials(sampler, cfg.defaultNTrials, cfg.defaultTrialParallelism)
+          .map(trials => RiskResult(sampler.nodeId, trials, Nil))
+      }
+    ).withParallelism(cfg.maxConcurrentSimulations)
+
+  /** Simulate every sampler one at a time — the reference result that the
+    * parallel path must match exactly. */
+  def simulateSequential(
+    samplers: Vector[RiskSampler]
+  )(using cfg: SimulationConfig): Task[Vector[RiskResult]] =
+    ZIO.foreach(samplers) { sampler =>
+      ZIO.attempt(RiskResult(sampler.nodeId, performTrialsSync(sampler, cfg.defaultNTrials), Nil))
+    }
+
+  /** Every trial of one risk, computed in order on the calling thread. */
+  def performTrialsSync(sampler: RiskSampler, nTrials: PositiveInt): Map[TrialId, Loss] = {
+    val n: Int = nTrials
+    (0 until n).view
+      .filter(trial => sampler.sampleOccurrence(trial.toLong))
+      .map(trial => (trial, sampler.sampleLoss(trial.toLong)))
+      .toMap
+  }
+}
+
 object SimulatorSpec extends ZIOSpecDefault {
-  
+
   // Helper to create OccurrenceProbability values (closed [0,1] interval)
   private def prob(value: Double): OccurrenceProbability =
     value.refineUnsafe
@@ -52,7 +93,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           lossDistribution = metalog
         )
         
-        val sparseMap = Simulator.performTrialsSync(sampler, nTrials = 10000)
+        val sparseMap = TestSimulator.performTrialsSync(sampler, nTrials = 10000)
         
         // With 1% probability, expect ~100 occurrences (not 10,000)
         // Note: Unbounded metalog can produce negative values at extreme probabilities
@@ -72,7 +113,7 @@ object SimulatorSpec extends ZIOSpecDefault {
           lossDistribution = metalog
         )
         
-        val trials = Simulator.performTrialsSync(sampler, nTrials = 1000)
+        val trials = TestSimulator.performTrialsSync(sampler, nTrials = 1000)
         
         // Unbounded metalog can produce negative values at tail probabilities
         // Just verify we have reasonable trial counts
@@ -92,7 +133,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         val nTrials = 500
-        val trials = Simulator.performTrialsSync(sampler, nTrials.refineUnsafe)
+        val trials = TestSimulator.performTrialsSync(sampler, nTrials.refineUnsafe)
         
         assertTrue(
           trials.forall { case (trialId, _) => trialId >= 0 && trialId < nTrials }
@@ -111,9 +152,9 @@ object SimulatorSpec extends ZIOSpecDefault {
           lossDistribution = metalog
         )
         
-        val run1 = Simulator.performTrialsSync(sampler, nTrials = 1000)
-        val run2 = Simulator.performTrialsSync(sampler, nTrials = 1000)
-        val run3 = Simulator.performTrialsSync(sampler, nTrials = 1000)
+        val run1 = TestSimulator.performTrialsSync(sampler, nTrials = 1000)
+        val run2 = TestSimulator.performTrialsSync(sampler, nTrials = 1000)
+        val run3 = TestSimulator.performTrialsSync(sampler, nTrials = 1000)
         
         assertTrue(
           run1 == run2,
@@ -148,9 +189,9 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          run1 <- Simulator.simulate(samplers)
-          run2 <- Simulator.simulate(samplers)
-          run3 <- Simulator.simulate(samplers)
+          run1 <- TestSimulator.simulate(samplers)
+          run2 <- TestSimulator.simulate(samplers)
+          run3 <- TestSimulator.simulate(samplers)
         } yield assertTrue(
           run1.map(_.outcomes) == run2.map(_.outcomes),
           run2.map(_.outcomes) == run3.map(_.outcomes),
@@ -178,8 +219,8 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          parallel <- Simulator.simulate(samplers)
-          sequential <- Simulator.simulateSequential(samplers)
+          parallel <- TestSimulator.simulate(samplers)
+          sequential <- TestSimulator.simulateSequential(samplers)
         } yield assertTrue(
           parallel.map(_.outcomes).toSet == sequential.map(_.outcomes).toSet
         )
@@ -214,7 +255,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          results <- Simulator.simulate(samplers)
+          results <- TestSimulator.simulate(samplers)
         } yield assertTrue(
           results.size == 3,
             results.map(_.nodeId).toSet == Set(nodeId("RISK-MULTI-1"), nodeId("RISK-MULTI-2"), nodeId("RISK-MULTI-3")),
@@ -242,7 +283,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          results <- Simulator.simulate(samplers)
+          results <- TestSimulator.simulate(samplers)
         } yield {
         
           val risk1 = results.find(_.nodeId == nodeId("RISK-IND-1")).get
@@ -255,7 +296,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         given SimulationConfig = TestConfigs.simulation.copy(defaultNTrials = 100.refineUnsafe)
         
         for {
-          results <- Simulator.simulate(Vector.empty)
+          results <- TestSimulator.simulate(Vector.empty)
         } yield assertTrue(results.isEmpty)
       },
       
@@ -271,7 +312,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          results <- Simulator.simulate(Vector(sampler))
+          results <- TestSimulator.simulate(Vector(sampler))
         } yield assertTrue(
           results.size == 1,
           results.head.nodeId == nodeId("RISK-SINGLE"),
@@ -296,7 +337,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         }.toVector
         
         for {
-          results <- Simulator.simulate(samplers)
+          results <- TestSimulator.simulate(samplers)
         } yield assertTrue(
           results.size == 20,
           results.map(_.nodeId).toSet.size == 20
@@ -323,8 +364,8 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          parallel1 <- Simulator.simulate(samplers)
-          sequential <- Simulator.simulateSequential(samplers)
+          parallel1 <- TestSimulator.simulate(samplers)
+          sequential <- TestSimulator.simulateSequential(samplers)
         } yield assertTrue(
           parallel1.map(_.outcomes) == sequential.map(_.outcomes)
         )
@@ -345,7 +386,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          results <- Simulator.simulate(Vector(sampler))
+          results <- TestSimulator.simulate(Vector(sampler))
         } yield {
           val result = results.head
           // Should complete successfully even with no occurrences
@@ -368,7 +409,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         
         val nTrials = 500
         for {
-          results <- Simulator.simulate(Vector(sampler))
+          results <- TestSimulator.simulate(Vector(sampler))
         } yield {
           val result = results.head
           // Expect most trials to have occurrences
@@ -391,7 +432,7 @@ object SimulatorSpec extends ZIOSpecDefault {
         )
         
         for {
-          results <- Simulator.simulate(Vector(sampler))
+          results <- TestSimulator.simulate(Vector(sampler))
         } yield {
           val result = results.head
           assertTrue(

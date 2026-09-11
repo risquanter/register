@@ -79,6 +79,8 @@ services:
       # Simulation configuration
       REGISTER_DEFAULT_NTRIALS: "10000"
       REGISTER_TRIAL_PARALLELISM: "8"
+      # Intended cap on concurrent risk-node resolution. Not read by the server
+      # yet — the resolver's fan-out across sibling nodes is unbounded.
       REGISTER_MAX_CONCURRENT_SIMULATIONS: "4"
       
       # CORS configuration
