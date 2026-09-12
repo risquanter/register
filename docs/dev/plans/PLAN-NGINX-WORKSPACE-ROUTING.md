@@ -97,6 +97,37 @@ Two facts complete the verification:
   The key still reaches the backend in the request, which is how authorization
   works.
 
+### How urgent the log leak is
+
+The credential is live and the exposure is bounded; both halves matter for
+deciding whether this can wait for a planned change.
+
+**The application side is clean, and was checked rather than assumed.**
+`WorkspaceKeySecret` has a redacted `toString` — its specification asserts that
+the value prints as `WorkspaceKeySecret(***)` and that the raw string does not
+appear. No logging statement in the server interpolates a key, the server logs
+no request URIs, and zio-http is configured with no request-logging middleware.
+There is no second leak to find in Scala.
+
+**The nginx side writes live credentials on every request**, to standard output,
+which the container runtime collects and a log pipeline would retain.
+
+**The exposure window is bounded by workspace expiry, not by log retention.**
+The defaults are a 72-hour absolute lifetime and a 1-hour idle timeout. A key
+found in a log is therefore useful only within an hour of the workspace's last
+legitimate use, and for at most 72 hours in total. A key in a month-old log is
+dead. This is a genuine limit, not a mitigation offered to minimise the finding —
+but note that it disappears in the configuration where `ttl` and `idleTimeout`
+are both zero, which switches the reaper off entirely and makes keys permanent.
+
+**What follows.** With logs going to a local Docker daemon and no real user data,
+this is a defect to fix on the normal path rather than an incident. **Two
+conditions flip that, and either one makes it urgent enough to land ahead of
+everything else:** logs being shipped to any aggregation or retention system
+beyond the local daemon, or a deployment holding data that is not test data.
+That is why this plan is first in the landing order despite having no technical
+dependency forcing it there.
+
 ### Why per-workspace routing matters — and where it is a correctness break
 
 Four pieces of state live per workspace inside one server process.
@@ -207,6 +238,38 @@ reconnect. Given that dynamic scaling is explicitly out of scope, keeping
 startup resilience is worth more than minimal remapping. **This is the one
 judgement inside a ruled decision; it is stated here so it can be overruled
 rather than discovered later.**
+
+### The comment that ships with the routing block
+
+The reasoning for choosing `split_clients` is not visible from the directive. A
+reader who knows nginx will reach for an upstream hash and needs to know why it
+is absent, so the rejected alternative is recorded where the decision lives.
+This exact block goes immediately above `split_clients` in the template:
+
+```nginx
+    # Workspace affinity: every request for one workspace reaches one instance.
+    # Required by Server-Sent Events, whose subscriber map is per process, and
+    # relied on by the per-workspace simulation and mitigation-scope caches.
+    #
+    # split_clients, not "upstream { hash $ws_key consistent; }": an upstream
+    # block resolves its server names when the config loads and nginx refuses to
+    # start if one does not resolve, which would lose the deferred-DNS start-up
+    # behaviour the variable proxy_pass below exists to provide. split_clients
+    # yields a variable, so resolution stays at request time.
+    #
+    # The trade this accepts: percentage buckets are not consistent hashing, so
+    # changing the instance count reshuffles most workspaces rather than one in
+    # N. Both forms need a config change and a reload to resize, so the
+    # difference appears only at a scale event, and its cost is that open event
+    # streams drop and reconnect.
+    #
+    # Generated from BACKEND_INSTANCES by the entrypoint; a single instance
+    # produces one catch-all bucket.
+```
+
+Written as current state, with no plan reference, no date and no decision label,
+per the comment rule. It survives the plan's completion because it explains the
+code as it stands rather than recording how it got there.
 
 ### Consumer 2 — the masked access log
 
