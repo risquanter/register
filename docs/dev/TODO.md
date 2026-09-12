@@ -2113,18 +2113,71 @@ one-eighth busy for the second half.
 as many chunks (four times as many, say). Fibers that finish early take the next
 unclaimed chunk, so an expensive region is absorbed rather than serialised.
 
-**What must be confirmed before making the change — this is why it is an
-investigation and not a fix:**
+**Provenance and confidence.** This was found by reading `Simulator.scala`, not
+by profiling. Nothing here has been measured, and the reasoning rests on two
+unverified assumptions. Both must be settled before any code changes — the
+change is not merely unproven without them, it can be actively harmful (see
+Assumption 1).
 
-1. Whether ZIO 2.1.24 implements `foreachPar` under a set parallelism as N
-   workers draining a queue, or as one fiber per element throttled to N. The
-   self-balancing only happens under the first. If it is the second, a finer
-   partition adds fork overhead and makes things slightly worse.
-2. Whether `sampleLoss` cost actually varies enough per trial to produce
-   stragglers. Measure the per-trial time distribution for a fitted metalog and
-   for the lognormal path before assuming it does.
-3. The measured before/after on a realistic leaf, since the change is worth
-   nothing without one.
+### Assumptions to validate before deciding
+
+**Assumption 1 — ZIO's bounded `foreachPar` is a worker pool, not a throttle.**
+The whole benefit depends on `ZIO.foreachPar` under `withParallelism(n)` running
+n worker fibers that pull chunks from a shared queue. If instead it forks one
+fiber per chunk and throttles how many run at once, a finer partition buys
+nothing and costs extra forks — it makes things slightly worse, not neutral. So
+this assumption does not merely gate the benefit; getting it wrong inverts the
+sign of the change.
+
+*How to check:* read the `foreachPar` / `Parallelism` FiberRef implementation in
+the ZIO 2.1.24 source (zio-core, `ZIO.scala` and `ZIOCompanionVersionSpecific`).
+Confirm by experiment as well: a list of chunks with one deliberately slow
+element, timed under a fine partition against a coarse one, distinguishes the two
+implementations directly.
+
+**Assumption 2 — per-trial `sampleLoss` cost varies enough to produce
+stragglers.** If every trial costs roughly the same, an even static partition is
+already optimal and there is nothing to rebalance. The premise is that a metalog
+inverse-CDF solve takes a variable number of iterations depending on where the
+draw lands, and that tail draws cost materially more than central ones.
+
+*How to check:* measure the per-trial time distribution for a fitted metalog and
+separately for the lognormal path. The number that matters is the spread (the
+ratio of the slowest decile to the median), not the mean.
+
+**If both hold, then measure.** A before/after on a realistic leaf — a 10 000-trial
+leaf at a middling occurrence probability — is what decides it. The change is
+worth nothing without that number.
 
 **Status:** open, investigation only. Ruled 2026-09-11 to leave the current
-partition in place until the two assumptions above are measured.
+partition in place until both assumptions above are settled and the before/after
+is measured.
+
+**Not the same issue as the resolver's unbounded fan-out.** This item is about
+how one leaf's trials are divided. How many leaves run at once is a separate
+problem with its own plan: `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md`
+(see item 48).
+
+---
+
+## 48. The resolver's fan-out across risk nodes is unbounded — plan written, awaiting approval
+
+**Observed:** `CachedResultResolverLive` resolves a portfolio's children with
+`ZIO.foreachPar` and recurses, with nothing limiting the fan-out. One request
+forks one fiber per risk node in the subtree and starts one Monte Carlo
+simulation per uncached leaf simultaneously. A 500-leaf tree runs 500
+simulations at once, each holding a partially built trial map. The only ceiling
+is the ZIO runtime thread pool, which caps CPU use but not fiber count or
+memory.
+
+`SimulationConfig.maxConcurrentSimulations` was meant to be that limit and is
+read by no production code, so the value an operator sets controls nothing.
+`ZIO.withParallelism` cannot supply the limit either: it sets an inherited
+fiber-local value, so a recursive traversal applies it per portfolio and admits
+`n^depth` leaves per request rather than `n`.
+
+**Status:** design complete, implementation not started.
+`docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` carries the mechanism, a
+worked example with timings, the deadlock argument for acquiring permits only at
+leaves, the exact signatures, and three open decisions. Nothing is implemented
+until that plan is approved.

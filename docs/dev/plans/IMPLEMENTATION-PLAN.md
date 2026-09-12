@@ -2542,7 +2542,9 @@ After (parallel):       cyber    ──────┐
 
 > **Done (2026-07-17, monoid plan Part A step C.1):** the resolver's portfolio branch uses `ZIO.foreachPar` over child IDs, licensed by the `TrialOutcomes` monoid laws — associativity and commutativity make the aggregation order-independent, so parallel reduction cannot change the figures.
 >
-> **The fan-out is unbounded.** No `withParallelism` constrains it, and every portfolio recurses, so one request forks one fiber per risk node in the subtree. The `SimulationSemaphore` this note originally cited as the bound never had a caller and has been deleted. `maxConcurrentSimulations` is the config value that should bound it; wiring it into the resolver's `foreachPar` is the open item. The only real ceiling today is the ZIO runtime thread pool, sized to the core count — which caps CPU use, not fiber count or memory.
+> **The fan-out is unbounded.** No `withParallelism` constrains it, and every portfolio recurses, so one request forks one fiber per risk node in the subtree. The `SimulationSemaphore` this note originally cited as the bound never had a caller and has been deleted. `maxConcurrentSimulations` is the config value that should bound it, and no production code reads it. The only real ceiling today is the ZIO runtime thread pool, sized to the core count — which caps CPU use, not fiber count or memory.
+>
+> `withParallelism` cannot be that bound: it sets an inherited fiber-local value, so a recursive traversal gets it per portfolio and `n^depth` per request. The fix is a semaphore acquired only around a leaf simulation, which forks nothing and so cannot deadlock. Design, worked example and open decisions: `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md`.
 
 #### Name-Change Re-Simulation Avoidance
 
