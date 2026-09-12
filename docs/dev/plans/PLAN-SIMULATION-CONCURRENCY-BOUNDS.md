@@ -1,6 +1,9 @@
 # Plan: bound concurrent leaf simulation with two nested limits
 
-**Status:** Awaiting approval. **Date:** 2026-09-11.
+**Status:** Direction approved — the two-nested-limits design is the agreed fix.
+Implementation is deliberately deferred; no source edit is authorized by this
+document until it is approved as the session's governing plan and the three open
+decisions below are ruled. **Date:** 2026-09-11.
 **ADR reference:** ADR-015 (cached result resolution), ADR-002 (telemetry),
 ADR-029 (resource limits / denial-of-service defence).
 
@@ -72,8 +75,8 @@ per-request limit. Both are semaphores.
 ### Head-of-line blocking
 
 A single first-in-first-out queue serves its waiters fairly **as waiters**, not
-as requests. If one request puts 500 entries in the queue and another request
-then adds 3, those 3 are served after the 500. Fairness between permits is not
+as requests. If one request puts 512 entries in the queue and another request
+then adds 8, those 8 are served after the 512. Fairness between permits is not
 fairness between requests. This effect is called head-of-line blocking, and it
 is the reason a process-wide limit alone is not the whole answer.
 
@@ -109,68 +112,106 @@ two-lock cycle cannot form. The nesting in the code *is* the ordering:
 
 ## Worked example — the design-correctness check
 
-Assumptions used throughout, chosen to be checkable rather than realistic:
+Assumptions used throughout, chosen so the arithmetic divides evenly rather than
+to be realistic:
 
 - 8-core machine. ZIO's default executor therefore runs 8 worker threads.
 - One uncached leaf simulation costs **20 ms** of CPU.
 - `maxConcurrentLeafSimulations` (process-wide) = **8**.
 - `maxConcurrentLeafSimulationsPerRequest` = **8**.
-- Request **A**: a tree with **500 uncached leaves**, submitted at t = 0.
-- Request **B**: a tree with **3 uncached leaves**, submitted at t = 1 ms.
+- Request **A**: a tree with **512 uncached leaves**, submitted at t = 0.
+- Request **B**: a tree with **8 uncached leaves**, submitted at t = 1 ms.
+
+### The conservation law that constrains every row
+
+Total work is 520 leaves × 20 ms = 10 400 ms of CPU. Eight threads cannot retire
+it in less than 10 400 / 8 = **1 300 ms**. Nothing below removes work or adds a
+core, so **the last leaf finishes at 1 300 ms in every case**. No limit makes the
+machine faster. What the limits change is the order in which the two requests are
+served, and how much memory is live while they are.
+
+Read the table with that in mind: a row where A finishes earlier is a row where B
+finished later, never a row that found extra capacity.
+
+| | A finishes | B finishes | All work drained | Peak simulations live |
+|---|---|---|---|---|
+| Today, no limit | 1 300 ms | 1 300 ms | 1 300 ms | 520 |
+| Process-wide limit only | 1 280 ms | 1 300 ms | 1 300 ms | 8 |
+| Both limits | 1 300 ms | **40 ms** | 1 300 ms | 8 |
 
 ### Case 1 — today, no limit
 
-A forks 500 leaf fibers; all are runnable at once. B's 3 fibers join them. ZIO
-schedules 503 runnable fibers across 8 threads, and its fibers yield
-cooperatively, so all of them make progress together rather than in submission
-order.
+A forks 512 leaf fibers, all runnable at once, and B's 8 join them. ZIO fibers
+yield cooperatively, so all 520 share the 8 threads roughly equally rather than
+running in submission order. Each fiber receives 8/520 of a core, so each leaf's
+20 ms of work takes 20 × 520 / 8 = **1 300 ms**, and every fiber finishes at
+about the same moment — A's last leaf and B's eight alike.
 
-- Total work: 503 × 20 ms = 10 060 ms of CPU, spread over 8 threads → **1 258 ms
-  wall clock**.
-- Under fair sharing each fiber receives 8/503 of a core, so B's 20 ms of work
-  takes 20 × 503 / 8 ≈ **1 258 ms**. B finishes when A does.
-- Memory: 500 partially built trial maps are live simultaneously. At 10 000
-  trials each, that is the peak this plan removes.
+That equality is not an artefact of the model; it is the pathology. B holds 8 of
+520 equal shares. B's 160 ms of work would take **20 ms** on an idle machine (8
+leaves across 8 threads), and sharing fairly with A stretches it to 1 300 ms — a
+factor of 65, set by the size of *A's* tree rather than by anything about B.
+
+Memory: 520 partially built trial maps are live simultaneously, 10 000 trials
+each. That peak is the other thing this plan removes.
 
 ### Case 2 — process-wide limit only
 
-A's 500 fibers call `withPermit`. 8 acquire; 492 queue. B's 3 fibers arrive and
-take queue positions 493, 494, 495.
+All 520 fibers call `withPermit`. Eight acquire, the rest queue in submission
+order, so all 512 of A's entries sit ahead of all 8 of B's. Permits free 8 at a
+time every 20 ms, so the queue drains in waves of 8.
 
-- The queue drains at 8 permits per 20 ms, i.e. one permit every 2.5 ms.
-- B's first leaf waits 492 × 2.5 ms = **1 230 ms**, then runs for 20 ms.
-- A finishes at 500 / 8 × 20 ms = **1 250 ms** — unchanged from Case 1, because
-  the machine was already the constraint.
-- Memory is now bounded at 8 simulations in flight. **This is the win.**
-- B is still blocked for 1.23 s behind A. **This is what Case 3 fixes.**
+- A occupies waves 0 through 63 and finishes at 64 × 20 = **1 280 ms**.
+- B is wave 64: its first leaf starts at 1 280 ms and B finishes at **1 300 ms**.
+- Peak live: **8**.
+
+A finished 20 ms earlier than in case 1 and B finished at the same moment.
+Nothing was gained overall, and nothing could have been — first-in-first-out
+serves A's work before B's where fair sharing interleaved them, and the total
+drain time is fixed at 1 300 ms either way. **What this case buys is the memory
+peak, 520 simulations down to 8.** That is a real and sufficient reason to want
+it.
+
+What it does not buy is B's latency. B waited 1 279 ms to start its first leaf
+because 512 entries sat ahead of it in one shared queue. Fairness between permits
+is not fairness between requests.
 
 ### Case 3 — both limits
 
-A's fibers acquire A's own semaphore first. 8 of them get through and go on to
-take all 8 process-wide permits; **A's other 492 fibers wait on A's own
-semaphore and are not in the process-wide queue at all.**
+A's fibers acquire A's own semaphore first. Eight get through and take all 8
+process-wide permits. **A's other 504 fibers wait on A's own semaphore and are
+not in the process-wide queue at all.**
 
-B arrives. B's semaphore is its own and empty, so all 3 of B's fibers pass it
-immediately and enter the process-wide queue at positions 1, 2, 3.
+B arrives at t = 1 ms. B's semaphore is its own and empty, so all 8 of B's fibers
+pass it immediately and enter the process-wide queue — which holds zero waiters,
+because A's overflow is parked elsewhere.
 
-- B's first leaf starts after one permit frees: **2.5 ms**. Its third starts at
-  7.5 ms. B finishes at ≈ **27.5 ms**, against 1 230 ms in Case 2.
-- A finishes at 500 / 8 × 20 ms = **1 250 ms** — *unchanged*. A is not slowed at
-  all, because its own limit (8) equals the process-wide limit (8), so A can
-  still occupy every permit whenever nobody else wants one.
+- The 8 permits free at t = 20 ms. B takes all eight, runs, and finishes at
+  **40 ms** — against 1 300 ms in both earlier cases.
+- A yields exactly that one wave and finishes at 65 × 20 = **1 300 ms**.
+- Peak live: **8**.
 
-This is the property to check when reviewing the design: **the per-request limit
-does not throttle a request; it keeps the shared queue short.** Setting it below
-the process-wide limit would throttle — with a per-request limit of 4, A would
-finish at 500 / 4 × 20 = 2 500 ms, doubling its time on an otherwise idle
-machine, for no gain. That is why the two values default to the same number, and
-why the per-request one exists as a separate knob rather than as a fraction.
+The exchange is the design in one sentence: **A pays 20 ms — one wave out of 65 —
+to cut B from 1 300 ms to 40 ms.** Against case 2, A is 20 ms slower. Against
+today, A is not slower at all.
+
+Now check the property the per-request limit exists for: **A was never
+throttled.** Its own limit (8) equals the process-wide limit (8), so whenever
+nobody else wants a permit A holds all eight and runs at full machine speed. The
+per-request semaphore did not change A's rate; it changed only how many of A's
+fibers were allowed to stand in the shared queue.
+
+That is the design-correctness check, and the reason the two values default to
+the same number: **the second limit is a queue-depth limit, not a concurrency
+limit.** Setting the per-request one lower would genuinely throttle — at 4, A
+would run 4 leaves at a time and finish at 512 / 4 × 20 = **2 560 ms** on an
+otherwise idle machine, roughly double, with no gain to anyone.
 
 ### Case 4 — what the design deliberately does not solve
 
 20 concurrent requests, each with a per-request limit of 8, against 8
 process-wide permits. The process-wide queue can hold 20 × 8 = 160 waiters, so a
-newcomer's first leaf waits up to 160 × 2.5 ms = **400 ms**.
+newcomer's first leaf waits up to 160 / 8 × 20 = **400 ms**.
 
 The wait therefore grows with the number of concurrent **requests**, not with the
 size of the largest tree. That is the intended behaviour: waiting proportional to
@@ -425,6 +466,48 @@ the same reason the limiter is a trait at all.
 
 ---
 
+---
+
+## Reference markers — every site that points at this plan
+
+While this plan is unimplemented, several comments and documents describe a
+limit that does not exist yet and would mislead a reader who did not know a fix
+was designed. Each such site therefore carries a pointer to this document.
+
+This overrides the normal rule that comments never name planning documents. The
+override is what makes the markers removable: they are all spelled the same way,
+so one search finds every one of them, and removing them is a required step of
+this plan rather than something a later reader has to notice.
+
+**The marker.** Every site contains this literal string, followed by the plan's
+path and one sentence saying what changes when the plan lands:
+
+```
+PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS)
+```
+
+**Finding every site:**
+
+```bash
+grep -rn 'PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS)' . \
+  --exclude-dir=target --exclude-dir=node_modules --exclude-dir=.git
+```
+
+**The sites, and what each becomes when the plan lands:**
+
+| Site | Marker says | On landing |
+|---|---|---|
+| `modules/common/src/main/scala/com/risquanter/register/configs/SimulationConfig.scala` | `maxConcurrentSimulations` is read by nothing | Marker deleted; the scaladoc describes the two fields that are now read |
+| `docker-compose.yml` | `REGISTER_MAX_CONCURRENT_SIMULATIONS` controls nothing | Marker deleted; the variable is renamed and a second one added |
+| `docs/user/DOCKER-DEVELOPMENT.md` | the operator table row controls nothing | Marker deleted; the row documents the two live variables and the tuning rule |
+| `docs/dev/TODO.md` items 47 and 48 | the fan-out is unbounded, fix designed | Item 48 closed; item 47's cross-reference keeps the plan path without the marker |
+| `docs/dev/plans/IMPLEMENTATION-PLAN.md` | the fan-out note | Marker deleted; the note states the bound as implemented |
+
+A site added later must use the same marker, and must be added to this table in
+the same change.
+
+---
+
 ## Verification plan
 
 Unit tests, `LeafSimulationLimiterSpec`:
@@ -462,3 +545,18 @@ Whole-suite green before reporting done: `commonJVM/test`, `server/test`,
 cleanup).
 
 Version: PATCH bump on landing, mirrored to `.env` and `.env.irmin`.
+
+### Mandatory final step — remove every reference marker
+
+This plan is not complete while any marker survives. The last step, after the
+suite is green and before the plan is reported done:
+
+1. Run the search from "Reference markers" above.
+2. For each hit, apply the "On landing" column of that table — the marker line is
+   deleted and the surrounding text is rewritten to describe the bound as it now
+   is, with no reference to this document.
+3. Re-run the search. **Zero hits is the acceptance condition.** A non-zero
+   result means a comment still tells the reader to consult a plan for behaviour
+   the code already has, which is exactly the state the normal comment rule
+   exists to prevent.
+4. Confirm the suite is still green after the comment edits.
