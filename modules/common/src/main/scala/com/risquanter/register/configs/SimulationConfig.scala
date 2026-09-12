@@ -19,9 +19,11 @@ import com.risquanter.register.domain.errors.ValidationError
   *   (leaves in flight) × defaultTrialParallelism runnable fibers. Actual CPU
   *   concurrency stays capped by the ZIO runtime thread pool (core count).
   * @param maxConcurrentSimulations Intended cap on how many risk nodes resolve
-  *   concurrently. No production code reads it yet: the resolver's fan-out across
-  *   sibling nodes is unbounded, and connecting this value to that fork point is
-  *   an open item.
+  *   concurrently. No production code reads it: the resolver's fan-out across
+  *   sibling nodes is unbounded, so the value an operator sets controls nothing.
+  *   PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS),
+  *   docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md — connects this value
+  *   and renames it.
   * @param defaultSeed3 Global seed 3 for HDR random number generation (reproducibility)
   * @param defaultSeed4 Global seed 4 for HDR random number generation (reproducibility)
   */
