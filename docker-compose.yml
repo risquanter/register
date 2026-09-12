@@ -81,6 +81,8 @@ services:
       REGISTER_TRIAL_PARALLELISM: "8"
       # Intended cap on concurrent risk-node resolution. Not read by the server
       # yet — the resolver's fan-out across sibling nodes is unbounded.
+      # PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS), docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md
+      # — connects this value and renames it.
       REGISTER_MAX_CONCURRENT_SIMULATIONS: "4"
       
       # CORS configuration

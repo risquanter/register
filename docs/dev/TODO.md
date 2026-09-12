@@ -2155,8 +2155,8 @@ is measured.
 
 **Not the same issue as the resolver's unbounded fan-out.** This item is about
 how one leaf's trials are divided. How many leaves run at once is a separate
-problem with its own plan: `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md`
-(see item 48).
+problem with its own plan — PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS),
+`docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` (see item 48).
 
 ---
 
@@ -2176,7 +2176,8 @@ read by no production code, so the value an operator sets controls nothing.
 fiber-local value, so a recursive traversal applies it per portfolio and admits
 `n^depth` leaves per request rather than `n`.
 
-**Status:** design complete, implementation not started.
+**Status:** design approved in direction, implementation deliberately deferred.
+PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS),
 `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` carries the mechanism, a
 worked example with timings, the deadlock argument for acquiring permits only at
 leaves, the exact signatures, and three open decisions. Nothing is implemented
