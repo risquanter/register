@@ -1,9 +1,9 @@
 # Plan: bound concurrent leaf simulation with two nested limits
 
-**Status:** Direction approved — the two-nested-limits design is the agreed fix.
-Implementation is deliberately deferred; no source edit is authorized by this
-document until it is approved as the session's governing plan and the three open
-decisions below are ruled. **Date:** 2026-09-11.
+**Status:** Direction approved and every decision ruled. Implementation is
+deliberately deferred; no source edit is authorized by this document until it is
+approved as the session's governing plan. Two other plans land first — see
+Sequencing. **Date:** 2026-09-13.
 **ADR reference:** ADR-015 (cached result resolution), ADR-002 (telemetry),
 ADR-029 (resource limits / denial-of-service defence).
 
@@ -392,79 +392,111 @@ Configuration and documentation:
 
 ---
 
-## Open decisions
+## Decisions — all ruled
 
-### Decision 1 — how the per-request semaphore reaches `simulateLeaf`
+Every decision this plan opened is ruled. The options and their trade-offs are
+kept because the reasoning behind a ruling is what makes it reviewable later.
 
-**Goal.** The semaphore is created once per public call and must be visible at
-one point four call levels down. Pick how it travels.
+### Decision 1 — how the per-request semaphore reaches `simulateLeaf`. RULED: A.
 
-**Option A — an explicit parameter on the four private methods.** Pros: visible
-in every signature, checked by the compiler, and impossible to lose by forking in
-the wrong place. Cons: four signatures grow by one parameter, in a file where
-they already carry six. How it plays out: a reader of `rawLeafResult` sees where
-the budget came from without leaving the file.
+**An explicit parameter on the four private methods.** The per-request budget
+travels as an ordinary argument rather than as ambient state.
 
-**Option B — a `FiberRef` set with `locally` around the whole resolution.** Pros:
-no signature changes at all; forked children inherit the value automatically.
-Cons: the dependency is invisible in the types, and any future code path that
-forks outside the `locally` scope silently gets the default instead of the
-request's budget — a bug that compiles and passes most tests. How it plays out: a
-later refactor that moves resolution into a separately forked fiber quietly loses
-the per-request bound.
+The two rejected options and why. **A `FiberRef` set with `locally` around the
+whole resolution** needs no signature changes and forked children inherit the
+value, but the dependency is invisible in the types: any future code path that
+forks outside the `locally` scope silently receives the default instead of the
+request's budget, and that bug compiles and passes most tests. A concurrency
+bound that fails silently is the worst shape available. **A resolver instance
+constructed per request** makes the semaphore an ordinary field and avoids all
+threading, but the service interface has to change from "a resolver" to
+"something that makes a resolver", so every caller of `CachedResultResolver`
+changes — much larger churn than the four parameters it avoids.
 
-**Option C — a resolver instance constructed per request.** Pros: the semaphore
-becomes an ordinary field, no threading and no `FiberRef`. Cons: the service
-interface must change from "a resolver" to "something that makes a resolver", so
-every caller of `CachedResultResolver` changes; this is much larger churn than the
-four private parameters it avoids.
+What A costs: four signatures grow by one parameter, in a file where they
+already carry six. What it buys: the compiler checks it, and a reader of
+`rawLeafResult` sees where the budget came from without leaving the file.
 
-**Recommendation (mine): Option A.** The threading is confined to one file, it is
-checked by the compiler, and it makes the per-request budget a visible part of the
-resolution context rather than ambient state. Option B's failure mode is silent,
-which is the worst property a concurrency bound can have.
+### Decision 2 — default values for the two limits. RULED: C.
 
-### Decision 2 — default values for the two limits
+**Both 4, and the rule relating them written into the operator table.** The
+numbers match today's literal; the substance of this ruling is the rule, not the
+value.
 
-**Goal.** Pick the numbers shipped in `application.conf`.
+Rejected: **both 8** would let one request saturate a typical eight-core
+machine, but eight leaves times eight trial fibers is sixty-four runnable
+fibers, and the deployed container is limited to two CPUs and 256 MB — eight
+concurrent ten-thousand-trial simulations is a real memory figure at that size.
+**Both 4 without the rule** ships the same numbers while leaving an operator no
+way to know how to change them coherently.
 
-**Option A — both 4** (keeps today's literal). Pros: no change in the number an
-operator already sees; conservative against the trial-parallelism multiplication
-(4 leaves × 8 trial fibers = 32 runnable fibers). Cons: on a machine with more
-than 4 cores a single request cannot use them all.
+**Outstanding measurement, which is a task of this plan and not a decision.**
+The tuning rule is phrased in terms of available cores, and
+`Simulator.scala:19` reads `Runtime.availableProcessors()`. What that returns
+inside a GraalVM native image running under a Docker CPU quota is unverified: if
+it reports the host's core count rather than the quota, a rule phrased in cores
+is wrong and must be phrased in the configured quota instead. **The rule text is
+written after this is measured, not before.** Build the image, run it under the
+compose CPU limit, print the value, and record it here:
 
-**Option B — both 8** (matches `REGISTER_TRIAL_PARALLELISM`). Pros: a single
-request can saturate a typical 8-core box. Cons: 8 × 8 = 64 runnable fibers, and
-the container in `docker-compose.yml` is limited to 2 CPUs and 256 MB — 8
-concurrent 10 000-trial simulations is a real memory figure there.
+| Environment | `availableProcessors()` | Configured quota |
+|---|---|---|
+| JVM, host | | n/a |
+| Native image, `cpus: '2'` | | 2 |
 
-**Option C — process-wide 4, per-request 4, and document the tuning rule.** Same
-numbers as Option A, with the relationship ("set both to the same value; raise the
-process-wide one only with the core count") written into the operator table.
+### Decision 3 — whether to emit a saturation gauge now. RULED: A.
 
-**Recommendation (mine): Option C.** The current default is 4 and the deployed
-container has 2 CPUs, so 4 is already generous; the value of this decision is in
-writing down the rule that keeps the two numbers coherent, not in the number.
+**Publish it now**, as a gauge beside the existing simulation instruments.
+Adding a bound without a way to see it saturate makes the first question about
+it — "is the bound what is making this slow?" — unanswerable. That is the same
+reason the limiter is a trait at all.
 
-### Decision 3 — whether to emit a saturation gauge now
+**The gauge's shape is settled by existing convention, not open.**
+`CachedResultResolverLive` already creates instruments from the injected
+`Meter`, and four conventions are visible in how it does so: dotted lowercase
+`subsystem.area.measurement` names with the unit as a suffix where it
+disambiguates; a unit and description always supplied, `"1"` for a dimensionless
+count; instruments created once at layer construction and passed into the
+constructor rather than created per call; and attributes attached per recording
+rather than baked into the instrument. The gauge follows all four:
 
-**Goal.** `available` exists on the limiter. Decide whether this plan also
-publishes it as a metric.
+```scala
+val permitsAvailable     = "risk_result.simulation.permits_available"
+val permitsAvailableUnit = "1"
+val permitsAvailableDesc = "Leaf-simulation permits currently free"
+```
 
-**Option A — expose it now**, as an observable gauge beside
-`risk_result.simulation.duration_ms`. Pros: the first question a bound raises is
-"is the bound what is making this slow", and only this number answers it. Cons:
-an asynchronous gauge is a new telemetry shape in this codebase.
+with an attribute distinguishing the process-wide limiter from the per-request
+one. No new dependency and no new layer: the `Meter` is already in this file's
+layer requirements.
 
-**Option B — ship the bound without the gauge.** Pros: smaller change. Cons: after
-landing, a slow response cannot be attributed to queueing versus computation
-without adding the metric anyway.
+**Two things this ruling depends on, both routed.** Nothing currently reads
+these instruments — the application wires the console exporters, whose output is
+filtered away — so `PLAN-TELEMETRY-EXPORT` lands first and makes the gauge
+observable. And no decision record governs metric naming; the convention above
+exists only as code. That gap is recorded as TODO item 50 and is not a
+prerequisite for this plan.
 
-**Recommendation (mine): Option A.** Adding a bound without a way to see it
-saturate means the first production question about it is unanswerable. This is
-the same reason the limiter is a trait at all.
+## Sequencing
 
----
+Two plans land before this one, each for a stated reason.
+
+**`PLAN-TELEMETRY-EXPORT` first.** Decision 3 publishes a saturation gauge, and
+Decision 2's tuning rule is written from what that gauge shows. Nothing can read
+it until the application stops wiring the console exporters, which is that
+plan's whole content.
+
+**`PLAN-CACHE-REGISTRY-RENAME` first.** It renames `CacheScope` to
+`ContentCacheRegistry`, and `CachedResultResolverLive` — the file this plan
+changes most — is one of its call sites. A rename landing after a substantive
+change to the same file means resolving conflicts that need not exist.
+
+`PLAN-IRMIN-RECURSIVE-READ` and `PLAN-NGINX-WORKSPACE-ROUTING` share no files
+with this plan and have no ordering relationship to it.
+
+Once those two land, this plan's signatures are restated against the renamed
+type: `CachedResultResolverLive`'s layer requires `ContentCacheRegistry` rather
+than `CacheScope`, and its cache lookups read `caches.forWorkspace(...)`.
 
 ---
 
