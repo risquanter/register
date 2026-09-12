@@ -28,18 +28,30 @@ trait LECCurve {
 }
 
 /**
- * Trial-aligned simulation outcomes — the lawful commutative monoid.
+ * Trial-aligned simulation outcomes — the algebraic content of a simulation
+ * result: the trial count plus the sparse trial→loss map.
  *
- * The algebraic content of a simulation result: the trial count plus the
- * sparse trial→loss map. Node identity does not participate in combination,
- * which is why the monoid lives here and not on `LossDistribution`
- * (`LossDistribution = NodeId × TrialOutcomes`; the label comes from tree
- * context, never from the algebra).
+ * Node identity does not participate in combination, which is why the algebra
+ * lives here and not on `LossDistribution` (`LossDistribution = NodeId ×
+ * TrialOutcomes`; the label comes from tree context, never from the algebra).
  *
- * Laws (all enforced under the same-nTrials alignment invariant):
+ * The carrier is one trial count, not the whole type. `combine` is defined only
+ * between values sharing an `nTrials`, so the lawful structure is a commutative
+ * monoid on each fixed-`nTrials` slice of this type — one monoid per trial
+ * count, not a single monoid over every `TrialOutcomes`. Within a slice:
+ * - Closed: combining two values of trial count N yields trial count N
  * - Associative: combine(a, combine(b, c)) == combine(combine(a, b), c)
  * - Commutative: combine(a, b) == combine(b, a)
- * - Identity: combine(empty, a) == a == combine(a, empty)
+ * - Identity: combine(empty, a) == a == combine(a, empty), where `empty` is the
+ *   zero-loss value at that same trial count
+ *
+ * Two operations therefore throw rather than return a value, and both are
+ * documented where they occur: mismatched trial counts (`combine`'s `require`)
+ * and per-trial sums exceeding `Long.MaxValue` (`Math.addExact`).
+ *
+ * Every result within one request sits in a single slice because the resolver
+ * builds them all under one `SimulationConfig`, whose `defaultNTrials` fixes N.
+ * That is the invariant the `require` guards.
  */
 case class TrialOutcomes(nTrials: PositiveInt, outcomes: Map[TrialId, Loss]) {
   /** Get outcome for specific trial (0 if not present) */
@@ -50,14 +62,20 @@ case class TrialOutcomes(nTrials: PositiveInt, outcomes: Map[TrialId, Loss]) {
 }
 
 object TrialOutcomes {
-  /** Zero losses across the configured number of trials — the monoid identity. */
+  /** Zero losses at `cfg.defaultNTrials` — the identity of that slice only.
+    * It is not an identity for values at any other trial count; combining it
+    * with one of those throws (see `combine`).
+    */
   def empty(using cfg: SimulationConfig): TrialOutcomes =
     TrialOutcomes(cfg.defaultNTrials, Map.empty)
 
   /**
    * Outer-join pointwise sum: union of trial IDs, missing trial = 0 loss.
-   * Enforces the same-nTrials alignment invariant — pointwise summation is
-   * only meaningful when both operands share the same trial coordinate space.
+   *
+   * Partiality: operands must share an `nTrials`, and a mismatch throws
+   * `IllegalArgumentException`. Pointwise summation is meaningful only within
+   * one trial coordinate space, so this is where the function is undefined
+   * rather than a check that could be relaxed.
    *
    * Partiality: per-trial sums use `Math.addExact`, so a sum exceeding
    * `Long.MaxValue` throws `ArithmeticException` instead of silently wrapping
@@ -85,6 +103,13 @@ object TrialOutcomes {
     override def combine(a: => TrialOutcomes, b: => TrialOutcomes): TrialOutcomes =
       TrialOutcomes.combine(a, b)
 
+  /** Identity for the slice named by `cfg.defaultNTrials`.
+    *
+    * `Identity[TrialOutcomes]` advertises an element for the whole type, but
+    * the element supplied here belongs to one slice: combining it with a value
+    * at a different trial count throws. Summon this instance under the same
+    * `SimulationConfig` that produced the values being combined.
+    */
   given identity(using cfg: SimulationConfig): Identity[TrialOutcomes] with
     def identity: TrialOutcomes = TrialOutcomes.empty
     def combine(a: => TrialOutcomes, b: => TrialOutcomes): TrialOutcomes =
@@ -285,10 +310,14 @@ object LossDistribution {
   * - Sums losses for each trial (missing trials treated as 0 loss)
   * - Preserves trial alignment for portfolio aggregation
    *
-   * Mathematical properties:
+   * Mathematical properties, holding among distributions that share a trial
+   * count (the condition `TrialOutcomes.combine` requires):
    * - Associative: merge(a, merge(b, c)) == merge(merge(a, b), c)
    * - Commutative: merge(a, b) == merge(b, a)
-   * - Identity: merge(empty, a) == a
+   *
+   * This is a reduction, not a fold: no identity element takes part, and an
+   * empty argument list yields `Map.empty` rather than the zero-loss value at
+   * some particular trial count.
    *
    * Loss semantics: Long represents millions of dollars (1L = $1M)
    * - Maximum representable: ±9.2 quintillion dollars

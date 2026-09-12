@@ -2086,6 +2086,15 @@ inventory (`Application.scala`, `RiskTreeServiceLive.scala`,
 - `modules/common/src/test/scala/com/risquanter/register/testutil/ConfigTestLoader.scala`
 - `modules/common/src/test/scala/com/risquanter/register/domain/PreludeOrdUsageSpec.scala`
 
+Monoid documentation accuracy — record on the type that the lawful structure is a
+commutative monoid on each fixed-`nTrials` slice rather than on the whole type,
+that the `Identity` instance's element belongs to the slice named by
+`cfg.defaultNTrials`, and that the trial-count `require` is partiality in the same
+sense the documented overflow is. Comment-only; no signature, type, or behaviour
+change:
+
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala`
+
 ### Open decisions
 
 Status after the 2026-08-08 review session:
