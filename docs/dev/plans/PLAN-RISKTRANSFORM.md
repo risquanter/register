@@ -2629,10 +2629,7 @@ M4 elevation respectively).
    expensive-to-retain is the head-only profile. Structurally the memo
    is a revision-checked slot per (tree, branch), not an evicting map —
    no EvictionStrategy, no generic-cache extraction from ContentCache
-   (design + `CacheStats` reuse only). A bounded LRU over revisions
-   remains the recorded M4 upgrade (carrying the generic-cache
-   extraction with it) only if deep trees with thousands of nodes make
-   per-step rebuild perceptible.
+   (design + `CacheStats` reuse only).
 
 ### 8.5 Sequencing note
 

@@ -2176,9 +2176,93 @@ read by no production code, so the value an operator sets controls nothing.
 fiber-local value, so a recursive traversal applies it per portfolio and admits
 `n^depth` leaves per request rather than `n`.
 
-**Status:** design approved in direction, implementation deliberately deferred.
+**Status:** design approved in direction and every decision ruled;
+implementation deliberately deferred.
 PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS),
 `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` carries the mechanism, a
 worked example with timings, the deadlock argument for acquiring permits only at
-leaves, the exact signatures, and three open decisions. Nothing is implemented
-until that plan is approved.
+leaves, and the exact signatures. Two plans land before it:
+`PLAN-TELEMETRY-EXPORT.md`, because the ruled saturation gauge cannot be read
+until the application stops wiring the console exporters, and
+`PLAN-CACHE-REGISTRY-RENAME.md`, because both change
+`CachedResultResolverLive.scala`. Nothing is implemented until that plan is
+approved.
+
+---
+
+## 49. Mitigation scope memo is head-only — a bounded revision cache if history browsing makes it thrash
+
+**Observed:** `MitigationScopeResolverLive` memoizes resolved mitigation scopes
+in `Ref[Map[(TreeId, BranchRef), (CommitHash, ResolvedScopes)]]`. The commit
+hash is a validity stamp inside the value, not part of the key, so each
+tree-and-branch holds exactly one entry — resolving at a different revision
+replaces it. Revisions never accumulate and memory stays bounded by the number
+of live tree-and-branch pairs.
+
+The cost of that shape is a single slot per tree-and-branch. Reading an older
+revision misses, recomputes, and overwrites the slot, so the next read of the
+head also misses. A caller that alternates between a historic revision and the
+head recomputes on every call and the memo contributes nothing.
+
+**Why this is not scheduled:** the upgrade is a bounded cache over revisions —
+the composite key `(TreeId, BranchRef, CommitHash)` plus an eviction policy to
+cap the entry count. It is only worth building once something actually
+alternates revisions in a tight loop, and nothing in the product does that
+today. It is not tied to any milestone: the circumstances that would justify it
+can arise at any point, before or after the mitigation work completes.
+
+**Trigger criteria — any one of these is the signal to build it:**
+
+1. **A feature lands that alternates revisions within one user interaction.**
+   This is the trigger that can be checked without production traffic, by
+   reading the design rather than measuring. The design-view history slider
+   (item 43) is the concrete candidate: dragging it steps through revisions, and
+   every step would recompute the full scope resolution for every mitigation.
+   Scenario compare mode is the second candidate if it ever resolves scopes at
+   two revisions in one request.
+2. **Resolution time becomes visible in the simulation telemetry.** Once
+   metrics reach a backend, a resolution duration that is no longer small
+   against the surrounding request is the measured signal. This needs a
+   `risk_result.scope.resolution_duration_ms` instrument, which does not exist
+   yet — adding it is part of this item, not a prerequisite held elsewhere.
+3. **A tree in real use exceeds roughly two thousand nodes.** Resolution is
+   O(mitigations x nodes) cheap evaluations; the ruling that made head-only
+   correct assumed hundreds of nodes and depth under ten. An order of magnitude
+   past that invalidates the assumption the ruling rests on, so the ruling
+   should be re-derived rather than re-applied.
+
+**What it would carry with it:** the eviction policy belongs with
+`ContentCache`'s `EvictionStrategy` rather than duplicated, so building this
+means extracting a generic bounded cache that both use. That extraction is part
+of this item's cost, not a separate task.
+
+**Not a memory concern.** Head-only is bounded by construction. This item is
+about wasted recomputation, never about growth.
+
+---
+
+## 50. No decision record governs metric instrument naming
+
+**Observed:** the project has full OpenTelemetry instrumentation —
+`MetricsLive` provides a `Meter`, and `CachedResultResolverLive`,
+`RiskTreeServiceLive` and `AuthorizationServiceSpiceDB` each create instruments
+from it. A consistent convention is visible across them: dotted lowercase
+`subsystem.area.measurement` names with the unit as a suffix where it
+disambiguates (`risk_result.simulation.duration_ms`), a unit and description
+always supplied (`"1"` for dimensionless counts), instruments created once at
+layer construction and passed into the constructor rather than created per call,
+and attributes attached per recording rather than baked into the instrument.
+
+None of that is written down. ADR-002 is the logging strategy and covers
+`ZIO.logInfo` and the Logback bridge, not metric instruments; no other decision
+record mentions them. The convention holds only because each new instrument was
+written next to an existing one.
+
+**Why it matters:** a fourth subsystem adding metrics has nothing to conform to,
+and a divergent naming scheme is not something review would reliably catch.
+Dashboard and alert queries are written against name prefixes, so an
+inconsistent name is a silently broken query rather than a visible error.
+
+**Shape:** a short decision record stating the four conventions above, with the
+existing instruments as the reference examples. Not urgent; worth doing before
+the next subsystem adds instruments.
