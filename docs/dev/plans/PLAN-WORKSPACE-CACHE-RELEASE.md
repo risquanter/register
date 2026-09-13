@@ -347,7 +347,7 @@ All four tiers green is the acceptance condition. Report pass or fail only.
 | `ContentCacheRegistry.scala` | the scaladoc currently reads "Cache lifecycle = workspace lifecycle; a deleted workspace's cache lingers until restart (NoOp eviction)." The second clause stops being true and is deleted; the first becomes a plain statement of what the code now does, with the in-flight race noted |
 | `MitigationScopeResolverRegistry.scala` | the same lifecycle statement added, since it now has the same behaviour |
 | `CascadeDelete.scala` | the scaladoc lists what a workspace teardown removes; cache release joins trees and scenario branches |
-| `docs/dev/plans/IMPLEMENTATION-PLAN.md` | the "Eviction Strategy" note ends "Monitor memory usage in production before implementing". It is rewritten to describe only within-cache eviction, which is what it is actually about, and to record that cross-workspace retention is handled here. Its unusable deferral criterion is replaced by the same kind of trigger criteria TODO 49 carries |
+| `docs/dev/plans/IMPLEMENTATION-PLAN.md` | the "Eviction Strategy" note ends "Monitor memory usage in production before implementing". It is rewritten to describe only within-cache eviction, which is what it is actually about, and to record that cross-workspace retention is handled here. Its unusable deferral criterion is replaced by the same kind of trigger criteria TODO 49 carries, and it gains the pointer to TODO 52 — which decides, once, which of the three shapes (a bound by construction, an eviction policy, or reclaiming the provably unreachable) belongs in which situation, and codifies the answer in an ADR |
 | `docs/dev/TODO.md` | item 51 becomes a pointer to this plan rather than a description of unowned work |
 
 ---

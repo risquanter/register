@@ -43,10 +43,11 @@ uses: `PLAN-RISKTRANSFORM.md` heads the relevant section "Per-workspace registry
 Only the type names disagree with the documents describing them.
 
 A second, smaller objective rides along, because it concerns a comment in a file
-this rename already touches. `MitigationScopeResolverLive`'s scaladoc states that
-the memo is head-only but not why the commit hash is stored in the value rather
-than in the map key. That is the design's least obvious property and the one a
-reader is most likely to try to "fix". The reasoning is stated in place.
+this rename already touches. `MitigationScopeResolverLive`'s scaladoc states the
+memo's shape but not why the commit hash is stored in the value rather than in
+the map key, nor why the slot is bounded by construction instead of by an
+eviction policy. Those are the design's two least obvious properties and the ones
+a reader is most likely to try to "fix". Both reasons are stated in place.
 
 ---
 
@@ -180,35 +181,49 @@ method reads as redundancy: `registry.forWorkspace(id)` rather than
 ## The memo scaladoc
 
 `MitigationScopeResolverLive`'s class scaladoc is replaced in full. The current
-text states the head-only shape and then points at a plan document for the
-rationale; the replacement states the rationale in place, which is what the
-comment rule requires — a comment reads as the current understanding of the code,
-and a pointer to a plan is not that.
+text states the shape and then points at a plan document for the rationale; the
+replacement states the rationale in place, which is what the comment rule
+requires — a comment reads as the current understanding of the code, and a
+pointer to a plan is not that.
+
+The slot's capacity is two, per the 2026-09-13 amendment to the memo ruling
+(`PLAN-RISKTRANSFORM.md` §8.4-5). If that amendment has not landed by the time
+this rename runs, apply this block as written and the capacity change with it —
+the two edits touch the same comment and the same field, and splitting them
+would mean writing the comment twice.
 
 Replacing the block in
 `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`:
 
 ```scala
 /** Memoizes the resolved scopes of one tree version. One entry per
-  * (treeId, branch) holds a revision and the scopes resolved at it; resolving
-  * at a different revision replaces that entry, so revisions never accumulate.
-  * In-memory `Ref` → `UIO`. One instance per workspace
+  * (treeId, branch) holds up to two revisions and the scopes resolved at each,
+  * evicting the least recently used, so revisions never accumulate. In-memory
+  * `Ref` → `UIO`. One instance per workspace
   * (`MitigationScopeResolverRegistry`).
   *
   * The revision is a stamp inside the stored value rather than part of the map
   * key, and that is what bounds the memo. Keying on the revision would make
   * every revision a separate entry with nothing to remove it; each entry holds
   * a full mitigation-to-node-id map, so an editing session would retain one per
-  * edit and grow without a ceiling. As a stamp it bounds the memo by the number
-  * of live tree-and-branch pairs instead.
+  * edit and grow without a ceiling. As a stamp under a fixed capacity it bounds
+  * the memo by the number of live tree-and-branch pairs instead.
   *
-  * The price is that each tree-and-branch has a single slot. Resolving a
-  * historic revision misses, recomputes, and overwrites the slot, so a caller
-  * alternating between a historic revision and the head recomputes every time
-  * and gains nothing from the memo. That is the accepted trade: an entry is
-  * cheap to rebuild and expensive to retain. Rebuilding scans the node domain
-  * once per predicate, which is small against the simulation the surrounding
-  * request performs; a retained entry carries a node-id set per mitigation.
+  * Two is the capacity because the alternation it exists to serve has two
+  * participants: the branch head, and whichever historic revision is being read.
+  * A reader scrubbing through history replaces the second entry at every step
+  * while the head entry survives, so neither reader forces the other to
+  * recompute. A third revision evicts the least recently used.
+  *
+  * The bound is structural rather than a policy. An eviction strategy could have
+  * served here, and `ContentCache` already has one; reusing it would mean
+  * extracting a generic bounded cache shared by both, a refactoring whose cost
+  * outweighed the return at two entries per slot. Open to reconsideration if a
+  * caller ever alternates across more than two revisions. An entry is in any
+  * case cheap to rebuild and expensive to retain: rebuilding scans the node
+  * domain once per predicate, which is small against the simulation the
+  * surrounding request performs, while a retained entry carries a node-id set
+  * per mitigation.
   *
   * The memo read and write are not atomic — last-writer-wins is a deliberate,
   * accepted trade-off, safe because the exact-revision hit guard never serves a

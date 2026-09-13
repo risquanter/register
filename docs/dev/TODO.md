@@ -2212,24 +2212,31 @@ approved.
 
 ---
 
-## 49. Mitigation scope memo is head-only — a bounded revision cache if history browsing makes it thrash
+## 49. Mitigation scope memo is bounded to two revisions — an adaptive revision cache if that ever binds
 
 **Observed:** `MitigationScopeResolverLive` memoizes resolved mitigation scopes
-in `Ref[Map[(TreeId, BranchRef), (CommitHash, ResolvedScopes)]]`. The commit
-hash is a validity stamp inside the value, not part of the key, so each
-tree-and-branch holds exactly one entry — resolving at a different revision
-replaces it. Revisions never accumulate and memory stays bounded by the number
-of live tree-and-branch pairs.
+in a `Ref`-held map keyed by `(TreeId, BranchRef)`. The commit hash is a validity
+stamp inside the value, not part of the key, so revisions never accumulate and
+memory stays bounded by the number of live tree-and-branch pairs.
 
-The cost of that shape is a single slot per tree-and-branch. Reading an older
-revision misses, recomputes, and overwrites the slot, so the next read of the
-head also misses. A caller that alternates between a historic revision and the
-head recomputes on every call and the memo contributes nothing.
+**Ruled 2026-09-13: the slot holds two revisions, evicting the least recently
+used.** That closes the cost the item was originally written about — a single
+slot meant a historic read overwrote the head entry, so a caller alternating
+between a pin and the head recomputed on every call and the memo contributed
+nothing. At capacity two the head survives any amount of scrubbing, because the
+scrubbing revisions all contend for the second position.
 
-**Why this is not scheduled:** the upgrade is a bounded cache over revisions —
-the composite key `(TreeId, BranchRef, CommitHash)` plus an eviction policy to
-cap the entry count. It is only worth building once something actually
-alternates revisions in a tight loop, and nothing in the product does that
+What remains open is the *adaptive* version, for a caller that alternates across
+more than two revisions. Nothing in the product does that today.
+
+**Why this is not scheduled:** the upgrade is an adaptive bounded cache over
+revisions — the composite key `(TreeId, BranchRef, CommitHash)` plus an eviction
+policy to cap the entry count. A composite key is only unbounded without such a
+policy; with one it is a legitimate design, and the only thing separating it from
+the ruled capacity-2 slot is that a global policy adapts (one hot tree may hold
+many revisions) while a per-slot capacity guarantees (the head can never be
+evicted by activity elsewhere). It is only worth building once something actually
+alternates across more than two revisions, and nothing in the product does that
 today. It is not tied to any milestone: the circumstances that would justify it
 can arise at any point, before or after the mitigation work completes.
 
@@ -2256,10 +2263,14 @@ can arise at any point, before or after the mitigation work completes.
 **What it would carry with it:** the eviction policy belongs with
 `ContentCache`'s `EvictionStrategy` rather than duplicated, so building this
 means extracting a generic bounded cache that both use. That extraction is part
-of this item's cost, not a separate task.
+of this item's cost, not a separate task, and it is the cost that made the
+capacity-2 slot the better trade at two entries.
 
-**Not a memory concern.** Head-only is bounded by construction. This item is
-about wasted recomputation, never about growth.
+**Not a memory concern.** The capacity-2 slot is bounded by construction. This
+item is about wasted recomputation, never about growth.
+
+**Revisit this item whenever the eviction-strategy topic is opened** — item 52
+says why, and this item is one of the cases that survey must weigh.
 
 ---
 
@@ -2318,4 +2329,46 @@ That is a different problem — it trades away cache hits and needs a policy and
 bound, where releasing a dead workspace trades away nothing because the memory is
 provably unreachable. It stays as described under "Eviction Strategy" in
 `docs/dev/plans/IMPLEMENTATION-PLAN.md`, and item 49 is its counterpart for the
-mitigation scope memo.
+mitigation scope memo. Which of the three shapes — a bound by construction, an
+eviction policy, or reclaiming the provably unreachable — belongs in which
+situation is item 52.
+
+---
+
+## 52. Evaluate the bounded-by-construction preference, then codify eviction strategy in an ADR
+
+**The preference.** Register prefers **bounds by construction** over eviction
+policies. A construction bound is a property of the data structure, provable by
+reading it, and no access pattern can defeat it. An eviction policy is a
+heuristic whose worst case depends on traffic, and the project has no real
+traffic to tune one against — so a policy chosen now would be tuned against
+guesses.
+
+**Why this is an item and not just a habit.** The preference has been applied
+case by case, and case-by-case application is what it exists to prevent. Three
+shapes already coexist and no document says which belongs where:
+
+| Shape | Where |
+|---|---|
+| Bound by construction | the mitigation scope memo's capacity-2 slot (item 49) |
+| Eviction policy | `ContentCache`'s `EvictionStrategy`, with `LeafSimResult.approxSizeBytes` for its accounting |
+| Reclaim the provably unreachable | dead-workspace cache release (item 51, `PLAN-WORKSPACE-CACHE-RELEASE.md`) |
+
+**What to do, in order, the next time the eviction-strategy topic is opened for
+any reason:**
+
+1. **Ask first whether the preference has paid off.** Name where a construction
+   bound held cleanly and where it forced a worse design. This question comes
+   before any new policy choice; a preference that has not paid off should be
+   revised rather than reapplied.
+2. If it has paid off, **survey every eviction strategy and construction bound in
+   the codebase together** — the three shapes above and anything added since.
+3. **Decide which shape applies to which situation, and why.** The output is a
+   rule someone can apply to a cache that does not exist yet, not a list of what
+   the existing caches happen to do.
+4. **Codify it in an ADR.** Until that ADR exists, no eviction policy is chosen
+   case by case: a new cache takes a construction bound, or the choice is
+   escalated as a decision.
+
+**Entry points that must lead here:** item 49, item 51, and the "Eviction
+Strategy" note in `docs/dev/plans/IMPLEMENTATION-PLAN.md`.

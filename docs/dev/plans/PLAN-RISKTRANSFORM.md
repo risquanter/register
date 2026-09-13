@@ -903,24 +903,38 @@ memoization into M2; the remaining M3 scope is listed in §8.2.
   `mitigations = oldTree.mitigations` over from its own read. Landing the
   buckets must delete that carry-over and its comment and resolve mitigations
   from the request instead; left in place it would make the new buckets inert.
-- **LEC endpoints**: `mitigations` selection parameter on the analysis
-  endpoints; responses carry raw + selected-mitigated curves and the
-  mitigation-provenance layer (`MitigationApplicationRecord`s) beside
-  simulation provenance. Client toggling re-fetches per selection (SSE/HTTP
-  notification-refetch model, ADR-004a) — see OD-3.
+- **LEC endpoints**: one `MitigationSelection` per request (Decision 11).
+  A response carries the inherent curves, the curves under that one selection,
+  and the mitigation-provenance layer (`MitigationApplicationRecord`s) beside
+  simulation provenance. Comparing several selections means several requests,
+  one per Compare slot. Each toggle issues its own request; there is no
+  server-push refetch on this path — the notification channel carries node
+  invalidation only, and no browser consumer for it exists (Decision 1).
 - **Frontend**: per-mitigation selection UI per OD-3's refined model —
   mitigation child-styled rows under scoped nodes (per-(mitigation, node)
-  enablement) + global tri-state control; within-view mitigated-twin curves
-  beside unmitigated, with a client-side display mode giving a purely
-  mitigated (residual-risk) view — granularity per OD-3c; **Compare slots
-  gain mitigation selection as a slot dimension** with a copy-for-compare
-  gesture (variant comparison: raw vs fw vs fw+IDS as slots,
-  overlay/side-by-side, slot-keyed colours; comparand slots display their
-  variant only, baseline shows raw);
+  enablement) + global tri-state control; a curve is identified by
+  (node, variant), where a variant is one named selection and `Inherent` is the
+  empty selection — a node has one curve per variant, never a fixed pair, since
+  several mitigations on a node compose into a single valuation; within-view
+  variant curves beside the inherent one, with a client-side display mode giving
+  a purely mitigated (residual-risk) view — granularity per OD-3c; colour stays
+  node identity and a variant is distinguished by **point-marker shape**
+  (Decision 7), with the curve cap counting nodes; **Compare slots
+  gain mitigation selection as a slot dimension** (Decision 6) with a
+  copy-for-compare gesture (variant comparison: inherent vs fw vs fw+IDS as
+  slots, overlay/side-by-side, slot-keyed colours; comparand slots display their
+  variant only, baseline shows the inherent curve);
   toggle↔curve colour consistency; two-tier badges (directly-scoped solid,
   affected-by-descendant faint + tooltip); override edit-popup flow (ADR-019
   Pattern 6 state machine) + stale badge surfacing; ADR-019
   ownership rules throughout.
+- **Change notification**: `InvalidationHandler.computeAffectedNodes` diffs node
+  membership and node content hashes only, so a mitigation edit changes every
+  affected node's results while the diff reports nothing. M4 extends it to diff
+  the mitigation collection and publish the affected nodes (Decision 1), which
+  gives `InvalidationHandler` a scope-resolver dependency on the write path. The
+  browser has no consumer for these messages, so M4's publish reaches zero
+  subscribers; building the consumer is M5 scope (§7.7), not an M4 omission.
 - **Semantic diff**: `ChangedNodesService` compares node domain hashes only —
   a mitigation edit changes results without changing any node hash. Ruled
   (OD-4): recorded as phase M5, §7.7 — planned after M1–M4 land.
@@ -1778,7 +1792,77 @@ Ammendment:
 - `modules/server-it/src/test/scala/com/risquanter/register/services/PinnedReadAuthorizationItSpec.scala`
 - `modules/server-it/src/test/scala/com/risquanter/register/services/TreeRevertItSpec.scala`
 
-### 7.6 — reserved for the M4 implementation-grade continuation.
+### 7.6 M4 implementation-grade elevation
+
+The elevation section itself is unwritten: exact signatures, the M4 file
+inventory and the verification plan arrive once §7.6.2's remaining decisions are
+ruled. Until then M4 has no plan coverage and no M4 source edit is authorized.
+
+#### 7.6.0 Design anchors
+
+The mitigation design tenets, each verified against source. Every M4 decision is
+checked against this list, and a decision that contradicts one is wrong or the
+anchor is wrong — neither is settled silently.
+
+| # | Anchor | Enforced at |
+|---|---|---|
+| A1 | Two valuations, never one merged value. Raw is the mitigation-free fold and is cached; mitigated is a second fold at the read edge and is never stored | ADR-034 §1 |
+| A2 | Stage determines **where** a mitigation may apply: `LeafStage` leaves only, `ResultStage` any node | the stage-domain intersection in `MitigationScopeResolverLive.resolveOne` |
+| A3 | Stage determines **when** it applies and therefore whether it is cached. `LeafStage` is baked in **before** hashing, so a mitigated leaf hashes differently and becomes its own content-addressed entry. `ResultStage` is applied **after** the lookup returns and is never cached | `CachedResultResolverLive` steps 1–3 |
+| A4 | Composition within a node is function composition in precedence order, not addition. Leaf: `foldLeft(applyTo)`. Result: `reduceOption(_.andThen(_))`. Order `(precedence.key, id.value)` | `MitigationApplication` |
+| A5 | A node's mitigated value folds its children's **mitigated** values, never the raw aggregate with a transform laid over it | ADR-034 §2, §4 |
+| A6 | Portfolios are never cached; the aggregate is recomputed on every read | `CachedResultResolverLive` step 4 |
+| A7 | One selection yields exactly **one** mitigated valuation per node. Several mitigations on a node compose into one curve, not one curve each | follows from A4 |
+| A8 | Scope is resolved server-side, per tree version, from a predicate. A predicate that stops binding makes that one mitigation a no-op plus a drift signal; it never fails the request | `MitigationScopeResolverLive`; `ScopeOutcome` |
+| A9 | A selection restricts and can never extend — `NodesOnly` intersects the resolved scope, so an out-of-scope id silently does nothing | `MitigationApplication.scoped` |
+| A10 | The defaults are identity: `Inherent` with empty scopes makes the whole mitigation path a no-op, so an unchanged caller gets an unchanged figure | OD-5; the resolver's default arguments |
+| A11 | Nothing mitigated is ever persisted. The effective tree is built per request and discarded | ADR-034 §5 and its persistence code smell |
+| A12 | The cache stores **content**, never mitigations. A param-stage mitigation is cached because it produces new content; a result-stage mitigation is not cached because it produces none | `ContentHashIndex`, `LeafSimContent` |
+
+**A12 stated as one sentence:** a param-stage mitigation changes what must be
+simulated; a result-stage mitigation changes what is done with a simulation.
+
+**Why a leaf is stored and a portfolio is not.** The cache key is
+`sha256(LeafSimContent.toJson)`, and `LeafSimContent` is `seedVarId,
+probability, distributionType, percentiles, quantiles, minLoss, maxLoss, terms`
+— no node id, no name, no parent. The value is `LeafSimResult(outcomes,
+provenance)`, also carrying no identity. So a mitigated leaf is not marked as a
+mitigation anywhere and produces no tree version; it is an ordinary leaf whose
+parameters happen to have come from a transform, and a user who typed those same
+numbers by hand would hit the same entry. `seedVarId` rides through the transform
+unchanged, so the mitigated leaf draws the same stochastic stream as the raw one
+and the two curves are a controlled comparison rather than two experiments.
+
+A leaf is stored because a param-mitigated leaf **must be simulated** — a leaf
+with one set of distribution parameters and a leaf with another are different
+stochastic processes, with no derive-from-raw shortcut — and simulation is the
+expensive operation whose result is a pure function of content. That argument is
+complete without reference to mitigations.
+
+A portfolio result is not stored for three separate reasons. Combining children
+is a fold while simulating is the expensive step, so a portfolio cache avoids
+nothing (portfolios still get content hashes — `sha256` of the sorted child
+hashes — but those serve change detection). A cached **raw** aggregate cannot
+produce the mitigated one, by A5. And a cached **mitigated** aggregate would need
+the selection in its key, which is exactly what content addressing avoids and
+what A11 forbids.
+
+**Worked example.** Tree `P → {Q → {a, b}, c}`. One `LeafStage` mitigation
+("Patch cadence") pulls leaf `a` from 9 to 5; one `ResultStage` mitigation
+("Cyber insurance") caps `Q` at 15. Per-trial dollars in millions, `b = 8`,
+`c = 1`:
+
+| Read | Selection | Effective tree | Cache | Q | P |
+|---|---|---|---|---|---|
+| 1 | `Inherent` | input | `h_a`, `h_b`, `h_c` all miss → simulate → store | 9+8 = 17 | 18 |
+| 2 | Patch cadence | `a → a'` | `h_a'` miss → store; `h_b`, `h_c` hit | 5+8 = 13 | 14 |
+| 3 | Insurance | input | all three hit | cap15(17) = 15 | 16 |
+| 4 | both | `a → a'` | all three hit | cap15(13) = 13 | 14 |
+
+Four analyses, four cache entries, four leaf simulations; read 4 costs none. The
+shortcut A5 forbids is visible at read 4: applying the cap to a cached
+`Q_raw = 17` gives 15, while the correct value is 13, and the gap is exactly
+Patch cadence's effect on `a`, which capping the raw total never sees.
 
 #### 7.6.1 Pre-elevation review register
 
@@ -1789,22 +1873,22 @@ time; the Status column is current.
 | # | Finding | Sev | Status |
 |---|---|---|---|
 | F1 | Tree PUT silently deletes every mitigation: `RiskTreeServiceLive.create`/`update` called `RiskTree.fromNodes` without `mitigations`, and `writeTree`'s whole-subtree `set_tree` (DD-7) deletes every `mitigations/{id}` blob the call omits. Latent while no write path creates mitigations; live data loss at M4. `MitigationPersistenceItSpec` exercises the repository, not the service, so it could not catch this | high | **Fixed.** Defaults removed from the `RiskTree` constructor, `fromNodes` and `fromNodesUnsafe` so the compiler forces intent; `create` passes `Nil`, `update` carries `oldTree.mitigations`; service-level regression tests added to `RiskTreeServiceLiveSpec` |
-| F2 | The refetch mechanism §7.4 cites does not exist on the client (the SPA has no SSE consumer at all; SSE lives only under `modules/server/`), and `InvalidationHandler.computeAffectedNodes` diffs node membership and node content hashes only, so it is blind to mitigation-only edits | med | Open → Decision 1 |
-| F3 | D5 is open and its designated ADR does not cover the API: §7.4 points at ADR-034, which explicitly scopes transform definitions out. No ADR covers the client-facing mitigation API. D4 likewise open, with `applicationRecords` built but consumed nowhere | high | Open → Decision 2 |
+| F2 | **Ruled (Decision 1 = B).** The refetch mechanism §7.4 cited does not exist on the client (the SPA has no SSE consumer at all; SSE lives only under `modules/server/`), and `InvalidationHandler.computeAffectedNodes` diffs node membership and node content hashes only, so it is blind to mitigation-only edits | med | Open → Decision 1 |
+| F3 | D5 is open and its designated ADR does not cover the API: §7.4 points at ADR-034, which explicitly scopes transform definitions out. No ADR covers the client-facing mitigation API. D4 likewise open, with `applicationRecords` built but consumed nowhere | high | Ruled → Decision 2 |
 | F4 | `overrideBaseStamp` is server-computed by ruling (§8.15) but client-supplied by the `Mitigation` codec, which decodes it straight off the wire | high | **Approved, not implemented.** Fix depends on the M4 DTO design |
 | F5 | The selection payload has no size bound: neither `ScopeRestriction.NodesOnly.ids` nor `MitigationSelection.Selected.entries` is bounded. Derived bounds 10 000 (tree node ceiling) and 1 000 (`MaxMitigations`), both from ADR-017 §6 domain cardinalities; the 8 MiB `RequestStreaming.Disabled(cfg.maxRequestBytes)` cap covers the aggregate | med-high | **Approved, not implemented** |
 | F6 | Where the selection rides is unresolved, and the plan's stated answer does not fit the endpoints | med | Open → Decision 3 |
 | F7 | The response type cannot carry what ADR-034 and OD-3 require: `Map[NodeId, LECNodeCurve]` has no room for two valuations, per-valuation provenance, `staleMitigationIds`, or drift signals | med | Open → Decision 4 |
 | F8 | The scope resolver is not reachable from the LEC path: `ScopeResolverScope` is wired into `QueryServiceLive` only, and `RiskTreeServiceLive` discarded the `CommitHash` | med | **Fixed.** `RiskTreeService.getById` widened to `(RiskTree, CommitHash)`; the three controller callers discard the hash at the wire boundary. Supersedes the confinement formerly recorded in §7.5.3 (i) and §7.5.4, both now corrected |
 | F9 | §8.7 Finding 3's required validating decoder has an unclear trigger: `MitigationApplicationRecord`'s derived codec re-validates nothing, so a tampered record decodes cleanly | med | Open → Decision 5 |
-| F10 | Mitigation selection collides with Compare slot identity: OD-3 wants selection as a slot dimension, but `SlotCoordinate.samePairAs` does not carry it | med | Open → Decision 6 |
-| F11 | The 13-curve cap and the twin-curve encoding are unruled: `LECChartState` caps user-selected nodes at 13 and `ColorAssigner` assigns one colour per node, which raw+mitigated twins break | med | Open → Decision 7 |
-| F12 | New nodes and new mitigations cannot reference each other in one PUT: `overrideAnchor` is a `NodeId` and `risk_id` literals need ids, but ADR-017 create buckets carry no ids — the server mints them | low-med | Open → Decision 8 |
+| F10 | Mitigation selection collides with Compare slot identity: OD-3 wants selection as a slot dimension, but `SlotCoordinate.samePairAs` does not carry it | med | Ruled → Decision 6 |
+| F11 | **Ruled (Decision 7).** `LECChartState` caps user-selected nodes at 13 and `ColorAssigner` assigns one colour per node, which a second curve per node breaks. The cap counts nodes; a variant is drawn with point-marker shape, colour staying node identity | med | Ruled → Decision 7 |
+| F12 | New nodes and new mitigations cannot reference each other in one PUT: `overrideAnchor` is a `NodeId` and `risk_id` literals need ids, but ADR-017 create buckets carry no ids — the server mints them | low-med | Ruled → Decision 8 |
 | F13 | §7.4's create-DTO wording contradicted ADR-017 Decision 1 by giving `RiskTreeDefinitionRequest` an identity-preserving bucket | low | **Fixed** (§7.4 first bullet) |
 | F14 | §7.4.1's user-documentation deliverable has zero coverage and is already due: `docs/user/VQL-QUERY-EXAMPLES.md`, `TERMINOLOGY.md` and `API-TUTORIAL.md` contain no occurrence of "mitigat"; the deliverable is scoped to "M3/M4" and M3 landed at 0.10.31/0.10.32 | low (blocking under G8) | Open — content depends on Decisions 2–4 |
 | F15 | Stale docs and comments to sweep | low | **Fixed.** ADR-034 status → "Accepted (implemented)"; `CachedResultResolver`/`CachedResultResolverLive` `None` → `Inherent` (3 sites); ADR-017 `obsoleteNodeIds` row corrected to the whole-subtree `set_tree` semantics. Not stale after all: `RiskTreeRequests.resolveUpdate`, which exists as a delegating entry point |
 | F16 | The plan's ADR-alignment table predates ADR-034, ADR-035 and ADR-036 | low | **Fixed** (rows added) |
-| F17 | A tree PUT can leave `overrideAnchor` pointing at a node the same request deleted. `validateMitigations` checks duplicate ids, duplicate names and the 1 000 cap only — it does not cross-check `MitigationSpec.LeafStage.overrideAnchor: Option[NodeId]` against the node collection, and its docstring places scope resolution outside the tree invariants. Predicate targets are not references — they are re-resolved per tree version, and a non-binding predicate is a designed per-mitigation no-op drift signal — but `overrideAnchor` is a stored reference to a ULID that, once its node is deleted, can never bind again. F12 is the forward case (a new node and a new mitigation referencing each other before ids are minted); this is the backward case | med | Open → Decision 9 |
+| F17 | A tree PUT can leave `overrideAnchor` pointing at a node the same request deleted. `validateMitigations` checks duplicate ids, duplicate names and the 1 000 cap only — it does not cross-check `MitigationSpec.LeafStage.overrideAnchor: Option[NodeId]` against the node collection, and its docstring places scope resolution outside the tree invariants. Predicate targets are not references — they are re-resolved per tree version, and a non-binding predicate is a designed per-mitigation no-op drift signal — but `overrideAnchor` is a stored reference to a ULID that, once its node is deleted, can never bind again. F12 is the forward case (a new node and a new mitigation referencing each other before ids are minted); this is the backward case | med | Ruled → Decision 9 |
 
 Two further items came from the complex-tier review of the F1/F8 change:
 
@@ -1813,41 +1897,94 @@ Two further items came from the complex-tier review of the F1/F8 change:
 | R1 | Lost update in the tree-update path: `RiskTreeServiceLive.update` precomputes a whole replacement tree from its own earlier read, then passes `_ => riskTree` to `repo.update`, which discards the fresh read it just performed. No compare-and-swap anywhere in the write path, so two overlapping PUTs silently drop one client's edit. Pre-existing; predates mitigations and applies equally to node content, tree name and `seedVarHighWater` | should-fix | Ruled: fix properly via optimistic concurrency keyed on `CommitHash`. Scoped out to `PLAN-TREE-WRITE-CONCURRENCY.md` (NEEDS REVIEW, not implementation-grade), whose write-shape ruling is a version token first, then server-side diff-and-merge — options in `PLAN-TREE-WRITE-CONCURRENCY-APPENDIX-WRITE-SHAPE.md` |
 | R2 | `CommitHash` described as "the storage-relation revision (ADR-032 §3)" in two trait scaladocs. ADR-032 §3 is about per-node byte hashing for merge-conflict prediction, not commit identity | note | **Fixed** in both `RiskTreeService` and `RiskTreeRepository` |
 
-**Open decisions from the register.** These are the M4 elevation's decision set;
-recommendations are the reviewer's, none is ruled.
+#### 7.6.2 Decision register — eight ruled, four open
 
-1. **Does M4 make mitigation edits visible to the invalidation channel?** (F2)
-   Recommendation: no — amend §7.7's scope line to name the invalidation
-   channel, and correct §7.4's SSE mis-citation.
+The M4 elevation's decision set. Decisions 11 and 12 were added during the
+ruling session; both were absent from the review that produced F1–F17.
+
+**Ruled.**
+
+1. **Does M4 make mitigation edits visible to the change-notification channel?**
+   (F2) **RULED B.** Yes. `computeAffectedNodes` gains a mitigation-collection
+   diff and publishes the affected nodes, which gives `InvalidationHandler` a
+   scope-resolver dependency on the write path. The browser consumer is M5
+   scope, so M4's publish reaches zero subscribers by design.
 2. **Where does the client-facing mitigation API contract live?** (F3)
-   Recommendation: a new ADR-037.
-3. **How does the selection cross the wire?** (F6) Recommendation: JSON body on
-   both; convert `prob-of-exceedance` to POST.
-4. **What shape does the analysis response take?** (F7) Recommendation: an
-   envelope for `lec-multi`, a small two-field result for `prob-of-exceedance`,
-   provenance per valuation inside `NodeCurves`.
-5. **Does M4's outbound record decode trigger §8.7 Finding 3's required
-   validator?** (F9) Recommendation: yes, ship it.
-6. **Does mitigation selection join `SlotCoordinate`?** (F10) Recommendation:
-   yes, as `at` already does.
-7. **What does the 13-curve cap count, and how is a mitigated twin drawn?**
-   (F11) Recommendation: the cap counts nodes; the twin is distinguished by
-   stroke dash.
+   **RULED B — split by surface.** The mitigation buckets amend ADR-017, whose
+   "Four Buckets" decision would otherwise describe a tree PUT that no longer
+   exists. The read side becomes a new **ADR-037**, which covers the analysis
+   read contract as a whole — pin, branch header, selection, response — not only
+   its mitigation-shaped part, and which follows the ADR-00X meta template.
+6. **Does mitigation selection join `SlotCoordinate`?** (F10) **RULED A**, and
+   under Decision 11 it is the only workable option rather than a preference:
+   two slots differing only in selection would hold identical coordinates,
+   `engagedSlots` would make the second inert, and no coordinate change could
+   ever differentiate it.
+7. **What does the curve cap count, and how is a variant drawn?** (F11)
+   **RULED: the cap counts nodes; a variant is drawn with point-marker shape.**
+   Colour stays node identity. Stroke dash was rejected — it already carries the
+   tail-quantile rule annotations on this chart. A second colour palette was
+   rejected on supply: `PaletteData` defines eight named families and
+   `CompareState` spends all eight, one per slot, under a `require`.
 8. **How does a client attach an override to a node created in the same
-   request?** (F12) Recommendation: a name-based anchor resolved server-side.
+   request?** (F12) **RULED: a name-based anchor**, resolved server-side against
+   the `SafeName`-keyed resolved-node map the request resolver already builds for
+   parent resolution. Verification debt: node-name uniqueness within a tree is
+   unconfirmed; if names are not unique the mechanism is ambiguous and returns as
+   a decision.
 9. **What happens to an `overrideAnchor` whose node the same PUT deletes?**
-   (F17) Recommendation: reject the request — add the cross-check to
+   (F17) **RULED A — reject the request**, via a cross-check added to
    `validateMitigations`, so an accepted update is always an internally
    consistent tree. Once M4's mitigation buckets land, one request enumerates
    both collections, so a client deleting a leaf can drop or retarget the
    override in the same PUT; rejection therefore costs a round trip only when
    the client is being inconsistent. Silently dropping the mitigation instead
    is the F1 failure mode again — destroying something the request did not ask
-   to delete.
+   to delete. The user-visible signal is the **same drift surface** every other
+   reference invalidation uses; the mechanisms stay distinct because a predicate
+   is a by-description lookup re-run per tree version while an anchor is a stored
+   id, but the two must not look different to the user.
+11. **Does one analysis request carry one selection or several named variants?**
+    **RULED A — one selection per request.** Comparing several selections is
+    therefore several requests, one per Compare slot, which is what makes
+    Decision 6 load-bearing.
 
-One question is carried without a decision number: what
-`ScopeResolutionContext` means for a `Revision.At` pinned read, where `branch`
-is in the context but the read is not at the branch head.
+**Open.**
+
+3. **How does the selection cross the wire?** (F6) Under Decision 11 the payload
+   is a single `MitigationSelection`. Size is the weakest argument for a request
+   body, not the strongest: scope resolution is server-side, so only
+   `ScopeRestriction.NodesOnly` carries node ids at all. The arguments that hold
+   are that node ids do not belong in a URI (ADR-036, and the nginx access log
+   records full request lines) and that one encoding across both endpoints is
+   simpler than two. Recommendation: JSON body on both, converting
+   `prob-of-exceedance` to POST.
+4. **What shape does the analysis response take?** (F7) Four things need a home
+   that `Map[NodeId, LECNodeCurve]` and a bare `Double` do not have: two
+   valuations per node, provenance per valuation, `staleMitigationIds`, and the
+   per-mitigation `ScopeOutcome.Failed` drift signals. Recommendation: an
+   envelope for `lec-multi` carrying the document-level fields once, a small
+   two-field result for `prob-of-exceedance`.
+5. **Does M4's record decode trigger §8.7 Finding 3's required validator?** (F9)
+   The ruling names two triggering paths, client resubmit and persist-and-reload.
+   M4 gives `MitigationApplicationRecord` a client *render* path, which is
+   neither — genuinely ambiguous, which is why it is a decision rather than a
+   lookup. Recommendation: ship the validating decoder.
+12. **Where does the client get mitigation definitions and resolved scopes?**
+    OD-3's interface renders a mitigation row under each node the mitigation's
+    scope covers, but `applicationRecords` only produces records for mitigations
+    a selection *applied* — so the rows cannot be drawn before anything is
+    ticked. No endpoint mentions mitigations and no response type carries them;
+    the collection crosses the wire in neither direction today. Recommendation:
+    carry definitions, resolved scopes and `ScopeOutcome` on the tree read, since
+    the resolved scope is a function of the tree version and any other placement
+    opens a window where scopes and nodes disagree.
+
+**Carried question, now answered.** What `ScopeResolutionContext` means for a
+`Revision.At` pinned read was carried without a decision number. It is resolved
+by the capacity-2 memo (§8.4-5): a pinned read occupies the second slot and the
+head entry survives, so alternating between head and a pin no longer recomputes
+both.
 
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 
@@ -1871,6 +2008,16 @@ scrubbing annotations, and any future "changed since" indicator.
 M1–M4 are landed, plan how mitigation-level changes become visible across the
 diff/compare/history surfaces — as a §7.8 implementation-grade continuation of
 this document, presented for approval before any source edit.
+
+**The browser change-notification consumer is part of that scope** (Decision 1).
+The server publishes node invalidations and, after M4, mitigation-driven ones
+too; nothing in the single-page app listens, so every publish reaches zero
+subscribers. The consumer belongs here rather than in M4 because its core
+operation is deciding which cached curves to discard for a given set of affected
+nodes, and the shape of that client-side state is fixed by M4's response and
+Compare-slot decisions. Building it before those land would target a layout about
+to change. It is the same question as the three surfaces above, asked of a
+fourth, and it takes the same input.
 
 ### ADR alignment
 
@@ -2146,10 +2293,10 @@ Status after the 2026-08-08 review session:
   selection; overlay/side-by-side then compares variants (raw vs fw vs fw+IDS
   = one slot each) with slot-keyed colours. This is phased **into M4** as a
   named work item (elevated at §7.6), not deferred. Display model (adopted
-  2026-08-09): the response for a selection always carries BOTH the raw and
-  mitigated series per charted node; which series are drawn is client-side
-  display state — so a **purely mitigated view** (residual-risk picture
-  without raw twins) is a display mode, not an API variant. Comparand slots
+  2026-08-09): the response for a selection always carries BOTH the inherent and
+  the selection's series per charted node; which series are drawn is client-side
+  display state — so a **purely mitigated view** (residual-risk picture without
+  the inherent series) is a display mode, not an API variant. Comparand slots
   with a selection display their variant curves only (baseline shows raw),
   keeping overlays free of duplicated raw curves. Open (OD-3c): the display
   control's granularity — chart-level tri-mode (Raw / Mitigated / Both) per
@@ -2384,7 +2531,8 @@ domain identity, is the correct key material). The KB built for scope
 resolution is **results-free** (no simulation results — the targeting
 sublanguage admits no simulation-backed symbols, §8.4-3), which is what
 makes the cached entry a true pure function of the tree version. Eviction
-of historic-revision entries: head-only, ruled (§8.4-5).
+of historic-revision entries: a capacity-2 slot per (tree, branch), ruled
+(§8.4-5).
 
 **Stage-domain scope restriction (ruled 2026-08-10).** A mitigation's
 applied scope is **defined** as the predicate's satisfying set intersected
@@ -2616,7 +2764,15 @@ M4 elevation respectively).
    (descendants index, ~n·depth set entries) per visited revision.
    **RULED (user, 2026-08-10): head-only** — one entry per live
    workspace/tree/branch, replaced on head advance; historic reads
-   resolve uncached. Cost analysis behind the ruling: at realistic tree
+   resolve uncached. **Amended (user, 2026-09-13): capacity 2.** The slot
+   holds at most two revisions and evicts the least recently used, so a
+   pinned historic read takes the second position and the head entry
+   survives. This keeps the bound structural — twice a constant rather
+   than a constant — while removing the one cost head-only carried: a
+   caller alternating between the head and a pinned revision missed on
+   every call and gained nothing from the memo. The amendment preserves
+   the reasoning below unchanged; only the claim that a single slot was
+   the sole bounded option was too strong. Cost analysis behind the ruling: at realistic tree
    shapes (hundreds of nodes, depth < 10) a KB rebuild plus
    quantifier-free resolution is single-digit milliseconds **per predicate**
    (`satisfyingSet` scans the node domain once per predicate; total resolution
@@ -2627,9 +2783,14 @@ M4 elevation respectively).
    orders of magnitude below fresh simulation (leaves × nTrials,
    default 10k) — while a retained entry is large; cheap-to-rebuild +
    expensive-to-retain is the head-only profile. Structurally the memo
-   is a revision-checked slot per (tree, branch), not an evicting map —
-   no EvictionStrategy, no generic-cache extraction from ContentCache
-   (design + `CacheStats` reuse only).
+   is a revision-checked, capacity-2 slot per (tree, branch), not an
+   evicting map — no EvictionStrategy, no generic-cache extraction from
+   ContentCache (design + `CacheStats` reuse only). The adaptive
+   alternative — the composite key `(TreeId, BranchRef, CommitHash)` plus
+   an eviction policy, which carries that extraction with it — remains
+   recorded as TODO 49 with its trigger criteria, and the project's
+   general preference for bounds by construction over eviction policies
+   is TODO 52.
 
 ### 8.5 Sequencing note
 
@@ -2943,8 +3104,8 @@ implementation-grade elevation; exact signatures are written there, not here.
   `satisfyingSet` over a **results-free KB** (targeting references structure
   and identity only, never simulation output, so resolution runs before any
   simulation). Resolution is selection-independent, so it is memoized on tree
-  version identity `(WorkspaceId, TreeId, BranchRef, CommitHash)` — head-only
-  per §8.4-5. The resolved `Map[MitigationId, Set[NodeId]]` is consumed at the
+  version identity `(WorkspaceId, TreeId, BranchRef, CommitHash)` — held in a
+  capacity-2 slot per (tree, branch), per §8.4-5. The resolved `Map[MitigationId, Set[NodeId]]` is consumed at the
   resolver edge (§8.2) and is exactly what `MitigationApplication.scoped` /
   `effectiveTree` already take as of §8.6.
 
@@ -4113,11 +4274,18 @@ import vql.error.QueryError
 import parser.FOLParser
 import logic.{Formula, FOL, FOLUtil}
 
-/** Memoizes the resolved scopes of one tree version. Head-only (§8.4-5): one
-  * entry per (treeId, branch) holds a revision and its scopes, and any resolve
-  * at a different revision overwrites it, so revisions never accumulate. The memo
-  * read and write are not atomic (last-writer-wins) — see "Memo write policy".
-  * In-memory `Ref` → `UIO`. One instance per workspace (`ScopeResolverScope`). */
+/** Memoizes the resolved scopes of one tree version. One entry per
+  * (treeId, branch) holds at most two revisions and their scopes, evicting the
+  * least recently used, so revisions never accumulate and a pinned historic read
+  * cannot displace the head. The memo read and write are not atomic
+  * (last-writer-wins) — see "Memo write policy". In-memory `Ref` → `UIO`. One
+  * instance per workspace (`ScopeResolverScope`).
+  *
+  * The bound is structural rather than a policy. An eviction strategy could have
+  * served here, and one already exists for `ContentCache`; reusing it would mean
+  * extracting a generic bounded cache, a refactoring whose cost outweighed the
+  * return at two entries per slot. Open to reconsideration if a caller ever
+  * alternates across more than two revisions. */
 final case class MitigationScopeResolverLive(
   memo: Ref[Map[(TreeId, BranchRef), (CommitHash, ResolvedScopes)]]
 ) extends MitigationScopeResolver:
@@ -4363,7 +4531,9 @@ New spec `MitigationScopeResolverSpec` (server, `zio-test`), cases:
   `named("Gone")` / `child_of(x, "Gone")` → `UnknownNode`.
 - **memoization:** two `resolve` calls at the same `(treeId, branch, revision)`
   build the KB once (assert via a resolve count / instrumented tree); a call at a
-  new `revision` recomputes and the old entry is gone (head-only).
+  second `revision` recomputes and **both** entries are then live, so alternating
+  between the two hits every time; a call at a third `revision` evicts the least
+  recently used, leaving the slot at two.
 - **per-workspace isolation:** `ScopeResolverScope.resolverFor` returns the same
   instance for one `WorkspaceId` and distinct instances for different ones.
 - **projection:** `ResolvedScopes.appliedScopes` equals the `Map[MitigationId,
