@@ -8,21 +8,23 @@ not prescribed solutions.
 
 ## Plan landing order — approved plans, in the order they must be implemented
 
-Five plans are ruled and awaiting approval. Three ordering constraints are real;
+Six plans are ruled and awaiting approval. Four ordering constraints are real;
 everything else is free. Each plan repeats its own constraint in a Sequencing
 section, and this is the single list.
 
-| # | Plan | Must land before | Why |
-|---|---|---|---|
-| 1 | `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md` | — | no ordering constraint; touches no Scala source and no file any other plan touches. First because it closes a credential-in-logs defect |
-| 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | 4 | both change `CachedResultResolverLive.scala`; a rename landing after a substantive change to the same file creates conflicts that need not exist |
-| 3 | `docs/dev/plans/PLAN-TELEMETRY-EXPORT.md` | 4 | plan 4 publishes a saturation gauge and writes its tuning rule from what that gauge shows; nothing can read it until the console exporters are replaced |
-| 4 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | — | depends on 2 and 3 |
-| — | `docs/dev/plans/PLAN-IRMIN-RECURSIVE-READ.md` | — | fully independent; shares no file with any of the above and may land at any point |
+| # | Plan | Why here |
+|---|---|---|
+| 1 | `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md` | no technical dependency; touches no Scala source and no file any other plan touches. First because it closes a credential-in-logs defect |
+| 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3 and 5 |
+| 3 | `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md` | must follow 2: it adds a method to both registries, which 2 renames. Writing it first means writing it twice |
+| 4 | `docs/dev/plans/PLAN-TELEMETRY-EXPORT.md` | must precede 5 |
+| 5 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | depends on 2 (both change `CachedResultResolverLive.scala`) and on 4 (it publishes a saturation gauge and writes its tuning rule from what that gauge shows; nothing can read it until the console exporters are replaced) |
+| — | `docs/dev/plans/PLAN-IRMIN-RECURSIVE-READ.md` | fully independent; shares no file with any of the above and may land at any point |
 
-Plans 2 and 3 both touch `Application.scala`, on different lines — renamed types
-in the cache block versus a layer swap in the telemetry block — so either order
-between them works. Landing the rename first keeps both diffs smaller.
+Steps 3 and 4 are independent of each other and could swap. Steps 3, 4 and 5 all
+touch `Application.scala`, each on different lines — a released-cache layer, a
+telemetry layer swap, and a limiter layer — so the order between them is a
+matter of diff size, not correctness.
 
 ---
 
@@ -2289,65 +2291,31 @@ the next subsystem adds instruments.
 
 ---
 
-## 51. A reaped workspace's caches are never released — the registries retain them until restart
+## 51. A reaped workspace's caches are never released — owned by a plan
 
-**Observed:** `CacheScope` holds `Ref[Map[SeedEntityId, ContentCache]]` and
-`ScopeResolverScope` holds `Ref[Map[WorkspaceId, MitigationScopeResolver]]`.
-Both create an entry on first access. **Neither ever removes one.**
+**Observed:** `ContentCacheRegistry` and `MitigationScopeResolverRegistry` both
+create an entry per workspace on first access and never remove one. The
+workspace teardown path — `CascadeDelete.workspace`, reached from the explicit
+delete endpoint, the admin eviction sweep and the background reaper — deletes
+the workspace's trees and scenario branches and touches neither registry. So an
+expired workspace's simulation results and resolved mitigation scopes stay in
+memory, reachable by nothing, until the process restarts. The server container
+is limited to 256 MB.
 
-`CacheScope`'s own scaladoc states the intent and then admits the gap in the
-same sentence: *"Cache lifecycle = workspace lifecycle; a deleted workspace's
-cache lingers until restart (NoOp eviction)."* The first clause is what the
-design wants; the second is what the code does.
+`CacheScope`'s scaladoc states the intent and concedes the gap in one sentence:
+*"Cache lifecycle = workspace lifecycle; a deleted workspace's cache lingers
+until restart (NoOp eviction)."*
 
-The workspace reaper runs every five minutes, calls `store.evictExpired`, and
-cascades deletion through `CascadeDelete.workspace`, which removes the
-workspace's trees and scenarios. It does not touch either registry. So when a
-workspace expires — 72 hours absolute or 1 hour idle by default — its simulation
-results and resolved mitigation scopes stay in memory, reachable by nothing,
-until the process restarts. The server container is limited to 256 MB.
+**Status:** owned by `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md`, which
+carries the exact signatures, the three call sites, the release-after-cascade
+ordering, the in-flight race it deliberately does not close, and the test plan
+built on `ContentCache.stats` so the proof is that the memory is gone rather
+than that a method was called. It lands after the registry rename, which renames
+both types. Nothing is implemented until that plan is approved.
 
-**There are two distinct growths here and only one of them is written down.**
-
-1. **Within one cache**, entries are never evicted: `ContentCache` uses
-   `NoOpEvictionStrategy`, so every edit adds a content-hash entry and no
-   generation is ever dropped. This is the growth
-   `docs/dev/plans/IMPLEMENTATION-PLAN.md` describes under "Eviction Strategy",
-   where it proposes a reference-counting strategy or a size-bounded LRU.
-2. **Across caches**, the registry map retains one cache per workspace that has
-   ever been accessed, including workspaces that no longer exist. This is not
-   described anywhere, and it is the more serious of the two: growth in the
-   first case is at least tied to a workspace somebody is still using, while
-   growth in the second is pure retention of dead data.
-
-**The note in `IMPLEMENTATION-PLAN.md` also defers on the wrong criterion.** It
-ends "Monitor memory usage in production before implementing", which cannot be
-acted on — the same objection that moved item 49 out of a plan. Releasing a
-reaped workspace's cache needs no production measurement to justify: the
-resource is provably unreachable the moment the workspace is gone.
-
-**Recommended fix, for the second growth only.** Give each registry a removal
-method and call it where a workspace is already being torn down:
-
-- `ContentCacheRegistry.release(seedEntityId)` and
-  `MitigationScopeResolverRegistry.release(workspaceId)`, each a `Ref.update`
-  dropping the key.
-- `CascadeDelete.workspace` calls both, alongside the tree and scenario
-  deletion it already performs. That is the one place a workspace's teardown is
-  expressed, so it is where the cache release belongs.
-
-This makes the `CacheScope` scaladoc's first clause true and lets its second
-clause be deleted. It is a small, bounded change that removes an unbounded
-retention, and it needs no eviction policy, no size accounting and no
-measurement.
-
-**Deliberately not included:** within-cache eviction (growth 1). That one does
-need a policy decision — reference counting versus a size-bounded LRU versus a
-generation limit — and a bound to choose, and unlike releasing dead workspaces
-it trades away cache hits. It stays as described in `IMPLEMENTATION-PLAN.md`,
-and item 49's bounded-revision-cache question is its counterpart for the
+**Deliberately not in that plan:** eviction *within* a live workspace's cache.
+That is a different problem — it trades away cache hits and needs a policy and a
+bound, where releasing a dead workspace trades away nothing because the memory is
+provably unreachable. It stays as described under "Eviction Strategy" in
+`docs/dev/plans/IMPLEMENTATION-PLAN.md`, and item 49 is its counterpart for the
 mitigation scope memo.
-
-**Sequencing:** after `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md`, which
-renames both registries and both their methods. Landing a new method on a type
-that is about to be renamed means writing it twice.
