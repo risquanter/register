@@ -73,6 +73,11 @@ if [ ! -f "$TOKEN" ]; then
 fi
 
 MISSING=""
+# Every token line the loop below actually looked at, recorded with what was
+# found there. The denial prints it, so "the token names a different plan" and
+# "the right plan does not list this file" are distinguishable from the message
+# alone instead of both reading as a bare refusal.
+CONSULTED=""
 # "|| [ -n "$LINE" ]": still process a final token line that lacks a
 # trailing newline (read returns nonzero there but does fill LINE).
 while IFS= read -r LINE || [ -n "$LINE" ]; do
@@ -82,6 +87,8 @@ while IFS= read -r LINE || [ -n "$LINE" ]; do
   PLAN="$ROOT/$LINE"
   if [ ! -f "$PLAN" ]; then
     MISSING="$LINE"
+    CONSULTED="$CONSULTED
+  - $LINE — named by the token, but there is no such file"
     continue
   fi
   # Authorization comes ONLY from bullet lines inside the plan's
@@ -91,6 +98,8 @@ while IFS= read -r LINE || [ -n "$LINE" ]; do
       | grep -qF "$REL"; then
     exit 0
   fi
+  CONSULTED="$CONSULTED
+  - $LINE — read; no bullet under its '## File inventory' heading contains this path"
 done < "$TOKEN"
 
 # Test escape hatch (Option B): authorize a same-module unit-test edit when a
@@ -111,11 +120,20 @@ case "$REL" in
         exit 0
       fi
     done < "$TOKEN"
+    CONSULTED="$CONSULTED
+  (same-module test escape hatch also declined: no approved plan lists any
+   modules/$MODULE/src/main/ file)"
     ;;
 esac
 
 if [ -n "$MISSING" ]; then
-  deny "Blocked (working-protocol G3): the approval token names plan '$MISSING' which does not exist. Ask the user to point the token at the approved plan document."
+  deny "Blocked (working-protocol G3): the approval token names plan '$MISSING' which does not exist. Ask the user to point the token at the approved plan document.
+
+Plans the token named, and what each gave:$CONSULTED"
 fi
 
-deny "Blocked (working-protocol G3): '$REL' is not a bullet entry in the '## File inventory' section of the approved plan(s) named by the token. This is a plan deviation — stop, present the deviation (why this file is needed), and wait; after approval the plan's file inventory must be amended."
+deny "Blocked (working-protocol G3): '$REL' is not a bullet entry in the '## File inventory' section of the approved plan(s) named by the token.
+
+Plans the token named, and what each gave:$CONSULTED
+
+If the plan listed above is not the one that covers this file, the token points at the wrong plan and the user has to repoint it. If it is the right plan, this is a plan deviation — stop, present why the file is needed, and wait; after approval the plan's file inventory must be amended."
