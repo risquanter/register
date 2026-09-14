@@ -6,7 +6,7 @@ import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
 import com.risquanter.register.domain.errors.ValidationError
 
 /**
- * Per-mitigation scope restriction inside a selection (OD-3): `FullScope`
+ * Per-mitigation scope restriction inside a selection: `FullScope`
  * applies the mitigation to its whole resolved scope (the global toggle);
  * `NodesOnly` restricts application to an explicit node subset (per-node
  * enablement). A `NodesOnly` set intersects with the mitigation's resolved
@@ -40,19 +40,19 @@ object ScopeRestriction {
 }
 
 /**
- * Which mitigations a resolution applies, each optionally scope-restricted
- * (per-(mitigation, node) enablement — OD-3 ruling). Crosses the wire in M4
- * as a request parameter. The three cases are the register-code spelling of
- * ADR-034's valuations: `Inherent` (raw, mitigation-free — the default on every
- * existing read path, OD-5), `Residual` (every applicable mitigation applied),
- * and `Selected` (an explicit mitigation subset, each optionally scope-restricted).
+ * Which mitigations a resolution applies, each optionally scope-restricted,
+ * so a mitigation can be enabled for some of the nodes it scopes and not
+ * others. The three cases are the register-code spelling of ADR-034's
+ * valuations: `Inherent` (raw, mitigation-free — the default on every read
+ * path), `Residual` (every applicable mitigation applied), and `Selected` (an
+ * explicit mitigation subset, each optionally scope-restricted).
  */
 sealed trait MitigationSelection
 
 object MitigationSelection {
-  /** Mitigation-free valuation (ADR-034 raw): no mitigation applied. The default
-    * on every existing read path (OD-5). Named for the domain term (inherent
-    * risk = before controls) and to avoid shadowing `scala.None`. */
+  /** Mitigation-free valuation (ADR-034 raw): no mitigation applied, and the
+    * default on every read path. Named for the domain term (inherent risk =
+    * before controls) and to avoid shadowing `scala.None`. */
   case object Inherent extends MitigationSelection
   /** Residual valuation (ADR-034): every applicable mitigation applied
     * (residual risk = after controls). */
@@ -92,14 +92,14 @@ object MitigationSelection {
  *   The resolver applies it to a node's finished `TrialOutcomes` — the
  *   combine's operand or finished aggregate, never the summation step
  *   (ADR-009 associativity invariant).
- * - `applicationRecords` — the D-4 provenance layer for one resolution.
+ * - `applicationRecords` — one record per applied mitigation for one
+ *   resolution, describing what the application touched.
  *
  * Scope-disjoint mitigations commute (trace-monoid property); order matters
  * only where scopes overlap, where the precedence key decides.
  *
- * Staleness layer 1 (`staleOverrides`) is deliberately NOT here: it needs the
- * JVM-only content hasher and lives in the server's `MitigationStaleness`
- * (PLAN-RISKTRANSFORM OD-6).
+ * Override staleness (`staleOverrides`) is deliberately NOT here: it needs the
+ * JVM-only content hasher and lives in the server's `MitigationStaleness`.
  */
 object MitigationApplication {
 
@@ -177,8 +177,8 @@ object MitigationApplication {
       .map(TransformPipeline.toTransform)
       .reduceOption(_.andThen(_))
 
-  /** D-4 records for one resolution: per applied mitigation, the node set the
-    * application actually touched under this tree version and selection. */
+  /** One record per applied mitigation for a single resolution: the node set
+    * the application actually touched under this tree version and selection. */
   def applicationRecords(
     tree: RiskTree,
     selection: MitigationSelection,

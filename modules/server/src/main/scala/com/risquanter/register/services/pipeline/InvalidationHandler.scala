@@ -11,15 +11,14 @@ import com.risquanter.register.domain.data.iron.{TreeId, NodeId, BranchChoice}
   * Notifies SSE subscribers which nodes' figures changed after a tree
   * mutation (ADR-004a: SSE provides unidirectional server→client push).
   *
-  * SSE-only since milestone 2b Phase A: the content-addressed `ContentCache`
-  * has no invalidation operation — an edited leaf hashes to a new key and
-  * misses naturally, so this handler's former cache half (ancestor-path
-  * invalidation via `TreeCacheManager`) is gone. What remains is the tree
-  * diff that tells browsers which nodes to re-fetch: the changed node plus
-  * every ancestor up to the root (their aggregates changed too).
+  * This handler touches no cache. The content-addressed `ContentCache` has no
+  * invalidation operation: an edited leaf hashes to a new key and misses
+  * naturally. What the handler computes is the tree diff that tells browsers
+  * which nodes to re-fetch — the changed node plus every ancestor up to the
+  * root, whose aggregates changed with it.
   *
-  * The published event is still `SSEEvent.CacheInvalidated` — for a browser
-  * the semantics are unchanged ("these nodes' figures are stale, re-fetch").
+  * The published event is named `SSEEvent.CacheInvalidated`. For a browser the
+  * meaning is "these nodes' figures are stale, re-fetch them".
   *
   * Triggered by RiskTreeServiceLive mutations (update, delete). Future: also
   * by Irmin watch subscription (for external mutations).
@@ -48,10 +47,9 @@ trait InvalidationHandler {
     * - Content-changed nodes: the node itself
     * Reparent and content-change contributions are unioned ADDITIVELY — a
     * node that is both reparented and param-changed in one mutation yields
-    * both contributions (TODO item 17: the pre-Phase-A exclusive if/else-if
-    * dropped the content change in that case, which was the invalidation
-    * bug; the cache no longer depends on this diff, but the SSE node list
-    * must not repeat it).
+    * both contributions. Treating them as alternatives drops the content
+    * change for such a node. The cache does not depend on this diff, but the
+    * node list published over SSE does.
     *
     * Each affected node expands to its ancestor path in the new tree, plus
     * removed nodes verbatim (browsers drop them after re-fetch).
@@ -152,7 +150,7 @@ final case class InvalidationHandlerLive(
     * - Content-changed node → the node itself
     *
     * Reparent and content-change checks are independent and their
-    * contributions are unioned ADDITIVELY (TODO item 17 — see trait doc).
+    * contributions are unioned ADDITIVELY (see the trait doc).
     *
     * Removed nodes are reported verbatim so subscribers learn they are gone.
     *
@@ -180,8 +178,8 @@ final case class InvalidationHandlerLive(
 
     // Common nodes: reparent and content change are INDEPENDENT contributions.
     // A node can be both reparented and param-changed in a single mutation —
-    // it must then contribute its parents AND itself (additive union; the
-    // exclusive if/else-if here was TODO item 17's bug).
+    // it must then contribute its parents AND itself. An exclusive if/else-if
+    // here would keep one contribution and lose the other.
     val affectedFromChanged: Set[NodeId] =
       common.flatMap { nid =>
         val oldParent = oldTree.index.parents.get(nid)

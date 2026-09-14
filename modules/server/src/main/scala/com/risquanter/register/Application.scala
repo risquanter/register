@@ -284,10 +284,10 @@ object Application extends ZIOAppDefault {
       RepositoryConfig.layer >>> chooseRepo,
       RepositoryConfig.layer >>> chooseScenarioService,
       RepositoryConfig.layer >>> chooseScenarioMergeService,
-      // Per-workspace content-addressed cache (DD-17)
+      // Per-workspace content-addressed cache
       CacheScope.layer,
       CachedResultResolverLive.layer,  // ADR-015: ensureCached primitive
-      ScopeResolverScope.layer,        // Per-workspace mitigation scope resolution (M3 analytics VQL)
+      ScopeResolverScope.layer,        // Per-workspace mitigation scope resolution
       SSEHub.live,
       InvalidationHandler.live,     // SSE-only mutation notifications (requires SSEHub)
       RiskTreeServiceLive.layer,    // Requires InvalidationHandler + Tracing + Meter

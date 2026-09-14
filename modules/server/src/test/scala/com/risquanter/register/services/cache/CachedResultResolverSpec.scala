@@ -445,7 +445,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           tree     = treeWith(m)
           mitRoot <- resolver.ensureCached(tree, rootId, testEntity, selection = MitigationSelection.Residual, resolvedScopes =scopes(m -> Set(rootId)))
         } yield assertTrue(
-          // Raw aggregate stays the pristine commutative sum of children (ADR-034 Decision 4)
+          // Raw aggregate stays the pristine commutative sum of children (ADR-034 Decision 3)
           rawRoot.isInstanceOf[RiskResultGroup],
           rawRoot.outcomes.forall { case (t, loss) =>
             loss == raw1.outcomes.getOrElse(t, 0L) + raw2.outcomes.getOrElse(t, 0L)

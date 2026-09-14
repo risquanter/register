@@ -51,7 +51,8 @@ object MitigationPrecedence {
  *
  * - `LeafStage` — param-stage (`RiskLeafTransform`), leaves only. When either
  *   component is an Override, `overrideBaseStamp` carries the `ContentHash` of
- *   the target leaf's `LeafSimContent` (DD-16 projection) at authoring time,
+ *   the target leaf's `LeafSimContent` at authoring time — the simulation-relevant
+ *   projection, so a rename or a reparent does not change it —
  *   and `overrideAnchor` names the single leaf the override asserts against
  *   (rename-stable). Both are present iff a component is an Override — a
  *   `Mitigation.create` cross-field rule.
@@ -109,7 +110,7 @@ object MitigationSpec {
  * First-class, explicit mitigation entity — tree-level content (`RiskTree.
  * mitigations`), versioned/diffed/merged with the tree, never baked into node
  * params. Application semantics live in `MitigationApplication`; staleness
- * detection in the server's `MitigationStaleness` (PLAN-RISKTRANSFORM OD-6).
+ * detection in the server's `MitigationStaleness`.
  */
 final case class Mitigation private (
   id: MitigationId,
@@ -241,11 +242,14 @@ object Mitigation {
 }
 
 /**
- * D-4 provenance layer: one record per applied mitigation and resolution,
- * stored beside the simulation provenance in responses — never inside
- * `NodeProvenance` (DD-19 stays identity-free). `resolvedScope` is the node
- * set the application actually touched under this tree version and selection,
- * making results reproducible and explainable under dynamic scope.
+ * One record per applied mitigation and resolution. It sits on the valuation
+ * the mitigated fold produces, and never inside `NodeProvenance`, which carries
+ * no identity of its own. It does not cross the wire: a response names the
+ * mitigations that shaped each reading, and the client already holds each
+ * mitigation's spec and resolved scope from the tree read. `resolvedScope` is
+ * the node set the application actually touched under this tree version and
+ * selection, which is what makes a result explainable when scope is resolved
+ * per version.
  */
 final case class MitigationApplicationRecord(
   mitigationId: MitigationId,

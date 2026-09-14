@@ -29,8 +29,8 @@ import io.github.iltotore.iron.refineUnsafe
   *    edge and never cached (ADR-034 Decision 1).
   * 4. Portfolio: never cached — the mitigated children are combined
   *    with `RiskResultGroup.create` on every read, then this node's result-stage
-  *    transform is applied to the combined total (ADR-034 F:
-  *    `mitigated(P) = f_P(⊕ mitigated(children))`).
+  *    transform is applied to the combined total, so
+  *    `mitigated(P) = f_P(⊕ mitigated(children))` (ADR-034).
   *
   * There is no invalidation path: an edited leaf hashes to a new key and
   * simply misses; the old entry becomes an unreachable orphan for the
@@ -141,9 +141,10 @@ final case class CachedResultResolverLive(
     node match {
       case leaf: RiskLeaf =>
         rawLeafResult(hashes, cache, leaf, seedEntityId).map { raw =>
-          // Result-stage transform on the finished leaf operand (ADR-009), applied
-          // post-cache and never stored (D3). None when nothing result-stage
-          // scopes the leaf, so the raw cached value passes through unchanged.
+          // Result-stage transform on the finished leaf operand, applied after
+          // the cache read and never stored — it produces no new content to key
+          // an entry by (ADR-009, ADR-034). None when nothing result-stage scopes
+          // the leaf, so the raw cached value passes through unchanged.
           MitigationApplication.resultTransformFor(leaf.id, scoped) match {
             case None    => raw
             case Some(t) => RiskResult.fromTrialOutcomes(leaf.id, t.run(raw.trialOutcomes), raw.provenances)
@@ -173,18 +174,19 @@ final case class CachedResultResolverLive(
             ))))
           }
           // ⊕ mitigated(children): the commutative fold over already-mitigated
-          // children. Portfolios are never cached; the aggregate is
-          // an undecorated combine of its children (mitigated or not), kept that
-          // way by ADR-034 Decision 4's non-mutation invariant.
+          // children. Portfolios are never cached, and the aggregate is always a
+          // plain combine of its children, mitigated or not — the raw aggregate
+          // is never mutated to carry a mitigation (ADR-034).
           combined <- ZIO.fromEither(RiskResultGroup.create(portfolio.id, childResults*).toEither)
             .mapError(errors => ValidationFailed(errors.toList))
         } yield {
-          // F (ADR-034): mitigated(P) = f_P(⊕ mitigated(children)). No result-stage
-          // mitigation scoping P returns the group unchanged — child structure and
-          // drill-down preserved, byte-identical to the un-mitigated path. A binding
-          // transform cannot be a RiskResultGroup (its aggregate is pinned to
-          // combine(children)), so it collapses to a flat RiskResult carrying the
-          // transformed outcomes and the descendants' provenances.
+          // mitigated(P) = f_P(⊕ mitigated(children)). With no result-stage
+          // mitigation scoping P the group is returned unchanged, so child
+          // structure and drill-down are preserved and the value is identical to
+          // the un-mitigated path. A binding transform cannot be a
+          // RiskResultGroup, whose constructor pins the aggregate to
+          // combine(children), so it collapses to a flat RiskResult carrying the
+          // transformed outcomes and the descendants' provenances (ADR-034).
           MitigationApplication.resultTransformFor(portfolio.id, scoped) match {
             case None    => combined
             case Some(t) => RiskResult.fromTrialOutcomes(portfolio.id, t.run(combined.trialOutcomes), descendantProvenances(combined))

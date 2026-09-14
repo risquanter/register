@@ -22,7 +22,8 @@ import vql.typed.{FolModel, QueryBinder, BoundQuery, BoundFormula, BoundTerm, Bo
 /** Live implementation of [[QueryService]] using the `vql.typed` many-sorted pipeline.
   *
   * Dependencies:
-  *   - `RiskTreeRepository` for tree lookups (and the resolved commit hash, OD-5=D)
+  *   - `RiskTreeRepository` for tree lookups, which also return the commit the
+  *     read resolved to
   *   - `CachedResultResolver` for cache-aside simulation results, one map per referenced selection
   *   - `ScopeResolverScope` for per-workspace mitigation scope resolution
   *   - `Tracing` for OpenTelemetry spans
@@ -72,8 +73,8 @@ class QueryServiceLive private (
       for
         _ <- tracing.setAttribute("query.tree_id", treeId.value)
 
-        // 1. Load the tree and the concrete commit it resolved to (OD-5=D): the
-        //    storage-relation revision the scope resolver memoizes on.
+        // 1. Load the tree and the concrete commit it resolved to — the
+        //    storage revision the scope resolver memoizes on.
         loaded <- repo.getById(wsId, treeId, Revision.Head(branch))
         treeAndHash <- loaded match
                          case Some(tc) => ZIO.succeed(tc)
@@ -171,7 +172,7 @@ object QueryServiceLive:
   * At each `p95`/`p99`/`lec` application it inspects the mitigation-slot term:
   * the `inherent`/`residual` constants map to the aggregate valuations; a bound
   * `∃m : mitigation` variable fans out to one single-mitigation `Selected` per
-  * `tree.mitigations` element (OD-4=A) — a `named_mitigation`/`mitigation_id`
+  * `tree.mitigations` element — a `named_mitigation`/`mitigation_id`
   * constraint narrows which bindings satisfy the formula at evaluation, not what
   * is precomputed. A `LiteralRef` in the mitigation slot is impossible (no
   * `mitigationSort` literal validator), so it is ignored.

@@ -17,10 +17,10 @@ import _root_.logic.FOLUtil
   * different revision overwrites it, so revisions never accumulate. In-memory
   * `Ref` → `UIO`. One instance per workspace (`ScopeResolverScope`).
   *
-  * The memo read and write are not atomic — last-writer-wins is a deliberate,
-  * accepted trade-off, safe because the exact-revision hit guard never serves a
-  * mismatched scope. Rationale and rejected alternatives: PLAN-RISKTRANSFORM
-  * §8.13 (memo write policy).
+  * The memo read and write are not atomic. Last-writer-wins is deliberate and
+  * safe: the entry carries the revision it was resolved at, and a read serves it
+  * only on an exact revision match, so a lost write costs a recomputation and
+  * never yields a scope from the wrong version.
   */
 final case class MitigationScopeResolverLive(
   memo: Ref[Map[(TreeId, BranchRef), (CommitHash, ResolvedScopes)]]

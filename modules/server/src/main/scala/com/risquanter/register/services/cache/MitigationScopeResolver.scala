@@ -6,11 +6,11 @@ import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, Comm
 
 /** Names the tree version whose scopes are resolved. The owning workspace is NOT
   * a field: one resolver instance exists per workspace (`ScopeResolverScope`,
-  * mirroring `CacheScope`), so the workspace IS the instance and the memo key
-  * inside it is exactly (treeId, branch, revision). `revision` is the byte-level
-  * Irmin commit hash, never the domain content hash — predicates reference node
-  * names, which the content hash omits, so a rename changes resolution but not
-  * the content hash.
+  * mirroring `CacheScope`), so the workspace is the instance. Inside it the memo
+  * is keyed by (treeId, branch); `revision` is stored in the entry and checked
+  * on read, not part of the key. `revision` is the byte-level Irmin commit hash,
+  * never the domain content hash — predicates reference node names, which the
+  * content hash omits, so a rename changes resolution but not the content hash.
   */
 final case class ScopeResolutionContext(treeId: TreeId, branch: BranchRef, revision: CommitHash)
 

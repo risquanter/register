@@ -14,10 +14,8 @@ import com.risquanter.register.domain.data.iron.SeedEntityId
   * instances they cannot be.
   *
   * Keyed by `seedEntityId` (unique per workspace — assigned at workspace
-  * creation). Cache lifecycle = workspace lifecycle; a deleted workspace's
-  * cache lingers until restart (NoOp eviction).
-  *
-  * Replaces `TreeCacheManager` as the resolver's cache entry point.
+  * creation). Cache lifecycle matches workspace lifecycle; a deleted
+  * workspace's cache lingers until restart, because nothing is evicted.
   */
 trait CacheScope {
 

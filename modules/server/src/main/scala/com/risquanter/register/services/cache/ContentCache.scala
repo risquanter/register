@@ -4,8 +4,8 @@ import zio.*
 import com.risquanter.register.domain.data.iron.ContentHash
 
 /**
-  * Cache observability snapshot (DD-20/CacheController precedent: logged
-  * only, no endpoint — build API surface only with a concrete consumer).
+  * Cache observability snapshot. The resolver logs it at debug after a read;
+  * no endpoint exposes it.
   *
   * @param entries Current entry count (includes orphans awaiting eviction)
   * @param hits    Lookups that found an entry, since cache creation
@@ -17,21 +17,20 @@ final case class CacheStats(entries: Int, hits: Long, misses: Long, evictedTotal
 /**
   * Content-addressed simulation cache: `ContentHash → LeafSimResult`.
   *
-  * Replaces the NodeId-keyed `RiskResultCache`/`TreeCacheManager` pair
-  * (milestone 2b, DD-3). The key is recomputed from a leaf's simulation
-  * content on every read (`ContentHashIndex`), so a changed leaf *is* a
-  * different key — staleness is structurally impossible and there is no
-  * invalidation operation. Old entries become unreachable orphans, handled
-  * by the `EvictionStrategy` (memory management, never correctness).
+  * The key is recomputed from a leaf's simulation content on every read
+  * (`ContentHashIndex`), so a changed leaf is a different key. Staleness is
+  * structurally impossible and there is no invalidation operation. Old
+  * entries become unreachable orphans, handled by the `EvictionStrategy` —
+  * memory management, never correctness.
   *
-  * Holds LEAF entries only (DD-15 → B): portfolios re-aggregate from child
-  * results on every read and never enter the cache. Values are identity-free
-  * (DD-16/DD-18): the resolver attaches the requested node's ID at the edge.
+  * Holds leaf entries only: portfolios re-aggregate from child results on
+  * every read and never enter the cache. Values carry no node identity; the
+  * resolver attaches the requested node's ID at the edge.
   *
-  * One instance per workspace (DD-17), created by `CacheScope` — the
-  * workspace's `seedEntityId` determines figures but lives in no leaf's
-  * bytes, so per-workspace instances make cross-workspace contamination
-  * structurally impossible. Cache lifecycle = workspace lifecycle.
+  * One instance per workspace, created by `CacheScope` — the workspace's
+  * `seedEntityId` determines figures but lives in no leaf's bytes, so
+  * per-workspace instances make cross-workspace contamination structurally
+  * impossible. Cache lifecycle matches workspace lifecycle.
   */
 trait ContentCache {
 

@@ -16,7 +16,7 @@ import com.risquanter.register.repositories.model.TreeMetadata
   * Path conventions (per ADR-004a, workspace-scoped): see
   * [[WorkspaceStoragePaths]] — the single owner of the storage layout.
   *
-  * Write path (DD-7): every mutation is ONE `set_tree` commit replacing the
+  * Write path: every mutation is ONE `set_tree` commit replacing the
   * whole tree subtree — atomic saves, one history entry per user action, and
   * obsolete nodes vanish via subtree-replace semantics (unlisted keys are
   * deleted). Delete is `set_tree` with an empty entry list.
@@ -115,7 +115,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
   // ----------------------------------------------------------------------------
 
   /** One atomic commit: meta + every node + every mitigation, replacing the
-    * whole subtree (DD-7). An omitted mitigation is deleted by the same
+    * whole subtree. An omitted mitigation is deleted by the same
     * subtree-replace that omits it, exactly as for nodes. */
   private def writeTree(base: IrminPath, meta: TreeMetadata, nodes: Seq[RiskNode],
                         mitigations: Seq[Mitigation], message: String, branch: BranchRef): Task[Unit] =
@@ -269,8 +269,8 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
 
 private final case class TreeWithMeta(meta: TreeMetadata, tree: RiskTree)
 
-// v2: nodes carry seedVarId, meta carries seedVarHighWater (PLAN-SEED-IDENTITY).
-// v1 stores are wiped, not migrated (plan §12.1) — no legacy decode path.
+// v2: nodes carry seedVarId, meta carries seedVarHighWater. There is no legacy
+// decode path — a v1 store is wiped rather than migrated.
 private val CurrentSchemaVersion: Int = 2
 
 object RiskTreeRepositoryIrmin:

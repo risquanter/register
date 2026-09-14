@@ -51,7 +51,8 @@ trait CachedResultResolver {
     * @param nodeId Node identifier
     * @param seedEntityId Owning workspace's stochastic identity (HDR Entity axis) —
     *                     threaded explicitly from the controller's resolved workspace
-    * @param includeProvenance Whether to capture provenance metadata (default: false)
+    * @param includeProvenance Recorded as a tracing attribute only. Provenance is
+    *   always captured at simulation; the service layer decides what to return.
     * @param selection Which mitigations to apply (default: Inherent — raw, un-mitigated)
     * @param resolvedScopes Server-resolved per-mitigation node sets (default: empty)
     * @return LossDistribution (from cache or freshly simulated)
@@ -75,7 +76,8 @@ trait CachedResultResolver {
     * @param tree Risk tree containing the nodes
     * @param nodeIds Set of node identifiers
     * @param seedEntityId Owning workspace's stochastic identity (HDR Entity axis)
-    * @param includeProvenance Whether to capture provenance metadata (default: false)
+    * @param includeProvenance Recorded as a tracing attribute only. Provenance is
+    *   always captured at simulation; the service layer decides what to return.
     * @param selection Which mitigations to apply (default: Inherent — raw, un-mitigated)
     * @param resolvedScopes Server-resolved per-mitigation node sets (default: empty)
     * @return Map from nodeId to LossDistribution

@@ -6,16 +6,16 @@ import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, L
 import com.risquanter.register.domain.data.iron.{NodeId, ContentHash}
 
 /**
-  * Pure, bottom-up content-hash computation for a risk tree (DD-14 → Option
-  * B: the JVM computes every hash itself — one code path, no Irmin coupling,
-  * unit-testable without a running Irmin).
+  * Pure, bottom-up content-hash computation for a risk tree. The JVM computes
+  * every hash itself, so there is one code path, no coupling to Irmin, and the
+  * calculation is unit-testable without a running Irmin.
   *
-  * - Leaf: `sha256(LeafSimContent.from(leaf).toJson)` — the simulation-
-  *   relevant projection (DD-16), so renames/moves preserve the hash and
-  *   content-identical leaves collide deliberately (shared cache entries).
-  * - Portfolio: Merkle hash over the children's hashes, sorted for
-  *   canonical order. Portfolio hashes never key cache entries (DD-15 → B);
-  *   they exist for structural diffing (branch comparison, UC5).
+  * - Leaf: `sha256(LeafSimContent.from(leaf).toJson)` — the simulation-relevant
+  *   projection only, so renames and moves preserve the hash, and
+  *   content-identical leaves collide deliberately and share one cache entry.
+  * - Portfolio: Merkle hash over the children's hashes, sorted for canonical
+  *   order. Portfolio hashes never key cache entries; they exist for
+  *   structural diffing when two branches are compared.
   *
   * O(n) — each node visited once (memoized); invisible against simulation
   * cost.
@@ -46,7 +46,7 @@ object ContentHashIndex {
     index.toMap
   }
 
-  /** The cache key for a single leaf (DD-16 preimage). */
+  /** The cache key for a single leaf. */
   def hashOf(leaf: RiskLeaf): ContentHash =
     contentHash(LeafSimContent.from(leaf).toJson)
 

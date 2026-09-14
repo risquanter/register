@@ -5,8 +5,10 @@ import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef,
 
 /** Per-workspace `MitigationScopeResolver` resolution, mirroring `CacheScope`.
   * One resolver instance per workspace makes cross-workspace scope contamination
-  * structurally impossible; the memo key inside each instance is
-  * (treeId, branch, revision).
+  * structurally impossible. Inside each instance the memo is keyed by
+  * (treeId, branch), with the revision held in the entry as a validity guard.
+  *
+  * Instances are created on first access and held until the process exits.
   */
 trait ScopeResolverScope:
   def resolverFor(workspaceId: WorkspaceId): UIO[MitigationScopeResolver]
