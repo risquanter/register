@@ -469,20 +469,20 @@ run_query() {
 # Q1 — Enterprise tail severity: how many risks carry catastrophic potential?
 run_query \
   "Q1: Do at least 1/4 of all leaves have P99 above \$10M?" \
-  'Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x), 10000000))'
+  'Q[>=]^{1/4} x (leaf(x), gt_loss(p99(x, "inherent"), 10000000))'
 
 # Q2 — High-frequency materiality: risks combining likelihood AND size
 run_query \
   "Q2: Do fewer than half of all leaves have a >10% chance of exceeding \$1M?" \
-  'Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000000), 0.10))'
+  'Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 1000000, "inherent"), 0.10))'
 
 # Q3 — Tail breadth at the P95 level (was Q7, scoped to Operational Risk)
 run_query \
   "Q3: Do at least 3/4 of all leaves have P95 above \$1M?" \
-  'Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x), 1000000))'
+  'Q[>=]^{3/4} x (leaf(x), gt_loss(p95(x, "inherent"), 1000000))'
 
 # Q4 — Mid-band materiality (~ vague quantifier)
-# NOT SATISFIED by design: p95(x) is the *unconditional* P95 — computed over
+# NOT SATISFIED by design: p95(x, "inherent") is the *unconditional* P95 — computed over
 # every Monte Carlo trial, including those where the risk event did not fire
 # (loss = $0). For a leaf with 15% annual probability, the unconditional P95
 # corresponds only to the conditional ~67th percentile ((0.95−0.85)/0.15).
@@ -491,22 +491,22 @@ run_query \
 # Q4b keeps the same threshold and restates the proportion to match reality.
 run_query \
   "Q4: Do about half of all leaves have unconditional P95 above \$5M?" \
-  'Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))'
+  'Q[~]^{1/2} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))'
 
 # Q4b — same $5M threshold: ~1/5 of leaves qualify; Q[~]^{1/5} showcases vague "about" tolerance
 run_query \
   "Q4b: Do about 1/5 of all leaves have unconditional P95 above \$5M? (around-quantifier contrast)" \
-  'Q[~]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))'
+  'Q[~]^{1/5} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))'
 
 # Q5 — Portfolio aggregation view (board-level filter)
 run_query \
   "Q5: Do at most 1/3 of portfolio nodes have P95 above \$50M?" \
-  'Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x), 50000000))'
+  'Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x, "inherent"), 50000000))'
 
 # Q6 — Catastrophic exceedance breadth
 run_query \
   "Q6: Do at most 1/4 of all leaves have a >5% chance of exceeding \$10M?" \
-  'Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000), 0.05))'
+  'Q[<=]^{1/4} x (leaf(x), gt_prob(lec(x, 10000000, "inherent"), 0.05))'
 
 # Q7 — existential quantifier in scope: which portfolios harbour at least one severe child?
 # NOT SATISFIED by design: same unconditional-P95 effect applies to direct
@@ -515,17 +515,17 @@ run_query \
 # the same question at the proportion the data actually supports.
 run_query \
   "Q7 (exists): Do at least 3/4 of portfolio nodes have at least one direct child with unconditional P95 above \$5M?" \
-  'Q[>=]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 5000000)))'
+  'Q[>=]^{3/4} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))'
 
 # Q7b — same $5M threshold, proportion expressed as "about 2/3" (satisfied)
 run_query \
   "Q7b (exists): Do about 2/3 of portfolio nodes have at least one direct child with unconditional P95 above \$5M?" \
-  'Q[~]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 5000000)))'
+  'Q[~]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 5000000)))'
 
 # Q8 — universal quantifier in scope: are all direct children of most portfolios above a material floor?
 run_query \
   "Q8 (forall): Do at least half of portfolio nodes have ALL their direct children with P99 above \$1M?" \
-  'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y), 1000000)))'
+  'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p99(y, "inherent"), 1000000)))'
 
 # ── Sub-portfolio scoped queries (Q-A – Q-D, Phase 6) ────────────────────────
 # Scope the quantifier range to a named sub-portfolio via quoted node-name
@@ -536,55 +536,55 @@ run_query \
 # NOT SATISFIED: no Cyber leaf has unconditional P95 > $5M (prob ≤ 30% means most are zero at P95)
 run_query \
   "Q-A: Do at least 2/3 of Technology and Cyber leaf risks have P95 above \$5M?" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x), 5000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x, "inherent"), 5000000))'
 
 # Q-Ab — same scope, P99 > $1M: all 4 Cyber leaves clear it (Insider Threat P99 well above $1M even at 5% prob)
 run_query \
   "Q-Ab: Do at least 2/3 of Technology and Cyber leaf risks have P99 above \$1M? (p99 contrast)" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p99(x), 1000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p99(x, "inherent"), 1000000))'
 
 # Q-B — direct-child scoping + LEC + Probability: Operational Risk immediate sub-units
 # NOT SATISFIED: only 1 of 3 direct children (Technology and Cyber) has high enough aggregate tail
 run_query \
   "Q-B: Do at least half of direct children of Operational Risk have >5% chance of exceeding \$10M?" \
-  'Q[>=]^{1/2} x (child_of(x, "Operational Risk"), gt_prob(lec(x, 10000000), 0.05))'
+  'Q[>=]^{1/2} x (child_of(x, "Operational Risk"), gt_prob(lec(x, 10000000, "inherent"), 0.05))'
 
 # Q-Bb — scope swap to Enterprise Risk: all 4 top-level domains have high aggregate tails
 run_query \
   "Q-Bb: Do at least half of direct children of Enterprise Risk have >5% chance of exceeding \$10M? (scope swap contrast)" \
-  'Q[>=]^{1/2} x (child_of(x, "Enterprise Risk"), gt_prob(lec(x, 10000000), 0.05))'
+  'Q[>=]^{1/2} x (child_of(x, "Enterprise Risk"), gt_prob(lec(x, 10000000, "inherent"), 0.05))'
 
 # Q-C1 / Q-C2 — cross-branch comparison: same P99 bar across two domains
 # Q-C1 NOT SATISFIED: only 1/5 Financial Risk leaves (Counterparty Default) clears $20M P99
 run_query \
   "Q-C1: Do at least 2/3 of Financial Risk leaf descendants have P99 above \$20M?" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x), 20000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x, "inherent"), 20000000))'
 
 # Q-C1b — quantifier flip: same data satisfies a <=1/3 cap
 run_query \
   "Q-C1b: Do at most 1/3 of Financial Risk leaf descendants have P99 above \$20M? (quantifier flip contrast)" \
-  'Q[<=]^{1/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x), 20000000))'
+  'Q[<=]^{1/3} x (leaf_descendant_of(x, "Financial Risk"), gt_loss(p99(x, "inherent"), 20000000))'
 
 # Q-C2 NOT SATISFIED: only 1/10 Operational Risk leaves clear $20M P99 (even fewer than Financial Risk)
 run_query \
   "Q-C2: Do at least 2/3 of Operational Risk leaf descendants have P99 above \$20M?" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x), 20000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Operational Risk"), gt_loss(p99(x, "inherent"), 20000000))'
 
 # Q-C2b — scope swap to Compliance and Legal Risk + lower threshold: all 3 leaves clear $5M P99
 run_query \
   "Q-C2b: Do at least 2/3 of Compliance and Legal Risk leaf descendants have P99 above \$5M? (scope+threshold swap contrast)" \
-  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x), 5000000))'
+  'Q[>=]^{2/3} x (leaf_descendant_of(x, "Compliance and Legal Risk"), gt_loss(p99(x, "inherent"), 5000000))'
 
 # Q-D — exclusion via negation: leaves outside the Cyber cluster
 # NOT SATISFIED: 9/21 non-Cyber leaves have P95 > $1M (43%) — clearly not "about 1/4"
 run_query \
   "Q-D: Do about 1/4 of non-Cyber leaves have P95 above \$1M?" \
-  'Q[~]^{1/4} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))'
+  'Q[~]^{1/4} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))'
 
 # Q-Db — same proportion IS "about 1/2"; Q[~]^{1/2} showcases around tolerance vs strict Q[<=]
 run_query \
   "Q-Db: Do about half of non-Cyber leaves have P95 above \$1M? (around-quantifier contrast)" \
-  'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x), 1000000))'
+  'Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology and Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))'
 
 header "Done — workspace info"
 ok "Workspace key : $WS_KEY"

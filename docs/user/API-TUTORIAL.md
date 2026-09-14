@@ -221,7 +221,7 @@ Queries are submitted via HTTP POST to the tree's query endpoint. The response r
   "rangeSize": 3,
   "satisfyingCount": 2,
   "sampleSize": 3,
-  "queryEcho": "Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))"
+  "queryEcho": "Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x, "inherent"), 5000000))"
 }
 ```
 
@@ -237,10 +237,10 @@ Queries are submitted via HTTP POST to the tree's query endpoint. The response r
 | `child_of(x, "Parent Name")` | x is a direct child of the named node |
 | `descendant_of(x, "Name")` | x is any descendant of the named node |
 | `leaf_descendant_of(x, "Name")` | x is a leaf anywhere under the named node |
-| `p95(x)`, `p99(x)` | P95 / P99 loss value for node x (returns Loss) |
-| `lec(x, 1000000)` | Exceedance probability at \$1 M for node x (returns Probability) |
-| `gt_loss(p95(x), 5000000)` | P95 loss exceeds \$5 M (Loss comparison) |
-| `gt_prob(lec(x, 1000000), 0.05)` | Exceedance probability at \$1 M exceeds 5 % (Probability comparison) |
+| `p95(x, "inherent")`, `p99(x, "inherent")` | P95 / P99 loss value for node x (returns Loss) |
+| `lec(x, 1000000, "inherent")` | Exceedance probability at \$1 M for node x (returns Probability) |
+| `gt_loss(p95(x, "inherent"), 5000000)` | P95 loss exceeds \$5 M (Loss comparison) |
+| `gt_prob(lec(x, 1000000, "inherent"), 0.05)` | Exceedance probability at \$1 M exceeds 5 % (Probability comparison) |
 
 ---
 

@@ -70,6 +70,39 @@ final case class LECCurveResponse(
 
 **Note:** This is **not** the LEC function itself, but a discrete sampling of it for visualization and API transmission.
 
+### Mitigation
+A **risk reduction measure**, recorded once on the tree and applied to the nodes
+it targets. It is tree-level content, never baked into a node's own parameters:
+the node keeps describing the risk as it stands, and the mitigation describes
+what reduces it.
+
+A mitigation says three things: what it targets (a predicate that resolves to a
+set of nodes), how it reduces (for example, cap the loss, scale it, apply a
+deductible), and where in the order it applies relative to other mitigations.
+
+Because the reduction is held separately from the node, the same tree can be
+valued with mitigations applied or without them. That is what the next two terms
+name.
+
+### Inherent Risk
+The loss **before any mitigation is applied** — the raw simulated figure for a
+node. This is what every read path returns unless a mitigation valuation is
+asked for explicitly.
+
+In the query language it is the literal `"inherent"`, as in
+`p95(x, "inherent")`.
+
+### Residual Risk
+The loss **after every mitigation whose target covers that node has been
+applied**. Mitigations apply in their recorded order, so residual risk is the
+result of running the whole applicable sequence, not of applying them
+independently.
+
+In the query language it is the literal `"residual"`, as in
+`p95(x, "residual")`.
+
+A tree with no mitigations has identical inherent and residual figures.
+
 ## Mathematical Structure
 
 ### Identity (Monoid) for Trial Outcomes
@@ -169,6 +202,9 @@ val vegaSpec: String =
 | **Loss Distribution** | `LossDistribution` | Empirical distribution | Simulation data |
 | **LEC Curve** | `LECCurve` trait | `Loss → ℝ` function | `probOfExceedance` method |
 | **LEC Curve Response** | `LECCurveResponse` | Discrete sampling | API response format |
+| **Mitigation** | `Mitigation` | Transform on a distribution | Recorded risk reduction |
+| **Inherent Risk** | `MitigationSelection.Inherent` | Untransformed value | Loss before controls |
+| **Residual Risk** | `MitigationSelection.Residual` | Value after every applicable transform | Loss after controls |
 
 ## Key Insights
 

@@ -52,7 +52,7 @@ concatenation followed by a second parse.
 
 ```scala
 // Wrong: string interpolation into a FOL query that will be re-parsed
-val query = s"""leaf(x) /\\ gt_loss(p95(x), ${userInput})"""
+val query = s"""leaf(x) /\\ gt_loss(p95(x, "inherent"), ${userInput})"""
 
 // Correct: user string resolved via a per-sort literal validator — never re-parsed
 val result = riskNameToId.get(userInput)  // Set.contains / Map.get only
@@ -99,7 +99,7 @@ CSS         →  cssEncode(value)
 
 ```scala
 // BAD: user string concatenated into a FOL expression
-val formula = s"""leaf(x) /\\ gt_loss(p95(x), "$threshold")"""
+val formula = s"""leaf(x) /\\ gt_loss(p95(x, "inherent"), "$threshold")"""
 
 // GOOD: threshold is a typed constant; no re-parse
 val thresholdVal: Long = threshold.value   // Long, not String

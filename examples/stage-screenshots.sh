@@ -72,8 +72,8 @@ SHOT LIST — open $WURL, then per shot:
 [slide 29]  Analyze view + query pane (VQL)
    Click: sidebar → Analyze → select tree "Financial Services Enterprise Risk".
    Paste into the query pane (verified — gives erfüllt/nicht erfüllt live):
-       Q[>=]^{1/2} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x), 2000000))
-       Q[>=]^{1/2} x (leaf_descendant_of(x, "Third-Party and Supply Chain"), gt_loss(p95(x), 2000000))
+       Q[>=]^{1/2} x (leaf_descendant_of(x, "Technology and Cyber"), gt_loss(p95(x, "inherent"), 2000000))
+       Q[>=]^{1/2} x (leaf_descendant_of(x, "Third-Party and Supply Chain"), gt_loss(p95(x, "inherent"), 2000000))
    Clip:  the query input + the result/highlighted nodes.
 
 [slide 3]   Tinder threat model — EXTERNAL image, source it yourself (not this app).

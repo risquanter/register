@@ -155,25 +155,25 @@ run_query() {
 
 run_query \
   "Do at least half of all leaves have P95 loss above \$2M?" \
-  'Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))'
+  'Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x, "inherent"), 2000000))'
 
 run_query \
   "Do at least 1/3 of all leaves have P99 loss above \$5M?" \
-  'Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))'
+  'Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x, "inherent"), 5000000))'
 
 run_query \
   "Do at most half of all leaves have a >5% chance of exceeding \$2M?" \
-  'Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 2000000), 0.05))'
+  'Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 2000000, "inherent"), 0.05))'
 
 # Existential quantifier in scope: does each portfolio harbour at least one high-severity child?
 run_query \
   "Existential (exists): Do at least 2/3 of portfolio nodes have at least one direct child with P95 above \$1M?" \
-  'Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 1000000)))'
+  'Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 1000000)))'
 
 # Universal quantifier in scope: are all direct children of most portfolios above a severity floor?
 run_query \
   "Universal (forall): Do at least half of portfolio nodes have ALL direct children with P95 above \$1M?" \
-  'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y), 1000000)))'
+  'Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y, "inherent"), 1000000)))'
 
 # ── Sub-portfolio scoped queries (Q-S1 – Q-S3) ────────────────────────────────
 # Same thresholds as Q1/Q2 above, but the quantifier is scoped to a named
@@ -183,17 +183,17 @@ run_query \
 # Q-S1 — IT Risk sub-scope: both leaves are heavy-tailed (Ransomware P95=$15M)
 run_query \
   "Q-S1: Do at least half of IT Risk leaves have P95 above \$2M?" \
-  'Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x), 2000000))'
+  'Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"), gt_loss(p95(x, "inherent"), 2000000))'
 
 # Q-S2 — Third Party Risk sub-scope: same bar, lighter-tailed leaves
 run_query \
   "Q-S2: Do at least half of Third Party Risk leaves have P95 above \$2M?" \
-  'Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x), 2000000))'
+  'Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x, "inherent"), 2000000))'
 
 # Q-S3 — child_of scoping: direct children of IT Risk at the $5M P99 bar (cf. Q2)
 run_query \
   "Q-S3: Do at least half of direct children of IT Risk have P99 above \$5M?" \
-  'Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x), 5000000))'
+  'Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x, "inherent"), 5000000))'
 
 header "Done — workspace info"
 ok "Workspace key : $WS_KEY"

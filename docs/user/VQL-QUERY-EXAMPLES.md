@@ -35,6 +35,40 @@ In the examples below, the simple 4-leaf tree and the 21-leaf enterprise tree pr
 
 ---
 
+## The mitigation argument
+
+Register can value the same node in more than one way: before any risk
+reduction has been applied, or after. The three value functions — `p95`, `p99`
+and `lec` — therefore take an extra argument saying which valuation to read.
+It is the last argument in every case:
+
+```
+p95(x, <mitigation>)
+p99(x, <mitigation>)
+lec(x, <loss threshold>, <mitigation>)
+```
+
+Three things can go in that position:
+
+- `"inherent"` — the node's loss with no mitigation applied. This is the raw
+  simulated figure. Inherent risk is the standard term for exposure before
+  controls.
+- `"residual"` — the node's loss after every mitigation whose scope covers that
+  node has been applied. Residual risk is the standard term for what is left
+  after controls.
+- A mitigation variable introduced by `exists m` — the node's loss after that
+  one mitigation alone, which is how you compare mitigations against each other.
+
+The argument is required, not optional. Writing `p95(x)` is rejected before the
+query runs, because the function's declared signature takes two arguments. Note
+that for `lec` the mitigation argument comes **third**, after the loss
+threshold: `lec(x, 2000000, "inherent")`.
+
+Every example in this document uses `"inherent"`, and the two reference trees
+carry no mitigations, so `"residual"` would return the same figures for them.
+
+---
+
 ## Running the examples
 
 The `examples/` directory contains ready-to-run scripts that bootstrap a tree and execute a selection of the queries below, printing a pass/fail summary of results. For working through the examples manually, you will only need the workspace key and tree ID they output. Register's first access layer is capability-based: the workspace key is a secret token embedded in the workspace URL. To view the tree in the application, navigate to `http://localhost:18080/w/<workspaceKey>` in a browser. After the app loads, switch to the Analyze view and select the tree from the dropdown. From there you can run VQL queries directly in the query pane.
@@ -48,13 +82,13 @@ The simplest queries check each individual risk against a single condition — f
 *"Do at least half of all leaves carry a loss above $2M in 1-in-20 occurrences?"* — only 1 of 4 qualifies in the simple tree, so this is **not satisfied**:
 
 ```
-Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x), 2000000))
+Q[>=]^{1/2} x (leaf(x), gt_loss(p95(x, "inherent"), 2000000))
 ```
 
 Relaxing the proportion to 1/3 and targeting the more extreme 1-in-100 tail — *"Do at least a third of all leaves carry a loss above $5M in 1-in-100 occurrences?"* — is **satisfied** (2 of 4):
 
 ```
-Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x), 5000000))
+Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x, "inherent"), 5000000))
 ```
 
 Both queries test the same condition — only the fraction changes. Raising the bar from 1/3 to 1/2 is what tips the result from passing to failing.
@@ -68,10 +102,10 @@ The `<=` operator tests whether a proportion stays *below* a ceiling — useful 
 *"Do at most half of all leaves have a greater-than-5% annual probability of generating a loss above $2M?"*:
 
 ```
-Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 2000000), 0.05))
+Q[<=]^{1/2} x (leaf(x), gt_prob(lec(x, 2000000, "inherent"), 0.05))
 ```
 
-`lec(x, threshold)` returns the Loss Exceedance Curve probability — the unconditional annual probability that node x generates a loss exceeding the threshold.
+`lec(x, threshold, "inherent")` returns the Loss Exceedance Curve probability — the unconditional annual probability that node x generates a loss exceeding the threshold.
 
 ---
 
@@ -82,13 +116,13 @@ The `~` operator matches proportions that are roughly equal to the stated fracti
 *"Do about half of all leaves carry a loss above $5M in 1-in-20 occurrences?"* — only ~24% qualify across the enterprise tree, so this is **not satisfied** even with fuzzy tolerance:
 
 ```
-Q[~]^{1/2} x (leaf(x), gt_loss(p95(x), 5000000))
+Q[~]^{1/2} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))
 ```
 
 Restating the same question at the proportion the data actually supports — *"Do about a fifth of all leaves carry a loss above $5M in 1-in-20 occurrences?"* — is **satisfied**:
 
 ```
-Q[~]^{1/5} x (leaf(x), gt_loss(p95(x), 5000000))
+Q[~]^{1/5} x (leaf(x), gt_loss(p95(x, "inherent"), 5000000))
 ```
 
 This pair shows the key distinction from `>=`: `~` expects the proportion to be *close to* the stated fraction, not merely at or above it.
@@ -102,7 +136,7 @@ Replacing `leaf(x)` with `portfolio(x)` shifts the quantifier range to aggregate
 *"Do at most a third of portfolio nodes carry an aggregate loss above $50M in 1-in-20 occurrences?"*:
 
 ```
-Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x), 50000000))
+Q[<=]^{1/3} x (portfolio(x), gt_loss(p95(x, "inherent"), 50000000))
 ```
 
 ---
@@ -117,14 +151,14 @@ The following pair applies the same 1-in-20 loss bar and the same quantifier to 
 *"Do at least half of Third Party Risk's leaves carry a loss above $2M in 1-in-20 occurrences?"*
 
 ```
-Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"),          gt_loss(p95(x), 2000000))
-Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x), 2000000))
+Q[>=]^{1/2} x (leaf_descendant_of(x, "IT Risk"),          gt_loss(p95(x, "inherent"), 2000000))
+Q[>=]^{1/2} x (leaf_descendant_of(x, "Third Party Risk"), gt_loss(p95(x, "inherent"), 2000000))
 ```
 
 `child_of` restricts to direct children only:
 
 ```
-Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x), 5000000))
+Q[>=]^{1/2} x (child_of(x, "IT Risk"), gt_loss(p99(x, "inherent"), 5000000))
 ```
 
 Swapping the named scope while holding the quantifier and predicate constant is a reliable technique for locating which branch drives a risk property.
@@ -138,13 +172,13 @@ The predicate position can contain a second quantified formula over a second var
 **Existential** — *"Do at least two-thirds of portfolio nodes have at least one direct child carrying a loss above $1M in 1-in-20 occurrences?"*:
 
 ```
-Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y), 1000000)))
+Q[>=]^{2/3} x (portfolio(x), exists y . (child_of(y, x) /\ gt_loss(p95(y, "inherent"), 1000000)))
 ```
 
 **Universal** — *"Do at least half of portfolio nodes have ALL their direct children carrying a loss above $1M in 1-in-20 occurrences?"*:
 
 ```
-Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y), 1000000)))
+Q[>=]^{1/2} x (portfolio(x), forall y . (child_of(y, x) ==> gt_loss(p95(y, "inherent"), 1000000)))
 ```
 
 The `exists` / `forall` forms are particularly useful for asserting structural properties — for example, that no portfolio is composed entirely of low-severity risks.
@@ -158,7 +192,7 @@ The predicate can include a negation (`~`) to exclude nodes matching a named bra
 *"Do about half of the non-Cyber leaves carry a loss above $1M in 1-in-20 occurrences?"*:
 
 ```
-Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x), 1000000))
+Q[~]^{1/2} x (leaf(x), ~descendant_of(x, "Technology & Cyber") /\ gt_loss(p95(x, "inherent"), 1000000))
 ```
 
 ---
