@@ -215,15 +215,20 @@ request-specific is attached at the edge), and the avoided work is a linear
 map pass, not a simulation. Revisit only if measurement shows transform
 application dominating read latency.
 
-### D4 — Provenance of a transform application (monoid B.7 decision 5)
+### D4 — Provenance of a transform application (monoid B.7 decision 5) — ✅ DECIDED (2026-09-14)
 
-**Unblocked 2026-07-18:** DD-19 closed → (c)+(d) + A′ (identity-free
-content record; provenance leaf-only; structural attribution). D4 itself
-remains open — decide with D1's build or the first mitigation wiring.
-Original note: Blocked on DD-19 (provenance record shape). A transform application is
-analytically meaningful and must be explainable (ADR-003), so whatever record
-DD-19 produces needs a representation for "transform X with parameters Y was
-applied". **Decide together with DD-19 — last, per the agreed sequencing.**
+A transform application is analytically meaningful and must be explainable
+(ADR-003), so it needs a representation for "transform X with parameters Y was
+applied". That representation is `MitigationApplicationRecord`, and §8.16 rules
+where the records live: on the `applied` field of the `ValuationResult` the
+mitigated fold returns, server-side. They are not carried on the wire; the
+response tags each reading with `withMitigations`, and the client already holds
+each mitigation's `spec` and `resolvedScope` from the tree read (§7.6.2
+Decision 4).
+
+The derivation behind this placement is in
+[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md);
+consult it before re-opening the question.
 
 ### D5 — Client-facing mitigation API (monoid B.7 decision 4)
 
@@ -387,7 +392,7 @@ changes**.
 | **M1** | Domain model: renames, reified transform specs, `Mitigation` entity, tree-level collection + codecs, pure application algebra | `common` (+ tests) | nothing |
 | **M2** | Persistence + resolution: Irmin storage paths, resolver-edge wiring (effective tree, result-stage application), mitigation-application record, override staleness detection | `server` (+ tests, server-it) | M1 |
 | **M3** | VQL targeting & analytics: `Predicate` target variant, targeting-sublanguage validation, scope resolution via `satisfyingSet`, KB schema (`Mitigation` sort, `mitigate`, precomputed `mitigated`/`unmitigated`), KB memoization (P-2/P-3), engine version bump | `common`, `server`, `build.sbt` | M1, M2, engine AC-1…AC-10 delivered |
-| **M4** | API surface + frontend: tree-PUT mitigation buckets, LEC endpoint selection parameter + mitigation-provenance layer in responses, mitigation selection UI (see OD-3), two-tier badges, override edit-popup + stale badge | `common`, `server`, `app` | M1–M3 (badges/selection UI need only M1–M2; predicate-scope UI needs M3) |
+| **M4** | API surface + frontend: tree-PUT mitigation buckets, LEC endpoint selection parameter, per-node readings tagged with the mitigations that produced them, mitigation selection UI (see OD-3), two-tier badges, override edit-popup + stale badge | `common`, `server`, `app` | M1–M3 (badges/selection UI need only M1–M2; predicate-scope UI needs M3) |
 | **M5** | Mitigation-aware change visibility: problem space recorded in §7.7 — **no design yet, planned only after M1–M4 have landed** (user ruling on OD-4, 2026-08-08) | TBD | M1–M4 landed |
 
 **Staging superseded for targeting (2026-08-10):** §8.2 is the
@@ -622,8 +627,12 @@ object Mitigation {
   given Schema[Mitigation]
 }
 
-/** D-4 provenance layer: one record per applied mitigation, stored beside the simulation
-  * provenance in responses — NEVER inside NodeProvenance (DD-19 stays identity-free). */
+/** One record per applied mitigation. It sits on the `applied` field of the
+  * `ValuationResult` the mitigated fold returns, and never inside
+  * `NodeProvenance`, which carries no identity. It does not cross the wire:
+  * a response tags each reading with the mitigation ids that shaped it, and the
+  * client already holds each mitigation's spec and resolved scope from the tree
+  * read. (§8.16 rules the placement.) */
 final case class MitigationApplicationRecord(
   mitigationId: MitigationId,
   spec: MitigationSpec,
@@ -665,8 +674,8 @@ effective parameters client-side:
 ```scala
 /** Which mitigations to apply, each optionally restricted to a subset of its scope
   * (per-(mitigation, node) enablement — OD-3 ruling 2026-08-09). Crosses the wire in
-  * M4 as a query parameter. A NodesOnly restriction intersects with the mitigation's
-  * resolved scope at application time: ids outside the current scope no-op. */
+  * M4 in the request body (Decision 3). A NodesOnly restriction intersects with the
+  * mitigation's resolved scope at application time: ids outside the current scope no-op. */
 sealed trait MitigationSelection
 object MitigationSelection {
   case object None extends MitigationSelection
@@ -681,6 +690,9 @@ object ScopeRestriction {
   final case class NodesOnly(ids: Set[NodeId]) extends ScopeRestriction // explicit per-node enablement
   given JsonCodec[ScopeRestriction]
 }
+
+// The two nullary cases shipped as `Inherent` and `Residual`, matching ADR-034's
+// valuation names; `None`/`All` above is the pre-rename sketch.
 
 object MitigationApplication {
 
@@ -903,19 +915,45 @@ memoization into M2; the remaining M3 scope is listed in §8.2.
   `mitigations = oldTree.mitigations` over from its own read. Landing the
   buckets must delete that carry-over and its comment and resolve mitigations
   from the request instead; left in place it would make the new buckets inert.
-- **LEC endpoints**: one `MitigationSelection` per request (Decision 11).
-  A response carries the inherent curves, the curves under that one selection,
-  and the mitigation-provenance layer (`MitigationApplicationRecord`s) beside
-  simulation provenance. Comparing several selections means several requests,
-  one per Compare slot. Each toggle issues its own request; there is no
-  server-push refetch on this path — the notification channel carries node
-  invalidation only, and no browser consumer for it exists (Decision 1).
+- **LEC endpoints**: one `MitigationSelection` per request (Decision 11),
+  carried in a **JSON request body on both endpoints** (Decision 3), which makes
+  `prob-of-exceedance` a POST. `Inherent` is the wire spelling of "no
+  mitigations" and is identity, so a caller that does not select anything reads
+  exactly the figure it reads today. A response carries the inherent curves and
+  the curves under that one selection, each tagged with the mitigation ids that
+  produced it (`withMitigations`); the `MitigationApplicationRecord` layer stays
+  server-side on the valuation and is not carried on the wire, because its `spec`
+  and `resolvedScope` are already in the client's hands from the tree read
+  (Decision 4, and §8.16 for where the records live). Comparing
+  several selections means several requests, one per Compare slot. Each toggle
+  issues its own request; there is no server-push refetch on this path — the
+  notification channel carries node invalidation only, and no browser consumer
+  for it exists (Decision 1).
+- **Tree read**: the structure endpoint gains each mitigation's **resolved scope
+  and `ScopeOutcome`** (Decision 12), so the selection interface can draw a
+  mitigation's rows, and show which mitigations no longer match any node, before
+  anything is ticked. The mitigation definitions themselves already cross the
+  wire — `RiskTree.mitigations` is part of the tree's serialized form. The
+  resolved scopes travel beside the tree in the same response, not inside
+  `RiskTree`, which is the persisted content type.
 - **Frontend**: per-mitigation selection UI per OD-3's refined model —
   mitigation child-styled rows under scoped nodes (per-(mitigation, node)
   enablement) + global tri-state control; a curve is identified by
-  (node, variant), where a variant is one named selection and `Inherent` is the
-  empty selection — a node has one curve per variant, never a fixed pair, since
-  several mitigations on a node compose into a single valuation; within-view
+  (node, variant), where a variant is one selection and `Inherent` is the empty
+  selection — a node has one curve per variant, never a fixed pair, since the
+  mitigations in a selection compose into a single valuation. **A selection is a
+  set**: any subset of the tree's mitigations can be applied together, each with
+  its own scope restriction, and the comparison axis is between selections —
+  `{m1, m2, m3}` against `{m1, m2}` is two variants, one per Compare slot, and
+  the difference between their curves is m3's contribution in the presence of
+  the others. A single-mitigation selection is the one-element case, not a
+  distinct concept. Because one request carries one selection (Decision 11),
+  comparing several selections costs one slot each, and the slot pool is one per
+  palette family — at most eight selections on screen together. The content
+  cache absorbs most of the repetition: two selections agreeing on a leaf's
+  param-stage transforms produce the same leaf content and hit the same entry,
+  and a result-stage mitigation changes no leaf content at all, so N selections
+  cost N round trips rather than N simulations; within-view
   variant curves beside the inherent one, with a client-side display mode giving
   a purely mitigated (residual-risk) view — granularity per OD-3c; colour stays
   node identity and a variant is distinguished by **point-marker shape**
@@ -978,13 +1016,15 @@ filled by the node picker; the name is shown here only for readability.)
 
 - Tree version 1 has leaves `srv-web` and `srv-db`. The predicate resolves to
   `{srv-web, srv-db}`. Firewall is enabled globally (full scope): both leaves
-  are mitigated; the LEC's provenance layer records
-  `resolvedScope = {srv-web, srv-db}`.
+  are mitigated; the tree read reports Firewall's
+  `resolvedScope = {srv-web, srv-db}`, and both leaves' readings name Firewall in
+  `withMitigations`.
 - You add a leaf `srv-mail` under `Servers` (tree version 2). Scope re-resolves per tree
   version, so `srv-mail` enters Firewall's scope automatically. Because the
   enablement is full-scope, `srv-mail` is mitigated with no further action,
-  and the next LEC's provenance records the three-node set. The version-1
-  result's record still says two nodes — past results are not retro-altered.
+  and the tree read at version 2 reports the three-node set. Reading version 1
+  still reports two nodes — scope is a function of the tree version, so past
+  versions are not retro-altered.
 - Same story but Firewall was enabled per-node on `srv-web` only: after adding
   `srv-mail`, only `srv-web` stays mitigated. A restriction is an explicit
   list; new scope members are not silently pulled into it. `srv-mail` shows
@@ -1794,9 +1834,35 @@ Ammendment:
 
 ### 7.6 M4 implementation-grade elevation
 
-The elevation section itself is unwritten: exact signatures, the M4 file
-inventory and the verification plan arrive once §7.6.2's remaining decisions are
-ruled. Until then M4 has no plan coverage and no M4 source edit is authorized.
+Written for slices 1 to 5 (§7.6.4 names the slices). Those five carry exact
+signatures, ADR alignment, a verification plan and a file inventory. Slice 6 —
+the interface and the user documentation — is not elevated here. §7.6.12 lists
+the seven open decisions: five gate the `ValuationResult` sub-slice ruled in
+§8.16, which slice 1 consumes, and two gate slice 6. Slices 2 to 5 carry none. No M4 source edit is
+authorized until the approval token names this plan and the edited file appears
+in the shared `## File inventory`.
+
+**Sequencing: `PLAN-CACHE-REGISTRY-RENAME` lands before this elevation.** The two
+plans share fifteen files, including all three scope-resolver sources. The rename
+turns `ScopeResolverScope` into `MitigationScopeResolverRegistry` and `resolverFor`
+into `forWorkspace`. Slice 1 adds a scope-resolver field to `RiskTreeServiceLive`
+and slice 4 rewrites the resolver's memo, so both are written against names the
+rename changes. Landing M4 first would instead grow the rename's ripple list by
+everything M4 adds. `docs/dev/TODO.md`'s plan landing order records this as
+constraint 6.
+
+Consequently **every signature in §7.6.5 and §7.6.8 that names `ScopeResolverScope`
+or `resolverFor` is written in pre-rename vocabulary and is renamed as the rename
+plan lands**, not re-decided here. The rename plan's own document list carries
+this file, so the two stay consistent by that plan's own scope.
+
+**Reasoning source.** Where a question about the mitigated value's type, the two
+folds, the identity case, or `flatten` is ambiguous in the sections below, the
+derivation that settles it is
+[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md).
+It builds the vocabulary, the raw fold, the obstruction, the Option F ruling and
+each consequence in order, and it is the record to consult before re-deciding any
+of them. Individual sections below point at the specific part that governs them.
 
 #### 7.6.0 Design anchors
 
@@ -1806,21 +1872,30 @@ anchor is wrong — neither is settled silently.
 
 | # | Anchor | Enforced at |
 |---|---|---|
-| A1 | Two valuations, never one merged value. Raw is the mitigation-free fold and is cached; mitigated is a second fold at the read edge and is never stored | ADR-034 §1 |
+| A1 | Two valuations, never one merged value. Raw is the mitigation-free fold and is cached; mitigated is a second fold at the read edge and is never stored. Why one valuation cannot serve both is derived in the reasoning document, Part 3 | ADR-034 §1 |
 | A2 | Stage determines **where** a mitigation may apply: `LeafStage` leaves only, `ResultStage` any node | the stage-domain intersection in `MitigationScopeResolverLive.resolveOne` |
 | A3 | Stage determines **when** it applies and therefore whether it is cached. `LeafStage` is baked in **before** hashing, so a mitigated leaf hashes differently and becomes its own content-addressed entry. `ResultStage` is applied **after** the lookup returns and is never cached | `CachedResultResolverLive` steps 1–3 |
 | A4 | Composition within a node is function composition in precedence order, not addition. Leaf: `foldLeft(applyTo)`. Result: `reduceOption(_.andThen(_))`. Order `(precedence.key, id.value)` | `MitigationApplication` |
-| A5 | A node's mitigated value folds its children's **mitigated** values, never the raw aggregate with a transform laid over it | ADR-034 §2, §4 |
+| A5 | A node's mitigated value folds its children's **mitigated** values, never the raw aggregate with a transform laid over it. The worked example is in the reasoning document, Part 4 | ADR-034 §2, §4 |
 | A6 | Portfolios are never cached; the aggregate is recomputed on every read | `CachedResultResolverLive` step 4 |
-| A7 | One selection yields exactly **one** mitigated valuation per node. Several mitigations on a node compose into one curve, not one curve each | follows from A4 |
+| A7 | **A selection is a set** — any subset of the tree's mitigations, each with its own scope restriction — and one selection yields exactly **one** mitigated valuation per node. Several mitigations scoping a node compose into one curve, not one curve each. A single-mitigation selection is the one-element case, not a distinct concept. The comparison axis is between selections | `MitigationSelection.Selected`; follows from A4 |
 | A8 | Scope is resolved server-side, per tree version, from a predicate. A predicate that stops binding makes that one mitigation a no-op plus a drift signal; it never fails the request | `MitigationScopeResolverLive`; `ScopeOutcome` |
 | A9 | A selection restricts and can never extend — `NodesOnly` intersects the resolved scope, so an out-of-scope id silently does nothing | `MitigationApplication.scoped` |
-| A10 | The defaults are identity: `Inherent` with empty scopes makes the whole mitigation path a no-op, so an unchanged caller gets an unchanged figure | OD-5; the resolver's default arguments |
+| A10 | The defaults are identity: `Inherent` with empty scopes makes the whole mitigation path a no-op, so an unchanged caller gets an unchanged **figure**. This anchor constrains figures, not representation: under §8.16 an unchanged caller receives a `ValuationResult` whose outcomes are identical to what it reads today | OD-5; the resolver's default arguments |
 | A11 | Nothing mitigated is ever persisted. The effective tree is built per request and discarded | ADR-034 §5 and its persistence code smell |
 | A12 | The cache stores **content**, never mitigations. A param-stage mitigation is cached because it produces new content; a result-stage mitigation is not cached because it produces none | `ContentHashIndex`, `LeafSimContent` |
 
 **A12 stated as one sentence:** a param-stage mitigation changes what must be
 simulated; a result-stage mitigation changes what is done with a simulation.
+
+**Reasoning source for A1, A5, A6 and A10.** These four state the two-fold model
+and its identity case. Their derivation — why a result transform is not a monoid
+homomorphism, why no single valuation can satisfy both the cache invariant and an
+aggregate cap, and what type the mitigated value therefore has — is in
+[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md).
+§8.16 records the rulings that follow from it. An ambiguity in any section below
+about the mitigated value's type, the identity case or `flatten` is resolved
+there, not by re-deriving it.
 
 **Why a leaf is stored and a portfolio is not.** The cache key is
 `sha256(LeafSimContent.toJson)`, and `LeafSimContent` is `seedVarId,
@@ -1875,17 +1950,17 @@ time; the Status column is current.
 | F1 | Tree PUT silently deletes every mitigation: `RiskTreeServiceLive.create`/`update` called `RiskTree.fromNodes` without `mitigations`, and `writeTree`'s whole-subtree `set_tree` (DD-7) deletes every `mitigations/{id}` blob the call omits. Latent while no write path creates mitigations; live data loss at M4. `MitigationPersistenceItSpec` exercises the repository, not the service, so it could not catch this | high | **Fixed.** Defaults removed from the `RiskTree` constructor, `fromNodes` and `fromNodesUnsafe` so the compiler forces intent; `create` passes `Nil`, `update` carries `oldTree.mitigations`; service-level regression tests added to `RiskTreeServiceLiveSpec` |
 | F2 | **Ruled (Decision 1 = B).** The refetch mechanism §7.4 cited does not exist on the client (the SPA has no SSE consumer at all; SSE lives only under `modules/server/`), and `InvalidationHandler.computeAffectedNodes` diffs node membership and node content hashes only, so it is blind to mitigation-only edits | med | Open → Decision 1 |
 | F3 | D5 is open and its designated ADR does not cover the API: §7.4 points at ADR-034, which explicitly scopes transform definitions out. No ADR covers the client-facing mitigation API. D4 likewise open, with `applicationRecords` built but consumed nowhere | high | Ruled → Decision 2 |
-| F4 | `overrideBaseStamp` is server-computed by ruling (§8.15) but client-supplied by the `Mitigation` codec, which decodes it straight off the wire | high | **Approved, not implemented.** Fix depends on the M4 DTO design |
-| F5 | The selection payload has no size bound: neither `ScopeRestriction.NodesOnly.ids` nor `MitigationSelection.Selected.entries` is bounded. Derived bounds 10 000 (tree node ceiling) and 1 000 (`MaxMitigations`), both from ADR-017 §6 domain cardinalities; the 8 MiB `RequestStreaming.Disabled(cfg.maxRequestBytes)` cap covers the aggregate | med-high | **Approved, not implemented** |
-| F6 | Where the selection rides is unresolved, and the plan's stated answer does not fit the endpoints | med | Open → Decision 3 |
-| F7 | The response type cannot carry what ADR-034 and OD-3 require: `Map[NodeId, LECNodeCurve]` has no room for two valuations, per-valuation provenance, `staleMitigationIds`, or drift signals | med | Open → Decision 4 |
+| F4 | `overrideBaseStamp` is server-computed by ruling (§8.15) but client-supplied by the `Mitigation` codec, which decodes it straight off the wire | high | **Specified, not implemented.** Discharged structurally at §7.6.6: the request-side spec type carries no base-stamp field at all, so a client cannot send one; the stamp is computed from the anchored leaf |
+| F5 | The selection payload has no size bound: neither `ScopeRestriction.NodesOnly.ids` nor `MitigationSelection.Selected.entries` is bounded. Derived bounds 10 000 (tree node ceiling) and 1 000 (`MaxMitigations`), both from ADR-017 §6 domain cardinalities; the 8 MiB `RequestStreaming.Disabled(cfg.maxRequestBytes)` cap covers the aggregate | med-high | **Specified, not implemented** (§7.6.5). The elevation adds a third bound F5 did not name: the requested node list, bounded by the same tree node ceiling |
+| F6 | Where the selection rides is unresolved, and the plan's stated answer does not fit the endpoints | med | Ruled → Decision 3 |
+| F7 | The response type cannot carry what ADR-034 and OD-3 require: `Map[NodeId, LECNodeCurve]` has no room for two valuations or for per-valuation provenance | med | Ruled → Decision 4; shape at §7.6.3 |
 | F8 | The scope resolver is not reachable from the LEC path: `ScopeResolverScope` is wired into `QueryServiceLive` only, and `RiskTreeServiceLive` discarded the `CommitHash` | med | **Fixed.** `RiskTreeService.getById` widened to `(RiskTree, CommitHash)`; the three controller callers discard the hash at the wire boundary. Supersedes the confinement formerly recorded in §7.5.3 (i) and §7.5.4, both now corrected |
-| F9 | §8.7 Finding 3's required validating decoder has an unclear trigger: `MitigationApplicationRecord`'s derived codec re-validates nothing, so a tampered record decodes cleanly | med | Open → Decision 5 |
+| F9 | §8.7 Finding 3's required validating decoder has an unclear trigger: `MitigationApplicationRecord`'s derived codec re-validates nothing, so a tampered record decodes cleanly | med | **Closed, no action.** The record is outbound only; both inbound paths (targeting expression, persisted mitigation) already re-validate. See Decision 5 |
 | F10 | Mitigation selection collides with Compare slot identity: OD-3 wants selection as a slot dimension, but `SlotCoordinate.samePairAs` does not carry it | med | Ruled → Decision 6 |
 | F11 | **Ruled (Decision 7).** `LECChartState` caps user-selected nodes at 13 and `ColorAssigner` assigns one colour per node, which a second curve per node breaks. The cap counts nodes; a variant is drawn with point-marker shape, colour staying node identity | med | Ruled → Decision 7 |
-| F12 | New nodes and new mitigations cannot reference each other in one PUT: `overrideAnchor` is a `NodeId` and `risk_id` literals need ids, but ADR-017 create buckets carry no ids — the server mints them | low-med | Ruled → Decision 8 |
+| F12 | New nodes and new mitigations cannot reference each other in one PUT: `overrideAnchor` is a `NodeId` and `risk_id` literals need ids, but ADR-017 create buckets carry no ids — the server mints them | low-med | Ruled → Decision 8; the name-uniqueness debt it carried is discharged (`requireDistinctNodeNames`) |
 | F13 | §7.4's create-DTO wording contradicted ADR-017 Decision 1 by giving `RiskTreeDefinitionRequest` an identity-preserving bucket | low | **Fixed** (§7.4 first bullet) |
-| F14 | §7.4.1's user-documentation deliverable has zero coverage and is already due: `docs/user/VQL-QUERY-EXAMPLES.md`, `TERMINOLOGY.md` and `API-TUTORIAL.md` contain no occurrence of "mitigat"; the deliverable is scoped to "M3/M4" and M3 landed at 0.10.31/0.10.32 | low (blocking under G8) | Open — content depends on Decisions 2–4 |
+| F14 | §7.4.1's user-documentation deliverable has zero coverage and is already due: `docs/user/VQL-QUERY-EXAMPLES.md`, `TERMINOLOGY.md` and `API-TUTORIAL.md` contain no occurrence of "mitigat"; the deliverable is scoped to "M3/M4" and M3 landed at 0.10.31/0.10.32 | low (blocking under G8) | Open — scheduled in slice 6 (§7.6.4); writable now that the wire shapes are ruled |
 | F15 | Stale docs and comments to sweep | low | **Fixed.** ADR-034 status → "Accepted (implemented)"; `CachedResultResolver`/`CachedResultResolverLive` `None` → `Inherent` (3 sites); ADR-017 `obsoleteNodeIds` row corrected to the whole-subtree `set_tree` semantics. Not stale after all: `RiskTreeRequests.resolveUpdate`, which exists as a delegating entry point |
 | F16 | The plan's ADR-alignment table predates ADR-034, ADR-035 and ADR-036 | low | **Fixed** (rows added) |
 | F17 | A tree PUT can leave `overrideAnchor` pointing at a node the same request deleted. `validateMitigations` checks duplicate ids, duplicate names and the 1 000 cap only — it does not cross-check `MitigationSpec.LeafStage.overrideAnchor: Option[NodeId]` against the node collection, and its docstring places scope resolution outside the tree invariants. Predicate targets are not references — they are re-resolved per tree version, and a non-binding predicate is a designed per-mitigation no-op drift signal — but `overrideAnchor` is a stored reference to a ULID that, once its node is deleted, can never bind again. F12 is the forward case (a new node and a new mitigation referencing each other before ids are minted); this is the backward case | med | Ruled → Decision 9 |
@@ -1897,94 +1972,1739 @@ Two further items came from the complex-tier review of the F1/F8 change:
 | R1 | Lost update in the tree-update path: `RiskTreeServiceLive.update` precomputes a whole replacement tree from its own earlier read, then passes `_ => riskTree` to `repo.update`, which discards the fresh read it just performed. No compare-and-swap anywhere in the write path, so two overlapping PUTs silently drop one client's edit. Pre-existing; predates mitigations and applies equally to node content, tree name and `seedVarHighWater` | should-fix | Ruled: fix properly via optimistic concurrency keyed on `CommitHash`. Scoped out to `PLAN-TREE-WRITE-CONCURRENCY.md` (NEEDS REVIEW, not implementation-grade), whose write-shape ruling is a version token first, then server-side diff-and-merge — options in `PLAN-TREE-WRITE-CONCURRENCY-APPENDIX-WRITE-SHAPE.md` |
 | R2 | `CommitHash` described as "the storage-relation revision (ADR-032 §3)" in two trait scaladocs. ADR-032 §3 is about per-node byte hashing for merge-conflict prediction, not commit identity | note | **Fixed** in both `RiskTreeService` and `RiskTreeRepository` |
 
-#### 7.6.2 Decision register — eight ruled, four open
+#### 7.6.2 Decision register — all twelve ruled
 
-The M4 elevation's decision set. Decisions 11 and 12 were added during the
-ruling session; both were absent from the review that produced F1–F17.
-
-**Ruled.**
+The M4 elevation's decision set, in decision-number order. Decisions 11 and 12
+were added during the ruling session; both were absent from the review that
+produced F1–F17. Decision 5 turned out not to be a decision and is recorded as
+closed. **Decision 9 was re-ruled on 2026-09-14** and now reads the opposite way
+from its first ruling; the entry states both the new ruling and why it changed.
 
 1. **Does M4 make mitigation edits visible to the change-notification channel?**
    (F2) **RULED B.** Yes. `computeAffectedNodes` gains a mitigation-collection
    diff and publishes the affected nodes, which gives `InvalidationHandler` a
    scope-resolver dependency on the write path. The browser consumer is M5
    scope, so M4's publish reaches zero subscribers by design.
+
 2. **Where does the client-facing mitigation API contract live?** (F3)
    **RULED B — split by surface.** The mitigation buckets amend ADR-017, whose
    "Four Buckets" decision would otherwise describe a tree PUT that no longer
    exists. The read side becomes a new **ADR-037**, which covers the analysis
    read contract as a whole — pin, branch header, selection, response — not only
    its mitigation-shaped part, and which follows the ADR-00X meta template.
+
+3. **How does the selection cross the wire?** (F6) **RULED A — a JSON body on
+   both analysis endpoints; `prob-of-exceedance` becomes a POST.** A selection
+   is a set (A7), so the payload is a map of up to 1 000 mitigation entries,
+   each of which may carry up to 10 000 node ids under
+   `ScopeRestriction.NodesOnly` (F5's bounds); a URL cannot be designed against
+   the typical case when the bound is that large. Two further arguments hold
+   independently: node ids are confidential internal identifiers (ADR-036) and
+   the nginx access log records full request lines, so a selection in a query
+   string writes node ids to disk; and `lec-multi` is already a POST with a JSON
+   body, so a body on both endpoints is one encoding rather than two.
+
+   Three consequences, each verified against source:
+   - **`MitigationSelection.Inherent` is the wire spelling of "no mitigations",
+   and it is identity.** `MitigationApplication.scoped` returns `Nil` for it,
+   so `effectiveTree` applies no transform and `resultTransformFor` yields
+   `None`. The tree is rebuilt through `RiskTree.fromNodes` with unchanged
+   node values, so `LeafSimContent` hashes identically and no cache entry
+   fragments.
+   - **Existing figures and assertions do not move.**
+   `CachedResultResolver.ensureCached` and `ensureCachedAll` already declare
+   `selection: MitigationSelection = MitigationSelection.Inherent` and
+   `resolvedScopes` defaulted in the trait, and `RiskTreeServiceLive` calls
+   them without either argument. The same defaulting carries to
+   `RiskTreeService.probOfExceedance` and `getLECCurvesMulti`, so every
+   service-level call site compiles and asserts unchanged.
+   - **Only one existing test re-encodes a request.**
+   `SeedReproducibilityItSpec` posts a bare `List[NodeId]` body to
+   `lec-multi` and moves to the request object. `prob-of-exceedance` has no
+   HTTP-level test and no browser consumer — `getWorkspaceProbOfExceedanceEndpoint`
+   is referenced only by its own definition and its controller — so the method
+   change costs no test at all. `LECChartState` is the one production caller
+   to change.
+
+   The request body is **required**, not optional: a Tapir `jsonBody` cannot be
+   absent, and `Inherent` is the explicit spelling of the empty selection, so an
+   optional body would add a second way to say the same thing.
+
+   Doc sweep this ruling makes due when the change lands (not before — the
+   endpoint is a GET today): the method column in
+   `docs/dev/plans/IMPLEMENTATION-PLAN.md` and the endpoint row in
+   `docs/dev/plans/AUTHORIZATION-PLAN.md`.
+
+4. **What shape does the analysis response take?** (F7) **RULED 2026-09-13 —
+   the shape is written out with examples at §7.6.3.** The response is keyed by
+   node id; each node carries a list of series, and each series is a curve plus
+   `withMitigations`, the mitigations that shaped it. The inherent series is the
+   entry whose list is empty, so it is a case of the general structure rather
+   than a separately named field — which is what finally retires the
+   mitigated-twin framing that kept reappearing as a field name. A node the
+   selection does not reach carries one series only.
+
+   `withMitigations` reads as every mitigation that shaped this curve: those
+   applied at the node plus every one applied below it. The union is required,
+   not cosmetic: no mitigation scopes a portfolio directly when only its leaves
+   are targeted, so an "applied here" reading would leave both of the root's
+   entries tagged with an empty list and nothing would distinguish them.
+
+   Three things the earlier framing expected in this response are **not** in it.
+   The per-request facts have no home here because there are none: a ticked
+   mitigation that contributed nothing is visible as an identifier appearing in
+   no node's `withMitigations`, and why it contributed nothing reaches the
+   interface earlier through the tree read, which carries each mitigation's
+   resolved scope and `ScopeOutcome` under Decision 12. The full
+   `MitigationApplicationRecord` list is redundant for the same reason — its
+   `spec` and `resolvedScope` are both already in the client's hands from that
+   tree read. And no staleness or revision-stamp field is carried, because
+   immutable versioning excludes the condition one would report (§7.6.3).
+
+5. **Does M4's record decode trigger §8.7 Finding 3's required validator?** (F9)
+   **CLOSED — no action in M4, and none required.** Not a decision: the question
+   dissolves once the paths are named.
+
+   The obligation fires on an **inbound** decode path — a record arriving from
+   somewhere the server does not control. Both such paths are already validated,
+   and were before M4 began:
+   - **The targeting expression**, on every path. `MitigationTarget`'s codec is
+   `JsonCodec[TargetingPredicate].transform(...)` and `TargetingPredicate`'s own
+   decode re-runs `create`.
+   - **The persisted mitigation**, on every tree PUT. `Mitigation`'s codec is a
+   `mapOrFail` calling `Mitigation.create`, so the 1-to-10 pipeline step limit
+   and the Override stamp/anchor pairing both run on stored content.
+
+   `MitigationApplicationRecord` only travels outward: the server builds it and
+   sends it to the browser, which displays it. Re-checking a value the server
+   itself produced, inside the client it was sent to, defends against nobody —
+   there is no third party between them. The record's generated decoder stays as
+   it is. The obligation stays correctly conditional on a client sending a record
+   back, or on one being stored and read again; neither path exists, and if one
+   is ever built the check lands with it.
+
 6. **Does mitigation selection join `SlotCoordinate`?** (F10) **RULED A**, and
    under Decision 11 it is the only workable option rather than a preference:
    two slots differing only in selection would hold identical coordinates,
    `engagedSlots` would make the second inert, and no coordinate change could
    ever differentiate it.
+
 7. **What does the curve cap count, and how is a variant drawn?** (F11)
    **RULED: the cap counts nodes; a variant is drawn with point-marker shape.**
    Colour stays node identity. Stroke dash was rejected — it already carries the
    tail-quantile rule annotations on this chart. A second colour palette was
    rejected on supply: `PaletteData` defines eight named families and
    `CompareState` spends all eight, one per slot, under a `require`.
+
 8. **How does a client attach an override to a node created in the same
    request?** (F12) **RULED: a name-based anchor**, resolved server-side against
    the `SafeName`-keyed resolved-node map the request resolver already builds for
-   parent resolution. Verification debt: node-name uniqueness within a tree is
-   unconfirmed; if names are not unique the mechanism is ambiguous and returns as
-   a decision.
+   parent resolution. The verification debt is discharged: `RiskTree.fromNodes`
+   runs `requireDistinctNodeNames`, so a name identifies at most one node in a
+   tree and the anchor is unambiguous.
+
 9. **What happens to an `overrideAnchor` whose node the same PUT deletes?**
-   (F17) **RULED A — reject the request**, via a cross-check added to
-   `validateMitigations`, so an accepted update is always an internally
-   consistent tree. Once M4's mitigation buckets land, one request enumerates
-   both collections, so a client deleting a leaf can drop or retarget the
-   override in the same PUT; rejection therefore costs a round trip only when
-   the client is being inconsistent. Silently dropping the mitigation instead
-   is the F1 failure mode again — destroying something the request did not ask
-   to delete. The user-visible signal is the **same drift surface** every other
-   reference invalidation uses; the mechanisms stay distinct because a predicate
-   is a by-description lookup re-run per tree version while an anchor is a stored
-   id, but the two must not look different to the user.
+   (F17) **RULED — accept the request; staleness is the mechanism.** No
+   cross-check is added to `validateMitigations`. A mitigation whose anchor names
+   a node that no longer exists is a legal tree that reports itself stale:
+   `MitigationStaleness.isStale` already ends with the arm that treats a missing
+   or no-longer-leaf anchor as stale, and slice 3 delivers the result in
+   `staleMitigationIds` on every structure read.
+
+   This reverses an earlier ruling of "reject the request", and the reason is the
+   experience each option can actually deliver. Rejection turns a deleted anchor
+   into a failed PUT, so the information exists only as a transient string bound
+   to one submission attempt: a reload loses it, and the node deletion the user
+   asked for is not saved either. The failure also cannot be routed to the
+   mitigation it concerns — `ValidationError` carries a field name, a code and a
+   message, and no node or mitigation id as data — so no interface can offer
+   "keep the node or retarget the override". Acceptance puts the same information
+   in persisted, addressable, per-mitigation state that survives a reload and is
+   acted on when the user chooses, which is the affordance that was wanted, and
+   the staleness machinery for it is already designed and built.
+
+   Two consequences follow. The `case _ => true` arm in `MitigationStaleness`
+   stays reachable and is the specified behaviour, not a leftover. And a stored
+   tree carrying a dangling anchor stays decodable, so `fromNodes` does not
+   tighten on this point.
+
 11. **Does one analysis request carry one selection or several named variants?**
-    **RULED A — one selection per request.** Comparing several selections is
-    therefore several requests, one per Compare slot, which is what makes
-    Decision 6 load-bearing.
+   **RULED A — one selection per request.** Comparing several selections is
+   therefore several requests, one per Compare slot, which is what makes
+   Decision 6 load-bearing.
 
-**Open.**
-
-3. **How does the selection cross the wire?** (F6) Under Decision 11 the payload
-   is a single `MitigationSelection`. Size is the weakest argument for a request
-   body, not the strongest: scope resolution is server-side, so only
-   `ScopeRestriction.NodesOnly` carries node ids at all. The arguments that hold
-   are that node ids do not belong in a URI (ADR-036, and the nginx access log
-   records full request lines) and that one encoding across both endpoints is
-   simpler than two. Recommendation: JSON body on both, converting
-   `prob-of-exceedance` to POST.
-4. **What shape does the analysis response take?** (F7) Four things need a home
-   that `Map[NodeId, LECNodeCurve]` and a bare `Double` do not have: two
-   valuations per node, provenance per valuation, `staleMitigationIds`, and the
-   per-mitigation `ScopeOutcome.Failed` drift signals. Recommendation: an
-   envelope for `lec-multi` carrying the document-level fields once, a small
-   two-field result for `prob-of-exceedance`.
-5. **Does M4's record decode trigger §8.7 Finding 3's required validator?** (F9)
-   The ruling names two triggering paths, client resubmit and persist-and-reload.
-   M4 gives `MitigationApplicationRecord` a client *render* path, which is
-   neither — genuinely ambiguous, which is why it is a decision rather than a
-   lookup. Recommendation: ship the validating decoder.
 12. **Where does the client get mitigation definitions and resolved scopes?**
-    OD-3's interface renders a mitigation row under each node the mitigation's
-    scope covers, but `applicationRecords` only produces records for mitigations
-    a selection *applied* — so the rows cannot be drawn before anything is
-    ticked. No endpoint mentions mitigations and no response type carries them;
-    the collection crosses the wire in neither direction today. Recommendation:
-    carry definitions, resolved scopes and `ScopeOutcome` on the tree read, since
-    the resolved scope is a function of the tree version and any other placement
-    opens a window where scopes and nodes disagree.
+   **RULED A — the tree read carries them.** The resolved scope is a function
+   of the tree version and nothing else, so shipping it with the tree makes it
+   definitionally consistent with the nodes it describes; every other placement
+   opens a window where scopes and nodes come from different revisions. It also
+   puts the warnings about mitigations that no longer match any node on the
+   editing screen, which is where a user can act on them.
+
+   Scope of the change, corrected against source: **mitigation definitions
+   already cross the wire.** `RiskTree` carries `mitigations: Seq[Mitigation]`
+   and its codec emits the field (omitted when empty, for pre-mitigation
+   payloads), so `getWorkspaceTreeStructureEndpoint` — the read
+   `TreeViewState` uses — already returns them. What is missing is the
+   **resolved scopes and each mitigation's `ScopeOutcome`**.
+
+   Those must not be added to `RiskTree`. `RiskTree` is the persisted content
+   type: it is what the PUT carries and what Irmin stores, so a server-computed,
+   per-revision resolution result placed inside it would persist derived
+   mitigation state, against A11, and would claim tree-version independence it
+   does not have, against A8. The structure endpoint's response therefore
+   returns a type holding the tree and the resolved scopes side by
+   side; its exact shape is written in the §7.6 elevation.
 
 **Carried question, now answered.** What `ScopeResolutionContext` means for a
 `Revision.At` pinned read was carried without a decision number. It is resolved
 by the capacity-2 memo (§8.4-5): a pinned read occupies the second slot and the
 head entry survives, so alternating between head and a pin no longer recomputes
 both.
+
+#### 7.6.3 Analysis request and response shapes
+
+The ruled request and response shapes of the two analysis endpoints, with worked
+examples and the reason behind each rule. Every shape question is settled. What
+is still missing is the elevation, not the design: this section carries no exact
+Tapir signature, no file inventory and no verification plan, so on its own it
+confers no plan coverage.
+
+**Naming principle.** The JSON field names reuse the existing domain wording
+wherever the concept is the same, so that a reader moving between the wire
+format and `MitigationSelection` meets one vocabulary rather than two.
+`fullScope` and `nodesOnly` are the names of the two `ScopeRestriction` cases and
+are used verbatim on the wire.
+
+**Shape.** The body carries the requested nodes and one selection (Decision 11).
+The selection is two lists, one per gesture the interface offers: a mitigation
+ticked on its own control applies across its whole resolved scope; a mitigation
+ticked on one of its rows beneath a node applies at that node only. The
+interface also offers an "All mitigations" control, which needs no third list —
+it fills `fullScope` with every mitigation the tree holds, as ruled below.
+
+```json
+{
+  "nodeIds": ["01HQ8ZK3", "01HQ8ZK7"],
+  "selection": {
+    "fullScope": ["m-backups"],
+    "nodesOnly": [ { "node": "01HQ8ZK3", "mitigation": "m-insurance" } ]
+  }
+}
+```
+
+**Conversion at the controller.** The body decodes into the existing
+`MitigationSelection`, so the service, the resolver, the cache path and the
+query-language path keep the signatures they have.
+
+| Body | `MitigationSelection` |
+|---|---|
+| `fullScope: ["m-backups"]` and `nodesOnly: [{01HQ8ZK3, m-insurance}]` | `Selected(Map(m-backups -> FullScope, m-insurance -> NodesOnly(Set(01HQ8ZK3))))` |
+| both lists empty | `Inherent` |
+
+**A mitigation named in both lists — ruled 2026-09-13.** The two lists are both
+statements that a mitigation is on, so they combine by union and cannot
+conflict. A mitigation ticked on its own control is on across its whole resolved
+scope; naming it again beneath one of its nodes states something already true.
+The conversion therefore yields `FullScope` for that mitigation and the decoder
+accepts the input rather than rejecting it. This agrees with what
+`MitigationApplication.scoped` already computes: `FullScope` yields the resolved
+scope, `NodesOnly` yields the resolved scope intersected with the named nodes,
+and the union of those two is the resolved scope.
+
+**A state this shape cannot express, deliberately.** `NodesOnly(Set.empty)` —
+a mitigation switched on and applied to no node — has no spelling here, because
+a mitigation is named only by appearing in `fullScope` or by having at least one
+entry in `nodesOnly`. The current `ScopeRestriction` codec accepts an empty
+`ids` array and produces that state, which is indistinguishable in effect from
+the mitigation being off.
+
+**A named mitigation that is not in the tree — ruled 2026-09-13: reject.** A
+selection names mitigations by `MitigationId`, never by name. An identifier the
+tree does not hold at the served revision fails the request; there is no
+time-travel exemption, so scrubbing the pin back past a mitigation's creation
+while that mitigation is ticked breaks the chart, and that is intended. The two
+cases are deliberately different: naming a mitigation that applies to nothing is
+a valid request whose answer is "no effect", which the response shows by that
+mitigation appearing in no node's series; naming a mitigation that does not
+exist is a broken request.
+
+The check cannot live in the JSON decoder. The decoder validates that a
+`MitigationId` is well formed — the Iron refinement — but has no tree to look it
+up in; the tree is loaded afterwards, at a revision chosen by the branch header
+and the `at` pin. Membership is a lookup, not a validation, so the check belongs
+immediately after the tree is loaded, where the scope resolver already runs.
+`RiskTree.validateMitigations` draws the same line for the write path: unique
+ids, unique names and the collection bound are tree invariants, while resolving
+a predicate against a version is a server-side concern.
+
+**Renaming a mitigation is not a failure and not a behaviour change**, because
+identification is by identifier. The curve is unaffected and only the interface's
+labels go stale. Renaming a *node* is the case that changes behaviour: targeting
+predicates reference node names, so a node rename can change which nodes a
+mitigation binds to while leaving the domain content hash identical.
+
+**The "All mitigations" control enumerates — ruled 2026-09-13, no `residual`
+spelling on the wire.** The interface offers a single control that turns every
+mitigation on. It sends them in `fullScope` using the structure above; no extra
+field and no extra case are needed. Enumeration is exact rather than a snapshot
+that might have gone stale, because a tree version is immutable: the client
+enumerated the mitigations of a version it read, and a request is answered at
+the version it names, so the list it sends is the list that version holds. A
+mitigation created after that read is absent from the list and is not applied,
+which is exactly what the request asked for; a mitigation the tree does not hold
+at the served revision is rejected by the rule above. `Residual` stays a
+`MitigationSelection` case, because the query language's `residual` literal
+produces it (`RiskTreeKnowledgeBase.scala:476`); the analysis endpoint's body
+simply never constructs it.
+
+**No staleness mechanism is needed, by construction.** Irmin stores immutable
+versions and every save appends a new one, so a version a client has read stays
+readable and unchanged forever. There is no mutable authoritative tree for a
+client's view to diverge from, and therefore no condition where a selection
+panel silently describes a tree that no longer exists. Which version an answer
+describes is a choice the request makes: a request naming a revision is served
+at that revision, and a request naming none is served at branch head, which is
+equally what was asked for. Simultaneous editors change nothing here — each save
+appends a commit and neither invalidates the other's read; simultaneous editing
+resolves on the write path, as a merge. Proposals to stamp responses with the
+served revision, to have the server compare a client-supplied basis revision
+against branch head, or to return the current node and mitigation inventory on
+every chart response were all raised and withdrawn on this ground.
+
+**Response shape — ruled 2026-09-13.** The response is keyed by node id. Each
+node carries a list of series, and each series is a curve together with the
+mitigations that shaped it. The inherent series is the entry whose mitigation
+list is empty — a case of the general structure rather than a separately named
+field, which is what retires the "mitigated twin" framing for good.
+
+```json
+{
+  "01HQ8ZK3": [
+    { "curve": { "id": "01HQ8ZK3", "name": "Ransomware",
+                 "curve": [ {"loss": 1000000, "exceedanceProbability": 0.41} ],
+                 "quantiles": {"p95": 24000000.0},
+                 "averageAnnualLoss": 3100000.0, "probabilityOfNoLoss": 0.55 },
+      "withMitigations": [] },
+    { "curve": { "id": "01HQ8ZK3", "name": "Ransomware",
+                 "curve": [ {"loss": 1000000, "exceedanceProbability": 0.22} ],
+                 "quantiles": {"p95": 11000000.0},
+                 "averageAnnualLoss": 1400000.0, "probabilityOfNoLoss": 0.72 },
+      "withMitigations": ["m-backups"] }
+  ],
+  "01HQ8ROOT": [
+    { "curve": { "id": "01HQ8ROOT", "name": "Total", "curve": [ ... ] },
+      "withMitigations": [] },
+    { "curve": { "id": "01HQ8ROOT", "name": "Total", "curve": [ ... ] },
+      "withMitigations": ["m-backups"] }
+  ],
+  "01HQ8ZK9": [
+    { "curve": { "id": "01HQ8ZK9", "name": "Phishing", "curve": [ ... ] },
+      "withMitigations": [] }
+  ]
+}
+```
+
+Reading that example: Ransomware is inside the applied scope of `m-backups`, so
+it carries a second series. The root carries one too, because a portfolio's
+mitigated value folds its children's mitigated values (A5). Phishing is reached
+by nothing and carries one series only.
+
+**The three rules the shape encodes.**
+
+1. The inherent series is always present and is never replaced. A selection adds
+   curves; it does not substitute them.
+2. A node the selection reaches carries exactly one additional series, holding
+   the combined effect of every mitigation applied at it — never one series per
+   mitigation, because the mitigations scoping a node compose into a single
+   valuation (A4, A7).
+3. A node the selection does not reach — neither inside an applied mitigation's
+   effective scope nor an ancestor of such a node — carries no additional
+   series. It is omitted rather than returned as a duplicate of the inherent one.
+
+**`withMitigations` is every mitigation that shaped this curve**: those applied
+at the node itself, plus every mitigation applied anywhere below it. The union
+is what makes a portfolio's two series distinguishable. No mitigation scopes the
+root directly in the example above, so an "applied here" reading would give both
+of the root's entries an empty list and nothing would tell them apart. A
+result-stage mitigation scoping a portfolio directly is included as well, since
+result-stage mitigations may attach to any node.
+
+The list's order is significant at a leaf and not at a portfolio.
+`MitigationApplication.scoped` sorts by `(precedence.key, id.value)`, and at a
+leaf that is the order the transforms compose in. At a portfolio the list
+gathers mitigations applied at different nodes, which never compose with each
+other, so the order there is determinism only and carries no meaning.
+
+**Nothing else belongs in this response.** There is no enclosing object and no
+per-request content beside the map. A mitigation that was ticked and contributed
+nothing is observable directly: the client knows what it sent, and an identifier
+appearing in no node's `withMitigations` contributed to no curve here. Why it
+contributed nothing — a predicate that no longer binds, or one that resolves to
+nothing once intersected with the stage domain — reaches the interface earlier
+and more usefully through the tree read, which carries each mitigation's
+resolved scope and `ScopeOutcome` (Decision 12) so the panel can mark a
+mitigation as matching nothing before anything is ticked. The full application
+records add nothing either: their `spec` comes from `RiskTree.mitigations` and
+their `resolvedScope` from that same tree read, both already in the client's
+hands.
+
+#### 7.6.4 Delivery slices
+
+M4 lands in six slices. The order is forced by what each slice depends on: the
+wire types come first because everything else consumes them, and the interface
+comes last because it consumes all of them. Slicing is how the work is
+sequenced, not permission to stop partway — the plan is done when every slice
+has landed green (G8).
+
+| Slice | What it delivers | Elevated |
+|---|---|---|
+| 1 | The analysis read path: request and response types, both endpoint signatures, the controller and service threading, the scope-resolver call, and the smallest browser change that keeps the app compiling | §7.6.5 |
+| 2 | The tree write path: the two mitigation buckets on the tree PUT, the name-based override anchor, and the server-computed override stamp. No anchor cross-check — Decision 9 rules that a deleted anchor is a staleness signal, not a validation failure | §7.6.6 |
+| 3 | The tree structure read: resolved scopes, resolution failures and stale-override ids beside the tree | §7.6.7 |
+| 4 | Change notification: the mitigation-collection diff, and the scope memo's capacity-2 amendment | §7.6.8 |
+| 5 | The two decision records: the ADR-017 amendment and the new ADR-037 | §7.6.9 |
+| 6 | The interface and the user documentation | not elevated — see §7.6.12 |
+
+Slices 2 to 5 are specified below and carry no open decisions. Slice 1 consumes
+the `ValuationResult` ruling of §8.16, whose five gating decisions are open.
+Slice 6 is not elevated in this pass: it is the one part of M4 whose shape the
+twelve rulings do not determine. §7.6.12 lists all seven open decisions.
+
+#### 7.6.5 Slice 1 — the analysis read path
+
+**What this slice changes, in plain terms.** Today both analysis endpoints
+answer one question each: the exceedance probability at a node, and the loss
+exceedance curves of several nodes. Neither can be asked "and what would these
+look like with these mitigations applied". This slice adds that: each request
+carries one mitigation selection, and each answer carries the mitigation-free
+reading plus, for every node the selection reaches, one more reading under it.
+
+**Reasoning source, and what is not settled here.** This slice reads the resolver
+and turns what it returns into curves. What the resolver returns is ruled in
+§8.16: the mitigated fold yields a `ValuationResult` at every node it visits. The
+derivation is in
+[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md).
+The signatures written below predate that ruling and read the resolver's result
+as a bare `LossDistribution`. They still compile against it, because
+`ValuationResult` is a `LossDistribution`, but the exact resolver return type is
+an open decision in §7.6.12 and this slice is not implemented until it is ruled.
+Any ambiguity below about which valuation a value represents is resolved by §8.16
+and that document, never by re-deriving it here.
+
+**New file — `modules/common/src/main/scala/com/risquanter/register/http/requests/AnalysisRequests.scala`.**
+
+```scala
+package com.risquanter.register.http.requests
+
+import zio.json.{DeriveJsonCodec, JsonCodec, JsonEncoder, JsonDecoder}
+import zio.prelude.Validation
+import sttp.tapir.Schema
+
+import com.risquanter.register.domain.data.{MitigationSelection, ScopeRestriction}
+import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
+import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
+
+/** One tick on a mitigation's row beneath a node: that mitigation applies at
+  * that node and nowhere else.
+  */
+final case class NodeMitigationEntry(node: NodeId, mitigation: MitigationId)
+
+object NodeMitigationEntry:
+  given codec: JsonCodec[NodeMitigationEntry] = DeriveJsonCodec.gen[NodeMitigationEntry]
+  given schema: Schema[NodeMitigationEntry]   = Schema.derived[NodeMitigationEntry]
+
+/** A mitigation selection in the form the interface produces it. `fullScope`
+  * holds the mitigations ticked on their own control, each applying across its
+  * whole resolved scope; `nodesOnly` holds the per-node ticks. Both lists empty
+  * is the mitigation-free reading. A mitigation named in both lists applies
+  * across its whole resolved scope, because both lists are statements that it
+  * is on and the wider one subsumes the narrower.
+  */
+final case class MitigationSelectionRequest private (
+  fullScope: List[MitigationId],
+  nodesOnly: List[NodeMitigationEntry]
+):
+
+  /** The domain selection this body denotes. */
+  def toSelection: MitigationSelection = (fullScope, nodesOnly) match
+    case (Nil, Nil) => MitigationSelection.Inherent
+    case _ =>
+      val full = fullScope.toSet
+      val restricted: Map[MitigationId, ScopeRestriction] =
+        nodesOnly
+          .filterNot(e => full.contains(e.mitigation))
+          .groupMap(_.mitigation)(_.node)
+          .view.mapValues(ns => ScopeRestriction.NodesOnly(ns.toSet): ScopeRestriction)
+          .toMap
+      MitigationSelection.Selected(
+        restricted ++ full.map(_ -> ScopeRestriction.FullScope).toMap
+      )
+
+  /** Every mitigation this body names, in either list. */
+  def namedMitigations: Set[MitigationId] =
+    fullScope.toSet ++ nodesOnly.map(_.mitigation).toSet
+
+object MitigationSelectionRequest:
+
+  /** The empty selection: no mitigation is on. */
+  val inherent: MitigationSelectionRequest = new MitigationSelectionRequest(Nil, Nil)
+
+  /** How many distinct mitigations one selection may name. Mirrors the bound on
+    * `RiskTree.mitigations`: a selection cannot usefully name more mitigations
+    * than a tree can hold. */
+  private val MaxSelectedMitigations = 1000
+
+  /** How many nodes one mitigation may be ticked at. Mirrors the tree's node
+    * bound: a mitigation cannot be ticked at more nodes than a tree can hold. */
+  private val MaxNodesPerMitigation = 10000
+
+  /** Both bounds are checked together so an oversized request reports every
+    * problem at once. Whether the named mitigations exist is deliberately not
+    * checked here: that is a lookup against a loaded tree, and no tree is in
+    * hand at decode time. */
+  def create(
+    fullScope: List[MitigationId],
+    nodesOnly: List[NodeMitigationEntry],
+    fieldPrefix: String = "selection"
+  ): Validation[ValidationError, MitigationSelectionRequest] =
+    val named = fullScope.toSet ++ nodesOnly.map(_.mitigation).toSet
+    val oversizedTick = nodesOnly.groupBy(_.mitigation).collectFirst {
+      case (id, ticks) if ticks.sizeIs > MaxNodesPerMitigation => (id, ticks.size)
+    }
+
+    val countV: Validation[ValidationError, Unit] =
+      if named.sizeIs <= MaxSelectedMitigations then Validation.succeed(())
+      else Validation.fail(ValidationError(
+        field   = fieldPrefix,
+        code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"selection names too many mitigations: ${named.size} exceeds the limit of $MaxSelectedMitigations"
+      ))
+
+    val perMitigationV: Validation[ValidationError, Unit] = oversizedTick match
+      case None => Validation.succeed(())
+      case Some((id, count)) => Validation.fail(ValidationError(
+        field   = s"$fieldPrefix.nodesOnly",
+        code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"mitigation ${id.value} is ticked at too many nodes: $count exceeds the limit of $MaxNodesPerMitigation"
+      ))
+
+    Validation.validateWith(countV, perMitigationV)((_, _) =>
+      new MitigationSelectionRequest(fullScope, nodesOnly))
+
+  private case class Raw(
+    fullScope: Option[List[MitigationId]],
+    nodesOnly: Option[List[NodeMitigationEntry]]
+  )
+  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+  /** Decode runs `create`, so no value of this type exists that breaks a bound.
+    * Either list may be omitted and means the empty list. */
+  given codec: JsonCodec[MitigationSelectionRequest] = JsonCodec(
+    JsonEncoder[Raw].contramap(s => Raw(Some(s.fullScope), Some(s.nodesOnly))),
+    JsonDecoder[Raw].mapOrFail(raw =>
+      create(raw.fullScope.getOrElse(Nil), raw.nodesOnly.getOrElse(Nil))
+        .toEither.left.map(_.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; ")))
+  )
+
+  given schema: Schema[MitigationSelectionRequest] = Schema.any[MitigationSelectionRequest]
+
+/** Body of the multi-node curve read: the nodes to draw, and the one selection
+  * the answer is computed under.
+  */
+final case class LECCurvesMultiRequest private (
+  nodeIds: List[NodeId],
+  selection: MitigationSelectionRequest
+)
+
+object LECCurvesMultiRequest:
+
+  /** How many nodes one request may ask for. Mirrors the tree's node bound: a
+    * request cannot ask for more nodes than a tree can hold. */
+  private val MaxRequestedNodes = 10000
+
+  def create(
+    nodeIds: List[NodeId],
+    selection: MitigationSelectionRequest
+  ): Validation[ValidationError, LECCurvesMultiRequest] =
+    if nodeIds.sizeIs <= MaxRequestedNodes then
+      Validation.succeed(new LECCurvesMultiRequest(nodeIds, selection))
+    else
+      Validation.fail(ValidationError(
+        field   = "nodeIds",
+        code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
+        message = s"too many nodes requested: ${nodeIds.size} exceeds the limit of $MaxRequestedNodes"
+      ))
+
+  private case class Raw(nodeIds: List[NodeId], selection: Option[MitigationSelectionRequest])
+  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+  given codec: JsonCodec[LECCurvesMultiRequest] = JsonCodec(
+    JsonEncoder[Raw].contramap(r => Raw(r.nodeIds, Some(r.selection))),
+    JsonDecoder[Raw].mapOrFail(raw =>
+      create(raw.nodeIds, raw.selection.getOrElse(MitigationSelectionRequest.inherent))
+        .toEither.left.map(_.toChunk.map(e => s"[${e.field}] ${e.message}").mkString("; ")))
+  )
+
+  given schema: Schema[LECCurvesMultiRequest] = Schema.any[LECCurvesMultiRequest]
+
+/** Body of the exceedance-probability read. The node and the threshold stay
+  * where they are — in the path and the query string — so the body carries the
+  * selection alone.
+  */
+final case class ProbOfExceedanceRequest(selection: MitigationSelectionRequest)
+
+object ProbOfExceedanceRequest:
+  private case class Raw(selection: Option[MitigationSelectionRequest])
+  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+  given codec: JsonCodec[ProbOfExceedanceRequest] = JsonCodec(
+    JsonEncoder[Raw].contramap(r => Raw(Some(r.selection))),
+    JsonDecoder[Raw].map(raw =>
+      ProbOfExceedanceRequest(raw.selection.getOrElse(MitigationSelectionRequest.inherent)))
+  )
+
+  given schema: Schema[ProbOfExceedanceRequest] = Schema.any[ProbOfExceedanceRequest]
+```
+
+Three points about that file. The node-count bound on `nodeIds` is new: F5 bounded the
+selection payload and said nothing about the requested node list, and an
+unbounded list on an endpoint that now also carries a selection is the same
+defect in a second place. The empty-`nodeIds` case is deliberately **not**
+moved into the decoder: `RiskTreeServiceLive` already fails it with
+`EMPTY_COLLECTION` and a test asserts that, and moving the check would change
+the error a caller sees for no gain. `Schema.any` is the settled treatment for
+these payloads — §7.4.1 records that the OpenAPI document renders the
+mitigation types as opaque objects and that the wire-format reference lives in
+`docs/user/API-TUTORIAL.md`, because a second hand-written schema beside the
+custom codecs would drift silently and no external OpenAPI consumer exists.
+
+**New file — `modules/common/src/main/scala/com/risquanter/register/http/responses/AnalysisResponses.scala`.**
+
+```scala
+package com.risquanter.register.http.responses
+
+import zio.json.{DeriveJsonCodec, JsonCodec}
+import sttp.tapir.Schema
+
+import com.risquanter.register.domain.data.LECNodeCurve
+import com.risquanter.register.domain.data.iron.MitigationId
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
+
+/** One drawn curve together with the mitigations that shaped it: those applied
+  * at the node itself and every one applied anywhere below it. The
+  * mitigation-free curve is the entry whose list is empty, which is why there
+  * is no separately named field for it.
+  */
+final case class LECNodeSeries(curve: LECNodeCurve, withMitigations: List[MitigationId])
+
+object LECNodeSeries:
+  given codec: JsonCodec[LECNodeSeries] = DeriveJsonCodec.gen[LECNodeSeries]
+  given schema: Schema[LECNodeSeries]   = Schema.derived[LECNodeSeries]
+
+/** One exceedance probability together with the mitigations that shaped it,
+  * read exactly as `LECNodeSeries.withMitigations`.
+  */
+final case class ExceedanceSeries(probability: Double, withMitigations: List[MitigationId])
+
+object ExceedanceSeries:
+  given codec: JsonCodec[ExceedanceSeries] = DeriveJsonCodec.gen[ExceedanceSeries]
+  given schema: Schema[ExceedanceSeries]   = Schema.derived[ExceedanceSeries]
+```
+
+**`modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`** gains the
+Tapir schema `MitigationId` needs to appear inside a JSON body, mirroring the
+one `NodeId` already has:
+
+```scala
+  /** Schema for MitigationId for JSON body parameters (ADR-001 §2). */
+  given Schema[MitigationId] = Schema.string
+```
+
+**`modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceAnalysisEndpoints.scala`** — both endpoints:
+
+```scala
+  val getWorkspaceProbOfExceedanceEndpoint =
+    authedBaseEndpoint
+      .tag("workspaces")
+      .name("getWorkspaceProbOfExceedance")
+      .description("Get probability of exceeding a loss threshold (workspace-scoped) under one mitigation selection; optional `at` commit pin")
+      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "nodes" / path[NodeId]("nodeId") / "prob-of-exceedance")
+      .post
+      .in(query[Long]("threshold"))
+      .in(query[Boolean]("includeProvenance").default(false))
+      .in(jsonBody[ProbOfExceedanceRequest].description("The mitigation selection this reading is computed under"))
+      .in(branchHeader)
+      .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
+      .out(jsonBody[List[ExceedanceSeries]])
+
+  val getWorkspaceLECCurvesMultiEndpoint =
+    authedBaseEndpoint
+      .tag("workspaces")
+      .name("getWorkspaceLECCurvesMulti")
+      .description("Get LEC curves for multiple nodes (workspace-scoped) under one mitigation selection; optional `at` commit pin")
+      .in("w" / path[WorkspaceKeySecret]("key") / "risk-trees" / path[TreeId]("treeId") / "nodes" / "lec-multi")
+      .post
+      .in(query[Boolean]("includeProvenance").default(false))
+      .in(jsonBody[LECCurvesMultiRequest].description("Requested node IDs and the mitigation selection"))
+      .in(branchHeader)
+      .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
+      .in(query[Boolean]("omitAbsent").default(false)
+        .description("When true, requested node IDs absent from the tree at this revision are omitted from the result instead of failing the request (point-in-time reads)."))
+      .out(jsonBody[Map[NodeId, List[LECNodeSeries]]])
+```
+
+The exceedance endpoint becomes a POST. That is Decision 3 and it is not
+cosmetic: a selection can name a thousand mitigations, each ticked at up to ten
+thousand nodes, so it cannot ride in a query string — and node ids are
+confidential internal identifiers (ADR-036) that the nginx access log would
+write to disk if they appeared in a request line.
+
+**`modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`** — the two
+analysis methods:
+
+```scala
+  /** Exceedance probability at a threshold for one node, under one mitigation
+    * selection.
+    *
+    * The result is a list of readings rather than a single number: the first
+    * entry is always the mitigation-free reading, and a second entry follows
+    * when the selection reaches this node, carrying the combined effect of
+    * every mitigation applied at it or below it. `withMitigations` names them.
+    *
+    * `branch` and `at` are taken separately rather than as a `Revision`
+    * because the scope resolver memoizes per (tree, branch) and `Revision.At`
+    * carries a commit with no branch. The method composes the `Revision` the
+    * repository reads at.
+    */
+  def probOfExceedance(
+    wsId: WorkspaceId,
+    treeId: TreeId,
+    nodeId: NodeId,
+    threshold: Long,
+    seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean,
+    branch: BranchRef,
+    at: Option[CommitHash],
+    selection: MitigationSelection = MitigationSelection.Inherent
+  ): Task[List[ExceedanceSeries]]
+
+  /** LEC curves for several nodes on one shared tick domain, under one
+    * mitigation selection.
+    *
+    * Each node carries the mitigation-free curve first, and a second curve when
+    * the selection reaches it. Every curve in the answer — both valuations of
+    * every node — is evaluated against one tick domain, so any two of them can
+    * be read against each other.
+    */
+  def getLECCurvesMulti(
+    wsId: WorkspaceId,
+    treeId: TreeId,
+    nodeIds: Set[NodeId],
+    seedEntityId: SeedEntityId.SeedEntityId,
+    includeProvenance: Boolean,
+    branch: BranchRef,
+    at: Option[CommitHash],
+    omitAbsent: Boolean = false,
+    selection: MitigationSelection = MitigationSelection.Inherent
+  ): Task[Map[NodeId, List[LECNodeSeries]]]
+```
+
+**`modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`** — the class gains
+one dependency and five private members.
+
+```scala
+class RiskTreeServiceLive private (
+  repo: RiskTreeRepository,
+  resolver: CachedResultResolver,
+  scopeResolver: ScopeResolverScope,
+  invalidationHandler: InvalidationHandler,
+  tracing: Tracing,
+  operationsCounter: Counter[Long]
+) extends RiskTreeService {
+```
+
+```scala
+  /** The read coordinate for a (branch, pin) pair. */
+  private def revisionOf(branch: BranchRef, at: Option[CommitHash]): Revision =
+    at.fold[Revision](Revision.Head(branch))(Revision.At(_))
+
+  /** Fail when the selection names a mitigation this tree version does not
+    * hold. Naming a mitigation that applies to nothing is a valid request whose
+    * answer is "no effect"; naming one that does not exist is a broken request.
+    * The check cannot live in the JSON decoder, which has no tree to look an id
+    * up in. */
+  private def requireKnownMitigations(tree: RiskTree, selection: MitigationSelection): Task[Unit] =
+    selection match
+      case MitigationSelection.Selected(entries) =>
+        val absent = entries.keySet -- tree.mitigations.map(_.id).toSet
+        if absent.isEmpty then ZIO.unit
+        else ZIO.fail(ValidationFailed(absent.toList.sortBy(_.value).map(id => ValidationError(
+          field   = "selection",
+          code    = ValidationErrorCode.NOT_FOUND,
+          message = s"Mitigation ${id.value} not found in tree ${tree.id}"
+        ))))
+      case _ => ZIO.unit
+
+  /** Per-mitigation resolved scopes for this tree version. A mitigation-free
+    * reading applies nothing, so nothing needs resolving and the resolver is
+    * not called at all. */
+  private def resolvedScopesFor(
+    wsId: WorkspaceId,
+    treeId: TreeId,
+    branch: BranchRef,
+    commit: CommitHash,
+    tree: RiskTree,
+    selection: MitigationSelection
+  ): Task[ResolvedScopes] = selection match
+    case MitigationSelection.Inherent => ZIO.succeed(ResolvedScopes(Map.empty))
+    case _ =>
+      for
+        mitResolver <- scopeResolver.resolverFor(wsId)
+        scopes      <- mitResolver.resolve(ScopeResolutionContext(treeId, branch, commit), tree)
+        _           <- ResolvedScopes.logFailures(scopes)
+      yield scopes
+
+  /** Every mitigation that shaped one node's mitigated reading: those applied
+    * at the node plus every one applied anywhere below it, in the order
+    * `MitigationApplication.scoped` composes them. Computed per requested node,
+    * so the cost follows the requested subtrees rather than the whole tree.
+    *
+    * The list is also the reached test: it is empty exactly when neither the
+    * node nor any descendant is inside an applied mitigation's scope, and such
+    * a node carries no second reading. */
+  private def withMitigationsFor(
+    tree: RiskTree,
+    scoped: Map[NodeId, List[Mitigation]],
+    nodeId: NodeId
+  ): List[MitigationId] =
+    tree.index.descendants(nodeId).toList
+      .flatMap(scoped.getOrElse(_, Nil))
+      .distinct
+      .sortBy(m => (m.precedence.key, m.id.value))
+      .map(_.id)
+
+  /** Key for the one shared tick-domain computation. Both valuations of a node
+    * must be evaluated against the same ticks, or the two curves land on
+    * different x-axes and cannot be read against each other; keying by
+    * (node, mitigated) puts them through a single
+    * `LECGenerator.generateCurvePointsMulti` call. */
+  private case class SeriesKey(nodeId: NodeId, mitigated: Boolean)
+
+  /** Assemble one node's curve from its evaluated points and its own result. */
+  private def curveOf(
+    nodeId: NodeId,
+    name: String,
+    points: Vector[(Long, Double)],
+    result: Option[LossDistribution]
+  ): LECNodeCurve =
+    LECNodeCurve(
+      nodeId,
+      name,
+      points.map { case (loss, prob) => LECPoint(loss, prob) },
+      result.map(LECGenerator.calculateQuantiles).getOrElse(Map.empty),
+      result.map(LECGenerator.averageAnnualLoss).getOrElse(0.0),
+      result.map(LECGenerator.probabilityOfNoLoss).getOrElse(1.0)
+    )
+```
+
+`getLECCurvesMulti`'s body, replacing the current one from the tree lookup
+onward. Everything before the lookup — the empty-`nodeIds` failure, the tracing
+attributes, the `omitAbsent` log line — stays as it is:
+
+```scala
+      (tree, commit, nodesMap) = treeWithNodes
+      _        <- requireKnownMitigations(tree, selection)
+      presentIds = nodesMap.keySet
+      scopes   <- resolvedScopesFor(wsId, treeId, branch, commit, tree, selection)
+      applied   = scopes.appliedScopes
+      scoped    = MitigationApplication.scoped(tree, selection, applied)
+
+      inherent  <- resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance)
+      mitigated <- selection match
+                     case MitigationSelection.Inherent =>
+                       ZIO.succeed(Map.empty[NodeId, LossDistribution])
+                     case _ =>
+                       resolver.ensureCachedAll(tree, presentIds, seedEntityId, includeProvenance, selection, applied)
+
+      // One tick domain for every curve in the answer, both valuations included.
+      curves = LECGenerator.generateCurvePointsMulti(
+                 inherent.map((id, r) => SeriesKey(id, false) -> r) ++
+                 mitigated.map((id, r) => SeriesKey(id, true) -> r)
+               )
+
+      result = presentIds.iterator.map { id =>
+                 val name    = nodesMap.get(id).map(_.name.value.toString).getOrElse(id.value)
+                 val applied = withMitigationsFor(tree, scoped, id)
+                 val base    = LECNodeSeries(
+                   curveOf(id, name, curves.getOrElse(SeriesKey(id, false), Vector.empty), inherent.get(id)),
+                   Nil
+                 )
+                 val extra   = Option.when(applied.nonEmpty)(
+                   LECNodeSeries(
+                     curveOf(id, name, curves.getOrElse(SeriesKey(id, true), Vector.empty), mitigated.get(id)),
+                     applied
+                   )
+                 )
+                 id -> (base :: extra.toList)
+               }.toMap
+    } yield result
+```
+
+`probOfExceedance`'s body follows the same shape with one node and no curve
+generation:
+
+```scala
+        (tree, commit, _) <- lookupNodeInTree(wsId, treeId, nodeId, revisionOf(branch, at))
+        _        <- requireKnownMitigations(tree, selection)
+        scopes   <- resolvedScopesFor(wsId, treeId, branch, commit, tree, selection)
+        applied   = scopes.appliedScopes
+        scoped    = MitigationApplication.scoped(tree, selection, applied)
+        withMits  = withMitigationsFor(tree, scoped, nodeId)
+
+        base     <- resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
+                      .map(r => ExceedanceSeries(r.probOfExceedance(threshold), Nil))
+        extra    <- if withMits.isEmpty then ZIO.succeed(Nil)
+                    else resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance, selection, applied)
+                           .map(r => List(ExceedanceSeries(r.probOfExceedance(threshold), withMits)))
+      } yield base :: extra
+```
+
+**`modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`** gains one
+shared logging helper, moved out of `QueryServiceLive` so both readers of a
+resolution report drift the same way:
+
+```scala
+object ResolvedScopes:
+  /** Per-mitigation drift signals (ADR-002): a predicate that no longer binds
+    * makes that one mitigation a no-op, never a request failure, so this only
+    * logs. */
+  def logFailures(resolved: ResolvedScopes): UIO[Unit] =
+    ZIO.when(resolved.failures.nonEmpty)(
+      ZIO.logWarning(
+        s"MitigationScopeResolver: ${resolved.failures.size} mitigation(s) did not " +
+        s"resolve against this tree version: " +
+        resolved.failures.map((id, errs) => s"${id.value} -> ${errs.mkString("[", ", ", "]")}").mkString("; ")
+      )
+    ).unit
+```
+
+`QueryServiceLive.logResolutionFailures` is deleted and its one call site now
+reads `ResolvedScopes.logFailures(resolved)`.
+
+**`modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisController.scala`** — both
+handlers take the new tuple and forward the branch and the pin instead of
+composing a `Revision`:
+
+```scala
+  val probOfExceedance: ServerEndpoint[Any, Task] = getWorkspaceProbOfExceedanceEndpoint.serverLogic {
+    case (maybeUserId, key, treeId, nodeId, threshold, includeProvenance, body, activeBranch, at) =>
+      (for
+        userId <- userCtx.requireAuthenticated(maybeUserId)
+        given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
+        result <- riskTreeService.probOfExceedance(
+                    ws.id, treeId, nodeId, threshold, ws.seedEntityId, includeProvenance,
+                    branch, at, body.selection.toSelection)
+      yield result).either
+  }
+
+  val getLECCurvesMulti: ServerEndpoint[Any, Task] = getWorkspaceLECCurvesMultiEndpoint.serverLogic {
+    case (maybeUserId, key, treeId, includeProvenance, body, activeBranch, at, omitAbsent) =>
+      (for
+        userId <- userCtx.requireAuthenticated(maybeUserId)
+        given Checked[Permission] <- authzService.check(userId, Permission.AnalyzeRun, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
+        result <- riskTreeService.getLECCurvesMulti(
+                    ws.id, treeId, body.nodeIds.toSet, ws.seedEntityId, includeProvenance,
+                    branch, at, omitAbsent, body.selection.toSelection)
+      yield result).either
+  }
+```
+
+**`modules/server/src/main/scala/com/risquanter/register/Application.scala`** — `RiskTreeServiceLive.layer` now also
+requires `ScopeResolverScope`, which the application already provides at line
+290; the layer's type widens and no wiring line moves.
+
+**The browser, minimally.** Changing a shared endpoint definition breaks the
+Scala.js module, so this slice carries the smallest change that keeps it
+compiling and its behaviour identical: `LECChartState.loadCurves` sends the new
+body with the empty selection, and takes each node's mitigation-free curve out
+of the answer. The variant-aware cache belongs to slice 6.
+
+```scala
+  def loadCurves(nodeIds: List[NodeId]): Unit =
+    (keySignal.now(), selectedTreeId.now()) match
+      case (Some(key), Some(treeId)) =>
+        curvesTrigger.emit(Some(() =>
+          getWorkspaceLECCurvesMultiEndpoint(
+            (userIdAccessor(), key, treeId, false,
+             LECCurvesMultiRequest.create(nodeIds, MitigationSelectionRequest.inherent)
+               .getOrElse(throw new IllegalStateException("selection request rejected its own empty value")),
+             branchAccessor(), atAccessor(), true)
+          ).toOutcomeEventStream.map(_.map(LECChartState.inherentCurves))
+        ))
+      case _ => ()
+```
+
+```scala
+object LECChartState:
+  /** Each node's mitigation-free curve — the series whose mitigation list is
+    * empty. Every node always has one, so a node missing from the result is a
+    * node absent at this revision, which is what `deriveDropped` reports. */
+  def inherentCurves(response: Map[NodeId, List[LECNodeSeries]]): Map[NodeId, LECNodeCurve] =
+    response.flatMap { case (id, series) =>
+      series.find(_.withMitigations.isEmpty).map(id -> _.curve)
+    }
+```
+
+The `getOrElse` above throws on a value that cannot fail — the empty selection
+breaks no bound — and that is the wrong shape for the finished code. Slice 6
+replaces the whole call with one that carries a real selection and handles a
+rejected one; until then the throw is unreachable and states the invariant.
+`LECCurvesMultiRequest` exposes no total constructor deliberately, so this is
+the one place the tension shows.
+
+#### 7.6.6 Slice 2 — the tree write path carries mitigations
+
+**What this slice changes, in plain terms.** A mitigation can be stored today
+and read back, but no request can create one: the tree PUT has no mitigation
+field, and `RiskTreeServiceLive.update` carries the previous version's
+mitigations forward so that the omission does not delete them. This slice gives
+the request both mitigation buckets, deletes the carry-over, and closes the two
+reference problems the buckets create.
+
+**`modules/common/src/main/scala/com/risquanter/register/http/requests/MitigationRequests.scala`** — new file:
+
+```scala
+package com.risquanter.register.http.requests
+
+import zio.json.{DeriveJsonCodec, JsonCodec, JsonEncoder, JsonDecoder}
+import sttp.tapir.Schema
+
+import com.risquanter.register.domain.data.{RiskLeafTransform, TransformPipeline}
+
+/** A mitigation's effect as a request states it. It differs from the stored
+  * `MitigationSpec` in exactly two ways, both deliberate. The override anchor
+  * is a node NAME, because a request may attach an override to a node the same
+  * request creates and ids are minted server-side. There is no override base
+  * stamp field at all, because the stamp is the content hash of the anchored
+  * leaf and is computed server-side; a client cannot state it and now cannot
+  * send it.
+  */
+sealed trait MitigationSpecRequest
+
+object MitigationSpecRequest:
+
+  final case class LeafStage(
+    transform: RiskLeafTransform,
+    overrideAnchorName: Option[String]
+  ) extends MitigationSpecRequest
+
+  final case class ResultStage(pipeline: TransformPipeline) extends MitigationSpecRequest
+
+  private case class Raw(
+    stage: String,
+    transform: Option[RiskLeafTransform],
+    overrideAnchorName: Option[String],
+    pipeline: Option[TransformPipeline]
+  )
+  private object Raw { given c: JsonCodec[Raw] = DeriveJsonCodec.gen }
+
+  given codec: JsonCodec[MitigationSpecRequest] = JsonCodec(
+    JsonEncoder[Raw].contramap {
+      case LeafStage(t, anchor) => Raw("leaf", Some(t), anchor, None)
+      case ResultStage(p)       => Raw("result", None, None, Some(p))
+    },
+    JsonDecoder[Raw].mapOrFail {
+      case Raw("leaf", Some(t), anchor, None)    => Right(LeafStage(t, anchor))
+      case Raw("result", None, None, Some(p))    => Right(ResultStage(p))
+      case other => Left(s"invalid mitigation spec: stage '${other.stage}' with mismatched fields")
+    }
+  )
+
+  given schema: Schema[MitigationSpecRequest] = Schema.any[MitigationSpecRequest]
+
+/** Create bucket: a mitigation the request is adding. No id — the server mints
+  * it (ADR-017 Decision 1). */
+final case class MitigationDefinitionRequest(
+  name: String,
+  target: String,
+  spec: MitigationSpecRequest,
+  precedence: Int = 0
+)
+
+object MitigationDefinitionRequest:
+  given codec: JsonCodec[MitigationDefinitionRequest] = DeriveJsonCodec.gen
+  given schema: Schema[MitigationDefinitionRequest]   = Schema.any[MitigationDefinitionRequest]
+
+/** Identity-preserving bucket: a mitigation the request is keeping, by id. */
+final case class MitigationUpdateRequest(
+  id: String,
+  name: String,
+  target: String,
+  spec: MitigationSpecRequest,
+  precedence: Int = 0
+)
+
+object MitigationUpdateRequest:
+  given codec: JsonCodec[MitigationUpdateRequest] = DeriveJsonCodec.gen
+  given schema: Schema[MitigationUpdateRequest]   = Schema.any[MitigationUpdateRequest]
+```
+
+`target` is the predicate source text, which is the only stored form of a
+targeting predicate; refinement runs `TargetingPredicate.create` at the DTO
+boundary, so a malformed predicate is a 400 before any handler runs.
+
+**`RiskTreeUpdateRequest` and `RiskTreeDefinitionRequest`** gain their buckets:
+
+```scala
+final case class RiskTreeUpdateRequest(
+  name: String,
+  portfolios: Seq[RiskPortfolioUpdateRequest],
+  leaves: Seq[RiskLeafUpdateRequest],
+  newPortfolios: Seq[RiskPortfolioDefinitionRequest],
+  newLeaves: Seq[RiskLeafDefinitionRequest],
+  mitigations: Seq[MitigationUpdateRequest] = Nil,
+  newMitigations: Seq[MitigationDefinitionRequest] = Nil
+)
+
+final case class RiskTreeDefinitionRequest(
+  name: String,
+  portfolios: Seq[RiskPortfolioDefinitionRequest],
+  leaves: Seq[RiskLeafDefinitionRequest],
+  newMitigations: Seq[MitigationDefinitionRequest] = Nil
+)
+```
+
+**Omission now means deletion, and that is the point.** Once the update request
+enumerates the mitigation collection, a PUT that omits `mitigations` deletes
+every mitigation the tree had, exactly as omitting a node deletes the node. The
+carry-over in `RiskTreeServiceLive.update` — `mitigations = oldTree.mitigations`
+and the comment explaining it — is deleted in the same change, because leaving
+it would make the new buckets inert. The consequence is that any client issuing
+a tree PUT must send the mitigations back; the interface slice does that, and
+until it lands, a PUT from the current browser clears the mitigation
+collection. That is a real window and it is acceptable only because nothing can
+create a mitigation before this slice: the collection it would clear is always
+empty.
+
+**`modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`** — resolved
+shapes and validators:
+
+```scala
+  /** A mitigation from a request, refined but not yet anchored. The override
+    * anchor is still a node NAME here: nodes created in the same request have
+    * no id until the service mints them, so the anchor resolves server-side
+    * against the same name-keyed map parent names resolve against. */
+  final case class ResolvedMitigation(
+    id: MitigationId,
+    name: SafeName.SafeName,
+    target: MitigationTarget,
+    stage: ResolvedMitigationStage,
+    precedence: MitigationPrecedence
+  )
+
+  enum ResolvedMitigationStage:
+    case LeafStage(transform: RiskLeafTransform, overrideAnchorName: Option[SafeName.SafeName])
+    case ResultStage(pipeline: TransformPipeline)
+```
+
+`ResolvedCreate` and `ResolvedUpdate` each gain `mitigations: Seq[ResolvedMitigation]`.
+Kept and added mitigations merge into one field because they end in one
+collection and the id is already decided by the time they meet: a kept
+mitigation carries the client's id, an added one carries an id minted by the
+same `IdGenerator` that mints node ids.
+
+```scala
+  private[requests] def refineMitigationDefs(
+    mitigations: Seq[MitigationDefinitionRequest],
+    baseLabel: String,
+    newId: IdGenerator
+  ): Validation[ValidationError, Seq[ResolvedMitigation]]
+
+  private[requests] def refineExistingMitigations(
+    mitigations: Seq[MitigationUpdateRequest],
+    baseLabel: String
+  ): Validation[ValidationError, Seq[ResolvedMitigation]]
+
+  /** Guard: one request may not name the same mitigation id or the same
+    * mitigation name twice. `RiskTree.fromNodes` enforces the same rule on the
+    * tree; this layer contributes the request-scoped field path so the client
+    * is told which bucket entry is at fault. */
+  private[requests] def requireDistinctMitigations(
+    mitigations: Seq[ResolvedMitigation]
+  ): Validation[ValidationError, Unit]
+```
+
+Each element's refinement accumulates its own errors through
+`Validation.validateWith`: the name through `refineNameField`, the predicate
+through `TargetingPredicate.create`, the id (kept bucket only) through
+`ValidationUtil.refineId`, and the stage through a shape mapping that carries
+the anchor name through `refineNameField`.
+
+**`modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`** — the anchoring
+and stamping step, and the two call sites:
+
+```scala
+  /** Turn a request's mitigations into stored ones: resolve each override
+    * anchor name against the request's own nodes, and stamp the override with
+    * the anchor leaf's current content hash.
+    *
+    * An anchor naming something the request does not contain, or naming a
+    * portfolio, fails the request — an override asserts a value for one
+    * assessed leaf, and an anchor that names no leaf can never bind again.
+    * `Mitigation.create` then enforces the pairing rule: a transform with an
+    * Override component must have both an anchor and a stamp, and one without
+    * must have neither. */
+  private def buildMitigations(
+    resolved: Seq[RiskTreeRequests.ResolvedMitigation],
+    nodesByName: Map[SafeName.SafeName, RiskTreeRequests.ResolvedNode],
+    nodes: Seq[RiskNode]
+  ): Task[Seq[Mitigation]]
+```
+
+The anchor resolution is: name → `ResolvedNode` → `NodeId` → the built
+`RiskLeaf` in `nodes` → `ContentHashIndex.hashOf(leaf)`. A name absent from
+`nodesByName`, or present but resolving to a portfolio, is a
+`MISSING_REFERENCE` / `INVALID_NODE_TYPE` validation error carrying the
+mitigation's field path.
+
+`create` passes `mitigations = buildMitigations(resolved.mitigations, resolved.nodes, nodes)`
+instead of `Nil`, and `update` passes the same instead of `oldTree.mitigations`.
+`allocateIds` in both methods widens to cover the added mitigations:
+
+```scala
+      ids <- allocateIds(req.newPortfolios.size + req.newLeaves.size + req.newMitigations.size)
+```
+
+**`modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`** — unchanged
+by this slice. Decision 9 rules that a PUT deleting an anchored leaf is accepted,
+so `validateMitigations` keeps the invariants it already enforces — unique
+mitigation ids, unique mitigation names and the collection bound — and gains no
+anchor cross-check. Its signature and its docstring stay as they are.
+
+An override whose anchor names a deleted node is therefore a legal tree.
+`MitigationStaleness.isStale` reports it stale, slice 3 carries the result to the
+client in `staleMitigationIds`, and the user retargets or removes the mitigation
+when they choose. Placing the check in `validateMitigations` would have put it in
+the decode path as well, since `RiskTree`'s decoder routes through `fromNodes`;
+not adding it keeps every stored tree readable.
+
+#### 7.6.7 Slice 3 — the tree read carries resolved scopes
+
+**What this slice changes, in plain terms.** The selection interface has to draw
+a mitigation's row under every node it currently scopes, and has to say which
+mitigations no longer match anything, before the user ticks anything. The
+mitigation definitions already cross the wire inside the tree. What is missing
+is the resolution of each predicate against this tree version, and the ids of
+overrides whose stored stamp no longer matches the leaf they were authored
+against.
+
+**New file — `modules/common/src/main/scala/com/risquanter/register/http/responses/TreeStructureResponse.scala`.**
+
+```scala
+package com.risquanter.register.http.responses
+
+import zio.json.{DeriveJsonCodec, JsonCodec}
+import sttp.tapir.Schema
+
+import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
+import com.risquanter.register.http.codecs.IronTapirCodecs.given
+
+/** Why one mitigation's targeting predicate did not resolve, in wire form.
+  * `code` is one of "unknown-node", "malformed-node-id", "type-error",
+  * "malformed-predicate", "internal-error". `detail` names the reference or
+  * symbol at fault for the four a user can act on; for "internal-error" it is a
+  * fixed message, because that case carries server internals a client must not
+  * receive (ADR-035).
+  */
+final case class ScopeFailureView(code: String, detail: String)
+
+object ScopeFailureView:
+  given codec: JsonCodec[ScopeFailureView] = DeriveJsonCodec.gen[ScopeFailureView]
+  given schema: Schema[ScopeFailureView]   = Schema.derived[ScopeFailureView]
+
+/** One mitigation's resolution against the tree version this read returned: the
+  * nodes it applies to, and why it resolved to none when its predicate did not
+  * bind. An empty `failures` with an empty `resolvedScope` is a predicate that
+  * bound correctly and matched nothing — a different situation from a predicate
+  * that failed, and the interface says so differently.
+  */
+final case class MitigationScopeView(
+  mitigationId: MitigationId,
+  resolvedScope: Set[NodeId],
+  failures: List[ScopeFailureView]
+)
+
+object MitigationScopeView:
+  given codec: JsonCodec[MitigationScopeView] = DeriveJsonCodec.gen[MitigationScopeView]
+  given schema: Schema[MitigationScopeView]   = Schema.derived[MitigationScopeView]
+
+/** The structure read: the tree, each mitigation's resolved scope for this
+  * version, and the overrides whose stored base stamp no longer matches the
+  * leaf they were authored against.
+  *
+  * The scopes travel beside the tree rather than inside it. `RiskTree` is the
+  * persisted content type — what a PUT carries and what the store holds — so a
+  * server-computed, per-version resolution placed inside it would persist
+  * derived mitigation state and would claim a version-independence it does not
+  * have.
+  */
+final case class TreeStructureResponse(
+  tree: RiskTree,
+  mitigationScopes: List[MitigationScopeView],
+  staleMitigationIds: Set[MitigationId]
+)
+
+object TreeStructureResponse:
+  given codec: JsonCodec[TreeStructureResponse] = DeriveJsonCodec.gen[TreeStructureResponse]
+  given schema: Schema[TreeStructureResponse]   = Schema.derived[TreeStructureResponse]
+```
+
+**`MitigationScopeResolver.scala`** gains the wire mapping on the failure enum,
+following the `NodeChangeStatus.toWire` precedent — the enum is server-side, the
+view type is shared, and the server module already depends on the shared one:
+
+```scala
+enum ScopeResolutionFailure:
+  ...
+  def toWire: ScopeFailureView = this match
+    case UnknownNode(reference)      => ScopeFailureView("unknown-node", reference)
+    case MalformedNodeId(reference)  => ScopeFailureView("malformed-node-id", reference)
+    case TypeError(detail)           => ScopeFailureView("type-error", detail)
+    case MalformedPredicate(detail)  => ScopeFailureView("malformed-predicate", detail)
+    case InternalError(_)            => ScopeFailureView("internal-error", "resolution failed")
+```
+
+**`RiskTreeService`** gains one method rather than widening `getById`:
+
+```scala
+  /** The tree at this read coordinate, together with each mitigation's resolved
+    * scope for that version and the ids of overrides whose base stamp is stale.
+    *
+    * Separate from `getById` because resolving scopes builds a knowledge base
+    * and evaluates every predicate. `getById` is on the update path's pre-read
+    * and on the cascade paths, none of which consume a resolution, and none of
+    * which should pay for one. The commit hash `getById` returns is not
+    * analogous: it is already in hand from the same read and costs nothing.
+    */
+  def getStructure(wsId: WorkspaceId, id: TreeId, branch: BranchRef, at: Option[CommitHash])(
+    using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]
+  ): Task[Option[(RiskTree, ResolvedScopes, Set[MitigationId])]]
+```
+
+The implementation reads through `repo.getById`, calls the workspace's scope
+resolver with `ScopeResolutionContext(id, branch, commit)`, and computes
+`MitigationStaleness.staleOverrides(tree)`. It returns domain values; the
+controller builds the wire type, exactly as the changed-nodes endpoint does:
+
+```scala
+  val getTreeStructure: ServerEndpoint[Any, Task] = getWorkspaceTreeStructureEndpoint.serverLogic {
+    case (maybeUserId, key, treeId, activeBranch, at) =>
+      (for
+        userId <- userCtx.requireAuthenticated(maybeUserId)
+        given Checked[Permission] <- authzService.check(userId, Permission.ViewTree, ResourceRef(ResourceType.RiskTree, treeId.toSafeId))
+        ws     <- workspaceStore.resolveTreeWorkspace(key, treeId)
+        branch <- ActiveBranch.resolve(ws.id, activeBranch)
+        loaded <- riskTreeService.getStructure(ws.id, treeId, branch, at)
+      yield loaded.map { case (tree, scopes, stale) =>
+        TreeStructureResponse(
+          tree = tree,
+          mitigationScopes = scopes.outcomes.toList.sortBy(_._1.value).map { (id, outcome) =>
+            MitigationScopeView(id, outcome.scopeOrEmpty, outcome.failures.toList.flatMap(_.toList).map(_.toWire))
+          },
+          staleMitigationIds = stale
+        )
+      }).either
+  }
+```
+
+and the endpoint's output type becomes `jsonBody[Option[TreeStructureResponse]]`.
+
+**The browser, minimally.** `TreeViewState.emitStructureFetch` now receives the
+response object; the minimal adaptation maps it to `_.tree` so every existing
+consumer of `selectedTree` is untouched. The scopes and the stale ids are
+carried and unused until slice 6, which is where a consumer for them exists.
+
+#### 7.6.8 Slice 4 — change notification sees mitigation edits
+
+**What this slice changes, in plain terms.** When a tree is saved, the server
+tells subscribers which nodes' figures changed. It computes that from the node
+collection alone, so editing a mitigation — which changes every scoped node's
+mitigated figures — reports nothing at all. This slice makes the diff see the
+mitigation collection.
+
+**`MitigationScopeResolver.scala`** exposes resolution as a pure function, which
+is what the write path can actually call:
+
+```scala
+object MitigationScopeResolver:
+  /** Resolve every mitigation's predicate against `tree` without consulting or
+    * writing the memo. The write path has neither a workspace-scoped resolver
+    * instance nor the commit hash a memo entry is keyed by, and resolution is
+    * cheap to repeat: one knowledge-base build plus one quantifier-free
+    * evaluation per mitigation. */
+  def resolveUncached(tree: RiskTree): ResolvedScopes
+```
+
+`computeAll`, `resolveOne`, `satisfyingIds`, `fromTypeCheckError` and
+`fromQueryError` move from `MitigationScopeResolverLive` into this object
+unchanged — none of them reads instance state — and the live resolver's miss
+branch calls `MitigationScopeResolver.resolveUncached(tree)`. This is how
+Decision 1's "scope-resolver dependency on the write path" is discharged:
+`InvalidationHandler` gains no constructor parameter and no layer requirement,
+because `handleMutation` is given two trees and a branch and has neither a
+workspace nor a commit to key a memo with.
+
+**`InvalidationHandler.scala`** — the diff:
+
+```scala
+  /** Nodes whose mitigated figures changed because the mitigation collection
+    * changed.
+    *
+    * A mitigation is compared on what it does — its target, its spec and its
+    * precedence — so renaming one contributes nothing, which is correct: a name
+    * changes no figure. A mitigation whose effect changed affects every node in
+    * either version's scope. A mitigation whose effect is unchanged but whose
+    * scope moved — a node was renamed into or out of what its predicate matches
+    * — affects exactly the nodes the two scopes disagree on.
+    *
+    * Resolving both versions costs two knowledge-base builds per mutation,
+    * which is the same order as the tree-diff this method already performs and
+    * orders of magnitude below a simulation.
+    */
+  private def mitigationAffectedNodes(oldTree: RiskTree, newTree: RiskTree): Set[NodeId] = {
+    val oldScopes = MitigationScopeResolver.resolveUncached(oldTree).appliedScopes
+    val newScopes = MitigationScopeResolver.resolveUncached(newTree).appliedScopes
+    val oldById   = oldTree.mitigations.map(m => m.id -> m).toMap
+    val newById   = newTree.mitigations.map(m => m.id -> m).toMap
+
+    (oldById.keySet ++ newById.keySet).flatMap { id =>
+      val before = oldScopes.getOrElse(id, Set.empty)
+      val after  = newScopes.getOrElse(id, Set.empty)
+      val effectChanged = oldById.get(id).map(mitigationEffect) != newById.get(id).map(mitigationEffect)
+      if effectChanged then before ++ after
+      else (before ++ after) -- (before intersect after)
+    }.filter(newTree.index.nodes.contains)
+  }
+
+  /** What a mitigation does, as a comparison key. Encoded rather than compared
+    * by value for the same reason `nodeContent` is: a transform can carry
+    * arrays, which compare by reference, and every mutation rebuilds the tree,
+    * so value comparison would report every mitigation as changed on every
+    * save. The name is deliberately not part of the key. */
+  private def mitigationEffect(m: Mitigation): String =
+    s"${m.target.toJson}|${m.spec.toJson}|${m.precedence.key}"
+```
+
+`computeAffectedNodes` returns `(affectedFromAdded ++ affectedFromRemoved ++ affectedFromChanged ++ mitigationAffectedNodes(oldTree, newTree), removed)`,
+and every affected node still expands to its ancestor path in the existing
+caller. The browser has no consumer for these messages, so this publish reaches
+zero subscribers by design; building the consumer is M5 (§7.7), not an omission
+here.
+
+**The scope memo becomes capacity 2.** §8.4-5's amendment lands in this slice
+because the read path it serves is slice 1's: a reader alternating between the
+branch head and a pinned revision currently misses on every call and gains
+nothing from the memo.
+
+```scala
+/** Memoizes resolved scopes per tree version. Each (tree, branch) slot holds at
+  * most two revisions, most recently used first, so a pinned historic read
+  * takes the second position and the head entry survives. The bound is a
+  * property of the structure, not an eviction policy.
+  *
+  * The memo read and write are not atomic — last-writer-wins is a deliberate,
+  * accepted trade-off, safe because the exact-revision hit guard never serves a
+  * mismatched scope.
+  */
+final case class MitigationScopeResolverLive(
+  memo: Ref[Map[(TreeId, BranchRef), Vector[(CommitHash, ResolvedScopes)]]]
+) extends MitigationScopeResolver:
+
+  override def resolve(context: ScopeResolutionContext, tree: RiskTree): UIO[ResolvedScopes] =
+    val slot = (context.treeId, context.branch)
+    memo.get.map(_.getOrElse(slot, Vector.empty)).flatMap { entries =>
+      entries.find(_._1 == context.revision) match
+        case Some(hit) =>
+          memo.update(m => m.updated(slot, hit +: entries.filterNot(_._1 == context.revision))).as(hit._2)
+        case None =>
+          val resolved = MitigationScopeResolver.resolveUncached(tree)
+          memo.update { m =>
+            val current = m.getOrElse(slot, Vector.empty).filterNot(_._1 == context.revision)
+            m.updated(slot, ((context.revision, resolved) +: current).take(MitigationScopeResolverLive.SlotCapacity))
+          }.as(resolved)
+    }
+
+object MitigationScopeResolverLive:
+  /** Revisions one (tree, branch) slot holds: the branch head and one pinned
+    * revision. */
+  val SlotCapacity: Int = 2
+```
+
+`ScopeResolverScope.resolverFor` constructs the widened `Ref` type:
+
+```scala
+          memo <- Ref.make(Map.empty[(TreeId, BranchRef), Vector[(CommitHash, ResolvedScopes)]])
+```
+
+#### 7.6.9 Slice 5 — the two decision records
+
+Decision 2 ruled that the client-facing mitigation contract is split by surface.
+Both documents land with the code they describe, not after it.
+
+**`docs/dev/decision-records/ADR-017-tree-api-design.md` — amendment.** The
+"Four Buckets" decision describes a tree PUT that this plan changes, so leaving
+it as it stands would make it wrong. The amendment records that the update
+request carries two further buckets, `mitigations` and `newMitigations`; that
+the create request carries `newMitigations` only, because Decision 1 of that
+same ADR keeps id-bearing buckets out of create requests; that omission of the
+mitigation collection deletes it, exactly as for nodes; and that an override
+anchor is stated as a node name and resolved server-side against the same
+name-keyed map parent names resolve against. The amendment also records that a
+tree PUT whose mitigation carries an override anchor naming an absent node is
+accepted, and that the resulting mitigation reports itself stale (Decision 9).
+
+**The same amendment corrects that ADR's HTTP surface table, which is wrong in
+both directions.** It lists `POST /w/{key}/risk-trees/{treeId}/invalidate/{nodeId}`,
+an endpoint that exists nowhere in `modules/`; and it omits every workspace-scoped
+endpoint that is not tree CRUD — `changed-nodes`, `history`, `revert`,
+`nodes/{nodeId}/prob-of-exceedance`, `nodes/lec-multi`, `query`, the five
+`scenarios` routes, `rotate`, and workspace delete. Fixing the table as a whole is
+part of this amendment, not a separate change: the mitigation buckets are being
+added to a table that does not currently describe the surface it claims to.
+
+**`docs/dev/decision-records/ADR-037-analysis-read-contract.md` — new, following the
+ADR-00X template.** It covers the analysis read contract as a whole rather than
+its mitigation-shaped part: the required branch header, the optional `at` pin
+and what it means, why both analysis endpoints take a JSON body, the selection's
+two-list form and its conversion, the rule that a named-but-absent mitigation
+fails the request while a mitigation that applies to nothing does not, the
+series-shaped response and the reading of `withMitigations`, the payload bounds,
+and the reason there is no staleness or revision field — stored versions are
+immutable, so a request is answered at the version it names and there is nothing
+for a client's view to diverge from.
+
+#### 7.6.10 ADR alignment
+
+| ADR | Bearing | Status |
+|---|---|---|
+| ADR-001 (validate once, at the boundary) | The request types carry smart constructors and their decoders run them, so a handler receives a selection that already satisfies both bounds. The one check deliberately outside the decoder — whether a named mitigation exists — is a lookup against a loaded tree, not a field format rule, and the plan says so where it is placed | Compliant |
+| ADR-001 §2 (Iron types in JSON bodies need an explicit Tapir schema) | `Schema[MitigationId]` is added beside the existing `Schema[NodeId]` | Compliant |
+| ADR-002 (drift signals, not failures) | A predicate that no longer binds makes one mitigation a no-op and is logged; it never fails a read | Compliant |
+| ADR-004a (storage mapping) | Unchanged: mitigations are already stored as `mitigations/{id}` blobs and this plan adds no storage shape | Compliant |
+| ADR-009 (associativity of the aggregate) | Unchanged: result-stage transforms still apply to a finished node value, never inside the summation | Compliant |
+| ADR-010 (typed errors, accumulated) | Every new validation returns `ValidationError` with a code, and independent checks accumulate through `Validation.validateWith` | Compliant |
+| ADR-014 (render-time curve computation) | Both valuations of every requested node go through one `generateCurvePointsMulti` call, so the shared tick domain covers them together | Compliant |
+| ADR-015 (query APIs compose on `ensureCached`) | The mitigated reading is a second `ensureCached`/`ensureCachedAll` call with a selection, not a new resolution path | Compliant |
+| ADR-017 (tree API design) | The tree PUT gains two buckets; the ADR is amended in slice 5 rather than contradicted | Amended, slice 5 |
+| ADR-018 (nominal id wrappers) | `MitigationId` stays distinct from `NodeId` and `TreeId` throughout the new types | Compliant |
+| ADR-019 (frontend ownership rules) | Slice 1's browser change touches one state class and adds one pure function beside it; no component gains state | Compliant |
+| ADR-024 (application as a pure enforcement point) | Both analysis handlers keep their `AnalyzeRun` check and the structure handler keeps `ViewTree`; the method change on one endpoint moves no check | Compliant |
+| ADR-032 (two equality relations) | The mitigation diff compares encoded content, not values, for the same array-equality reason the node diff already does | Compliant |
+| ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. ADR-034 gained Decision 6 on 2026-09-14, stating that the mitigated value of a transformed node is flat by construction; §8.16 rules the type that carries it | Compliant; ADR-034 amended |
+| ADR-035 (error leakage prevention) | The internal-error resolution failure reaches the wire as a fixed message with no detail | Compliant |
+| ADR-036 (confidential internal identifiers) | Node ids move in a request body, never in a request line an access log records — this is one of Decision 3's two independent arguments | Compliant |
+
+#### 7.6.11 Verification plan
+
+New tests, by the behaviour each one pins:
+
+- `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationSelectionRequestSpec.scala` —
+  both lists empty converts to the mitigation-free reading; the two-list form
+  converts to the entry map; a mitigation in both lists converts to full scope;
+  an omitted list decodes as empty; each bound rejects with its own field path
+  and both bounds accumulate.
+- `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationRequestsSpec.scala` —
+  a malformed predicate is rejected at the DTO boundary; a request-side
+  duplicate mitigation id and a duplicate name are each rejected; the request
+  spec type has no field in which a base stamp could be sent.
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeSpec.scala` (or the
+  existing mitigation entity spec) — a tree whose override anchor names a node
+  that is not in the tree still builds and still decodes, because Decision 9
+  makes that a staleness signal rather than a validation failure; duplicate
+  mitigation ids, duplicate mitigation names and an over-large collection each
+  still fail.
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationStalenessSpec.scala` —
+  a mitigation whose override anchor names a deleted node reports stale, and a
+  mitigation whose anchor names a node that is no longer a leaf reports stale.
+- `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala` — the
+  mitigation-free reading is always present and first; a node inside an applied
+  scope carries exactly one further reading; a node outside every applied scope
+  carries one reading only; a portfolio above a scoped leaf carries a second
+  reading whose `withMitigations` names the descendant's mitigations; a
+  selection naming an absent mitigation fails with `NOT_FOUND`; a
+  mitigation-free request performs one resolution pass and no scope resolution;
+  a tree PUT carrying mitigation buckets stores them, and a PUT omitting the
+  buckets clears them.
+- `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala`
+  (new, or added to the existing pipeline spec) — adding a mitigation publishes
+  its scope and the ancestors; removing one publishes the scope it had; renaming
+  a mitigation publishes nothing; renaming a node into a predicate's match
+  publishes the difference between the two scopes.
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationScopeResolverSpec.scala` —
+  alternating between head and one pinned revision hits the memo on both after
+  the first pass; a third revision evicts the least recently used of the two.
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisControllerSpec.scala`
+  (new) — the exceedance endpoint answers a POST with a body; an oversized
+  selection is a 400 before the handler runs; the structure endpoint returns the
+  resolved scopes and the stale ids beside the tree.
+- `modules/app/src/test/scala/app/state/LECChartStateSpec.scala` — `inherentCurves`
+  takes the empty-mitigation series and drops nothing else.
+- `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala` — updated
+  to the request object, its assertions unchanged.
+- `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala` —
+  extended with a round trip through the service: a PUT creating a mitigation,
+  a structure read returning its resolved scope, and a curve read under a
+  selection naming it.
+
+Commands that must be green before any slice is reported done. The complete run
+is all four:
+
+```
+sbt 'commonJVM/test; server/test'
+sbt app/test
+docker ps -a --filter name=register_it_ --format '{{.ID}}' | xargs -r docker rm -f; docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docker network rm
+sbt 'serverIt/test'
+```
+
+The leaked-network cleanup is a mandatory pre-step for the integration tier, not
+crash recovery. A BATS fast gate (`run_bats tests/bats/suite-c-in-memory.bats`,
+invoked as the register-dev skill defines it) runs after the slices that change
+the server image's behaviour, which is all of slices 1 to 4.
+
+Each slice lands with a PATCH version bump in `build.sbt`, mirrored into `.env`
+and `.env.irmin`; closing M4 is the MINOR bump.
+
+#### 7.6.12 Open decisions
+
+Five decisions gate the `ValuationResult` sub-slice ruled in §8.16, which slice 1
+consumes. Two further decisions gate slice 6. Slices 2 to 5 carry none. All seven
+are listed here so the elevation states them rather than implying them.
+
+**Gating the §8.16 sub-slice.** §8.16 rules the design; none of the following is
+ruled by it, and each changes what the code looks like. The reasoning that
+produced the design is in
+[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md)
+and should be read before any of these is answered.
+
+1. **Where `ValuationResult` is defined.** It extends `LossDistribution`, whose
+   hierarchy is sealed in
+   `modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala`,
+   so a sealed hierarchy requires it in that file or that file's directory. That
+   places a read-edge concept in the shared domain module, which every other
+   valuation type already sits in. The alternative — unsealing the hierarchy to
+   put it in `server` — trades an enforced invariant for module placement.
+2. **The resolver trait's return type.** `ensureCached` and `ensureCachedAll`
+   return `Task[LossDistribution]` and `Task[Map[NodeId, LossDistribution]]`.
+   Under uniform wrapping every returned value is a `ValuationResult`, so the
+   return type can be narrowed to say so, or left wide. Narrowing states the fact
+   in the type and is the reason the decorator exists; it also moves every stub
+   and test that wires the resolver layer.
+3. **Where the wrapping happens.** Either `CachedResultResolverLive`'s recursion
+   builds the decorator directly at each node, or a separate function decorates
+   what the existing recursion returns. This is the remaining part of the
+   "second traversal or threaded pair" question §8.14 left to the code step.
+4. **Whether `flatten`'s removal travels with this sub-slice or lands
+   separately.** It touches the same file and the same sealed hierarchy, which
+   argues for one change; it is also a deletion with no dependency on
+   `ValuationResult`, which argues for landing it first and alone so the
+   `ValuationResult` diff carries no unrelated deletion.
+5. **The file inventory delta.** `LossDistribution.scala` is already a bullet in
+   the shared inventory. `CascadeTestStubs.scala`, `LossDistributionSpec.scala`
+   and `ProvenanceSpec.scala` have to be checked against it before any edit, and
+   the resolver's own stubs move if decision 2 narrows the return type.
+
+**Gating slice 6.**
+
+6. **The exceedance endpoint's answer shape.** §7.6.3 wrote out the curve
+   response and not this one. §7.6.5 applies the same three rules to it — the
+   mitigation-free reading always present and first, one further reading when
+   the selection reaches the node, `withMitigations` naming what shaped it — and
+   the alternative is to leave the endpoint returning a bare number and refuse
+   selections on it. The elevation specifies the first; it is recorded as a
+   decision because the shape was derived here rather than ruled at §7.6.3.
+7. **Whether M4 ships mitigation authoring.** §7.4's interface list covers
+   selecting mitigations, drawing their effect, comparing selections, the
+   badges, and the override edit popup. It does not say whether a user can
+   create a mitigation and write its targeting predicate in the interface. Slice
+   2 gives the API the ability; whether slice 6 builds the authoring screen, or
+   M4 ships with mitigations authored through the API alone, decides a large
+   part of slice 6's size.
+
+The two original slice-6 decisions kept their wording and were renumbered 6 and 7.
+
+#### 7.6.13 File inventory — slices 1 to 5
+
+These lines append to the shared `## File inventory` section on approval. Files
+already listed there for M1, M1R, M2 or M3 are repeated only where this plan
+edits them again; the hook matches on presence, so a repeat is harmless and an
+omission is a denial.
+
+```
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/AnalysisRequests.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/MitigationRequests.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeDefinitionRequest.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeUpdateRequest.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/responses/AnalysisResponses.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/responses/TreeStructureResponse.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceAnalysisEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceTreeEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationSelectionRequestSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationRequestsSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeBoundsSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationEntitySpec.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/ScopeResolverScope.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala`
+- `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisController.scala`
+- `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala`
+- `modules/server/src/main/scala/com/risquanter/register/Application.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/CascadeTestStubs.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/AggregateFreshnessAfterLeafMoveSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationScopeResolverSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisControllerSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RouteSecurityRegressionSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala`
+- `modules/app/src/main/scala/app/state/LECChartState.scala`
+- `modules/app/src/main/scala/app/state/TreeViewState.scala`
+- `modules/app/src/test/scala/app/state/LECChartStateSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala`
+```
+
+Two documents change outside the gated tree and are listed for scope, not for
+the hook: `docs/dev/decision-records/ADR-017-tree-api-design.md` (amended) and
+`docs/dev/decision-records/ADR-037-analysis-read-contract.md` (new).
+
+Why each non-obvious entry is here. `QueryServiceLive.scala` loses its private
+resolution-failure logger to the shared one. `CascadeTestStubs.scala` is the
+only other implementation of `RiskTreeService`, so every signature change
+reaches it. `AggregateFreshnessAfterLeafMoveSpec`, `SeedStabilitySpec`,
+`RiskTreeControllerSpec`, `RouteSecurityRegressionSpec`,
+`WorkspaceLifecycleControllerSpec`, `HttpTestHarness` and `StubHttpTestHarness`
+each build `RiskTreeServiceLive.layer`, which now also requires
+`ScopeResolverScope`. `TreeViewState.scala` and `LECChartState.scala` are the
+two browser call sites of the endpoints whose signatures change, and without
+them the Scala.js module does not compile.
 
 ### 7.7 M5 — Mitigation-aware change visibility (problem space only)
 
@@ -2124,7 +3844,7 @@ themselves are the renamed bullets above (`CachedResultResolver.scala`,
 - `modules/server/src/main/scala/com/risquanter/register/Application.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`
-- `modules/server/src/test/scala/com/risquanter/register/services/Item17RegressionSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/AggregateFreshnessAfterLeafMoveSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala`
@@ -2217,7 +3937,7 @@ Simulation parallelism cleanup — delete the never-wired `SimulationSemaphore`
 and drive risk-node parallelism from config at the fork point. New to the
 inventory (`Application.scala`, `RiskTreeServiceLive.scala`,
 `CachedResultResolverLive.scala`, `RiskTreeServiceLiveSpec.scala`,
-`Item17RegressionSpec.scala`, `SeedStabilitySpec.scala`,
+`AggregateFreshnessAfterLeafMoveSpec.scala`, `SeedStabilitySpec.scala`,
 `RouteSecurityRegressionSpec.scala`, `RiskTreeControllerSpec.scala`,
 `WorkspaceLifecycleControllerSpec.scala`, `HttpTestHarness.scala` and
 `StubHttpTestHarness.scala` are already listed above):
@@ -2240,9 +3960,58 @@ that the `Identity` instance's element belongs to the slice named by
 sense the documented overflow is. Comment-only; no signature, type, or behaviour
 change:
 
+
+M4 slices 1–5 add (§7.6.13):
+
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/AnalysisRequests.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/MitigationRequests.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeRequests.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeDefinitionRequest.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/requests/RiskTreeUpdateRequest.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/responses/AnalysisResponses.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/responses/TreeStructureResponse.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceAnalysisEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceTreeEndpoints.scala`
+- `modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationSelectionRequestSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/http/requests/MitigationRequestsSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskTreeBoundsSpec.scala`
+- `modules/common/src/test/scala/com/risquanter/register/domain/data/MitigationEntitySpec.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/ScopeResolverScope.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala`
+- `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisController.scala`
+- `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala`
+- `modules/server/src/main/scala/com/risquanter/register/Application.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/CascadeTestStubs.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/AggregateFreshnessAfterLeafMoveSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationScopeResolverSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisControllerSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RouteSecurityRegressionSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala`
+- `modules/app/src/main/scala/app/state/LECChartState.scala`
+- `modules/app/src/main/scala/app/state/TreeViewState.scala`
+- `modules/app/src/test/scala/app/state/LECChartStateSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala`
+- `modules/server-it/src/test/scala/com/risquanter/register/services/MitigationPersistenceItSpec.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala`
 
 ### Open decisions
+
+This section records the M1 and M2 decision set. **The decisions that are open
+now are in §7.6.12** — five gating the `ValuationResult` sub-slice ruled in §8.16,
+and two gating M4 slice 6. Nothing below is open.
 
 Status after the 2026-08-08 review session:
 
@@ -4583,7 +6352,7 @@ updates; the compiler enforces completeness. Sites (verified by grep
   (doc comment). `RiskTreeKnowledgeBase.scala` already names
   `CachedResultResolver` in a scaladoc line — no edit needed.
 - **test:** `RiskResultResolverSpec.scala`, `CacheTransparencySpec.scala`,
-  `Item17RegressionSpec.scala`, `SeedStabilitySpec.scala`, `ProvenanceSpec.scala`,
+  `AggregateFreshnessAfterLeafMoveSpec.scala`, `SeedStabilitySpec.scala`, `ProvenanceSpec.scala`,
   `RiskTreeServiceLiveSpec.scala`, `RiskTreeControllerSpec.scala`,
   `RouteSecurityRegressionSpec.scala`, `WorkspaceLifecycleControllerSpec.scala`
   (the last four update `RiskResultResolverLive.layer` in ZLayer wiring);
@@ -4697,13 +6466,17 @@ scoped)` applied to the raw leaf outcomes); the portfolio arm applies
 `resultTransformFor` is `None` off-scope, so an un-mitigated subtree's mitigated
 fold equals its raw fold and the two coincide.
 
-**Implementation-grade item finalized at the code echo.** Whether the edge runs
-the mitigated fold as a second traversal or threads a `(raw, mitigated)` pair
-through the existing one — and the exact `CachedResultResolverLive` return shape
-that carries the mitigated aggregate alongside the cached raw value — is a
-signature decision presented at the code step's Signature Echo. It touches
-`CachedResultResolverLive`'s recursion, not the public trait parameter list fixed
-above; it changes no `common` wire type and adds no `LossDistribution` API.
+**The deferred return shape — RULED 2026-09-14, see §8.16.** This paragraph
+originally left "the exact `CachedResultResolverLive` return shape that carries
+the mitigated aggregate alongside the cached raw value" to the code step's
+Signature Echo. That question is now ruled: the mitigated fold returns a
+`ValuationResult` at every node it visits. §8.16 records the ruling and its
+consequences, and
+[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md)
+carries the derivation behind it. Read that document before re-opening any part
+of this ruling. What remains a code-step choice is only whether the edge runs the
+mitigated fold as a second traversal or threads a pair through the existing one —
+an internal recursion question that changes no `common` wire type.
 
 **Resolver file renames — RULED: rename to match the type.**
 `CachedResultResolver.scala`, `CachedResultResolverLive.scala`,
@@ -4766,7 +6539,7 @@ Rename ripple — **add** (not currently listed; hook would otherwise deny):
 - `modules/server/src/main/scala/com/risquanter/register/Application.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`
-- `modules/server/src/test/scala/com/risquanter/register/services/Item17RegressionSpec.scala`
+- `modules/server/src/test/scala/com/risquanter/register/services/AggregateFreshnessAfterLeafMoveSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala`
@@ -5139,6 +6912,112 @@ Option B would additionally add `ScenarioMergeResponse.scala` and
 recommended Option A and would be added only if B is ruled. The token stays
 pointed at this plan; the user re-points it after approving this amendment so
 the two new production/test paths are covered.
+
+### 8.16 The mitigated value's type — `ValuationResult` (RULED 2026-09-14)
+
+**Reasoning source.** Every claim in this section is derived in
+[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md),
+which builds the vocabulary, the raw fold, the obstruction, the Option F ruling
+and each consequence in dependency order. Where any section of this plan is
+ambiguous about the mitigated value's type, the two folds, the identity case or
+`flatten`, that document settles it. Do not re-decide any of it from this summary
+alone.
+
+#### What was missing
+
+§8.14 ruled the fold — `mitigated(P) = f_P(⊕ mitigated(children))` — and left the
+return shape to the code step. The code step chose a flat `RiskResult` at a
+transformed portfolio, which is correct arithmetic, and the test suite pins it.
+But the returned type said three true things and omitted three others: it did not
+say which valuation the caller was holding, it did not say which mitigations had
+been applied to produce it, and it did not carry the value the transform was
+applied to. A caller holding the result could not tell a mitigated reading from a
+raw one without remembering what it had passed in.
+
+#### The ruling
+
+**1. The mitigated fold returns a decorator named `ValuationResult`.** It records
+the node, the value the transform layer was applied to, which mitigation
+applications produced the layer, and the resulting outcomes:
+
+```scala
+final case class ValuationResult private (
+  override val nodeId: NodeId,
+  source: LossDistribution,
+  applied: List[MitigationApplicationRecord],
+  override val trialOutcomes: TrialOutcomes
+) extends LossDistribution(nodeId, trialOutcomes)
+```
+
+`source` is the raw value at that node — a `RiskResultGroup` at a portfolio, a
+`RiskResult` at a leaf — so the children remain reachable through it and ADR-009's
+drill-down structure is preserved rather than discarded.
+
+**2. Wrapping is uniform: every node the mitigated fold visits is wrapped.** The
+empty `applied` list is the identity, so a node with no mitigation in scope is
+wrapped with an empty list rather than left bare. This was ruled in preference to
+wrapping only where a transform binds. The reason is that a no-op mitigation is
+authorable today — `ScaleLosses(1.0)`, `ApplyDeductible(0)` and
+`FilterBelowThreshold(0)` are all valid single-step pipelines — so a rule of
+"wrap only when something changed" would make the return type depend on the
+numeric value of a parameter rather than on the shape of the request.
+
+**3. One method, not two.** `ensureCached` keeps its single form and its
+`selection` parameter. A raw reading is the identity instance of the same fold,
+recoverable as `source`, not a separate function. A two-method form was proposed
+and withdrawn: the ADR-034 passage cited for it is about what is *stored*, and
+Form 3 satisfies that passage identically.
+
+**4. The empty case must be physically the identity.** Applying an empty pipeline
+must return the *same* `TrialOutcomes` reference it was given, not a structurally
+equal rebuild. A rebuild would duplicate the outcome map of every untransformed
+node on every read, which on a large tree is the dominant allocation.
+
+**5. `MitigationApplicationRecord` becomes the `applied` field.** The type and
+`MitigationApplication.applicationRecords` exist, are tested, and today have no
+production caller; the record's own scaladoc claims it is carried in responses,
+which is not true. This ruling gives it its only home. It closes the open
+question of where the provenance layer lives and removes the contradiction
+between §7.4's prose and the ruled response shape in §7.6.3 — the records live on
+the server-side valuation, and the wire response continues to carry only
+`withMitigations: List[MitigationId]`.
+
+**6. `LossDistribution.flatten` is removed.** The abstract member and both
+overrides go, together with the two `LossDistributionSpec` sites that exercise
+them. It has no production caller and cannot acquire one: the expand-and-collapse
+tree in the interface walks the persisted structure through `childIds`, the chart
+receives a map from node id to curve, and the browser never holds a
+`LossDistribution`. Keeping it would tax every future subtype — including
+`ValuationResult` — with an override that nothing calls. A replacement shape was
+considered and deliberately **not** ruled; it is recorded in §12.4 of the
+reasoning document along with the three changes that would bring the need back.
+
+#### Decision Trigger #8 — the test assertion this changes
+
+`CachedResultResolverSpec` asserts that an un-mitigated portfolio read is a
+`RiskResultGroup` and that a mitigated one is a flat `RiskResult`. Under uniform
+wrapping both readings are `ValuationResult`s, so the assertions are rewritten to
+test the property they were protecting rather than the type name: that the raw
+structure is reachable and unchanged, and that the mitigated outcomes differ from
+their source exactly where a transform binds. Rewriting them was approved under
+Decision Trigger #8. This is the one place where the ruling changes a shipped
+assertion; no other test in the suite asserts on these type names.
+
+#### Cache interaction: none
+
+`ValuationResult` is built strictly above the cache boundary. Only leaf content is
+cached, keyed by a content hash of identity-free content; param-stage transforms
+are folded in before the hash, and result-stage transforms are applied after the
+cache read and never stored. The decorator is constructed from values the cache
+has already returned, so no cache key, no cached value and no hash input changes.
+
+#### Status: ruled, not yet elevated
+
+This section records the rulings. It is **not** an implementation-grade
+specification and confers no G3 coverage: the exact file placement, the resolver
+trait's return type, the construction site and the inventory delta are not settled
+here. They are listed as open decisions in §7.6.12 and must be ruled and written
+up before any source edit implements this.
 
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 

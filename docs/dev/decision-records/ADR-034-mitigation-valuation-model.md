@@ -104,9 +104,11 @@ mitigated(D) = cap15(6 + 8 + 1) = cap15(15) = 15   // parent transform sees the 
 At a binding cap, `mitigated(node) ≠ combine(mitigated(children))` — the cap
 removed something at this level — while `raw(node)` still equals
 `combine(raw(children))`. The cap lives in the mitigated fold as this node's
-transform layer. Drilling **decomposes** `mitigated(node)` into that layer and
-the children's mitigated aggregate, so where each reduction happened stays
-visible.
+transform layer. Where each reduction happened stays visible: a node's mitigated
+value and the combine of its children's mitigated values differ by exactly this
+node's transform layer. A client reads the children's mitigated values by
+requesting those nodes, and the difference is displayed as the transform's
+effect rather than as an inconsistency.
 
 ### 5. Reproducible from raw × active mitigations
 
@@ -115,6 +117,23 @@ pinned to a node, each with its precedence). Mitigated values are re-derived on
 demand; identical `(raw version, active mitigation set)` yields identical
 mitigated values. There is no stored mitigated tree and no application log —
 history is raw versions combined with active mitigations.
+
+### 6. The mitigated value of a transformed node is flat, by construction
+
+`RiskResultGroup` carries a claim its private constructor enforces: its aggregate
+is the combine of its children. The raw valuation can always honour that claim.
+The mitigated valuation cannot, at any node where a transform binds — that is the
+non-linearity stated in Context, `f(a ⊕ b) ≠ f(a) ⊕ f(b)`.
+
+So the mitigated value of a transformed node is a plain transformed-outcomes
+value with no children attached, and is deliberately **not** a `RiskResultGroup`.
+This is not a loss of structure. The value never carried the children-claim, so
+there is nothing for it to lose, and a type that asserted the claim would be
+asserting something false.
+
+A node with no result-stage transform in scope returns its `RiskResultGroup`
+unchanged, so the mitigated and raw values coincide there and drill-down is
+identical to the un-mitigated path.
 
 ---
 
