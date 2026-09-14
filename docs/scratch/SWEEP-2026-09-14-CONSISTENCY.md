@@ -725,3 +725,59 @@ label "M3 analytics VQL".
 - **S3-3** — TODO 40's shared bounding mechanism versus M4's per-endpoint
   constant.
 - **S1-7 to S1-12** — the remaining code-review findings.
+
+---
+
+# Second pass — 2026-09-14, after the token was repointed
+
+## The comment sweep is done
+
+The token now names `PLAN-RISKTRANSFORM.md`, and the whole production-comment
+pass landed in one go: plan references, decision codes (`OD-n`, `DD-n`, `D-4`,
+`D3`), milestone and phase labels, and the three `InvalidationHandler.scala`
+sites. Eleven files, all of them bullets in that plan's inventory.
+
+Two findings were corrected as part of it rather than left as comment hygiene:
+
+- **S1-3** — `MitigationStaleness`'s scaladoc claimed HTTP handlers were its sole
+  consumers. Nothing reads it yet; the comment now says so.
+- **S1-4** — the memo key was stated as the (treeId, branch, revision) triple in
+  three places. It is keyed by (treeId, branch), with the revision held in the
+  entry as a validity guard. All three corrected.
+- **S1-7** — `includeProvenance`'s scaladoc claimed it controls whether
+  provenance is captured. It is written to a tracing attribute and never read.
+  The documentation now states that. **The dead parameter itself is untouched:
+  removing it changes a trait signature and needs a ruling.**
+
+Four more files carry the same defect and are **not** in the plan's inventory, so
+the hook denies them: `ContentCache.scala`, `ContentHashIndex.scala`,
+`LeafSimResult.scala` and `EvictionStrategy.scala`, all under
+`modules/server/.../services/cache/`. They need an inventory amendment.
+
+## The example scripts were broken in a second way, and now have a test
+
+Running them against a live server found a break the arity fix did not cover:
+**`X-Branch` is a required header on every workspace-scoped endpoint, and none of
+the four demo scripts sent it.** Every call after the bootstrap returned 400. The
+`stage-*` scripts do send it, so only the demo scripts had drifted.
+
+Worse, and the reason both breaks went unnoticed: **a rejected query printed as
+`✘ NOT SATISFIED proportion=null`.** A tutorial reader saw a plausible negative
+answer where the server had refused the query. The scripts now stop with the
+server's message when a query carries no verdict.
+
+`docs/user/API-TUTORIAL.md` had the same missing header on both of its
+tree-summary commands; its documented `queryEcho` JSON was invalid (unescaped
+inner quotes); and its description of that response claimed per-node P95/P99
+statistics and curve points, where `SimulationResponse` carries a tree id, a
+name, a quantile map and an optional curve string. All three corrected.
+
+**Coverage now exists.** `tests/bats/suite-c-in-memory.bats` gains C17-C20, one
+per demo script, asserting a clean exit and one evaluated proportion per query.
+The httpie pair skips when `http` is absent, which it is in the BATS runner
+image — adding it would be a dependency change under ADR-020.
+
+The guard was checked against both regression classes before being kept: with the
+mitigation argument removed it fails, and with the branch header removed it
+fails. Its first version passed in both cases and was rewritten — counting
+verdict lines was vacuous, because a rejected query printed one.

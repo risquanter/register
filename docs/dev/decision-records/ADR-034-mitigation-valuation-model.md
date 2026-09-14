@@ -1,24 +1,17 @@
 # ADR-034: Mitigation Valuation Model
 
-**Status:** Accepted (implemented)  
-**Date:** 2026-08-28  
+**Status:** Accepted  
+**Date:** 2026-09-14  
 **Tags:** mitigation, aggregation, fold, monoid, caching
-
-**Scope:** how a node's value is computed once mitigations are present — the two
-valuations (raw and mitigated), the order transforms compose in, and the
-invariant that keeps aggregation and content-addressed caching sound. The
-transform **definitions** (leaf-stage vs result-stage specs, targeting,
-precedence) belong to the mitigation spec plans; this ADR governs how those
-definitions combine into a value.
 
 ---
 
 ## Context
 
-- A parent's value is the aggregate of its children; this aggregation is a commutative fold, and content-addressed caching keys on it — any operation that makes an aggregate differ from the combination of its children breaks both.
-- A result transform (a cap, a deductible) is non-linear: applying it to a total is not the same as applying it to each part (`f(a ⊕ b) ≠ f(a) ⊕ f(b)`), so it cannot live inside the aggregation step.
-- A mitigation legitimately changes what a node is worth; that change must be representable and inspectable without corrupting the un-mitigated aggregate that caching and drill-down depend on.
-- Two independent orderings exist — a transform on a child must act before its parent aggregates, and two transforms at one node do not commute — while the sequence in which mitigations were authored is not an ordering at all.
+- This model governs how transform **definitions** combine into a value; the definitions themselves — stage, targeting, precedence — are specified elsewhere.
+- A parent's value is the combine of its children's values. Content-addressed caching keys on that identity, so any operation making an aggregate differ from the combine of its children breaks caching and aggregation together.
+- A result transform (a cap, a deductible) is non-linear: `f(a ⊕ b) ≠ f(a) ⊕ f(b)`. It is not a homomorphism, so it cannot live inside the combine step. It follows that "every node is the combine of its children" and "a genuine aggregate cap exists" are contradictory requirements, and one value per node cannot satisfy both.
+- Two orderings are real — a child's transform acts before its parent aggregates, and two transforms at one node do not commute — while the order mitigations were authored in is not an ordering at all.
 - A derived value must be reproducible from stored inputs alone, with no log of the steps that produced it.
 
 ---
@@ -27,113 +20,88 @@ definitions combine into a value.
 
 ### 1. Two valuations, computed separately
 
-`raw` is the mitigation-free commutative fold of children; it is cached and never
-altered by a mitigation. `mitigated` is a second fold computed at the read edge,
-carried alongside `raw`, and never stored. `transforms(node)` is identity for an
-un-mitigated node, so the two coincide wherever nothing applies.
+`raw` is the mitigation-free commutative fold; it is cached and never altered by a
+mitigation. `mitigated` is a second fold computed at the read edge and never
+stored. Each node applies its own transforms to the combine of its children's
+**mitigated** values, so a node with no transform yields that combine unchanged.
 
 ```
-raw(node)       = combine(raw(child)       for child in children)   // cached, mitigation-free
-mitigated(node) = transforms(node)( combine(mitigated(child) …) )   // derived at the edge
+raw(node)       = combine(raw(child)       for child in children)   // cached
+mitigated(node) = transforms(node)( combine(mitigated(child) …) )   // at the edge
 ```
 
-#### Worked example
-
-Read every figure as dollars from one trial (the real fold runs per trial across
-the whole distribution; the shape is identical). The tree carries two
-result-stage caps:
+Worked example. One trial, in dollars; the real fold runs per trial.
 
 ```
-P  (portfolio, root)
-├── Q  (portfolio)     cap Q at $15
-│   ├── a  (leaf)      cap a at $6,  raw $9
-│   └── b  (leaf)      raw $8
-└── c  (leaf)          raw $1
+P (root)                      raw: a=9, b=8, c=1
+├── Q          cap Q at $15         Q_raw = 9+8 = 17,  P_raw = 17+1 = 18
+│   ├── a      cap a at $6     mitigated: a = cap6(9) = 6, b = 8, c = 1
+│   └── b                                 Q = cap15(6+8) = cap15(14) = 14
+└── c                                     P = 14+1 = 13
 ```
 
-Raw fold (mitigation-free — the cached, content-addressed value):
-`a_raw=9, b_raw=8, c_raw=1`; `Q_raw = 9 + 8 = 17`; `P_raw = 17 + 1 = 18`.
+`cap15` applied to the cached `Q_raw = 17` gives 15, not 14. The $1 gap is `a`'s
+own cap: capping the raw total never sees that `a` was already pulled from 9 to 6.
+Only folding the mitigated children attributes each reduction to the layer it
+happened at.
 
-Mitigated fold (leaves-upward, at the edge):
+### 2. Transforms compose by position, never by authoring order
 
-| node | rule | value |
-|------|------|-------|
-| a | `cap6(a_raw) = cap6(9)` | 6 — leaf arm |
-| b | identity | 8 |
-| c | identity | 1 |
-| Q | `cap15(a_mit + b_mit) = cap15(14)` | 14 — portfolio arm |
-| P | `Q_mit + c_mit = 14 + 1` | 13 |
+`mitigated` folds leaves-upward, so a child's transform always acts before its
+parent aggregates. Within one mitigation, `TransformPipeline` steps run in list
+order; across mitigations on one node, `MitigationPrecedence` orders them.
 
-The leaf arm is the base case of one uniform rule — *apply this node's transform
-to the combine of its children's mitigated values*. At `Q` the children are `a`
-and `b` (`cap15(a_mit + b_mit)`); at leaf `a` there are no children, so the
-combine degenerates to `a`'s own raw simulation and the rule is just `cap6(9)`.
-
-The mitigated value cannot decorate the cached aggregate. Applying Q's cap to the
-cached raw `Q_raw = 17` gives `cap15(17) = 15`, but the correct `Q_mit` is `14`.
-The `$1` gap is `a`'s own cap: capping the raw total at 15 never sees that `a` was
-already pulled from `$9` to `$6`. Only folding the *mitigated* children
-(`6 + 8 = 14`, then `cap15`, which does not bind) attributes the reduction to the
-layer it happened at — which is why the mitigated value is a separate fold
-(Decision 1), never the raw aggregate transformed (Decision 4).
-
-### 2. A node's value is its transforms applied to its children's combined value
-
-Each node's value is that node's own mitigations, applied in their set order, to
-the combined value of its children. A node with no mitigations is just the
-combined children — the ordinary case, and the only case before any mitigation
-exists.
-
-### 3. Transforms compose by position, never by authoring order
-
-`mitigated` is folded leaves-upward, so a child's transform always acts before
-its parent aggregates. Within one mitigation, `TransformPipeline` steps run in
-list order; across two mitigations on the same node, `MitigationPrecedence`
-orders them — both because the transforms do not commute. The order mitigations
-were authored in does not enter the computation.
-
-```
+```scala
 // D = A ⊕ B ⊕ C, raw 18 = 9 + 8 + 1. cap A at 6, cap D at 15.
-mitigated(A) = cap6(9) = 6      // child transform first
-mitigated(D) = cap15(6 + 8 + 1) = cap15(15) = 15   // parent transform sees the mitigated total
+mitigated(A) = cap6(9) = 6                          // child transform first
+mitigated(D) = cap15(6 + 8 + 1) = cap15(15) = 15    // parent sees the mitigated total
 // authoring "cap D then cap A" yields the identical result
 ```
 
-### 4. The raw aggregate is never mutated to carry a mitigation
+### 3. The raw aggregate is never mutated, and a transformed node's value is flat
 
-At a binding cap, `mitigated(node) ≠ combine(mitigated(children))` — the cap
-removed something at this level — while `raw(node)` still equals
-`combine(raw(children))`. The cap lives in the mitigated fold as this node's
-transform layer. Where each reduction happened stays visible: a node's mitigated
-value and the combine of its children's mitigated values differ by exactly this
-node's transform layer. A client reads the children's mitigated values by
-requesting those nodes, and the difference is displayed as the transform's
-effect rather than as an inconsistency.
+`RiskResultGroup`'s private constructor enforces one claim: its aggregate is the
+combine of its children. `raw` always honours that claim; `mitigated` cannot,
+wherever a transform binds. So a transformed node's mitigated value is a plain
+transformed-outcomes value and is deliberately **not** a `RiskResultGroup`.
+
+Nothing is lost by this. The value never carried the children-claim, and a type
+asserting it would assert something false. Where each reduction happened stays
+visible: a node's mitigated value and the combine of its children's mitigated
+values differ by exactly that node's transform layer. A client reads a child's
+mitigated value by requesting that node.
+
+### 4. Every mitigated reading is a `ValuationResult`; raw is its identity instance
+
+The mitigated fold wraps every node it visits, recording what the transform layer
+was applied to and which mitigation applications produced it. The empty record
+list is the identity, so a node with nothing in scope is wrapped too.
+
+```scala
+final case class ValuationResult private (
+  override val nodeId: NodeId,
+  source: LossDistribution,                     // the value the layer was applied to
+  applied: List[MitigationApplicationRecord],   // empty = identity = a raw reading
+  override val trialOutcomes: TrialOutcomes
+) extends LossDistribution(nodeId, trialOutcomes)
+```
+
+Wrapping is unconditional because a no-op mitigation is authorable —
+`ScaleLosses(1.0)`, `ApplyDeductible(0)`, `FilterBelowThreshold(0)` — so
+"wrap when something changed" would make the return type depend on a parameter's
+numeric value. `source` keeps the children reachable at a transformed node.
+Applying an empty pipeline must return the **same** `TrialOutcomes` reference,
+not an equal rebuild, or every untransformed node reallocates its outcome map on
+every read.
+
+The decorator is built strictly above the cache boundary: it is constructed from
+values the cache already returned, so no key, entry or hash input changes.
 
 ### 5. Reproducible from raw × active mitigations
 
-Stored state is the raw tree (versioned) and the mitigation definitions (each
-pinned to a node, each with its precedence). Mitigated values are re-derived on
-demand; identical `(raw version, active mitigation set)` yields identical
-mitigated values. There is no stored mitigated tree and no application log —
-history is raw versions combined with active mitigations.
-
-### 6. The mitigated value of a transformed node is flat, by construction
-
-`RiskResultGroup` carries a claim its private constructor enforces: its aggregate
-is the combine of its children. The raw valuation can always honour that claim.
-The mitigated valuation cannot, at any node where a transform binds — that is the
-non-linearity stated in Context, `f(a ⊕ b) ≠ f(a) ⊕ f(b)`.
-
-So the mitigated value of a transformed node is a plain transformed-outcomes
-value with no children attached, and is deliberately **not** a `RiskResultGroup`.
-This is not a loss of structure. The value never carried the children-claim, so
-there is nothing for it to lose, and a type that asserted the claim would be
-asserting something false.
-
-A node with no result-stage transform in scope returns its `RiskResultGroup`
-unchanged, so the mitigated and raw values coincide there and drill-down is
-identical to the un-mitigated path.
+Stored state is the raw tree (versioned) and the mitigation definitions. Mitigated
+values are re-derived on demand; identical `(raw version, active mitigation set)`
+yields identical values. There is no stored mitigated tree and no application log.
 
 ---
 
@@ -142,7 +110,7 @@ identical to the un-mitigated path.
 ### ❌ Mutating the aggregate to carry a mitigation
 
 ```scala
-// BAD: a builder that lets a group's aggregate differ from its children
+// BAD: a builder letting a group's aggregate differ from its children
 RiskResultGroup.withAggregate(nodeId, children, cappedOutcomes)   // aggregate ≠ combine(children)
 
 // GOOD: the raw group is a pure combine; the cap lives in the mitigated fold
@@ -152,7 +120,7 @@ RiskResultGroup.create(nodeId, children*)                         // aggregate =
 ### ❌ Applying a portfolio transform per child
 
 ```scala
-// BAD: transform each child, then combine — wrong figures (transform is non-linear)
+// BAD: transform each child, then combine — wrong figures, the transform is non-linear
 combine(children.map(c => cap(c)))
 
 // GOOD: combine the mitigated children, then apply the node's transform to the total
@@ -169,6 +137,16 @@ mitigations.foldLeft(base)((acc, m) => m.run(acc))
 transformsByPrecedence(node).run( combine(children.map(mitigated)) )
 ```
 
+### ❌ Deciding the return shape from whether a transform changed anything
+
+```scala
+// BAD: a no-op mitigation now changes the type the caller receives
+if (outcomes == transformed) raw else ValuationResult(id, raw, records, transformed)
+
+// GOOD: wrap every visited node; the empty record list is the identity
+ValuationResult(id, raw, records, run(records, raw.trialOutcomes))
+```
+
 ### ❌ Persisting the mitigated tree or an application log
 
 ```scala
@@ -176,28 +154,27 @@ transformsByPrecedence(node).run( combine(children.map(mitigated)) )
 store.put(treeId, mitigatedTree)
 
 // GOOD: store raw tree + mitigation definitions; re-derive mitigated on read
-store.put(treeId, rawTree)   // definitions travel with the tree; mitigated is a function of both
+store.put(treeId, rawTree)
 ```
 
 ---
 
 ## Implementation
 
-| Concern | Location |
-|---------|----------|
-| Raw fold (cached, mitigation-free) | `RiskResultGroup.create` — combine of children |
-| Leaf-stage mitigated tree | `MitigationApplication.effectiveTree` (drives cache keys) |
-| Result-stage transform on a leaf | `MitigationApplication.resultTransformFor`, applied at the result resolver edge |
-| Result-stage fold onto a portfolio aggregate | `CachedResultResolverLive` — portfolio arm of `distributionOf` |
-| Same-node ordering | `TransformPipeline` step order; `MitigationPrecedence` across mitigations |
-| Non-mutation invariant | `RiskResultGroup` private constructor (aggregate = combine(children), no exception) |
+| Concern | Location | State |
+|---------|----------|-------|
+| Raw fold (cached, mitigation-free) | `RiskResultGroup.create` — combine of children | live |
+| Non-mutation invariant | `RiskResultGroup` private constructor, no exception | live |
+| Leaf-stage mitigated tree | `MitigationApplication.effectiveTree` — drives cache keys | live |
+| Result-stage transform on a leaf | `MitigationApplication.resultTransformFor`, at the resolver edge | live |
+| Result-stage fold onto a portfolio aggregate | `CachedResultResolverLive` — portfolio arm of `distributionOf` | live |
+| Same-node ordering | `TransformPipeline` step order; `MitigationPrecedence` across mitigations | live |
+| `ValuationResult` and its `applied` records | `LossDistribution` hierarchy; built at the resolver edge | ruled, not yet built |
 
 ---
 
 ## References
 
 - ADR-009 — associativity: a transform acts on a finished operand, never inside the combine
-- ADR-003 — provenance of a computed value
 - ADR-015 — cache-aside; keys are effective content, misses re-simulate
-- PLAN-MONOID-RISKRESULT-AND-MITIGATION.md §B — the monoid / staged-mitigation analysis (B3 result-stage, B4 aggregation-stage)
-- PLAN-RISKTRANSFORM.md §8.14 — the result-resolver-edge wiring that realizes this model
+- `docs/scratch/MITIGATION-VALUATION-EXPLAINED.md` — the derivation behind Decisions 1, 3 and 4, built from first principles

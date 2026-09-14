@@ -1876,7 +1876,7 @@ anchor is wrong — neither is settled silently.
 | A2 | Stage determines **where** a mitigation may apply: `LeafStage` leaves only, `ResultStage` any node | the stage-domain intersection in `MitigationScopeResolverLive.resolveOne` |
 | A3 | Stage determines **when** it applies and therefore whether it is cached. `LeafStage` is baked in **before** hashing, so a mitigated leaf hashes differently and becomes its own content-addressed entry. `ResultStage` is applied **after** the lookup returns and is never cached | `CachedResultResolverLive` steps 1–3 |
 | A4 | Composition within a node is function composition in precedence order, not addition. Leaf: `foldLeft(applyTo)`. Result: `reduceOption(_.andThen(_))`. Order `(precedence.key, id.value)` | `MitigationApplication` |
-| A5 | A node's mitigated value folds its children's **mitigated** values, never the raw aggregate with a transform laid over it. The worked example is in the reasoning document, Part 4 | ADR-034 §2, §4 |
+| A5 | A node's mitigated value folds its children's **mitigated** values, never the raw aggregate with a transform laid over it. The worked example is in the reasoning document, Part 4 | ADR-034 §1, §3 |
 | A6 | Portfolios are never cached; the aggregate is recomputed on every read | `CachedResultResolverLive` step 4 |
 | A7 | **A selection is a set** — any subset of the tree's mitigations, each with its own scope restriction — and one selection yields exactly **one** mitigated valuation per node. Several mitigations scoping a node compose into one curve, not one curve each. A single-mitigation selection is the one-element case, not a distinct concept. The comparison axis is between selections | `MitigationSelection.Selected`; follows from A4 |
 | A8 | Scope is resolved server-side, per tree version, from a predicate. A predicate that stops binding makes that one mitigation a no-op plus a drift signal; it never fails the request | `MitigationScopeResolverLive`; `ScopeOutcome` |
@@ -3507,7 +3507,7 @@ for a client's view to diverge from.
 | ADR-019 (frontend ownership rules) | Slice 1's browser change touches one state class and adds one pure function beside it; no component gains state | Compliant |
 | ADR-024 (application as a pure enforcement point) | Both analysis handlers keep their `AnalyzeRun` check and the structure handler keeps `ViewTree`; the method change on one endpoint moves no check | Compliant |
 | ADR-032 (two equality relations) | The mitigation diff compares encoded content, not values, for the same array-equality reason the node diff already does | Compliant |
-| ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. ADR-034 gained Decision 6 on 2026-09-14, stating that the mitigated value of a transformed node is flat by construction; §8.16 rules the type that carries it | Compliant; ADR-034 amended |
+| ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. ADR-034 was restructured on 2026-09-14: its Decision 3 states that a transformed node's mitigated value is flat by construction, and its Decision 4 carries the `ValuationResult` ruling that §8.16 records | Compliant; ADR-034 amended |
 | ADR-035 (error leakage prevention) | The internal-error resolution failure reaches the wire as a fixed message with no detail | Compliant |
 | ADR-036 (confidential internal identifiers) | Node ids move in a request body, never in a request line an access log records — this is one of Decision 3's two independent arguments | Compliant |
 
@@ -3810,6 +3810,11 @@ M1/M2 files (M3/M4 files are appended here when §7.5/§7.6 are approved):
 - `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryInMemory.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala`
+
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCache.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/ContentHashIndex.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/LeafSimResult.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/EvictionStrategy.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationStaleness.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationStalenessSpec.scala`
 - `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala`
@@ -6447,7 +6452,7 @@ F keeps portfolios in scope, so slice-2's `MitigationScopeResolverLive.resolveOn
 fold: `mitigated(P) = f_P(⊕ mitigated(children))` (ADR-034 Decisions 1–3). It
 folds into ancestors — a parent aggregates its children's *mitigated* values.
 The raw commutative fold `raw(P) = ⊕ raw(children)` is untouched and stays the
-cached, content-addressed value (ADR-034 Decision 4); `RiskResultGroup` keeps its
+cached, content-addressed value (ADR-034 Decision 3); `RiskResultGroup` keeps its
 private constructor with **no** sanctioned exception. Withdrawn: Option A
 (mutating the canonical aggregate — it would have needed that exception), Option E
 (terminal projection that does not fold), and the old A/B/C framing built on the
@@ -6499,7 +6504,7 @@ not a separate decision.
 - **D3**: result-stage transforms applied post-cache at the edge, never stored.
   Compliant.
 - **Correct-by-construction / §9 aggregate-privacy**: F needs no exception —
-  `RiskResultGroup` stays private (ADR-034 Decision 4). No `common` domain-type
+  `RiskResultGroup` stays private (ADR-034 Decision 3). No `common` domain-type
   API change.
 
 #### Open decisions
@@ -6526,7 +6531,7 @@ an open design choice.
     equals `⊕ raw(children)` (cache invariant preserved), while the **mitigated**
     aggregate equals `f_P(⊕ mitigated(children))` and differs from the raw one at
     a binding cap.
-  - compositional fold (ADR-034 Decision 3): a `ResultStage` on a child *and* on
+  - compositional fold (ADR-034 Decision 2): a `ResultStage` on a child *and* on
     its ancestor compose by tree position — the ancestor's transform sees the
     child's already-mitigated total — and the result is independent of the order
     the two mitigations were authored.
