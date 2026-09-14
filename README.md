@@ -92,7 +92,7 @@ The server defaults to in-memory storage with no extra configuration. Copy the b
 cp .env.inmemory.example .env.inmemory
 ```
 
-Review `.env.inmemory` — the defaults are usable as-is for a local trial. See `docs/user/DOCKER-DEVELOPMENT.md` and `docs/dev/ADR-016-config-management.md` for the full variable reference, including the Irmin-backed persistence option.
+Review `.env.inmemory` — the defaults are usable as-is for a local trial. See `docs/user/DOCKER-DEVELOPMENT.md` and `docs/dev/decision-records/ADR-016-config-management.md` for the full variable reference, including the Irmin-backed persistence option.
 
 ### 3. Build the GraalVM builder base
 

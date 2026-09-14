@@ -106,6 +106,7 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
   RiskTreeRepositoryInMemory.layer,
   CachedResultResolverLive.layer,
   CacheScope.layer,
+  ScopeResolverScope.layer,
   RiskTreeServiceLive.layer,
   ZLayer.fromZIO(RiskTreeController.makeZIO)
 )
@@ -237,37 +238,61 @@ RiskNode (sealed trait)
 
 ```scala
 // Configuration (persisted, no simulation results)
-final case class RiskTree(
+final case class RiskTree private (
   id: TreeId,                          // ULID-based nominal wrapper
   name: SafeName.SafeName,
   nodes: Seq[RiskNode],                // Flat collection (not nested root)
   rootId: NodeId,                      // Root node reference
-  index: TreeIndex                     // O(1) node lookup by NodeId
+  index: TreeIndex,                    // O(1) node lookup by NodeId
+  seedVarHighWater: SeedVarId.SeedVarId, // Highest seed variable assigned so far
+  mitigations: Seq[Mitigation]         // Tree-level risk reductions
 )
 
 // Node identity uses nominal wrapper (ADR-018)
 case class NodeId(toSafeId: SafeId.SafeId)
 case class TreeId(toSafeId: SafeId.SafeId)
 
-// Simulation results are per-node, cached in-memory
-final case class RiskResult(
-  nodeId: NodeId,
-  outcomes: Map[TrialId, Loss],
-  provenances: List[NodeProvenance]
+// A risk reduction, recorded on the tree rather than on the nodes it affects
+final case class Mitigation private (
+  id: MitigationId,
+  name: SafeName.SafeName,
+  target: MitigationTarget,            // Predicate resolved server-side to a node set
+  spec: MitigationSpec,                // LeafStage (rewrites parameters) or ResultStage (rewrites outcomes)
+  precedence: MitigationPrecedence     // Global application order
 )
 
-// Metalog Distribution (compact representation)
-final case class LossDistribution(
-  coefficients: Array[Double],         // ~10 values instead of 10K samples
-  lowerBound: Option[Double],
-  upperBound: Option[Double]
-)
+// Simulation results are per-node and cached in memory. The supertype carries
+// the node identity and the trial outcomes; the two subtypes differ in whether
+// the value is simulated or aggregated.
+sealed abstract class LossDistribution(
+  val nodeId: NodeId,
+  val trialOutcomes: TrialOutcomes
+) extends LECCurve
+
+// A simulated leaf value
+case class RiskResult private (
+  override val nodeId: NodeId,
+  override val trialOutcomes: TrialOutcomes,
+  provenances: List[NodeProvenance] = Nil
+) extends LossDistribution(nodeId, trialOutcomes)
+
+// A portfolio aggregate. Only `create` can build one, and it forces
+// trialOutcomes to be the combine of the children, so the aggregate can never
+// disagree with what it aggregates.
+final case class RiskResultGroup private (
+  children: List[LossDistribution],
+  override val nodeId: NodeId,
+  override val trialOutcomes: TrialOutcomes
+) extends LossDistribution(nodeId, trialOutcomes)
 ```
 
 **Key Design Decision: No Raw Trial Data Stored**
-- ✅ Store: Metalog coefficients (~100 bytes)
-- ❌ Don't store: Raw trial arrays (~80KB for 10K trials)
-- **Benefit:** Compact storage, reproducible results, fast deserialization
+- ✅ Store: the leaf's distribution parameters (percentiles, quantiles or the
+  90% confidence interval bounds) plus its seed variable — a few dozen bytes
+- ❌ Don't store: raw trial arrays (~80KB for 10K trials)
+- **Benefit:** Compact storage, reproducible results, fast deserialization. The
+  trial outcomes are re-derived from the stored parameters and the recorded
+  seeds, so a re-simulation reproduces the same figures exactly.
 
 ### **Sparse Storage: Current Implementation Benefits**
 
@@ -305,12 +330,16 @@ See [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogr
 │  - CachedResultResolver: Simulation orchestration │
 │  - CacheScope/ContentCache: content-addressed   │
 │    result caching (per workspace)               │
+│  - ScopeResolverScope/MitigationScopeResolver:  │
+│    resolves each mitigation's targeting         │
+│    predicate to a node set (per workspace)      │
 └─────────────────────────────────────────────────┘
                      ↓
 ┌─────────────────────────────────────────────────┐
 │ Domain Layer (modules/common)                   │
 │  - RiskNode: ADT for risk trees                 │
 │  - RiskTree: Aggregate root                     │
+│  - Mitigation: Tree-level risk reduction        │
 │  - Smart Constructors: Validation logic         │
 │  - Iron Types: Refinement types                 │
 └─────────────────────────────────────────────────┘
@@ -358,11 +387,16 @@ SimulationResponse (without LEC)
 
 ### **2. Compute LEC (On-Demand)**
 ```
-GET /risk-trees/:treeId/nodes/:nodeId/lec
+GET /w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance
 
 Load RiskTree from Repository
   ↓
-CachedResultResolver.ensureCached(tree, nodeId)
+CachedResultResolver.ensureCached(tree, nodeId, seedEntityId,
+                                  includeProvenance, selection, resolvedScopes)
+  │
+  │  selection says which mitigation valuation to return; it defaults to
+  │  Inherent, the raw figure with no mitigation applied. resolvedScopes
+  │  carries the node set each mitigation was resolved to.
   │
   ├─→ Cache hit: Return cached RiskResult
   │
@@ -488,7 +522,7 @@ ZIO.foreachPar(successfulTrials) { trial =>
 
 ## Testing Strategy
 
-### **Current Test Coverage: 512 Tests**
+### **Current Test Coverage**
 - **Common Module:** 289 tests (domain model, validation, Iron types, tree operations)
 - **Server Module:** 223 tests (service, simulation, HTTP, cache, SSE, provenance)
 - **Focus:** Simulation determinism, parallel execution, tree aggregation, content-addressed cache transparency
@@ -497,13 +531,13 @@ ZIO.foreachPar(successfulTrials) { trial =>
 
 ```
            /\
-          /  \  E2E Tests (Future: K8s + Testcontainers)
+          /  \  End-to-end smoke suites (BATS against built images)
          /────\
-        /      \  Integration Tests (Future: Redis, Postgres)
+        /      \  Integration tests (serverIt: Irmin and Postgres in Docker)
        /────────\
-      /          \  Unit Tests (Current: 512 tests)
+      /          \  Unit tests (commonJVM, server, app)
      /────────────\
-    /              \  Property Tests (Current: Algebraic laws)
+    /              \  Property tests (algebraic laws)
    /────────────────\
 ```
 
@@ -623,7 +657,7 @@ Frontend Features:
 Workflow:
 1. Baseline: Original risk tree
 2. Scenario 1: Increase probability of cyber attack
-3. Scenario 2: Add mitigation (reduces maxLoss)
+3. Scenario 2: Add a mitigation and read the residual valuation
 4. Compare: Baseline vs Scenario 1 vs Scenario 2
 ```
 
@@ -881,7 +915,7 @@ HDR Histogram would require fundamental architecture changes (approximate merge,
 ### **Key Architectural Decisions**
 
 The architecture decision records themselves are the single source of truth:
-every `docs/dev/ADR-*.md` file present is in force (see the ADR meta-template,
+every `docs/dev/decision-records/ADR-*.md` file present is in force (see the ADR meta-template,
 `ADR-00X.md`, for structure and the deletion-is-archival rule). No summary copy
 is maintained here — a duplicated index drifts from the files it summarizes.
 

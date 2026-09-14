@@ -180,10 +180,9 @@ ADR-001 rejects "custom wrapper types" as an **alternative to Iron** — i.e., h
 
 | Location | Pattern |
 |----------|---------|
-| `OpaqueTypes.scala` | `case class TreeId`, `case class NodeId` definitions |
+| `OpaqueTypes.scala` | `case class TreeId`, `case class NodeId` definitions, and their JSON encoders and decoders |
 | `IronTapirCodecs.scala` | Separate Tapir `Codec` and `Schema` per wrapper |
-| `TreeIdCodecs.scala` | JSON encoder/decoder for `TreeId` |
-| `RiskTree.scala` | JSON codecs for `TreeId`, `NodeId` |
+| `RiskTree.scala` | Tree and node structures carrying `TreeId`, `NodeId` |
 | `IdGenerators.scala` | `nextTreeId`, `nextNodeId` wrap `nextId` result |
 | `TreeIndex.scala` | Maps keyed by `NodeId` |
 | `RiskTreeService.scala` | Signatures use `TreeId`, `NodeId` |

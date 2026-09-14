@@ -41,7 +41,7 @@ publishers need user approval documented at the pin site; signature verification
 wherever the ecosystem supports it (prefer Sigstore/cosign); npm installs are
 ask-first, always. PATCH and MINOR bumps of our own version are autonomous;
 MAJOR is user-owned. Map of what a change triggers:
-`docs/dev/VERSION-UPGRADE-PROTOCOL.md`; policy: `docs/dev/ADR-020-supply-chain-security.md`.
+`docs/dev/VERSION-UPGRADE-PROTOCOL.md`; policy: `docs/dev/decision-records/ADR-020-supply-chain-security.md`.
 
 ---
 

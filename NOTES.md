@@ -37,7 +37,7 @@ capped at 5s, bounded by a total elapsed-time budget (`IrminConfig.healthCheckBu
 default 45s), fail-closed after the budget. `IrminClient.healthCheck` now returns a
 typed error (not `Boolean`), so the final failure carries the real cause instead of a
 generic "returned false". Governed by new
-[ADR-031](docs/dev/ADR-031-startup-readiness-vs-request-path-resilience.md), which
+[ADR-031](docs/dev/decision-records/ADR-031-startup-readiness-vs-request-path-resilience.md), which
 draws the boundary between this (app-owned startup lifecycle gating) and request-path
 resilience (mesh-owned, ADR-012 §4). Verified: bounded fail-closed exit when irmin is
 absent for the whole budget, and clean recovery (server boots) when irmin becomes
@@ -46,7 +46,7 @@ reachable mid-window.
 **Related**: `modules/server/.../infra/StartupReadiness.scala`,
 `modules/server/.../Application.scala` (`irminHealthCheck`),
 `modules/server/.../configs/IrminConfig.scala`,
-`docs/dev/ADR-031-startup-readiness-vs-request-path-resilience.md`.
+`docs/dev/decision-records/ADR-031-startup-readiness-vs-request-path-resilience.md`.
 
 ---
 

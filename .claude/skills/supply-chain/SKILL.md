@@ -5,7 +5,7 @@ description: "Supply-chain and versioning rules for the register project. Load b
 
 # Supply Chain & Versioning — Register
 
-Policy source: `docs/dev/ADR-020-supply-chain-security.md` (§1–§12).
+Policy source: `docs/dev/decision-records/ADR-020-supply-chain-security.md` (§1–§12).
 Per-ecosystem map (what is pinned where, what to rebuild):
 `docs/dev/VERSION-UPGRADE-PROTOCOL.md`. Commands: register-dev skill.
 

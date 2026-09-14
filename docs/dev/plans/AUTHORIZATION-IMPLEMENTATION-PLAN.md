@@ -33,7 +33,7 @@ not duplicate the strategic content; read AUTHORIZATION-PLAN.md first.
 
 ## Pre-Wave: ADR-024 Clarification
 
-**File:** `docs/dev/ADR-024-externalized-authorization-pep-pattern.md`
+**File:** `docs/dev/decision-records/ADR-024-externalized-authorization-pep-pattern.md`
 
 Add a new section to ADR-024 clarifying the boundary between policy administration (PAP) and
 resource lifecycle management. The distinction that was missing:
@@ -796,7 +796,7 @@ All items below must be satisfied before the authorization rollout is considered
 - [x] `BootstrapProvisioner` trait separate from `AuthorizationService`; `AuthorizationService` has no write methods — **DONE** (`auth/BootstrapProvisioner.scala`, Wave 0D, verified 2026-07-01). Extended 2026-07-04 with `bootstrapToken()` and `systemMaintenanceToken()` lifecycle proof methods.
 - [x] `BootstrapProvisioner.recordOwnership()` wired in bootstrap handler only — **DONE** (`WorkspaceLifecycleController.bootstrapWorkspace`, Wave 6, verified 2026-07-05)
 - [x] ADR-024 updated with lifecycle write clarification and service account scope note — **DONE** (ADR-024 §7, Pre-Wave, verified 2026-07-01)
-- [x] ADR-030 created: Authorization Enforcement at the Orchestration Boundary — **DONE** (`docs/dev/ADR-030-authorization-enforcement-orchestration-boundary.md`, 2026-07-04)
+- [x] ADR-030 created: Authorization Enforcement at the Orchestration Boundary — **DONE** (`docs/dev/decision-records/ADR-030-authorization-enforcement-orchestration-boundary.md`, 2026-07-04)
 
 **Infrastructure (K8s/CI):**
 - [ ] Header spoofing smoke test passes against deployed K.5 cluster

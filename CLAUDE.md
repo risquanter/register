@@ -85,4 +85,4 @@ Report test results as **pass or fail only** — never report or act on test cou
 - Semantically distinct IDs sharing an encoding get nominal `case class` wrappers (ADR-018). Credential types are `final class`, never `case class` (ADR-022; `WorkspaceKeySecret` is the reference).
 - Inexhaustive sealed-trait matches are compile **errors** (see `scalacOptions` in `build.sbt`) — new `AppError` subtypes must be handled everywhere they're matched.
 
-Full constraint set: adr-constraints skill; the ADRs themselves live in `docs/dev/` alongside `ARCHITECTURE.md`.
+Full constraint set: adr-constraints skill; the ADRs themselves live in `docs/dev/decision-records/`.

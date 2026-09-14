@@ -129,9 +129,9 @@ GET /w  → List[WorkspaceKeySecret]
 |----------|---------|
 | `WorkspaceKeySecret` | `common/.../domain/data/iron/OpaqueTypes.scala` — `final class` with Iron-validated `WorkspaceKeyStr` internal, `SecureRandom` factory, redacted `toString` (ADR-022) |
 | `WorkspaceStore` | `server/.../services/workspace/WorkspaceStore.scala` — trait + `Ref[Map]` + TTL + reaper fiber |
-| `WorkspaceEndpoints` | `common/.../http/endpoints/WorkspaceEndpoints.scala` — Tapir endpoint definitions under `/w/{key}` |
-| `WorkspaceController` | `server/.../http/controllers/WorkspaceController.scala` — wires endpoints to `WorkspaceStore` + `RiskTreeService` |
-| `WorkspaceConfig` | `server/.../config/WorkspaceConfig.scala` — TTL, rate limit, reaper interval |
+| Workspace endpoints | `common/.../http/endpoints/WorkspaceLifecycleEndpoints.scala`, `WorkspaceTreeEndpoints.scala`, `WorkspaceAnalysisEndpoints.scala`, `WorkspaceQueryEndpoints.scala` — Tapir endpoint definitions under `/w/{key}`, split by concern |
+| Workspace controllers | `server/.../http/controllers/WorkspaceLifecycleController.scala`, `WorkspaceTreeController.scala`, `WorkspaceAnalysisController.scala` — wire those endpoints to `WorkspaceStore` + `RiskTreeService` |
+| `WorkspaceConfig` | `server/.../configs/WorkspaceConfig.scala` — TTL, rate limit, reaper interval |
 | Istio policy | `AuthorizationPolicy` — skip JWT validation for `/w/*` paths |
 
 ---

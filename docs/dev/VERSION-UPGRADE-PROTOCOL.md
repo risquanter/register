@@ -5,7 +5,7 @@ change triggers downstream, and which document holds the actual commands.
 This file does **not** repeat build instructions — those live in the
 register-dev skill, `docs/user/IMAGE-BUILD-REFERENCE.md`, and
 `docs/user/DOCKER-DEVELOPMENT.md`. Policy (pinning, cooldown, trust,
-signatures) lives in `docs/dev/ADR-020-supply-chain-security.md`.
+signatures) lives in `docs/dev/decision-records/ADR-020-supply-chain-security.md`.
 
 ---
 

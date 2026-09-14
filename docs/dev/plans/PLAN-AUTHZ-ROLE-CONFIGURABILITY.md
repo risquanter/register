@@ -56,7 +56,7 @@ Policy Enforcement Point (`ADR-024`), not a gap. Not in scope.
 as a union over them (`permission design_write = editor + owner_user + owner_team->design_write`,
 schema.zed:50). SpiceDB treats this file as a document applied at deploy time
 (`zed schema write`, run by a separate CI job in `register-infra`), not compiled into
-anything. `ADR-030` §6 (`docs/dev/ADR-030-authorization-enforcement-orchestration-boundary.md:191-197`)
+anything. `ADR-030` §6 (`docs/dev/decision-records/ADR-030-authorization-enforcement-orchestration-boundary.md:191-197`)
 already documents an **enterprise override**:
 
 ```hocon

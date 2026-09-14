@@ -218,7 +218,7 @@ default to every npm project on this machine, not only `register`.
 
 Full incident writeup, the `npm ci` vs `npm install` distinction for
 `Dockerfile.frontend-prod`, and Sigstore/`npm audit signatures` status:
-`docs/dev/ADR-020-supply-chain-security.md` §7–§9. Prerequisites and the
+`docs/dev/decision-records/ADR-020-supply-chain-security.md` §7–§9. Prerequisites and the
 same command sequence for new contributors:
 `docs/user/DEVELOPMENT-SETUP.md`.
 
