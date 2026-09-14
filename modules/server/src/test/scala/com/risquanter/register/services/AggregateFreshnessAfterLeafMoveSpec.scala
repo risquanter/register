@@ -12,28 +12,29 @@ import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.testutil.TestHelpers.safeId
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 
-/** Phase A acceptance probe for TODO item 17 (tactical fix skipped by
-  * decision, 2026-07-18 — the content-addressed cache retires the bug class).
+/** Pins an aggregate against its leaves' current parameters when one update
+  * both moves a leaf and changes it.
   *
-  * The bug: `computeAffectedNodes` treated "reparented" and "data changed"
-  * as exclusive branches, so a leaf that was BOTH reparented and
-  * param-changed in one PUT was never self-invalidated — its stale result
-  * was folded into every ancestor re-simulation. Live repro measured root
-  * exceedance ≈ 0.58 (stale) where ≈ 0.78 (fresh) is correct.
+  * A move and a parameter change are independent facts about the same node, so
+  * a single request carrying both is where a stale leaf result is most likely
+  * to reach an aggregate: code that treats them as alternatives keeps one and
+  * loses the other. Under content addressing the edited leaf hashes to a new
+  * key and misses the cache, so the root must equal the analytic value for the
+  * new parameters.
   *
-  * Under content addressing the leaf's new params hash to a new key and
-  * simply miss, so the aggregate must match the analytic value for the NEW
-  * params: P(any loss) = 1 − ∏(1 − pᵢ). This spec drives the full service
-  * path (create → LEC → combined reparent+param update → LEC) and pins the
-  * root figure against that analytic value — if any stale entry were served,
-  * the figure would sit near the stale product instead.
+  * Every leaf has a minimum loss of at least 1000, so any occurrence produces a
+  * loss of at least 1 and the root's exceedance probability at 1 is
+  * P = 1 − ∏(1 − pᵢ). The spec drives the whole service path — create, read the
+  * curve, one update carrying both changes, read again — and checks the
+  * measured root figure both against that value and against the figure a stale
+  * leaf would produce.
   */
-object Item17RegressionSpec extends ZIOSpecDefault {
+object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
   private given Checked[Permission] = TestChecked.value
 
   private type Env = RiskTreeService & CachedResultResolver
 
-  private val wsId: WorkspaceId = WorkspaceId(safeId("item17-ws"))
+  private val wsId: WorkspaceId = WorkspaceId(safeId("aggregate-freshness-ws"))
   private val entity1: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
   private def service[A](f: RiskTreeService => Task[A]): ZIO[Env, Throwable, A] =
@@ -62,7 +63,7 @@ object Item17RegressionSpec extends ZIOSpecDefault {
     *   └─ Fraud      (p = 0.25)
     */
   private val createReq = RiskTreeDefinitionRequest(
-    name = "Item17 Tree",
+    name = "Freshness Tree",
     portfolios = Seq(
       RiskPortfolioDefinitionRequest("Root", None),
       RiskPortfolioDefinitionRequest("Sub", Some("Root"))
@@ -91,9 +92,9 @@ object Item17RegressionSpec extends ZIOSpecDefault {
     )
 
   override def spec: Spec[TestEnvironment & Scope, Any] =
-    suite("Item17Regression (Phase A acceptance probe)")(
+    suite("aggregate freshness after a leaf is moved and edited in one update")(
 
-      test("combined reparent + param change in ONE update yields the analytic root exceedance for the NEW params") {
+      test("a leaf moved and re-parameterised in one update yields the analytic root exceedance for its new parameters") {
         // All leaves have minLoss ≥ 1000, so any occurrence produces loss ≥ 1:
         // P(root loss ≥ 1) = 1 − ∏(1 − pᵢ)
         val staleAnalytic   = 1.0 - math.pow(1.0 - 0.25, 3)                  // 0.578… (bug signature)
@@ -109,7 +110,7 @@ object Item17RegressionSpec extends ZIOSpecDefault {
 
           // ONE update: Cyber moves Sub → Root AND its probability 0.25 → 0.6
           updated <- service(_.update(wsId, created.id, RiskTreeUpdateRequest(
-            name = "Item17 Tree",
+            name = "Freshness Tree",
             portfolios = Seq(
               portfolioUpd(created, "Root", None),
               portfolioUpd(created, "Sub", Some("Root"))
