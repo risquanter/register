@@ -137,7 +137,7 @@ ok "Expires at    : $EXPIRES"
 # ── Step 2: Fetch tree summary ─────────────────────────────────────────────────
 header "Step 2 — Fetch tree summary"
 
-curl -s "$BASE/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
+curl -s -H "X-Branch: main" "$BASE/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
 
 # ── Step 3: Vague quantifier queries ──────────────────────────────────────────
 # Q1–Q5 cover the full query surface over all leaves / all portfolios.
@@ -153,12 +153,20 @@ run_query() {
   local result
   result=$(curl -s -X POST "$BASE/w/$WS_KEY/risk-trees/$TREE_ID/query" \
     -H 'Content-Type: application/json' \
+    -H 'X-Branch: main' \
     -d "{\"query\": $(echo "$q" | jq -Rs .)}")
   local satisfied proportion range_size satisfying_count
   satisfied=$(echo "$result" | jq -r '.satisfied')
   proportion=$(echo "$result" | jq -r '.proportion')
   range_size=$(echo "$result" | jq -r '.rangeSize')
   satisfying_count=$(echo "$result" | jq -r '.satisfyingCount')
+  # A rejected query carries no verdict. Report it as an error rather than
+  # printing it as an unsatisfied result, which would read as a real answer.
+  if [[ "$satisfied" != "true" && "$satisfied" != "false" ]]; then
+    fail "Query rejected by the server:"
+    echo "$result" | jq . 2>/dev/null || echo "  $result"
+    exit 1
+  fi
   if [[ "$satisfied" == "true" ]]; then
     echo -e "  ${GRN}✔ SATISFIED${RST}  proportion=$proportion  ($satisfying_count / $range_size nodes)"
   else

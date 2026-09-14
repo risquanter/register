@@ -231,3 +231,59 @@ setup() {
         "${REGISTER_URL}/w/${WORKSPACE_KEY}/risk-trees/${TREE_ID}")
     [[ "$status" == "200" ]]
 }
+
+# ============================================================================
+# Published example scripts
+# ============================================================================
+# The scripts in examples/ are what the user documentation tells a reader to
+# run first, so a change that breaks them breaks the documented entry point.
+# Each test runs one script end to end and asserts that it exits cleanly and
+# that every query it issues came back evaluated — a query rejected by the
+# server prints no verdict line.
+
+run_example_script() {
+    local script="$1" expected_queries="$2"
+    local path="${BATS_TEST_DIRNAME}/../../examples/${script}"
+    [[ -f "$path" ]] || { echo "missing script: $path" >&2; return 1; }
+
+    local output
+    output=$(bash "$path" "${REGISTER_URL}" 2>&1) || {
+        echo "$output" >&2
+        return 1
+    }
+
+    # Every query must come back with a real proportion. A rejected query
+    # yields a null one, which is the signature of a query the server would
+    # not evaluate.
+    local verdicts
+    verdicts=$(echo "$output" | grep -c 'proportion=[0-9]' || true)
+    if [[ "$verdicts" -ne "$expected_queries" ]]; then
+        echo "expected ${expected_queries} evaluated queries, got ${verdicts}" >&2
+        echo "$output" >&2
+        return 1
+    fi
+
+    # A jq parse error means a response was not the JSON the script expected.
+    if echo "$output" | grep -q 'parse error\|Invalid value for\|proportion=null'; then
+        echo "$output" >&2
+        return 1
+    fi
+}
+
+@test "C17: examples/demo-simple-curl.sh runs and every query is evaluated" {
+    run_example_script demo-simple-curl.sh 8
+}
+
+@test "C18: examples/demo-enterprise-curl.sh runs and every query is evaluated" {
+    run_example_script demo-enterprise-curl.sh 20
+}
+
+@test "C19: examples/demo-simple-httpie.sh runs and every query is evaluated" {
+    command -v http >/dev/null || skip "httpie not installed in this runner"
+    run_example_script demo-simple-httpie.sh 8
+}
+
+@test "C20: examples/demo-enterprise-httpie.sh runs and every query is evaluated" {
+    command -v http >/dev/null || skip "httpie not installed in this runner"
+    run_example_script demo-enterprise-httpie.sh 20
+}

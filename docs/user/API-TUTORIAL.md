@@ -199,15 +199,15 @@ export TREE_ID=01J...
 
 **httpie:**
 ```bash
-http GET "localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID"
+http GET "localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID" "X-Branch: main"
 ```
 
 **curl:**
 ```bash
-curl -s "http://localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
+curl -s -H "X-Branch: main" "http://localhost:18080/w/$WS_KEY/risk-trees/$TREE_ID" | jq .
 ```
 
-Returns the simulation summary for every node in the tree, including P95/P99 quantile statistics and LEC curve points.
+Returns a summary for the tree as a whole: its id, its name, a map of key quantiles, and an optional exceedance-curve rendering. It does not return per-node figures — for those, read a node's exceedance probability or request several nodes' curves. The quantile map is empty until a simulation has been run for the tree.
 
 ## 3. Run a Vague Quantifier Query
 
@@ -221,7 +221,7 @@ Queries are submitted via HTTP POST to the tree's query endpoint. The response r
   "rangeSize": 3,
   "satisfyingCount": 2,
   "sampleSize": 3,
-  "queryEcho": "Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x, "inherent"), 5000000))"
+  "queryEcho": "Q[>=]^{1/3} x (leaf(x), gt_loss(p99(x, \"inherent\"), 5000000))"
 }
 ```
 
