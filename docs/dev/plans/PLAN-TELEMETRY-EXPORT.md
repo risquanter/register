@@ -183,16 +183,14 @@ and should build one SDK rather than two.
 
 ## File inventory
 
-| Path | Change |
-|---|---|
-| `modules/common/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala` | the `TelemetryExporter` enum, the new field, the `DeriveConfig` given |
-| `modules/server/src/main/scala/com/risquanter/register/telemetry/TelemetryLive.scala` | the `configured` selector layer |
-| `modules/server/src/main/scala/com/risquanter/register/Application.scala` | the layer swap and the comment that stops being true |
-| `modules/server/src/main/resources/application.conf` | the `exporter` setting and its environment override |
-| `modules/common/src/test/scala/com/risquanter/register/configs/TelemetryConfigSpec.scala` | new — the exporter field parses from configuration and rejects an unknown value |
-| `docker-compose.yml` | uncomment `OTEL_EXPORTER_OTLP_ENDPOINT` and remove the "Unused with console exporters" note |
-| `docs/user/DOCKER-DEVELOPMENT.md` | how to read metrics: run the observability profile, curl port 8889 |
-| `docs/dev/ARCHITECTURE.md` | the observability section currently states telemetry is "fully integrated via TelemetryLive (console + OTLP exporters)", which reads as though export works; it is corrected to say which exporter is default and how to change it |
+- `modules/common/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala` — the `TelemetryExporter` enum, the new field, the `DeriveConfig` given
+- `modules/server/src/main/scala/com/risquanter/register/telemetry/TelemetryLive.scala` — the `configured` selector layer
+- `modules/server/src/main/scala/com/risquanter/register/Application.scala` — the layer swap and the comment that stops being true
+- `modules/server/src/main/resources/application.conf` — the `exporter` setting and its environment override
+- `modules/common/src/test/scala/com/risquanter/register/configs/TelemetryConfigSpec.scala` — new — the exporter field parses from configuration and rejects an unknown value
+- `docker-compose.yml` — uncomment `OTEL_EXPORTER_OTLP_ENDPOINT` and remove the "Unused with console exporters" note
+- `docs/user/DOCKER-DEVELOPMENT.md` — how to read metrics: run the observability profile, curl port 8889
+- `docs/dev/ARCHITECTURE.md` — the observability section currently states telemetry is "fully integrated via TelemetryLive (console + OTLP exporters)", which reads as though export works; it is corrected to say which exporter is default and how to change it
 
 Any test that provides `TelemetryConfig` by constructing it directly gains the
 new field. Adding a field to a case class is a compile error at every

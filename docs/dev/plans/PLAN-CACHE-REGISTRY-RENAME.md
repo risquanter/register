@@ -240,44 +240,36 @@ Every path is repo-relative and complete, as the approval hook requires.
 
 ### Source — renamed files
 
-| Path | Change |
-|---|---|
-| `modules/server/src/main/scala/com/risquanter/register/services/cache/CacheScope.scala` | renamed to `ContentCacheRegistry.scala`; 7 occurrences |
-| `modules/server/src/main/scala/com/risquanter/register/services/cache/ScopeResolverScope.scala` | renamed to `MitigationScopeResolverRegistry.scala`; 8 occurrences |
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CacheScope.scala` — renamed to `ContentCacheRegistry.scala`; 7 occurrences
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/ScopeResolverScope.scala` — renamed to `MitigationScopeResolverRegistry.scala`; 8 occurrences
 
 ### Source — call sites
 
-| Path | Occurrences |
-|---|---|
-| `modules/server/src/main/scala/com/risquanter/register/Application.scala` | 3 + 2 |
-| `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala` | 5 |
-| `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala` | 5 |
-| `modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCache.scala` | 1 |
-| `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala` | 1 + 1 |
-| `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala` | 1, plus the scaladoc replacement above |
+- `modules/server/src/main/scala/com/risquanter/register/Application.scala` — 3 + 2
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala` — 5
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala` — 5
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCache.scala` — 1
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala` — 1 + 1
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala` — 1, plus the scaladoc replacement above
 
 ### Unit tests — `server`
 
-| Path | Occurrences |
-|---|---|
-| `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationScopeResolverSpec.scala` | 1, plus 3 `resolverFor` call sites |
-| `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala` | 12, plus 8 `cacheFor` call sites |
-| `modules/server/src/test/scala/com/risquanter/register/services/cache/CacheTransparencySpec.scala` | 7, including an `override def cacheFor` in a stub |
-| `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala` | 4 |
-| `modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala` | 1 |
-| `modules/server/src/test/scala/com/risquanter/register/http/controllers/RouteSecurityRegressionSpec.scala` | 2 |
-| `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala` | 2 |
-| `modules/server/src/test/scala/com/risquanter/register/services/Item17RegressionSpec.scala` | 1 |
-| `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala` | 1 |
-| `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala` | 1 |
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/MitigationScopeResolverSpec.scala` — 1, plus 3 `resolverFor` call sites
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala` — 12, plus 8 `cacheFor` call sites
+- `modules/server/src/test/scala/com/risquanter/register/services/cache/CacheTransparencySpec.scala` — 7, including an `override def cacheFor` in a stub
+- `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala` — 4
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RiskTreeControllerSpec.scala` — 1
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/RouteSecurityRegressionSpec.scala` — 2
+- `modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala` — 2
+- `modules/server/src/test/scala/com/risquanter/register/services/AggregateFreshnessAfterLeafMoveSpec.scala` — 1
+- `modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala` — 1
+- `modules/server/src/test/scala/com/risquanter/register/services/SeedStabilitySpec.scala` — 1
 
 ### Integration tests — `serverIt`
 
-| Path | Occurrences |
-|---|---|
-| `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala` | 2 + 2 |
-| `modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala` | 2 + 2 |
-| `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala` | 2 |
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala` — 2 + 2
+- `modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala` — 2 + 2
+- `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala` — 2
 
 ---
 
@@ -307,13 +299,18 @@ reader meeting one should be pointed at the other.
 
 ### Plan and architecture documents
 
-| Path | Occurrences | Treatment |
-|---|---|---|
-| `docs/dev/plans/PLAN-RISKTRANSFORM.md` | 29 | every occurrence renamed, including the `## File inventory` entry and the heading "Per-workspace registry — ScopeResolverScope.scala (mirrors CacheScope)". The inventory change is delivered as a copy-pasteable block plus a verbatim anchor line, not applied silently |
-| `docs/dev/ARCHITECTURE.md` | 4 | renamed in place |
-| `docs/dev/plans/PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` | 1 | renamed in place |
-| `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | 1 | renamed in place |
-| `docs/dev/decision-records/ADR-015.md` | 1 | renamed in place. An accepted decision record is amended, never rewritten: the sentence names the type as a component of the design it records, so the name is corrected and nothing else about the record changes |
+No occurrence count is given: these documents are edited while this plan waits,
+so any number recorded here is stale before it is used. The rename step greps
+each file for `CacheScope`, `ScopeResolverScope`, `cacheFor` and `resolverFor`
+and renames what it finds.
+
+| Path | Treatment |
+|---|---|
+| `docs/dev/plans/PLAN-RISKTRANSFORM.md` | every occurrence renamed, including the `## File inventory` entries and the heading "Per-workspace registry — ScopeResolverScope.scala (mirrors CacheScope)". The inventory change is delivered as a copy-pasteable block plus a verbatim anchor line, not applied silently. This is the largest of the five and the reason this plan lands before M4 |
+| `docs/dev/ARCHITECTURE.md` | renamed in place, in the layered-architecture diagram and the layer-wiring example |
+| `docs/dev/plans/PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` | renamed in place |
+| `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | renamed in place |
+| `docs/dev/decision-records/ADR-015.md` | renamed in place. An accepted decision record is amended, never rewritten: the sentence names the type as a component of the design it records, so the name is corrected and nothing else about the record changes |
 
 ### Documents deliberately left alone
 

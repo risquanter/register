@@ -8,23 +8,25 @@ not prescribed solutions.
 
 ## Plan landing order — approved plans, in the order they must be implemented
 
-Six plans are ruled and awaiting approval. Four ordering constraints are real;
+Seven plans are ruled and awaiting approval. Five ordering constraints are real;
 everything else is free. Each plan repeats its own constraint in a Sequencing
 section, and this is the single list.
 
 | # | Plan | Why here |
 |---|---|---|
 | 1 | `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md` | no technical dependency; touches no Scala source and no file any other plan touches. First because it closes a credential-in-logs defect |
-| 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3 and 5 |
+| 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3, 5 and 6 |
 | 3 | `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md` | must follow 2: it adds a method to both registries, which 2 renames. Writing it first means writing it twice |
 | 4 | `docs/dev/plans/PLAN-TELEMETRY-EXPORT.md` | must precede 5 |
 | 5 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | depends on 2 (both change `CachedResultResolverLive.scala`) and on 4 (it publishes a saturation gauge and writes its tuning rule from what that gauge shows; nothing can read it until the console exporters are replaced) |
+| 6 | `docs/dev/plans/PLAN-RISKTRANSFORM.md` (M4) | must follow 2. The two share fifteen files, including all three scope-resolver sources. M4 adds a scope-resolver field to `RiskTreeServiceLive` and rewrites the resolver's memo, both against names that 2 changes: `ScopeResolverScope` becomes `MitigationScopeResolverRegistry` and `resolverFor` becomes `forWorkspace`. Landing M4 first would grow 2's ripple list by everything M4 adds |
 | — | `docs/dev/plans/PLAN-IRMIN-RECURSIVE-READ.md` | fully independent; shares no file with any of the above and may land at any point |
 
 Steps 3 and 4 are independent of each other and could swap. Steps 3, 4 and 5 all
 touch `Application.scala`, each on different lines — a released-cache layer, a
 telemetry layer swap, and a limiter layer — so the order between them is a
-matter of diff size, not correctness.
+matter of diff size, not correctness. Step 6 is the largest plan by far and is
+ordered only against step 2; it is independent of 3, 4 and 5.
 
 ---
 
@@ -923,7 +925,7 @@ and should be reviewed at Phase K.5 / K.6 planning.
 **RESOLVED 2026-07-18 — milestone-2b Phase A shipped.** The content-addressed
 `ContentCache` retired the bug class as designed: leaf cache keys are
 recomputed from stored content on every read, so no diff decides invalidation.
-All three package-b deliverables landed: `Item17RegressionSpec` (service-level
+All three package-b deliverables landed: `AggregateFreshnessAfterLeafMoveSpec` (service-level
 combined reparent+param-change PUT → root exceedance pinned to the analytic
 `1−∏(1−pᵢ)` for the new params, 10σ away from the stale signature),
 the SSE-only `InvalidationHandler` rewrite with the ADDITIVE union in
@@ -1770,7 +1772,7 @@ the touched ones. Several ADRs predate or exceed the template (e.g. ADR-010 runs
 ~300 lines vs the 100–200-line target; some lack the exact Context/Decision/Code
 Smells/Implementation shape).
 
-**Task:** audit every `docs/dev/ADR-*.md` against `ADR-00X.md` (structure, sizing,
+**Task:** audit every `docs/dev/decision-records/ADR-*.md` against `ADR-00X.md` (structure, sizing,
 timeless-context phrasing, code-first style) and bring each into conformance, or
 split oversized ones per the template's guidance. Keep each ADR's number.
 
@@ -2212,7 +2214,7 @@ approved.
 
 ---
 
-## 49. Mitigation scope memo is bounded to two revisions — an adaptive revision cache if that ever binds
+## 49. Mitigation scope memo holds one revision per slot; two is ruled and not yet built — an adaptive revision cache if that ever binds
 
 **Observed:** `MitigationScopeResolverLive` memoizes resolved mitigation scopes
 in a `Ref`-held map keyed by `(TreeId, BranchRef)`. The commit hash is a validity
@@ -2220,11 +2222,13 @@ stamp inside the value, not part of the key, so revisions never accumulate and
 memory stays bounded by the number of live tree-and-branch pairs.
 
 **Ruled 2026-09-13: the slot holds two revisions, evicting the least recently
-used.** That closes the cost the item was originally written about — a single
-slot meant a historic read overwrote the head entry, so a caller alternating
-between a pin and the head recomputed on every call and the memo contributed
-nothing. At capacity two the head survives any amount of scrubbing, because the
-scrubbing revisions all contend for the second position.
+used.** The code today still holds one; the capacity-2 change is specified in
+`docs/dev/plans/PLAN-RISKTRANSFORM.md` §7.6.8 and lands with that plan. The
+ruling closes the cost this item was originally written about — a single slot
+means a historic read overwrites the head entry, so a caller alternating between
+a pin and the head recomputes on every call and the memo contributes nothing. At
+capacity two the head survives any amount of scrubbing, because the scrubbing
+revisions all contend for the second position.
 
 What remains open is the *adaptive* version, for a caller that alternates across
 more than two revisions. Nothing in the product does that today.
