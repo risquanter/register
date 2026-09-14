@@ -103,3 +103,16 @@ node_modules/tmp/
 
 # Working-protocol approval token (user-owned, local-only)
 .claude/protocol/
+
+# Agent enforcement configuration. Kept local: these files describe what the
+# working-protocol gate blocks, where its approval token lives, and which
+# phrases authorize an action — a map for anyone trying to talk the agent past
+# it. The non-sensitive skills and instruction files stay tracked.
+.claude/protocol/
+.claude/settings.json
+.claude/hooks/
+.claude/skills/working-protocol/
+.github/skills/working-protocol/
+.github/copilot-instructions.md
+/CLAUDE.md
+docs/dev/WORKING-INSTRUCTIONS.md
