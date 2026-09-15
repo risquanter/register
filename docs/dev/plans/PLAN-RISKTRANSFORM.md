@@ -3490,6 +3490,23 @@ and the reason there is no staleness or revision field — stored versions are
 immutable, so a request is answered at the version it names and there is nothing
 for a client's view to diverge from.
 
+**Scope of the ADR amendments — RULED 2026-09-15 (user).** Slice 5 amends the
+four records marked "Amended, slice 5" in §7.6.10, and in ADR-003 and ADR-009 it
+also corrects two statements that were already wrong before this plan touched
+them, because they sit in the same paragraphs:
+
+- ADR-003's Implementation table claims optional provenance capture is
+  implemented via an `includeProvenance` flag. The flag sets a tracing attribute
+  and nothing else, and no production caller passes `true`.
+- ADR-003 §3 and ADR-009 §5 both publish
+  `group.children.collect { case r: RiskResult => r.nodeId -> r.provenances }`
+  as the provenance derivation. That pattern exists nowhere in `src/main`.
+
+Editing a paragraph while leaving an adjacent falsehood in it is the drift the
+docs-as-current-state rule exists to stop, so both are fixed here. Everything
+else the 2026-09-15 ADR review found is housekeeping and is tracked in
+[`docs/dev/ADR-HOUSEKEEPING.md`](../ADR-HOUSEKEEPING.md), not in this plan.
+
 #### 7.6.10 ADR alignment
 
 | ADR | Bearing | Status |
@@ -3497,16 +3514,20 @@ for a client's view to diverge from.
 | ADR-001 (validate once, at the boundary) | The request types carry smart constructors and their decoders run them, so a handler receives a selection that already satisfies both bounds. The one check deliberately outside the decoder — whether a named mitigation exists — is a lookup against a loaded tree, not a field format rule, and the plan says so where it is placed | Compliant |
 | ADR-001 §2 (Iron types in JSON bodies need an explicit Tapir schema) | `Schema[MitigationId]` is added beside the existing `Schema[NodeId]` | Compliant |
 | ADR-002 (drift signals, not failures) | A predicate that no longer binds makes one mitigation a no-op and is logged; it never fails a read | Compliant |
+| ADR-003 (provenance and reproducibility) | Uniform wrapping puts a `ValuationResult` between a portfolio and its children, so the resolver's provenance walk descends through `source` to keep §3's "union of all leaf provenances in its subtree, in child order". ADR-003's Implementation table separately claims optional provenance capture is implemented via `includeProvenance`, which sets a tracing attribute only | Amended, slice 5 |
 | ADR-004a (storage mapping) | Unchanged: mitigations are already stored as `mitigations/{id}` blobs and this plan adds no storage shape | Compliant |
-| ADR-009 (associativity of the aggregate) | Unchanged: result-stage transforms still apply to a finished node value, never inside the summation | Compliant |
+| ADR-009 (associativity of the aggregate) | Result-stage transforms still apply to a finished node value, never inside the summation — compliant and unchanged. But §2 enumerates exactly two subtypes and the Implementation table names them, and a third subtype makes both stale; §5's `children.collect { case r: RiskResult => … }` provenance pattern is superseded by the `source` descent | Amended, slice 5 |
+
 | ADR-010 (typed errors, accumulated) | Every new validation returns `ValidationError` with a code, and independent checks accumulate through `Validation.validateWith` | Compliant |
 | ADR-014 (render-time curve computation) | Both valuations of every requested node go through one `generateCurvePointsMulti` call, so the shared tick domain covers them together | Compliant |
-| ADR-015 (query APIs compose on `ensureCached`) | The mitigated reading is a second `ensureCached`/`ensureCachedAll` call with a selection, not a new resolution path | Compliant |
+| ADR-015 (query APIs compose on `ensureCached`) | The mitigated reading is a second `ensureCached`/`ensureCachedAll` call with a selection, not a new resolution path — compliant. The ADR writes the resolver trait out verbatim in a form two generations old, and §7.6.12 decision 2 would change it again if the return type is narrowed | Amended, slice 5 |
+
 | ADR-017 (tree API design) | The tree PUT gains two buckets; the ADR is amended in slice 5 rather than contradicted | Amended, slice 5 |
 | ADR-018 (nominal id wrappers) | `MitigationId` stays distinct from `NodeId` and `TreeId` throughout the new types | Compliant |
 | ADR-019 (frontend ownership rules) | Slice 1's browser change touches one state class and adds one pure function beside it; no component gains state | Compliant |
 | ADR-024 (application as a pure enforcement point) | Both analysis handlers keep their `AnalyzeRun` check and the structure handler keeps `ViewTree`; the method change on one endpoint moves no check | Compliant |
 | ADR-032 (two equality relations) | The mitigation diff compares encoded content, not values, for the same array-equality reason the node diff already does | Compliant |
+| ADR-033 (narrowest sound catch) | `ValuationResult.create` catches `ArithmeticException` from the scaled-loss guard and converts it to a `ValidationError`, the same named-type conversion `RiskResultGroup.create` already performs in this file. ADR-033's Implementation table lists `LossDistribution.scala` and gains the second site | Amended, slice 5 |
 | ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. ADR-034 was restructured on 2026-09-14: its Decision 3 states that a transformed node's mitigated value is flat by construction, and its Decision 4 carries the `ValuationResult` ruling that §8.16 records | Compliant; ADR-034 amended |
 | ADR-035 (error leakage prevention) | The internal-error resolution failure reaches the wire as a fixed message with no detail | Compliant |
 | ADR-036 (confidential internal identifiers) | Node ids move in a request body, never in a request line an access log records — this is one of Decision 3's two independent arguments | Compliant |
@@ -3587,38 +3608,127 @@ Five decisions gate the `ValuationResult` sub-slice ruled in §8.16, which slice
 consumes. Two further decisions gate slice 6. Slices 2 to 5 carry none. All seven
 are listed here so the elevation states them rather than implying them.
 
-**Gating the §8.16 sub-slice.** §8.16 rules the design; none of the following is
+Numbering is kept stable because other sections reference these by number.
+Decision 5 has since been answered by checking the inventory rather than by a
+ruling, so it keeps its slot and records the answer in place. Decisions 1, 2, 3
+and 4 remain open.
+
+**Gating the §8.16 sub-slice.** §8.16 rules the design; none of the following was
 ruled by it, and each changes what the code looks like. The reasoning that
 produced the design is in
 [`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md)
 and should be read before any of these is answered.
 
+**Ruled 2026-09-15 (user):** decisions 1, 2, 3, 4 and 7 below, each recorded in
+place. Decision 5 was answered by checking the inventory rather than by a ruling.
+Decision 6 is held pending the baseline questions recorded under it. Two new
+questions were raised while ruling 1 and 2 and are recorded as decisions 8, 9 and
+10 at the end of this section; the sub-slice is not elevated until they are
+settled, because each changes where the type lives or what it is.
+
 1. **Where `ValuationResult` is defined.** It extends `LossDistribution`, whose
    hierarchy is sealed in
-   `modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala`,
-   so a sealed hierarchy requires it in that file or that file's directory. That
-   places a read-edge concept in the shared domain module, which every other
-   valuation type already sits in. The alternative — unsealing the hierarchy to
-   put it in `server` — trades an enforced invariant for module placement.
+   `modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala`.
+   Scala 3 permits a subclass of a sealed class only in the **same source file** —
+   not the same directory and not the same package — so keeping the hierarchy
+   sealed means the type goes in that file. That places a read-edge concept in the
+   shared domain module, which every other valuation type already sits in. The
+   alternative — unsealing the hierarchy to put it in `server` — trades an
+   enforced invariant for module placement, and the invariant is load-bearing:
+   sealing is what makes the exhaustiveness check in the subsection "The sealed
+   hierarchy gains a third case" a compile error rather than a silent omission,
+   and ADR-035 §1 relies on the same mechanism for the error hierarchy.
+
+   **RULED 2026-09-15 (user): keep the hierarchy sealed.** Unsealing is off the
+   table. Which module the sealed file lives in is a separate question and is
+   decision 8 below.
 2. **The resolver trait's return type.** `ensureCached` and `ensureCachedAll`
    return `Task[LossDistribution]` and `Task[Map[NodeId, LossDistribution]]`.
    Under uniform wrapping every returned value is a `ValuationResult`, so the
    return type can be narrowed to say so, or left wide. Narrowing states the fact
-   in the type and is the reason the decorator exists; it also moves every stub
-   and test that wires the resolver layer.
+   in the type and is the reason the decorator exists.
+
+   **Corrected baseline (2026-09-15).** An earlier version of this decision said
+   narrowing "moves every stub and test that wires the resolver layer". That is
+   wrong. `CachedResultResolverLive` is the only implementation of the trait in
+   the repository; no test implements it, and every test wires
+   `CachedResultResolverLive.layer`. The three production consumers — two in
+   `RiskTreeServiceLive`, one in `QueryServiceLive` — read the returned values
+   through members inherited `final` from the base class, so narrowing is
+   source-compatible for them. `RiskTreeKnowledgeBase` keeps its
+   `Map[NodeId, LossDistribution]` parameter and still accepts a narrowed map,
+   because `Map` is covariant in its value type. The edit is the trait's two
+   signatures, the companion's two accessors and the two overrides in the live
+   implementation.
+
+   **RULED 2026-09-15 (user): narrow it.** Two questions raised while ruling this
+   are recorded as decisions 9 and 10 below; both bear on what is being narrowed
+   to, so the signature is not written until they are settled.
 3. **Where the wrapping happens.** Either `CachedResultResolverLive`'s recursion
    builds the decorator directly at each node, or a separate function decorates
    what the existing recursion returns. This is the remaining part of the
    "second traversal or threaded pair" question §8.14 left to the code step.
+
+   One consequence to weigh that §8.14 did not state: a fold that threads a pair —
+   the raw value and the mitigated value together — would let a single resolver
+   call return both readings, which would collapse §7.6.5's two `ensureCachedAll`
+   calls into one. It is not free. Each call today builds its own effective tree
+   via `MitigationApplication.effectiveTree` and its own
+   `ContentHashIndex.build(effective)`, and the whole recursion looks nodes up
+   through that effective tree. A pair-threaded fold would have to carry both
+   trees and both hash indexes, because a parameter-stage transform gives a leaf a
+   different content hash in the mitigated pass than in the raw one. Whether that
+   is worth removing one traversal is the decision; the reasoning document's Part 9
+   describes the read path as resolving twice, so two calls is the shape that
+   document assumes and the one §7.6.5 currently writes.
+
+   **RULED 2026-09-15 (user): second traversal, two calls.** The threaded pair is
+   rejected on a ground the options list did not carry: a caller may ask for more
+   than two valuations at once. The analytics query language already binds an
+   existential over mitigations, so a request can reference several selections in
+   one evaluation, and §7.6.2 precomputes one result map per referenced selection.
+   A fold threading a fixed pair serves exactly two readings and would have to be
+   generalised or abandoned the moment a third is asked for, whereas repeating a
+   one-selection traversal per selection scales without redesign. The repeated
+   work is the portfolio combines; the expensive half, leaf simulation, is shared
+   through the content-addressed cache wherever the effective leaf content is
+   unchanged.
+
+   The post-hoc decoration option that appeared in earlier framings is withdrawn
+   as not viable: `applied` needs the records scoped to that node and `source`
+   needs the combine of the mitigated children, and both exist only during the
+   fold, so a pass over its finished output would have to re-walk the tree and
+   re-derive them.
 4. **Whether `flatten`'s removal travels with this sub-slice or lands
    separately.** It touches the same file and the same sealed hierarchy, which
    argues for one change; it is also a deletion with no dependency on
    `ValuationResult`, which argues for landing it first and alone so the
    `ValuationResult` diff carries no unrelated deletion.
-5. **The file inventory delta.** `LossDistribution.scala` is already a bullet in
-   the shared inventory. `CascadeTestStubs.scala`, `LossDistributionSpec.scala`
-   and `ProvenanceSpec.scala` have to be checked against it before any edit, and
-   the resolver's own stubs move if decision 2 narrows the return type.
+
+   **RULED 2026-09-15 (user): lands separately, first.** The deletion is its own
+   landing — the abstract member on `LossDistribution`, the overrides on
+   `RiskResult` and `RiskResultGroup`, and the two assertions in
+   `LossDistributionSpec.scala` — taken green before any `ValuationResult` work
+   starts. It has no dependency on the decorator and is banked even if decisions 8,
+   9 or 10 hold the sub-slice up. `docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`
+   §12.4 records the shape to reach for should the method ever return; it stays
+   unruled.
+5. **The file inventory delta.** Checked against the inventory as it stands, the
+   answer is that **no bullet has to be added** for the sub-slice as ruled:
+
+   - `LossDistribution.scala`, `CachedResultResolver.scala`,
+     `CachedResultResolverLive.scala`, `RiskResultTransform.scala`,
+     `CascadeTestStubs.scala`, `ProvenanceSpec.scala`,
+     `CachedResultResolverSpec.scala`, `CacheTransparencySpec.scala` and
+     `RiskResultTransformSpec.scala` are already bullets.
+   - `LossDistributionSpec.scala` is **not** a bullet and does not need to be. It
+     sits under `modules/common/src/test/`, and the enforcement hook authorises a
+     module's test tree whenever the plan lists any file under that module's
+     `src/main` — which it does many times over.
+
+   What remains genuinely conditional is decision 2: if the resolver trait's
+   return type is narrowed, every stub implementing that trait moves, and each
+   such file must be re-checked against the inventory before it is edited.
 
 **Gating slice 6.**
 
@@ -3629,6 +3739,29 @@ and should be read before any of these is answered.
    the alternative is to leave the endpoint returning a bare number and refuse
    selections on it. The elevation specifies the first; it is recorded as a
    decision because the shape was derived here rather than ruled at §7.6.3.
+
+   **Baseline established 2026-09-15, ruling held.** Who actually consumes this
+   endpoint was checked, because it decides whether changing its shape costs
+   anything. `GET /w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance`
+   is defined in `WorkspaceAnalysisEndpoints.scala` and wired in
+   `WorkspaceAnalysisController.scala:38`. Nothing else calls it: the browser
+   module contains no reference to it, no integration test exercises it, and no
+   BATS suite touches it. It is a published endpoint with no in-repository client.
+
+   The curve endpoint it would be made to match answers with `LECNodeCurve`
+   (`LEC.scala:52`) — node id, name, the curve points on a shared tick domain,
+   the tail quantiles, the average annual loss and the probability of no loss.
+   §7.6.3 ruled that a node's answer becomes a **list** of such readings rather
+   than one, for a single reason: a node can be read under more than one
+   valuation in one request, and the list is how the mitigation-free reading and
+   the mitigated readings are returned together so they share one tick domain
+   and can be drawn on one chart. Each entry carries `withMitigations` naming the
+   mitigations that shaped it, with the empty list marking the mitigation-free
+   reading.
+
+   The exceedance endpoint returns a single probability, which has no tick domain
+   and needs no shared axis. So the list is not forced on it by the same argument
+   that forced it on the curve endpoint, and the decision is genuinely open.
 7. **Whether M4 ships mitigation authoring.** §7.4's interface list covers
    selecting mitigations, drawing their effect, comparing selections, the
    badges, and the override edit popup. It does not say whether a user can
@@ -3637,7 +3770,64 @@ and should be read before any of these is answered.
    M4 ships with mitigations authored through the API alone, decides a large
    part of slice 6's size.
 
+   **RULED 2026-09-15 (user): M4 ships selection and visualisation only.**
+   Mitigations are authored through the API for the duration of M4. Slice 6 builds
+   what §7.4 lists and no authoring screen.
+
+   The predicate editor gets **its own plan document**, not a continuation section
+   here — this plan is already too large to absorb it. That plan follows M4 in the
+   implementation sequence. M4's closing report ends with an explicit instruction
+   to start it, so the gap M4 ships with is handed forward rather than discovered
+   later: until the editor exists, a mitigation cannot be created without calling
+   the API directly.
+
 The two original slice-6 decisions kept their wording and were renumbered 6 and 7.
+
+**Raised while ruling decisions 1 and 2 (2026-09-15). These gate the sub-slice.**
+
+8. **Which module the sealed hierarchy lives in.** Decision 1 settled that the
+   hierarchy stays sealed, which pins every subtype to one source file. It did not
+   settle which module that file sits in, and the review had wrongly treated
+   `common` as forced. Moving the whole file to `server` keeps the sealing intact,
+   because sealing constrains the file, not the module.
+
+   Checked 2026-09-15: outside `server`, nothing uses the hierarchy in code.
+   `LEC.scala` and `Provenance.scala` in `common/src/main` name `RiskResult` and
+   `RiskResultGroup` only inside scaladoc. The browser's single occurrence, in
+   `LECSpecBuilder.scala:404`, is also a comment. `server` has five files in
+   `src/main` and ten in `src/test`. The live code users outside `server` are four
+   files in `common/src/test`: `LossDistributionSpec.scala`,
+   `RiskResultTestSupport.scala`, `PreludeOrdUsageSpec.scala` and
+   `ConfigTestLoader.scala` — those would move with it. The dependency direction
+   permits the move: `server` depends on `commonJVM`, so `SimulationConfig`,
+   `NodeId`, `Loss` and `TrialId` all still resolve. A move also stops the
+   hierarchy being cross-compiled into the Scala.js artifact, where nothing uses
+   it.
+
+9. **Whether `RiskResult` and `RiskResultGroup` stop being part of any consumer-
+   facing surface, and what follows.** If decision 2's narrowing lands, the
+   resolver hands back only `ValuationResult`, and the two older subtypes are
+   reachable only through its `source` field. The question is whether they then
+   become an implementation detail that should be closed off, and relatedly which
+   code still needs to match across the whole hierarchy at all.
+
+   Checked 2026-09-15: after `flatten` is deleted (decision 4) the only production
+   match over the hierarchy is `descendantProvenances` at
+   `CachedResultResolverLive.scala:201`. Note the naming trap — `RiskLeaf` and
+   `RiskPortfolio` are **tree node** types and are unaffected by any of this;
+   `RiskResult` and `RiskResultGroup` are the **computed value** types. Only the
+   second pair is in question.
+
+10. **Whether `ValuationResult` should be a subtype of `LossDistribution` at all,
+    and whether its name carries its meaning.** A decorator that wraps a value of
+    a type and is also a member of that type is a deliberate choice, not a
+    necessity. The alternative is a separate type holding a `LossDistribution`,
+    which would leave the sealed hierarchy at two members and remove every
+    exhaustiveness consequence — at the cost that consumers must unwrap before
+    reading a figure. The name is a second, independent question:
+    `docs/scratch/MITIGATION-VALUATION-EXPLAINED.md` §8.2 records only why it is
+    *not* called `MitigatedResult`, and does not argue that "valuation" is the
+    right word against the vocabulary the rest of the domain uses.
 
 #### 7.6.13 File inventory — slices 1 to 5
 
@@ -6954,13 +7144,35 @@ final case class ValuationResult private (
 ) extends LossDistribution(nodeId, trialOutcomes)
 ```
 
-`source` is the raw value at that node — a `RiskResultGroup` at a portfolio, a
-`RiskResult` at a leaf — so the children remain reachable through it and ADR-009's
-drill-down structure is preserved rather than discarded.
+`source` is the value this node's own transform layer was applied to. At a
+portfolio that is the combine of the children's **mitigated** values, built as a
+true `RiskResultGroup` whose aggregate really is the combine of exactly those
+children, so the children remain reachable through it and ADR-009's drill-down
+structure is preserved rather than discarded. At a leaf it is the cached raw
+`RiskResult`.
+
+`source` is **not** the raw value at that node. The two differ at every node that
+has a transformed descendant: in the reasoning document's worked example the node
+`Servers` has a raw figure of 23 and a `source` of 20, the 3 being a leaf cap
+below it. The difference between this node's `trialOutcomes` and
+`source.trialOutcomes` is therefore exactly this node's own layer and nothing
+else, which is the property the decorator exists to provide.
 
 **2. Wrapping is uniform: every node the mitigated fold visits is wrapped.** The
 empty `applied` list is the identity, so a node with no mitigation in scope is
-wrapped with an empty list rather than left bare. This was ruled in preference to
+wrapped with an empty list rather than left bare.
+
+Uniform means uniform in both directions, and the second one is easy to miss.
+Wrapping does not depend on whether a transform binds at the node, **and it does
+not depend on which `MitigationSelection` the caller passed.** There is one fold
+at the read edge; a raw reading is that fold run with `Inherent`, which feeds the
+identity transform everywhere. So every value the resolver returns is a
+`ValuationResult`, for every selection, including the mitigation-free one. There
+is no undecorated return path.
+
+What stays undecorated is everything *inside*: `source` is a plain `RiskResult`
+at a leaf and a plain `RiskResultGroup` at a portfolio, and the cache below it
+stores identity-free leaf content that the decorator never reaches. This was ruled in preference to
 wrapping only where a transform binds. The reason is that a no-op mitigation is
 authorable today — `ScaleLosses(1.0)`, `ApplyDeductible(0)` and
 `FilterBelowThreshold(0)` are all valid single-step pipelines — so a rule of
@@ -6968,20 +7180,49 @@ authorable today — `ScaleLosses(1.0)`, `ApplyDeductible(0)` and
 numeric value of a parameter rather than on the shape of the request.
 
 **3. One method, not two.** `ensureCached` keeps its single form and its
-`selection` parameter. A raw reading is the identity instance of the same fold,
-recoverable as `source`, not a separate function. A two-method form was proposed
-and withdrawn: the ADR-034 passage cited for it is about what is *stored*, and
-Form 3 satisfies that passage identically.
+`selection` parameter. A two-method form — a separate `resolveRaw` beside a
+`resolveMitigated` — was proposed and withdrawn: the ADR-034 passage cited for it
+is about what is *stored*, and Form 3 satisfies that passage identically.
+
+A raw reading is the identity instance of the same fold: the same method called
+with `MitigationSelection.Inherent`, which feeds the identity transform at every
+node, so every `applied` list comes back empty and every `trialOutcomes` equals
+its `source`. It is **not** read off a mitigated result's `source`, because
+`source` carries the combine of the mitigated children and equals the raw
+aggregate only where no descendant transforms.
+
+**One method does not mean one call.** A read that must show both valuations
+resolves twice — once with `Inherent` and once with the caller's selection — and
+feeds both into one curve generation so the two series share a tick domain. That
+is what §7.6.5's two `ensureCachedAll` calls are, and the reasoning document's
+Part 9 states it in those terms. The second resolution re-reads the same leaf
+cache entries wherever no parameter-stage transform changed that leaf's content
+hash, so its cost is the portfolio combines plus only the leaves whose simulation
+inputs the selection actually rewrote. Whether the two resolutions could instead
+be one traversal carrying a pair is the open question in §7.6.12 decision 3.
 
 **4. The empty case must be physically the identity.** Applying an empty pipeline
 must return the *same* `TrialOutcomes` reference it was given, not a structurally
 equal rebuild. A rebuild would duplicate the outcome map of every untransformed
 node on every read, which on a large tree is the dominant allocation.
 
-**5. `MitigationApplicationRecord` becomes the `applied` field.** The type and
-`MitigationApplication.applicationRecords` exist, are tested, and today have no
-production caller; the record's own scaladoc claims it is carried in responses,
-which is not true. This ruling gives it its only home. It closes the open
+**5. `MitigationApplicationRecord` becomes the `applied` field.** The type exists,
+is tested, and today has no production caller. This ruling gives it its only home.
+
+The existing `MitigationApplication.applicationRecords` is **not** the producer of
+that field and cannot be reused unchanged. It answers a whole-tree question: it
+groups by mitigation across the entire resolution and emits one record per
+mitigation carrying the union of every node that mitigation touched, and it does
+not filter by mitigation stage. `applied` answers a per-node question: the records
+for the **result-stage** mitigations scoping *this* node, in precedence order.
+Parameter-stage transforms are folded into the effective tree before the content
+hash is computed, so they are not part of the layer this node applied and must not
+appear in its `applied` list. A new per-node function is therefore needed beside
+the existing one; the precedence ordering — by `(precedence.key, mitigationId.value)`
+— is the one part that carries over unchanged. `applicationRecords` keeps its
+current shape and its current tests.
+
+This ruling closes the open
 question of where the provenance layer lives and removes the contradiction
 between §7.4's prose and the ruled response shape in §7.6.3 — the records live on
 the server-side valuation, and the wire response continues to carry only
@@ -7008,6 +7249,137 @@ their source exactly where a transform binds. Rewriting them was approved under
 Decision Trigger #8. This is the one place where the ruling changes a shipped
 assertion; no other test in the suite asserts on these type names.
 
+#### Constructing a `ValuationResult`
+
+The primary constructor is private, so the companion object is the only place a
+value can be built. That companion lives in `LossDistribution.scala` in the
+`common` module, while the fold that builds the values runs in
+`CachedResultResolverLive` in the `server` module, so a factory on the companion
+is not optional — without one the type cannot be constructed at all from the
+module that needs it.
+
+The construction itself is otherwise mechanical. It is one function applied at
+every node, with the node's children already resolved:
+
+```
+recordsFor(node)        = the MitigationApplicationRecords for the result-stage
+                          mitigations scoping this node, in precedence order
+run(records, outcomes)  = the composed transform applied to outcomes;
+                          run(Nil, outcomes) returns outcomes itself
+
+decorate(id, source, records) =
+    ValuationResult.create(id, source, records, run(records, source.trialOutcomes))
+
+m(leaf)         = decorate(leaf.id, cachedSimulation(effectiveLeaf), recordsFor(leaf))
+m(portfolio P)  = decorate(P.id, RiskResultGroup.create(P.id, P.children.map(m)*),
+                           recordsFor(P))
+```
+
+Two constraints on that sketch, both already ruled above. `run(Nil, outcomes)`
+must return the same `TrialOutcomes` reference it was given (ruling 4). And the
+group at a portfolio is built from the **mitigated** children, so its aggregate
+claim stays true and `RiskResultGroup`'s private constructor needs no exception.
+
+**The factory returns `Validation`, and one real failure reaches it.** This
+mirrors `RiskResultGroup.create`, which exists because `TrialOutcomes.combine`
+sums with `Math.addExact` and throws `ArithmeticException` on overflow, converted
+there into a `ValidationError` (ADR-033 §3).
+
+The transform path has one arithmetic hazard of its own, and today it does not
+fail — it reports a wrong number. `RiskResultTransform.scaleLosses` computes
+`(loss * factor).toLong`. Narrowing a `Double` that exceeds the `Long` range does
+not throw; it saturates at `Long.MaxValue`. A scaling factor large enough to push
+a loss past that range therefore produces `9223372036854775807` and presents it as
+a real figure. The other three transforms are safe: `applyDeductible` subtracts
+two non-negative values and floors at zero, `capLosses` takes a minimum, and
+`insurancePolicy` composes those two.
+
+**RULED (user, 2026-09-15): detect it and route it through `Validation`.** This
+lands inside this sub-slice rather than being scheduled, because the conversion
+site it needs is the factory this sub-slice introduces.
+
+- `RiskResultTransform.scaleLosses` guards the narrowing and throws
+  `ArithmeticException` when the scaled value is not representable as a `Long`,
+  matching what `TrialOutcomes.combine` already does for addition. The guard is
+  written so that a non-finite product fails the same way rather than silently
+  becoming zero.
+- `ValuationResult.create` catches `ArithmeticException` and returns
+  `Validation.fail(ValidationError(...))` with
+  `ValidationErrorCode.CONSTRAINT_VIOLATION`, exactly as `RiskResultGroup.create`
+  does for the aggregation overflow.
+- `RiskResultTransform` keeps its total shape, so `Identity[RiskResultTransform]`,
+  `TransformPipeline.toTransform` and `MitigationApplication.resultTransformFor`
+  are untouched. The failure is converted once, at the single public boundary.
+- **Ordering constraint.** The `scaleLosses` guard must not land before
+  `ValuationResult.create` exists. Until the factory is there, no caller catches
+  the exception and it would escape the resolver as a defect.
+- **Verification, required deliverable.** A test pins the new behaviour directly:
+  a scaling factor large enough to push a loss past the `Long` range produces a
+  `ValidationError`, not `Long.MaxValue`. A second test pins that an in-range
+  scaling is unchanged, so the guard cannot be satisfied by rejecting everything.
+  Both go in
+  `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskResultTransformSpec.scala`,
+  which the inventory already lists.
+
+#### The sealed hierarchy gains a third case
+
+`LossDistribution` is sealed, which means the compiler knows its complete list of
+subtypes and can check that a `match` over it covers every one. `build.sbt` sets
+`-Wconf:msg=match may not be exhaustive:error`, so a `match` that misses a case is
+a build failure rather than a warning. Adding `ValuationResult` therefore breaks
+every exhaustive match over the hierarchy until each is extended.
+
+There is exactly one such match in production code, the resolver's provenance
+walk at `CachedResultResolverLive.scala:201`:
+
+```scala
+private def descendantProvenances(dist: LossDistribution): List[NodeProvenance] =
+  dist match {
+    case r: RiskResult      => r.provenances
+    case g: RiskResultGroup => g.children.flatMap(descendantProvenances)
+  }
+```
+
+The branch to add is:
+
+```scala
+    case v: ValuationResult => descendantProvenances(v.source)
+```
+
+**The elevation must state why that branch is correct, not merely that it
+compiles.** The argument it has to make, and which the implementation must be
+checked against, is this. ADR-003 §3 requires that a portfolio's provenance be
+"the union of all leaf provenances in its subtree, in child order". Under uniform
+wrapping every value the mitigated fold returns is a `ValuationResult`, so a
+portfolio's children are all wrappers and the existing `RiskResultGroup` branch
+would recurse into values that match neither existing case. Descending through
+`source` restores the walk exactly: a wrapper over a leaf has the cached
+`RiskResult` as its `source`, which carries that leaf's records; a wrapper over a
+portfolio has a `RiskResultGroup` as its `source`, whose children are the wrapped
+children, so the recursion continues one level down per node and terminates at the
+leaves. Child order is preserved because `RiskResultGroup` retains its children in
+the order the fold produced them, which `ZIO.foreachPar` already fixes to
+`childIds` order. Descending through `source` rather than skipping the wrapper is
+what keeps the result a union over leaves; returning `Nil` for a wrapper would
+silently empty the provenance of every mitigated portfolio, and that failure would
+be invisible because no test asserts on a mitigated portfolio's provenance today.
+
+The elevation must also record the two consequences that follow from this branch
+existing:
+
+- The collapsed-transformed-portfolio case disappears. Today a portfolio whose
+  transform binds returns a flat `RiskResult` carrying
+  `descendantProvenances(combined)` computed eagerly. Under uniform wrapping the
+  wrapper keeps `source` instead, so the walk is performed on demand and the
+  eager call at the portfolio arm goes away. The scaladoc above
+  `descendantProvenances` describes that collapsed case and is rewritten in the
+  same pass.
+- `ProvenanceSpec.scala:336-337` uses
+  `g.children.collect { case r: RiskResult => r.nodeId -> r.provenances }`. A
+  `collect` is not exhaustiveness-checked, so it will compile and silently return
+  an empty list once the children are wrappers. It must be updated with the
+  production branch, not left to pass vacuously.
+
 #### Cache interaction: none
 
 `ValuationResult` is built strictly above the cache boundary. Only leaf content is
@@ -7020,9 +7392,14 @@ has already returned, so no cache key, no cached value and no hash input changes
 
 This section records the rulings. It is **not** an implementation-grade
 specification and confers no G3 coverage: the exact file placement, the resolver
-trait's return type, the construction site and the inventory delta are not settled
-here. They are listed as open decisions in §7.6.12 and must be ruled and written
-up before any source edit implements this.
+trait's return type, and whether `flatten`'s removal travels with this sub-slice
+are not settled here. They are §7.6.12 decisions 1, 2 and 4, and must be ruled and
+written up before any source edit implements this.
+
+The inventory delta is settled — §7.6.12 decision 5 records the check and its
+answer — and so is the construction site, in "Constructing a `ValuationResult`"
+above. What that subsection does **not** settle is decision 3, which is where in
+the resolver the decoration happens, not what it produces.
 
 ## 9. Domain-invariant hardening (immediate follow-up to M1R)
 
