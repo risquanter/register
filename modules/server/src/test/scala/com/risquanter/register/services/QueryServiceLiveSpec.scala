@@ -4,11 +4,12 @@ import zio.test.*
 import io.github.iltotore.iron.autoRefine
 
 import com.risquanter.register.domain.data.{
-  RiskResult, RiskLeaf, RiskPortfolio, RiskNode, RiskTree, LossDistribution,
-  MitigationSelection, ScopeRestriction,
+  RiskLeaf, RiskPortfolio, RiskNode, RiskTree,
   Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
   TransformPipeline, ResultTransformSpec
 }
+import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
+import com.risquanter.register.simulation.{LossDistribution, RiskResult}
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.testutil.TestHelpers

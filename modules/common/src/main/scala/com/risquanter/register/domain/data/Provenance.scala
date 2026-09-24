@@ -22,14 +22,14 @@ import io.github.iltotore.iron.*
  * The recorded seed values are the same `HdrStreams` the sampler consumed —
  * both come from the single derivation site (`SeedDerivation.streams`, server
  * module), fed by the workspace's `seedEntityId` and the leaf's stored
- * `seedVarId` (PLAN-SEED-IDENTITY §4). Names, ULIDs, and hashes play no role.
+ * `seedVarId`. Names, ULIDs, and hashes play no role.
  *
- * This record is content-only (DD-19, closed 2026-07-18): it carries no node
+ * This record is content-only: it carries no node
  * identity. Attribution is structural — a leaf's record sits on its
  * `RiskResult` (whose `nodeId` is beside it); portfolio provenance is read by
  * walking `RiskResultGroup.children`, pairing each child's `nodeId` with its
  * records one level above any flattening. This is what lets the record double
- * as the content-addressed cache value's provenance half (DD-18): two nodes
+ * as the content-addressed cache value's provenance half: two nodes
  * with identical simulation content share one record.
  *
  * @param entityId The workspace's seedEntityId (HDR Entity axis — isolates workspaces/organisations)

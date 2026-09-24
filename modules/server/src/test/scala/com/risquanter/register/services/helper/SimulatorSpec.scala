@@ -5,7 +5,8 @@ import zio.test.*
 import zio.test.Assertion.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, SeedDerivation, HdrStreams}
 import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability, PositiveInt, SeedEntityId, SeedVarId}
-import com.risquanter.register.domain.data.{RiskLeaf, RiskResult, TrialId, Loss, ExpertDistributionParams}
+import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, ExpertDistributionParams}
+import com.risquanter.register.simulation.RiskResult
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import io.github.iltotore.iron.*

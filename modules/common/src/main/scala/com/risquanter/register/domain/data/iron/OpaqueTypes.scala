@@ -80,7 +80,8 @@ type NonNegativeInt = Int :| GreaterEqual[0]
 // (Iron's compile-time literal refinement needs a literal, not a reference
 // to the `Double.MaxValue` val) and excludes +Infinity: unlike Probability/
 // OccurrenceProbability, this type has no upper bound to reject +Infinity as
-// a side effect, and downstream arithmetic (e.g. RiskResultTransform.scaleLosses'
+// a side effect, and downstream arithmetic (e.g. the server's
+// RiskResultTransform.scaleLosses'
 // `.toLong`) silently converts an unchecked Infinity/NaN into
 // Long.MaxValue/0L instead of failing. (-Infinity and NaN already fail
 // GreaterEqual[0.0], since IEEE 754 comparisons against them are always

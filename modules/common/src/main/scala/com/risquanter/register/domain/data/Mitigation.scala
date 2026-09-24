@@ -56,7 +56,9 @@ object MitigationPrecedence {
  *   and `overrideAnchor` names the single leaf the override asserts against
  *   (rename-stable). Both are present iff a component is an Override — a
  *   `Mitigation.create` cross-field rule.
- * - `ResultStage` — ordered `TransformPipeline` on `TrialOutcomes`, any node.
+ * - `ResultStage` — ordered `TransformPipeline` on a simulation's trial
+ *   outcomes, any node. The outcomes type and the code that applies the
+ *   pipeline to it are server-side.
  */
 sealed trait MitigationSpec
 
@@ -109,8 +111,8 @@ object MitigationSpec {
 /**
  * First-class, explicit mitigation entity — tree-level content (`RiskTree.
  * mitigations`), versioned/diffed/merged with the tree, never baked into node
- * params. Application semantics live in `MitigationApplication`; staleness
- * detection in the server's `MitigationStaleness`.
+ * params. Application semantics live in the server's `MitigationApplication`;
+ * staleness detection in its `MitigationStaleness`.
  */
 final case class Mitigation private (
   id: MitigationId,

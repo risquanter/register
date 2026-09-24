@@ -1,9 +1,10 @@
-package com.risquanter.register.domain.data
+package com.risquanter.register.simulation
 
 import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.*
 import com.risquanter.register.configs.SimulationConfig
+import com.risquanter.register.domain.data.NodeProvenance
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.errors.ValidationErrorCode
 import com.risquanter.register.testutil.TestHelpers.nodeId

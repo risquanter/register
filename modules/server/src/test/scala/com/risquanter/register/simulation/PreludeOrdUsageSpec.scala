@@ -1,9 +1,9 @@
-package com.risquanter.register.domain
+package com.risquanter.register.simulation
 
 import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.Ord
-import com.risquanter.register.domain.data.{RiskResult, RiskResultGroup, Loss}
+import com.risquanter.register.domain.data.Loss
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.configs.SimulationConfig
 import com.risquanter.register.domain.PreludeInstances.given

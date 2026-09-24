@@ -401,8 +401,8 @@ object LECSpecBuilder:
 
   // ── Annotation helpers ────────────────────────────────────────
 
-  /** Format a loss value (already in millions, per `LossDistribution`'s own
-    * convention) for a static annotation label — mirrors the x-axis's own
+  /** Format a loss value for a static annotation label. Losses arrive already
+    * in millions and need no scaling here — mirrors the x-axis's own
     * `labelExpr` B/M formatting so the label and axis never disagree.
     */
   private def formatLossValue(value: Double): String =

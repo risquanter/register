@@ -5,7 +5,7 @@ import zio.telemetry.opentelemetry.tracing.Tracing
 import io.opentelemetry.api.trace.SpanKind
 
 import com.risquanter.register.domain.data.RiskTree
-import com.risquanter.register.domain.data.{MitigationSelection, ScopeRestriction}
+import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
 import com.risquanter.register.domain.data.iron.{TreeId, WorkspaceId, SeedEntityId, BranchRef, Revision}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.domain.errors.FolQueryFailure

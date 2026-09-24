@@ -56,7 +56,7 @@ case class NodeProvenance(
 - `ExpertDistributionParams(percentiles, quantiles, terms)`
 
 **`RiskResult`** — `com.risquanter.register.domain.data.RiskResult`  
-`modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala`
+`modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala`
 
 ```scala
 case class RiskResult private (

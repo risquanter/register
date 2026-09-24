@@ -6,7 +6,7 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, CacheScope}
-import com.risquanter.register.simulation.SeedDerivation
+import com.risquanter.register.simulation.{LossDistribution, RiskResult, RiskResultGroup, SeedDerivation}
 import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId, unsafeGet}
 import zio.*
 import zio.test.*

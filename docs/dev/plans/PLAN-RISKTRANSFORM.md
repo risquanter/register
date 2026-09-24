@@ -3623,6 +3623,17 @@ New tests, by the behaviour each one pins:
   extended with a round trip through the service: a PUT creating a mitigation,
   a structure read returning its resolved scope, and a curve read under a
   selection naming it.
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpApiIntegrationSpec.scala`
+  (new test) — a tree carrying a result-stage mitigation is created over the real
+  HTTP API and read back with its `TransformPipeline` intact, step order and all.
+  No test sends a mitigation over HTTP today: the persistence spec reaches Irmin
+  through the repository rather than the wire, and every mitigation it builds is a
+  leaf-stage one, so the result-stage branch has never crossed a real boundary.
+  The gap matters because that branch's decoder is hand-assembled — five per-case
+  codecs chained behind an `op` discriminator, each re-validating its Iron fields —
+  and an in-process round trip only ever feeds a decoder bytes its own encoder
+  produced. Mitigations have no endpoints of their own; they ride inside the tree
+  payload, so the tree create and read calls are where this is exercised.
 
 Commands that must be green before any slice is reported done. The complete run
 is all four:

@@ -1,8 +1,9 @@
-package com.risquanter.register.domain.data
+package com.risquanter.register.simulation
 
 import zio.test.*
 import zio.prelude.Identity
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
+import com.risquanter.register.domain.data.{Loss, TrialId}
 import com.risquanter.register.domain.data.iron.PositiveInt
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 

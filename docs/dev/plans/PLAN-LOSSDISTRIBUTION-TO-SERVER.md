@@ -4,7 +4,7 @@ Move the server-only simulation and mitigation-application code out of the
 shared `common` module and into `server`, keeping the `LossDistribution`
 hierarchy sealed.
 
-**Status:** awaiting ruling on the two open decisions below, then approval.
+**Status:** both decisions ruled; awaiting approval.
 
 ---
 
@@ -59,7 +59,7 @@ its companion defines `toTransform(spec: ResultTransformSpec):
 RiskResultTransform` at line 47, plus `TransformPipeline.toTransform` at line
 187. A staying file therefore names a moving type. Its only production caller is
 `MitigationApplication.scala:177`, which moves. Cutting the link is what makes
-the whole move possible — see open decision 1.
+the whole move possible — see ruled decision 1.
 
 **Why this matters for the file's contents.** With the link cut, `TrialOutcomes`
 travels with the hierarchy instead of being stranded. Its only code users are the
@@ -70,68 +70,34 @@ aggregate constructors, and the n-ary fold over them, all in one file — surviv
 intact. An earlier draft of this plan split that file; it does not need to be
 split.
 
-## Open decision 1 — where `toTransform` lives
+## Ruled decision 1 — `toTransform` moves to the server
 
 `toTransform` turns a serializable description of a mitigation's effect into the
-function that executes it. It is the single interpretation point, and
-`ResultTransformSpec.scala:11` says so.
+function that executes it. It is the single interpretation point.
 
-**Option A — move both `toTransform` methods into a new server file, leaving the
-spec types in `common`.** `ResultTransformSpec` and `TransformPipeline` become
-pure serializable data with no knowledge of how they are executed; a new server
-object interprets them.
+**Ruled: it moves, as `ResultTransformInterpreter`.** The spec types stay in
+`common` as pure serializable data with no knowledge of how they are executed,
+and the server holds their interpretation. A caller writes
+`ResultTransformInterpreter.toTransform(spec)`. There is one production caller
+and it moves anyway, so the only other affected code is the interpreter tests.
 
-*What this looks like in practice:* a caller writes
-`ResultTransformInterpreter.toTransform(spec)` instead of
-`ResultTransformSpec.toTransform(spec)`. There is one production caller and it
-moves anyway, so the only other affected code is the interpreter tests.
+This follows from the ruling to move the whole server-only group rather than the
+sealed hierarchy by itself. Leaving `toTransform` behind pins `RiskResultTransform`
+in `common`, which pins `TrialOutcomes`, which is declared inside
+`LossDistribution.scala` and cannot be declared anywhere else while the hierarchy
+is sealed. That file would then have to be split, which is the narrower shape the
+group move replaced.
 
-Pros: the shared module holds descriptions and the server holds their
-interpretation, which is the separation the two types already imply. It is the
-only option that lets `TrialOutcomes` move, which is what avoids splitting
-`LossDistribution.scala`.
-Cons: it takes a method off a companion where it is discoverable, and it is a
-design change rather than a file move — the one thing in this plan that is.
+## Ruled decision 2 — two packages
 
-**Option B — leave `toTransform` where it is.** Then `RiskResultTransform` and
-`TrialOutcomes` both stay in `common`, `MitigationApplication` cannot move
-either, and the change shrinks back to moving the sealed hierarchy alone — which
-forces the split of `LossDistribution.scala` that this plan just established is
-unnecessary.
-
-*What this looks like in practice:* you get roughly a third of the move and pay
-for it by breaking up a file `ADR-009` groups deliberately.
-
-Pros: no design change at all. Cons: it is the shape already examined and set
-aside; it takes the split's cost without the group move's benefit.
-
-**My recommendation: Option A.** Option B is not really a smaller version of this
-plan — it is the previous plan, which the measurement above showed to be the
-worst of the three shapes.
-
-## Open decision 2 — one package or two
-
-The earlier ruling put the moved types in `com.risquanter.register.simulation`.
-That ruling was made when the move was the hierarchy alone. The widened set adds
-mitigation application, which is not simulation.
-
-**Option A — two packages.** `com.risquanter.register.simulation` takes
+**Ruled: two.** `com.risquanter.register.simulation` takes
 `LossDistribution.scala`, beside the existing `LECGenerator.scala`.
 `com.risquanter.register.mitigation` takes `RiskResultTransform.scala`,
-`MitigationApplication.scala` and the new interpreter.
+`MitigationApplication.scala` and `ResultTransformInterpreter.scala`.
 
-**Option B — one package**, `com.risquanter.register.simulation`, for all four.
-
-*What this looks like in practice:* an import line either reads
-`com.risquanter.register.mitigation.MitigationApplication` or
-`com.risquanter.register.simulation.MitigationApplication`.
-
-**My recommendation: Option A.** Applying a mitigation is not simulating, and the
-server already keeps mitigation scope resolution in its own place. One package
-named for one of the two things it holds is the kind of small inaccuracy that
-survives for years.
-
-The rest of this plan is written against Option A on both decisions.
+Applying a mitigation is not simulating, and the server already keeps mitigation
+scope resolution in a place of its own. The earlier ruling naming `simulation`
+alone was made when the move was the sealed hierarchy by itself.
 
 ## Exact signatures
 
@@ -196,6 +162,9 @@ anywhere else.
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/ResultTransformSpec.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/LEC.scala`
 - `modules/common/src/main/scala/com/risquanter/register/domain/data/Provenance.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/Mitigation.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/RiskTree.scala`
+- `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`
 - `modules/common/src/test/scala/com/risquanter/register/domain/data/LossDistributionSpec.scala`
 - `modules/common/src/test/scala/com/risquanter/register/domain/data/TrialOutcomesSpec.scala`
 - `modules/common/src/test/scala/com/risquanter/register/domain/data/RiskResultTransformSpec.scala`
@@ -214,7 +183,9 @@ anywhere else.
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/LeafSimResult.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/helper/Simulator.scala`
 - `modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala`
 - `modules/server/src/test/scala/com/risquanter/register/simulation/LossDistributionSpec.scala`
@@ -250,13 +221,42 @@ changes.
 | `LossDistributionSpec`, `TrialOutcomesSpec`, `PreludeOrdUsageSpec` | move whole to `server/src/test/.../simulation/` — their subjects move |
 | `RiskResultTransformSpec`, `MitigationApplicationSpec` | move whole to `server/src/test/.../mitigation/` — their subjects move |
 | `RiskResultTestSupport` | moves to `server/src/test/.../testutil/`; five server specs already use it and keep working, now from the same module |
-| `ResultTransformSpecSpec` | **splits.** Its `interpreter` suite and the two `TransformPipeline` interpretation-law tests move into `ResultTransformInterpreterSpec`; its `Equal on reified data` and `codec` suites stay with the type they test |
+| `ResultTransformSpecSpec` | **splits, per test rather than per suite** — see the breakdown below |
 | `IdentityPropertySpec` | stays — it imports only `Loss`; its two `TrialOutcomes` mentions are comments that need repointing |
 | `ConfigTestLoader` | stays — its `RiskResult` mention is an example in a comment |
 
-No assertion is added, weakened or removed anywhere. The `ResultTransformSpecSpec`
-split is the one place tests are redistributed, and it follows the production
-split exactly, which is itself evidence the boundary is real.
+No assertion is added, weakened or removed anywhere. `ResultTransformSpecSpec` is
+the one place tests are redistributed.
+
+### How `ResultTransformSpecSpec` divides
+
+A test moves if and only if it names one of the three things that move —
+`RiskResultTransform`, `toTransform` or `TrialOutcomes`. Nothing else decides it,
+and two of the four suites therefore divide internally rather than whole.
+
+| Test | Moves? | Why |
+|---|---|---|
+| `interpreter` / "each case behaves as its RiskResultTransform constructor" | yes | `RiskResultTransform` and `toTransform` |
+| `interpreter` / "InsurancePolicy interprets as deductible then cap" | yes | `RiskResultTransform` and `toTransform` |
+| `interpreter` / "InsurancePolicy.create rejects cap <= deductible" | no | a cross-field validation rule on the spec type |
+| `Equal on reified data` / "structurally identical specs compare equal" | no | structural equality of the spec type |
+| `codec` / "every case round-trips" | no | JSON only |
+| `codec` / "op discriminator prevents cross-case decoding" | no | JSON only |
+| `codec` / "invalid parameters are rejected at decode" | no | JSON only |
+| `TransformPipeline` / "Identity laws" | no | list concatenation only |
+| `TransformPipeline` / "interpretation law" | yes | `TransformPipeline.toTransform` |
+| `TransformPipeline` / "pipeline order is preserved" | yes | `TrialOutcomes` and `toTransform` |
+| `TransformPipeline` / "pipeline JSON round-trips" | no | JSON only |
+
+The two shared fixtures follow the same rule. `outcomes`, which builds a
+`TrialOutcomes`, is used only by the four moving tests and travels with them.
+`allSpecs` is used only by staying tests and remains.
+
+The staying file is left with no reference to any moved type, which is what makes
+the division safe rather than merely tidy. The three `codec` tests are the only
+place the hand-written five-case discriminated decoder is covered per case —
+`MitigationEntitySpec` round-trips one `CapLosses` pipeline and nothing finer — so
+they stay with the type they test for a positive reason, not by default.
 
 ## Documentation sweep
 

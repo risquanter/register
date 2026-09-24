@@ -44,7 +44,7 @@ that differences base-vs-mitigated curves.
 
 Confirmed by reading the current sources:
 
-**`modules/common/.../domain/data/LossDistribution.scala`**
+**`modules/server/.../simulation/LossDistribution.scala`**
 - `Loss` is `Long` = **whole millions of dollars** (`1L` = $1M).
 - `TrialOutcomes(nTrials: PositiveInt, outcomes: Map[TrialId, Loss])` — a sparse
   per-trial loss vector; a commutative monoid whose `combine` is a per-trial

@@ -1,9 +1,10 @@
-package com.risquanter.register.domain.data
+package com.risquanter.register.simulation
 
 import zio.prelude.{Commutative, Debug, Equal, Identity, Ord, Validation}
 import com.risquanter.register.configs.SimulationConfig
 import scala.collection.immutable.TreeMap
 import com.risquanter.register.domain.PreludeInstances.given
+import com.risquanter.register.domain.data.{Loss, NodeProvenance, TrialId}
 import com.risquanter.register.domain.data.iron.{NodeId, PositiveInt, ValidationMessages}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
@@ -203,7 +204,7 @@ object RiskResult {
   def empty(nodeId: NodeId)(using cfg: SimulationConfig): RiskResult =
     RiskResult(nodeId, TrialOutcomes.empty, Nil)
 
-  /** Attach node identity to identity-free result content (DD-16 corollary).
+  /** Attach node identity to identity-free result content.
     *
     * The content-addressed cache stores `TrialOutcomes` + content-only
     * provenance with no node ID; the resolver labels the content with the

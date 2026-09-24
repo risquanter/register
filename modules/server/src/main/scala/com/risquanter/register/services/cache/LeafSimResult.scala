@@ -1,6 +1,7 @@
 package com.risquanter.register.services.cache
 
-import com.risquanter.register.domain.data.{TrialOutcomes, NodeProvenance}
+import com.risquanter.register.domain.data.NodeProvenance
+import com.risquanter.register.simulation.TrialOutcomes
 
 /**
   * The `ContentCache` value type: identity-free simulation result content for

@@ -2,7 +2,6 @@ package com.risquanter.register.simulation
 
 import zio.test.*
 import zio.test.Assertion.*
-import com.risquanter.register.domain.data.RiskResult
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg

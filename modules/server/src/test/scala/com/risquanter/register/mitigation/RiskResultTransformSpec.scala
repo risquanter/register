@@ -1,9 +1,10 @@
-package com.risquanter.register.domain.data
+package com.risquanter.register.mitigation
 
 import zio.test.*
 import zio.prelude.Identity
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
 import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, PositiveInt, ValidationUtil}
+import com.risquanter.register.simulation.TrialOutcomes
 
 /**
  * Property-based tests for RiskResultTransform Identity laws and mitigation strategies.

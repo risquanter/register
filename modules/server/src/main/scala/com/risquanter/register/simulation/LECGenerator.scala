@@ -1,6 +1,5 @@
 package com.risquanter.register.simulation
 
-import com.risquanter.register.domain.data.LossDistribution
 import scala.collection.immutable.TreeMap
 
 /** Utility for generating Loss Exceedance Curve (LEC) data from simulation outcomes.

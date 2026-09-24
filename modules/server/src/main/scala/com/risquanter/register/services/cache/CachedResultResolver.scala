@@ -1,7 +1,9 @@
 package com.risquanter.register.services.cache
 
 import zio.*
-import com.risquanter.register.domain.data.{LossDistribution, RiskTree, MitigationSelection}
+import com.risquanter.register.domain.data.RiskTree
+import com.risquanter.register.mitigation.MitigationSelection
+import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{NodeId, SeedEntityId, MitigationId}
 
 /**

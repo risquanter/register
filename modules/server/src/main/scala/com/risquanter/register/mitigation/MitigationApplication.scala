@@ -1,7 +1,11 @@
-package com.risquanter.register.domain.data
+package com.risquanter.register.mitigation
 
 import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
+import com.risquanter.register.domain.data.{
+  Mitigation, MitigationApplicationRecord, MitigationSpec,
+  RiskLeaf, RiskLeafTransform, RiskNode, RiskPortfolio, RiskTree
+}
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
 import com.risquanter.register.domain.errors.ValidationError
 
@@ -174,7 +178,7 @@ object MitigationApplication {
   ): Option[RiskResultTransform] =
     scoped.getOrElse(nodeId, Nil)
       .collect { case Mitigation(_, _, _, MitigationSpec.ResultStage(pipeline), _) => pipeline }
-      .map(TransformPipeline.toTransform)
+      .map(ResultTransformInterpreter.toTransform)
       .reduceOption(_.andThen(_))
 
   /** One record per applied mitigation for a single resolution: the node set

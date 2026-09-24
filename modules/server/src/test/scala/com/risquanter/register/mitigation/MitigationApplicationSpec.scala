@@ -1,8 +1,14 @@
-package com.risquanter.register.domain.data
+package com.risquanter.register.mitigation
 
 import zio.test.*
 import io.github.iltotore.iron.autoRefine
+import com.risquanter.register.domain.data.{
+  DistributionTransform, LikelihoodTransform, Mitigation, MitigationPrecedence,
+  MitigationSpec, MitigationTarget, ResultTransformSpec, RiskLeaf, RiskLeafTransform,
+  RiskPortfolio, RiskTree, TargetingPredicate, TransformPipeline
+}
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName}
+import com.risquanter.register.simulation.TrialOutcomes
 import com.risquanter.register.testutil.TestHelpers.{idStr, mitigationId, nodeId, treeId, unsafeGet}
 
 /**

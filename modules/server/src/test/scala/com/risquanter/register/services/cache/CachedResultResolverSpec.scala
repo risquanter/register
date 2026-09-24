@@ -6,7 +6,9 @@ import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
-import com.risquanter.register.domain.data.{RiskResult, RiskResultGroup, RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationSelection, MitigationPrecedence, TargetingPredicate, TransformPipeline, ResultTransformSpec, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
+import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, TransformPipeline, ResultTransformSpec, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
+import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
+import com.risquanter.register.simulation.{RiskResult, RiskResultGroup}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, TreeId, NodeId, SeedEntityId, MitigationId, ValidationUtil}
 import com.risquanter.register.testutil.TestHelpers.*
@@ -515,7 +517,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
   /** The effective (param-stage-baked) tree for one LeafStage mitigation scoping
     * `risk1`, used to derive the mitigated leaf's content hash. */
   private def effectiveTreeFor(tree: RiskTree, m: Mitigation): RiskTree =
-    com.risquanter.register.domain.data.MitigationApplication
+    MitigationApplication
       .effectiveTree(tree, MitigationSelection.Residual, scopes(m -> Set(risk1Id)))
       .toEither.toOption.get
 }

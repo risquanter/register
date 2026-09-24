@@ -1,6 +1,8 @@
 package com.risquanter.register.foladapter
 
-import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio, LossDistribution, MitigationSelection, ScopeRestriction}
+import com.risquanter.register.domain.data.{RiskTree, RiskPortfolio}
+import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
+import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.simulation.LECGenerator

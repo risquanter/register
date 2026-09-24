@@ -8,9 +8,9 @@ import com.risquanter.register.domain.data.{
   RiskTree, RiskLeaf, RiskPortfolio, RiskNode,
   Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate,
   RiskLeafTransform, LikelihoodTransform, DistributionTransform,
-  TransformPipeline, ResultTransformSpec,
-  MitigationApplication, MitigationSelection
+  TransformPipeline, ResultTransformSpec
 }
+import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
 import com.risquanter.register.domain.data.iron.{NodeId, SafeName, SeedVarId, ContentHash}
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.testutil.TestHelpers

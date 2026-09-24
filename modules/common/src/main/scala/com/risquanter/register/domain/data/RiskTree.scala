@@ -28,7 +28,7 @@ import io.github.iltotore.iron.*
   *        branches. Invariant: >= every leaf's seedVarId (checked in fromNodes).
   * @param mitigations Tree-level mitigation collection — explicit first-class
   *        entities scoping nodes by stable id, versioned with the tree content
-  *        Application semantics: MitigationApplication.
+  *        Application semantics: the server's MitigationApplication.
   */
 final case class RiskTree private (
   id: TreeId,

@@ -7,9 +7,10 @@ import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCo
 
 /**
  * Reified result-stage transform: pure data describing one atomic operation on
- * `TrialOutcomes` — comparable, hashable, serializable (unlike the opaque
- * function inside `RiskResultTransform`). `toTransform` is the single
- * interpreter from spec to executable transform.
+ * a simulation's trial outcomes — comparable, hashable, serializable. The
+ * description is shared with the browser, which builds and displays it;
+ * executing it belongs to the server, where `ResultTransformInterpreter` turns
+ * a description into the function that carries it out.
  *
  * Wire format is discriminated by an `op` field; each case validates its own
  * `op` tag during decode, so decoding is unambiguous even where cases share
@@ -41,16 +42,6 @@ object ResultTransformSpec {
           code = ValidationErrorCode.INVALID_COMBINATION,
           message = ValidationMessages.capMustExceedDeductible
         ))
-  }
-
-  /** Single interpreter: spec → executable transform. */
-  def toTransform(spec: ResultTransformSpec): RiskResultTransform = spec match {
-    case ApplyDeductible(d)       => RiskResultTransform.applyDeductible(d)
-    case CapLosses(c)             => RiskResultTransform.capLosses(c)
-    case ScaleLosses(f)           => RiskResultTransform.scaleLosses(f)
-    case FilterBelowThreshold(t)  => RiskResultTransform.filterBelowThreshold(t)
-    case InsurancePolicy(d, c)    =>
-      RiskResultTransform.applyDeductible(d).andThen(RiskResultTransform.capLosses(c))
   }
 
   // Lawful: structural equality on scalar data (unlike the deleted
@@ -161,9 +152,9 @@ object ResultTransformSpec {
 /**
  * Ordered list of result-stage operations: position is application order;
  * interpretation folds front-to-back with `andThen`; combining pipelines is
- * list concatenation (appends, never reorders). Flat by design — the
- * recursive alternative gave one sequence multiple representations and needed
- * special recursive serialization (PLAN-RISKTRANSFORM D1).
+ * list concatenation (appends, never reorders). Flat by design — a recursive
+ * shape would give one sequence several representations and would need special
+ * recursive serialization.
  */
 final case class TransformPipeline(steps: List[ResultTransformSpec])
 
@@ -182,10 +173,4 @@ object TransformPipeline {
 
   given JsonCodec[TransformPipeline] =
     JsonCodec[List[ResultTransformSpec]].transform(TransformPipeline(_), _.steps)
-
-  /** Law (tested): toTransform(a <> b) behaves as toTransform(a) andThen toTransform(b). */
-  def toTransform(p: TransformPipeline): RiskResultTransform =
-    p.steps.foldLeft(RiskResultTransform.identityTransform)((acc, s) =>
-      acc.andThen(ResultTransformSpec.toTransform(s))
-    )
 }

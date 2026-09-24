@@ -18,8 +18,9 @@ import com.risquanter.register.domain.PreludeInstances.given
  * Tests use ZIO Test generators to generate hundreds of random examples,
  * providing much stronger confidence than manual test cases.
  *
- * The simulation-outcome monoid laws live in `TrialOutcomesSpec` —
- * `TrialOutcomes` is the lawful monoid for trial-aligned aggregation.
+ * The simulation-outcome monoid laws live in the server module's
+ * `TrialOutcomesSpec` — `TrialOutcomes` is the lawful monoid for
+ * trial-aligned aggregation, and it is server-side code.
  */
 object IdentityPropertySpec extends ZIOSpecDefault {
 

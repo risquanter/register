@@ -1,6 +1,7 @@
 package com.risquanter.register.testutil
 
-import com.risquanter.register.domain.data.{Loss, RiskResult, TrialId}
+import com.risquanter.register.domain.data.{Loss, TrialId}
+import com.risquanter.register.simulation.RiskResult
 import com.risquanter.register.testutil.TestHelpers.nodeId
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
 

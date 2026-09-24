@@ -61,7 +61,7 @@ no recursive structure to descend; finding/replacing a leaf is a keyed map updat
 
 ### Results preserve trial indexes; aggregation is additive per trial
 
-[`RiskResult`](../../modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala):
+[`RiskResult`](../../modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala):
 
 ```scala
 case class RiskResult(nodeId: NodeId, outcomes: Map[TrialId, Loss], nTrials: Int, …)

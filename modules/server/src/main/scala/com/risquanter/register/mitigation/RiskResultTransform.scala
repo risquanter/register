@@ -1,8 +1,9 @@
-package com.risquanter.register.domain.data
+package com.risquanter.register.mitigation
 
 import zio.prelude.*
 import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, ValidationMessages}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
+import com.risquanter.register.simulation.TrialOutcomes
 
 /**
  * Pure transformation of TrialOutcomes for mitigation strategies.

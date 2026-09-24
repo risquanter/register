@@ -17,11 +17,12 @@ import java.io.File
  *   import com.risquanter.register.testutil.ConfigTestLoader.withCfg
  *   
  *   val result = withCfg(100) {
- *     RiskResult(nodeId("test"), outcomes, Nil)
+ *     // build whatever reads the simulation config, with nTrials fixed at 100
  *   }
  * }}}
- * 
- * Note: For domain-specific test fixtures, see RiskResultTestSupport.
+ *
+ * Note: For simulation-result fixtures, see the server module's
+ * RiskResultTestSupport.
  */
 object ConfigTestLoader {
   private def load(): SimulationConfig = {
