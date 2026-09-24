@@ -28,7 +28,7 @@ import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeReposit
 import com.risquanter.register.infra.irmin.{IrminClient, IrminClientLive}
 import zio.telemetry.opentelemetry.tracing.Tracing
 import zio.telemetry.opentelemetry.metrics.Meter
-import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
+import com.risquanter.register.telemetry.TelemetryLive
 
 /** Main application entry point
   * Sets up HTTP server with configuration management, dependency injection, and routing
@@ -187,7 +187,7 @@ object Application extends ZIOAppDefault {
     }
 
   // Requires Tracing & Meter because FineGrained mode creates AuthorizationServiceSpiceDB
-  // with OTel instruments. Both are already provided in appLayer (TracingLive/MetricsLive).
+  // with OTel instruments. Both are already provided in appLayer (TelemetryLive.configured).
   private val chooseAuthorizationService: ZLayer[AuthConfig & Tracing & Meter, Throwable, AuthorizationService] =
     ZLayer.scoped {
       for
@@ -273,14 +273,8 @@ object Application extends ZIOAppDefault {
             .requestStreaming(Server.RequestStreaming.Disabled(cfg.maxRequestBytes))
         )
       ) >>> Server.live,
-      // Telemetry - provides Tracing + Meter for observability (requires TelemetryConfig)
-      // Current setup: LoggingSpanExporter & LoggingMetricExporter configured
-      // NOTE: Console exporters produce no visible output in application logs
-      // (likely log at DEBUG/FINE level filtered by default log config)
-      // TODO: Configure log level or switch to TracingLive.otlp & MetricsLive.otlp
-      // for actual telemetry export to otel-collector
-      TracingLive.console,
-      MetricsLive.console,
+      // Telemetry — one SDK serving both traces and metrics, exporter from config
+      TelemetryLive.configured,
       RepositoryConfig.layer >>> chooseRepo,
       RepositoryConfig.layer >>> chooseScenarioService,
       RepositoryConfig.layer >>> chooseScenarioMergeService,

@@ -17,7 +17,7 @@ import io.opentelemetry.sdk.resources.Resource
 import io.opentelemetry.semconv.ServiceAttributes
 import io.opentelemetry.api.common.Attributes
 import io.opentelemetry.api
-import com.risquanter.register.configs.TelemetryConfig
+import com.risquanter.register.configs.{TelemetryConfig, TelemetryExporter}
 import com.risquanter.register.domain.data.iron.Url.*
 
 /** Combined OpenTelemetry layer providing both Tracing and Metrics
@@ -234,5 +234,15 @@ object TelemetryLive {
       val metricsLayer = OpenTelemetry.metrics(config.instrumentationScope)
       
       otelSdkOtlpLayer(config) ++ contextLayer >>> (tracingLayer ++ metricsLayer)
+    }
+
+  // ===== Configuration-selected =====
+
+  /** The combined Tracing + Meter layer for the configured exporter. */
+  val configured: ZLayer[TelemetryConfig, Throwable, Tracing & Meter & Instrument.Builder] =
+    ZLayer.service[TelemetryConfig].flatMap { configEnv =>
+      configEnv.get.exporter match
+        case TelemetryExporter.Console => console
+        case TelemetryExporter.Otlp    => otlp
     }
 }

@@ -7,7 +7,7 @@ import sttp.client3.testing.SttpBackendStub
 import sttp.tapir.server.stub.*
 import sttp.tapir.ztapir.RIOMonadError
 
-import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig, WorkspaceConfig}
+import com.risquanter.register.configs.{IrminConfig, SimulationConfig, TelemetryConfig, TelemetryExporter, WorkspaceConfig}
 import com.risquanter.register.domain.data.iron.Url
 import com.risquanter.register.http.HttpApi
 import com.risquanter.register.http.controllers.{SystemController, WorkspaceLifecycleController, WorkspaceTreeController, WorkspaceAnalysisController, QueryController, DistributionPreviewController, ScenarioController}
@@ -38,6 +38,7 @@ object StubHttpTestHarness {
   private val defaultTelemetryConfig = TelemetryConfig(
     serviceName = "register-test",
     instrumentationScope = "com.risquanter.register",
+    exporter = TelemetryExporter.Console,
     otlpEndpoint = TestSafeUrls.localhostOtlpEndpoint,
     devExportIntervalSeconds = 5,
     prodExportIntervalSeconds = 60

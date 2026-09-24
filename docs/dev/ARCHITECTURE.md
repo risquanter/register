@@ -147,7 +147,7 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
 
 **Status:** ✅ Application-level logging complete
 
-**Current:** ZIO logging (`ZIO.logInfo`, `logWarning`, `logDebug`, `logError`) used throughout all service layers per ADR-002. Routed via `zio-logging-slf4j2` bridge to Logback with env-configurable levels (`LOG_LEVEL`). OpenTelemetry tracing and metrics fully integrated via `TelemetryLive` (console + OTLP exporters).
+**Current:** ZIO logging (`ZIO.logInfo`, `logWarning`, `logDebug`, `logError`) used throughout all service layers per ADR-002. Routed via `zio-logging-slf4j2` bridge to Logback with env-configurable levels (`LOG_LEVEL`). OpenTelemetry tracing and metrics are a separate pipeline from logging, wired by `TelemetryLive.configured` as a single SDK serving both signals. Which exporter it builds comes from `register.telemetry.exporter`, which defaults to `otlp` and is overridden per environment with `REGISTER_TELEMETRY_EXPORTER`. Under `otlp` the data goes to the collector, which republishes it in Prometheus format on port 8889; under `console` it is printed on the server's own output, for running without a collector.
 
 **Remaining (production deployment):** Swap Logback plain-text encoder to JSON encoder (e.g., `logstash-logback-encoder`) for structured log aggregation in containerised environments. Request-ID correlation and user context headers are Kubernetes deployment concerns, not application-level gaps.
 

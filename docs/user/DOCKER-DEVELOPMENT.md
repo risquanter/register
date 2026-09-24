@@ -137,8 +137,17 @@ docker compose --profile persistence --profile frontend down -v
 
 ### Use case C+: Full stack + observability
 
-Adds the OpenTelemetry Collector to use case C. The collector receives OTLP traces from
-register-server and exposes Prometheus metrics on port 8889.
+Adds the OpenTelemetry Collector to use case C. The collector receives metrics and traces
+from register-server over OTLP, prints both on its own output, and republishes the metrics
+in Prometheus format on port 8889.
+
+This is the profile that makes telemetry readable. Without it nothing is listening on the
+OTLP port, and register-server drops what it records rather than failing. To see telemetry
+without running a collector at all, set `REGISTER_TELEMETRY_EXPORTER=console` and the
+server prints each span and each metric on its own output instead.
+
+Note that this is separate from application logs, which always go to the server's output
+regardless of this setting.
 
 ```bash
 docker compose \
@@ -151,6 +160,7 @@ docker compose \
 
 ```bash
 curl http://localhost:8889/metrics    # Prometheus metrics
+docker compose logs -f otel-collector # the same metrics, plus traces, as text
 ```
 
 ```bash
@@ -244,7 +254,8 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `REGISTER_WORKSPACE_MAX_CREATES_PER_IP` | `5` | Max workspace creates per IP per hour |
 | `REGISTER_WORKSPACE_MAX_TREES` | `10` | Max risk trees per workspace |
 | `OTEL_SERVICE_NAME` | `risk-register` | OpenTelemetry service name |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP endpoint |
+| `REGISTER_TELEMETRY_EXPORTER` | `otlp` | Where metrics and traces go. `otlp` sends them to the collector; `console` prints them on the server's own output. Unrelated to `LOG_LEVEL`, which governs application logs |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP endpoint, used when the exporter is `otlp` |
 | `REGISTER_REPOSITORY_TYPE` | `in-memory` | Set to `irmin` to enable Irmin backend. Read by **both** `register-server` and `frontend` (see `/config.json` below) — one variable, one source of truth, so the two containers can never disagree on whether scenarios are available. |
 | `IRMIN_URL` | `http://localhost:9080` | Irmin GraphQL URL (use `http://irmin:8080` inside compose) |
 | `IRMIN_BRANCH` | `main` | Irmin default branch |

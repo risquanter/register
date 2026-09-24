@@ -84,7 +84,7 @@ exists, and the only missing link is which exporter the SDK is built with.
 ### `TelemetryConfig` gains one field
 
 In
-`modules/common/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala`:
+`modules/server/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala`:
 
 ```scala
 /** Where telemetry is sent. `Console` writes through the logging framework and
@@ -183,11 +183,14 @@ and should build one SDK rather than two.
 
 ## File inventory
 
-- `modules/common/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala` — the `TelemetryExporter` enum, the new field, the `DeriveConfig` given
+- `modules/server/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala` — the `TelemetryExporter` enum, the new field, the `DeriveConfig` given
 - `modules/server/src/main/scala/com/risquanter/register/telemetry/TelemetryLive.scala` — the `configured` selector layer
 - `modules/server/src/main/scala/com/risquanter/register/Application.scala` — the layer swap and the comment that stops being true
 - `modules/server/src/main/resources/application.conf` — the `exporter` setting and its environment override
-- `modules/common/src/test/scala/com/risquanter/register/configs/TelemetryConfigSpec.scala` — new — the exporter field parses from configuration and rejects an unknown value
+- `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala` — the new `exporter` field at its `TelemetryConfig` construction site
+- `modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala` — the new `exporter` field at its `TelemetryConfig` construction site
+- `modules/server/src/test/scala/com/risquanter/register/configs/TelemetryConfigSpec.scala` — existing file, extended — the exporter field parses from configuration and rejects an unknown value
+- `otel-collector-config.yaml` — migrate the deprecated `logging` exporter to `debug` in both pipelines; the collector removed `logging` at v0.111.0
 - `docker-compose.yml` — uncomment `OTEL_EXPORTER_OTLP_ENDPOINT` and remove the "Unused with console exporters" note
 - `docs/user/DOCKER-DEVELOPMENT.md` — how to read metrics: run the observability profile, curl port 8889
 - `docs/dev/ARCHITECTURE.md` — the observability section currently states telemetry is "fully integrated via TelemetryLive (console + OTLP exporters)", which reads as though export works; it is corrected to say which exporter is default and how to change it
@@ -220,7 +223,7 @@ that way are added to this inventory before being edited.
 
 ### Configuration parsing
 
-A unit test in `commonJVM` asserts the exporter field parses from configuration
+A unit test in `server` asserts the exporter field parses from configuration
 and that an unknown value is rejected rather than silently defaulted. A
 mistyped exporter name should fail at startup, not quietly produce the wrong
 one.

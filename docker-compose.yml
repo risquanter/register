@@ -125,13 +125,14 @@ services:
       REGISTER_WORKSPACE_TTL: "${REGISTER_WORKSPACE_TTL:-72h}"
       REGISTER_WORKSPACE_IDLE_TIMEOUT: "${REGISTER_WORKSPACE_IDLE_TIMEOUT:-1h}"
 
-      # Telemetry configuration
-      # NOTE: TracingLive.console & MetricsLive.console are configured but produce
-      # no visible output (likely log at DEBUG level filtered by default log config).
-      # For working telemetry: switch to TracingLive.otlp & MetricsLive.otlp, then run:
-      # docker-compose --profile observability up
+      # Telemetry configuration. Metrics and traces go to the collector, which is
+      # started by the observability profile and republishes them on port 8889:
+      #   docker compose --profile observability up
+      # Set REGISTER_TELEMETRY_EXPORTER=console to print them on this service's
+      # own output instead, for running without the collector.
       OTEL_SERVICE_NAME: "risk-register"
-      # OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"  # Unused with console exporters
+      REGISTER_TELEMETRY_EXPORTER: "${REGISTER_TELEMETRY_EXPORTER:-otlp}"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
     image: local/register-server:${APP_VERSION:-dev}
     read_only: true
     security_opt:

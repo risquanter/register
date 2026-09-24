@@ -29,6 +29,7 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
       withConfig(
         "register.telemetry.serviceName" -> "risk-register",
         "register.telemetry.instrumentationScope" -> "com.risquanter.register",
+        "register.telemetry.exporter" -> "otlp",
         "register.telemetry.otlpEndpoint" -> "http://localhost:4317",
         "register.telemetry.devExportIntervalSeconds" -> "5",
         "register.telemetry.prodExportIntervalSeconds" -> "60"
@@ -40,6 +41,7 @@ object ValidatedConfigSpec extends ZIOSpecDefault {
       withConfig(
         "register.telemetry.serviceName" -> "risk-register",
         "register.telemetry.instrumentationScope" -> "com.risquanter.register",
+        "register.telemetry.exporter" -> "otlp",
         "register.telemetry.otlpEndpoint" -> "not-a-url",
         "register.telemetry.devExportIntervalSeconds" -> "5",
         "register.telemetry.prodExportIntervalSeconds" -> "60"

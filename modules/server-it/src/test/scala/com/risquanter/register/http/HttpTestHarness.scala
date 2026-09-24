@@ -43,6 +43,7 @@ object HttpTestHarness:
   private val defaultTelemetryConfig = TelemetryConfig(
     serviceName = "register-it",
     instrumentationScope = "com.risquanter.register",
+    exporter = TelemetryExporter.Console,
     otlpEndpoint = TestSafeUrls.localhostOtlpEndpoint,
     devExportIntervalSeconds = 5,
     prodExportIntervalSeconds = 60
