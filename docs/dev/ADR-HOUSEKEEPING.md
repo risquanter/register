@@ -200,6 +200,44 @@ to this list. Recorded here so it is not lost if the sweep misses it.
 
 ---
 
+## T8 — ADR-036 (Confidential Internal Identifiers) — DONE 2026-09-15
+
+**Why it was here.** Two passages of `PLAN-RISKTRANSFORM` asserted that node ids
+are confidential internal identifiers under ADR-036 and that an access log
+writing them to disk was a reason to redesign an endpoint. ADR-036 says neither
+thing: it names `WorkspaceId` as its subject, shows `nodeId` as a client-safe
+reporting field, and §3 explicitly permits a confidential identifier in server
+logs.
+
+**Settled by a security review**, which tested the claim against the code rather
+than the ADR text alone. The finding: confinement is warranted only where
+presenting an identifier makes the server widen its lookup. `WorkspaceId` has
+that property, because `WorkspaceStore.resolveById` spans every workspace with no
+capability check. A node id does not: every lookup of one runs against
+`tree.index.nodes`, a map belonging to a single tree the caller already passed
+`ws.trees.contains(treeId)` for, and no code path takes a bare node id and
+searches across trees. A node id from another workspace is therefore
+indistinguishable from one that was never issued — not by response shape, and not
+by branch, because it is the same `None` from the same lookup.
+
+**Done in this pass:**
+
+- ADR-036 gained §4, "Identifiers Not Confined by This Record", naming `TreeId`,
+  `NodeId` and `MitigationId` as client-facing, with the property that decides it
+  and the worked A-and-B walkthrough.
+- The Implementation table gained a row for the three.
+- The References line claiming "`WorkspaceId`/`TreeId` stay internal" now says
+  what ADR-021 actually decided: `TreeId` is never the credential, which is not
+  the same as never appearing on the wire — ADR-021 §3's own endpoint design puts
+  it in the path.
+- Both wrong passages in `PLAN-RISKTRANSFORM` were corrected to reason from the
+  selection payload's size, which is the argument that always held, and the
+  ADR-036 alignment-table row now states the real compliance ground.
+
+No code changed. No vulnerability was found.
+
+---
+
 ## Sequencing
 
 T2 before T1, because T1's banner points at ADR-012 §4.
@@ -207,3 +245,4 @@ T3 before T6, because T6's replacement wording depends on T3's outcome.
 T5 after the `ValuationResult` sub-slice, or accept editing twice.
 T4 after PLAN-RISKTRANSFORM slice 5, which already fixes the two statements.
 T7 rides with the rename plan.
+T8 is done and needs no sequencing.

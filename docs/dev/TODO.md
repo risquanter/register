@@ -8,25 +8,26 @@ not prescribed solutions.
 
 ## Plan landing order — approved plans, in the order they must be implemented
 
-Seven plans are ruled and awaiting approval. Five ordering constraints are real;
+Eight plans are ruled and awaiting approval. Six ordering constraints are real;
 everything else is free. Each plan repeats its own constraint in a Sequencing
 section, and this is the single list.
 
 | # | Plan | Why here |
 |---|---|---|
 | 1 | `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md` | no technical dependency; touches no Scala source and no file any other plan touches. First because it closes a credential-in-logs defect |
-| 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3, 5 and 6 |
+| 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3, 5 and 7 |
 | 3 | `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md` | must follow 2: it adds a method to both registries, which 2 renames. Writing it first means writing it twice |
 | 4 | `docs/dev/plans/PLAN-TELEMETRY-EXPORT.md` | must precede 5 |
 | 5 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | depends on 2 (both change `CachedResultResolverLive.scala`) and on 4 (it publishes a saturation gauge and writes its tuning rule from what that gauge shows; nothing can read it until the console exporters are replaced) |
-| 6 | `docs/dev/plans/PLAN-RISKTRANSFORM.md` (M4) | must follow 2. The two share fifteen files, including all three scope-resolver sources. M4 adds a scope-resolver field to `RiskTreeServiceLive` and rewrites the resolver's memo, both against names that 2 changes: `ScopeResolverScope` becomes `MitigationScopeResolverRegistry` and `resolverFor` becomes `forWorkspace`. Landing M4 first would grow 2's ripple list by everything M4 adds |
+| 6 | `docs/dev/plans/PLAN-LOSSDISTRIBUTION-TO-SERVER.md` | must precede 7. It moves the sealed `LossDistribution` file and `RiskResultTransformSpec.scala`, both of which 7's `ValuationResult` sub-slice writes into. Landing it second means writing the new subtype and its tests in `common` and moving them afterwards |
+| 7 | `docs/dev/plans/PLAN-RISKTRANSFORM.md` (M4) | must follow 2. The two share fifteen files, including all three scope-resolver sources. M4 adds a scope-resolver field to `RiskTreeServiceLive` and rewrites the resolver's memo, both against names that 2 changes: `ScopeResolverScope` becomes `MitigationScopeResolverRegistry` and `resolverFor` becomes `forWorkspace`. Landing M4 first would grow 2's ripple list by everything M4 adds |
 | — | `docs/dev/plans/PLAN-IRMIN-RECURSIVE-READ.md` | fully independent; shares no file with any of the above and may land at any point |
 
 Steps 3 and 4 are independent of each other and could swap. Steps 3, 4 and 5 all
 touch `Application.scala`, each on different lines — a released-cache layer, a
 telemetry layer swap, and a limiter layer — so the order between them is a
-matter of diff size, not correctness. Step 6 is the largest plan by far and is
-ordered only against step 2; it is independent of 3, 4 and 5.
+matter of diff size, not correctness. Step 7 is the largest plan by far and is
+ordered only against steps 2 and 6; it is independent of 3, 4 and 5.
 
 ---
 
@@ -1922,8 +1923,12 @@ request bounds: the 10 000-node tree ceiling and the 8 MiB body cap. Candidate t
 bounded-input mechanism with the screening-query length cap (TODO 41) — one
 limiting mechanism, not per-endpoint re-implementations.
 
-**Status:** open (moved here from the code-quality-review skill's known-gap
-note, 2026-08-10; originally flagged in a security review).
+**Status:** open, and specified for implementation. `PLAN-RISKTRANSFORM` slice 1
+adds exactly this bound — its `LECCurvesMultiRequest` refines the requested node
+list against the same 10 000-node tree ceiling, alongside the two selection
+bounds. This item is marked closed when that slice lands, or immediately if the
+bound ships ahead of the rest of M4. (Moved here from the code-quality-review
+skill's known-gap note, 2026-08-10; originally flagged in a security review.)
 
 ---
 

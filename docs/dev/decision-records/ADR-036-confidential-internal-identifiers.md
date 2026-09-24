@@ -79,6 +79,58 @@ something with no server-side scoping power — `WorkspaceKeySecret` itself
 `WorkspaceId`. Any new response field, log line, or header that would return a
 `WorkspaceId` to a client is a Decision Trigger — stop and ask.
 
+### 4. Identifiers Not Confined by This Record
+
+`TreeId`, `NodeId` and `MitigationId` are **client-facing**. They are returned in
+responses, accepted as path segments and body fields, and none of that is a
+violation of this record. This section states why, so the question is not
+re-derived each time one of them appears on the wire.
+
+**The property that decides it.** Confinement is warranted only when presenting
+the identifier makes the server widen what it looks at. An identifier that
+merely *names* something inside a set the caller already earned the right to
+read has no scoping power of its own, and hiding it buys nothing.
+
+`WorkspaceId` has that power. `WorkspaceStore.resolveById` looks one up in a
+store spanning every workspace, with no accompanying capability check. A
+`WorkspaceId` in a client's hands would therefore be an ingredient a future
+feature could turn into cross-tenant access, which is what §1 forecloses.
+
+A node id has no such power, and the reason is structural rather than a
+convention anyone has to remember. Every lookup of a client-supplied node id
+runs against `tree.index.nodes`, a `Map[NodeId, RiskNode]` belonging to one
+`RiskTree` object. That object is only ever obtained after the caller's
+`WorkspaceKeySecret` resolved to their own workspace and the requested `TreeId`
+passed `ws.trees.contains(treeId)` in `WorkspaceStore.resolveTreeWorkspace`. No
+code path anywhere takes a bare node id and searches across trees or across
+workspaces for it.
+
+**Worked through.** Suppose an attacker holds a valid `WorkspaceKeySecret` for
+workspace A and has somehow obtained a real node id from workspace B's tree.
+
+- If they name B's tree as well, `resolveTreeWorkspace` fails first: B's
+  `TreeId` is not in A's tree set, and the request is refused before any node is
+  looked at.
+- If they name their own tree — the only tree they are allowed to name — the
+  lookup `tree.index.nodes.get(nodeId)` runs against A's node map, which does
+  not contain B's node id, and returns nothing.
+
+The second case is not merely mapped to the same response as a node id that was
+never issued to anyone; it *is* the same event, the same `None` from the same
+lookup. There is no branch distinguishing them, so there is no status code,
+response shape, or timing difference to enumerate against.
+
+The same argument covers `TreeId`, which is looked up only inside the caller's
+own resolved workspace record, and `MitigationId`, which is looked up only
+inside an already-loaded tree's own mitigation list.
+
+**The second half of the test.** Confinement is also cheap only where the
+identifier has no legitimate client use. `WorkspaceId` has none — §1's point is
+that no feature needs to return it. `TreeId`, `NodeId` and `MitigationId` are
+the everyday way a client names what it is working on: a node id appears in
+every tree read and every analysis response, and the interface cannot be built
+without it. There is no unexposed state here to protect.
+
 ---
 
 ## Code Smells
@@ -122,11 +174,12 @@ ZIO.fail(MergeConflict(name, s"${conflicts.size} conflicting path(s)"))
 | Workspace endpoints | Accept `WorkspaceKeySecret`; derive `WorkspaceId` via `WorkspaceStore.resolve` |
 | `MergeConflictPath` | Workspace-relative path; the `WorkspaceId` is parsed out, never carried |
 | Wire-facing errors (`MergeConflict`, translated `DataConflict`) | Carry a `ScenarioName` substitute, not a `BranchRef` |
+| `TreeId`, `NodeId`, `MitigationId` | Client-facing; each is resolved only inside a container the caller is already authorized for (§4) |
 
 ---
 
 ## References
 
 - [ADR-024: Externalized Authorization](./ADR-024-externalized-authorization-pep-pattern.md) — capability-based access; possessing a key grants access, not knowledge of an id
-- [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — `WorkspaceKeySecret` is the bearer capability; `WorkspaceId`/`TreeId` stay internal
+- [ADR-021: Capability URLs](./ADR-021-capability-urls.md) — `WorkspaceKeySecret` is the bearer capability. Its §1 phrase "`TreeId` remains internal" means `TreeId` is never the credential, not that it never appears on the wire: ADR-021 §3's own endpoint design puts `{treeId}` in the path beside the key. See §4 above
 - [ADR-035: Error Leakage Prevention](./ADR-035-error-leakage-prevention.md) — a confidential identifier is one of the things an error message must not carry

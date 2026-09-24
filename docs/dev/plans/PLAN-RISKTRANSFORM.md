@@ -1998,11 +1998,12 @@ from its first ruling; the entry states both the new ruling and why it changed.
    is a set (A7), so the payload is a map of up to 1 000 mitigation entries,
    each of which may carry up to 10 000 node ids under
    `ScopeRestriction.NodesOnly` (F5's bounds); a URL cannot be designed against
-   the typical case when the bound is that large. Two further arguments hold
-   independently: node ids are confidential internal identifiers (ADR-036) and
-   the nginx access log records full request lines, so a selection in a query
-   string writes node ids to disk; and `lec-multi` is already a POST with a JSON
-   body, so a body on both endpoints is one encoding rather than two.
+   the typical case when the bound is that large. At those bounds a selection
+   carries up to ten million node ids, which exceeds the request-line limit of
+   every common server and proxy, so a query string is not a viable carrier for
+   it at any size near the bound. One further argument holds independently:
+   `lec-multi` is already a POST with a JSON body, so a body on both endpoints
+   is one encoding rather than two.
 
    Three consequences, each verified against source:
    - **`MitigationSelection.Inherent` is the wire spelling of "no mitigations",
@@ -2592,10 +2593,13 @@ import com.risquanter.register.domain.data.LECNodeCurve
 import com.risquanter.register.domain.data.iron.MitigationId
 import com.risquanter.register.http.codecs.IronTapirCodecs.given
 
-/** One drawn curve together with the mitigations that shaped it: those applied
-  * at the node itself and every one applied anywhere below it. The
-  * mitigation-free curve is the entry whose list is empty, which is why there
-  * is no separately named field for it.
+/** One drawn curve together with the mitigations that shaped it.
+  *
+  * `withMitigations` names every mitigation whose resolved scope covers this
+  * node or any node below it — decided by scope, so a selected mitigation that
+  * covers nothing here is absent and a covering mitigation is named whether or
+  * not it visibly bent this curve. The mitigation-free curve is the entry whose
+  * list is empty, which is why there is no separately named field for it.
   */
 final case class LECNodeSeries(curve: LECNodeCurve, withMitigations: List[MitigationId])
 
@@ -2603,8 +2607,15 @@ object LECNodeSeries:
   given codec: JsonCodec[LECNodeSeries] = DeriveJsonCodec.gen[LECNodeSeries]
   given schema: Schema[LECNodeSeries]   = Schema.derived[LECNodeSeries]
 
-/** One exceedance probability together with the mitigations that shaped it,
-  * read exactly as `LECNodeSeries.withMitigations`.
+/** One exceedance probability together with the mitigations that shaped it.
+  *
+  * `withMitigations` is read exactly as `LECNodeSeries.withMitigations`: the
+  * mitigations whose resolved scope covers this node or any node below it,
+  * neither the set the caller selected nor the set that moved the number. It is
+  * empty exactly when no selected mitigation reached this node, which is the
+  * only way a caller can tell an unmitigated figure from a mitigated one that
+  * happens to match it — a cap set above the queried threshold leaves the
+  * probability unchanged while still being named here.
   */
 final case class ExceedanceSeries(probability: Double, withMitigations: List[MitigationId])
 
@@ -2637,7 +2648,7 @@ one `NodeId` already has:
       .in(jsonBody[ProbOfExceedanceRequest].description("The mitigation selection this reading is computed under"))
       .in(branchHeader)
       .in(query[Option[CommitHash]]("at").description("Commit pin for point-in-time read — absent = branch head."))
-      .out(jsonBody[List[ExceedanceSeries]])
+      .out(jsonBody[ExceedanceSeries])
 
   val getWorkspaceLECCurvesMultiEndpoint =
     authedBaseEndpoint
@@ -2657,9 +2668,8 @@ one `NodeId` already has:
 
 The exceedance endpoint becomes a POST. That is Decision 3 and it is not
 cosmetic: a selection can name a thousand mitigations, each ticked at up to ten
-thousand nodes, so it cannot ride in a query string — and node ids are
-confidential internal identifiers (ADR-036) that the nginx access log would
-write to disk if they appeared in a request line.
+thousand nodes, so at the bound it carries ten million node ids and cannot ride
+in a query string at any size approaching that.
 
 **`modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala`** — the two
 analysis methods:
@@ -2668,10 +2678,12 @@ analysis methods:
   /** Exceedance probability at a threshold for one node, under one mitigation
     * selection.
     *
-    * The result is a list of readings rather than a single number: the first
-    * entry is always the mitigation-free reading, and a second entry follows
-    * when the selection reaches this node, carrying the combined effect of
-    * every mitigation applied at it or below it. `withMitigations` names them.
+    * One reading, computed under the selection the caller passed.
+    * `withMitigations` names the mitigations whose resolved scope reached this
+    * node or any node below it, and is empty exactly when none did — which is
+    * also the whole answer for the mitigation-free selection. A caller wanting
+    * the mitigation-free figure alongside a mitigated one asks twice; the two
+    * probabilities share no tick domain and need no shared request.
     *
     * `branch` and `at` are taken separately rather than as a `Revision`
     * because the scope resolver memoizes per (tree, branch) and `Revision.At`
@@ -2688,7 +2700,7 @@ analysis methods:
     branch: BranchRef,
     at: Option[CommitHash],
     selection: MitigationSelection = MitigationSelection.Inherent
-  ): Task[List[ExceedanceSeries]]
+  ): Task[ExceedanceSeries]
 
   /** LEC curves for several nodes on one shared tick domain, under one
     * mitigation selection.
@@ -2766,14 +2778,27 @@ class RiskTreeServiceLive private (
         _           <- ResolvedScopes.logFailures(scopes)
       yield scopes
 
-  /** Every mitigation that shaped one node's mitigated reading: those applied
-    * at the node plus every one applied anywhere below it, in the order
-    * `MitigationApplication.scoped` composes them. Computed per requested node,
-    * so the cost follows the requested subtrees rather than the whole tree.
+  /** The mitigations whose resolved scope covers this node or any node below
+    * it, in the order `MitigationApplication.scoped` composes them. Computed per
+    * requested node, so the cost follows the requested subtrees rather than the
+    * whole tree.
+    *
+    * Membership is decided by scope alone, which makes this list two things it
+    * is easy to mistake it for, and neither of them:
+    *
+    *   - It is not the set the caller selected. A selected mitigation whose
+    *     scope covers nothing in this subtree is absent from it.
+    *   - It is not the set that changed the figure. A mitigation whose scope
+    *     covers the subtree is present even when the reading is identical to
+    *     the mitigation-free one — a cap set above an exceedance threshold
+    *     moves trials down to the cap, and trials already at or above that
+    *     threshold stay above it. Deciding "did this change the figure" would
+    *     require computing the mitigation-free reading as well, which the
+    *     single-reading exceedance answer deliberately does not do.
     *
     * The list is also the reached test: it is empty exactly when neither the
-    * node nor any descendant is inside an applied mitigation's scope, and such
-    * a node carries no second reading. */
+    * node nor any descendant is inside an applied mitigation's scope. On the
+    * curve response such a node carries no second reading. */
   private def withMitigationsFor(
     tree: RiskTree,
     scoped: Map[NodeId, List[Mitigation]],
@@ -2852,8 +2877,10 @@ attributes, the `omitAbsent` log line — stays as it is:
     } yield result
 ```
 
-`probOfExceedance`'s body follows the same shape with one node and no curve
-generation:
+`probOfExceedance` shares the lookup, the known-mitigation check and the scope
+resolution, and diverges after them: it reads one node, generates no curve, and
+resolves once rather than twice, because it answers under the caller's selection
+alone.
 
 ```scala
         (tree, commit, _) <- lookupNodeInTree(wsId, treeId, nodeId, revisionOf(branch, at))
@@ -2863,13 +2890,17 @@ generation:
         scoped    = MitigationApplication.scoped(tree, selection, applied)
         withMits  = withMitigationsFor(tree, scoped, nodeId)
 
-        base     <- resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
-                      .map(r => ExceedanceSeries(r.probOfExceedance(threshold), Nil))
-        extra    <- if withMits.isEmpty then ZIO.succeed(Nil)
+        result   <- if withMits.isEmpty
+                    then resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance)
                     else resolver.ensureCached(tree, nodeId, seedEntityId, includeProvenance, selection, applied)
-                           .map(r => List(ExceedanceSeries(r.probOfExceedance(threshold), withMits)))
-      } yield base :: extra
+      } yield ExceedanceSeries(result.probOfExceedance(threshold), withMits)
 ```
+
+The empty-`withMits` branch drops the selection rather than passing one that
+reaches nothing. Both branches return the same figure in that case — a selection
+scoping no node in this subtree leaves the effective subtree and its content
+hash unchanged — so the branch is there to keep the mitigation-free read on the
+path it already has, not to correct a result.
 
 **`modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`** gains one
 shared logging helper, moved out of `QueryServiceLive` so both readers of a
@@ -3485,7 +3516,10 @@ its mitigation-shaped part: the required branch header, the optional `at` pin
 and what it means, why both analysis endpoints take a JSON body, the selection's
 two-list form and its conversion, the rule that a named-but-absent mitigation
 fails the request while a mitigation that applies to nothing does not, the
-series-shaped response and the reading of `withMitigations`, the payload bounds,
+two response shapes and the one reading of `withMitigations` they share — the
+curve endpoint answers a list of readings per node so that both valuations land
+on one tick domain, the exceedance endpoint answers one reading because a single
+probability has no axis to share — the payload bounds,
 and the reason there is no staleness or revision field — stored versions are
 immutable, so a request is answered at the version it names and there is nothing
 for a client's view to diverge from.
@@ -3530,7 +3564,7 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 | ADR-033 (narrowest sound catch) | `ValuationResult.create` catches `ArithmeticException` from the scaled-loss guard and converts it to a `ValidationError`, the same named-type conversion `RiskResultGroup.create` already performs in this file. ADR-033's Implementation table lists `LossDistribution.scala` and gains the second site | Amended, slice 5 |
 | ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. ADR-034 was restructured on 2026-09-14: its Decision 3 states that a transformed node's mitigated value is flat by construction, and its Decision 4 carries the `ValuationResult` ruling that §8.16 records | Compliant; ADR-034 amended |
 | ADR-035 (error leakage prevention) | The internal-error resolution failure reaches the wire as a fixed message with no detail | Compliant |
-| ADR-036 (confidential internal identifiers) | Node ids move in a request body, never in a request line an access log records — this is one of Decision 3's two independent arguments | Compliant |
+| ADR-036 (confidential internal identifiers) | `WorkspaceId` and `BranchRef` stay on internal service signatures and never cross the client boundary. `TreeId`, `NodeId` and `MitigationId` are not confined by this record: it names `WorkspaceId` as its subject and shows `nodeId` as a client-safe reporting field, and every lookup taking a client-supplied node id resolves it inside a tree the caller is already authorized for | Compliant |
 
 #### 7.6.11 Verification plan
 
@@ -3558,7 +3592,13 @@ New tests, by the behaviour each one pins:
   mitigation-free reading is always present and first; a node inside an applied
   scope carries exactly one further reading; a node outside every applied scope
   carries one reading only; a portfolio above a scoped leaf carries a second
-  reading whose `withMitigations` names the descendant's mitigations; a
+  reading whose `withMitigations` names the descendant's mitigations; the
+  exceedance endpoint answers one reading rather than a list, with an empty
+  `withMitigations` for a node no applied scope reaches and the descendant's
+  mitigations named for a portfolio above a scoped leaf; a cap set above the
+  queried threshold leaves that endpoint's probability equal to the
+  mitigation-free figure while `withMitigations` still names the mitigation,
+  which is what makes the field load-bearing rather than decorative; a
   selection naming an absent mitigation fails with `NOT_FOUND`; a
   mitigation-free request performs one resolution pass and no scope resolution;
   a tree PUT carrying mitigation buckets stores them, and a PUT omitting the
@@ -3609,9 +3649,9 @@ consumes. Two further decisions gate slice 6. Slices 2 to 5 carry none. All seve
 are listed here so the elevation states them rather than implying them.
 
 Numbering is kept stable because other sections reference these by number.
-Decision 5 has since been answered by checking the inventory rather than by a
-ruling, so it keeps its slot and records the answer in place. Decisions 1, 2, 3
-and 4 remain open.
+Decision 5 was answered by checking the inventory rather than by a ruling, so it
+keeps its slot and records the answer in place. Decisions 8, 9 and 10 are the
+open ones.
 
 **Gating the §8.16 sub-slice.** §8.16 rules the design; none of the following was
 ruled by it, and each changes what the code looks like. The reasoning that
@@ -3619,11 +3659,10 @@ produced the design is in
 [`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md)
 and should be read before any of these is answered.
 
-**Ruled 2026-09-15 (user):** decisions 1, 2, 3, 4 and 7 below, each recorded in
-place. Decision 5 was answered by checking the inventory rather than by a ruling.
-Decision 6 is held pending the baseline questions recorded under it. Two new
-questions were raised while ruling 1 and 2 and are recorded as decisions 8, 9 and
-10 at the end of this section; the sub-slice is not elevated until they are
+**Ruled 2026-09-15 (user):** decisions 1, 2, 3, 4, 6 and 7 below, each recorded
+in place. Decision 5 was answered by checking the inventory rather than by a
+ruling. Two new questions were raised while ruling 1 and 2 and are recorded as
+decisions 8, 9 and 10 at the end of this section; the sub-slice is not elevated until they are
 settled, because each changes where the type lives or what it is.
 
 1. **Where `ValuationResult` is defined.** It extends `LossDistribution`, whose
@@ -3733,14 +3772,15 @@ settled, because each changes where the type lives or what it is.
 **Gating slice 6.**
 
 6. **The exceedance endpoint's answer shape.** §7.6.3 wrote out the curve
-   response and not this one. §7.6.5 applies the same three rules to it — the
-   mitigation-free reading always present and first, one further reading when
-   the selection reaches the node, `withMitigations` naming what shaped it — and
-   the alternative is to leave the endpoint returning a bare number and refuse
-   selections on it. The elevation specifies the first; it is recorded as a
-   decision because the shape was derived here rather than ruled at §7.6.3.
+   response and not this one. Three shapes were on the table: the curve
+   endpoint's three rules applied unchanged, so that a node answers a list with
+   the mitigation-free reading always present and first; a bare probability with
+   selections refused outright; or one reading under the caller's selection,
+   carrying `withMitigations`. It is recorded as a decision because the shape was
+   derived here rather than ruled at §7.6.3, and because the endpoint has no
+   in-repository client, which is what made every one of the three affordable.
 
-   **Baseline established 2026-09-15, ruling held.** Who actually consumes this
+   **Baseline the ruling rests on.** Who actually consumes this
    endpoint was checked, because it decides whether changing its shape costs
    anything. `GET /w/{key}/risk-trees/{treeId}/nodes/{nodeId}/prob-of-exceedance`
    is defined in `WorkspaceAnalysisEndpoints.scala` and wired in
@@ -3761,7 +3801,37 @@ settled, because each changes where the type lives or what it is.
 
    The exceedance endpoint returns a single probability, which has no tick domain
    and needs no shared axis. So the list is not forced on it by the same argument
-   that forced it on the curve endpoint, and the decision is genuinely open.
+   that forced it on the curve endpoint.
+
+   **RULED 2026-09-15 (user): one `ExceedanceSeries`, not a list of them.** The
+   endpoint answers the selection the caller passed, and answers it once. A
+   caller who wants the mitigation-free figure beside a mitigated one asks
+   twice, which costs a second tree read and a second scope resolution and no
+   second simulation, because leaf results are content-addressed and the second
+   request reads them from cache.
+
+   The reading keeps `withMitigations` rather than collapsing to a bare
+   probability, and that is the part of the ruling that carries weight. A bare
+   number cannot say whether any mitigation reached this node, and a second
+   request does not recover it: a mitigation whose scope reaches the node can
+   leave `probOfExceedance` at one threshold bit-identical to the inherent
+   figure — a cap set above the threshold moves every trial above the cap down
+   to it, and each of those trials was already at or above the threshold and
+   still is. So equal probabilities do not mean nothing applied, and only
+   `withMitigations` distinguishes the two cases.
+
+   `withMitigations` is read here exactly as it is on the curve endpoint, by the
+   same `withMitigationsFor` function: the mitigations whose **resolved scope**
+   covers this node or any node below it, ordered by
+   `(precedence.key, id.value)`. It is not the set the caller sent, and it is
+   not the set that changed the number. A requested mitigation scoping nothing
+   in this subtree is absent from it; a mitigation scoping the subtree is
+   present even when the probability did not move. A test of "did it change this
+   figure" would require computing the inherent reading too, which is the second
+   call this shape deliberately does not make.
+
+   The ruling also removes a resolver call: the list shape resolved twice inside
+   one request to build both entries, and one reading resolves once.
 7. **Whether M4 ships mitigation authoring.** §7.4's interface list covers
    selecting mitigations, drawing their effect, comparing selections, the
    badges, and the override edit popup. It does not say whether a user can
@@ -3783,6 +3853,13 @@ settled, because each changes where the type lives or what it is.
 
 The two original slice-6 decisions kept their wording and were renumbered 6 and 7.
 
+**Two obligations on M4's closing report, recorded here so neither is
+rediscovered.** It ends with the instruction to start the predicate-editor plan,
+per the ruling above. It also marks `docs/dev/TODO.md` item 40 closed: that item
+asks for a maximum size on the multi-LEC endpoint's node-id list, and slice 1's
+`LECCurvesMultiRequest` adds precisely that bound. If the bound ships ahead of
+the rest of M4, item 40 is marked closed then rather than at the end.
+
 **Raised while ruling decisions 1 and 2 (2026-09-15). These gate the sub-slice.**
 
 8. **Which module the sealed hierarchy lives in.** Decision 1 settled that the
@@ -3803,6 +3880,26 @@ The two original slice-6 decisions kept their wording and were renumbered 6 and 
    `NodeId`, `Loss` and `TrialId` all still resolve. A move also stops the
    hierarchy being cross-compiled into the Scala.js artifact, where nothing uses
    it.
+
+   **RULED 2026-09-15 (user): move it to `server`.** The work is scoped in its
+   own document,
+   [`PLAN-LOSSDISTRIBUTION-TO-SERVER.md`](./PLAN-LOSSDISTRIBUTION-TO-SERVER.md),
+   and lands **before** the `ValuationResult` sub-slice, so the third subtype is
+   written once in its final home rather than written here and moved afterwards.
+
+   Two facts that document establishes and this decision did not anticipate.
+   The hierarchy is not the only server-only code in `common`:
+   `RiskResultTransform.scala` and `MitigationApplication.scala` have the same
+   property, and moving the group rather than the one file is what lets
+   `LossDistribution.scala` move whole instead of being split around
+   `TrialOutcomes`. And the argument that the move shrinks the browser bundle is
+   false — the Scala.js linker already strips every one of these types, measured
+   at zero occurrences in the linked output. The case is placement, not size.
+
+   Consequences for this plan when that one lands: the inventory entries for
+   `LossDistribution.scala` and `RiskResultTransformSpec.scala` both change path,
+   and ADR-009 gains a second reason to be amended in slice 5 — it gives file
+   paths for every item as well as enumerating the two subtypes.
 
 9. **Whether `RiskResult` and `RiskResultGroup` stop being part of any consumer-
    facing surface, and what follows.** If decision 2's narrowing lands, the
