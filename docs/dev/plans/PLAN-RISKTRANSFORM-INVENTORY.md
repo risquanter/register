@@ -362,3 +362,6 @@ sweep (comments/docs touched by the change updated in the same pass) and its
 PATCH bump; plan close = MINOR bump.
 - modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCacheRegistry.scala
 - modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverRegistry.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/NodeValuation.scala
+- modules/common/src/main/scala/com/risquanter/register/http/responses/NodeReading.scala
+- modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala
