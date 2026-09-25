@@ -38,7 +38,7 @@ import io.github.iltotore.iron.refineUnsafe
   * simply misses; the old entry becomes an unreachable orphan for the
   * `EvictionStrategy`.
   *
-  * Cache instances are per-workspace via `CacheScope`, keyed by the
+  * Cache instances are per-workspace via `ContentCacheRegistry`, keyed by the
   * workspace's `seedEntityId`.
   *
   * Telemetry (ADR-002):
@@ -46,7 +46,7 @@ import io.github.iltotore.iron.refineUnsafe
   * - Cache stats (entries/hits/misses) logged at debug after each resolution
   */
 final case class CachedResultResolverLive(
-    cacheScope: CacheScope,
+    caches: ContentCacheRegistry,
     config: SimulationConfig,
     tracing: Tracing,
     simulationDuration: Histogram[Double],
@@ -77,7 +77,7 @@ final case class CachedResultResolverLive(
         _         <- tracing.setAttribute("include_provenance", includeProvenance)
         effective <- effectiveTreeOf(tree, selection, resolvedScopes)
         scoped     = MitigationApplication.scoped(tree, selection, resolvedScopes)
-        cache     <- cacheScope.cacheFor(seedEntityId)
+        cache     <- caches.forWorkspace(seedEntityId)
         result    <- distributionForId(effective, ContentHashIndex.build(effective), cache, nodeId, seedEntityId, scoped)
         stats     <- cache.stats
         _         <- ZIO.logDebug(s"ContentCache stats: entries=${stats.entries}, hits=${stats.hits}, misses=${stats.misses}, evicted=${stats.evictedTotal}")
@@ -95,7 +95,7 @@ final case class CachedResultResolverLive(
     for {
       effective <- effectiveTreeOf(tree, selection, resolvedScopes)
       scoped     = MitigationApplication.scoped(tree, selection, resolvedScopes)
-      cache     <- cacheScope.cacheFor(seedEntityId)
+      cache     <- caches.forWorkspace(seedEntityId)
       // One tree fingerprint serves the whole batch
       hashes     = ContentHashIndex.build(effective)
       results   <- ZIO.foreach(nodeIds.toList)(id =>
@@ -276,12 +276,12 @@ object CachedResultResolverLive {
 
   /**
     * Create ZLayer for CachedResultResolver with telemetry.
-    * Uses CacheScope for per-workspace content-addressed cache access.
+    * Uses ContentCacheRegistry for per-workspace content-addressed cache access.
     */
-  val layer: ZLayer[CacheScope & SimulationConfig & Tracing & Meter, Throwable, CachedResultResolver] =
+  val layer: ZLayer[ContentCacheRegistry & SimulationConfig & Tracing & Meter, Throwable, CachedResultResolver] =
     ZLayer.fromZIO {
       for {
-        cacheScope <- ZIO.service[CacheScope]
+        caches     <- ZIO.service[ContentCacheRegistry]
         config     <- ZIO.service[SimulationConfig]
         tracing    <- ZIO.service[Tracing]
         meter      <- ZIO.service[Meter]
@@ -297,6 +297,6 @@ object CachedResultResolverLive {
           Some(MetricNames.trialsUnit),
           Some(MetricNames.trialsDesc)
         )
-      } yield CachedResultResolverLive(cacheScope, config, tracing, simDuration, trials)
+      } yield CachedResultResolverLive(caches, config, tracing, simDuration, trials)
     }
 }

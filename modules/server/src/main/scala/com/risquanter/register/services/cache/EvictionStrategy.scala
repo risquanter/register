@@ -19,7 +19,7 @@ final case class EvictionStats(evictedTotal: Long)
   * recomputed from content, so a stale entry is unreachable — eviction is
   * about memory, never correctness.
   *
-  * `NoOpEvictionStrategy` is the only implementation, and `CacheScope`
+  * `NoOpEvictionStrategy` is the only implementation, and `ContentCacheRegistry`
   * constructs it for every workspace cache.
   */
 trait EvictionStrategy {

@@ -312,7 +312,7 @@ removing it cannot change any running deployment's behaviour.
 
 ```scala
 final case class CachedResultResolverLive(
-    cacheScope: CacheScope,
+    caches: ContentCacheRegistry,
     config: SimulationConfig,
     tracing: Tracing,
     simulationDuration: Histogram[Double],
@@ -462,17 +462,12 @@ publishes a saturation gauge, and Decision 2's tuning rule is written from what
 that gauge shows. Reading it needs metrics to reach a backend, which that plan
 delivered.
 
-**`PLAN-CACHE-REGISTRY-RENAME` first.** It renames `CacheScope` to
-`ContentCacheRegistry`, and `CachedResultResolverLive` — the file this plan
-changes most — is one of its call sites. A rename landing after a substantive
-change to the same file means resolving conflicts that need not exist.
-
 `PLAN-IRMIN-RECURSIVE-READ` and `PLAN-NGINX-WORKSPACE-ROUTING` share no files
 with this plan and have no ordering relationship to it.
 
-Once those two land, this plan's signatures are restated against the renamed
-type: `CachedResultResolverLive`'s layer requires `ContentCacheRegistry` rather
-than `CacheScope`, and its cache lookups read `caches.forWorkspace(...)`.
+This plan's signatures name the renamed type:
+`CachedResultResolverLive`'s layer requires `ContentCacheRegistry`, and its
+cache lookups read `caches.forWorkspace(...)`.
 
 ---
 

@@ -223,12 +223,11 @@ cause wrong code to be written by an agent correctly citing an in-force ADR.
 Recommended: a superseded banner on ADR-008 pointing at ADR-012 §4, ADR-010 and
 ADR-031. One paragraph, no dependants.
 
-### D7 — the coming registry rename will stale two more ADR mentions
+### D7 — the registry rename's ADR mentions — DONE
 
-`PLAN-CACHE-REGISTRY-RENAME` renames `CacheScope` to `ContentCacheRegistry` and
-`cacheFor` to `forWorkspace`. `CacheScope` is named in ADR-015's retirement
-banner; `cacheFor` is named in ADR-005's code block. Two one-line edits belong in
-that plan's documentation sweep.
+`PLAN-CACHE-REGISTRY-RENAME` landed. ADR-015's retirement banner and ADR-014's
+Implementation-block table row name the current `ContentCacheRegistry`
+(per-workspace `ContentCache` resolution).
 
 ---
 

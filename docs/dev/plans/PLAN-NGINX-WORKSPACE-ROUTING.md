@@ -133,8 +133,8 @@ dependency forcing it there.
 Four pieces of state live per workspace inside one server process.
 
 `ContentCache` holds simulation results per workspace, handed out by
-`CacheScope`. `MitigationScopeResolver` holds resolved mitigation scopes per
-workspace, handed out by `ScopeResolverScope`. Spreading one workspace's
+`ContentCacheRegistry`. `MitigationScopeResolver` holds resolved mitigation scopes per
+workspace, handed out by `MitigationScopeResolverRegistry`. Spreading one workspace's
 requests across instances means each instance separately rebuilds both. That is
 waste, not incorrectness — a cache miss produces a correct answer slowly.
 

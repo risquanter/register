@@ -42,3 +42,9 @@ Every path is repo-relative and complete, as the approval hook requires.
 - `modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala` — 2 + 2
 - `modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala` — 2 + 2
 - `modules/server-it/src/test/scala/com/risquanter/register/http/SeedReproducibilityItSpec.scala` — 2
+- modules/server/src/main/scala/com/risquanter/register/services/cache/EvictionStrategy.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCacheRegistry.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverRegistry.scala
+- build.sbt
+- .env
+- .env.irmin

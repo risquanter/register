@@ -180,10 +180,10 @@ object MitigationScopeResolverSpec extends ZIOSpecDefault with TestHelpers:
         val ws2 = WorkspaceId(safeId("ws-2"))
         for
           ref   <- Ref.make(Map.empty[WorkspaceId, MitigationScopeResolver])
-          scope  = ScopeResolverScopeLive(ref)
-          r1    <- scope.resolverFor(ws1)
-          r1b   <- scope.resolverFor(ws1)
-          r2    <- scope.resolverFor(ws2)
+          scope  = MitigationScopeResolverRegistryLive(ref)
+          r1    <- scope.forWorkspace(ws1)
+          r1b   <- scope.forWorkspace(ws1)
+          r2    <- scope.forWorkspace(ws2)
         yield assertTrue(r1 eq r1b, !(r1 eq r2))
       }
     )

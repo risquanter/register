@@ -710,7 +710,7 @@ LECChartView re-renders via VegaEmbed
 
 ### Phase I.a: Error Handling (Non-SSE) ✅
 
-**Goal:** Robust error handling for API calls following ADR-008 patterns.
+**Goal:** Robust error handling for API calls following ADR-019 Pattern 7.
 
 **Decision:** Option A — supplement per-view error flows with a global `ErrorBanner`.
 Per-view handlers (`LoadState.Failed`, `SubmitState.Failed`, `submitError`) are unchanged.
@@ -2574,7 +2574,6 @@ Upon completing Tier 3, promote the following proposals:
 | ADR-005-proposal | Already accepted (ADR-015 covers cache-aside) |
 | ADR-006-proposal | Rename to `ADR-006.md`, set status "Accepted" |
 | ADR-007-proposal | Rename to `ADR-007.md`, set status "Accepted" |
-| ADR-008-proposal | Rename to `ADR-008.md`, set status "Accepted" |
 
 ---
 
@@ -2858,12 +2857,11 @@ final case class LECCurveResponse(
 | ADR-005-proposal | Cached Subtree Aggregates | Proposal | O(depth) invalidation |
 | ADR-006-proposal | Real-Time Collaboration | Proposal | Multi-user editing, Tier 3 |
 | ADR-007-proposal | Scenario Branching | Proposal | What-if via Irmin branches, Tier 3 |
-| ADR-008-proposal | Error Handling & Resilience | Proposal | Frontend error patterns |
 | ADR-009 | Compositional Risk Aggregation | Accepted | `Identity[RiskResult].combine` |
 | ADR-010 | Error Handling Strategy | Accepted | `SimulationError` hierarchy |
 | ADR-011 | Import Conventions | Accepted | Top-level imports |
 | ADR-012 | Service Mesh Strategy | Accepted | Istio Ambient Mode, no app-level retries |
-| ADR-014 | Code Quality & Caching Strategy | Accepted | `RiskResultCache`, `TreeCacheManager` |
+| ADR-014 | Simulation Result Caching and Render-Time Curve Generation | Accepted | `ContentCache`, `ContentHashIndex`, `ContentCacheRegistry` |
 | ADR-015 | Cache-Aside Pattern | Accepted | `CachedResultResolver` lazy computation |
 | ADR-017 | Tree API Design | Accepted | Phase 1 CRUD ✅, Phase 2 batch `TreeOp` pending |
 | ADR-018 | Nominal Wrappers | Accepted | `NodeId`, `TreeId` opaque types |

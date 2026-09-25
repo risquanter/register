@@ -89,12 +89,12 @@ object CacheTransparencySpec extends ZIOSpecDefault {
 
   private val editSequence = List(v1, v2, v2, v3, v3, v1)  // repeats force hits on the real run
 
-  /** A CacheScope whose caches never store and never hit — every read
+  /** A ContentCacheRegistry whose caches never store and never hit — every read
     * simulates fresh. The truth baseline.
     */
-  private val passThroughScope: ULayer[CacheScope] =
-    ZLayer.succeed(new CacheScope {
-      override def cacheFor(seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache] =
+  private val passThroughScope: ULayer[ContentCacheRegistry] =
+    ZLayer.succeed(new ContentCacheRegistry {
+      override def forWorkspace(seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache] =
         ZIO.succeed(new ContentCache {
           override def get(key: ContentHash): UIO[Option[LeafSimResult]] = ZIO.none
           override def put(key: ContentHash, value: LeafSimResult): UIO[Unit] = ZIO.unit
@@ -102,8 +102,8 @@ object CacheTransparencySpec extends ZIOSpecDefault {
         })
     })
 
-  private def resolverWith(scope: ULayer[CacheScope]): ZLayer[Any, Throwable, CachedResultResolver & CacheScope] =
-    ZLayer.make[CachedResultResolver & CacheScope](
+  private def resolverWith(scope: ULayer[ContentCacheRegistry]): ZLayer[Any, Throwable, CachedResultResolver & ContentCacheRegistry] =
+    ZLayer.make[CachedResultResolver & ContentCacheRegistry](
       scope,
       ZLayer.succeed(TestConfigs.simulation),
       TestConfigs.telemetryLayer >>> TracingLive.console,
@@ -112,7 +112,7 @@ object CacheTransparencySpec extends ZIOSpecDefault {
     )
 
   /** Run the full edit sequence, collecting every node's figures at every step. */
-  private val runSequence: ZIO[CachedResultResolver & CacheScope, Throwable, List[Map[NodeId, Map[TrialId, Loss]]]] =
+  private val runSequence: ZIO[CachedResultResolver & ContentCacheRegistry, Throwable, List[Map[NodeId, Map[TrialId, Loss]]]] =
     ZIO.serviceWithZIO[CachedResultResolver] { resolver =>
       ZIO.foreach(editSequence) { t =>
         ZIO.foreach(t.index.nodes.keys.toList.sortBy(_.value)) { nid =>
@@ -125,7 +125,7 @@ object CacheTransparencySpec extends ZIOSpecDefault {
 
     test("real ContentCache and pass-through cache yield byte-identical figures over the full edit sequence") {
       for {
-        cachedRun   <- runSequence.provideLayer(resolverWith(CacheScope.layer))
+        cachedRun   <- runSequence.provideLayer(resolverWith(ContentCacheRegistry.layer))
         uncachedRun <- runSequence.provideLayer(resolverWith(passThroughScope))
       } yield assertTrue(
         cachedRun == uncachedRun,

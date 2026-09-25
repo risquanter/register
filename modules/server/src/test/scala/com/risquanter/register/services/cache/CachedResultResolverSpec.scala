@@ -17,7 +17,7 @@ import com.risquanter.register.testutil.TestHelpers.*
  * Tests for CachedResultResolverLive (ADR-015), which is content-addressed.
  *
  * Verifies cache-aside behavior over ContentHash keys, per-workspace
- * cache isolation via CacheScope, leaf-only caching, orphan
+ * cache isolation via ContentCacheRegistry, leaf-only caching, orphan
  * semantics (a param edit strands the old entry; the new content misses),
  * error handling, and the resolver-edge mitigation fold (ADR-034 F: param-stage
  * transforms change the cache key, result-stage transforms apply post-cache).
@@ -122,9 +122,9 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       MitigationPrecedence.default).toEither.toOption.get
 
   // Test layer with all dependencies
-  val testLayer: ZLayer[Any, Throwable, CachedResultResolver & CacheScope] =
-    ZLayer.make[CachedResultResolver & CacheScope](
-      CacheScope.layer,
+  val testLayer: ZLayer[Any, Throwable, CachedResultResolver & ContentCacheRegistry] =
+    ZLayer.make[CachedResultResolver & ContentCacheRegistry](
+      ContentCacheRegistry.layer,
       ZLayer.succeed(TestConfigs.simulation),
       TestConfigs.telemetryLayer >>> TracingLive.console,
       TestConfigs.telemetryLayer >>> MetricsLive.console,
@@ -138,8 +138,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       test("cache miss: simulates and caches the identity-free content under the content hash") {
         for {
           resolver   <- ZIO.service[CachedResultResolver]
-          cacheScope <- ZIO.service[CacheScope]
-          cache      <- cacheScope.cacheFor(testEntity)
+          caches     <- ZIO.service[ContentCacheRegistry]
+          cache      <- caches.forWorkspace(testEntity)
 
           // Verify cache is empty initially
           initialCached <- cache.get(risk1Key)
@@ -163,8 +163,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       test("cache hit: returns cached content and counts a hit") {
         for {
           resolver   <- ZIO.service[CachedResultResolver]
-          cacheScope <- ZIO.service[CacheScope]
-          cache      <- cacheScope.cacheFor(testEntity)
+          caches     <- ZIO.service[ContentCacheRegistry]
+          cache      <- caches.forWorkspace(testEntity)
 
           // First call: simulate and cache
           firstResult  <- resolver.ensureCached(testTree, risk1Id, testEntity)
@@ -183,8 +183,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       test("simulates portfolio by aggregating children — portfolio results are never cached") {
         for {
           resolver   <- ZIO.service[CachedResultResolver]
-          cacheScope <- ZIO.service[CacheScope]
-          cache      <- cacheScope.cacheFor(testEntity)
+          caches     <- ZIO.service[ContentCacheRegistry]
+          cache      <- caches.forWorkspace(testEntity)
 
           risk1Result <- resolver.ensureCached(testTree, risk1Id, testEntity)
           risk2Result <- resolver.ensureCached(testTree, risk2Id, testEntity)
@@ -232,8 +232,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
 
         for {
           resolver   <- ZIO.service[CachedResultResolver]
-          cacheScope <- ZIO.service[CacheScope]
-          cache      <- cacheScope.cacheFor(testEntity)
+          caches     <- ZIO.service[ContentCacheRegistry]
+          cache      <- caches.forWorkspace(testEntity)
 
           // Original content cached under its hash
           _         <- resolver.ensureCached(testTree, risk1Id, testEntity)
@@ -281,8 +281,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
 
         for {
           resolver   <- ZIO.service[CachedResultResolver]
-          cacheScope <- ZIO.service[CacheScope]
-          cache      <- cacheScope.cacheFor(testEntity)
+          caches     <- ZIO.service[ContentCacheRegistry]
+          cache      <- caches.forWorkspace(testEntity)
 
           first       <- resolver.ensureCached(testTree, risk1Id, testEntity)
           statsBefore <- cache.stats
@@ -302,8 +302,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       test("caches multiple nodes in one call") {
         for {
           resolver   <- ZIO.service[CachedResultResolver]
-          cacheScope <- ZIO.service[CacheScope]
-          cache      <- cacheScope.cacheFor(testEntity)
+          caches     <- ZIO.service[ContentCacheRegistry]
+          cache      <- caches.forWorkspace(testEntity)
 
           // Call with multiple node IDs
           results <- resolver.ensureCachedAll(testTree, Set(risk1Id, risk2Id), testEntity)
@@ -353,10 +353,10 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
         val otherEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(2L).toOption.get
         for {
           resolver   <- ZIO.service[CachedResultResolver]
-          cacheScope <- ZIO.service[CacheScope]
+          caches     <- ZIO.service[ContentCacheRegistry]
 
           _      <- resolver.ensureCached(testTree, risk1Id, testEntity)
-          cacheB <- cacheScope.cacheFor(otherEntity)
+          cacheB <- caches.forWorkspace(otherEntity)
           // Workspace B never simulated anything: same content hash, no entry
           crossHit <- cacheB.get(risk1Key)
         } yield assertTrue(crossHit.isEmpty)
@@ -497,8 +497,8 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
         val effKey  = ContentHashIndex.hashOf(effTree.index.nodes(risk1Id).asInstanceOf[RiskLeaf])
         for {
           resolver   <- ZIO.service[CachedResultResolver]
-          cacheScope <- ZIO.service[CacheScope]
-          cache      <- cacheScope.cacheFor(testEntity)
+          caches     <- ZIO.service[ContentCacheRegistry]
+          cache      <- caches.forWorkspace(testEntity)
           raw   <- resolver.ensureCached(testTree, risk1Id, testEntity)
           mit   <- resolver.ensureCached(tree, risk1Id, testEntity, selection = MitigationSelection.Residual, resolvedScopes =scopes(scale -> Set(risk1Id)))
           rawEntry <- cache.get(risk1Key)

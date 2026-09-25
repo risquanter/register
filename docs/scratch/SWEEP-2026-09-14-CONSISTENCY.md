@@ -35,7 +35,7 @@ source.
 ## S1 — scope resolution down to persistence (code review)
 
 Files read in full: `MitigationScopeResolver.scala`, `MitigationScopeResolverLive.scala`,
-`ScopeResolverScope.scala`, `MitigationStaleness.scala`, `CacheScope.scala`,
+`MitigationScopeResolverRegistry.scala`, `MitigationStaleness.scala`, `ContentCacheRegistry.scala`,
 `CachedResultResolver.scala`, `CachedResultResolverLive.scala`,
 `Mitigation.scala`, `MitigationApplication.scala`, `QueryServiceLive.scala`,
 the mitigation parts of `RiskTree.scala`, `RiskTreeServiceLive.create/update`,
@@ -89,7 +89,7 @@ key is (treeId, branch) and the revision is a stored guard, not part of the key.
 `MitigationScopeResolverLive`'s own scaladoc says this correctly ("Head-only").
 Three other places say the key is the triple:
   - `MitigationScopeResolver.scala`, `ScopeResolutionContext` scaladoc
-  - `ScopeResolverScope.scala`, trait scaladoc
+  - `MitigationScopeResolverRegistry.scala`, trait scaladoc
   - `QueryServiceLive.scala`, step 2 comment
 Slice 4 (7.6.8) changes the slot to capacity 2, so all four need rewriting then
 anyway.
@@ -164,9 +164,9 @@ should say so loudly rather than silently shrink the scope.
 
 ### S1-12 (low) — per-workspace resolvers are never released
 
-`ScopeResolverScopeLive.resolvers` grows one entry per workspace touched and
-never shrinks, the same shape as `CacheScope`. `CacheScope` documents the
-lifetime ("lingers until restart"); `ScopeResolverScope` does not. Check whether
+`MitigationScopeResolverRegistryLive.resolvers` grows one entry per workspace touched and
+never shrinks, the same shape as `ContentCacheRegistry`. `ContentCacheRegistry` documents the
+lifetime ("lingers until restart"); `MitigationScopeResolverRegistry` does not. Check whether
 PLAN-WORKSPACE-CACHE-RELEASE covers the scope resolver or only the content cache.
 
 ### S1-13 (stale plan inventory, low)
@@ -190,7 +190,7 @@ the repository.
 - `CachedResultResolverLive` applies the result-stage transform after the cache
   read and never stores it, and folds already-mitigated children at a portfolio
   (design anchors A5 and A6 hold).
-- `ScopeResolverScopeLive.resolverFor` and `CacheScopeLive.cacheFor` both use
+- `MitigationScopeResolverRegistryLive.forWorkspace` and `ContentCacheRegistryLive.forWorkspace` both use
   `Ref.modify` to pick a single winner under a first-access race.
 
 ## S2 — ADRs against the code
@@ -341,16 +341,16 @@ plan, computed mechanically:
 
 - **PLAN-CACHE-REGISTRY-RENAME — 15 shared files**, including all three
   scope-resolver sources (`MitigationScopeResolver.scala`,
-  `MitigationScopeResolverLive.scala`, `ScopeResolverScope.scala`),
+  `MitigationScopeResolverLive.scala`, `MitigationScopeResolverRegistry.scala`),
   `Application.scala`, `QueryServiceLive.scala`, and six test files.
 - PLAN-WORKSPACE-CACHE-RELEASE — 5 shared files.
 - PLAN-SIMULATION-CONCURRENCY-BOUNDS — 3 shared files.
 - PLAN-TELEMETRY-EXPORT — 1 shared file (`Application.scala`).
 - PLAN-IRMIN-RECURSIVE-READ — none.
 
-The rename is not cosmetic for M4: it renames `ScopeResolverScope` to
-`MitigationScopeResolverRegistry` and `resolverFor` to `forWorkspace`. M4 slice 1
-adds a `scopeResolver: ScopeResolverScope` field to `RiskTreeServiceLive` and
+The rename is not cosmetic for M4: it renames `MitigationScopeResolverRegistry` to
+`MitigationScopeResolverRegistry` and `forWorkspace` to `forWorkspace`. M4 slice 1
+adds a `scopeResolver: MitigationScopeResolverRegistry` field to `RiskTreeServiceLive` and
 slice 4 rewrites `MitigationScopeResolverLive`'s memo. So one of these holds:
   - M4 lands first, and the rename plan's ripple list grows by everything M4 adds;
   - the rename lands first, and every signature in 7.6.5 and 7.6.8 is written in
@@ -443,10 +443,10 @@ which the mitigation entity explicitly replaced — a mitigation is tree-level
 content, never baked into node parameters.
 
 Beyond that line the document does not mention mitigations at all: no
-`MitigationScopeResolver`, no `ScopeResolverScope`, no mitigation entity in the
+`MitigationScopeResolver`, no `MitigationScopeResolverRegistry`, no mitigation entity in the
 domain model, and the layer listing at lines 107-108 shows
-`CachedResultResolverLive.layer` and `CacheScope.layer` but not
-`ScopeResolverScope.layer`, which `Application.scala` line 290 wires.
+`CachedResultResolverLive.layer` and `ContentCacheRegistry.layer` but not
+`MitigationScopeResolverRegistry.layer`, which `Application.scala` line 290 wires.
 
 Also stale in the same document: line 365 shows
 `CachedResultResolver.ensureCached(tree, nodeId)`; the real method takes

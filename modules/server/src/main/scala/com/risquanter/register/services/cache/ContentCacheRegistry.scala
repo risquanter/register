@@ -4,7 +4,10 @@ import zio.*
 import com.risquanter.register.domain.data.iron.SeedEntityId
 
 /**
-  * Per-workspace `ContentCache` resolution.
+  * Per-workspace registry of `ContentCache` instances: one cache per workspace
+  * seed identity, created on first request and held until the process exits.
+  * Mirrored by `MitigationScopeResolverRegistry`, which does the same for
+  * `MitigationScopeResolver`.
   *
   * The workspace's `seedEntityId` (HDR Entity axis) determines simulated
   * figures but appears in no leaf's bytes — so it cannot be part of the
@@ -17,31 +20,31 @@ import com.risquanter.register.domain.data.iron.SeedEntityId
   * creation). Cache lifecycle matches workspace lifecycle; a deleted
   * workspace's cache lingers until restart, because nothing is evicted.
   */
-trait CacheScope {
+trait ContentCacheRegistry {
 
   /** Get or create the owning workspace's cache. */
-  def cacheFor(seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache]
+  def forWorkspace(seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache]
 }
 
-object CacheScope {
+object ContentCacheRegistry {
 
   /** Live layer: NoOp eviction (restart clears; see EvictionStrategy). */
-  val layer: ZLayer[Any, Nothing, CacheScope] =
+  val layer: ZLayer[Any, Nothing, ContentCacheRegistry] =
     ZLayer.fromZIO {
       Ref.make(Map.empty[SeedEntityId.SeedEntityId, ContentCache])
-        .map(CacheScopeLive(_, () => new NoOpEvictionStrategy))
+        .map(ContentCacheRegistryLive(_, () => new NoOpEvictionStrategy))
     }
 
-  def cacheFor(seedEntityId: SeedEntityId.SeedEntityId): URIO[CacheScope, ContentCache] =
-    ZIO.serviceWithZIO[CacheScope](_.cacheFor(seedEntityId))
+  def forWorkspace(seedEntityId: SeedEntityId.SeedEntityId): URIO[ContentCacheRegistry, ContentCache] =
+    ZIO.serviceWithZIO[ContentCacheRegistry](_.forWorkspace(seedEntityId))
 }
 
-final case class CacheScopeLive(
+final case class ContentCacheRegistryLive(
   caches: Ref[Map[SeedEntityId.SeedEntityId, ContentCache]],
   mkStrategy: () => EvictionStrategy
-) extends CacheScope {
+) extends ContentCacheRegistry {
 
-  override def cacheFor(seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache] =
+  override def forWorkspace(seedEntityId: SeedEntityId.SeedEntityId): UIO[ContentCache] =
     caches.get.map(_.get(seedEntityId)).flatMap {
       case Some(cache) => ZIO.succeed(cache)
       case None =>
@@ -54,7 +57,7 @@ final case class CacheScopeLive(
               case None           => (candidate, m + (seedEntityId -> candidate))
             }
           }
-          _ <- ZIO.logDebug(s"CacheScope: cache ready for seedEntityId=${seedEntityId.value}")
+          _ <- ZIO.logDebug(s"ContentCacheRegistry: cache ready for seedEntityId=${seedEntityId.value}")
         } yield cache
     }
 }

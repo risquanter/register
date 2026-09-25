@@ -749,7 +749,7 @@ read), closed 2026-07-16.** The live options and why B won:
   ordered/weighted aggregation is speculative and unplanned.
 
 **What the follow-up decides:** whether to add A/C′ portfolio caching behind a
-`CacheScope`, judged against the landed system's measured behaviour —
+`ContentCacheRegistry`, judged against the landed system's measured behaviour —
 re-aggregation cost on real trees, `RiskResultGroup` in the resolver, and the
 DD-18 cache value type. This is a genuinely prerequisite-gated future item (needs
 the landed system's measurements), not deferred current-plan scope.

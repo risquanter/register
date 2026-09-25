@@ -15,12 +15,19 @@ import _root_.logic.FOLUtil
 /** Memoizes the resolved scopes of one tree version. Head-only: one entry per
   * (treeId, branch) holds a revision and its scopes, and any resolve at a
   * different revision overwrites it, so revisions never accumulate. In-memory
-  * `Ref` → `UIO`. One instance per workspace (`ScopeResolverScope`).
+  * `Ref` → `UIO`. One instance per workspace (`MitigationScopeResolverRegistry`).
+  *
+  * The revision is a stamp inside the stored value rather than part of the map
+  * key. Keying on the revision would make every revision a separate entry with
+  * nothing to remove it; each entry holds a full mitigation-to-node-id map, so
+  * an editing session would retain one per edit and grow without a ceiling. As
+  * a stamp under a slot keyed by (treeId, branch), the map is bounded by the
+  * number of live tree-and-branch pairs instead.
   *
   * The memo read and write are not atomic. Last-writer-wins is deliberate and
-  * safe: the entry carries the revision it was resolved at, and a read serves it
-  * only on an exact revision match, so a lost write costs a recomputation and
-  * never yields a scope from the wrong version.
+  * safe: the entry carries the revision it was resolved at, and a read serves
+  * it only on an exact revision match, so a lost write costs a recomputation
+  * and never yields a scope from the wrong version.
   */
 final case class MitigationScopeResolverLive(
   memo: Ref[Map[(TreeId, BranchRef), (CommitHash, ResolvedScopes)]]

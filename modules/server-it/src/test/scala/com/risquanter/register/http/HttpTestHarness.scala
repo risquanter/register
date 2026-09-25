@@ -20,7 +20,7 @@ import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeReposit
 import com.risquanter.register.services.{RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService, ScenarioService, ScenarioServiceLive, ScenarioServiceNotSupported, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioMergeServiceNotSupported}
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
-import com.risquanter.register.services.cache.{CachedResultResolverLive, CacheScope, ScopeResolverScope}
+import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.workspace.{WorkspaceStoreLive, RateLimiterLive}
 import com.risquanter.register.services.sse.SSEHub
@@ -143,9 +143,9 @@ object HttpTestHarness:
       RiskTreeServiceLive.layer,
       ChangedNodesServiceLive.layer,
       ZLayer.succeed(TreeHistoryService.empty),
-      CacheScope.layer,
+      ContentCacheRegistry.layer,
       CachedResultResolverLive.layer,
-      ScopeResolverScope.layer,
+      MitigationScopeResolverRegistry.layer,
       SSEHub.live,
       InvalidationHandler.live,
       WorkspaceStoreLive.layer,

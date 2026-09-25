@@ -38,7 +38,7 @@ by nothing, until the process restarts. The server container is limited to
 256 MB.
 
 The current code states the intent and concedes the gap in the same sentence, in
-`CacheScope`'s scaladoc:
+`ContentCacheRegistry`'s scaladoc:
 
 > Cache lifecycle = workspace lifecycle; a deleted workspace's cache lingers
 > until restart (NoOp eviction).

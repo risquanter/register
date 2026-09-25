@@ -14,7 +14,7 @@ import com.risquanter.register.http.controllers.{SystemController, WorkspaceLife
 import com.risquanter.register.http.sse.SSEController
 import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory, RiskTreeRepositoryIrmin}
 import com.risquanter.register.services.{RiskTreeServiceLive, ChangedNodesServiceLive, TreeHistoryService, ScenarioServiceNotSupported, ScenarioMergeServiceNotSupported}
-import com.risquanter.register.services.cache.{CachedResultResolverLive, CacheScope, ScopeResolverScope}
+import com.risquanter.register.services.cache.{CachedResultResolverLive, ContentCacheRegistry, MitigationScopeResolverRegistry}
 import com.risquanter.register.services.pipeline.InvalidationHandler
 import com.risquanter.register.services.QueryServiceLive
 import com.risquanter.register.services.DistributionPreviewService
@@ -59,9 +59,9 @@ object StubHttpTestHarness {
         TracingLive.console,
         MetricsLive.console,
         repoLayer,
-        CacheScope.layer,
+        ContentCacheRegistry.layer,
         CachedResultResolverLive.layer,
-        ScopeResolverScope.layer,
+        MitigationScopeResolverRegistry.layer,
         RiskTreeServiceLive.layer,
         ChangedNodesServiceLive.layer,
         ZLayer.succeed(TreeHistoryService.empty),

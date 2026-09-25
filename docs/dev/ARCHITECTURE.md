@@ -105,8 +105,8 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
   Server.default,
   RiskTreeRepositoryInMemory.layer,
   CachedResultResolverLive.layer,
-  CacheScope.layer,
-  ScopeResolverScope.layer,
+  ContentCacheRegistry.layer,
+  MitigationScopeResolverRegistry.layer,
   RiskTreeServiceLive.layer,
   ZLayer.fromZIO(RiskTreeController.makeZIO)
 )
@@ -328,11 +328,13 @@ See [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogr
 │ Service Layer (modules/server)                  │
 │  - RiskTreeService: Business logic              │
 │  - CachedResultResolver: Simulation orchestration │
-│  - CacheScope/ContentCache: content-addressed   │
-│    result caching (per workspace)               │
-│  - ScopeResolverScope/MitigationScopeResolver:  │
-│    resolves each mitigation's targeting         │
-│    predicate to a node set (per workspace)      │
+│  - ContentCacheRegistry/ContentCache:            │
+│    content-addressed result caching              │
+│    (per workspace)                               │
+│  - MitigationScopeResolverRegistry/              │
+│    MitigationScopeResolver: resolves each        │
+│    mitigation's targeting predicate to a node    │
+│    set (per workspace)                           │
 └─────────────────────────────────────────────────┘
                      ↓
 ┌─────────────────────────────────────────────────┐
@@ -698,9 +700,9 @@ Persistence Strategy:
 
 #### **Caching Strategy** ✅ (Implemented — content-addressed, milestone 2b Phase A)
 ```scala
-// CacheScope: one ContentCache per workspace (DD-17, keyed by seedEntityId)
-trait CacheScope:
-  def cacheFor(seedEntityId: SeedEntityId): UIO[ContentCache]
+// ContentCacheRegistry: one ContentCache per workspace, keyed by seedEntityId
+trait ContentCacheRegistry:
+  def forWorkspace(seedEntityId: SeedEntityId): UIO[ContentCache]
 
 // ContentCache: content-addressed leaf result cache (DD-15: leaves only)
 trait ContentCache:

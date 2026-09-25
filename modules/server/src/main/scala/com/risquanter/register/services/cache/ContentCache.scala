@@ -27,7 +27,7 @@ final case class CacheStats(entries: Int, hits: Long, misses: Long, evictedTotal
   * every read and never enter the cache. Values carry no node identity; the
   * resolver attaches the requested node's ID at the edge.
   *
-  * One instance per workspace, created by `CacheScope` — the workspace's
+  * One instance per workspace, created by `ContentCacheRegistry` — the workspace's
   * `seedEntityId` determines figures but lives in no leaf's bytes, so
   * per-workspace instances make cross-workspace contamination structurally
   * impossible. Cache lifecycle matches workspace lifecycle.

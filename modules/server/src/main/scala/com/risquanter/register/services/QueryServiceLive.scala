@@ -12,7 +12,7 @@ import com.risquanter.register.domain.errors.FolQueryFailure
 import com.risquanter.register.foladapter.{RiskTreeKnowledgeBase, QueryResponseBuilder}
 import com.risquanter.register.http.responses.QueryResponse
 import com.risquanter.register.repositories.RiskTreeRepository
-import com.risquanter.register.services.cache.{CachedResultResolver, ScopeResolverScope, ScopeResolutionContext, ResolvedScopes}
+import com.risquanter.register.services.cache.{CachedResultResolver, MitigationScopeResolverRegistry, ScopeResolutionContext, ResolvedScopes}
 
 import vql.logic.ParsedQuery
 import vql.semantics.VagueSemantics
@@ -25,14 +25,14 @@ import vql.typed.{FolModel, QueryBinder, BoundQuery, BoundFormula, BoundTerm, Bo
   *   - `RiskTreeRepository` for tree lookups, which also return the commit the
   *     read resolved to
   *   - `CachedResultResolver` for cache-aside simulation results, one map per referenced selection
-  *   - `ScopeResolverScope` for per-workspace mitigation scope resolution
+  *   - `MitigationScopeResolverRegistry` for per-workspace mitigation scope resolution
   *   - `Tracing` for OpenTelemetry spans
   */
 class QueryServiceLive private (
-  repo:          RiskTreeRepository,
-  resolver:      CachedResultResolver,
-  scopeResolver: ScopeResolverScope,
-  tracing:       Tracing
+  repo:           RiskTreeRepository,
+  resolver:       CachedResultResolver,
+  scopeResolvers: MitigationScopeResolverRegistry,
+  tracing:        Tracing
 ) extends QueryService:
 
   /** Wrap body in an OTel span. */
@@ -89,7 +89,7 @@ class QueryServiceLive private (
         // 2. Resolve every mitigation's scope for this tree version. The resolver
         //    is per-workspace, so cross-workspace scope contamination is
         //    structurally impossible; the memo key is (treeId, branch, commit).
-        mitResolver <- scopeResolver.resolverFor(wsId)
+        mitResolver <- scopeResolvers.forWorkspace(wsId)
         resolved    <- mitResolver.resolve(ScopeResolutionContext(treeId, branch, commitHash), tree)
 
         allNodeIds = tree.index.nodes.keySet
@@ -157,13 +157,13 @@ end QueryServiceLive
 
 object QueryServiceLive:
 
-  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & ScopeResolverScope & Tracing, Nothing, QueryService] = ZLayer {
+  val layer: ZLayer[RiskTreeRepository & CachedResultResolver & MitigationScopeResolverRegistry & Tracing, Nothing, QueryService] = ZLayer {
     for
-      repo          <- ZIO.service[RiskTreeRepository]
-      resolver      <- ZIO.service[CachedResultResolver]
-      scopeResolver <- ZIO.service[ScopeResolverScope]
-      tracing       <- ZIO.service[Tracing]
-    yield QueryServiceLive(repo, resolver, scopeResolver, tracing)
+      repo           <- ZIO.service[RiskTreeRepository]
+      resolver       <- ZIO.service[CachedResultResolver]
+      scopeResolvers <- ZIO.service[MitigationScopeResolverRegistry]
+      tracing        <- ZIO.service[Tracing]
+    yield QueryServiceLive(repo, resolver, scopeResolvers, tracing)
   }
 
 /** Walks a bound query for the mitigation selections its value functions
