@@ -1,14 +1,21 @@
 # ADR-005-proposal: Cached Subtree Aggregates
 
-**Status:** Proposed  
+**Status:** Retired — superseded by ADR-014 and ADR-015  
 **Date:** 2026-01-16  
 **Tags:** caching, performance, lec, aggregation, zio
 
-> **2026-07-18 (milestone 2b Phase A):** the `RiskResultCache`/
-> `TreeCacheManager` implementation this proposal describes is retired,
-> replaced by the content-addressed `ContentCache` (no invalidation; leaf
-> entries only). The SSE notification half survives in the SSE-only
-> `InvalidationHandler`.
+> **Retired. This record is not in force.** The per-node `RiskResultCache` and
+> `TreeCacheManager` storage design below exists in no source file. Simulation
+> results are cached content-addressed — keyed by a hash of the node's content,
+> leaf entries only, with no invalidation operation (ADR-014). What this record
+> calls invalidation is, in the system, the set of nodes whose figures changed
+> after a mutation, which `InvalidationHandler` publishes over SSE and which
+> touches no cache.
+>
+> The parts of it that are in force are owned by other records: parent-pointer
+> navigation through `TreeIndex` by ADR-001, and the cache-aside read primitive
+> by ADR-015. Code blocks below are sketches of an unbuilt design, not
+> descriptions of any type in the codebase.
 
 ---
 
@@ -47,7 +54,7 @@ object TreeIndex:
 Cache simulation `RiskResult` for each node (not rendered curves — see ADR-014):
 
 ```scala
-// Actual implementation: RiskResultCache + TreeCacheManager
+// Sketch of the unbuilt per-node cache this proposal describes
 trait RiskResultCache:
   def get(nodeId: NodeId): UIO[Option[RiskResult]]
   def put(nodeId: NodeId, result: RiskResult): UIO[Unit]
@@ -185,13 +192,13 @@ def onNodeChanged(nodeId: NodeId): Task[Unit] =
 
 ## Implementation
 
-| Component | Location | Purpose | Status |
-|-----------|----------|---------|--------|
-| `TreeIndex` | `domain/tree/TreeIndex.scala` | Parent-pointer navigation | ✅ Implemented |
-| `RiskResultCache` | `services/cache/RiskResultCache.scala` | Per-node result storage | ✅ Implemented |
-| `TreeCacheManager` | `services/cache/TreeCacheManager.scala` | Per-tree cache lifecycle + invalidation | ✅ Implemented |
-| `CachedResultResolverLive` | `services/cache/CachedResultResolverLive.scala` | Lazy recomputation logic | ✅ Implemented |
-| `InvalidationHandler` | `services/cache/InvalidationHandler.scala` | Handles Irmin change notifications | ✅ Implemented |
+| Component | Location | Purpose | State |
+|-----------|----------|---------|-------|
+| `TreeIndex` | `domain/tree/TreeIndex.scala` | Parent-pointer navigation | Exists |
+| `CachedResultResolverLive` | `services/cache/CachedResultResolverLive.scala` | Cache-aside reads and the portfolio fold (ADR-015) | Exists |
+| `InvalidationHandler` | `services/pipeline/InvalidationHandler.scala` | Publishes the SSE set of nodes whose figures changed after a mutation; touches no cache | Exists |
+| `RiskResultCache` | — | Per-node result storage | Not built; the cache is content-addressed (ADR-014) |
+| `TreeCacheManager` | — | Per-tree cache lifecycle and invalidation | Not built; no invalidation operation exists |
 
 ---
 

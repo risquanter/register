@@ -222,23 +222,24 @@ records under its own id.
 
 ---
 
-## T5 — ADR-005 and ADR-015: resolver signature drift
+## T5 — ADR-015: resolver signature drift
 
-**Why it is here.** Both publish
+**Why it is here.** It publishes
 `ensureCached(tree, nodeId, includeProvenance: Boolean = false): Task[RiskResult]`.
 The live trait takes six parameters — adding `seedEntityId`, `selection` and
 `resolvedScopes` — and returns `Task[LossDistribution]`.
 
-**User's ruling:** update both to the live code where behaviour has not
+**User's ruling:** update it to the live code where behaviour has not
 fundamentally changed. *Mechanical*, with one caveat.
 
 **Caveat.** The return type is about to move again. PLAN-RISKTRANSFORM §7.6.12
 decision 2 was ruled on 2026-09-15 to narrow it to `ValuationResult`. Doing T5
-before that lands means editing these two records twice. Sequence T5 after the
+before that lands means editing the record twice. Sequence T5 after the
 `ValuationResult` sub-slice, or accept the second edit.
 
-Both records already carry 2026-07-18 banners saying the storage layer they sketch
-is retired, so only the resolver signature blocks are in scope here.
+ADR-005 carried the same drifted signature and was in this task's scope until it
+was retired to `docs/archive/decision-records/`. An archived record is not
+maintained against the code, so only ADR-015 remains in scope.
 
 ---
 
@@ -318,15 +319,16 @@ cursor tracking, version-vector conflict detection and the `RiskEvent` ADT occur
 in no source file, and the SSE hub the system does have is notification-only and
 single-writer.
 
-**Ruled by the user:** not a retirement candidate. The record was postponed, and
-it is kept so that a feature whose scope would overlap multi-user editing is
-found while it is still being planned. It is used exactly that way —
-`PLAN-RISKTRANSFORM` runs an explicit ADR sweep and records ADR-006 under "No
-bearing (checked, explicitly)".
+**Ruled by the user:** the design was postponed, and the record is kept so that a
+feature whose scope would overlap multi-user editing is found while it is still
+being planned. It is used exactly that way — `PLAN-RISKTRANSFORM` runs an
+explicit ADR sweep and records ADR-006 under "No bearing (checked, explicitly)".
 
 **Done in this pass:** a header paragraph stating, in current-state terms, that
-the record describes a design the system does not implement and that its purpose
-is to reserve the scope for planning.
+the record describes a design the system does not implement and that it holds a
+scope boundary for planning. The record itself is retired to
+`docs/archive/decision-records/` under T10; being kept and being in force are
+separate things, and it is the first of the two.
 
 **Left open, and small.** `PLAN-RISKTRANSFORM`'s ADR-alignment list carries a row
 labelled "**ADR-006 / M2-D2**" whose content is about `ScopeOutcome` and
@@ -341,9 +343,43 @@ not, so it is recorded rather than assumed.
 
 ---
 
+## T10 — retired records move to `docs/archive/decision-records/` — DONE
+
+**What changed.** Until now a decision record had two possible fates: stay in
+`docs/dev/decision-records/`, where every file is in force whatever its Status
+field says, or be deleted. `docs/archive/decision-records/` adds a third: a
+record that is kept and readable but is not in force.
+
+**Moved, with the state each carries:**
+
+| Record | Status | Why it is not in force |
+|---|---|---|
+| `ADR-004b-proposal.md` | Retired — superseded by ADR-004a | The adopted transport is ADR-004a's unidirectional SSE. No `WebSocketHub`, `PresenceHub` or `ConflictDetector` exists |
+| `ADR-005-proposal.md` | Retired — superseded by ADR-014 and ADR-015 | The per-node `RiskResultCache`/`TreeCacheManager` design exists in no source file. Caching is content-addressed with no invalidation (ADR-014); the cache-aside primitive is ADR-015's; `TreeIndex` navigation is ADR-001's |
+| `ADR-006-proposal.md` | Retired — never adopted | `EventHub`, presence and cursor tracking, version-vector conflict detection and `RiskEvent` exist in no source file |
+
+**Not moved, and why.** ADR-007 (scenario branching), ADR-016 (configuration
+management) and ADR-025 (SPA routing) still read `Proposed` but describe
+implemented behaviour, so they are in force and their Status fields are wrong
+instead. ADR-015 describes a retired storage layer but its resolver decision
+stands, which is T5.
+
+**Two consequences to settle.**
+
+1. ADR-004b and ADR-006 are kept specifically so a plan touching multi-user
+   editing finds them at planning time. That works only if planning reads the
+   archive folder as well as the live one. Nothing states that it does.
+2. The `adr-constraints` skill says "All ADRs present in `docs/dev/` are live
+   regardless of the Status field. Deletion is the only form of archival — a file
+   that exists is in force." The archive folder makes the second sentence false.
+   The skill is not edited here: it is the subject of the ADR-maintenance rule
+   still to be specified.
+
+---
+
 ## Sequencing
 
 T5 after the `ValuationResult` sub-slice, or accept editing twice — the only
 task still sequenced against other work.
-T1, T2, T3, T4, T6, T7, T8 and T9 are done. T4 leaves one follow-up, the two
+T1, T2, T3, T4, T6, T7, T8, T9 and T10 are done. T4 leaves one follow-up, the two
 wrong ADR-003 statements, which PLAN-RISKTRANSFORM slice 5 carries.

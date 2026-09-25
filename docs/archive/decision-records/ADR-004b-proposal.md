@@ -1,11 +1,21 @@
 # ADR-004b-proposal: Persistence Architecture (WebSocket Enhancement)
 
-**Status:** Proposed  
+**Status:** Retired — superseded by ADR-004a  
 **Date:** 2026-01-16  
 **Tags:** persistence, irmin, graphql, websocket, architecture
 
-> **Note:** Code examples in this ADR are conceptual patterns showing the intended data flow.
-> See actual implementations: `IrminClient`, `ContentCache` (content-addressed, milestone 2b Phase A — replaced `RiskResultCache`), `SSEHub`.
+> **Retired. This record is not in force, and it describes an alternative the
+> system does not implement.** The adopted transport is the unidirectional SSE
+> design of [ADR-004a](../../dev/decision-records/ADR-004a-proposal.md):
+> `SSEHub` pushes notifications and the browser re-fetches over HTTP. Nothing
+> bidirectional exists — no `WebSocketHub`, no `PresenceHub`, no
+> `ConflictDetector`, no presence or cursor tracking.
+>
+> It is kept because it holds a scope boundary. The trigger that would bring the
+> design back is multi-user collaborative editing of one tree, which the
+> single-writer model does not support; a plan proposing that feature is the plan
+> that has to read this record. Code blocks below are sketches of an unbuilt
+> design, not descriptions of any type in the codebase.
 
 ---
 
@@ -15,7 +25,6 @@
 - Computation and persistence must be **separated** (ZIO/Scala vs Irmin/OCaml)
 - Two communication channels required: Irmin↔ZIO (internal) and ZIO↔Browser (external)
 - WebSocket provides **bidirectional streaming** for enhanced collaboration
-- Full requirements documented in [REQUIREMENTS-PERSISTENCE.md](./REQUIREMENTS-PERSISTENCE.md)
 
 ---
 
@@ -235,13 +244,15 @@ presenceHub.getEditorsFor(nodeId).flatMap {
 
 ## Implementation
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| `IrminClient` | sttp + GraphQL | Mutations and subscriptions to Irmin |
-| `RiskResultCache` | ZIO Ref + Map | In-memory simulation result storage |
-| `WebSocketHub` | ZIO HTTP WebSocket | Bidirectional client communication |
-| `PresenceHub` | ZIO Ref + Hub | Track connected users and cursors |
-| `ConflictDetector` | ZIO logic | Pre-commit conflict awareness |
+Components this design would need. Only the first exists.
+
+| Component | Technology | Purpose | State |
+|-----------|------------|---------|-------|
+| `IrminClient` | sttp + GraphQL | Mutations and queries against Irmin | Exists |
+| `ContentCache` | ZIO `Ref` keyed by `ContentHash` | Simulation result storage (ADR-014) | Exists; serves the adopted design too |
+| `WebSocketHub` | ZIO HTTP WebSocket | Bidirectional client communication | Not built |
+| `PresenceHub` | ZIO `Ref` + `Hub` | Connected users and cursors | Not built |
+| `ConflictDetector` | ZIO logic | Pre-commit conflict awareness | Not built |
 
 ---
 
@@ -250,6 +261,5 @@ presenceHub.getEditorsFor(nodeId).flatMap {
 - [Irmin Documentation](https://irmin.org/)
 - [irmin-graphql](https://github.com/mirage/irmin)
 - [ZIO HTTP WebSocket](https://zio.dev/zio-http/websocket/)
-- [REQUIREMENTS-PERSISTENCE.md](./REQUIREMENTS-PERSISTENCE.md)
 - ADR-004a-proposal: SSE variant (simpler, unidirectional)
 - ADR-003: Provenance (simulation reproducibility)

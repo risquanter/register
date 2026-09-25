@@ -917,8 +917,10 @@ HDR Histogram would require fundamental architecture changes (approximate merge,
 ### **Key Architectural Decisions**
 
 The architecture decision records themselves are the single source of truth:
-every `docs/dev/decision-records/ADR-*.md` file present is in force (see the ADR meta-template,
-`ADR-00X.md`, for structure and the deletion-is-archival rule). No summary copy
+every `docs/dev/decision-records/ADR-*.md` file present is in force, whatever its
+Status field says (see the ADR meta-template, `ADR-00X.md`, for structure). A
+record that is no longer in force is moved to `docs/archive/decision-records/`,
+where it stays readable and is not maintained against the code. No summary copy
 is maintained here — a duplicated index drifts from the files it summarizes.
 
 ---

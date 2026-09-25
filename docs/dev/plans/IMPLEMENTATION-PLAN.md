@@ -2570,9 +2570,9 @@ Upon completing Tier 3, promote the following proposals:
 
 | ADR | Action |
 |-----|--------|
-| ADR-004a-proposal | Rename to `ADR-004a.md`, set status "Accepted" |
-| ADR-005-proposal | Already accepted (ADR-015 covers cache-aside) |
-| ADR-006-proposal | Rename to `ADR-006.md`, set status "Accepted" |
+| ADR-004a-proposal | Accepted |
+| ADR-005-proposal | Retired to `docs/archive/decision-records/`; ADR-014 and ADR-015 carry what is in force |
+| ADR-006-proposal | Retired to `docs/archive/decision-records/`; never adopted |
 | ADR-007-proposal | Rename to `ADR-007.md`, set status "Accepted" |
 
 ---
@@ -2852,10 +2852,10 @@ final case class LECCurveResponse(
 | ADR-001 | Public String API, Internal Iron Types | Accepted | Wire format uses String; internal uses `NodeId`, `TreeId` |
 | ADR-002 | Structured Logging | Accepted | All service operations logged |
 | ADR-003 | HDR Seed Provenance | Accepted | Simulation reproducibility |
-| ADR-004a-proposal | Persistence Architecture (SSE) | Proposal | Irmin ↔ ZIO ↔ Browser data flow |
-| ADR-004b-proposal | WebSocket Enhancement | Proposal | Tier 4 bidirectional comms |
-| ADR-005-proposal | Cached Subtree Aggregates | Proposal | O(depth) invalidation |
-| ADR-006-proposal | Real-Time Collaboration | Proposal | Multi-user editing, Tier 3 |
+| ADR-004a-proposal | Persistence Architecture (SSE) | Accepted | Irmin ↔ ZIO ↔ Browser data flow |
+| ADR-004b-proposal | WebSocket Enhancement | Retired (archived) | Unadopted alternative to ADR-004a; holds the multi-user-editing scope boundary |
+| ADR-005-proposal | Cached Subtree Aggregates | Retired (archived) | Superseded by ADR-014 and ADR-015 |
+| ADR-006-proposal | Real-Time Collaboration | Retired (archived) | Never adopted; holds the multi-user-editing scope boundary |
 | ADR-007-proposal | Scenario Branching | Proposal | What-if via Irmin branches, Tier 3 |
 | ADR-009 | Compositional Risk Aggregation | Accepted | `Identity[RiskResult].combine` |
 | ADR-010 | Error Handling Strategy | Accepted | `SimulationError` hierarchy |

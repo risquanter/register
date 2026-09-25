@@ -1,10 +1,19 @@
 # ADR-006-proposal: Real-Time Collaboration
 
-**Status:** Proposed  
+**Status:** Retired — never adopted  
 **Date:** 2026-01-16  
 **Tags:** collaboration, events, concurrency, zio, irmin
 
-> **Note:** Code examples in this ADR are conceptual patterns, not actual codebase types.
+> **Retired. This record is not in force, and it describes a design the system
+> does not implement.** `EventHub`, presence and cursor tracking, version-vector
+> conflict detection and the `RiskEvent` ADT exist in no source file; the SSE hub
+> the system does have (ADR-004a §3) is notification-only and single-writer.
+>
+> It is kept because it holds a scope boundary. A plan whose feature would
+> overlap multi-user editing checks against this record and states whether it has
+> a bearing, so an overlap is found while the feature is still being planned.
+> Code blocks below are sketches of an unbuilt design, not descriptions of any
+> type in the codebase.
 
 ---
 
