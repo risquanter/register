@@ -133,6 +133,6 @@ final case class LeafSimContent(seedVarId: SeedVarId.SeedVarId, /* ... */)
 
 ## References
 
-- [ADR-014: RiskResult Caching Strategy](ADR-014.md) — why cache keys use the domain relation
+- [ADR-014: Simulation Result Caching and Render-Time Curve Generation](ADR-014.md) — why cache keys use the domain relation
 - [ADR-007 Appendix §4](ADR-007-appendix.md#4-merge-and-the-per-node-advantage) — per-path merge mechanics
 - [ADR-004a Appendix §2](ADR-004a-appendix.md#2-domain-to-storage-mapping) — node-per-path storage layout

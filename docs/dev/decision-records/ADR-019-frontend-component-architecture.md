@@ -133,6 +133,43 @@ least one transition is triggered by something other than "this value's own
 inputs changed" — a submit, a load, a user action; (c) different phases
 enable or disable different behavior, rather than just displaying differently.
 
+### 7. Error Presentation: Inline by Default, One Global Banner as the Catch-All
+
+A view that issued a request owns its failure and renders it inline
+(`LoadState.Failed`, `SubmitState.Failed`). Failures no view owns — a
+fire-and-forget call, the startup health probe, an expired workspace — go to a
+single `GlobalError` signal that `ErrorBanner` renders above the layout. An
+error belongs to exactly one tier; sending a per-view failure to the banner as
+well shows it to the user twice.
+
+`GlobalError` is the app module's own sealed enum, named apart from the server's
+`AppError` because the two describe different things — what went wrong, versus
+what the user is told:
+
+```scala
+enum GlobalError:
+  case ValidationFailed(errors: List[ValidationError])
+  case NetworkError(message: String)
+  case Conflict(message: String)
+  case ServerError(message: String)
+  case DependencyError(message: String)
+  case WorkspaceExpired(message: String)
+```
+
+Three properties keep it usable:
+
+- **Variants are pure values.** No variant carries a callback or an effect. Which
+  action the user is offered — a refresh on `Conflict`, informational rather than
+  error styling on `WorkspaceExpired` — is chosen at the rendering site, so one
+  value can render differently in different contexts (ADR-010: errors are values).
+- **Classification is compiler-enforced.** `fromThrowable` routes domain failures
+  through `fromAppError`, whose match over the sealed `AppError` hierarchy is
+  exhaustive, so a new server-side error family cannot quietly degrade into
+  `NetworkError`.
+- **The SPA does not retry.** Request-path resilience is the mesh's
+  (ADR-012 §4, ADR-031); a failure that reaches the browser is final for that
+  request and is displayed rather than re-attempted.
+
 ---
 
 ## Code Smells
@@ -226,6 +263,32 @@ options --> { opts =>
 }
 ```
 
+### ❌ An Effect Stored Inside the Error Value
+
+```scala
+// BAD: the error carries its own remedy, so it renders one way everywhere
+case Conflict(message: String, onRefresh: () => Unit)
+```
+
+```scala
+// GOOD: a pure value; the rendering site decides what to offer
+case Conflict(message: String)
+// ErrorBanner chooses "Reload trees", or no action at all, per context
+```
+
+### ❌ Duplicating a Per-View Error into the Global Banner
+
+```scala
+// BAD: the view already renders this inline — the user sees it twice
+submitState.set(SubmitState.Failed(e))
+globalError.set(Some(GlobalError.fromThrowable(e)))
+```
+
+```scala
+// GOOD: the owning view renders it; the banner takes only unowned failures
+submitState.set(SubmitState.Failed(e))
+```
+
 ---
 
 ## Implementation
@@ -243,6 +306,8 @@ options --> { opts =>
 | `AppShell` | Pure structural shell — receives all state as signals, owns no effects (Pattern 1/2) |
 | `FormMode` | Sealed enum + pure transition/dirty-check functions (Pattern 6) |
 | `TreeLoadPolicy.decide` | Pure decision function producing a named outcome type (Pattern 6) |
+| `GlobalError` | Sealed enum of failures no view owns; pure values, exhaustive classification (Pattern 7) |
+| `ErrorBanner` | Renders the global signal; picks per-variant styling and action (Pattern 7) |
 | `HealthState` + `Main` | Health probe state extracted from view; `Main` orchestrates one-shot startup probe |
 | `DistributionChartPlaceholder` | Stateless placeholder in Design view for future modelling chart (Pattern 5) |
 
@@ -253,3 +318,5 @@ options --> { opts =>
 - [Laminar documentation — State Management](https://laminar.dev/documentation)
 - ADR-001: Validation strategy (Iron types reused in frontend)
 - ADR-009: Iron type constraints (shared via `common.js` cross-project)
+- ADR-010: Errors are values — the rule Pattern 7's pure variants follow
+- ADR-012 §4 / ADR-031: request-path resilience is the mesh's, which is why the SPA does not retry

@@ -53,11 +53,12 @@ consequences:
    prefix (`risk-tree:{treeId}:update:{txn}:set-node:{nodeId}`) that
    identifies exactly what changed.
 
-2. **O(depth) cache invalidation.** Because each node is a separate path,
-   Irmin's change tracking is per-node. The ancestor-path invalidation
-   strategy (ADR-005, ADR-014) walks from the changed node to the root,
-   invalidating only the affected O(depth) cache entries — not the entire
-   tree.
+2. **O(depth) change notification.** Because each node is a separate path,
+   Irmin's change tracking is per-node. A write's affected set is the changed
+   node plus its ancestors walked to the root, so the SSE event a mutation
+   publishes names O(depth) nodes rather than the whole tree
+   (`InvalidationHandler`). The simulation cache takes no part in this: it is
+   content-addressed and has no invalidation operation (ADR-014).
 
 3. **Path-level merge resolution.** Irmin merges operate at the path level.
    When two branches modify different nodes (different paths), Irmin

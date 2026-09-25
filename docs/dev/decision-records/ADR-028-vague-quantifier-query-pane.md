@@ -256,4 +256,4 @@ detailed component design and scalability analysis.
 - [ADR-019](ADR-019-frontend-component-architecture.md): Frontend
   component patterns (composable functions, state via params)
 - [ADR-009](ADR-009.md): Simulation engine design
-- [ADR-014](ADR-014.md): RiskResult caching strategy
+- [ADR-014](ADR-014.md): Simulation result caching and render-time curve generation
