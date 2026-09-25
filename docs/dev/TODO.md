@@ -17,9 +17,9 @@ single list.
 | 1 | `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md` | no technical dependency; touches no Scala source and no file any other plan touches. First because it closes a credential-in-logs defect |
 | 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3, 5 and 7 |
 | 3 | `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md` | must follow 2: it adds a method to both registries, which 2 renames. Writing it first means writing it twice |
-| ~~4~~ | ~~`docs/dev/plans/PLAN-TELEMETRY-EXPORT.md`~~ | **Landed in 0.10.37** (`docs/archive/DONE-PLAN-TELEMETRY-EXPORT.md`). Metrics and traces now reach the collector by default, so 5's prerequisite is met |
+| ~~4~~ | ~~`docs/dev/plans/PLAN-TELEMETRY-EXPORT.md`~~ | **Landed in 0.10.37** (`docs/archive/plans/DONE-PLAN-TELEMETRY-EXPORT.md`). Metrics and traces now reach the collector by default, so 5's prerequisite is met |
 | 5 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | depends on 2 (both change `CachedResultResolverLive.scala`). Its other dependency, 4, has landed: the saturation gauge it publishes can now be read |
-| ~~6~~ | ~~`docs/dev/plans/PLAN-LOSSDISTRIBUTION-TO-SERVER.md`~~ | **Landed in 0.10.36** (`docs/archive/DONE-PLAN-LOSSDISTRIBUTION-TO-SERVER.md`). It moved the sealed `LossDistribution` file and `RiskResultTransformSpec.scala` into `server`, which 7's `ValuationResult` sub-slice writes into |
+| ~~6~~ | ~~`docs/dev/plans/PLAN-LOSSDISTRIBUTION-TO-SERVER.md`~~ | **Landed in 0.10.36** (`docs/archive/plans/DONE-PLAN-LOSSDISTRIBUTION-TO-SERVER.md`). It moved the sealed `LossDistribution` file and `RiskResultTransformSpec.scala` into `server`, which 7's `ValuationResult` sub-slice writes into |
 | 7 | `docs/dev/plans/PLAN-RISKTRANSFORM.md` (M4) | must follow 2. The two share fifteen files, including all three scope-resolver sources. M4 adds a `MitigationScopeResolverRegistry` field to `RiskTreeServiceLive` and rewrites the resolver's memo, both of which reach the type through the `MitigationScopeResolverRegistry.forWorkspace` name that 2 introduces. Landing M4 first would grow 2's ripple list by everything M4 adds |
 | — | `docs/dev/plans/PLAN-IRMIN-RECURSIVE-READ.md` | fully independent; shares no file with any of the above and may land at any point |
 
@@ -622,7 +622,7 @@ Portfolios carry **no** seed ID (no stochastic behaviour — retracted).
 deliberately separate types with separate lifecycles.
 
 Implementation plan (full rationale, HDR paper findings, verified
-arithmetic, decision log): [DONE-PLAN-SEED-IDENTITY.md](../archive/DONE-PLAN-SEED-IDENTITY.md).
+arithmetic, decision log): [DONE-PLAN-SEED-IDENTITY.md](../archive/plans/DONE-PLAN-SEED-IDENTITY.md).
 **Implemented in full — see the completion record below.**
 
 **Decision history (do not re-litigate):**
@@ -1003,7 +1003,7 @@ reparent-plus-param-change case — exactly the hole.
    result doesn't depend on the parent) but harmless — decide whether to keep
    that optimisation.
 2. Longer-term (milestone-2b Phase A, designed but unimplemented): move to the
-   content-addressed cache per `docs/archive/milestone-2b-cache-and-decisions.md`,
+   content-addressed cache per `docs/archive/plans/milestone-2b-cache-and-decisions.md`,
    which makes this whole bug class structurally impossible — see that doc's
    Review Addendum (2026-07-12) for the audited status, a recommended
    leaf-only-caching lean-down, and why it is the required substrate for
@@ -1022,7 +1022,7 @@ the leaf cache key is recomputed from the leaf's stored content
 (`sha256(LeafSimContent)`), so a param change *is* a different key — no
 hand-written diff decides invalidation, hence nothing to get wrong.
 Consequences, now explicit Phase A deliverables in
-`docs/archive/milestone-2b-cache-and-decisions.md` (Phase Outline):
+`docs/archive/plans/milestone-2b-cache-and-decisions.md` (Phase Outline):
 
 1. **End-to-end regression test** replicating this item's live repro at service
    level (create tree → LEC → one update combining reparent + param change →
@@ -1450,7 +1450,7 @@ before reporting it done). Questions to resolve before choosing:
 **Origin (2026-07-21):** surfaced as one of three options for covering
 milestone-2b Phase B's "create scenario, switch, edit, switch back"
 end-to-end item (the other two: item 24's browser automation, or a live
-manual round-trip — see `docs/archive/milestone-2b-cache-and-decisions.md`,
+manual round-trip — see `docs/archive/plans/milestone-2b-cache-and-decisions.md`,
 Phase Outline, Phase B). Every current `app/test` spec is a pure state/logic
 test (`TreeBuilderStateSpec`, `TreePreviewSpec`, etc.) — none exercise
 `ScenarioState`/`TreeViewState` against a fake backend. The server module has
@@ -2064,7 +2064,7 @@ parked for it are not orphaned; it is deliberately a pointer, not a spec.
   asset graph exists. Revisit their applicability and approach then. (Today the
   tool models no cross-risk dependence; with-vs-without portfolio comparison is
   the sensible influence-tracking.)
-- **Asset-scope mitigation targeting.** `docs/archive/MITIGATION-PRE-PLANNING.md`
+- **Asset-scope mitigation targeting.** `docs/archive/plans/MITIGATION-PRE-PLANNING.md`
   "Follow-ups (future / asset-scope)": the precomputed unary predicate
   `has_unmitigated_risk(x) ≝ ∃r. (has_risk(x, r) ∧ ¬∃m. has_mitigation(r, m))`
   and D5 (client-facing mitigation API, own ADR). These need the auxiliary sorts

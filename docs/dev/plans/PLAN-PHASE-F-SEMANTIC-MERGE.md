@@ -3,7 +3,7 @@
 **Status: NEEDS REVIEW — not yet implementation-grade, does not confer G3 plan
 coverage.** This document rehomes the Phase F requirements that were tracked in
 the now-archived milestone-2b scratch doc
-(`docs/archive/milestone-2b-cache-and-decisions.md`, "Deferred: Phase D Option-2
+(`docs/archive/plans/milestone-2b-cache-and-decisions.md`, "Deferred: Phase D Option-2
 conflict resolution"). It validates the decisions already ruled and presents the
 outstanding ones for ruling. Before any code, it must be elevated to
 implementation-grade (exact signatures, `## File inventory` with full paths, ADR

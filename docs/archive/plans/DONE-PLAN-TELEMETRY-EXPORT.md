@@ -1,6 +1,6 @@
 # Plan: make telemetry reach a backend, selected by configuration
 
-**Status:** Ruled, awaiting approval as the session's governing plan.
+**Status:** Landed in 0.10.37.
 **Date:** 2026-09-13.
 **ADR reference:** ADR-002 (logging strategy — the sibling signal, unchanged
 here); ADR-016 (configuration management — how a new setting is declared and
@@ -14,7 +14,7 @@ layers already exist and are already compiled.
 
 ## Objective
 
-The project records metrics and traces that nothing can read.
+The project records metrics and traces that no backend receives.
 
 `MetricsLive` and `TracingLive` build an OpenTelemetry SDK and expose a `Meter`
 and a `Tracing` service. Three subsystems use them: `CachedResultResolverLive`
@@ -23,7 +23,7 @@ an operations counter, and `AuthorizationServiceSpiceDB` records its own counter
 and histogram. All of that instrumentation works.
 
 `Application.scala` wires the **console** exporter variants, and carries a
-comment saying what that means:
+comment about what that means:
 
 > Current setup: LoggingSpanExporter & LoggingMetricExporter configured.
 > NOTE: Console exporters produce no visible output in application logs (likely
@@ -31,16 +31,39 @@ comment saying what that means:
 > TODO: Configure log level or switch to `TracingLive.otlp` & `MetricsLive.otlp`
 > for actual telemetry export to otel-collector.
 
-So every recorded measurement goes into an exporter whose output is filtered
-away. The compose stack already runs an OpenTelemetry collector under the
-`observability` profile, receiving OTLP on ports 4317 and 4318 and exposing
-Prometheus metrics on 8889. The application never sends it anything;
-`docker-compose.yml` even carries the endpoint commented out with the note
-"Unused with console exporters".
+**That comment's diagnosis is wrong on both counts, and the correction matters
+because it changes what the fix has to be.** The comment hedges with "likely",
+and neither half of the guess holds.
+
+*Wrong framework.* `LoggingSpanExporter` and `LoggingMetricExporter` come from
+`opentelemetry-exporter-logging`, whose only dependencies are
+`opentelemetry-sdk` and an autoconfigure SPI artifact — no SLF4J. Both hold a
+`java.util.logging.Logger`, the JDK's own framework. The project bridges ZIO
+logging to SLF4J and Logback with `zio-logging-slf4j2`, but carries no
+`jul-to-slf4j` bridge and installs no `SLF4JBridgeHandler`, so Logback never
+receives those records. The `<logger name="io.opentelemetry" level="WARN"/>`
+line in `logback.xml` therefore does not apply to them: it governs SLF4J loggers
+of that name, and the exporters are not SLF4J loggers.
+
+*Wrong level.* Both exporters log at `Level.INFO`, not at DEBUG or FINE. The
+JDK's default logging configuration is a console handler on standard error at
+INFO, so the records pass it.
+
+So the console exporters are not silent. They print every span and every metric
+export cycle as unstructured text on the process's own error output. The real
+defect is narrower and still worth fixing: text on stderr is not a telemetry
+backend. It cannot be queried, graphed, aggregated across runs, or scraped, and
+in a container it is interleaved with the application's own log stream. The
+compose stack already runs an OpenTelemetry collector under the `observability`
+profile, receiving OTLP on ports 4317 and 4318 and exposing Prometheus metrics
+on 8889. The application never sends it anything; `docker-compose.yml` even
+carries the endpoint commented out with the note "Unused with console
+exporters".
 
 This matters now because the concurrency work adds a saturation gauge whose
-entire purpose is to be watched while tuning concurrency limits. A gauge that
-cannot be read does not do that job.
+entire purpose is to be watched while tuning concurrency limits. Tuning means
+reading a value as it changes over time. Grepping it out of stderr does not do
+that job.
 
 **A second defect surfaces on the same lines.** `TelemetryLive` provides
 combined layers, `TelemetryLive.console` and `TelemetryLive.otlp`, each building
@@ -61,10 +84,11 @@ Application code talks to its API; a configurable *exporter* decides where the
 data goes.
 
 **An exporter** is the component that ships recorded data somewhere. Two are in
-play. The **logging exporter** writes measurements through the Java logging
-framework — intended for local debugging, and in this application filtered out
-before it becomes visible. The **OTLP exporter** sends data over OpenTelemetry
-Protocol to a collector, over gRPC on port 4317.
+play. The **logging exporter** writes measurements as text through
+`java.util.logging`, which in this application reaches standard error directly
+rather than passing through Logback — intended for local debugging with no
+collector running. The **OTLP exporter** sends data over OpenTelemetry Protocol
+to a collector, over gRPC on port 4317.
 
 **A collector** receives telemetry from applications and forwards it to
 backends. The compose stack runs one, configured to expose what it receives in
@@ -87,9 +111,13 @@ In
 `modules/server/src/main/scala/com/risquanter/register/configs/TelemetryConfig.scala`:
 
 ```scala
-/** Where telemetry is sent. `Console` writes through the logging framework and
-  * is filtered out by the default log configuration; `Otlp` sends to the
-  * collector at `otlpEndpoint`. */
+/** Where recorded metrics and traces are sent. This is a separate pipeline from
+  * application logging, which always goes to standard output through Logback.
+  *
+  * `Console` prints each span and each metric as text on the running process's
+  * own output, for development with no collector running. `Otlp` sends them to
+  * the collector at `otlpEndpoint`, which decides where they go from there.
+  */
 enum TelemetryExporter:
   case Console, Otlp
 
@@ -165,10 +193,13 @@ stops being true.
 
 **The default is `otlp`, and that choice needs its reasoning stated.** The OTLP
 exporter does not fail when no collector is listening — it retries in the
-background and drops data, so a developer running without the observability
-profile sees nothing worse than today, which is also nothing. Defaulting to
-`console` would instead preserve the current situation as the default and leave
-the visible path opt-in, which is what this plan exists to end.
+background and drops the data, so a developer running without the observability
+profile loses only the stderr text they had before, and gains a working backend
+the moment they start the profile. Defaulting to `console` would make the
+queryable path the opt-in one, which is the situation this plan exists to end.
+The trade is deliberate and it is not free: a developer who wants telemetry
+without running a collector now has to set `REGISTER_TELEMETRY_EXPORTER=console`
+rather than getting that behaviour by default.
 
 ---
 
@@ -277,6 +308,10 @@ It touches `Application.scala`, which `PLAN-CACHE-REGISTRY-RENAME` also touches.
 The two edit different lines — a layer swap in the telemetry block versus
 renamed types in the cache block — so either order works; landing the rename
 first keeps the diffs smaller.
+
+**What happened:** this plan landed first, in 0.10.37, with the rename still
+outstanding. The two did not conflict, as expected. The concurrency plan's
+prerequisite is met.
 
 ---
 

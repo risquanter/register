@@ -190,8 +190,6 @@ Nothing else in T4 is open.
 
 **Found while checking, not fixed here.**
 
-- `docs/dev/TODO.md:625` links `./DONE-PLAN-SEED-IDENTITY.md`, which resolves
-  under `docs/dev/`. The file is at `docs/archive/DONE-PLAN-SEED-IDENTITY.md`.
 - `modules/common/.../domain/data/iron/OpaqueTypes.scala:200` cites
   "PLAN-SEED-IDENTITY §5.1" in a comment. Plan references in comments are
   forbidden by the comment-style rule, and the file is hook-gated, so the edit

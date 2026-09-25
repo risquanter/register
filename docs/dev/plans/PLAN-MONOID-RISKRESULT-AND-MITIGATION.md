@@ -11,7 +11,7 @@ callers (verified 2026-07-17).
 Code audit completed 2026-06-18; A.1 Option 1 decided 2026-07-16 (see A.1).
 Scope: Internal implementation only (no API change intended). API implications flagged where relevant.
 Related: ADR-003 (provenance), ADR-014/ADR-015 (RiskResult as cache/runtime state, cache-aside),
-`docs/archive/milestone-2b-cache-and-decisions.md` (Leaf-as-aggregate semantic smell;
+`docs/archive/plans/milestone-2b-cache-and-decisions.md` (Leaf-as-aggregate semantic smell;
 DD-18 cache value type — decided with A.1 Option 1; DD-19 provenance record shape — closed
 2026-07-18 → (c)+(d) + A′, see milestone-2b Closed table).
 
@@ -177,7 +177,7 @@ fix. Both are correct; Option 1 is better long-term. The choice between them is 
 gate (new type on a shared domain module → trigger #4/#5).
 
 > **Decided 2026-07-16 — Option 1.** The cache value type decision in
-> `docs/archive/milestone-2b-cache-and-decisions.md` (DD-18) fixes the
+> `docs/archive/plans/milestone-2b-cache-and-decisions.md` (DD-18) fixes the
 > `ContentCache` value as a named case class of `TrialOutcomes` plus a
 > content-only provenance record, which requires the explicit type. The
 > trigger #4 gate was resolved by that user decision. The provenance
@@ -190,7 +190,7 @@ gate (new type on a shared domain module → trigger #4/#5).
 
 1. **Documented semantic smell**: aggregated portfolios are currently represented as a Leaf-type
    `RiskResult` rather than a proper group/aggregate type
-   (`docs/archive/milestone-2b-cache-and-decisions.md`). A lawful monoid gives a single,
+   (`docs/archive/plans/milestone-2b-cache-and-decisions.md`). A lawful monoid gives a single,
    principled `combineAll`-style aggregation instead of ad-hoc Leaf reuse.
 
 2. **Safe parallel subtree reduction**. The resolver currently aggregates children sequentially
@@ -630,7 +630,7 @@ Surfaced from the review; each is **informational**, none approved.
 The sequential `ZIO.foreach` child traversal in `CachedResultResolverLive` is the main performance
 gap. **Do not parallelize it independently** — its correctness depends on the Part A associativity
 law. Treat C.1 as the *payoff* of Part A, not a separate task. (Cross-ref:
-`docs/archive/milestone-2b-cache-and-decisions.md`.)
+`docs/archive/plans/milestone-2b-cache-and-decisions.md`.)
 
 ### C.2 Aggregate type vs. `RiskResult` reuse — Leaf-as-aggregate smell
 

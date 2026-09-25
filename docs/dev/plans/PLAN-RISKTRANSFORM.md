@@ -10,7 +10,7 @@ consumer; the trait was later renamed `ResultTransformSpec` — §7 OD-2 ruling
 build or the first mitigation wiring) and D5 (after D1's build) remain open.
 Source material: `PLAN-MONOID-RISKRESULT-AND-MITIGATION.md` Part B (B.0–B.8, which
 remains the historical record and scoring of the design space),
-`docs/archive/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
+`docs/archive/plans/milestone-2b-cache-and-decisions.md` (DD-15 through DD-19),
 ADR-001 (correct-by-construction), ADR-003 (provenance).
 Purpose: a single pickup point for mitigation work. Every decision below follows
 the decision-guide format: goal and context, options, recommendation (labelled).
@@ -303,7 +303,7 @@ and keeping only a metadata trace is rejected.
   versioned blob; on-node is only the degenerate single-node mapping. **Range
   expressiveness decided (B):** extend the *typed* range to full formulas
   (`∧`/`¬`/`∃`, closed-world negation) rather than adapter-derived predicates — a
-  sibling vql-engine change (`docs/archive/MITIGATION-PRE-PLANNING.md` §P-4). A
+  sibling vql-engine change (`docs/archive/plans/MITIGATION-PRE-PLANNING.md` §P-4). A
   mitigation's targeting predicate is a **restricted** sublanguage (closed in x, no answer variables, no quantifiers, no mitigation-state predicates; §8.4-3. Targeting ranges over the node sort only, and mitigation-state predicates are permanently barred (self-reference/fixpoint), so there is no other sort to quantify over — the no-quantifier rule costs no expressiveness).
 
 **Open research feeding this concept:**
@@ -379,7 +379,7 @@ Consequences that follow from this framing:
 ## 7. Build plan (continuation, 2026-08-08)
 
 Implements the §6 concept and the rulings recorded in
-`docs/archive/MITIGATION-PRE-PLANNING.md` ("Decisions (ruled)"). The sibling
+`docs/archive/plans/MITIGATION-PRE-PLANNING.md` ("Decisions (ruled)"). The sibling
 vql-engine work is delegated under the contract
 `../vague-quantifier-logic/PROMPT-VQL-RANGE-AND-TARGETING.md` (AC-1…AC-10);
 this plan designs against those acceptance criteria and contains **no engine
@@ -5433,7 +5433,7 @@ Then: version bump PATCH (`0.10.18` → `0.10.19`), mirror `APP_VERSION` into
 #### Outcome (2026-08-31) — spun-off cleanup completed; vql pin advanced to 0.17.0
 
 The cleanup §8.11 deferred to PLAN-ERROR-REFACTORING §11 has landed, and that
-plan is closed (archived at `docs/archive/DONE-PLAN-ERROR-REFACTORING.md`).
+plan is closed (archived at `docs/archive/plans/DONE-PLAN-ERROR-REFACTORING.md`).
 Verified against the code at register `0.10.28`:
 
 - **Sibling `decode` arms brought onto the message slot (that plan §13,

@@ -6,7 +6,7 @@ detailed evaluation. No option below is recommended over another; trade-offs are
 recorded neutrally.
 
 Related: `PLAN-RISKTRANSFORM.md` §6 (asset / knowledge-graph transferability,
-scope), `docs/archive/MITIGATION-PRE-PLANNING.md` (follow-ups / asset-scope).
+scope), `docs/archive/plans/MITIGATION-PRE-PLANNING.md` (follow-ups / asset-scope).
 
 ---
 

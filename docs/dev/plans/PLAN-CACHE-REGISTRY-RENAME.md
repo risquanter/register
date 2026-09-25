@@ -284,8 +284,8 @@ and renames what it finds.
 
 | Path | Why |
 |---|---|
-| `docs/archive/milestone-2b-cache-and-decisions.md` (6) | archived documents record what was decided at the time. Renaming inside them would make the record describe code that did not exist when it was written |
-| `docs/archive/DONE-PLAN-SEED-IDENTITY.md` (1) | same |
+| `docs/archive/plans/milestone-2b-cache-and-decisions.md` (6) | archived documents record what was decided at the time. Renaming inside them would make the record describe code that did not exist when it was written |
+| `docs/archive/plans/DONE-PLAN-SEED-IDENTITY.md` (1) | same |
 
 ---
 
