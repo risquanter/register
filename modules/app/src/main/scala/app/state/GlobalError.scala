@@ -10,8 +10,8 @@ import app.core.safeMessage
   * calls, unexpected server errors, or future cross-cutting concerns
   * (workspace auth failures, SSE disconnection).
   *
-  * Per-view errors should NOT be duplicated here — the ErrorBanner supplements,
-  * it does not replace, the existing inline error display (ADR-008 / Option A).
+  * Per-view errors are not duplicated here — the ErrorBanner supplements the
+  * inline error display, it does not replace it (ADR-019 Pattern 7).
   *
   * Named `GlobalError` (not `AppError`) to avoid collision with the server-side
   * `com.risquanter.register.domain.errors.AppError` sealed trait.
@@ -20,8 +20,8 @@ import app.core.safeMessage
   * are values). UI actions (e.g. a refresh button on Conflict) are determined
   * at the rendering site, not stored in the error.
   *
-  * @see ADR-008 (error handling & resilience)
-  * @see ADR-010 (accepted error handling strategy)
+  * @see ADR-019 Pattern 7 (two-tier error presentation)
+  * @see ADR-010 (error handling strategy)
   */
 enum GlobalError:
   /** Server-side validation rejection (HTTP 400).

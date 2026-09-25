@@ -100,7 +100,7 @@ case class TreeNotInWorkspace(key: WorkspaceKeySecret, treeId: TreeId) extends S
 }
 
 // ============================================================================
-// Infrastructure Errors (ADR-008: Error Handling & Resilience)
+// Infrastructure Errors (ADR-010: Error Handling Strategy)
 // ============================================================================
 
 /** External service (Irmin) is unavailable - transient, retriable */

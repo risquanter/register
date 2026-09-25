@@ -129,7 +129,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         )
       },
       
-      // Infrastructure errors (ADR-008)
+      // Infrastructure errors (ADR-010)
       test("encodes IrminUnavailable to ServiceUnavailable (503)") {
         val error = IrminUnavailable("Connection refused")
         val (status, response) = ErrorResponse.encode(error)

@@ -189,8 +189,9 @@ object ErrorResponse {
     case _: AuthServiceUnavailable               => makeAccessDeniedResponse("Access denied")
   }
 
-  /** Exhaustive match on IrminError — compiler-enforced coverage (ADR-008).
-    * BranchAlreadyExists/BranchHeadStale (Phase B CAS results) are expected
+  /** Exhaustive match on IrminError — compiler-enforced coverage (ADR-035).
+    * BranchAlreadyExists and BranchHeadStale, the compare-and-set outcomes,
+    * are expected
     * to be intercepted and translated into a domain SimError one layer up
     * (ScenarioService) before reaching this boundary — these two cases are
     * the safety net if that interception is ever skipped, matching every
@@ -277,7 +278,7 @@ object ErrorResponse {
     response(StatusCode.InternalServerError, "simulation", ValidationErrorCode.INTERNAL_ERROR,
       s"Simulation $simulationId failed", domain, requestId)
 
-  // ── Infrastructure Error Responses (ADR-008) ───────────────────────────────
+  // ── Infrastructure Error Responses (ADR-010) ───────────────────────────────
 
   def makeServiceUnavailableResponse(reason: String, domain: String = "irmin", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.ServiceUnavailable, "service", ValidationErrorCode.DEPENDENCY_FAILED,
@@ -313,7 +314,7 @@ object ErrorResponse {
     )
     (StatusCode.Conflict, ErrorResponse(JsonHttpError(StatusCode.Conflict.code, message, errors)))
 
-  /** Phase B CAS safety net (see encodeIrminError) — a scenario name collision
+  /** Compare-and-set safety net (see encodeIrminError) — a scenario name collision
     * that reached the HTTP boundary without being translated by ScenarioService.
     * Reuses DUPLICATE_VALUE, the existing code for "this identity is taken".
     */
@@ -321,7 +322,7 @@ object ErrorResponse {
     response(StatusCode.Conflict, "branch", ValidationErrorCode.DUPLICATE_VALUE,
       s"Branch already exists: ${branch.toBranchRef}", domain, requestId)
 
-  /** Phase B CAS safety net (see encodeIrminError) — a stale branch head
+  /** Compare-and-set safety net (see encodeIrminError) — a stale branch head
     * (concurrent modification) that reached the HTTP boundary without being
     * translated by ScenarioService. Reuses VERSION_CONFLICT, the existing
     * code for "your expectation of the current state is stale".

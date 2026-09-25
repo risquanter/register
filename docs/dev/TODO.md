@@ -1777,6 +1777,11 @@ Smells/Implementation shape).
 timeless-context phrasing, code-first style) and bring each into conformance, or
 split oversized ones per the template's guidance. Keep each ADR's number.
 
+**ADR-001 conformance — DONE.** Carried out under
+`docs/archive/plans/DONE-PLAN-ADR-001-CONFORMANCE.md` and its inventory sidecar,
+both archived. The rest of this item — the other 39 decision records — is not
+started. What that pass covered is recorded below.
+
 **Decisions (2026-09-03) — ADR-001 full template conformance rides this item (Option C).**
 ADR-001 ("Validation Strategy with Iron Types and Smart Constructors") is
 ~485 lines against the template's 100–200 target, with ~10 Decision patterns
@@ -1811,13 +1816,13 @@ anchor in the same change:
 - ADR-001 §8 — `modules/server/.../configs/SpiceDbConfig.scala:19,76`; `modules/common/.../domain/data/iron/OpaqueTypes.scala:34,42`; `modules/common/.../domain/data/iron/ValidationUtil.scala:112,129`
 - ADR-001 named anchor "JSON Bodies with Iron Types" — `modules/common/.../http/codecs/IronTapirCodecs.scala:80`
 
-Several of these are under `modules/**` (hook-gated), so **this item, when
-executed, needs its own implementation-grade plan document and hook token** — it
-is not a docs-only change.
+Several of these are under `modules/**` (hook-gated), so the pass carried its own
+inventory document and hook token rather than running as a docs-only change. All
+of the citations above are applied.
 
 **Sequencing with the domain-invariant-hardening plan.** This item runs FIRST;
 then a consistency sweep; then the domain-invariant-hardening plan
-(`docs/dev/plans/PLAN-DOMAIN-INVARIANT-HARDENING.md`, PLAN-RISKTRANSFORM §9)
+(`docs/archive/plans/DONE-PLAN-DOMAIN-INVARIANT-HARDENING.md`, PLAN-RISKTRANSFORM §9)
 adds its new "Aggregate Constructors Are Private" Decision pattern onto the
 already-conformant ADR-001. That plan's implementation section is gated on a
 consistency sweep of this item's output.
@@ -1831,7 +1836,7 @@ source citations in the mapping above are applied and verified (only §1/§2/§3
 remain in `modules/**`; six `ADR-001-appendix.md` references in place). All unit
 tiers plus `serverIt` are green. The remaining ADRs in this repo-wide sweep are
 not started; ADR-001 completion unblocks the consistency sweep that gates
-`docs/dev/plans/PLAN-DOMAIN-INVARIANT-HARDENING.md`.
+`docs/archive/plans/DONE-PLAN-DOMAIN-INVARIANT-HARDENING.md`.
 
 ## 37. LECGenerator single-pass statistics — efficiency
 
