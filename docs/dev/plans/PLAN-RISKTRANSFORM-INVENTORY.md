@@ -360,3 +360,5 @@ Tests added per phase are listed in §7.1.7 / §7.2.3; M3/M4 test plans arrive
 with their elevation sections. Each phase closes with the doc-consistency
 sweep (comments/docs touched by the change updated in the same pass) and its
 PATCH bump; plan close = MINOR bump.
+- modules/server/src/main/scala/com/risquanter/register/services/cache/ContentCacheRegistry.scala
+- modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverRegistry.scala

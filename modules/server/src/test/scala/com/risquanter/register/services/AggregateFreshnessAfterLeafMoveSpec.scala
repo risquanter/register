@@ -139,7 +139,7 @@ object AggregateFreshnessAfterLeafMoveSpec extends ZIOSpecDefault {
       RiskTreeRepositoryInMemory.layer,
       com.risquanter.register.configs.TestConfigs.simulationLayer,
       com.risquanter.register.services.cache.CachedResultResolverLive.layer,
-      com.risquanter.register.services.cache.CacheScope.layer,
+      com.risquanter.register.services.cache.ContentCacheRegistry.layer,
       com.risquanter.register.services.pipeline.InvalidationHandler.live,
       com.risquanter.register.services.sse.SSEHub.live,
       com.risquanter.register.configs.TestConfigs.telemetryLayer >>> TracingLive.console,

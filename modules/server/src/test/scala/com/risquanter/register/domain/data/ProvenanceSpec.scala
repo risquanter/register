@@ -5,7 +5,7 @@ import com.risquanter.register.domain.data.iron.{SafeId, SafeName, NonNegativeLo
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
-import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, CacheScope}
+import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry}
 import com.risquanter.register.simulation.{LossDistribution, RiskResult, RiskResultGroup, SeedDerivation}
 import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId, unsafeGet}
 import zio.*
@@ -28,9 +28,9 @@ object ProvenanceSpec extends ZIOSpecDefault {
   private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
 
   // Test layer with all dependencies for provenance tests
-  val testLayer: ZLayer[Any, Throwable, CachedResultResolver & CacheScope] =
-    ZLayer.make[CachedResultResolver & CacheScope](
-      CacheScope.layer,
+  val testLayer: ZLayer[Any, Throwable, CachedResultResolver & ContentCacheRegistry] =
+    ZLayer.make[CachedResultResolver & ContentCacheRegistry](
+      ContentCacheRegistry.layer,
       ZLayer.succeed(TestConfigs.simulation),
       TestConfigs.telemetryLayer >>> TracingLive.console,
       TestConfigs.telemetryLayer >>> MetricsLive.console,
