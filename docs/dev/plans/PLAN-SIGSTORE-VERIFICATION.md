@@ -343,8 +343,5 @@ and per-push CI stages run unattended without it.
 
 ## File inventory
 
-(To be completed at implementation-grade elevation — expected: policy file,
-verify script, GitHub Actions workflow(s), admission-controller manifests,
-Semgrep/Scalafix rule pack under `security/` or `.semgrep/`,
-ADR-020 §12 update, supply-chain skill update, VERSION-UPGRADE-PROTOCOL.md
-update, docs/dev/TODO.md item-39 closure.)
+The file inventory lives in its own document, `PLAN-SIGSTORE-VERIFICATION-INVENTORY.md`,
+which the approval hook reads and only the user writes.

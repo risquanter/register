@@ -26,13 +26,8 @@ which remains §1 — no edit.
 
 ## File inventory
 
-- modules/server/src/main/scala/com/risquanter/register/services/QueryService.scala
-- modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala
-- modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationUtil.scala
-- modules/server/src/main/scala/com/risquanter/register/configs/SpiceDbConfig.scala
-- modules/app/src/main/scala/app/state/LECChartState.scala
-- modules/app/src/main/scala/app/state/TreeViewState.scala
-- modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala
+The file inventory lives in its own document, `PLAN-ADR-001-CONFORMANCE-INVENTORY.md`,
+which the approval hook reads and only the user writes.
 
 ## Verification
 

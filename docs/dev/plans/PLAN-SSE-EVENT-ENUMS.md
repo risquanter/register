@@ -83,13 +83,8 @@ counts, `isDefined`, and `result1 == result2`), so nothing is weakened.
 
 ## File inventory
 
-The enforcement hook authorizes gated edits only from bullet lines in this H2
-section (up to the next `## ` heading). Approving the plan (token → this
-document) authorizes every file below.
-
-- modules/server/src/main/scala/com/risquanter/register/http/sse/SSEEvent.scala
-- modules/server/src/main/scala/com/risquanter/register/http/sse/SSEController.scala
-- modules/server/src/test/scala/com/risquanter/register/services/sse/SSEHubSpec.scala
+The file inventory lives in its own document, `PLAN-SSE-EVENT-ENUMS-INVENTORY.md`,
+which the approval hook reads and only the user writes.
 
 ---
 

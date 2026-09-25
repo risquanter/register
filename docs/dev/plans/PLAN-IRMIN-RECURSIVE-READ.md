@@ -191,18 +191,8 @@ returns exactly the set the current list-then-fetch pair produces.
 
 ## File inventory
 
-- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala` — one trait method plus its companion accessor
-- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala` — the implementation and its private extractor
-- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminQueries.scala` — the GraphQL query builder
-- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/model/IrminResponses.scala` — four response case classes and their JSON decoders
-- `modules/server/src/main/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrmin.scala` — `readNodesAt` and `readMitigationsAt` bodies
-- `modules/server-it/src/test/scala/com/risquanter/register/http/support/CountingIrminClient.scala` — new — the call-counting wrapper
-- `modules/server-it/src/test/scala/com/risquanter/register/repositories/RiskTreeRepositoryIrminSpec.scala` — the call-count test
-
-Any in-memory or stub implementation of `IrminClient` gains the new method.
-Adding a method to a trait is a compile error at every implementation, so the
-compiler produces this list exhaustively; implementations found that way are
-added to this inventory before being edited, not edited under this sentence.
+The file inventory lives in its own document, `PLAN-IRMIN-RECURSIVE-READ-INVENTORY.md`,
+which the approval hook reads and only the user writes.
 
 ---
 

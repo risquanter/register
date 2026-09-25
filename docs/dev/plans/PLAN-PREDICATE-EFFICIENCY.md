@@ -55,15 +55,8 @@ Behaviour-preserving proof (all four edge classes match the old
 
 ## File inventory
 
-- modules/server/src/main/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBase.scala
-- build.sbt
-
-`build.sbt` is listed only for the PATCH version bump. `.env` and `.env.irmin`
-are mirrored from it (not hook-gated, handled in the same landing).
-`TreeIndex.descendants` is **not** touched — it stays the right tool wherever the
-whole subtree set is genuinely needed (change fan-out). No test file changes: the
-existing `RiskTreeKnowledgeBaseSpec` truth-table and irreflexivity suites plus
-`BinderIntegrationSpec` are the oracle that the rewrite preserves behaviour.
+The file inventory lives in its own document, `PLAN-PREDICATE-EFFICIENCY-INVENTORY.md`,
+which the approval hook reads and only the user writes.
 
 ## ADR alignment
 
