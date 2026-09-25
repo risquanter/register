@@ -1062,7 +1062,7 @@ Everything upstream of M3 has landed and is exploited here rather than rebuilt:
 
 - M1R (§8.6): vql adoption sweep, `TargetingPredicate` + parser boundary.
 - M2 slice 2 (§8.13): `MitigationScopeResolver` + `ResolvedScopes` + per-`(TreeId,
-  BranchRef, CommitHash)` memoization; `ScopeResolverScope` per-workspace factory.
+  BranchRef, CommitHash)` memoization; `MitigationScopeResolverRegistry` per-workspace factory.
 - M2 slice 3 (§8.14): `CachedResultResolver.ensureCached`/`ensureCachedAll`
   already take `selection: MitigationSelection` and `resolvedScopes`;
   `MitigationApplication.effectiveTree` already bakes a selection into a
@@ -1092,7 +1092,7 @@ In scope:
    on `p95`/`p99`/`lec` (D6=C arity break). Results become keyed by
    `MitigationSelection`. Node identity predicates renamed `named`→`named_risk`,
    `has_id`→`risk_id` (Decision 1=A); `eq` unchanged.
-3. `QueryServiceLive`: resolve scopes via the per-workspace `ScopeResolverScope`;
+3. `QueryServiceLive`: resolve scopes via the per-workspace `MitigationScopeResolverRegistry`;
    bind once against the catalog; walk the bound AST for referenced selections;
    precompute one result map per selection; build the KB from the
    selection-keyed results and resolved scopes.
@@ -1448,8 +1448,8 @@ Tapir endpoint shapes are unchanged. Decision Trigger #4 — pre-ruled OD-5=D.
 
 **(j) `QueryServiceLive` wiring** —
 `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`.
-Add `ScopeResolverScope` (the per-workspace resolver factory, mirrors
-`CacheScope`; one resolver instance per workspace, so cross-workspace scope
+Add `MitigationScopeResolverRegistry` (the per-workspace resolver factory, mirrors
+`ContentCacheRegistry`; one resolver instance per workspace, so cross-workspace scope
 contamination is structurally impossible). `evaluate` binds once against the
 catalog to discover referenced selections, precomputes one result map per
 selection, then builds the KB:
@@ -1458,7 +1458,7 @@ selection, then builds the KB:
 class QueryServiceLive private (
   repo:          RiskTreeRepository,
   resolver:      CachedResultResolver,
-  scopeResolver: ScopeResolverScope,        // NEW
+  scopeResolver: MitigationScopeResolverRegistry,        // NEW
   tracing:       Tracing
 ) extends QueryService:
 
@@ -1469,7 +1469,7 @@ class QueryServiceLive private (
                                 case Some(t) => ZIO.succeed(t)
                                 case None    => ZIO.fail(treeNotFound(treeId))
                               }
-        mitResolver <- scopeResolver.resolverFor(wsId)                    // UIO
+        mitResolver <- scopeResolver.forWorkspace(wsId)                    // UIO
         resolved    <- mitResolver.resolve(ScopeResolutionContext(treeId, branch, commitHash), tree)
         allNodeIds   = tree.index.nodes.keySet
 
@@ -1507,7 +1507,7 @@ class QueryServiceLive private (
 
 object QueryServiceLive:
   val layer: ZLayer[
-    RiskTreeRepository & CachedResultResolver & ScopeResolverScope & Tracing,
+    RiskTreeRepository & CachedResultResolver & MitigationScopeResolverRegistry & Tracing,
     Nothing, QueryService
   ] = ZLayer { … }
 ```
@@ -1542,7 +1542,7 @@ targeting evaluates predicates only). No signature change.
 
 **(m) `Application.scala`** —
 `modules/server/src/main/scala/com/risquanter/register/Application.scala` adds
-`ScopeResolverScope.layer` to the layer graph (built in M2, no live call site
+`MitigationScopeResolverRegistry.layer` to the layer graph (built in M2, no live call site
 until now) and updates the `QueryServiceLive.layer` requirement.
 
 **(n) App default/placeholder query strings** — the arity break makes the
@@ -1664,12 +1664,12 @@ change; flagged, not fixed here.)
   interpolation surface.
 - **ADR-030** (Authz at the orchestration boundary) + **ADR-024** (PEP pattern):
   compliant, and reinforced. No new endpoint; the query endpoint's existing
-  capability gate is unchanged. `ScopeResolverScope.resolverFor(wsId)` takes a
+  capability gate is unchanged. `MitigationScopeResolverRegistry.forWorkspace(wsId)` takes a
   server-derived `WorkspaceId`, and the one-resolver-per-workspace design makes
   cross-workspace scope contamination structurally impossible — a tenancy
   isolation property, not just an absence of new surface.
 - **ADR-031** (Startup readiness vs request-path resilience): compliant.
-  `ScopeResolverScope.layer` is a pure `Ref.make` with no external dependency, so
+  `MitigationScopeResolverRegistry.layer` is a pure `Ref.make` with no external dependency, so
   it adds no startup-readiness dependency; `resolve` is `UIO`, so it adds no new
   request-path failure mode.
 - **ADR-032** (Content equality — domain hash vs storage hash): **bears on
@@ -1723,8 +1723,7 @@ change; flagged, not fixed here.)
 **No bearing (checked, explicitly):** ADR-004a/004b (persistence SSE/WebSocket
 proposals), ADR-005 (cached subtree aggregates proposal), ADR-006 (real-time
 collaboration proposal), ADR-007 (scenario branching — M3 reads at an existing
-branch head, no branching change), ADR-008 (error/resilience proposal, superseded
-by ADR-010/031), ADR-011 (import conventions — implementation style, not a design
+branch head, no branching change), ADR-011 (import conventions — implementation style, not a design
 bearing), ADR-012 (service mesh / JWT at waypoint — no app-code auth change),
 ADR-016 (config management — no config change), ADR-017 (tree API / create-vs-update
 DTOs — M4), ADR-019 (frontend — M4), ADR-021 (capability URLs — unchanged), ADR-022
@@ -1842,19 +1841,9 @@ the seven open decisions: five gate the `ValuationResult` sub-slice ruled in
 authorized until the approval token names this plan and the edited file appears
 in the shared `## File inventory`.
 
-**Sequencing: `PLAN-CACHE-REGISTRY-RENAME` lands before this elevation.** The two
-plans share fifteen files, including all three scope-resolver sources. The rename
-turns `ScopeResolverScope` into `MitigationScopeResolverRegistry` and `resolverFor`
-into `forWorkspace`. Slice 1 adds a scope-resolver field to `RiskTreeServiceLive`
-and slice 4 rewrites the resolver's memo, so both are written against names the
-rename changes. Landing M4 first would instead grow the rename's ripple list by
-everything M4 adds. `docs/dev/TODO.md`'s plan landing order records this as
-constraint 6.
-
-Consequently **every signature in §7.6.5 and §7.6.8 that names `ScopeResolverScope`
-or `resolverFor` is written in pre-rename vocabulary and is renamed as the rename
-plan lands**, not re-decided here. The rename plan's own document list carries
-this file, so the two stay consistent by that plan's own scope.
+**Signatures below use the current names of the two per-workspace registries:
+`ContentCacheRegistry` and `MitigationScopeResolverRegistry`, both handing out
+their instance via `forWorkspace(...)`.**
 
 **Reasoning source.** Where a question about the mitigated value's type, the two
 folds, the identity case, or `flatten` is ambiguous in the sections below, the
@@ -1954,7 +1943,7 @@ time; the Status column is current.
 | F5 | The selection payload has no size bound: neither `ScopeRestriction.NodesOnly.ids` nor `MitigationSelection.Selected.entries` is bounded. Derived bounds 10 000 (tree node ceiling) and 1 000 (`MaxMitigations`), both from ADR-017 §6 domain cardinalities; the 8 MiB `RequestStreaming.Disabled(cfg.maxRequestBytes)` cap covers the aggregate | med-high | **Specified, not implemented** (§7.6.5). The elevation adds a third bound F5 did not name: the requested node list, bounded by the same tree node ceiling |
 | F6 | Where the selection rides is unresolved, and the plan's stated answer does not fit the endpoints | med | Ruled → Decision 3 |
 | F7 | The response type cannot carry what ADR-034 and OD-3 require: `Map[NodeId, LECNodeCurve]` has no room for two valuations or for per-valuation provenance | med | Ruled → Decision 4; shape at §7.6.3 |
-| F8 | The scope resolver is not reachable from the LEC path: `ScopeResolverScope` is wired into `QueryServiceLive` only, and `RiskTreeServiceLive` discarded the `CommitHash` | med | **Fixed.** `RiskTreeService.getById` widened to `(RiskTree, CommitHash)`; the three controller callers discard the hash at the wire boundary. Supersedes the confinement formerly recorded in §7.5.3 (i) and §7.5.4, both now corrected |
+| F8 | The scope resolver is not reachable from the LEC path: `MitigationScopeResolverRegistry` is wired into `QueryServiceLive` only, and `RiskTreeServiceLive` discarded the `CommitHash` | med | **Fixed.** `RiskTreeService.getById` widened to `(RiskTree, CommitHash)`; the three controller callers discard the hash at the wire boundary. Supersedes the confinement formerly recorded in §7.5.3 (i) and §7.5.4, both now corrected |
 | F9 | §8.7 Finding 3's required validating decoder has an unclear trigger: `MitigationApplicationRecord`'s derived codec re-validates nothing, so a tampered record decodes cleanly | med | **Closed, no action.** The record is outbound only; both inbound paths (targeting expression, persisted mitigation) already re-validate. See Decision 5 |
 | F10 | Mitigation selection collides with Compare slot identity: OD-3 wants selection as a slot dimension, but `SlotCoordinate.samePairAs` does not carry it | med | Ruled → Decision 6 |
 | F11 | **Ruled (Decision 7).** `LECChartState` caps user-selected nodes at 13 and `ColorAssigner` assigns one colour per node, which a second curve per node breaks. The cap counts nodes; a variant is drawn with point-marker shape, colour staying node identity | med | Ruled → Decision 7 |
@@ -2730,7 +2719,7 @@ one dependency and five private members.
 class RiskTreeServiceLive private (
   repo: RiskTreeRepository,
   resolver: CachedResultResolver,
-  scopeResolver: ScopeResolverScope,
+  scopeResolver: MitigationScopeResolverRegistry,
   invalidationHandler: InvalidationHandler,
   tracing: Tracing,
   operationsCounter: Counter[Long]
@@ -2773,7 +2762,7 @@ class RiskTreeServiceLive private (
     case MitigationSelection.Inherent => ZIO.succeed(ResolvedScopes(Map.empty))
     case _ =>
       for
-        mitResolver <- scopeResolver.resolverFor(wsId)
+        mitResolver <- scopeResolver.forWorkspace(wsId)
         scopes      <- mitResolver.resolve(ScopeResolutionContext(treeId, branch, commit), tree)
         _           <- ResolvedScopes.logFailures(scopes)
       yield scopes
@@ -2957,7 +2946,7 @@ composing a `Revision`:
 ```
 
 **`modules/server/src/main/scala/com/risquanter/register/Application.scala`** — `RiskTreeServiceLive.layer` now also
-requires `ScopeResolverScope`, which the application already provides at line
+requires `MitigationScopeResolverRegistry`, which the application already provides at line
 290; the layer's type widens and no wiring line moves.
 
 **The browser, minimally.** Changing a shared endpoint definition breaks the
@@ -3478,7 +3467,7 @@ object MitigationScopeResolverLive:
   val SlotCapacity: Int = 2
 ```
 
-`ScopeResolverScope.resolverFor` constructs the widened `Ref` type:
+`MitigationScopeResolverRegistry.forWorkspace` constructs the widened `Ref` type:
 
 ```scala
           memo <- Ref.make(Map.empty[(TreeId, BranchRef), Vector[(CommitHash, ResolvedScopes)]])
@@ -3532,9 +3521,17 @@ them, because they sit in the same paragraphs:
 - ADR-003's Implementation table claims optional provenance capture is
   implemented via an `includeProvenance` flag. The flag sets a tracing attribute
   and nothing else, and no production caller passes `true`.
-- ADR-003 §3 and ADR-009 §5 both publish
+- ADR-003's Decision 4 and ADR-009 §5 both publish
   `group.children.collect { case r: RiskResult => r.nodeId -> r.provenances }`
   as the provenance derivation. That pattern exists nowhere in `src/main`.
+
+These two are the follow-up step ADR housekeeping task T4 leaves open. T4 itself
+is closed: ADR-003 was rewritten on 2026-09-25 to state the boundary-assigned
+seed-identity decision and to fold its per-node-provenance section into
+Decision 4, and both statements above were left untouched in that pass so that
+slice 5 is their only edit. The section numbering the corrections apply to is
+therefore the new one — Decision 4 and the Implementation table row "Optional
+provenance capture".
 
 Editing a paragraph while leaving an adjacent falsehood in it is the drift the
 docs-as-current-state rule exists to stop, so both are fixed here. Everything
@@ -3548,7 +3545,7 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 | ADR-001 (validate once, at the boundary) | The request types carry smart constructors and their decoders run them, so a handler receives a selection that already satisfies both bounds. The one check deliberately outside the decoder — whether a named mitigation exists — is a lookup against a loaded tree, not a field format rule, and the plan says so where it is placed | Compliant |
 | ADR-001 §2 (Iron types in JSON bodies need an explicit Tapir schema) | `Schema[MitigationId]` is added beside the existing `Schema[NodeId]` | Compliant |
 | ADR-002 (drift signals, not failures) | A predicate that no longer binds makes one mitigation a no-op and is logged; it never fails a read | Compliant |
-| ADR-003 (provenance and reproducibility) | Uniform wrapping puts a `ValuationResult` between a portfolio and its children, so the resolver's provenance walk descends through `source` to keep §3's "union of all leaf provenances in its subtree, in child order". ADR-003's Implementation table separately claims optional provenance capture is implemented via `includeProvenance`, which sets a tracing attribute only | Amended, slice 5 |
+| ADR-003 (provenance and reproducibility) | Uniform wrapping puts a `ValuationResult` between a portfolio and its children, so the resolver's provenance walk descends through `source` to keep Decision 4's "union of all leaf provenances in its subtree, in child order". ADR-003's Implementation table separately claims optional provenance capture is implemented via `includeProvenance`, which sets a tracing attribute only | Amended, slice 5 |
 | ADR-004a (storage mapping) | Unchanged: mitigations are already stored as `mitigations/{id}` blobs and this plan adds no storage shape | Compliant |
 | ADR-009 (associativity of the aggregate) | Result-stage transforms still apply to a finished node value, never inside the summation — compliant and unchanged. But §2 enumerates exactly two subtypes and the Implementation table names them, and a third subtype makes both stale; §5's `children.collect { case r: RiskResult => … }` provenance pattern is superseded by the `source` descent | Amended, slice 5 |
 
@@ -3964,7 +3961,7 @@ omission is a denial.
 - `modules/server/src/main/scala/com/risquanter/register/services/QueryServiceLive.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolver.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverLive.scala`
-- `modules/server/src/main/scala/com/risquanter/register/services/cache/ScopeResolverScope.scala`
+- `modules/server/src/main/scala/com/risquanter/register/services/cache/MitigationScopeResolverRegistry.scala`
 - `modules/server/src/main/scala/com/risquanter/register/services/pipeline/InvalidationHandler.scala`
 - `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisController.scala`
 - `modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceTreeController.scala`
@@ -4000,7 +3997,7 @@ reaches it. `AggregateFreshnessAfterLeafMoveSpec`, `SeedStabilitySpec`,
 `RiskTreeControllerSpec`, `RouteSecurityRegressionSpec`,
 `WorkspaceLifecycleControllerSpec`, `HttpTestHarness` and `StubHttpTestHarness`
 each build `RiskTreeServiceLive.layer`, which now also requires
-`ScopeResolverScope`. `TreeViewState.scala` and `LECChartState.scala` are the
+`MitigationScopeResolverRegistry`. `TreeViewState.scala` and `LECChartState.scala` are the
 two browser call sites of the endpoints whose signatures change, and without
 them the Scala.js module does not compile.
 
@@ -5915,8 +5912,8 @@ import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.{NodeId, TreeId, BranchRef, CommitHash, MitigationId}
 
 /** Names the tree version whose scopes are resolved. The owning workspace is NOT
-  * a field: one resolver instance exists per workspace (`ScopeResolverScope`, the
-  * DD-17 `CacheScope` precedent), so the workspace IS the instance and the memo
+  * a field: one resolver instance exists per workspace (`MitigationScopeResolverRegistry`, the
+  * DD-17 `ContentCacheRegistry` precedent), so the workspace IS the instance and the memo
   * key inside it is exactly (treeId, branch, revision). `revision` is the
   * byte-level Irmin commit hash, never the DD-16 domain hash — predicates
   * reference node names, which the domain hash omits, so a rename changes
@@ -6001,7 +5998,7 @@ import logic.{Formula, FOL, FOLUtil}
   * least recently used, so revisions never accumulate and a pinned historic read
   * cannot displace the head. The memo read and write are not atomic
   * (last-writer-wins) — see "Memo write policy". In-memory `Ref` → `UIO`. One
-  * instance per workspace (`ScopeResolverScope`).
+  * instance per workspace (`MitigationScopeResolverRegistry`).
   *
   * The bound is structural rather than a policy. An eviction strategy could have
   * served here, and one already exists for `ContentCache`; reusing it would mean
@@ -6107,7 +6104,7 @@ for the granularity ruling):
 | `UnknownPredicate`, `UnknownFunction`, `ArityMismatch`, `UnknownConstantOrLiteral`, `UnconstrainedVar`, `UnexpectedFreeVar`, `TypeNotQuantifiable`, `UnboundAnswerVar` | `MalformedPredicate(detail)` | structural — the predicate does not fit the current catalog (only reachable if the catalog vocabulary changed under a stored predicate) |
 | any evaluation-phase `QueryError` | `InternalError(detail)` | a wiring fault; should not occur for a bound predicate |
 
-#### Per-workspace registry — `ScopeResolverScope.scala` (mirrors `CacheScope`)
+#### Per-workspace registry — `MitigationScopeResolverRegistry.scala` (mirrors `ContentCacheRegistry`)
 
 ```scala
 package com.risquanter.register.services.cache
@@ -6116,25 +6113,25 @@ import zio.*
 import com.risquanter.register.domain.data.iron.{WorkspaceId, TreeId, BranchRef, CommitHash}
 
 /** Per-workspace `MitigationScopeResolver` resolution (§8.1 cache-identity, the
-  * DD-17 `CacheScope` precedent). One resolver instance per workspace makes
+  * DD-17 `ContentCacheRegistry` precedent). One resolver instance per workspace makes
   * cross-workspace scope contamination structurally impossible; the memo key
   * inside each instance is (treeId, branch, revision). */
-trait ScopeResolverScope:
-  def resolverFor(workspaceId: WorkspaceId): UIO[MitigationScopeResolver]
+trait MitigationScopeResolverRegistry:
+  def forWorkspace(workspaceId: WorkspaceId): UIO[MitigationScopeResolver]
 
-object ScopeResolverScope:
-  val layer: ZLayer[Any, Nothing, ScopeResolverScope] =
+object MitigationScopeResolverRegistry:
+  val layer: ZLayer[Any, Nothing, MitigationScopeResolverRegistry] =
     ZLayer.fromZIO(
-      Ref.make(Map.empty[WorkspaceId, MitigationScopeResolver]).map(ScopeResolverScopeLive(_))
+      Ref.make(Map.empty[WorkspaceId, MitigationScopeResolver]).map(MitigationScopeResolverRegistryLive(_))
     )
 
-  def resolverFor(workspaceId: WorkspaceId): URIO[ScopeResolverScope, MitigationScopeResolver] =
-    ZIO.serviceWithZIO[ScopeResolverScope](_.resolverFor(workspaceId))
+  def forWorkspace(workspaceId: WorkspaceId): URIO[MitigationScopeResolverRegistry, MitigationScopeResolver] =
+    ZIO.serviceWithZIO[MitigationScopeResolverRegistry](_.forWorkspace(workspaceId))
 
-final case class ScopeResolverScopeLive(
+final case class MitigationScopeResolverRegistryLive(
   resolvers: Ref[Map[WorkspaceId, MitigationScopeResolver]]
-) extends ScopeResolverScope:
-  override def resolverFor(workspaceId: WorkspaceId): UIO[MitigationScopeResolver] =
+) extends MitigationScopeResolverRegistry:
+  override def forWorkspace(workspaceId: WorkspaceId): UIO[MitigationScopeResolver] =
     resolvers.get.map(_.get(workspaceId)).flatMap {
       case Some(r) => ZIO.succeed(r)
       case None =>
@@ -6166,7 +6163,7 @@ final case class ScopeResolverScopeLive(
    itself is an M3 analytics concern (KB reuse across analytic queries), out of
    slice-2 scope. Flagged rather than swept because it narrows the §8.1 wording.
 3. **Per-workspace partition key is `WorkspaceId`, not `SeedEntityId`.**
-   `CacheScope` keys by `SeedEntityId` because simulation figures depend on the
+   `ContentCacheRegistry` keys by `SeedEntityId` because simulation figures depend on the
    HDR entity axis; scope resolution has no seed relationship, so `WorkspaceId`
    is the honest authority identity. Structurally identical isolation.
 4. **`ScopeResolutionContext` carries `(treeId, branch, revision)`, not the
@@ -6224,7 +6221,7 @@ scaladoc.** (Option A of the complex-review decision, 2026-08-28.)
   `BranchRef`, `CommitHash` are the existing nominal wrappers; no raw primitive
   carries a domain value across any signature.
 - **Concurrency** — the per-workspace registry resolves a first-access race to
-  one winner via atomic `Ref.modify` (the `CacheScope` pattern). The per-instance
+  one winner via atomic `Ref.modify` (the `ContentCacheRegistry` pattern). The per-instance
   memo write is a non-atomic get-then-update with last-writer-wins semantics — a
   reviewed, accepted trade-off that never serves a wrong scope; see "Memo write
   policy" above.
@@ -6256,7 +6253,7 @@ New spec `MitigationScopeResolverSpec` (server, `zio-test`), cases:
   second `revision` recomputes and **both** entries are then live, so alternating
   between the two hits every time; a call at a third `revision` evicts the least
   recently used, leaving the slot at two.
-- **per-workspace isolation:** `ScopeResolverScope.resolverFor` returns the same
+- **per-workspace isolation:** `MitigationScopeResolverRegistry.forWorkspace` returns the same
   instance for one `WorkspaceId` and distinct instances for different ones.
 - **projection:** `ResolvedScopes.appliedScopes` equals the `Map[MitigationId,
   Set[NodeId]]` `MitigationApplication.scoped` consumes; `Failed` maps to `∅`.
@@ -7106,7 +7103,7 @@ The branch to add is:
 
 **The elevation must state why that branch is correct, not merely that it
 compiles.** The argument it has to make, and which the implementation must be
-checked against, is this. ADR-003 §3 requires that a portfolio's provenance be
+checked against, is this. ADR-003 Decision 4 requires that a portfolio's provenance be
 "the union of all leaf provenances in its subtree, in child order". Under uniform
 wrapping every value the mitigated fold returns is a `ValuationResult`, so a
 portfolio's children are all wrappers and the existing `RiskResultGroup` branch

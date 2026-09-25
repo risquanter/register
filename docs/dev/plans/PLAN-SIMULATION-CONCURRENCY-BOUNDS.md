@@ -445,21 +445,22 @@ with an attribute distinguishing the process-wide limiter from the per-request
 one. No new dependency and no new layer: the `Meter` is already in this file's
 layer requirements.
 
-**Two things this ruling depends on, both routed.** Nothing currently reads
-these instruments — the application wires the console exporters, whose output is
-filtered away — so `PLAN-TELEMETRY-EXPORT` lands first and makes the gauge
-observable. And no decision record governs metric naming; the convention above
-exists only as code. That gap is recorded as TODO item 50 and is not a
-prerequisite for this plan.
+**Two things this ruling depends on, both routed.** The gauge needs a backend
+that can be read over time, which `PLAN-TELEMETRY-EXPORT` supplied: the
+application now wires `TelemetryLive.configured`, which defaults to the OTLP
+exporter and sends to the collector, and the collector republishes metrics in
+Prometheus format on port 8889. That prerequisite is met. And no decision record
+governs metric naming; the convention above exists only as code. That gap is
+recorded as TODO item 50 and is not a prerequisite for this plan.
 
 ## Sequencing
 
-Two plans land before this one, each for a stated reason.
+One plan still lands before this one. A second already has.
 
-**`PLAN-TELEMETRY-EXPORT` first.** Decision 3 publishes a saturation gauge, and
-Decision 2's tuning rule is written from what that gauge shows. Nothing can read
-it until the application stops wiring the console exporters, which is that
-plan's whole content.
+**`PLAN-TELEMETRY-EXPORT` — landed in 0.10.37, nothing to wait for.** Decision 3
+publishes a saturation gauge, and Decision 2's tuning rule is written from what
+that gauge shows. Reading it needs metrics to reach a backend, which that plan
+delivered.
 
 **`PLAN-CACHE-REGISTRY-RENAME` first.** It renames `CacheScope` to
 `ContentCacheRegistry`, and `CachedResultResolverLive` — the file this plan

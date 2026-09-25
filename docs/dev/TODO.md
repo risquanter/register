@@ -8,26 +8,26 @@ not prescribed solutions.
 
 ## Plan landing order — approved plans, in the order they must be implemented
 
-Eight plans are ruled and awaiting approval. Six ordering constraints are real;
-everything else is free. Each plan repeats its own constraint in a Sequencing
-section, and this is the single list.
+Eight plans were ruled. Two have landed and are struck through below; six remain.
+Each plan repeats its own constraint in a Sequencing section, and this is the
+single list.
 
 | # | Plan | Why here |
 |---|---|---|
 | 1 | `docs/dev/plans/PLAN-NGINX-WORKSPACE-ROUTING.md` | no technical dependency; touches no Scala source and no file any other plan touches. First because it closes a credential-in-logs defect |
 | 2 | `docs/dev/plans/PLAN-CACHE-REGISTRY-RENAME.md` | must precede 3, 5 and 7 |
 | 3 | `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md` | must follow 2: it adds a method to both registries, which 2 renames. Writing it first means writing it twice |
-| 4 | `docs/dev/plans/PLAN-TELEMETRY-EXPORT.md` | must precede 5 |
-| 5 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | depends on 2 (both change `CachedResultResolverLive.scala`) and on 4 (it publishes a saturation gauge and writes its tuning rule from what that gauge shows; nothing can read it until the console exporters are replaced) |
-| 6 | `docs/dev/plans/PLAN-LOSSDISTRIBUTION-TO-SERVER.md` | must precede 7. It moves the sealed `LossDistribution` file and `RiskResultTransformSpec.scala`, both of which 7's `ValuationResult` sub-slice writes into. Landing it second means writing the new subtype and its tests in `common` and moving them afterwards |
-| 7 | `docs/dev/plans/PLAN-RISKTRANSFORM.md` (M4) | must follow 2. The two share fifteen files, including all three scope-resolver sources. M4 adds a scope-resolver field to `RiskTreeServiceLive` and rewrites the resolver's memo, both against names that 2 changes: `ScopeResolverScope` becomes `MitigationScopeResolverRegistry` and `resolverFor` becomes `forWorkspace`. Landing M4 first would grow 2's ripple list by everything M4 adds |
+| ~~4~~ | ~~`docs/dev/plans/PLAN-TELEMETRY-EXPORT.md`~~ | **Landed in 0.10.37** (`docs/archive/DONE-PLAN-TELEMETRY-EXPORT.md`). Metrics and traces now reach the collector by default, so 5's prerequisite is met |
+| 5 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | depends on 2 (both change `CachedResultResolverLive.scala`). Its other dependency, 4, has landed: the saturation gauge it publishes can now be read |
+| ~~6~~ | ~~`docs/dev/plans/PLAN-LOSSDISTRIBUTION-TO-SERVER.md`~~ | **Landed in 0.10.36** (`docs/archive/DONE-PLAN-LOSSDISTRIBUTION-TO-SERVER.md`). It moved the sealed `LossDistribution` file and `RiskResultTransformSpec.scala` into `server`, which 7's `ValuationResult` sub-slice writes into |
+| 7 | `docs/dev/plans/PLAN-RISKTRANSFORM.md` (M4) | must follow 2. The two share fifteen files, including all three scope-resolver sources. M4 adds a `MitigationScopeResolverRegistry` field to `RiskTreeServiceLive` and rewrites the resolver's memo, both of which reach the type through the `MitigationScopeResolverRegistry.forWorkspace` name that 2 introduces. Landing M4 first would grow 2's ripple list by everything M4 adds |
 | — | `docs/dev/plans/PLAN-IRMIN-RECURSIVE-READ.md` | fully independent; shares no file with any of the above and may land at any point |
 
-Steps 3 and 4 are independent of each other and could swap. Steps 3, 4 and 5 all
-touch `Application.scala`, each on different lines — a released-cache layer, a
-telemetry layer swap, and a limiter layer — so the order between them is a
-matter of diff size, not correctness. Step 7 is the largest plan by far and is
-ordered only against steps 2 and 6; it is independent of 3, 4 and 5.
+Steps 3 and 5 both touch `Application.scala`, on different lines — a
+released-cache layer and a limiter layer — so the order between them is a matter
+of diff size, not correctness. Step 4 touched the same file and has landed. Step
+7 is the largest plan by far and is ordered only against step 2, step 6 having
+landed; it is independent of 3 and 5.
 
 ---
 
@@ -622,7 +622,7 @@ Portfolios carry **no** seed ID (no stochastic behaviour — retracted).
 deliberately separate types with separate lifecycles.
 
 Implementation plan (full rationale, HDR paper findings, verified
-arithmetic, decision log): [DONE-PLAN-SEED-IDENTITY.md](./DONE-PLAN-SEED-IDENTITY.md).
+arithmetic, decision log): [DONE-PLAN-SEED-IDENTITY.md](../archive/DONE-PLAN-SEED-IDENTITY.md).
 **Implemented in full — see the completion record below.**
 
 **Decision history (do not re-litigate):**
@@ -2210,12 +2210,11 @@ implementation deliberately deferred.
 PLAN-REF(SIMULATION-CONCURRENCY-BOUNDS),
 `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` carries the mechanism, a
 worked example with timings, the deadlock argument for acquiring permits only at
-leaves, and the exact signatures. Two plans land before it:
-`PLAN-TELEMETRY-EXPORT.md`, because the ruled saturation gauge cannot be read
-until the application stops wiring the console exporters, and
+leaves, and the exact signatures. One plan still lands before it,
 `PLAN-CACHE-REGISTRY-RENAME.md`, because both change
-`CachedResultResolverLive.scala`. Nothing is implemented until that plan is
-approved.
+`CachedResultResolverLive.scala`. Its other prerequisite,
+`PLAN-TELEMETRY-EXPORT.md`, landed in 0.10.37, so the ruled saturation gauge can
+now be read. Nothing is implemented until that plan is approved.
 
 ---
 
@@ -2258,11 +2257,12 @@ can arise at any point, before or after the mitigation work completes.
    every step would recompute the full scope resolution for every mitigation.
    Scenario compare mode is the second candidate if it ever resolves scopes at
    two revisions in one request.
-2. **Resolution time becomes visible in the simulation telemetry.** Once
-   metrics reach a backend, a resolution duration that is no longer small
-   against the surrounding request is the measured signal. This needs a
-   `risk_result.scope.resolution_duration_ms` instrument, which does not exist
-   yet — adding it is part of this item, not a prerequisite held elsewhere.
+2. **Resolution time becomes visible in the simulation telemetry.** Metrics now
+   reach the collector and are readable in Prometheus format on port 8889, so a
+   resolution duration that is no longer small against the surrounding request
+   is a measurable signal. What is still missing is the instrument itself,
+   `risk_result.scope.resolution_duration_ms`; adding it is part of this item,
+   not a prerequisite held elsewhere.
 3. **A tree in real use exceeds roughly two thousand nodes.** Resolution is
    O(mitigations x nodes) cheap evaluations; the ruling that made head-only
    correct assumed hundreds of nodes and depth under ten. An order of magnitude
@@ -2322,7 +2322,7 @@ expired workspace's simulation results and resolved mitigation scopes stay in
 memory, reachable by nothing, until the process restarts. The server container
 is limited to 256 MB.
 
-`CacheScope`'s scaladoc states the intent and concedes the gap in one sentence:
+`ContentCacheRegistry`'s scaladoc states the intent and concedes the gap in one sentence:
 *"Cache lifecycle = workspace lifecycle; a deleted workspace's cache lingers
 until restart (NoOp eviction)."*
 
