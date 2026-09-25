@@ -1,0 +1,11 @@
+docs/dev/plans/PLAN-PROVENANCE-ENDPOINT.md
+modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceAnalysisEndpoints.scala
+modules/server/src/main/scala/com/risquanter/register/services/RiskTreeService.scala
+modules/server/src/main/scala/com/risquanter/register/services/RiskTreeServiceLive.scala
+modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolver.scala
+modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala
+modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala
+modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceAnalysisController.scala
+modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala
+modules/server/src/test/scala/com/risquanter/register/services/CascadeTestStubs.scala
+modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala
