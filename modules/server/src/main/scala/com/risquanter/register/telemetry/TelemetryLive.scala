@@ -28,9 +28,12 @@ import com.risquanter.register.domain.data.iron.Url.*
   * which is more efficient than separate layers and ensures
   * consistent resource attributes across all signals.
   * 
-  * Provides two configurations:
-  * - `console`: Logging exporters for development
-  * - `otlp`: OTLP gRPC exporters for production
+  * `configured` is the entry point the application wires: it reads
+  * `TelemetryConfig.exporter` and yields one of the two exporter setups below.
+  * Name one of those directly only to pin the exporter regardless of
+  * configuration, which is what tests do.
+  * - `console`: logging exporters, printed on the process's own output
+  * - `otlp`: OTLP gRPC exporters, sent to the collector
   * 
   * Pattern follows official zio-telemetry documentation:
   * - OpenTelemetry.custom() for SDK configuration
