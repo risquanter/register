@@ -1,6 +1,6 @@
 ---
 name: register-dev
-description: "Dev workflow for the register project. Use for: compiling Scala/SBT modules, running unit/integration tests, Scala.js frontend builds, Vite dev server, Docker Compose stack management, container image builds, BATS smoke tests, health checks, leaked-network cleanup, sbt commands, fastLinkJS, fullLinkJS, docker compose up, docker compose down."
+description: "Dev workflow for the register project. Use for: compiling Scala/SBT modules, running unit/integration tests, Scala.js frontend builds, Vite dev server, Docker Compose stack management, container image builds, BATS smoke tests, health checks, leaked Docker state cleanup, sbt commands, fastLinkJS, fullLinkJS, docker compose up, docker compose down."
 user-invocable: false
 ---
 
@@ -82,8 +82,9 @@ Requires `local/irmin-prod:3.11-p1` Docker image (built once — see Image Build
 `docker-compose.server-it.yml` (dynamic host port — multiple specs run concurrently
 without port conflicts).
 
-**Before every run, clear leaked networks first** — see "Leaked Docker state
-cleanup" below (Mechanism 1). It is a mandatory pre-step, not just crash recovery.
+**Before every run, clear leaked containers, networks and volumes first** — see
+"Leaked Docker state cleanup" below (Mechanism 1). It is a mandatory pre-step,
+not just crash recovery.
 
 ```bash
 # All integration tests (runs all specs concurrently — safe)
@@ -106,32 +107,67 @@ and re-run, never re-diagnose them, and never count the run as a real failure on
 their account. Clear the relevant one **before** starting a Docker tier — not
 only after a Ctrl+C / crash.
 
-**Mechanism 1 — `register_it_` per-run networks (serverIt).** `IrminCompose`
+**Mechanism 1 — `register_it_` per-run stacks (serverIt).** `IrminCompose`
 creates a uniquely-named `register_it_<random>` stack per spec. Interrupted runs
 leave these behind until Docker's address pool is exhausted (`all predefined
 address pools have been fully subnetted`). That daemon error has this one cause.
-Run before every `serverIt` run:
+
+The stack leaks three kinds of resource, and **volumes are the one that hides**:
+nothing ever errors on a leaked volume, so they accumulate without limit while
+the network leak is the only symptom anyone notices. Clear all three. Run before
+every `serverIt` run:
 
 ```bash
-docker ps -a --filter name=register_it_ --format '{{.ID}}' | xargs -r docker rm -f; docker network ls --filter name=register_it_ --format '{{.ID}}' | xargs -r docker network rm; echo "--- remaining register_it_ networks ---"; docker network ls --filter name=register_it_ --format '{{.Name}}' | wc -l
+docker ps -a --filter name=register_it_ -q | xargs -r docker rm -f; docker network ls --filter name=register_it_ -q | xargs -r docker network rm; docker volume ls --filter name=register_it_ -q | xargs -r docker volume rm; echo "--- remaining register_it_ containers/networks/volumes ---"; for k in "ps -a" "network ls" "volume ls"; do docker $k --filter name=register_it_ -q | wc -l; done
 ```
 
 **Mechanism 2 — the fixed `register` compose stack (BATS suites A/C, dev
 Compose).** BATS suites A and C and day-to-day `docker compose up` share the
 default `register` project. An interrupted teardown leaves a container bound to
 a since-removed network, and the next `up` fails with `network <id> not found`.
-Run before every BATS suite A/C run (and any Docker Compose dev tier). This is
-strictly scoped to the `register` project — label-matched, so it cannot touch
-any other project's or manually-created resources — and `-v` **deliberately
-purges the `register_pg-data` volume** so each run starts from a pristine store:
+Run before every BATS suite A/C run (and any Docker Compose dev tier):
 
 ```bash
 docker compose -p register down -v --remove-orphans 2>/dev/null || true
 ```
 
-Because `-v` destroys the Irmin/postgres data volume, do not run it while doing
-persistence dev work whose data you want to keep — it is a test-tier pre-step,
-not a general dev command.
+**What this reaches, stated precisely.** It is label-matched to the `register`
+compose project, so it cannot touch another project's resources. It **can**
+reach a container that was started by hand, if that container carries the
+register compose labels: `--remove-orphans` reaps by label, not by how the
+container was created, and a long-running stray from an old version looks
+exactly like an orphan to it. List them before running it:
+
+```bash
+docker ps -a --filter label=com.docker.compose.project=register --format '{{.Names}}\t{{.Image}}\t{{.Status}}'
+```
+
+`-v` additionally purges the `register_pg-data` volume, so each run starts from
+a pristine store. Do not run it while doing persistence dev work whose data you
+want to keep — it is a test-tier pre-step, not a general dev command.
+
+### What has to be rebuilt after a cleanup
+
+**Nothing, because a cleanup removes no images.** Neither mechanism passes
+`--rmi`, so every image survives and `docker compose up` recreates containers,
+networks and volumes from what is already there. A rebuild is triggered by a
+**version bump**, not by a cleanup: `register-server` and `frontend` are tagged
+`${APP_VERSION}` with `pull_policy: build`, so after a bump compose finds no
+image at the new tag and builds one (server roughly 5–10 min, frontend 10–15).
+
+What each tier needs, and whether it can build it on demand:
+
+| Tier | Needs | On demand? |
+|---|---|---|
+| `commonJVM/test`, `app/test` | nothing | no Docker at all |
+| `server/test` | `postgres:17-alpine` | yes — public image, pulled |
+| `serverIt/test` | `local/irmin-prod:3.11-p1`, `authzed/spicedb:latest` | irmin is a **fixed** tag, unaffected by version bumps; build it once (see Image Builds). spicedb is pulled |
+| BATS A/B/C, manual stack | `local/register-server:${APP_VERSION}`, `local/frontend:${APP_VERSION}`, `local/bats-runner:1.11` | server and frontend build on first `up` after a bump; the runner is built once |
+
+So the unit and integration tiers never need a rebuild after a cleanup. Only the
+BATS suites and the manual Docker stack do, and only when the version has moved
+since those images were last built — check with
+`docker images --filter reference='local/*'` against `APP_VERSION` in `.env`.
 
 ---
 
@@ -378,8 +414,9 @@ Requires pre-built production images and the `local/bats-runner:1.11` image.
 
 **Before every suite A/C run, clear the leaked `register` compose stack first**
 — see "Leaked Docker state cleanup" above (Mechanism 2:
-`docker compose -p register down -v --remove-orphans`). It is a mandatory
-pre-step, not just crash recovery.
+`docker compose -p register down -v --remove-orphans`, which purges
+`register_pg-data` and reaps any container carrying the register compose
+labels). It is a mandatory pre-step, not just crash recovery.
 
 ```bash
 # Build BATS runner (once)
