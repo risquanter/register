@@ -13,14 +13,20 @@ Two different types are called `LossDistribution`, and this plan names both.
 **old-LossDistribution** is the sealed class in
 `modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala`,
 with `RiskResult` for a simulated leaf and `RiskResultGroup` for an aggregated
-portfolio. This plan is written against it, and every unqualified mention below
-means this one.
+portfolio. Phase 1 is written against it, and an unqualified mention in that
+phase means this one.
 
-**FB-c LossDistribution** is the flat valuation type designed in
-`docs/scratch/FB-C-DESIGN.md`. It is not ruled. This plan does not depend on it
-and can be implemented without it. The one section that mentions it is
-"Interaction with the valuation design", which says what becomes simpler if it
-lands.
+**FB-F LossDistribution** is the flat valuation type ruled 2026-09-27 and
+specified by
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md): one
+concrete type carrying `nodeId`, `trials`, `source`, `applied` and
+`provenance`, with no subtypes. It was chosen from four candidates written out
+and run as code in `docs/scratch/valuation-prototypes/`.
+
+Phase 1 is independent of which one is in the tree. **Phase 2 is written against
+FB-F** and lands after it, because a leaf's record is read off the value's own
+`provenance` field. The two plans are aligned on that single point and on
+nothing else: this plan owns the endpoint, that one owns the field.
 
 ---
 
@@ -238,25 +244,27 @@ use for.
 
 ### Reading the records off the results
 
-`descendantProvenances` in `CachedResultResolverLive` is private and serves the
-portfolio-collapse path. It also discards the node id. So the endpoint needs its
-own function, and it lives on the `LossDistribution` companion, where the
-subtypes are visible:
+`descendantProvenances` in `CachedResultResolverLive` was private, served the
+portfolio-collapse path, and discarded the node id; the FB-F transplant deletes
+it along with that path. So the endpoint needs its own function, and it lives on
+the `LossDistribution` companion:
 
 ```scala
 /** Each simulated leaf's provenance record, keyed by the node that carries it.
   *
-  * A leaf resolution always yields a `RiskResult` holding exactly one record.
-  * A portfolio carries none, so a non-leaf entry contributes nothing.
+  * A leaf resolution always carries one record; a portfolio carries none, so a
+  * portfolio entry contributes nothing. The caller supplies the leaf
+  * set from `TreeIndex` and resolves each leaf under its own identifier, so
+  * nothing here walks a value structure.
   */
 def leafProvenances(results: Map[NodeId, LossDistribution]): Map[NodeId, NodeProvenance] =
-  results.iterator.collect {
-    case (id, r: RiskResult) => r.provenances.map(id -> _)
-  }.flatten.toMap
+  results.iterator.flatMap { case (id, d) => d.provenance.map(id -> _) }.toMap
 ```
 
-One record per key holds because the resolver's leaf path always produces
-`List(provenance)`, on both the cache hit and the cache miss.
+No type test: under FB-F every value carries its own record directly, and a
+portfolio's is absent. One record per key holds because the resolver's leaf
+path always produces `List(provenance)`, on both the cache hit and the cache
+miss.
 
 ### Controller route
 
@@ -282,19 +290,39 @@ changes.
 
 ## Interaction with the valuation design
 
-`docs/scratch/FB-C-DESIGN.md` proposes replacing old-LossDistribution with a
-flat FB-c LossDistribution carrying `provenances` as an ordinary field. It is
-not ruled, and nothing in this plan waits on it.
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) replaces
+old-LossDistribution with a flat type carrying `provenance` as an ordinary
+field. **Ruled 2026-09-27, and Phase 2 above is written for it** — that is why
+`leafProvenances` has no type test.
 
-If it lands, one function in this plan simplifies. `leafProvenances` stops
-needing a type test, because every result carries its own records directly:
+**What the two plans share, and it is one sentence.** The public
+`LossDistribution` carries `provenance: Option[NodeProvenance]`: one record for a
+simulated leaf, absent for a portfolio, which draws nothing of its own
+(ADR-003 §2). That field is the transplant plan's to define and this plan's
+to read. Nothing else crosses between them.
 
-```scala
-results.flatMap { case (id, d) => d.provenances.map(id -> _) }
-```
+**What this plan's design does NOT depend on**, stated so it is not reopened
+during implementation:
 
-Everything else in this plan is unaffected: the route, the endpoint definition,
-the response type, the service method signature, the controller, and every test.
+- **The route is `TreeIndex`, not traversal.** The subtree's leaves come from
+  `tree.index.descendants(nodeId).intersect(tree.index.leafIds)` and each leaf is
+  resolved under its own identifier. No code walks from one resolved value to
+  another. This held under old-LossDistribution, it holds under FB-F, and it
+  would hold under any of the four candidate shapes.
+- **Nothing aggregates provenance upward.** A portfolio's records are its
+  descendants' records read individually, never a merge. Resolving the leaves
+  rather than their common ancestor also avoids combining figures at every
+  intermediate portfolio, which this endpoint has no use for.
+- **The wire drops it.** No curve or exceedance response carries provenance;
+  those are built from the figures. This endpoint is the only reader, which is
+  ADR-003 Decision 4's "dedicated audit endpoint".
+
+The route, the endpoint definition, the response type, the service method
+signature, the controller and every test bullet are unaffected by the
+transplant.
+
+**Sequencing.** Phase 1 can land before or after the transplant. Phase 2 lands
+after it.
 
 ---
 
