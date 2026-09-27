@@ -40,7 +40,7 @@ the decision-guide format: goal and context, options, recommendation (labelled).
   change the moment a call path exists.
 - No transform records provenance (ADR-003 gap) — see D4.
 - A transform applies to any node's result, leaf or portfolio, by acting on
-  its `trialOutcomes` field (since D6; before that it accepted only
+  its `trials` field (since D6; before that it accepted only
   `RiskResult`, so portfolio results were out of reach).
 - The pipeline stage is decided: B3, result-stage endomorphism (monoid plan
   B.5/B.6). Portfolio-stage mitigation (B4) was scored and not chosen; if it
@@ -247,7 +247,7 @@ or rewrite the constructors twice.
 
 **Decision (user, 2026-07-17): Option 1 — `run: TrialOutcomes => TrialOutcomes`.**
 A transform now applies to any node's result (leaf or portfolio) via its
-`trialOutcomes` field and cannot see identity or provenance. The alternative
+`trials` field and cannot see identity or provenance. The alternative
 (keep `RiskResult => RiskResult`) preserved the portfolio limitation and
 guaranteed a second, breaking rewrite once callers exist. Accepted cost:
 `nTrials` is visible to a transform; a `RiskTransformSpec` property asserts
@@ -816,7 +816,7 @@ serve.
    the edge on every read and never cached.
 3. In `distributionOf`, after a node's result exists (leaf hit/miss or portfolio
    aggregate), match `resultTransformFor(node.id, scoped)`: `None` returns the
-   node's outcomes unchanged, `Some(t)` applies `t.run` to its `trialOutcomes`
+   node's outcomes unchanged, `Some(t)` applies `t.run` to its `trials`
    **before returning it to the parent** — the transform acts on the combine's
    operand or finished aggregate, never inside the combine (ADR-009 associativity
    honoured).
@@ -6396,7 +6396,7 @@ behaviour-unchanged.
    ```scala
    MitigationApplication.resultTransformFor(leaf.id, scoped) match {   // None when unscoped
      case None    => raw
-     case Some(t) => RiskResult.fromTrialOutcomes(leaf.id, t.run(raw.trialOutcomes), raw.provenances)
+     case Some(t) => RiskResult.fromTrialOutcomes(leaf.id, t.run(raw.trials), raw.provenances)
    }
    ```
 
@@ -6922,8 +6922,8 @@ final case class ValuationResult private (
   override val nodeId: NodeId,
   source: LossDistribution,
   applied: List[MitigationApplicationRecord],
-  override val trialOutcomes: TrialOutcomes
-) extends LossDistribution(nodeId, trialOutcomes)
+  override val trials: TrialOutcomes
+) extends LossDistribution(nodeId, trials)
 ```
 
 `source` is the value this node's own transform layer was applied to. At a
@@ -6936,8 +6936,8 @@ structure is preserved rather than discarded. At a leaf it is the cached raw
 `source` is **not** the raw value at that node. The two differ at every node that
 has a transformed descendant: in the reasoning document's worked example the node
 `Servers` has a raw figure of 23 and a `source` of 20, the 3 being a leaf cap
-below it. The difference between this node's `trialOutcomes` and
-`source.trialOutcomes` is therefore exactly this node's own layer and nothing
+below it. The difference between this node's `trials` and
+`source.trials` is therefore exactly this node's own layer and nothing
 else, which is the property the decorator exists to provide.
 
 **2. Wrapping is uniform: every node the mitigated fold visits is wrapped.** The
@@ -6968,7 +6968,7 @@ is about what is *stored*, and Form 3 satisfies that passage identically.
 
 A raw reading is the identity instance of the same fold: the same method called
 with `MitigationSelection.Inherent`, which feeds the identity transform at every
-node, so every `applied` list comes back empty and every `trialOutcomes` equals
+node, so every `applied` list comes back empty and every `trials` equals
 its `source`. It is **not** read off a mitigated result's `source`, because
 `source` carries the combine of the mitigated children and equals the raw
 aggregate only where no descendant transforms.
@@ -7050,7 +7050,7 @@ run(records, outcomes)  = the composed transform applied to outcomes;
                           run(Nil, outcomes) returns outcomes itself
 
 decorate(id, source, records) =
-    ValuationResult.create(id, source, records, run(records, source.trialOutcomes))
+    ValuationResult.create(id, source, records, run(records, source.trials))
 
 m(leaf)         = decorate(leaf.id, cachedSimulation(effectiveLeaf), recordsFor(leaf))
 m(portfolio P)  = decorate(P.id, RiskResultGroup.create(P.id, P.children.map(m)*),
@@ -7203,68 +7203,95 @@ until it is gone.
 
 #### The two types
 
-`LossDistribution` keeps its name and its curve interface and stops being a
-hierarchy. It becomes the single concrete type that every consumer holds, and it
-*is* the mitigated value. A new sealed hierarchy takes over the role it vacates;
-that one is internal to the resolution machinery and nothing outside sees it.
+Quoting the ruling in full, because two readings of it have already been drafted
+wrongly:
+
+> LossDistribution keeps its name and its API — probOfExceedance, maxLoss,
+> minLoss, the histogram, nodeId, trials — and stops being a hierarchy.
+> It becomes the single concrete type every consumer takes. A new internal
+> parent takes over the role it vacates: that one is sealed, it has RiskResult
+> and RiskResultGroup as its cases. BUT LossDistribution becomas the type for
+> the mitigated value.
+
+Three things are settled by those words and are not to be re-derived.
+`trials` keeps its name — it is named in the API `LossDistribution`
+keeps. The internal parent is sealed with `RiskResult` and `RiskResultGroup` as
+its cases, and takes over exactly the role `LossDistribution` vacates, which is
+being their base class. And `LossDistribution` is the mitigated value, so the
+three value fields live on it.
+
+**`LossDistribution` holds a reference to the internal case, not the reverse.**
+The public type is the value; the internal case says only where that value came
+from and carries the one extra thing each origin has — provenance at a leaf,
+children at a portfolio. No field appears twice.
 
 ```scala
-// modules/server/.../simulation/LossDistribution.scala — external
+// modules/server/.../simulation/LossDistribution.scala
 final case class LossDistribution private (
   nodeId: NodeId,
-  trialOutcomes: TrialOutcomes,               // after this node's layer
-  preLayerOutcomes: TrialOutcomes,            // before this node's layer
-  applied: List[MitigationApplicationRecord]  // the layer, in precedence order
+  trials: TrialOutcomes,               // after this node's layer
+  source: TrialOutcomes,                      // what that layer was applied to
+  applied: List[MitigationApplicationRecord], // the layer, in precedence order
+  private val origin: NodeValuation           // leaf or aggregation, plus its payload
 ) extends LECCurve:
-  // An empty layer returns the same reference, never a structurally equal
-  // rebuild (§8.16 point 4). Reference comparison, so the check is free.
-  require(applied.nonEmpty || (trialOutcomes eq preLayerOutcomes))
   // Curve members unchanged: outcomes, nTrials, outcomeCount, maxLoss, minLoss,
-  // probOfExceedance, outcomeOf, trialIds — all in terms of trialOutcomes.
-```
+  // probOfExceedance, outcomeOf, trialIds — all in terms of trials.
 
-`preLayerOutcomes` is **not** the inherent value. At a leaf it is the cached
-figure after parameter-stage transforms; at a portfolio it is the combine of the
-children's post-layer figures. In the §8.16 worked example `Servers` has an
-inherent figure of 23 and a `preLayerOutcomes` of 20. The difference between a
-node's `trialOutcomes` and its `preLayerOutcomes` is exactly that node's own
-layer, which is the property the field exists to provide; the inherent figure is
-recovered only by a second reading under `Inherent`.
+// same file — sealed, so the cases must share it; nothing outside names it
+private[simulation] sealed trait NodeValuation
 
-```scala
-// modules/server/.../services/cache/NodeValuation.scala — internal
-private[cache] sealed trait NodeValuation:
-  def value: LossDistribution
-  final def nodeId: NodeId = value.nodeId
-
-private[cache] final case class RiskResult private (
-  value: LossDistribution,
+private[simulation] final case class RiskResult(
   provenances: List[NodeProvenance]
 ) extends NodeValuation
 
-private[cache] final case class RiskResultGroup private (
-  value: LossDistribution,
-  children: List[NodeValuation]
+private[simulation] final case class RiskResultGroup(
+  children: List[LossDistribution]
 ) extends NodeValuation
 ```
 
-Composition, not inheritance: each field has one home. The internal cases add
-only what `LossDistribution` does not carry — provenance records at a leaf,
-children at a portfolio. Handing a value to a caller is `.value`, a field read.
+The value tree now recurses through `LossDistribution` itself, so the resolver
+returns the public type with nothing to unwrap and no `.value` projection
+anywhere.
 
-#### Both constructors derive the value; neither accepts one
+**Why `private[simulation]` and not `private[cache]`.** A class in package
+`simulation` cannot name a type private to `services.cache` — the type is not in
+scope there at all. Since `LossDistribution` holds the parent, the two share a
+file, and the strongest visibility available is private to the package they share.
+The resolver never names the parent: it calls the two factories below.
 
-This is what makes the aggregate claim unfalsifiable rather than merely checked,
-and it is how `RiskResultGroup.create` already earns that claim today.
+`source` is **not** the inherent value. At a leaf it is the cached figure after
+parameter-stage transforms; at a portfolio it is the combine of the children's
+mitigated values. In the §8.16 worked example `Servers` has an inherent figure of
+23 and a `source` of 20. The difference between a node's `trials` and its
+`source` is exactly that node's own layer, which is the property the field exists
+to provide; the inherent figure is recovered only by a second reading under
+`Inherent`.
+
+#### The factories derive the value; neither accepts one
 
 ```scala
-private[cache] object RiskResultGroup:
-  def create(
+object LossDistribution:
+
+  /** A leaf's value. `source` is the cached simulation for the effective leaf,
+    * so a parameter-stage mitigation is already inside it and is not in
+    * `applied`. */
+  def leaf(
     nodeId: NodeId,
-    children: List[NodeValuation],
-    layer: List[MitigationApplicationRecord],
-    transform: Option[ResultTransform]
-  )(using cfg: SimulationConfig): Validation[ValidationError, RiskResultGroup]
+    source: TrialOutcomes,
+    provenances: List[NodeProvenance],
+    applied: List[MitigationApplicationRecord],
+    run: TrialOutcomes => TrialOutcomes
+  ): Validation[ValidationError, LossDistribution]
+
+  /** A portfolio's value. `source` is derived as the combine of exactly these
+    * children's `trials`, so no caller can claim an aggregate its
+    * children do not support. */
+  def group(
+    nodeId: NodeId,
+    children: List[LossDistribution],
+    applied: List[MitigationApplicationRecord],
+    run: TrialOutcomes => TrialOutcomes
+  )(using cfg: SimulationConfig): Validation[ValidationError, LossDistribution]
 ```
 
 Three failure sites, separated by origin (ADR-010):
@@ -7275,11 +7302,12 @@ Three failure sites, separated by origin (ADR-010):
 2. **Combine overflow** — `TrialOutcomes.combine` uses `Math.addExact` and is
    reachable from validated user data through extreme distribution parameters.
    Converted to a `ValidationError`, as today.
-3. **Transform overflow** — new. Applying the node's own layer can overflow
-   independently of the combine. Same conversion, same `try`.
+3. **Layer overflow** — new. Running the node's own layer can overflow
+   independently of the combine, including through `scaleLosses`, which
+   saturates silently today. Same conversion.
 
-The invariant `value.preLayerOutcomes == combine(children.map(_.value.trialOutcomes))`
-holds by derivation: step 2 produces it, so no caller can supply a different one.
+The invariant `source == combine(children.map(_.trials))` holds by
+derivation: `group` computes it, so no caller can supply a different one.
 
 #### The wire type
 
@@ -7321,14 +7349,16 @@ scoped, nodeId)`, computed from resolved scopes.
   satisfied: the return type stays `LossDistribution`, but that type now denotes
   a node's value under one selection rather than a base class with two cases.
 - **Decision 9** (whether `RiskResult` and `RiskResultGroup` stop being
-  consumer-facing) is **moot**. They are internal by construction, and
-  `private[cache]` needs no package split because they live beside the resolver
-  and have no consumer outside it.
+  consumer-facing) is **moot**. They are internal by construction:
+  `private[simulation]`, reachable only through a private field of the public
+  value, with no consumer anywhere.
 - **Decision 10** (whether the new type belongs in the hierarchy, and its name)
-  is **moot**. There is no new type and no hierarchy for it to join.
+  is **moot**. There is no new type. `LossDistribution` stops being a hierarchy
+  and becomes the mitigated value itself.
 
-The provenance walk stays a two-case match permanently, since the mitigated
-value is not a case in the internal hierarchy.
+The origin stays a two-case hierarchy permanently: a value is produced either by
+simulating a leaf or by aggregating children, and the mitigated value is neither
+a third origin nor a case of anything.
 
 #### Test changes
 
@@ -7354,9 +7384,9 @@ set is listed; the statement below is kept because it is where the question was
 first put.
 
 **Goal.** `LossDistribution.merge(distributions: LossDistribution*): Map[TrialId, Loss]`
-is a companion helper that reduces over `_.trialOutcomes` and is called by
+is a companion helper that reduces over `_.trials` and is called by
 `RiskResultGroup`'s private constructor. Under this ruling the things being
-merged are children's post-layer outcomes held on `NodeValuation`, so the
+merged are children's mitigated outcomes held on `NodeValuation`, so the
 helper's signature no longer matches its only caller. It has to move or go.
 
 **Option A — move it to the internal side**, retyped over `NodeValuation`. Keeps
@@ -7413,6 +7443,26 @@ subsections, which describe a type this ruling does not build.
    computed from resolved scopes and independent of this ruling. `applied` never
    reaches the wire.
 
+3. **The second field is `source`, the name §8.16 gave it.** Drafts of §8.17 and
+   §8.18 spelled it `preLayerOutcomes`. That was an unauthorized rename of a
+   field that already had a name, and it is reverted throughout. The quantity is
+   unchanged: in the worked example `Servers` has an inherent figure of 23, a
+   `source` of 20 and a `trials` of 18. What FB changes is the field's
+   *type*, not its name — §8.16 held a whole `LossDistribution` there, FB holds
+   a `TrialOutcomes`.
+
+**Names this section introduces, listed rather than slipped in.** Every one is
+open to review. `MitigationApplication.resultTransformFor(nodeId, scoped)`
+becomes `run(applied, outcomes)` — not a pure rename, since the parameters change
+from a node plus the whole scope map to that node's records, which is what
+removes the possibility of the records and the transform disagreeing. The new
+functions are `MitigationApplication.recordsByNode`, `LossDistribution.leaf` and
+`LossDistribution.group`. None of these is a coinage: `run(records, outcomes)`
+and `recordsFor(node)` are the reasoning document's own construction algorithm
+(§8.3), and "layer" is its word for what `applied` holds ("the 2 removed at that
+step is Servers' own policy doing its work, and it is called the **layer** at
+Servers", §4.2).
+
 **Preconditions, in order.** Neither is part of this change and both are green
 before it starts.
 
@@ -7438,16 +7488,16 @@ type. Members that were `final` on the base class lose the modifier, which a
 ```scala
 /** One node's loss distribution under one mitigation selection.
   *
-  * `trialOutcomes` is the figure after this node's own layer of result-stage
-  * mitigations. `preLayerOutcomes` is the figure that layer was applied to: at
+  * `trials` is the figure after this node's own layer of result-stage
+  * mitigations. `source` is the figure that layer was applied to: at
   * a leaf the cached simulation output, which already carries any
   * parameter-stage mitigation because those are folded into the tree before its
   * content hash is computed; at a portfolio the combine of the children's
-  * post-layer figures.
+  * mitigated values.
   *
-  * `preLayerOutcomes` is not the inherent figure. A node with a mitigated
-  * descendant and no layer of its own carries `trialOutcomes eq
-  * preLayerOutcomes`, and neither equals what the same node carries under
+  * `source` is not the inherent figure. A node with a mitigated
+  * descendant and no layer of its own carries `trials eq
+  * source`, and neither equals what the same node carries under
   * `MitigationSelection.Inherent`. The inherent figure is a second reading,
   * never a field.
   *
@@ -7458,15 +7508,16 @@ type. Members that were `final` on the base class lose the modifier, which a
   */
 final case class LossDistribution private (
   nodeId: NodeId,
-  trialOutcomes: TrialOutcomes,
-  preLayerOutcomes: TrialOutcomes,
-  applied: List[MitigationApplicationRecord]
+  trials: TrialOutcomes,
+  source: TrialOutcomes,
+  applied: List[MitigationApplicationRecord],
+  private val origin: NodeValuation
 ) extends LECCurve {
 
   /** Sparse trial→loss map (delegates to the embedded TrialOutcomes) */
-  def outcomes: Map[TrialId, Loss] = trialOutcomes.outcomes
+  def outcomes: Map[TrialId, Loss] = trials.outcomes
 
-  override def nTrials: Int = trialOutcomes.nTrials
+  override def nTrials: Int = trials.nTrials
 
   /** Frequency distribution of loss amounts (histogram view) */
   lazy val outcomeCount: TreeMap[Loss, Int] =
@@ -7484,66 +7535,112 @@ final case class LossDistribution private (
   }
 
   /** Get outcome for specific trial (0 if not present) */
-  def outcomeOf(trial: TrialId): Loss = trialOutcomes.outcomeOf(trial)
+  def outcomeOf(trial: TrialId): Loss = trials.outcomeOf(trial)
 
   /** All trial IDs with non-zero outcomes */
-  def trialIds(): Set[TrialId] = trialOutcomes.trialIds
+  def trialIds(): Set[TrialId] = trials.trialIds
 }
 ```
 
-The companion. The primary constructor is private, so these two functions are
-the only way a value comes to exist, and they partition the space: an empty
-layer can only be built by the first, a non-empty one only by the second. The
-`require` §8.17 wrote is therefore unnecessary and is not carried over — the
-empty layer is physically the identity because `unlayered` passes one reference
-twice, and no other path can produce an empty `applied`.
+The internal parent, in the same file because the trait is sealed:
+
+```scala
+/** Where a value came from, and the one thing that origin carries beyond the
+  * value itself. Sealed, so the cases live in this file; package-private, so
+  * nothing outside `simulation` names it. `LossDistribution` is the value —
+  * this hierarchy never repeats a field of it.
+  */
+private[simulation] sealed trait NodeValuation
+
+private[simulation] final case class RiskResult(
+  provenances: List[NodeProvenance]
+) extends NodeValuation
+
+private[simulation] final case class RiskResultGroup(
+  children: List[LossDistribution]
+) extends NodeValuation
+```
+
+The companion. The primary constructor is private, so these are the only ways a
+value comes to exist, and each derives what it stores.
 
 ```scala
 object LossDistribution {
 
-  /** A node's value with no layer of its own. Both outcome fields are the same
-    * reference, so an unmitigated node allocates no second outcome map. */
-  def unlayered(nodeId: NodeId, trialOutcomes: TrialOutcomes): LossDistribution =
-    LossDistribution(nodeId, trialOutcomes, trialOutcomes, Nil)
-
-  /** Same, from a raw trial→loss map at the configured trial count. */
-  def unlayered(nodeId: NodeId, outcomes: Map[TrialId, Loss])(using cfg: SimulationConfig): LossDistribution =
-    unlayered(nodeId, TrialOutcomes(cfg.defaultNTrials, outcomes))
-
-  /** A node's value under a non-empty layer.
+  /** A leaf's value.
     *
-    * `run` is the layer's composed transform. It is taken as a function rather
-    * than derived here because interpreting a `MitigationSpec` belongs to the
-    * mitigation package and this file does not depend on it. The single caller
-    * is `NodeValuation.valueOf`, which derives `run` from the same `layer` it
-    * passes; that pairing is the limit of what this signature guarantees, and
-    * the visibility keeps the number of places it has to hold at one.
-    *
-    * A transform sums losses through `Math.addExact`, so it can overflow on
-    * validated user data (extreme distribution parameters). The
-    * `ArithmeticException` is converted here and no exception crosses this API
-    * (ADR-010, ADR-033 §3).
-    */
-  private[register] def layered(
+    * `source` is the cached simulation output for the effective leaf, so any
+    * parameter-stage mitigation is already inside it and is not part of
+    * `applied`. */
+  def leaf(
     nodeId: NodeId,
-    preLayerOutcomes: TrialOutcomes,
-    layer: ::[MitigationApplicationRecord],
+    source: TrialOutcomes,
+    provenances: List[NodeProvenance],
+    applied: List[MitigationApplicationRecord],
     run: TrialOutcomes => TrialOutcomes
   ): Validation[ValidationError, LossDistribution] =
-    try Validation.succeed(LossDistribution(nodeId, run(preLayerOutcomes), preLayerOutcomes, layer))
-    catch {
-      case _: ArithmeticException =>
-        Validation.fail(ValidationError(
-          field   = s"mitigatedResult.${nodeId.value}",
-          code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-          message = ValidationMessages.aggregatedLossOverflow
-        ))
-    }
+    build(nodeId, source, applied, run, RiskResult(provenances))
+
+  /** A portfolio's value.
+    *
+    * `source` is derived here as the combine of exactly these children's
+    * `trials`, so no caller can claim an aggregate its children do not
+    * support. Children at differing trial counts is a programming error — the
+    * resolver builds them all under one `SimulationConfig` — and propagates as
+    * a defect. */
+  def group(
+    nodeId: NodeId,
+    children: List[LossDistribution],
+    applied: List[MitigationApplicationRecord],
+    run: TrialOutcomes => TrialOutcomes
+  )(using cfg: SimulationConfig): Validation[ValidationError, LossDistribution] = {
+    require(
+      children.isEmpty || children.map(_.nTrials).distinct.sizeIs == 1,
+      s"Cannot aggregate distributions with different trial counts: ${children.map(_.nTrials).mkString(", ")}"
+    )
+    try {
+      val source = children.map(_.trials)
+        .reduceOption(TrialOutcomes.combine)
+        .getOrElse(TrialOutcomes.empty)
+      build(nodeId, source, applied, run, RiskResultGroup(children))
+    } catch { case _: ArithmeticException => Validation.fail(overflow(nodeId)) }
+  }
+
+  /** The value at one node: `applied` run over `source`.
+    *
+    * `run` is the layer's composed transform. It arrives as a function rather
+    * than being derived here because interpreting a `MitigationSpec` belongs to
+    * the mitigation package and this file does not depend on it; both callers
+    * above take it from the same `applied` they pass.
+    *
+    * An empty layer short-circuits, which is what makes "the identity returns
+    * the same reference" a fact rather than a rule `run` has to honour.
+    *
+    * Two arithmetic failures are converted here and neither escapes as an
+    * exception (ADR-010, ADR-033 §3): a scale factor that takes a loss past
+    * `Long.MaxValue`, and a deductible-and-cap pipeline that overflows. */
+  private def build(
+    nodeId: NodeId,
+    source: TrialOutcomes,
+    applied: List[MitigationApplicationRecord],
+    run: TrialOutcomes => TrialOutcomes,
+    origin: NodeValuation
+  ): Validation[ValidationError, LossDistribution] =
+    if (applied.isEmpty) Validation.succeed(LossDistribution(nodeId, source, source, Nil, origin))
+    else
+      try Validation.succeed(LossDistribution(nodeId, run(source), source, applied, origin))
+      catch { case _: ArithmeticException => Validation.fail(overflow(nodeId)) }
+
+  private def overflow(nodeId: NodeId): ValidationError =
+    ValidationError(
+      field   = s"mitigatedResult.${nodeId.value}",
+      code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message = ValidationMessages.aggregatedLossOverflow
+    )
 
   /** Value equality over the reading: the node, its figure, and — subject to
-    * the second open decision below — the layer that produced it. Provenance is
-    * not a field of this type and cannot enter the relation; `preLayerOutcomes`
-    * is excluded because it is derivable context rather than the value. */
+    * the second open decision below — the layer that produced it. `source` and
+    * `origin` are excluded as derivable context rather than the value. */
   given Equal[LossDistribution] = ???
 
   /** Human-readable representation */
@@ -7554,140 +7651,44 @@ object LossDistribution {
 }
 ```
 
-`::[MitigationApplicationRecord]` is the standard library's non-empty list. It
-is used because it makes "a layered value has a layer" a fact the compiler holds
-rather than a runtime check, and because the caller's natural shape is already a
-`match` on the layer. Its one cost is that a caller cannot pass `List(a, b)`
-directly — the value must arrive from a pattern match or from `a :: Nil`, which
-is what the one caller below does.
+Tests and the mitigation-free path build a value with `leaf(id, outcomes, Nil,
+Nil, identity)`; the short-circuit makes the `run` argument unreachable in that
+case, so the identity function is not a claim about anything.
 
 `LossDistribution.merge` is absent from the listing above; its fate is the first
 open decision at the end of this section.
 
-**`modules/server/src/main/scala/com/risquanter/register/services/cache/NodeValuation.scala` — new.**
+**`modules/server/src/main/scala/com/risquanter/register/mitigation/RiskResultTransform.scala` — the C1 fix.**
+`scaleLosses` narrows `loss * factor` with `.toLong`, and a `Double` out of
+`Long`'s range saturates at `Long.MaxValue` instead of throwing, so an
+over-scaled loss is presented as a real figure. Ruled 2026-09-15 to be fixed
+inside this sub-slice, with a test pinning it as a required deliverable
+(`docs/scratch/ADR-REVIEW-2026-09-15.md` C1). The other three transforms are
+safe: `applyDeductible` subtracts non-negative values and floors at zero,
+`capLosses` takes a minimum, `insurancePolicy` composes those two.
 
 ```scala
-package com.risquanter.register.services.cache
+  def scaleLosses(factor: NonNegativeDouble): RiskResultTransform = RiskResultTransform { to =>
+    val scaled = to.outcomes.map { case (trial, loss) =>
+      val product = loss * factor
+      // Double→Long narrowing saturates silently at Long.MaxValue. Throw the way
+      // TrialOutcomes.combine does; LossDistribution converts it (ADR-033 §3).
+      if (product.isNaN || product >= Long.MaxValue.toDouble)
+        throw new ArithmeticException(s"scaled loss overflow: $loss * $factor")
+      trial -> product.toLong
+    }.filter(_._2 > 0)
 
-import zio.prelude.Validation
-
-import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.{MitigationApplicationRecord, NodeProvenance}
-import com.risquanter.register.domain.data.iron.{NodeId, ValidationMessages}
-import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
-import com.risquanter.register.mitigation.MitigationApplication
-import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
-
-/** A node's value together with the structure that produced it.
-  *
-  * The value is what leaves the resolver. The structure — provenance records at
-  * a leaf, children at a portfolio — is what the fold needs while it runs and
-  * has no consumer outside this package, which is why the whole hierarchy is
-  * package-private and why it composes the value rather than extending it.
-  */
-private[cache] sealed trait NodeValuation {
-  def value: LossDistribution
-  final def nodeId: NodeId = value.nodeId
-}
-
-private[cache] object NodeValuation {
-
-  /** A node's value: its layer run over the figure the layer applies to. The
-    * two branches are the only two entry points on `LossDistribution`, so the
-    * empty layer and the non-empty one cannot be confused. */
-  private[cache] def valueOf(
-    nodeId: NodeId,
-    preLayerOutcomes: TrialOutcomes,
-    layer: List[MitigationApplicationRecord]
-  ): Validation[ValidationError, LossDistribution] = layer match {
-    case Nil =>
-      Validation.succeed(LossDistribution.unlayered(nodeId, preLayerOutcomes))
-    case nonEmpty @ (_ :: _) =>
-      MitigationApplication.layerTransform(nonEmpty) match {
-        case None    => Validation.succeed(LossDistribution.unlayered(nodeId, preLayerOutcomes))
-        case Some(t) => LossDistribution.layered(nodeId, preLayerOutcomes, nonEmpty, t.run)
-      }
+    to.copy(outcomes = scaled)
   }
-
-  private[cache] def overflow(nodeId: NodeId): ValidationError =
-    ValidationError(
-      field   = s"riskPortfolio.${nodeId.value}",
-      code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
-      message = ValidationMessages.aggregatedLossOverflow
-    )
-}
-
-/** A leaf's valuation: its value and the provenance of the simulation behind it. */
-private[cache] final case class RiskResult private (
-  value: LossDistribution,
-  provenances: List[NodeProvenance]
-) extends NodeValuation
-
-private[cache] object RiskResult {
-
-  /** `preLayerOutcomes` is the cached simulation output for the effective leaf,
-    * so any parameter-stage mitigation is already inside it and is not part of
-    * `layer`. */
-  def create(
-    nodeId: NodeId,
-    preLayerOutcomes: TrialOutcomes,
-    provenances: List[NodeProvenance],
-    layer: List[MitigationApplicationRecord]
-  ): Validation[ValidationError, RiskResult] =
-    NodeValuation.valueOf(nodeId, preLayerOutcomes, layer).map(RiskResult(_, provenances))
-}
-
-/** A portfolio's valuation: its value and the children it aggregates. */
-private[cache] final case class RiskResultGroup private (
-  value: LossDistribution,
-  children: List[NodeValuation]
-) extends NodeValuation
-
-private[cache] object RiskResultGroup {
-
-  /** The aggregate is derived, never supplied: `value.preLayerOutcomes` is the
-    * combine of exactly these children's post-layer figures, so no caller can
-    * claim an aggregate its children do not support.
-    *
-    * Three failure sites, separated by origin (ADR-010):
-    * - Children at different trial counts is a programming error, because the
-    *   resolver builds them all under one `SimulationConfig`. The `require`
-    *   propagates as a defect.
-    * - The combine can overflow on validated user data, and becomes a
-    *   `ValidationError` here.
-    * - Running this node's layer can overflow independently of the combine, and
-    *   becomes the same error inside `LossDistribution.layered`.
-    */
-  def create(
-    nodeId: NodeId,
-    children: List[NodeValuation],
-    layer: List[MitigationApplicationRecord]
-  )(using cfg: SimulationConfig): Validation[ValidationError, RiskResultGroup] = {
-    require(
-      children.isEmpty || children.map(_.value.nTrials).distinct.sizeIs == 1,
-      s"Cannot aggregate distributions with different trial counts: ${children.map(_.value.nTrials).mkString(", ")}"
-    )
-
-    val preLayerV: Validation[ValidationError, TrialOutcomes] =
-      try Validation.succeed(
-        children.map(_.value.trialOutcomes)
-          .reduceOption(TrialOutcomes.combine)
-          .getOrElse(TrialOutcomes.empty)
-      )
-      catch { case _: ArithmeticException => Validation.fail(NodeValuation.overflow(nodeId)) }
-
-    preLayerV
-      .flatMap(pre => NodeValuation.valueOf(nodeId, pre, layer))
-      .map(RiskResultGroup(_, children))
-  }
-}
 ```
 
-The `.flatMap` is a sequential dependency — the layer cannot run until the
-combine has produced something to run it on — and not the independent-field
-accumulation that ADR-001 requires `validateWith` for.
+The bound is conservative: doubles lose integer precision near 2^63, so `>=`
+rejects a narrow band that would in fact have narrowed correctly rather than
+admitting one that would not. `RiskResultTransform` keeps its total shape; the
+conversion boundary is `LossDistribution`, exactly as `RiskResultGroup.create`
+is the boundary for `TrialOutcomes.combine` today.
 
-**One deliberate behaviour change inside `RiskResultGroup.create`** (Decision
+**One deliberate behaviour change inside `LossDistribution.group`** (Decision
 Trigger #5, recorded here rather than escalated separately because it is this
 section's own subject). The present code writes the aggregate as
 `TrialOutcomes(cfg.defaultNTrials, LossDistribution.merge(results*))`, which
@@ -7720,7 +7721,7 @@ records and the transform are always read off the same list.
     * whole node set under this tree version and selection, which is what makes
     * one reading explainable without a second lookup.
     */
-  def resultStageLayers(
+  def recordsByNode(
     scoped: Map[NodeId, List[Mitigation]]
   ): Map[NodeId, List[MitigationApplicationRecord]] = {
     val perNode: Map[NodeId, List[Mitigation]] =
@@ -7740,41 +7741,38 @@ records and the transform are always read off the same list.
     )).toMap
   }
 
-  /** The composed transform of one node's layer, in the order the records are
-    * in; None when no record in the layer is result-stage. Every record a layer
-    * holds is result-stage by construction, so None means an empty layer. */
-  def layerTransform(layer: List[MitigationApplicationRecord]): Option[RiskResultTransform] =
-    layer
+  /** The composed transform of one node's layer, applied. Every record a layer
+    * holds is result-stage by construction, so an empty layer composes to
+    * nothing and this returns the same reference it was given — the identity
+    * must not rebuild the outcome map, or every untransformed node allocates a
+    * second copy of it. */
+  def run(applied: List[MitigationApplicationRecord], outcomes: TrialOutcomes): TrialOutcomes =
+    applied
       .collect { case MitigationApplicationRecord(_, MitigationSpec.ResultStage(pipeline), _, _) => pipeline }
       .map(ResultTransformInterpreter.toTransform)
       .reduceOption(_.andThen(_))
+      .fold(outcomes)(_.run(outcomes))
 ```
 
+Both names are the reasoning document's own, from its construction algorithm in
+§8.3: `recordsFor(node)` and `run(records, outcomes)`. `recordsByNode` is that
+`recordsFor` computed once for the whole tree rather than per node, because the
+`resolvedScope` on each record needs the tree-wide inversion.
+
 `scoped` already returns each node's mitigations in precedence order, so
-`resultStageLayers` preserves that order by filtering rather than re-sorting.
+`recordsByNode` preserves that order by filtering rather than re-sorting.
 `applicationRecords` keeps its current shape, its current caller and its current
 tests.
 
 **`modules/server/src/main/scala/com/risquanter/register/services/cache/CachedResultResolverLive.scala`.**
-The recursion changes its return type and loses both transform branches and the
-collapse. `ensureCached` and `ensureCachedAll` keep their signatures and read
-`.value` off the fold's answer.
+The recursion keeps returning `LossDistribution` and loses both transform
+branches and the collapse. `ensureCached` and `ensureCachedAll` keep their
+signatures and return the fold's answer directly — there is nothing to unwrap.
+
+Both compute `records` where they compute `scoped` today:
 
 ```scala
-        result    <- distributionForId(effective, ContentHashIndex.build(effective), cache, nodeId, seedEntityId, layers)
-                       .map(_.value)
-```
-
-```scala
-      results   <- ZIO.foreach(nodeIds.toList)(id =>
-        distributionForId(effective, hashes, cache, id, seedEntityId, layers).map(id -> _.value)
-      )
-```
-
-Both compute `layers` where they compute `scoped` today:
-
-```scala
-        layers     = MitigationApplication.resultStageLayers(
+        records    = MitigationApplication.recordsByNode(
                        MitigationApplication.scoped(tree, selection, resolvedScopes))
 ```
 
@@ -7785,8 +7783,8 @@ Both compute `layers` where they compute `scoped` today:
     cache: ContentCache,
     nodeId: NodeId,
     seedEntityId: SeedEntityId.SeedEntityId,
-    layers: Map[NodeId, List[MitigationApplicationRecord]]
-  ): Task[NodeValuation]
+    records: Map[NodeId, List[MitigationApplicationRecord]]
+  ): Task[LossDistribution]
 
   private def distributionOf(
     tree: RiskTree,
@@ -7794,22 +7792,24 @@ Both compute `layers` where they compute `scoped` today:
     cache: ContentCache,
     node: RiskNode,
     seedEntityId: SeedEntityId.SeedEntityId,
-    layers: Map[NodeId, List[MitigationApplicationRecord]]
-  ): Task[NodeValuation] =
+    records: Map[NodeId, List[MitigationApplicationRecord]]
+  ): Task[LossDistribution] =
     node match {
       case leaf: RiskLeaf =>
         for {
-          raw    <- rawLeafResult(hashes, cache, leaf, seedEntityId)
-          result <- fromValidation(
-                      RiskResult.create(leaf.id, raw._1, List(raw._2), layers.getOrElse(leaf.id, Nil)))
+          raw     <- rawLeafResult(hashes, cache, leaf, seedEntityId)
+          applied  = records.getOrElse(leaf.id, Nil)
+          result  <- fromValidation(LossDistribution.leaf(
+                       leaf.id, raw._1, List(raw._2), applied, MitigationApplication.run(applied, _)))
         } yield result
 
       case portfolio: RiskPortfolio =>
         for {
           childResults <- ZIO.foreachPar(portfolio.childIds.toList) { childId => /* unchanged */ }
           _            <- ZIO.when(childResults.isEmpty) { /* unchanged EMPTY_COLLECTION failure */ }
-          group        <- fromValidation(
-                            RiskResultGroup.create(portfolio.id, childResults, layers.getOrElse(portfolio.id, Nil)))
+          applied       = records.getOrElse(portfolio.id, Nil)
+          group        <- fromValidation(LossDistribution.group(
+                            portfolio.id, childResults, applied, MitigationApplication.run(applied, _)))
         } yield group
     }
 
@@ -7832,30 +7832,32 @@ Both compute `layers` where they compute `scoped` today:
 ```
 
 `rawLeafResult` and `simulateLeaf` stop attaching node identity, because
-`RiskResult.create` now does it; their bodies lose the
+`LossDistribution.leaf` now does it; their bodies lose the
 `RiskResult.fromTrialOutcomes` wrappers at the three sites and return the pair
-the cache already holds. `RiskResult.fromTrialOutcomes` goes with them.
+the cache already holds. `RiskResult.fromTrialOutcomes` goes with them. Inside
+`simulateLeaf` the local `trials` holds a `Map[TrialId, Loss]` and is renamed
+`losses`, so that `trials` is not two things one line apart:
+
+```scala
+        losses <- Simulator.performTrials(sampler, nTrials, parallelism)
+        trials  = TrialOutcomes(nTrials, losses)
+        _      <- cache.put(key, LeafSimResult(trials, provenance))
+```
 
 **The portfolio collapse disappears, and that is a behaviour improvement worth
 naming.** Today a result-stage mitigation binding at a portfolio cannot be
 expressed as a group, because the group's constructor pins its aggregate to the
 combine of its children; the code therefore rebuilds the node as a flat
-`RiskResult` and discards the child structure. Under this ruling the group's
-aggregate claim sits on `value.preLayerOutcomes`, which the transform does not
-touch, so a transformed portfolio stays a `RiskResultGroup` with its children
-intact. The provenance list is unchanged either way: the collapse used to
-pre-compute the descendants' provenances, and the surviving group yields the
-same list by recursion.
+`RiskResult` and discards the child structure. Under this ruling the aggregate
+claim sits on `source`, which the transform does not touch, so a transformed
+portfolio keeps a `RiskResultGroup` origin with its children intact.
 
 `descendantProvenances` was called only from the collapse branch and is deleted
-with it. **A consequence to carry forward:** provenance is now unreachable
-outside `services.cache`, because `LossDistribution` does not carry it and the
-type that does is package-private. Nothing in production reads it today, so
-nothing breaks now.
-[`PLAN-PROVENANCE-ENDPOINT.md`](PLAN-PROVENANCE-ENDPOINT.md) must therefore add
-an explicit accessor to `CachedResultResolver` rather than reading provenance
-off a returned value; a note to that effect belongs in that plan when it is next
-opened.
+with it. Provenance now lives behind `origin`, which is private, so nothing
+reads it — nothing in production does today either.
+[`PLAN-PROVENANCE-ENDPOINT.md`](PLAN-PROVENANCE-ENDPOINT.md) will need a public
+accessor on `LossDistribution` when it is built; that is a one-line addition to
+this file and a note belongs in that plan when it is next opened.
 
 **Production files that do not change, and why.** `LECGenerator`,
 `RiskTreeKnowledgeBase`, `QueryServiceLive` and `RiskTreeServiceLive` all read
@@ -7873,43 +7875,50 @@ paragraph — that its signatures predate the ruling and hold only because
 #### Test changes
 
 Thirteen test files name one of these types. The blast radius is wide and
-shallow: eight of them want a value with given outcomes and reach for
+shallow: most of them want a value with given outcomes and reach for
 `RiskResult` only because it was the concrete leaf case, so they swap one
-constructor call and stay where they are. Only the four that name
-`RiskResultGroup` are affected structurally.
+constructor call. Because the whole hierarchy stays in `simulation`, **only
+`ProvenanceSpec` moves**, and it was misfiled before this change.
 
 No test helper with back-door constructors is introduced. One would be a hole in
 the guarantee that an aggregate cannot be claimed without its children.
 
 | File | Change |
 |---|---|
-| `modules/server/src/test/scala/com/risquanter/register/simulation/LossDistributionSpec.scala` | Split. The `RiskResult` value cases stay and use `LossDistribution.unlayered`; `RiskResult.empty(id)` becomes `LossDistribution.unlayered(id, Map.empty)`; the `Equal` cases follow the second decision below. The seven `RiskResultGroup` sites move to a new `services/cache/NodeValuationSpec.scala`. The `LossDistribution.merge` suite follows the first decision below. |
-| `modules/server/src/test/scala/com/risquanter/register/simulation/PreludeOrdUsageSpec.scala` | Split the same way: the `RiskResult — Ord[Loss] with TreeMap` suite stays and swaps its constructor; the `RiskResultGroup — Ord[Loss] with TreeMap` suite moves to `services/cache/NodeValuationSpec.scala`. |
-| `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala` | Relocate whole to `modules/server/src/test/scala/com/risquanter/register/services/cache/ProvenanceSpec.scala`. It is misfiled today independently of this ruling — its subject is provenance capture through `CachedResultResolver` and its imports are the resolver and the hierarchy, while its package is `domain.data`. Its two structural sites (`case r: RiskResult` at line 45, `case g: RiskResultGroup` at line 336) compile only from inside `services.cache`. |
+| `modules/server/src/test/scala/com/risquanter/register/simulation/LossDistributionSpec.scala` | Stays where it is — the whole hierarchy is in `simulation`, so nothing has to move. Every `RiskResult(id, outcomes, Nil)` becomes `LossDistribution.leaf(id, outcomes, Nil, Nil, identity)` and every `RiskResultGroup` site becomes `LossDistribution.group(...)`; `RiskResult.empty(id)` becomes `leaf(id, Map.empty, Nil, Nil, identity)`. The `Equal` cases follow the second decision below, the `merge` suite the first. Gains the new guarantees listed under this table. |
+| `modules/server/src/test/scala/com/risquanter/register/simulation/PreludeOrdUsageSpec.scala` | Stays. Both suites swap their constructors the same way; neither moves. |
+| `modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala` | Its two structural sites — `case r: RiskResult` at line 45 and `case g: RiskResultGroup` at line 336 — walk a hierarchy that no longer exists and cannot be named from `domain.data`. Both are rewritten against the public value, and the spec relocates to `modules/server/src/test/scala/com/risquanter/register/simulation/ProvenanceSpec.scala` with the type it exercises. It is misfiled today independently of this ruling: its subject is provenance capture through `CachedResultResolver`, its imports are the resolver and the hierarchy, and its package is `domain.data`. **Provenance is behind `private val origin` after this change**, so whatever these two sites need becomes the first caller of the public accessor `PLAN-PROVENANCE-ENDPOINT.md` will add; if the accessor is not written here, the spec's provenance-by-node assertions have nothing to read and the two sites are deleted rather than rewritten. Which of the two is decision 2 below. |
 | `modules/server/src/test/scala/com/risquanter/register/services/cache/CachedResultResolverSpec.scala` | No move. Its three type-name assertions are rewritten under §8.16's Decision Trigger #8, and one of them inverts: the assertion at line 462 that a mitigated portfolio read is a flat `RiskResult` becomes the assertion that it is still a group. The rewritten properties are listed below this table. |
-| `modules/server/src/test/scala/com/risquanter/register/simulation/LECGeneratorSpec.scala` | Swap `RiskResult(id, outcomes, Nil)` for `LossDistribution.unlayered(id, outcomes)` throughout; `Map.empty[String, RiskResult]` becomes `Map.empty[String, LossDistribution]`. |
+| `modules/server/src/test/scala/com/risquanter/register/simulation/LECGeneratorSpec.scala` | Swap `RiskResult(id, outcomes, Nil)` for `LossDistribution.leaf(id, outcomes, Nil, Nil, identity)` throughout; `Map.empty[String, RiskResult]` becomes `Map.empty[String, LossDistribution]`. |
 | `modules/server/src/test/scala/com/risquanter/register/testutil/RiskResultTestSupport.scala` | `identityFor` returns `LossDistribution`. Nothing here builds a group, so the file neither splits nor moves. Its name no longer describes its contents; renaming it is a separate hygiene change and is not folded in. |
 | `modules/server/src/test/scala/com/risquanter/register/services/helper/SimulatorSpec.scala` | Two local helpers swap the constructor. |
 | `modules/server/src/test/scala/com/risquanter/register/services/QueryServiceLiveSpec.scala` | `flat` returns `LossDistribution`; the `widen` helper is deleted, because the map no longer needs widening to a base type. |
 | `modules/server/src/test/scala/com/risquanter/register/foladapter/BinderIntegrationSpec.scala` | Swap the constructor; the `(v: LossDistribution)` ascriptions are deleted for the same reason. |
 | `modules/server/src/test/scala/com/risquanter/register/foladapter/RiskTreeKnowledgeBaseSpec.scala` | Same. |
 | `modules/server/src/test/scala/com/risquanter/register/services/pipeline/InvalidationHandlerSpec.scala` | Remove the unused `RiskResult` import. It is dead today. |
-| `modules/server/src/test/scala/com/risquanter/register/mitigation/MitigationApplicationSpec.scala` | The `resultTransformFor` suite is rewritten against `layerTransform`, and a `resultStageLayers` suite is added: a parameter-stage mitigation produces no layer entry; a node with two result-stage mitigations gets both records in precedence order; each record's `resolvedScope` holds every node that mitigation reaches, not only the one whose layer it is on. The `applicationRecords` suite is untouched. |
-| `modules/server/src/test/scala/com/risquanter/register/services/cache/NodeValuationSpec.scala` — new | Receives the moved group suites and adds what the derived constructors newly guarantee: `value.preLayerOutcomes` equals the combine of the children's `value.trialOutcomes`; an empty layer yields `trialOutcomes eq preLayerOutcomes`; a non-empty layer leaves `preLayerOutcomes` at the combine while `trialOutcomes` differs; a combine that overflows and a layer that overflows each fail with `CONSTRAINT_VIOLATION` rather than throwing; children at different trial counts still throw. |
+| `modules/server/src/test/scala/com/risquanter/register/mitigation/MitigationApplicationSpec.scala` | The `resultTransformFor` suite is rewritten against `run`, and a `recordsByNode` suite is added: a parameter-stage mitigation produces no record; a node with two result-stage mitigations gets both in precedence order; each record's `resolvedScope` holds every node that mitigation reaches, not only the one whose layer it is on; `run(Nil, outcomes)` returns the same reference. The `applicationRecords` suite is untouched. |
+| `modules/server/src/test/scala/com/risquanter/register/mitigation/RiskResultTransformSpec.scala` | Gains the C1 test, a required deliverable of that ruling: a scale factor that takes a loss past `Long.MaxValue` raises `ArithmeticException` instead of saturating, and the same case reaches a caller as a `CONSTRAINT_VIOLATION` through `LossDistribution`. |
+
+What `LossDistributionSpec` gains, because the derived factories newly guarantee
+it: `source` equals the combine of the children's `trials`; an empty
+`applied` yields `trials eq source`; a non-empty one leaves `source` at
+the combine while `trials` differs; a combine that overflows and a layer
+that overflows each fail with `CONSTRAINT_VIOLATION` rather than throwing;
+children at different trial counts still throw.
 
 The rewritten `CachedResultResolverSpec` assertions, which are the only shipped
 assertions this change alters:
 
 - An un-mitigated portfolio read carries an empty `applied` and
-  `trialOutcomes eq preLayerOutcomes`, replacing "is a `RiskResultGroup`".
+  `trials eq source`, replacing "is a `RiskResultGroup`".
 - A portfolio read under a selection that binds a transform at the root carries
-  that mitigation's record in `applied`, and its `trialOutcomes` differs from
-  its `preLayerOutcomes`, replacing "is a flat `RiskResult`".
+  that mitigation's record in `applied`, and its `trials` differs from
+  its `source`, replacing "is a flat `RiskResult`".
 - A portfolio read under a selection that binds only below the root carries an
-  empty `applied` at the root, `trialOutcomes eq preLayerOutcomes` there, and a
+  empty `applied` at the root, `trials eq source` there, and a
   root figure that differs from the un-mitigated one. This is the case the old
   type-name assertions could not express at all, and it is the property that
-  makes `preLayerOutcomes` distinct from the inherent figure.
+  makes `source` distinct from the inherent figure.
 
 #### Documentation sweep
 
@@ -7931,36 +7940,35 @@ covers.
 
 #### ADR alignment
 
-- **ADR-001 (validate once at the boundary; smart constructors).** Compliant and strengthened. Every construction path returns `Validation`, the primary constructors are private, and no function here takes a raw primitive carrying a domain value. `LECNodeSeries` stays the boundary type; nothing in either hierarchy gains a codec or a schema.
-- **ADR-009 (result hierarchy and drill-down).** Compliant, and the transformed-portfolio collapse that discarded child structure is removed. The ADR's enumeration of the hierarchy is stale after this change and is amended in slice 5.
+- **ADR-001 (validate once at the boundary; smart constructors).** Compliant and strengthened. Every construction path returns `Validation`, the primary constructor is private, and no function here takes a raw primitive carrying a domain value. This is also the answer to `ADR-REVIEW-2026-09-15` C2, which found the §8.16 type had no construction gate at all. `LECNodeSeries` stays the boundary type; nothing here gains a codec or a schema.
+- **ADR-003 (seed identity and provenance).** Amended in slice 5, and this change adds to what that amendment covers. §3 publishes `group.children.collect { case r: RiskResult => r.nodeId -> r.provenances }` as the provenance derivation. After this change `RiskResult` is `private[simulation]` and carries no `nodeId`, so the snippet does not compile anywhere outside one package — an ADR publishing uncompilable code, which upgrades `ADR-REVIEW-2026-09-15` D4 from cosmetic to required. The Implementation table's `includeProvenance` row is separately false (D3).
+- **ADR-009 (result hierarchy and drill-down).** Compliant, and the transformed-portfolio collapse that discarded child structure is removed. §2 enumerates exactly two subtypes and the Implementation table names them with file paths; both are stale after this change and are amended in slice 5. ADR-009 §5 carries the same uncompilable snippet as ADR-003 §3.
 - **ADR-010 (errors are values; failures separated by origin).** Compliant. Three failure sites, two converted to `ValidationError` and one left to propagate as a defect, each with its reason stated at the site.
 - **ADR-015 (cache-aside, content-addressed).** No change. Only leaf content is cached, keyed by a hash of identity-free content; nothing here reaches a cache key, a cached value, or a hash input.
 - **ADR-018 (nominal ID wrappers).** No change; `NodeId` is carried as before.
 - **ADR-033 (narrowest sound catch).** Compliant. Both catches name `ArithmeticException`, the exception `Math.addExact` is documented to raise.
 - **ADR-034 (what is stored versus what is applied).** Compliant. Result-stage transforms are still applied at the read edge and never stored; the layer records travel on the in-memory value and never on the wire.
-- **ADR-035 (exhaustiveness).** The sealed hierarchy moves rather than disappearing: `NodeValuation` is sealed, and the two-case match in the provenance walk stays compiler-checked. `LossDistribution` stops being sealed because it stops having cases.
+- **ADR-035 (exhaustiveness).** The sealed hierarchy moves rather than disappearing: `NodeValuation` is sealed in the same file as its cases, so a third origin would still be a compile error wherever it is matched. `LossDistribution` stops being sealed because it stops having cases; `ADR-REVIEW-2026-09-15` A1, which asked for a third branch in `descendantProvenances`, is moot — there is no third case and that function is deleted.
 
 #### File inventory
 
-Every path this section touches is already a bullet in
-[`PLAN-RISKTRANSFORM-INVENTORY.md`](PLAN-RISKTRANSFORM-INVENTORY.md), including
-`services/cache/NodeValuation.scala`, which the last amendment added. **No
-amendment is required.**
+**One amendment is required**, for the transform file the C1 fix touches.
+Everything else this section edits is already a bullet in
+[`PLAN-RISKTRANSFORM-INVENTORY.md`](PLAN-RISKTRANSFORM-INVENTORY.md).
 
-Production: `simulation/LossDistribution.scala`,
-`services/cache/NodeValuation.scala` (new file),
+Production: `simulation/LossDistribution.scala` (the internal parent lives in
+this file, so no new production file is created),
 `mitigation/MitigationApplication.scala`,
+`mitigation/RiskResultTransform.scala` — **not a bullet today**,
 `services/cache/CachedResultResolverLive.scala`, and — comment changes only —
 `services/cache/CachedResultResolver.scala`, `simulation/LECGenerator.scala`,
 `services/helper/Simulator.scala`, `domain/data/Provenance.scala`,
 `domain/data/LEC.scala`, `domain/data/Mitigation.scala`,
 `app/components/LECSpecBuilder.scala`.
 
-Tests: the thirteen files in the table above, plus
-`services/cache/NodeValuationSpec.scala` (new file). The hook authorises a
-module's test tree whenever the plan lists any file under that module's
-`src/main`, which this plan does many times over for `server`, so no test path
-needs a bullet of its own.
+Tests: the files in the table above. The hook authorises a module's test tree
+whenever the plan lists any file under that module's `src/main`, which this plan
+does many times over for `server`, so no test path needs a bullet of its own.
 
 Three inventory bullets are stale and grant nothing; none of them blocks this
 change.
@@ -7968,9 +7976,11 @@ change.
 and
 `modules/common/src/test/scala/com/risquanter/register/domain/PreludeOrdUsageSpec.scala`
 are pre-move paths, superseded by the `server` locations used throughout this
-section. `modules/common/src/main/scala/com/risquanter/register/http/responses/NodeReading.scala`
-names a file this plan no longer creates, per the correction at the top of this
-section.
+section. Two bullets from the last amendment name files this plan no longer
+creates: `.../http/responses/NodeReading.scala` (the wire type is
+`LECNodeSeries`, per the correction at the top of this section) and
+`.../services/cache/NodeValuation.scala` (the internal parent lives beside
+`LossDistribution`, not in the cache package).
 
 #### Verification plan
 
@@ -7993,7 +8003,8 @@ into `.env` and `.env.irmin`.
 Two properties are checked by hand once, because no test states them directly:
 that `sbt compile` reports zero warnings, and that an unmitigated read still
 allocates one outcome map per node rather than two, which
-`LossDistribution.unlayered` passing one reference twice is what guarantees.
+the empty-layer short-circuit in `build` passing one reference twice is what
+guarantees.
 
 #### Open decisions
 
@@ -8001,9 +8012,9 @@ allocates one outcome map per node rather than two, which
 restated here so the set sits in one place.
 
 `merge(distributions: LossDistribution*): Map[TrialId, Loss]` is a companion
-helper that reduces over `_.trialOutcomes`. Its only caller is
+helper that reduces over `_.trials`. Its only caller is
 `RiskResultGroup`'s private constructor, and under this ruling the things being
-combined are children's post-layer outcomes held on `NodeValuation`, so the
+combined are children's mitigated outcomes held on `NodeValuation`, so the
 helper's signature no longer matches its call site. It has to move or go.
 
 *Option A — move it to the internal side*, retyped over `NodeValuation`. Keeps
@@ -8025,7 +8036,31 @@ are rewritten against `TrialOutcomes.combine` — the same laws, one level down.
 reading convenience at the price of two ways to combine. The signatures above
 are written for B; A changes `RiskResultGroup.create`'s body and nothing else.
 
-**2. What `Equal[LossDistribution]` compares.** New, and it has to be answered
+**2. Whether `LossDistribution` exposes its origin.** Opened by this direction:
+provenance and children now sit behind `private val origin`, so nothing outside
+the file can read either.
+
+Nothing in production reads them today, and the collapse that used
+`descendantProvenances` is gone, so the private field is sufficient for
+everything this plan ships. But `ProvenanceSpec` reads provenance by node, and
+[`PLAN-PROVENANCE-ENDPOINT.md`](PLAN-PROVENANCE-ENDPOINT.md) will need it.
+
+*Option A — keep `origin` fully private.* Smallest surface. `ProvenanceSpec`'s
+two structural assertions are deleted rather than rewritten, and the provenance
+endpoint adds the accessor when it is built.
+
+*Option B — add `def provenances: List[NodeProvenance]` and
+`def children: List[LossDistribution]` now*, each reading `origin` and returning
+empty for the other case. `ProvenanceSpec` keeps its coverage, the provenance
+endpoint has what it needs, and the reasoning document's §8.4 property — that a
+descendant's cap is "visible inside `source`'s children" — survives, which it
+does not under A.
+
+**My recommendation: Option B.** Deleting test coverage to keep a field private
+trades something real for something notional, and the accessors are two lines
+that expose only what the fold already computed.
+
+**3. What `Equal[LossDistribution]` compares.** New, and it has to be answered
 because the instance exists today and its subject is changing.
 
 The present `Equal[RiskResult]` compares `outcomes`, `nTrials` and `nodeId`, and
