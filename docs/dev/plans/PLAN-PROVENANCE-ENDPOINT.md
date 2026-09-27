@@ -6,6 +6,24 @@
 
 ---
 
+## A naming distinction used throughout
+
+Two different types are called `LossDistribution`, and this plan names both.
+
+**old-LossDistribution** is the sealed class in
+`modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala`,
+with `RiskResult` for a simulated leaf and `RiskResultGroup` for an aggregated
+portfolio. This plan is written against it, and every unqualified mention below
+means this one.
+
+**FB-c LossDistribution** is the flat valuation type designed in
+`docs/scratch/FB-C-DESIGN.md`. It is not ruled. This plan does not depend on it
+and can be implemented without it. The one section that mentions it is
+"Interaction with the valuation design", which says what becomes simpler if it
+lands.
+
+---
+
 ## Objective
 
 Give provenance a first-class read path, and remove the `includeProvenance`
@@ -20,10 +38,10 @@ that endpoint and deletes the parameter that stands in its place.
 
 ## Current state
 
-### Provenance is always captured, and never returned
+### Provenance is captured on every leaf and never returned
 
-`CachedResultResolverLive` builds a `NodeProvenance` for every leaf it
-simulates and stores it beside the outcomes in the cache value:
+`CachedResultResolverLive` builds a `NodeProvenance` for every leaf it simulates
+and stores it beside the outcomes in the cache value:
 
 ```scala
 final case class LeafSimResult(
@@ -48,8 +66,17 @@ case class NodeProvenance(
 )
 ```
 
-Attribution is therefore structural: a record belongs to the `RiskResult` that
-holds it, and that result carries the `nodeId`. No response type in
+Identity is attached at the read edge instead. Whether the cache hits or misses,
+the resolver labels the record with the requested node:
+
+```scala
+// hit
+RiskResult.fromTrialOutcomes(leaf.id, content.outcomes, List(content.provenance))
+// miss
+RiskResult.fromTrialOutcomes(leaf.id, outcomes, List(provenance))
+```
+
+A portfolio holds no record of its own. No response type in
 `modules/common/.../http/responses` contains provenance, and no route serves it.
 
 ### `includeProvenance` affects nothing
@@ -69,16 +96,24 @@ There is no branch on it and no filtering anywhere. `ProvenanceSpec` carries a
 comment stating that filtering happens at the service layer; no such filtering
 exists.
 
-### Where the live derivation sits
+### What the tree already supplies
 
-`CachedResultResolverLive.descendantProvenances` walks a `LossDistribution` and
-returns every descendant leaf's records as a flat `List[NodeProvenance]`, so
-attribution is discarded. It is private and serves the portfolio-collapse path,
-not a read API.
+`RiskTree` carries a `TreeIndex`, rebuilt from the flat node list whenever a
+tree is decoded. It answers both structural questions this endpoint needs:
 
-`LossDistribution` exposes only `nodeId` and `trialOutcomes`; `provenances` is a
-member of `RiskResult` alone. A walk that keeps attribution must match on the
-subtype.
+```scala
+def descendants(nodeId: NodeId): Set[NodeId]   // the node and everything beneath it
+def leafIds: Set[NodeId]                       // every node with no children
+```
+
+`leafIds` is exact rather than approximate here, because a portfolio cannot be
+childless. `RiskPortfolio` enforces `require(childIds != null && childIds.nonEmpty, …)`,
+and `RiskTreeRequests` rejects an empty one at the boundary with
+`EMPTY_COLLECTION`.
+
+`CachedResultResolver.ensureCachedAll` already takes an arbitrary set of node
+identifiers and resolves each one independently, returning
+`Map[NodeId, LossDistribution]`.
 
 ---
 
@@ -149,6 +184,9 @@ keyed by that leaf's id. Both `JsonFieldEncoder[NodeId]` and
 `JsonFieldDecoder[NodeId]` already exist in `OpaqueTypes`, and
 `Map[NodeId, LECNodeCurve]` is the existing precedent for this response shape.
 
+The response is a map and therefore unordered. Node identity is the only
+ordering a client needs, since each key names the leaf the record belongs to.
+
 ### Tapir endpoint
 
 ```scala
@@ -182,34 +220,43 @@ override def getProvenance(wsId: WorkspaceId, treeId: TreeId, nodeId: NodeId,
                            rev: Revision): Task[Map[NodeId, NodeProvenance]] =
   traced("getProvenance") {
     for
-      _              <- tracing.setAttribute("tree_id", treeId.value)
-      _              <- tracing.setAttribute("node_id", nodeId.value)
-      (tree, _, _)   <- lookupNodeInTree(wsId, treeId, nodeId, rev)
-      dist           <- resolver.ensureCached(tree, nodeId, seedEntityId)
-      attributed      = LossDistribution.attributedProvenances(dist)
-      _              <- tracing.setAttribute("provenance_count", attributed.size.toLong)
+      _            <- tracing.setAttribute("tree_id", treeId.value)
+      _            <- tracing.setAttribute("node_id", nodeId.value)
+      (tree, _, _) <- lookupNodeInTree(wsId, treeId, nodeId, rev)
+      leaves        = tree.index.descendants(nodeId).intersect(tree.index.leafIds)
+      results      <- resolver.ensureCachedAll(tree, leaves, seedEntityId)
+      attributed    = LossDistribution.leafProvenances(results)
+      _            <- tracing.setAttribute("provenance_count", attributed.size.toLong)
     yield attributed
   }
 ```
 
-### Attributed walk
+The subtree's leaves come from the tree index, and each one is resolved on its
+own. Resolving the leaves directly rather than their common ancestor avoids
+combining figures at every intermediate portfolio, which this endpoint has no
+use for.
 
-`descendantProvenances` discards the node id, so the walk the endpoint needs is
-a new named function on the `LossDistribution` companion, where both subtypes
-are visible:
+### Reading the records off the results
+
+`descendantProvenances` in `CachedResultResolverLive` is private and serves the
+portfolio-collapse path. It also discards the node id. So the endpoint needs its
+own function, and it lives on the `LossDistribution` companion, where the
+subtypes are visible:
 
 ```scala
-/** Every simulated leaf's provenance in this distribution, keyed by the node
-  * that carries it. */
-def attributedProvenances(dist: LossDistribution): Map[NodeId, NodeProvenance] =
-  dist match
-    case r: RiskResult      => r.provenances.map(r.nodeId -> _).toMap
-    case g: RiskResultGroup => g.children.map(attributedProvenances).reduceOption(_ ++ _).getOrElse(Map.empty)
+/** Each simulated leaf's provenance record, keyed by the node that carries it.
+  *
+  * A leaf resolution always yields a `RiskResult` holding exactly one record.
+  * A portfolio carries none, so a non-leaf entry contributes nothing.
+  */
+def leafProvenances(results: Map[NodeId, LossDistribution]): Map[NodeId, NodeProvenance] =
+  results.iterator.collect {
+    case (id, r: RiskResult) => r.provenances.map(id -> _)
+  }.flatten.toMap
 ```
 
-Reading the inherent valuation is what makes the `Map` shape total: with
-`MitigationSelection.Inherent` no portfolio collapses into a `RiskResult`, so
-each key is a distinct leaf holding exactly one record.
+One record per key holds because the resolver's leaf path always produces
+`List(provenance)`, on both the cache hit and the cache miss.
 
 ### Controller route
 
@@ -233,28 +280,86 @@ changes.
 
 ---
 
+## Interaction with the valuation design
+
+`docs/scratch/FB-C-DESIGN.md` proposes replacing old-LossDistribution with a
+flat FB-c LossDistribution carrying `provenances` as an ordinary field. It is
+not ruled, and nothing in this plan waits on it.
+
+If it lands, one function in this plan simplifies. `leafProvenances` stops
+needing a type test, because every result carries its own records directly:
+
+```scala
+results.flatMap { case (id, d) => d.provenances.map(id -> _) }
+```
+
+Everything else in this plan is unaffected: the route, the endpoint definition,
+the response type, the service method signature, the controller, and every test.
+
+---
+
 ## ADR alignment
 
 | ADR | Bearing | Status |
 |---|---|---|
-| ADR-003 | The endpoint is §3's dedicated audit surface | Compliant — this plan implements it |
+| ADR-003 | Decision 4 (§4) names a dedicated audit endpoint as the surface for provenance; this plan builds it | Compliant on the decision — see the flagged deviation below on §4's worked example |
 | ADR-001 | `WorkspaceKeySecret`, `TreeId`, `NodeId`, `CommitHash` path and query params are refined; no raw primitive carries a domain value | Compliant |
 | ADR-002 | One span per call; `tree_id`, `node_id`, `provenance_count` attributes; net removal of three dead attributes | Compliant |
-| ADR-009 | Attribution is read through the structure; no flat list on the supertype, nothing merged onto the aggregate | Compliant |
+| ADR-009 | §5 requires that a record carry no node identity of its own, that the supertype expose no flat provenance list, and that nothing be merged onto an aggregate. All three hold: `NodeProvenance` is unchanged, no flat list is added, and a portfolio's own entry contributes nothing | Compliant on the rule — see the flagged deviation below on §5's worked example |
 | ADR-010 | `.either` at the controller boundary; `lookupNodeInTree` fails with `ValidationFailed(NOT_FOUND)` | Compliant |
 | ADR-014 | Reads go through the resolver, so a warm cache serves them | Compliant |
 | ADR-030 | The controller binds `given Checked[Permission]` before the service call, matching both existing routes | Compliant |
 | ADR-036 | The response carries `NodeId` keys only, which §4 names client-facing; no `WorkspaceId` | Compliant |
 
+### Flagged deviation — two ADRs publish an example this plan does not follow
+
+ADR-003 §4 and ADR-009 §5 both give the same worked example for how a record is
+attributed to a node:
+
+```scala
+group.children.collect { case r: RiskResult => r.nodeId -> r.provenances }
+```
+
+ADR-003 §4 states it as prose as well: "Its records are read by walking its
+children and pairing each child's `nodeId` with that child's records, giving the
+union of all leaf provenances in the subtree, in child order."
+
+This plan attributes records by resolving each leaf under its own identifier,
+taking the set of leaves from `TreeIndex`. It produces the same records with the
+same node keys. It differs in two respects: it does not descend through
+`RiskResultGroup.children`, and the result is a map, so there is no child order.
+Both ADR passages need amending to describe attribution by node identifier and
+to drop the ordering claim.
+
+Two things are worth separating here. The **rule** in ADR-009 §5 — that
+`NodeProvenance` carries no identity of its own, that the sealed supertype
+exposes no flat provenance list, and that nothing is merged onto an aggregate —
+is satisfied exactly. Only the **example** of how identity is supplied differs.
+
+The ordering claim is inaccurate about the endpoint independently of this, since
+the response type is an unordered map.
+
+**Decision required before implementation:** open decision 1.
+
 ---
 
 ## Open decisions
 
-1. **Mitigated provenance.** The endpoint reads the inherent valuation and takes
-   no `selection`. Under a mitigated selection a collapsed transformed portfolio
-   carries its descendants' records under its own id, so `Map[NodeId, NodeProvenance]`
-   stops being one-record-per-key. Whether the endpoint should ever accept a
-   selection — and what shape it would return — is not decided here.
+1. **Amending ADR-003 §4 and ADR-009 §5.** Both publish the child-walk example
+   and ADR-003 §4 adds the "in child order" claim. Either amend both to describe
+   attribution by node identifier and drop the ordering claim, or change this
+   plan to descend through `RiskResultGroup.children` instead. The first keeps
+   the endpoint resolving only the leaves it needs; the second keeps the ADRs
+   untouched at the cost of combining figures at every intermediate portfolio
+   for a result that discards them.
+
+2. **Whether the endpoint accepts a mitigation selection.** It currently takes
+   none and resolves the inherent valuation. Accepting one is technically
+   unobstructed: only leaves are resolved, a leaf never collapses, and a
+   parameter-stage mitigation changes the leaf's content hash, so the record
+   returned would describe the simulation that actually ran under that
+   selection. Whether the audit surface should offer that reading at all is a
+   product question, not a technical one.
 
 ---
 
@@ -271,10 +376,13 @@ sbt "serverIt/test"
 Tests to add:
 
 - `RiskTreeServiceLiveSpec` — a leaf node returns one entry keyed by that leaf;
-  a portfolio root returns one entry per leaf descendant; an unknown `treeId`
-  fails; a `nodeId` absent from the tree fails.
-- `ProvenanceSpec` — `attributedProvenances` pairs each record with the node
-  that holds it, and a portfolio's key set equals its leaf-descendant set.
+  a portfolio root returns one entry per leaf descendant; a mid-tree portfolio
+  returns its own leaf descendants and no others; an unknown `treeId` fails; a
+  `nodeId` absent from the tree fails.
+- `ProvenanceSpec` — `leafProvenances` pairs each record with the node that
+  holds it, and returns nothing for a portfolio entry.
+- `TreeIndexSpec` — `descendants(nodeId).intersect(leafIds)` is exactly the leaf
+  set beneath a node, for a leaf, for a mid-tree portfolio, and for the root.
 - An integration test exercising the route over HTTP, matching how the other
   analysis endpoints are covered.
 

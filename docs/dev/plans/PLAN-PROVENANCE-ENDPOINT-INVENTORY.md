@@ -9,3 +9,5 @@ modules/server/src/main/scala/com/risquanter/register/http/controllers/Workspace
 modules/server/src/test/scala/com/risquanter/register/domain/data/ProvenanceSpec.scala
 modules/server/src/test/scala/com/risquanter/register/services/CascadeTestStubs.scala
 modules/server/src/test/scala/com/risquanter/register/services/RiskTreeServiceLiveSpec.scala
+- modules/server/src/test/scala/com/risquanter/register/domain/tree/TreeIndexSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/ProvenanceEndpointItSpec.scala
