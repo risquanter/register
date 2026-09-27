@@ -2386,3 +2386,26 @@ any reason:**
 
 **Entry points that must lead here:** item 49, item 51, and the "Eviction
 Strategy" note in `docs/dev/plans/IMPLEMENTATION-PLAN.md`.
+
+---
+
+## 53. The trial count is not in the simulation cache key — unexamined
+
+A cached `LeafSimResult` carries the trial count it was computed at, inside its
+`TrialOutcomes`. Whether that count belongs in the content-hash key was never
+examined, because today a cache instance cannot outlive the `SimulationConfig`
+that fixed the count, and simulation results are not persisted.
+
+The question becomes real if either of those changes: a persistent result
+store, or a trial count settable per request rather than fixed per process.
+
+`docs/scratch/CACHE-TRIAL-COUNT-KEYING.md` holds what was said. **It is hastily
+constructed argumentation, it did not read the keying implementation, and it
+records no preferred option on purpose.** Re-derive it against the code, the
+ADRs and the design documents before using any of it. Deciding needs three
+things that note does not have: how seeding is handled and why it is not in the
+key, what `ContentHashIndex` actually puts in a key and why, and what the right
+behaviour is when a stored result is read under a different trial count than
+the runtime's.
+
+Adjacent to item 52 and possibly belongs inside it.
