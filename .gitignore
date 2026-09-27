@@ -119,3 +119,9 @@ docs/dev/WORKING-INSTRUCTIONS.md
 
 # Local-only ideation note; the rest of docs/scratch/ stays tracked
 docs/scratch/ASSURANCE-ANCHORED-PARAMETERS.md
+
+# Frozen design prototype for the FB-F valuation shape. Kept local: it is a
+# sketch that answers "what type shape", not production code, and nothing in
+# it is fit to be transcribed. The transplant works from production's own
+# idioms with the prototype as the shape reference only.
+docs/scratch/valuation-prototypes/
