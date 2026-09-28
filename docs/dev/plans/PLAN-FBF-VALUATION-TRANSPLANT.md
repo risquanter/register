@@ -109,23 +109,143 @@ sentence, and §7.6.10's ADR-alignment row for ADR-034.
 
 ---
 
-## 1. Preconditions
+## 1. Step 1 — delete `LossDistribution.flatten`, and land it on its own
 
-1. **`LossDistribution.flatten` is deleted** — the abstract member at
-   `modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala:176`,
-   the `RiskResult` override at line 191, the `RiskResultGroup` override at
-   line 251, and the two assertions in `LossDistributionSpec.scala` that are
-   its only callers. Ruled in `MITIGATION-VALUATION-EXPLAINED.md` §12.3 and
-   §11. It is the base class's only abstract member; the class stops existing
-   here in any case.
+**This is the first step of this plan, and it is committed green before any of §3
+starts.** Ruled 2026-09-15 and reaffirmed 2026-09-27 as the lower-risk path (§10
+decision 6): a deletion in two files, reviewed and banked on its own, so that
+nothing in the type change has to be unpicked together with it. §3 and §5 below
+are written for a tree in which `flatten` is already gone.
 
-   **It lands separately and first** — PLAN-RISKTRANSFORM §7.6.12 decision 4,
-   ruled 2026-09-15 and reaffirmed 2026-09-27 as the lower-risk path (§10
-   decision 6). It is its own landing, taken green before any of §3 starts: a
-   four-site deletion in two files, reviewable on its own, and banked whichever
-   way decision 7 goes. §3 and §5 below are written for a tree in which
-   `flatten` is already gone.
-2. **The hierarchy already lives in `server`.** Verified: the file is
+It is one approval, not two. The approval script accepts only a
+`docs/dev/plans/PLAN-*.md` document as the plan a token names, so this step lives
+here rather than in a fix-note of its own.
+
+### What `flatten` is, and why it goes
+
+`flatten` returns a node's whole subtree as one flat `Vector[LossDistribution]`.
+It was written so that a caller holding a portfolio result could walk everything
+beneath it. Ruled for deletion in `MITIGATION-VALUATION-EXPLAINED.md` §11 and
+§12.3.
+
+Nothing calls it. Searching the repository for the name gives three declarations
+and two test suites, and no other use. The fifteen other `.flatten` occurrences in
+the codebase are the standard collection and `Option` method on unrelated values —
+`RiskTreeServiceLive.scala:101`, `ScenarioMergeService.scala:193`,
+`WorkspaceStorePostgres.scala:166`, `Simulator.scala:158`, `RiskNode.scala:301`,
+`Mitigation.scala:172`.
+
+It has no future caller either. Drill-down is a separate request for the child
+node, and a subtree's provenance takes its set of leaves from `TreeIndex` and
+resolves each leaf under its own node identifier, which is what
+`PLAN-PROVENANCE-ENDPOINT.md` specifies. A method that hands back the whole subtree
+would also make a returned value's size depend on the tree beneath it, which is
+the opposite of what §3.2 is built to guarantee.
+
+### The deletions in `modules/server/src/main/scala/.../simulation/LossDistribution.scala`
+
+Three, with no additions.
+
+**The abstract member on the sealed base class, lines 175–176.** It is the class's
+only abstract member.
+
+```scala
+  /** All trial IDs with non-zero outcomes */
+  def trialIds(): Set[TrialId] = trialOutcomes.trialIds
+
+-  /** Flatten hierarchy to vector of all distributions */
+-  def flatten: Vector[LossDistribution]
+}
+```
+
+**The `RiskResult` override, line 191.** The class body becomes empty, so the
+braces go with it.
+
+```scala
+ case class RiskResult private (
+   override val nodeId: NodeId,
+   override val trialOutcomes: TrialOutcomes,
+   provenances: List[NodeProvenance] = Nil
+-) extends LossDistribution(nodeId, trialOutcomes) {
+-
+-  override def flatten: Vector[LossDistribution] = Vector(this)
+-}
++) extends LossDistribution(nodeId, trialOutcomes)
+```
+
+**The `RiskResultGroup` override, lines 251–252.** Same: the body becomes empty.
+
+```scala
+ final case class RiskResultGroup private (
+   children: List[LossDistribution],
+   override val nodeId: NodeId,
+   override val trialOutcomes: TrialOutcomes
+-) extends LossDistribution(nodeId, trialOutcomes) {
+-
+-  override def flatten: Vector[LossDistribution] =
+-    this +: children.toVector.sortBy(_.nodeId.value)
+-}
++) extends LossDistribution(nodeId, trialOutcomes)
+```
+
+### The deletions in `modules/server/src/test/scala/.../simulation/LossDistributionSpec.scala`
+
+Two. Both test only the deleted method, so neither holds a property to keep.
+Removing a test assertion is Decision Trigger #8; this section is where it is
+presented, and §10 decision 6 is the ruling behind it.
+
+**`test("flatten returns hierarchy")`, lines 164–174**, inside the
+`RiskResultGroup` suite:
+
+```scala
+      test("flatten returns hierarchy") {
+        val r1    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val r2    = withCfg(100) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
+        val group = withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), r1, r2).toEither.toOption.get }
+
+        val flattened = group.flatten
+
+        assertTrue(flattened.size == 3) &&
+        assertTrue(flattened(0) == group) &&
+        assertTrue(flattened.tail.toSet == Set(r1, r2))
+      },
+```
+
+The test immediately above it already asserts `group.children == List(r1, r2)`, so
+"a group holds its children" stays covered after this one is gone.
+
+**The whole `suite("RiskResult - flatten")`, lines 207–214**, which holds one test:
+
+```scala
+    suite("RiskResult - flatten")(
+      test("single result flattens to itself") {
+        val result    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val flattened = result.flatten
+
+        assertTrue(flattened == Vector(result))
+      }
+    ),
+```
+
+The suite is empty once its only test is removed, so the suite goes too, together
+with the trailing comma before `suite("RiskResult - equality")`.
+
+### How step 1 is verified
+
+The full run in §11, green, before this step is committed and before §3 starts.
+`sbt compile` carries most of the weight: `LossDistribution` is a sealed class and
+an inexhaustive match on a sealed hierarchy is a compile error in this build, so a
+remaining caller anywhere in `server`, `commonJVM` or `app` fails the build rather
+than slipping through.
+
+Step 1 carries its own PATCH bump, `0.10.38` → `0.10.39`, because shipped code
+changes. §8 covers the bump for the rest of the plan.
+
+---
+
+## 1b. Other preconditions
+
+1. **The hierarchy already lives in `server`.** Verified: the file is
    `modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala`.
    The inventory bullet
    `modules/common/src/main/scala/com/risquanter/register/domain/data/LossDistribution.scala`
@@ -1016,9 +1136,11 @@ bear on it:
 
 ## 8. Version and landing
 
-PATCH bump — shipped code changes and one deliberate behaviour improvement, no
-external API change. `ThisBuild / version` in `build.sbt` goes `0.10.38` →
-`0.10.39`, mirrored as `APP_VERSION` into **both** `.env` and `.env.irmin`.
+Two PATCH bumps, one per landing, because the plan lands in two commits. Shipped
+code changes in both and no external API changes in either. `ThisBuild / version`
+in `build.sbt` goes `0.10.38` → `0.10.39` with step 1 (§1), then `0.10.39` →
+`0.10.40` with the type change (§3 onward). Each bump is mirrored as `APP_VERSION`
+into **both** `.env` and `.env.irmin`.
 
 ---
 
@@ -1042,12 +1164,12 @@ covered by that rule, and this plan touches no integration test, so no
 integration-test path appears. One path carries the `new:` marker,
 `NodeLosses.scala`, which is the agent stating the file does not exist yet.
 
-**The `flatten` precondition (§1) lands first and takes its own approval, with
-its own inventory document.** It is a review-driven deletion with a ruling behind
-it rather than a new design, so it takes a short fix-note instead of a plan
-document. Its list is one path, because the spec it also edits sits under
-`modules/server/src/test/` and the hook authorizes a module's test tree whenever
-the inventory lists any file under that module's `src/main`.
+**One approval covers both landings.** Step 1 (§1) and the type change (§3 onward)
+are two commits, not two approvals: the approval script accepts only a
+`docs/dev/plans/PLAN-*.md` document as the plan a token names, so a separate
+fix-note could not be approved on its own. Step 1 touches
+`LossDistribution.scala`, its spec and `build.sbt`, all three of which the list
+already covers.
 
 ---
 
@@ -1063,7 +1185,7 @@ Eight, all ruled. **No open decisions.**
 | 3 | How the provenance endpoint reads a leaf's records | **Settled 2026-09-27** — the public value carries `provenance: Option[NodeProvenance]` (§3.2); both plans aligned |
 | 4 | What happens to `LossDistribution.merge`, and what an empty portfolio yields | **Ruled 2026-09-27: delete `merge`, fold inline, refuse the empty case.** See below |
 | 5 | What `Equal[LossDistribution]` compares | **Ruled 2026-09-27: `Equal.default`** — structural, no custom law; see below |
-| 6 | Whether `flatten`'s deletion lands separately and first | **Ruled 2026-09-27: yes** — the lower-risk path, and already ruled so on 2026-09-15 (§1) |
+| 6 | Whether `flatten`'s deletion lands separately and first | **Ruled 2026-09-27: yes** — the lower-risk path, and already ruled so on 2026-09-15. It is step 1 of this plan and its own commit, taken green before §3 starts (§1) |
 | 7 | What the internal family is for | **Closed 2026-09-27: not a decision.** The prototype settles the shape; see below |
 | 8 | What `LeafLosses.create` takes, and whether provenance is a list | **Ruled 2026-09-27: three required parameters, one record.** The ADR-003 code smell that was the only objection is deleted; see below |
 
