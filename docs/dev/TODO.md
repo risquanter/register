@@ -1917,6 +1917,17 @@ protected environment + signed release tag). Open decisions ride in the
 plan's §5 (admission controller; Rekor monitoring) and §7.6 (custom-rule
 mechanism; compiler-flag hardening; trigger granularity).
 
+3. **Container and base-image scanning is a prerequisite, not a nice-to-have.**
+   Every external base image is pinned by digest and every OS package by exact
+   version (ADR-020 §1). Pinning removes silent drift, and in exchange it removes
+   automatic security patching: a digest-pinned base keeps shipping a
+   known-vulnerable layer until a person bumps it. The pins are only safe while
+   something watches them. The scanning stage this item already lists must
+   therefore produce a bump trigger, not just a report — a scheduled scan of the
+   built images and of the pinned bases, failing or raising an issue when a fixed
+   version exists upstream. Design it together with the pin-bump procedure in
+   `VERSION-UPGRADE-PROTOCOL.md` so scanner output names the pin site to edit.
+
 ---
 
 ## 40. Bound the multi-LEC endpoint's node-id list

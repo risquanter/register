@@ -6,10 +6,9 @@
 # Purpose:   Validate the production Irmin image: health, GraphQL round-trip,
 #            non-root enforcement (UID 65532), read-only root filesystem.
 #
-# Uses irmin-prod (not irmin-dev) because the security properties under test
-# (UID 65532, no shell toolchain, minimal attack surface) only exist in the
-# prod image. The dev image runs as the 'opam' user with a full toolchain —
-# useful for interactive debugging but not representative of production.
+# Runs the image standalone rather than through compose so the security
+# properties under test — UID 65532, no shell toolchain, read-only root — are
+# observed on the artefact that actually deploys.
 #
 # Run:       bats tests/bats/suite-b-irmin-prod.bats
 # Prereq:    Image built: local/irmin-prod:3.11-p1

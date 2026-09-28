@@ -18,10 +18,14 @@
 # purging deployed images.
 # ============================================================================
 
-# alpine-ocaml-5.2 pins the OCaml major.minor version; Alpine patch version floats.
-# Prefer ocaml/opam:alpine-3.21-ocaml-5.2 for full Alpine version pinning.
-# For release builds, pin to a digest (ADR-020 §1).
-FROM ocaml/opam:alpine-3.21-ocaml-5.2
+# alpine-3.24-ocaml-5.2 pins the Alpine branch and the OCaml major.minor.
+# Alpine 3.24 is the one branch every image in this repository uses; irmin-prod
+# runs the binary this image produces, so the two must agree on musl.
+# Pinned by digest (ADR-020 §1); bump tag and digest together.
+# This base also enables the Alpine @edge/@testing repositories, but apk uses a
+# tagged repository only for a package requested with that tag, so the plain
+# installs below resolve from v3.24/main.
+FROM ocaml/opam:alpine-3.24-ocaml-5.2@sha256:f043d832b7cc7dbed2d16ff30d6af4bab0d39943de4f881fe3cec3efe31a68a0
 
 LABEL maintainer="risquanter"
 LABEL description="Irmin opam builder base — toolchain + compiled packages"
@@ -30,10 +34,12 @@ USER root
 
 # Install system dependencies required by Irmin/OCaml packages
 # (patch: applies the local irmin-graphql source patch below)
+# Versions are exact (ADR-020 §1), from the Alpine 3.24 branch; `apk policy
+# <package>` reports the current revision when bumping.
 RUN apk add --no-cache \
-    gmp-dev \
-    libffi-dev \
-    patch
+    gmp-dev=6.3.0-r4 \
+    libffi-dev=3.5.2-r1 \
+    patch=2.8-r0
 
 USER opam
 WORKDIR /home/opam

@@ -372,7 +372,9 @@ For day-to-day development, `docker compose up` builds application images automa
 (`pull_policy: build`). The explicit commands below are needed for one-time builder base
 setup and CI. See `docs/user/IMAGE-BUILD-REFERENCE.md` for the full reference.
 
-Builder bases are independent of each other; app images require the corresponding builder.
+The two builder bases are independent of each other. `register-prod` requires
+`graalvm-builder` and `irmin-prod` requires `irmin-builder`; `frontend-prod`
+requires neither, because it builds its own first stage inline (ADR-026 §4).
 
 ```bash
 # GraalVM builder base (~1-2 min; first-party libs resolve from Maven Central)

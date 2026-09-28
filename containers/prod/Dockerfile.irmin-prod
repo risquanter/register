@@ -16,12 +16,18 @@
 # patch carried by the builder (containers/builders/patches/).
 # ============================================================================
 
-# Stage 1: Reference the pre-built builder base
+# Stage 1: Reference the pre-built builder base.
+# No digest pin is possible here: this image is built on the machine that
+# consumes it, so no publisher digest exists to pin against. Its content is
+# fixed by the base digest and package versions inside
+# containers/builders/Dockerfile.irmin-builder (ADR-020 §1).
 FROM local/irmin-builder:3.11-p1 AS builder
 
 # Stage 2: Minimal Alpine runtime ("distroless in spirit")
-# alpine:3.21 pins major.minor; patch floats. Use alpine:3.21.x for full pinning (ADR-020 §1).
-FROM alpine:3.21
+# alpine:3.24.2 — the one Alpine branch every image in this repository uses, and
+# the same branch the builder compiles on, so the binary's musl and shared
+# libraries match. Pinned by digest (ADR-020 §1); bump tag and digest together.
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 LABEL maintainer="risquanter"
 LABEL description="Irmin GraphQL server — production (slim; local merge-conflict patch)"
@@ -31,9 +37,11 @@ LABEL version="3.11-p1"
 # gmp: GNU Multiple Precision Arithmetic (required by irmin-pack)
 # libffi: Foreign Function Interface (required by ctypes/OCaml FFI)
 # No compiler, no opam, no git, no shell-heavy tooling.
+# Versions are exact (ADR-020 §1), from the Alpine 3.24 branch; `apk policy
+# <package>` reports the current revision when bumping.
 RUN apk add --no-cache \
-    gmp \
-    libffi
+    gmp=6.3.0-r4 \
+    libffi=3.5.2-r1
 
 # Copy the compiled irmin binary from the builder base
 COPY --from=builder /home/opam/.opam/5.2/bin/irmin /usr/local/bin/irmin

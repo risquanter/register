@@ -83,30 +83,87 @@ Library dependency versions are controlled by `build.sbt`. All library version s
 
 #### Docker base images
 
-Prefer specific semver tags over floating major/minor tags. Never use `:latest`.
+A specific semver tag plus a digest. Never `:latest`, and never a tag alone.
 
 ```dockerfile
-# GOOD: patch version pinned — limited drift window
-FROM nginx:1.27.5-alpine-slim
-FROM node:22.14.0-alpine3.21
-FROM alpine:3.21.3
-FROM ocaml/opam:alpine-3.21-ocaml-5.2
+# GOOD: specific tag as the readable label, digest as the binding pin
+FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM node:22.23.3-alpine3.24@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402
 
-# ACCEPTABLE: minor version pinned — common convention for Alpine-based images
-FROM node:22-alpine     # locks major only; rebuilds may change patch
+# WEAK: patch version pinned, no digest — the publisher can still move the tag
+FROM nginx:1.27.5-alpine-slim
+
+# WEAKER: major only — the underlying distribution moves too. `node:22-alpine`
+# silently advanced from Alpine 3.21 to 3.24 while it was written this way.
+FROM node:22-alpine
 
 # BAD: completely unpinned
 FROM node:latest
 FROM nginx
 ```
 
-For the highest assurance, pin base images by digest:
+**One Alpine branch for the whole repository.** Every image here is built on
+Alpine 3.24, so `irmin-prod` runs a binary against the same musl and shared
+libraries `irmin-builder` compiled it with, and the BATS runner's Docker CLI
+matches the daemon it drives. A new base image joins that branch or states why
+it cannot.
+
+Every externally sourced base image in this repository is pinned by digest, which
+is what actually fixes the image bytes — a tag, however specific, can be moved by
+its publisher:
 
 ```dockerfile
 FROM nginx:1.27.5-alpine-slim@sha256:<digest>
 ```
 
-Digest pinning is recommended for production/release builds. Track digest updates with Dependabot or a manual review trigger when upstream tags move.
+The tag is kept alongside the digest as a human-readable label; both are bumped
+together. `docker buildx imagetools inspect <tag>` prints the digest to use.
+
+A digest pin freezes upstream security patches as well as upstream drift, so a
+bump is a deliberate act, not an automatic one. That makes a review trigger
+mandatory rather than optional: without one, a digest-pinned base silently ages.
+The image scanning that supplies the trigger is commissioned in `TODO.md` item 39.
+
+Two `FROM` lines are not digest-pinned and cannot be: `local/graalvm-builder:21`
+and `local/irmin-builder:3.11-p1` are built on the machine that consumes them, so
+there is no publisher digest to pin against. Their content is fixed by the pins
+inside their own Dockerfiles.
+
+#### OS packages (apk, microdnf/dnf, apt)
+
+The distribution package managers verify every package they install against the
+distribution's signing keys, which are baked into the base image — `/etc/apk/keys`
+on Alpine, the RPM GPG keys on Oracle Linux. That covers authenticity. It does
+not cover **which version** you get: a bare `apk add gmp` installs whatever
+revision is current in the branch on the day of the build.
+
+Signature verification alone is not enough, because it does not survive an
+upstream account compromise: a package signed with a legitimately-held key is
+accepted by every check. Version determinism is therefore required on top of it.
+
+No package manager here exposes a per-package hash argument, so the exact version
+is the strongest available pin:
+
+```dockerfile
+# GOOD: exact revision — reproducible, and a substitution is visible in the diff
+RUN apk add --no-cache gmp=6.3.0-r2 libffi=3.4.7-r0
+RUN microdnf install -y wget-1.21.1-11.el9_8 tar-1.34-13.el9_8
+
+# BAD: whatever the branch holds at build time
+RUN apk add --no-cache gmp libffi
+```
+
+Finding the current revision: `apk policy <package>` on Alpine,
+`microdnf repoquery <package>` on Oracle Linux. Both read the repository index
+and install nothing.
+
+**The cost, stated plainly.** Alpine's repositories carry only the current
+revision of a package for a release branch. When a package is updated inside the
+branch, the previous revision is removed, and a Dockerfile pinned to it fails to
+build with `unable to select packages`. That is the intended behaviour: the build
+stops and a person decides, rather than the image changing silently. It makes a
+pin bump part of routine maintenance, which is the same review trigger the digest
+pins need.
 
 ### 2. Verify Downloaded Artifacts
 
@@ -388,7 +445,8 @@ transparency-logged) over PGP.
 | npm | `npm audit signatures` — registry signatures + Sigstore provenance | **Adopted** (§9) |
 | sbt / Maven Central | None usable out of the box — coursier verifies checksums (integrity only); Central's PGP signatures are not checked by sbt | **Gap** — flagged to user 2026-07-24; fallback plan (Sigstore-based) to be commissioned separately |
 | opam | None — package signing (conex) never shipped; integrity relies on checksums in `ocaml/opam-repository` fetched over HTTPS | **Gap** — flagged to user 2026-07-24; a Sigstore fallback can only cover artifacts we build (builder images), not upstream packages. Note: `irmin-graphql` is carried with a local source patch under §11 (pin site: `Dockerfile.irmin-builder`; policy: `VERSION-UPGRADE-PROTOCOL.md`, opam section) |
-| Docker base images | Digest pinning (§1); `cosign verify` where the publisher signs | **Partial** — tags pinned, digests not yet; check publisher cosign support at each base-image bump and record the result at the pin site |
+| Docker base images | Digest pinning (§1); `cosign verify` where the publisher signs | **Partial** — every external base image is digest-pinned; publisher signature verification is not yet wired in. Check publisher cosign support at each base-image bump and record the result at the pin site |
+| OS packages (apk, microdnf) | Distribution signing keys baked into the base image verify the signed package index and each package's checksum; exact version pins (§1) supply determinism | **Partial** — signature checking is automatic, but it does not survive an upstream account compromise, and no per-package hash pin exists in either tool |
 | Fetched binaries (sbt launcher) | SHA-256 checksum (§2); upstream publishes no signatures | **Partial** — checksum only |
 
 The two hard gaps (sbt/Maven, opam) cannot be closed by configuration; they

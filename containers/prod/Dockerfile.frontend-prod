@@ -29,12 +29,19 @@
 # ============================================================================
 # Stage 1: Build — Scala.js compilation (sbt) + asset bundling (Vite)
 # ============================================================================
-# node:22-alpine is pinned to major — patch updates ride along with Alpine rebuilds.
-# For release builds, pin to a digest: node:22-alpine@sha256:<digest> (ADR-020 §1).
-FROM node:22-alpine AS builder
+# Pinned by digest (ADR-020 §1): the tag fixes Node 22.23.3 on Alpine 3.24, and
+# the digest fixes the exact image bytes, so a moved tag cannot change the build.
+# Bump tag and digest together; `docker buildx imagetools inspect <tag>` prints
+# the digest.
+FROM node:22.23.3-alpine3.24@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS builder
 
-# OpenJDK 21 is required by sbt / Scala.js compiler
-RUN apk add --no-cache openjdk21-jdk wget bash
+# OpenJDK 21 is required by sbt / Scala.js compiler.
+# Versions are exact (ADR-020 §1). They come from the Alpine 3.24 branch this
+# base image carries; `apk policy <package>` reports the current revision.
+RUN apk add --no-cache \
+    openjdk21-jdk=21.0.12_p8-r0 \
+    wget=1.25.0-r3 \
+    bash=5.3.9-r1
 
 # Install sbt — must match project/build.properties exactly.
 # wget over curl: consistent with graalvm-builder convention in this repo.
@@ -95,8 +102,8 @@ RUN cd modules/app && npm run build
 # Stage 2: Runtime — nginx serving static assets
 # ============================================================================
 # 1.27.5 confirmed from `Server: nginx/1.27.5` response header.
-# For release builds, pin to a digest: nginx:1.27.5-alpine-slim@sha256:<digest> (ADR-020 §1).
-FROM nginx:1.27.5-alpine-slim
+# Pinned by digest (ADR-020 §1); bump tag and digest together.
+FROM nginx:1.27.5-alpine-slim@sha256:b947b2630c97622793113555e13332eec85bdc7a0ac6ab697159af78942bb856
 
 LABEL maintainer="risquanter"
 LABEL description="Risk Register SPA — nginx frontend (production)"

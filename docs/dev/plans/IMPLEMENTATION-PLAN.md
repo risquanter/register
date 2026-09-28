@@ -298,7 +298,7 @@ The browser only displays precomputed `LECCurveResponse`. All aggregation happen
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| `containers/dev/Dockerfile.irmin-dev` | ✅ | Alpine dev image, port 9080 (see also `containers/prod/Dockerfile.irmin-prod`) |
+| `containers/prod/Dockerfile.irmin-prod` | ✅ | Slim Alpine runtime built from `local/irmin-builder` |
 | `docker-compose.yml` (Irmin service) | ✅ | `--profile persistence` |
 | `dev/irmin-schema.graphql` | ✅ | 180 lines, extracted schema |
 | `IrminConfig` | ✅ | `SafeUrl`, timeout, health check |
@@ -2150,7 +2150,7 @@ Tier 2 connects Irmin watch notifications to cache invalidation and SSE broadcas
 | Phase | Description | Status |
 |-------|-------------|--------|
 | Error Domain Model | `SimulationError` extended with `IrminUnavailable`, `NetworkTimeout`, `VersionConflict`, `MergeConflict` | ✅ Complete |
-| Irmin Dev Environment | `containers/dev/Dockerfile.irmin-dev`, `containers/prod/Dockerfile.irmin-prod`, docker-compose, schema extraction | ✅ Complete |
+| Irmin Environment | `containers/builders/Dockerfile.irmin-builder`, `containers/prod/Dockerfile.irmin-prod`, docker-compose, schema extraction | ✅ Complete |
 | Irmin GraphQL Client | `IrminClient` with get/set/remove/list/branches/healthCheck | ✅ Complete |
 | Tree Index & Cache | `TreeIndex`, `RiskResultCache`, `TreeCacheManager`, `TreeIndexService` | ✅ Complete |
 | SSE Infrastructure | `SSEHub`, `SSEEndpoints`, `SSEController`, heartbeat, event types | ✅ Complete |

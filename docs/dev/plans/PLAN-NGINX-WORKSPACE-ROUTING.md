@@ -130,13 +130,33 @@ dependency forcing it there.
 
 ### Why per-workspace routing matters — and where it is a correctness break
 
-Four pieces of state live per workspace inside one server process.
+Three kinds of state live inside one server process and are reachable only from
+that process: two per-workspace caches, and the Server-Sent Events hub, which is
+one process-wide object keyed by tree.
 
 `ContentCache` holds simulation results per workspace, handed out by
 `ContentCacheRegistry`. `MitigationScopeResolver` holds resolved mitigation scopes per
-workspace, handed out by `MitigationScopeResolverRegistry`. Spreading one workspace's
-requests across instances means each instance separately rebuilds both. That is
-waste, not incorrectness — a cache miss produces a correct answer slowly.
+workspace, handed out by `MitigationScopeResolverRegistry`. Both registries are a
+`Ref[Map[SeedEntityId, _]]` inside one JVM — nothing is shared between instances.
+Spreading one workspace's requests across instances means each instance separately
+rebuilds both. That is waste, not incorrectness — a cache miss produces a correct
+answer slowly.
+
+Affinity also confines each workspace's cached state to one instance, which has a
+consequence for reclaiming it. `WorkspaceReaper` runs as a background daemon in
+**every** instance, on its own timer, and `WorkspaceStorePostgres.evictExpired`
+reads the workspace rows, filters the expired ones and deletes them, returning what
+it read. Two instances therefore race on one shared table, and which one observes a
+given workspace expire is decided by timing rather than by the hash. The release
+that `PLAN-WORKSPACE-CACHE-RELEASE` adds to `CascadeDelete.workspace` is
+process-local, so it can run on an instance that holds no entry for that workspace
+while the instance that does holds it until restart.
+
+This is memory reclamation, not correctness. The workspace's row is gone, so every
+later request for it fails at `workspaceStore.resolve` before reaching a cache, and
+`seedEntityId` comes from a strictly increasing sequence, so no later workspace can
+inherit the entry. The effect is that the release is fully effective on one
+instance and a no-op on the others.
 
 `SSEHub` is different, and it is the reason this change is not merely an
 optimization.
@@ -176,12 +196,46 @@ structurally. It works because the workspace key is the first path segment of
 instance. `SSEHub` is keyed by tree rather than workspace, but a tree belongs to
 exactly one workspace, so workspace affinity implies tree affinity.
 
+### Every route that needs affinity carries the key, and every route that does not carries no state
+
+The mechanism below keys on the first path segment after `/w/`, so it can only
+deliver affinity for routes shaped that way. The endpoint definitions in
+`modules/common/.../http/endpoints/` divide cleanly.
+
+**Under `/w/{key}/…`, so covered:** the tree routes (`risk-trees` list and create;
+per-tree get, update, delete, `structure`, `changed-nodes`, `history`, `revert`,
+`query`), the analysis routes (`nodes/{nodeId}/prob-of-exceedance`,
+`nodes/lec-multi`), the scenario routes (list, create, get, delete,
+`merge-preview`, `merge`), workspace `rotate` and delete, and the events route
+`events/tree/{treeId}`. Every route that reads or writes a workspace's state is in
+this set.
+
+**Outside `/w/`, and holding no per-instance state:** `POST /workspaces` creates
+the workspace and issues the key, so no key exists yet to route on, and its state
+goes to Postgres. `/health` and `/docs` are static. `/distribution/preview` calls
+`DistributionPreviewService.preview(dist: Distribution)`, which takes a
+distribution and returns a preview with no service dependency and no cache.
+`/admin/workspaces/expired` triggers the same expiry sweep the in-process
+`WorkspaceReaper` daemon runs on a timer, and acts on the shared workspace table.
+
+These all fall into the `nokey` bucket and therefore reach a single instance. That
+is harmless because none of them reads or writes state held in a process.
+
+A new endpoint that touches per-workspace state must be defined under
+`/w/{key}/…`, or it silently escapes affinity.
+
 ---
 
 ## The mechanism — one extracted key, two consumers
 
 Both changes need the same thing: the workspace key, pulled out of the request
 path as a variable. nginx's `map` directive does that.
+
+It matches on `$uri`, the normalized and URL-decoded path, rather than
+`$request_uri`, which is the raw request line including the query string. Two
+requests for the same workspace must produce the same key, and `$request_uri`
+would fold differing query strings into the hash and scatter them across
+instances.
 
 ```nginx
     # Workspace key — first path segment after /w/

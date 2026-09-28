@@ -1,6 +1,10 @@
 # Stage 1: Build native image with GraalVM
 # Requires: docker build -f containers/builders/Dockerfile.graalvm-builder \
 #             -t local/graalvm-builder:21 containers/builders/
+# No digest pin is possible here: this image is built on the machine that
+# consumes it, so no publisher digest exists to pin against. Its content is
+# fixed by the base digest and package versions inside
+# containers/builders/Dockerfile.graalvm-builder (ADR-020 §1).
 FROM local/graalvm-builder:21 AS builder
 
 WORKDIR /app
@@ -18,9 +22,9 @@ COPY modules/server/src/main/ modules/server/src/main/
 RUN sbt server/compile && sbt server/nativeImage
 
 # Stage 2: Create minimal runtime image with distroless
-# nonroot is a stable tag (maps to a fixed Debian 12 snapshot); still, pin to
-# a digest for release builds to guarantee bit-for-bit reproducibility (ADR-020 §1).
-FROM gcr.io/distroless/static-debian12:nonroot
+# nonroot is a moving tag, so the digest is what fixes the image (ADR-020 §1).
+# Bump tag and digest together.
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 # Copy native binary from builder
 COPY --from=builder --chown=nonroot:nonroot /app/modules/server/target/register-server /app/register-server

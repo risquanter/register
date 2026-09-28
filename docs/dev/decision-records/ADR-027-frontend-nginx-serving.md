@@ -13,6 +13,32 @@
 > repository so developers working on the Dockerfile and nginx config have the
 > rationale locally. When the two diverge, ADR-INFRA-007 governs.
 
+## There is exactly one nginx, and it is this image
+
+Both repositories talk about "nginx" and mean the same container, so this says
+which one and where it runs.
+
+The image built here, `local/frontend:<version>`, *is* the nginx. It holds the
+compiled SPA under `/srv/app/` and the nginx that serves it and applies the
+Accept-header rule below. `register-infra` builds no images: its
+`infra/helm/frontend` chart declares a Deployment whose container image is a
+tag pointing at this one, and everything the chart says about nginx — the
+port 8080, the `BACKEND_URL` environment variable, the resource sizing —
+describes this image's behaviour.
+
+There is no second nginx anywhere in the platform. In particular there is no
+`ingress-nginx` and no Kubernetes `Ingress`: external traffic terminates at an
+**Istio Gateway**, which is a different component with a different job. The
+Gateway does TLS and authorization; this nginx serves files and decides, per
+request, whether `/w/{key}` means the SPA shell or the backend. Neither can do
+the other's work — the Gateway has no filesystem to serve from, and TLS and
+authorization do not belong in an application container.
+
+| Repository | Owns |
+|---|---|
+| `risquanter/register` (here) | Building the image: the SPA bundle, the baked-in `nginx.conf`, the routing rules, the entrypoint |
+| `risquanter/register-infra` | Deploying that image: the Helm chart, the Istio Gateway and HTTPRoute in front of it, the network policy, the image tag |
+
 ---
 
 ## Context

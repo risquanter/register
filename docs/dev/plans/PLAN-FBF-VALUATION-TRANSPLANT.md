@@ -1137,10 +1137,11 @@ bear on it:
 ## 8. Version and landing
 
 Two PATCH bumps, one per landing, because the plan lands in two commits. Shipped
-code changes in both and no external API changes in either. `ThisBuild / version`
-in `build.sbt` goes `0.10.38` → `0.10.39` with step 1 (§1), then `0.10.39` →
-`0.10.40` with the type change (§3 onward). Each bump is mirrored as `APP_VERSION`
-into **both** `.env` and `.env.irmin`.
+code changes in both and no external API changes in either. Step 1 (§1) took
+`0.10.38` → `0.10.39`. The type change (§3 onward) takes whatever `build.sbt`
+holds when it starts to the next PATCH: unrelated work landed between the two, so
+read `ThisBuild / version` rather than assuming `0.10.40`. Each bump is mirrored
+as `APP_VERSION` into **both** `.env` and `.env.irmin`.
 
 ---
 
