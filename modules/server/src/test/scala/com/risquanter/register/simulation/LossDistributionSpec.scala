@@ -161,17 +161,6 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(group.maxLoss == 3000L) &&
         assertTrue(group.children == List(r1, r2))
       },
-      test("flatten returns hierarchy") {
-        val r1    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2    = withCfg(100) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
-        val group = withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), r1, r2).toEither.toOption.get }
-
-        val flattened = group.flatten
-
-        assertTrue(flattened.size == 3) &&
-        assertTrue(flattened(0) == group) &&
-        assertTrue(flattened.tail.toSet == Set(r1, r2))
-      },
       test("rejects children with mismatched trial counts") {
         val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
         val r2 = withCfg(200) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
@@ -202,14 +191,6 @@ object LossDistributionSpec extends ZIOSpecDefault {
             )
           case Right(_) => assertTrue(false)
         }
-      }
-    ),
-    suite("RiskResult - flatten")(
-      test("single result flattens to itself") {
-        val result    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val flattened = result.flatten
-
-        assertTrue(flattened == Vector(result))
       }
     ),
     suite("RiskResult - equality")(

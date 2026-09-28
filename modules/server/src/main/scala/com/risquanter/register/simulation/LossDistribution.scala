@@ -171,9 +171,6 @@ sealed abstract class LossDistribution(
 
   /** All trial IDs with non-zero outcomes */
   def trialIds(): Set[TrialId] = trialOutcomes.trialIds
-
-  /** Flatten hierarchy to vector of all distributions */
-  def flatten: Vector[LossDistribution]
 }
 
 /**
@@ -186,10 +183,7 @@ case class RiskResult private (
   override val nodeId: NodeId,
   override val trialOutcomes: TrialOutcomes,
   provenances: List[NodeProvenance] = Nil
-) extends LossDistribution(nodeId, trialOutcomes) {
-
-  override def flatten: Vector[LossDistribution] = Vector(this)
-}
+) extends LossDistribution(nodeId, trialOutcomes)
 
 object RiskResult {
   /** Config-driven constructor; uses SimulationConfig.defaultNTrials */
@@ -246,11 +240,7 @@ final case class RiskResultGroup private (
   children: List[LossDistribution],
   override val nodeId: NodeId,
   override val trialOutcomes: TrialOutcomes
-) extends LossDistribution(nodeId, trialOutcomes) {
-
-  override def flatten: Vector[LossDistribution] =
-    this +: children.toVector.sortBy(_.nodeId.value)
-}
+) extends LossDistribution(nodeId, trialOutcomes)
 
 object RiskResultGroup {
   /**
