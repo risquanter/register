@@ -3,18 +3,16 @@ package com.risquanter.register.mitigation
 import zio.test.*
 import zio.prelude.Identity
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
+import com.risquanter.register.domain.data.{
+  MitigationApplicationRecord, MitigationPrecedence, MitigationSpec,
+  ResultTransformSpec, TransformPipeline
+}
 import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, PositiveInt, ValidationUtil}
-import com.risquanter.register.simulation.TrialOutcomes
+import com.risquanter.register.domain.errors.ValidationErrorCode
+import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
+import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId}
 
-/**
- * Property-based tests for RiskResultTransform Identity laws and mitigation strategies.
- *
- * Verifies:
- * - Identity laws: associativity, left/right identity
- * - nTrials preservation: no transform changes the trial count
- * - Mitigation strategies: deductible, cap, scaling, insurance policy
- * - Composition correctness: order matters for non-commutative operations
- */
+/** `Identity` laws, `nTrials` preservation, and all result-stage transform strategies. */
 object RiskResultTransformSpec extends ZIOSpecDefault {
 
 
@@ -218,6 +216,70 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
           val scaled = transform.run(outcomes)
 
           assertTrue(scaled.outcomes.isEmpty)
+        }
+      },
+
+      test("scaling rounds to nearest rather than toward zero") {
+        // 5 × 0.9 = 4.5 and 7 × 0.9 = 6.3. Truncation reports 4 and 6, both
+        // understated; rounding reports 5 and 6, erring in either direction.
+        val outcomes = TrialOutcomes(100, Map(1 -> 5L, 2 -> 7L))
+        val scaled   = RiskResultTransform.scaleLosses(0.9).run(outcomes)
+
+        assertTrue(
+          scaled.outcomeOf(1) == 5L,
+          scaled.outcomeOf(2) == 6L
+        )
+      },
+
+      test("rounding does not bias the total of a scaled set of losses") {
+        // Losses 1..20 halved land alternately on .0 and .5. True total 105;
+        // truncation reports 100, every unit lost in the same direction.
+        val outcomes = TrialOutcomes(100, (1 to 20).map(i => i -> i.toLong).toMap)
+        val scaled   = RiskResultTransform.scaleLosses(0.5).run(outcomes)
+        val total    = scaled.outcomes.values.sum
+
+        assertTrue(
+          math.abs(total - 105L) <= 10L,
+          total > 100L   // strictly better than what truncation would report
+        )
+      },
+
+      test("a scale factor that takes a loss past Long.MaxValue throws instead of saturating") {
+        // Narrowing would saturate silently, presenting an over-scaled loss as
+        // a real figure.
+        val outcomes  = TrialOutcomes(100, Map(1 -> Long.MaxValue))
+        val transform = RiskResultTransform.scaleLosses(2.0)
+
+        assertTrue(
+          try { transform.run(outcomes); false }
+          catch { case _: ArithmeticException => true }
+        )
+      },
+
+      test("the same overflow reaches a caller as a CONSTRAINT_VIOLATION, never as an exception") {
+        // decorate is the conversion boundary for the layer's arithmetic.
+        val id      = nodeId("risk-001")
+        val applied = List(MitigationApplicationRecord(
+          mitigationId("scale-over"),
+          MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.ScaleLosses(2.0)))),
+          Set.empty,
+          MitigationPrecedence.default
+        ))
+        val result = LossDistribution.decorate(
+          id,
+          TrialOutcomes(100, Map(1 -> Long.MaxValue)),
+          None,
+          applied,
+          MitigationApplication.run(applied, _)
+        )
+
+        result.toEither match {
+          case Left(errors) =>
+            assertTrue(
+              errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
+              errors.head.field == s"mitigatedResult.${id.value}"
+            )
+          case Right(_) => assertTrue(false)
         }
       },
 

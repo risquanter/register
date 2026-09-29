@@ -2,19 +2,7 @@ package com.risquanter.register.domain.data.iron
 
 import com.risquanter.register.common.Constants
 
-/**
- * Centralized catalog of all user-facing validation messages.
- *
- * Follows the "message catalog" pattern: every string the user can see lives
- * in a single grep-friendly file, making future i18n, copy-editing, or UX
- * review straightforward.
- *
- * Numeric limits reference [[Constants]] so there is exactly one source of
- * truth for constraint values.
- *
- * This object is shared across JVM and JS (lives in `common`), so both
- * backend [[ValidationUtil]] and frontend form states import from here.
- */
+/** All user-facing validation message strings. Shared across JVM and JS. Numeric limits reference `Constants`. */
 object ValidationMessages:
 
   // ══════════════════════════════════════════════════════════════════
@@ -56,6 +44,7 @@ object ValidationMessages:
   val capMustExceedDeductible: String   = "Cap must be greater than deductible"
   val aggregatedLossOverflow: String    = "Aggregated loss exceeds the maximum representable value"
   val shrinkFractionOutOfRange: String  = "Narrowing fraction must be at least 0 and below 1"
+  val portfolioHasNoChildren: String    = "Portfolio must have at least one child"
 
   // ══════════════════════════════════════════════════════════════════
   // Probability (open interval 0 < p < 1)

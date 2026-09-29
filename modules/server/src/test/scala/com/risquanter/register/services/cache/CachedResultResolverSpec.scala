@@ -8,20 +8,12 @@ import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, MitigationTarget, MitigationSpec, MitigationPrecedence, TargetingPredicate, TransformPipeline, ResultTransformSpec, RiskLeafTransform, LikelihoodTransform, DistributionTransform}
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
-import com.risquanter.register.simulation.{RiskResult, RiskResultGroup}
+import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.domain.data.iron.{SafeId, SafeName, PositiveInt, TreeId, NodeId, SeedEntityId, MitigationId, ValidationUtil}
 import com.risquanter.register.testutil.TestHelpers.*
 
-/**
- * Tests for CachedResultResolverLive (ADR-015), which is content-addressed.
- *
- * Verifies cache-aside behavior over ContentHash keys, per-workspace
- * cache isolation via ContentCacheRegistry, leaf-only caching, orphan
- * semantics (a param edit strands the old entry; the new content misses),
- * error handling, and the resolver-edge mitigation fold (ADR-034 F: param-stage
- * transforms change the cache key, result-stage transforms apply post-cache).
- */
+/** Content-addressed resolver: cache-aside, per-workspace isolation, leaf-only caching, orphan semantics, and the ADR-034 F mitigation fold. */
 object CachedResultResolverSpec extends ZIOSpecDefault {
 
   private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
@@ -398,16 +390,17 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
 
     suite("mitigation edge-fold (ADR-034)")(
 
-      test("un-mitigated: a tree carrying a mitigation still resolves raw under selection None, group preserved") {
+      test("un-mitigated: a tree carrying a mitigation still resolves raw under selection Inherent, no layer applied") {
         val cap = resultCap("cap-root", 1L)   // would bind hard if applied
         val tree = treeWith(cap)
         for {
           resolver <- ZIO.service[CachedResultResolver]
           raw  <- resolver.ensureCached(testTree, rootId, testEntity)  // mitigation-free tree
-          none <- resolver.ensureCached(tree, rootId, testEntity)      // mitigation present, selection defaults to None
+          none <- resolver.ensureCached(tree, rootId, testEntity)      // mitigation present, selection defaults to Inherent
         } yield assertTrue(
-          // Not collapsed — the result-stage transform was not applied
-          none.isInstanceOf[RiskResultGroup],
+          // The layer is empty, and an empty layer leaves the figures unchanged.
+          none.applied.isEmpty,
+          none.trials eq none.source,
           // Byte-identical to the mitigation-free resolution
           none.outcomes == raw.outcomes,
           none.nodeId == rootId
@@ -435,7 +428,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
         )
       },
 
-      test("ResultStage cap on a portfolio: raw aggregate = sum(children); mitigated = cap(sum), collapsed to a flat result") {
+      test("ResultStage cap on a portfolio: raw aggregate = sum(children); mitigated = cap(sum), children kept") {
         for {
           resolver <- ZIO.service[CachedResultResolver]
           rawRoot <- resolver.ensureCached(testTree, rootId, testEntity)
@@ -448,7 +441,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           mitRoot <- resolver.ensureCached(tree, rootId, testEntity, selection = MitigationSelection.Residual, resolvedScopes =scopes(m -> Set(rootId)))
         } yield assertTrue(
           // Raw aggregate stays the pristine commutative sum of children (ADR-034 Decision 3)
-          rawRoot.isInstanceOf[RiskResultGroup],
+          rawRoot.applied.isEmpty,
           rawRoot.outcomes.forall { case (t, loss) =>
             loss == raw1.outcomes.getOrElse(t, 0L) + raw2.outcomes.getOrElse(t, 0L)
           },
@@ -458,8 +451,11 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
           },
           mitRoot.outcomes.values.forall(_ <= cap),
           mitRoot.outcomes != rawRoot.outcomes,
-          // A binding portfolio transform cannot be a group → flat RiskResult
-          mitRoot.isInstanceOf[RiskResult]
+          // The layer is carried as a record, with the aggregate it was applied
+          // to kept beside it.
+          mitRoot.applied.map(_.mitigationId) == List(m.id),
+          mitRoot.source.outcomes == rawRoot.outcomes,
+          !(mitRoot.trials eq mitRoot.source)
         )
       },
 
@@ -486,7 +482,27 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
             rootAB.outcomes.getOrElse(t, 0L) ==
               math.min(math.min(raw1.outcomes.getOrElse(t, 0L), capChild) + raw2.outcomes.getOrElse(t, 0L), capRoot)
           },
-          rootAB.isInstanceOf[RiskResult]
+          rootAB.applied.map(_.mitigationId) == List(mr.id)
+        )
+      },
+
+      test("a selection binding only below the root leaves the root's layer empty while changing its figures") {
+        for {
+          resolver <- ZIO.service[CachedResultResolver]
+          raw1    <- resolver.ensureCached(testTree, risk1Id, testEntity)
+          rawRoot <- resolver.ensureCached(testTree, rootId, testEntity)
+          capChild = math.max(1L, raw1.outcomes.values.maxOption.getOrElse(2L) / 2)
+          mc       = resultCap("cap-child", capChild)
+          tree     = treeWith(mc)
+          mitRoot <- resolver.ensureCached(tree, rootId, testEntity, selection = MitigationSelection.Residual, resolvedScopes = scopes(mc -> Set(risk1Id)))
+        } yield assertTrue(
+          // Nothing binds at the root, so its own layer is empty and `source`
+          // equals `trials` by reference.
+          mitRoot.applied.isEmpty,
+          mitRoot.trials eq mitRoot.source,
+          // The figures still differ from the un-mitigated reading: `source` is
+          // the combine of the mitigated children, not the raw aggregate.
+          mitRoot.outcomes != rawRoot.outcomes
         )
       },
 

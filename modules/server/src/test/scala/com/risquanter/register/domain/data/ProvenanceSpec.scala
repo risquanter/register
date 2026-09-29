@@ -6,7 +6,7 @@ import com.risquanter.register.domain.tree.TreeIndex
 import com.risquanter.register.configs.TestConfigs
 import com.risquanter.register.telemetry.{TracingLive, MetricsLive}
 import com.risquanter.register.services.cache.{CachedResultResolver, CachedResultResolverLive, ContentCacheRegistry}
-import com.risquanter.register.simulation.{LossDistribution, RiskResult, RiskResultGroup, SeedDerivation}
+import com.risquanter.register.simulation.{LossDistribution, SeedDerivation}
 import com.risquanter.register.testutil.TestHelpers.{safeId, idStr, nodeId, treeId, unsafeGet}
 import zio.*
 import zio.test.*
@@ -15,14 +15,7 @@ import zio.json.*
 import java.time.Instant
 import io.github.iltotore.iron.*
 
-/**
- * Tests for Provenance metadata structures.
- * 
- * Verifies:
- * - JSON serialization/deserialization
- * - Provenance capture during simulation via CachedResultResolver
- * - Reproduction from provenance metadata
- */
+/** JSON round-trip, provenance capture during simulation, and reproduction from provenance metadata. */
 object ProvenanceSpec extends ZIOSpecDefault {
 
   private val testEntity: SeedEntityId.SeedEntityId = SeedEntityId.fromLong(1L).toOption.get
@@ -37,14 +30,12 @@ object ProvenanceSpec extends ZIOSpecDefault {
       CachedResultResolverLive.layer
     )
 
-  /** Structural attribution: a leaf's records sit on its RiskResult,
-    * whose nodeId is beside them — no riskId inside the record.
+  /** Attribution is by node, never by anything inside the record: the value's
+    * own `provenance` field carries the record and its `nodeId` names the node
+    * that produced it. A portfolio carries none.
     */
   private def leafProvenances(result: LossDistribution): List[NodeProvenance] =
-    result match {
-      case r: RiskResult => r.provenances
-      case _             => Nil
-    }
+    result.provenance.toList
   
   def spec = suite("ProvenanceSpec")(
     
@@ -324,21 +315,22 @@ object ProvenanceSpec extends ZIOSpecDefault {
           mitigations = Nil
         )
         
+        val leafIds = Set(nodeId("risk1"), nodeId("risk2"))
+
         for {
           resolver <- ZIO.service[CachedResultResolver]
-          // Simulate portfolio (which aggregates children)
-          result <- resolver.ensureCached(testTree, nodeId("portfolio"), testEntity, includeProvenance = true)
+          // The portfolio itself carries no record: its trials are sums of its
+          // children and it draws nothing of its own (ADR-003 §2).
+          portfolioResult <- resolver.ensureCached(testTree, nodeId("portfolio"), testEntity, includeProvenance = true)
+          // A subtree's records come from resolving each leaf under its OWN
+          // identifier, with the leaf set taken from the tree index — nothing
+          // traverses a returned value, so no value carries another node's data.
+          leafResults <- resolver.ensureCachedAll(testTree, leafIds, testEntity, includeProvenance = true)
         } yield {
-          // Portfolio provenance is read structurally: walk the
-          // group's children and pair each child's nodeId with its records
-          // one level above any flattening — never via ids inside the records.
-          val attributed = result match {
-            case g: RiskResultGroup =>
-              g.children.collect { case r: RiskResult => r.nodeId -> r.provenances }
-            case _ => Nil
-          }
-          assertTrue(attributed.map(_._1) == List(nodeId("risk1"), nodeId("risk2"))) &&
-          assertTrue(attributed.forall(_._2.size == 1))
+          val attributed = LossDistribution.leafProvenances(leafResults)
+          assertTrue(portfolioResult.provenance.isEmpty) &&
+          assertTrue(attributed.keySet == leafIds) &&
+          assertTrue(attributed.size == 2)
         }
       }
     ).provideLayerShared(testLayer),

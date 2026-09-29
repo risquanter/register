@@ -6,12 +6,7 @@ import sttp.tapir.Schema
 import com.risquanter.register.domain.data.iron.{ContentHash, MitigationId, NodeId, SafeName, ValidationUtil}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
-/**
- * What a mitigation applies to: a targeting predicate that resolves,
- * server-side, to the scoped node set. Single-variant sealed trait — the
- * override anchor is a separate `overrideAnchor` field on
- * `MitigationSpec.LeafStage`, not a target variant.
- */
+/** What a mitigation applies to; resolves server-side to the scoped node set. */
 sealed trait MitigationTarget
 
 object MitigationTarget {
@@ -20,20 +15,12 @@ object MitigationTarget {
 
   given Equal[MitigationTarget] = Equal.default
 
-  /** Wire format is the predicate source string (see `TargetingPredicate`);
-    * decode re-runs `TargetingPredicate.create`, so a stored predicate is
-    * re-validated on every read. */
+  /** Wire format is the predicate source string; decode re-runs `TargetingPredicate.create`. */
   given codec: JsonCodec[MitigationTarget] =
     summon[JsonCodec[TargetingPredicate]].transform(Predicate(_), { case Predicate(p) => p })
 }
 
-/**
- * Global cross-mitigation application order: ascending numeric key, with the
- * MitigationId string as the stable tiebreak. The key is the stored source of
- * truth (merge-stable); any UI ordering is a skin over it. Override placement
- * presets sit at the extremes: baseline overrides apply first (relative ops
- * blend on top), final overrides apply last (assert the mitigated state).
- */
+/** Application order: ascending key, MitigationId tiebreak. Override presets sit at the extremes. */
 final case class MitigationPrecedence(key: Int)
 
 object MitigationPrecedence {
@@ -49,16 +36,12 @@ object MitigationPrecedence {
 /**
  * The mitigation's effect, by stage.
  *
- * - `LeafStage` — param-stage (`RiskLeafTransform`), leaves only. When either
- *   component is an Override, `overrideBaseStamp` carries the `ContentHash` of
- *   the target leaf's `LeafSimContent` at authoring time — the simulation-relevant
- *   projection, so a rename or a reparent does not change it —
- *   and `overrideAnchor` names the single leaf the override asserts against
- *   (rename-stable). Both are present iff a component is an Override — a
- *   `Mitigation.create` cross-field rule.
- * - `ResultStage` — ordered `TransformPipeline` on a simulation's trial
- *   outcomes, any node. The outcomes type and the code that applies the
- *   pipeline to it are server-side.
+ * `LeafStage` — param-stage transform on leaves. An Override component requires
+ * `overrideBaseStamp` (the target leaf's `LeafSimContent` hash at authoring time)
+ * and `overrideAnchor` (the single leaf the override asserts against); both absent
+ * when no Override is present — enforced by `Mitigation.create`.
+ *
+ * `ResultStage` — ordered `TransformPipeline` on trial outcomes, any node.
  */
 sealed trait MitigationSpec
 
@@ -109,10 +92,8 @@ object MitigationSpec {
 }
 
 /**
- * First-class, explicit mitigation entity — tree-level content (`RiskTree.
- * mitigations`), versioned/diffed/merged with the tree, never baked into node
- * params. Application semantics live in the server's `MitigationApplication`;
- * staleness detection in its `MitigationStaleness`.
+ * A tree-level mitigation entity, versioned and merged with its tree.
+ * Application semantics live in `MitigationApplication`; staleness detection in `MitigationStaleness`.
  */
 final case class Mitigation private (
   id: MitigationId,
@@ -124,33 +105,14 @@ final case class Mitigation private (
 
 object Mitigation {
 
-  /** Upper bound on the length of a single ResultStage pipeline — the count of
-    * atomic result-stage operations (`ResultTransformSpec`: deductible, cap,
-    * scale, threshold, insurance-policy) chained inside one mitigation, not the
-    * number of mitigations (that is `RiskTree.mitigations` ≤ 1000). A guard-rail
-    * ceiling, not a modeling maximum: a realistic pipeline stacks at most one of
-    * each of the five op types, so 10 leaves headroom while still rejecting an
-    * abusive or malformed pipeline. A persisted-content bound, re-checked on
-    * every read via decode == create. */
+  /** Maximum steps in one ResultStage pipeline. Realistic pipelines use at most one of each of the five op types. */
   private val MaxPipelineSteps = 10
 
-  /** Minimum length of a ResultStage pipeline. A mitigation that transforms
-    * nothing is meaningless, so an empty pipeline is rejected at construction.
-    * `TransformPipeline.empty` stays the identity of the pipeline `Identity`
-    * instance, but that identity is internal to `combine`, which concatenates
-    * and never yields an empty result from non-empty operands; `create` runs
-    * per user-authored mitigation, so rejecting empty here does not touch the
-    * algebra. */
+  /** A pipeline with no steps has no effect and is rejected at construction. */
   private val MinPipelineSteps = 1
 
-  /** Cross-field rules (accumulated):
-    *  - LeafStage with an Override component ⇒ overrideBaseStamp AND
-    *    overrideAnchor both defined; without an Override ⇒ both empty;
-    *  - a ResultStage pipeline has between `MinPipelineSteps` and
-    *    `MaxPipelineSteps` steps.
-    * Predicate validity is enforced when the `TargetingPredicate` is built, so
-    * the target needs no further check here.
-    */
+  /** Cross-field rules: an Override component requires both `overrideBaseStamp` and `overrideAnchor`;
+    * a ResultStage pipeline must have between 1 and 10 steps. */
   def create(
     id: MitigationId,
     name: SafeName.SafeName,
@@ -244,14 +206,8 @@ object Mitigation {
 }
 
 /**
- * One record per applied mitigation and resolution. It sits on the valuation
- * the mitigated fold produces, and never inside `NodeProvenance`, which carries
- * no identity of its own. It does not cross the wire: a response names the
- * mitigations that shaped each reading, and the client already holds each
- * mitigation's spec and resolved scope from the tree read. `resolvedScope` is
- * the node set the application actually touched under this tree version and
- * selection, which is what makes a result explainable when scope is resolved
- * per version.
+ * One record per applied mitigation, stored in `LossDistribution.applied` in precedence order.
+ * `resolvedScope` is the node set the application actually touched under this tree version and selection.
  */
 final case class MitigationApplicationRecord(
   mitigationId: MitigationId,
