@@ -120,3 +120,21 @@ EOF
         return 1
     fi
 }
+
+# --------------------------------------------------------------------------
+# require_httpie
+#   Assert that the HTTPie client is available, failing the test if it is not.
+#
+#   HTTPie is a required part of the runner image, not an optional extra. The
+#   httpie example scripts are user-facing documentation, and these tests are
+#   the only thing that keeps them working against the current API. Skipping
+#   when the client is absent would report ok and hide that gap, so a missing
+#   client is a failure instead.
+# --------------------------------------------------------------------------
+require_httpie() {
+    command -v http >/dev/null && return 0
+    echo "httpie (the 'http' command) is not on PATH." >&2
+    echo "It is a required dependency of the BATS runner image —" >&2
+    echo "see containers/dev/Dockerfile.bats-runner." >&2
+    return 1
+}

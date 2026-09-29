@@ -360,14 +360,25 @@ docker inspect register-test --format='{{.State.ExitCode}}'
 Three automated [BATS](https://github.com/bats-core/bats-core) suites validate Docker
 images, compose topology, nginx routing, and end-to-end persistence **after**
 container images are built. Tests run inside a purpose-built runner image
-(`local/bats-runner:1.11`) that contains bash, bats-core 1.11, curl, jq, and
-the Docker CLI + compose plugin.
+(`local/bats-runner:1.11`) that contains bash, bats-core 1.11, curl, jq, httpie,
+and the Docker CLI with its compose and buildx plugins. Each suite starts its own
+stack, and the application services are `pull_policy: build`, so compose builds
+their images on every run — the buildx plugin is what makes those builds use
+BuildKit, which these Dockerfiles require. httpie is there because the example
+scripts under `examples/` ship in both a curl and an HTTPie variant, and the
+suites cover both; a missing client fails those tests rather than skipping them,
+so the gap cannot go unnoticed.
 
 | Suite | File | Services | Tests | Purpose |
 |-------|------|----------|-------|---------|
-| **A** | `tests/bats/suite-a-full-prod.bats` | server + frontend + irmin | 5 | E2E: data flows nginx → server → Irmin and is verifiable |
+| **A** | `tests/bats/suite-a-full-prod.bats` | server + frontend + irmin | 7 | E2E: data flows nginx → server → Irmin and is verifiable; the history-staging examples run in both client variants |
 | **B** | `tests/bats/suite-b-irmin-prod.bats` | irmin (standalone) | 5 | Irmin image security & GraphQL round-trip |
-| **C** | `tests/bats/suite-c-in-memory.bats` | server + frontend | 16 | In-memory mode — nginx routing & ADR-027 validation |
+| **C** | `tests/bats/suite-c-in-memory.bats` | server + frontend | 20 | In-memory mode — nginx routing, ADR-027 validation, and the demo examples in both client variants |
+
+Every example script under `examples/` that ships in both a curl and an HTTPie
+variant is covered in both, so the pair cannot drift apart or fall behind an API
+change without a test going red. The history-staging pair lives in suite A
+because commit history needs the Irmin backend; the demo pairs live in suite C.
 
 ### Prerequisites
 

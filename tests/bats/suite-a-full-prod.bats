@@ -180,3 +180,61 @@ irmin_get() {
     [[ -n "$tree_name" ]]
     [[ "$tree_name" != "null" ]]
 }
+
+# ============================================================================
+# Example staging scripts — curl and HTTPie variants must stay in step
+# ============================================================================
+# These scripts build a workspace whose tree carries a known commit history,
+# which the Analyze history slider needs. They live here rather than in the
+# in-memory suite because commit history requires the Irmin backend — the
+# in-memory repository keeps none.
+#
+# Unlike the demo scripts they issue no queries, so there is no evaluated-query
+# count to assert. What they do print is a summary naming exactly what they
+# built, and the markers below are that summary. Both client variants are
+# checked against the same markers, so the two examples cannot drift apart or
+# fall behind an API change without a test going red.
+
+run_staging_script() {
+    local script="$1"
+    local path="${BATS_TEST_DIRNAME}/../../examples/${script}"
+    [[ -f "$path" ]] || { echo "missing script: $path" >&2; return 1; }
+
+    local output
+    output=$(bash "$path" "${FRONTEND_URL}" 2>&1) || {
+        echo "$output" >&2
+        return 1
+    }
+
+    local marker
+    for marker in \
+        "Workspace key" \
+        "Tree ID" \
+        "Branch main   : 6 commits" \
+        "Branch mitig. : + M1, M2 on top of the fork" \
+        "pre-insider-audit : forked from commit C2" \
+        "Open in app"
+    do
+        if ! echo "$output" | grep -q "$marker"; then
+            echo "expected summary line missing: ${marker}" >&2
+            echo "$output" >&2
+            return 1
+        fi
+    done
+
+    # A jq parse error, or a null where an id or key belongs, means a response
+    # was not the JSON the script expected.
+    if echo "$output" | grep -qE 'parse error|Invalid value for|: null'; then
+        echo "$output" >&2
+        return 1
+    fi
+}
+
+@test "A06: examples/stage-history-slider-curl.sh stages the full commit history" {
+    run_staging_script stage-history-slider-curl.sh
+}
+
+@test "A07: examples/stage-history-slider-httpie.sh stages the full commit history" {
+    require_httpie
+    run_staging_script stage-history-slider-httpie.sh
+}

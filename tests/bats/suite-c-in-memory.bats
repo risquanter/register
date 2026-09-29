@@ -279,11 +279,11 @@ run_example_script() {
 }
 
 @test "C19: examples/demo-simple-httpie.sh runs and every query is evaluated" {
-    command -v http >/dev/null || skip "httpie not installed in this runner"
+    require_httpie
     run_example_script demo-simple-httpie.sh 8
 }
 
 @test "C20: examples/demo-enterprise-httpie.sh runs and every query is evaluated" {
-    command -v http >/dev/null || skip "httpie not installed in this runner"
+    require_httpie
     run_example_script demo-enterprise-httpie.sh 20
 }

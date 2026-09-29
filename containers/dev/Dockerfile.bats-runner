@@ -4,8 +4,9 @@
 # Purpose:  Self-contained test runner for BATS smoke and integration tests.
 #           Used in CI pipelines (GitHub Actions) and local validation.
 #
-# Contains: bash, bats-core (pinned + SHA256-verified), curl, jq,
-#           docker CLI + compose plugin (for compose lifecycle in tests).
+# Contains: bash, bats-core (pinned + SHA256-verified), curl, jq, httpie,
+#           docker CLI + compose and buildx plugins (for compose lifecycle in
+#           tests, and for the image builds compose performs).
 #
 # Security: Non-root (uid 65532), pinned base + dependency versions,
 #           SHA256-verified bats-core download, no unnecessary packages.
@@ -31,18 +32,36 @@ LABEL description="BATS test runner for container smoke/integration tests"
 # System dependencies
 #   bash:           required by bats-core
 #   curl + jq:      HTTP assertions in test scripts
+#   httpie:         required by the httpie example scripts under examples/.
+#                   Those scripts are user-facing documentation, and the suites
+#                   are the only thing keeping them working against the current
+#                   API, so the tests that exercise them fail rather than skip
+#                   when the client is absent. It carries a Python 3 runtime:
+#                   roughly 75 MiB and 54 packages, the price of covering the
+#                   examples at all.
 #   docker-cli +
 #   docker-cli-compose: compose lifecycle (setup_file / teardown_file)
+#   docker-cli-buildx:  the BuildKit engine. The suites start their stacks with
+#                       `docker compose up`, and the application services are
+#                       `pull_policy: build`, so compose builds their images on
+#                       every run. Without this plugin compose falls back to the
+#                       legacy builder, which mishandles two things these
+#                       Dockerfiles rely on: heredoc `RUN cat <<EOF > file`
+#                       blocks, which it writes as empty files without raising
+#                       an error, and `COPY --from` on a daemon with
+#                       user-namespace remapping, which it fails outright.
 # --------------------------------------------------------------------------
 # Versions are exact (ADR-020 §1), from the Alpine 3.24 branch; `apk policy
-# <package>` reports the current revision when bumping. The Docker CLI and
-# Compose versions track the host daemon this runner drives.
+# <package>` reports the current revision when bumping. The Docker CLI, Compose
+# and buildx versions track the host daemon this runner drives.
 RUN apk add --no-cache \
     bash=5.3.9-r1 \
     curl=8.22.0-r0 \
     jq=1.8.2-r0 \
     docker-cli=29.5.3-r1 \
-    docker-cli-compose=5.1.4-r1
+    docker-cli-compose=5.1.4-r1 \
+    docker-cli-buildx=0.34.1-r1 \
+    httpie=3.2.4-r2
 
 # --------------------------------------------------------------------------
 # bats-core — pinned version with SHA256 verification (ADR-020 §2).
