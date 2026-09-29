@@ -33,14 +33,21 @@ LABEL maintainer="risquanter"
 LABEL description="Irmin GraphQL server — production (slim; local merge-conflict patch)"
 LABEL version="3.11-p1"
 
-# Install only the shared libraries the irmin binary links against.
-# gmp: GNU Multiple Precision Arithmetic (required by irmin-pack)
-# libffi: Foreign Function Interface (required by ctypes/OCaml FFI)
+# Install only the shared libraries the irmin binary needs.
+# gmp:       GNU Multiple Precision Arithmetic (libgmp.so.10)
+# zstd-libs: Zstandard compression (libzstd.so.1)
+# libffi:    Foreign Function Interface. Not a link-time dependency — `ldd` on
+#            the binary does not list it — but OCaml's ctypes loads it at run
+#            time, which no build-time check would catch, so it stays.
+# `ldd $(opam var bin)/irmin` inside the builder image lists the link-time set;
+# re-check it after any opam version change, because the transitive package set
+# is resolved at build time and can gain a library.
 # No compiler, no opam, no git, no shell-heavy tooling.
 # Versions are exact (ADR-020 §1), from the Alpine 3.24 branch; `apk policy
 # <package>` reports the current revision when bumping.
 RUN apk add --no-cache \
     gmp=6.3.0-r4 \
+    zstd-libs=1.5.7-r2 \
     libffi=3.5.2-r1
 
 # Copy the compiled irmin binary from the builder base

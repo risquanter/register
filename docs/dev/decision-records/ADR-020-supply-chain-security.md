@@ -71,6 +71,22 @@ RUN opam install -y irmin-cli irmin-graphql irmin-pack
 
 To find installed versions after a first run: `opam list --installed <package>`.
 
+**These pins reach the three named packages and nothing beneath them.** Everything
+they depend on is resolved by the solver against the opam repository as it stands
+at build time, so the transitive set can change between two builds of an unchanged
+Dockerfile. It is not merely a version drift: the set of *shared libraries* the
+produced binary links against can change with it, and the runtime image installs
+that set by hand.
+
+That is why `Dockerfile.irmin-prod` verifies the binary with `RUN irmin --version`
+immediately after copying it. A library added beneath a pin fails that line during
+the build rather than when the container is deployed. After any opam change, read
+the current link-time set with `ldd $(opam var bin)/irmin` inside the builder image
+and reconcile the runtime image's `apk add` against it.
+
+Pinning the transitive set as well needs an opam lock file, which this build does
+not yet produce; the verification line is the compensating control.
+
 #### sbt / Scala
 
 The sbt launcher version is pinned in `project/build.properties`:
