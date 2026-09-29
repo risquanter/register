@@ -97,8 +97,13 @@ Quoted from the recovered analysis:
 > private-constructor breach, and no need for the 9 ADR exception Option A
 > required. The type system stays exactly as strict as it is now.
 
-So the flat `RiskResult` produced by `CachedResultResolverLive`'s portfolio arm
-is the derived and ruled outcome, not an implementation shortcut.
+So the flat value that `CachedResultResolverLive`'s portfolio arm returns — the
+public `LossDistribution`, carrying figures and no children — is the derived and
+ruled outcome, not an implementation shortcut. The aggregate claim it was built
+from lives one level below, on the internal `PortfolioLosses`, whose factory
+derives the total from exactly the children it was given. The layer is applied
+outside that claim, so the claim is never made falsely and the shape of the
+answer does not change when a transform binds.
 
 ## The options as they were presented
 

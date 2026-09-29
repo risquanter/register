@@ -98,12 +98,12 @@ combine of its children, rebuilding it from the children would produce a
 different number from reading it, and the cache would be serving a value the tree
 cannot reproduce.
 
-The type system enforces `I1`. `RiskResultGroup` is the type of an aggregated
+The type system enforces `I1`. `PortfolioLosses` is the type of an aggregated
 value, and its constructor is private. The only way to build one is
-`RiskResultGroup.create(nodeId, children*)`, which computes the aggregate *from*
+`PortfolioLosses.create(nodeId, children)`, which computes the aggregate *from*
 the children. It is not possible to hand it an aggregate of your choosing.
 
-So a `RiskResultGroup` is not merely "a value that happens to have children
+So a `PortfolioLosses` is not merely "a value that happens to have children
 attached". It is a value carrying a claim, and the claim is enforced:
 
 > **my aggregate is the combine of my children.**
@@ -307,8 +307,8 @@ wrong for an insurance payout that genuinely reduces the loss borne by whoever
 owns the parent.
 
 **Mutating the canonical aggregate.** Store `f_P(sum)` as Servers' aggregate
-inside its `RiskResultGroup`. This breaks `I1` directly, therefore breaks the
-cache, and requires a hole in `RiskResultGroup`'s private constructor. It is the
+inside its `PortfolioLosses`. This breaks `I1` directly, therefore breaks the
+cache, and requires a hole in `PortfolioLosses`'s private constructor. It is the
 contradiction of Part 3.3 written as code.
 
 **The compositional decorated fold — ruled.** `m(P) = f_P((+) m(children))`. It
@@ -319,9 +319,9 @@ aggregate cap, and lets the benefit propagate upward.
 
 ## Part 5 — What type the mitigated value must have
 
-### 5.1 It cannot be a RiskResultGroup
+### 5.1 It cannot be a PortfolioLosses
 
-Recall from Part 2 what a `RiskResultGroup` is: a value carrying an enforced
+Recall from Part 2 what a `PortfolioLosses` is: a value carrying an enforced
 claim, *my aggregate is the combine of my children*.
 
 Ask whether the mitigated value of a transformed portfolio can truthfully make
@@ -330,7 +330,7 @@ children's mitigated values is 20. The claim is false.
 
 Part 3.2 guarantees this happens whenever the transform binds, for any
 non-homomorphic transform, which is every interesting one. So the mitigated value
-of a transformed node **cannot** be a `RiskResultGroup` without lying. Making it
+of a transformed node **cannot** be a `PortfolioLosses` without lying. Making it
 one would either require weakening the constructor, which is the rejected
 mutation option, or would produce a value that asserts something false.
 
@@ -414,7 +414,7 @@ type ends up expressing something else — a trace of how the computation branch
 
 ---
 
-## Part 8 — ValuationResult
+## Part 8 — The value the fold returns
 
 ### 8.1 The decision
 
@@ -422,40 +422,38 @@ The mitigated fold returns, at **every** node it visits, a value that carries
 what was applied there, with the empty list as the identity. Nothing is special
 about the no-transform case: it is the identity instance of one uniform rule.
 
-### 8.2 The type
+### 8.2 What the value has to hold
 
-```scala
-final case class ValuationResult private (
-  override val nodeId: NodeId,
-  source: LossDistribution,
-  applied: List[MitigationApplicationRecord],
-  override val trialOutcomes: TrialOutcomes
-) extends LossDistribution(nodeId, trialOutcomes)
-```
+Four candidate shapes were written out and run as code in
+`docs/scratch/valuation-prototypes/`, then compared against each other rather
+than argued about. **FB-F** was evaluated as the best fit, and
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](../dev/plans/PLAN-FBF-VALUATION-TRANSPLANT.md)
+is the plan that implements it. What follows is the reasoning the choice rests
+on, not the specification; that plan carries the exact signatures.
 
-The name is deliberately not "MitigatedResult". Under this design the common case
-is a value with nothing applied, and a type named for mitigation would misdescribe
-it. The type is the result of the valuation fold together with the record of what
-was applied at that node, where "nothing" is a legal and frequent answer.
+The rule `m(P) = f_P((+) m(children))` written as data needs three things at
+every node:
 
-The three fields are the rule written as data:
+- the figures the node's own transform was applied to — `(+) m(children)` at a
+  portfolio, the cached simulation output at a leaf;
+- `f_P` itself, as records naming the mitigations and carrying their specs, with
+  the empty list as the identity;
+- the figures that come out.
 
-- `source` is `(+) m(children)` — the value before this node's own transform;
-- `applied` is `f_P`, as records naming the mitigations and carrying their specs;
-- `trialOutcomes` is the result of applying `applied` to `source`.
-
-The layer at a node is `trialOutcomes` against `source.trialOutcomes` — a local
+The layer at a node is the second set of figures against the first — a local
 subtraction, with no second request.
 
-A new subtype costs very little, because `LossDistribution`'s useful members are
-`final` on the base class and all derive from `trialOutcomes`. `probOfExceedance`,
-`maxLoss`, `minLoss`, `nTrials`, `outcomes` and `outcomeCount` are inherited
-unchanged, so every consumer of figures is unaffected.
+Two further points the prototypes settled. The value carries **figures**, not a
+nested value: nothing it holds names another node, so its size is bounded by its
+own node rather than by the subtree beneath it, and a walk over a returned value
+cannot reach a second node. And the aggregate claim — "my total is the combine of
+my children" — does not live on it at all; it lives one level below, on an
+internal type the fold builds and no consumer can name.
 
-It needs a smart constructor returning `Validation`, for one real reason:
-`ScaleLosses` takes a factor that may exceed 1, so applying a transform can
-overflow. `RiskResultGroup.create` already converts that arithmetic overflow into
-a `ValidationError`, and this mirrors it.
+Construction has to be able to fail, for one real reason: `ScaleLosses` takes a
+factor that may exceed 1, so applying a transform can overflow. The aggregation
+path already converts that arithmetic overflow into a `ValidationError`, and the
+layer's own overflow is converted the same way.
 
 ### 8.3 The construction algorithm
 
@@ -467,23 +465,23 @@ run(records, outcomes) = the composed transform applied to outcomes
                          run(Nil, outcomes) = outcomes          -- the identity
 
 decorate(id, source, records) =
-    ValuationResult(id, source, records, run(records, source.trialOutcomes))
+    the value carrying id, source, records, and run(records, source)
 
 m(leaf) =
-    let raw = cachedSimulation(effectiveLeaf)        -- RiskResult, from the cache
+    let raw = cachedSimulation(effectiveLeaf)        -- figures, from the cache
     in  decorate(leaf.id, raw, recordsFor(leaf))
 
 m(portfolio P) =
     let kids     = P.children.map(m)
-        combined = RiskResultGroup.create(P.id, kids*)   -- a TRUE group
+        combined = aggregateOf(P.id, kids)           -- a TRUE aggregate
     in  decorate(P.id, combined, recordsFor(P))
 ```
 
-Notice what the portfolio case does. `RiskResultGroup.create(P.id, kids*)` builds
-a group whose children are the **mitigated** children and whose aggregate is the
-combine of exactly those children. That group's claim is true. No lying group, no
-constructor change. The transform is then applied on top, by the wrapper, outside
-the group.
+Notice what the portfolio case does. `aggregateOf` derives its total from
+exactly the **mitigated** children it is given, and offers no parameter through
+which a different total could arrive. That aggregate's claim is therefore true by
+construction. No lying aggregate, no constructor loophole. The transform is then
+applied on top, outside the claim.
 
 **A required implementation constraint.** `run(Nil, outcomes)` must return the
 *same* `TrialOutcomes` reference, not a structurally equal rebuild. If it
@@ -497,28 +495,33 @@ it has to be written down.
 One trial, the tree from Part 4.2, resolved under a selection that turns both
 mitigations on:
 
-| node | what is built | outcomes |
-|---|---|---|
-| DiskFailure | cache read gives `RiskResult` 9; records `[cap6]` | `ValuationResult(source = RiskResult 9, applied = [cap6], outcomes = 6)` |
-| PowerLoss | cache read gives `RiskResult` 14; no records | `ValuationResult(source = RiskResult 14, applied = [], outcomes = 14)` |
-| Servers | `RiskResultGroup.create(Servers, [6, 14])` gives a true group of 20; records `[cap18]` | `ValuationResult(source = group 20, applied = [cap18], outcomes = 18)` |
-| Fraud | cache read gives 3; no records | `ValuationResult(source = RiskResult 3, applied = [], outcomes = 3)` |
-| Group | `RiskResultGroup.create(Group, [18, 3])` gives a true group of 21; no records | `ValuationResult(source = group 21, applied = [], outcomes = 21)` |
+| node | what is built | source | applied | trials |
+|---|---|---|---|---|
+| DiskFailure | cache read gives 9; records `[cap6]` | 9 | `[cap6]` | 6 |
+| PowerLoss | cache read gives 14; no records | 14 | `[]` | 14 |
+| Servers | aggregate of `[6, 14]` derived from exactly those children; records `[cap18]` | 20 | `[cap18]` | 18 |
+| Fraud | cache read gives 3; no records | 3 | `[]` | 3 |
+| Group | aggregate of `[18, 3]` derived from exactly those children; no records | 21 | `[]` | 21 |
 
 Read the Servers row against the raw figure of 23. Its source, the combine of its
-mitigated children, is 20. Its own outcomes are 18. The 3 between 23 and 20 is
-DiskFailure's leaf cap, visible inside `source`'s children. The 2 between 20 and
-18 is Servers' own policy, and it is a local subtraction on one value.
+mitigated children, is 20. Its own trials are 18. The 3 between 23 and 20 is
+DiskFailure's leaf cap, which is read by requesting DiskFailure. The 2 between 20
+and 18 is Servers' own policy, and it is a local subtraction on one value.
 
-Every group in that table is honest: 20 really is 6 + 14, and 21 really is
-18 + 3. `RiskResultGroup`'s constructor is untouched.
+Every aggregate in that table is honest: 20 really is 6 + 14, and 21 really is
+18 + 3. The factory that derives them is untouched by the layer.
+
+Notice the two rows with no records. Their `source` and their `trials` are not
+merely equal — they are the same object. The empty layer short-circuits and
+passes one reference twice, so an unmitigated node allocates one set of figures
+rather than two.
 
 ### 8.5 The raw valuation is the identity instance
 
 There is no separate raw method. A raw reading is the same fold with nothing
 scoped anywhere — the identity fed in at every node. Every `applied` list is
-empty, every `trialOutcomes` equals its `source`, and the figures are exactly
-today's figures.
+empty, every node's `trials` is literally the same object as its `source`, and
+the figures are exactly today's figures.
 
 This is why the design needs one function rather than two. A separate raw method
 would take the no-mitigation case out of the identity and handle it with separate
@@ -548,8 +551,8 @@ misses naturally.
 
 **Result-stage transforms go in after the cache read**, and are never stored.
 
-`ValuationResult` is built from result-stage records only, so it is constructed
-strictly **above** the cache boundary. It never enters the cache, never appears in
+The layer is built from result-stage records only, so it is applied strictly
+**above** the cache boundary. It never enters the cache, never appears in
 a cache key, and changes nothing about the key projection.
 
 The read path resolves twice — once with nothing selected and once with the
@@ -566,11 +569,11 @@ the cache read.
 ### 10.1 The provenance record gets a home
 
 `MitigationApplicationRecord` — which mitigation, its spec, the node set it
-touched, its precedence — was implemented and tested but attached to nothing, and
-its own documentation claimed it travelled in responses, which it did not. It is
-the `applied` field. The mitigated fold produces at each node a value together
-with an account of how that value was produced; the account is no longer
-discarded.
+touched, its precedence — is the `applied` field. The mitigated fold produces at
+each node a value together with an account of how that value was produced, so the
+account is not discarded. It does not cross the wire: a response names the
+mitigations that shaped each reading, and the client already holds each
+mitigation's spec and resolved scope from the tree read.
 
 ### 10.2 A test assertion is strengthened
 
@@ -579,8 +582,8 @@ still a group, inferring from an uncollapsed type that no transform had run.
 Under this design the intent is asserted directly:
 
 ```scala
-none.applied.isEmpty,                        // nothing was applied - stated, not inferred
-none.source.isInstanceOf[RiskResultGroup],   // the aggregate underneath is a true group
+none.applied.isEmpty,            // nothing was applied - stated, not inferred
+none.trials eq none.source,      // and the identity left the figures untouched
 none.outcomes == raw.outcomes
 ```
 
@@ -588,12 +591,12 @@ The old assertion infers the property; the new one states it.
 
 ### 10.3 The ripple is small
 
-`LossDistribution` is a sealed hierarchy, so in principle every match over it must
-handle a new case. In practice there is exactly one such match in production
-code, in the resolver's provenance walk, plus a handful of test sites. The browser
-module does not reference `LossDistribution` at all, so there is no Scala.js
-ripple. The wire shape is unchanged, because the response carries a generated
-curve derived from `trialOutcomes`.
+Every consumer reads the same members it always read — `outcomeCount`, `nTrials`,
+`probOfExceedance`, `maxLoss`, `minLoss`, `outcomes`, `nodeId` — and none of them
+names an origin or matches on one. The browser module does not reference
+`LossDistribution` at all, so there is no Scala.js ripple. The wire shape is
+unchanged, because the response carries a generated curve derived from the
+figures.
 
 ---
 
@@ -603,23 +606,27 @@ curve derived from `trialOutcomes`.
 
 - The mitigated valuation is a separate fold, `m(P) = f_P((+) m(children))`, with
   the raw fold left pristine and cached.
-- The mitigated value of a transformed node is not a `RiskResultGroup`.
+- The mitigated value of a transformed node is not a `PortfolioLosses`.
 - The fold returns a value at every node carrying what was applied there, with
   the empty list as the identity.
-- The type is `ValuationResult`.
+- The type is `LossDistribution`, the FB-F shape, specified by
+  [`PLAN-FBF-VALUATION-TRANSPLANT.md`](../dev/plans/PLAN-FBF-VALUATION-TRANSPLANT.md):
+  one concrete type carrying figures only, with the aggregate claim held one
+  level below on an internal type no consumer can name.
 - One method, not two; a raw reading is the identity instance.
 - `run(Nil, outcomes)` returns the same reference.
 - The unmitigated-read assertion is rewritten in the strengthened form above.
 
-- `LossDistribution.flatten` is removed from the hierarchy (Part 12).
+- `LossDistribution.flatten` is removed (Part 12).
 
 **Open.**
 
 - Nothing. Every question this design raised has been ruled.
 
-**Not yet done.** This is new design that sits in no existing plan slice. It needs
-an implementation-grade section — exact signatures, file inventory, ADR alignment,
-verification plan — before any source edit.
+**Built.** The specification is
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](../dev/plans/PLAN-FBF-VALUATION-TRANSPLANT.md)
+— exact signatures, file inventory, ADR alignment, verification plan — and the
+code it specifies is in the tree.
 
 ---
 

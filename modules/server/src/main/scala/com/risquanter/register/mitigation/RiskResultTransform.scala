@@ -153,6 +153,13 @@ object RiskResultTransform {
    * Scale all losses by a factor.
    * Useful for currency conversion or proportional risk transfer.
    *
+   * Scaled losses round to the nearest whole unit, so the error cancels across
+   * trials instead of accumulating in one direction.
+   *
+   * A factor above 1 can take a loss past `Long.MaxValue`. The overflow bound
+   * is conservative: doubles lose integer precision near 2^63, so it rejects a
+   * narrow band that would have narrowed correctly.
+   *
    * @param factor Scaling multiplier (non-negative)
    * @return Transformation scaling losses
    *
@@ -164,7 +171,12 @@ object RiskResultTransform {
    */
   def scaleLosses(factor: NonNegativeDouble): RiskResultTransform = RiskResultTransform { to =>
     val scaled = to.outcomes.map { case (trial, loss) =>
-      trial -> (loss * factor).toLong
+      val product = loss * factor
+      // Narrowing would saturate silently at Long.MaxValue; throw instead, and
+      // let LossDistribution.decorate convert it (ADR-033 §3).
+      if (product.isNaN || product >= Long.MaxValue.toDouble)
+        throw new ArithmeticException(s"scaled loss overflow: $loss * $factor")
+      trial -> Math.round(product)
     }.filter(_._2 > 0)  // Remove zero losses
 
     to.copy(outcomes = scaled)

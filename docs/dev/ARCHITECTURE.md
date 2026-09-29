@@ -261,29 +261,28 @@ final case class Mitigation private (
   precedence: MitigationPrecedence     // Global application order
 )
 
-// Simulation results are per-node and cached in memory. The supertype carries
-// the node identity and the trial outcomes; the two subtypes differ in whether
-// the value is simulated or aggregated.
-sealed abstract class LossDistribution(
-  val nodeId: NodeId,
-  val trialOutcomes: TrialOutcomes
+// Simulation results are per-node. Every consumer receives the same concrete
+// type, whether the node was simulated or aggregated: it carries figures only,
+// so its size is bounded by its own node rather than by the subtree beneath it.
+final case class LossDistribution private (
+  nodeId: NodeId,
+  trials: TrialOutcomes,                       // after this node's own mitigation layer
+  source: TrialOutcomes,                       // the figures that layer was applied to
+  applied: List[MitigationApplicationRecord],  // empty = no layer bound here
+  provenance: Option[NodeProvenance]           // a simulated leaf has one; a portfolio none
 ) extends LECCurve
 
-// A simulated leaf value
-case class RiskResult private (
-  override val nodeId: NodeId,
-  override val trialOutcomes: TrialOutcomes,
-  provenances: List[NodeProvenance] = Nil
-) extends LossDistribution(nodeId, trialOutcomes)
-
-// A portfolio aggregate. Only `create` can build one, and it forces
-// trialOutcomes to be the combine of the children, so the aggregate can never
-// disagree with what it aggregates.
-final case class RiskResultGroup private (
-  children: List[LossDistribution],
-  override val nodeId: NodeId,
-  override val trialOutcomes: TrialOutcomes
-) extends LossDistribution(nodeId, trialOutcomes)
+// Whether a node was simulated or aggregated is an internal matter, private to
+// the resolver's package. Only `PortfolioLosses.create` can build an aggregate,
+// and it derives the total from exactly the children it is given, so an
+// aggregate can never disagree with what it aggregates.
+private[cache] sealed trait NodeLosses
+private[cache] final case class LeafLosses private (
+  nodeId: NodeId, trials: TrialOutcomes, provenance: NodeProvenance
+) extends NodeLosses
+private[cache] final case class PortfolioLosses private (
+  nodeId: NodeId, trials: TrialOutcomes, children: List[LossDistribution]
+) extends NodeLosses
 ```
 
 **Key Design Decision: No Raw Trial Data Stored**

@@ -19,7 +19,7 @@ single list.
 | 3 | `docs/dev/plans/PLAN-WORKSPACE-CACHE-RELEASE.md` | must follow 2: it adds a method to both registries, which 2 renames. Writing it first means writing it twice |
 | ~~4~~ | ~~`docs/dev/plans/PLAN-TELEMETRY-EXPORT.md`~~ | **Landed in 0.10.37** (`docs/archive/plans/DONE-PLAN-TELEMETRY-EXPORT.md`). Metrics and traces now reach the collector by default, so 5's prerequisite is met |
 | 5 | `docs/dev/plans/PLAN-SIMULATION-CONCURRENCY-BOUNDS.md` | depends on 2 (both change `CachedResultResolverLive.scala`). Its other dependency, 4, has landed: the saturation gauge it publishes can now be read |
-| ~~6~~ | ~~`docs/dev/plans/PLAN-LOSSDISTRIBUTION-TO-SERVER.md`~~ | **Landed in 0.10.36** (`docs/archive/plans/DONE-PLAN-LOSSDISTRIBUTION-TO-SERVER.md`). It moved the sealed `LossDistribution` file and `RiskResultTransformSpec.scala` into `server`, which 7's `ValuationResult` sub-slice writes into |
+| ~~6~~ | ~~`docs/dev/plans/PLAN-LOSSDISTRIBUTION-TO-SERVER.md`~~ | **Landed in 0.10.36** (`docs/archive/plans/DONE-PLAN-LOSSDISTRIBUTION-TO-SERVER.md`). It moved the `LossDistribution` file and `RiskResultTransformSpec.scala` into `server`, which the valuation transplant then rewrote |
 | 7 | `docs/dev/plans/PLAN-RISKTRANSFORM.md` (M4) | must follow 2. The two share fifteen files, including all three scope-resolver sources. M4 adds a `MitigationScopeResolverRegistry` field to `RiskTreeServiceLive` and rewrites the resolver's memo, both of which reach the type through the `MitigationScopeResolverRegistry.forWorkspace` name that 2 introduces. Landing M4 first would grow 2's ripple list by everything M4 adds |
 | — | `docs/dev/plans/PLAN-IRMIN-RECURSIVE-READ.md` | fully independent; shares no file with any of the above and may land at any point |
 

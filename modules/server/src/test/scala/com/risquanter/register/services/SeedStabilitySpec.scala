@@ -20,7 +20,7 @@ import com.risquanter.register.auth.{Checked, Permission, TestChecked}
   * edits with common-random-numbers locality, differ across entities, and
   * survive an export → import round trip.
   *
-  * "Figures" here are `RiskResult.outcomes` (trial → loss maps): node IDs are
+  * "Figures" here are `LossDistribution.outcomes` (trial → loss maps): node IDs are
   * ULIDs and legitimately differ between tree instances, so outcome maps are
   * the byte-identical payload the plan pins.
   */

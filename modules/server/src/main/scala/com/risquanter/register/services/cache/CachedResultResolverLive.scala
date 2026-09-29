@@ -1,15 +1,16 @@
 package com.risquanter.register.services.cache
 
 import zio.*
+import zio.prelude.Validation
 import zio.telemetry.opentelemetry.tracing.Tracing
 import zio.telemetry.opentelemetry.metrics.{Meter, Histogram, Counter}
 import zio.telemetry.opentelemetry.common.{Attributes, Attribute}
 import io.opentelemetry.api.trace.SpanKind
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, Mitigation, NodeProvenance}
+import com.risquanter.register.domain.data.{RiskNode, RiskLeaf, RiskPortfolio, RiskTree, MitigationApplicationRecord}
 import com.risquanter.register.mitigation.{MitigationApplication, MitigationSelection}
-import com.risquanter.register.simulation.{LossDistribution, RiskResult, RiskResultGroup, TrialOutcomes}
-import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId}
+import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
+import com.risquanter.register.domain.data.iron.{PositiveInt, NodeId, ContentHash, SeedEntityId, MitigationId, ValidationMessages}
 import com.risquanter.register.domain.errors.{ValidationFailed, ValidationError, ValidationErrorCode}
 import com.risquanter.register.services.helper.Simulator
 import io.github.iltotore.iron.refineUnsafe
@@ -18,32 +19,22 @@ import io.github.iltotore.iron.refineUnsafe
   * Live implementation of CachedResultResolver (ADR-015), content-addressed.
   *
   * Resolution pipeline per request:
-  * 1. `effectiveTree` bakes every param-stage (LeafStage) mitigation into the
-  *    tree so it changes the cache-key content; `selection = Inherent` returns
-  *    the input tree revalidated (identical content, identical hashes).
-  * 2. `ContentHashIndex.build(effective)` — pure, O(n): leaf keys hash the
-  *    leaf's simulation-relevant projection only; portfolio Merkle hashes ride
-  *    along for diffing.
-  * 3. Leaf: look up `ContentCache` by content hash — hit returns the cached
-  *    identity-free content with the requested node's ID attached at this
-  *    edge; miss simulates and stores. The result-stage transform
-  *    (`resultTransformFor`) is applied to the finished leaf outcomes at the
-  *    edge and never cached (ADR-034 Decision 1).
-  * 4. Portfolio: never cached — the mitigated children are combined
-  *    with `RiskResultGroup.create` on every read, then this node's result-stage
-  *    transform is applied to the combined total, so
-  *    `mitigated(P) = f_P(⊕ mitigated(children))` (ADR-034).
+  * 1. `effectiveTree` bakes every param-stage mitigation into the tree so it
+  *    changes the cache-key content.
+  * 2. `ContentHashIndex.build` computes the leaf content hashes.
+  * 3. `recordsByNode` computes each node's result-stage layer once for the tree.
+  * 4. Leaf: look up `ContentCache` by content hash, simulating and storing on a
+  *    miss. `NodeLosses.leaf` attaches the requested node's ID at this edge.
+  * 5. Portfolio: never cached. `PortfolioLosses.create` combines the
+  *    already-mitigated children on every read.
+  * 6. `LossDistribution.decorate` applies the node's layer to those figures,
+  *    giving `m(P) = f_P(⊕ m(children))` (ADR-034).
   *
   * There is no invalidation path: an edited leaf hashes to a new key and
-  * simply misses; the old entry becomes an unreachable orphan for the
-  * `EvictionStrategy`.
+  * misses; the old entry becomes an orphan for the `EvictionStrategy`.
   *
   * Cache instances are per-workspace via `ContentCacheRegistry`, keyed by the
   * workspace's `seedEntityId`.
-  *
-  * Telemetry (ADR-002):
-  * - Spans: ensureCached; simulateLeaf on miss (with duration + trials metrics)
-  * - Cache stats (entries/hits/misses) logged at debug after each resolution
   */
 final case class CachedResultResolverLive(
     caches: ContentCacheRegistry,
@@ -77,8 +68,9 @@ final case class CachedResultResolverLive(
         _         <- tracing.setAttribute("include_provenance", includeProvenance)
         effective <- effectiveTreeOf(tree, selection, resolvedScopes)
         scoped     = MitigationApplication.scoped(tree, selection, resolvedScopes)
+        records    = MitigationApplication.recordsByNode(scoped)
         cache     <- caches.forWorkspace(seedEntityId)
-        result    <- distributionForId(effective, ContentHashIndex.build(effective), cache, nodeId, seedEntityId, scoped)
+        result    <- distributionForId(effective, ContentHashIndex.build(effective), cache, nodeId, seedEntityId, records)
         stats     <- cache.stats
         _         <- ZIO.logDebug(s"ContentCache stats: entries=${stats.entries}, hits=${stats.hits}, misses=${stats.misses}, evicted=${stats.evictedTotal}")
       } yield result
@@ -95,11 +87,12 @@ final case class CachedResultResolverLive(
     for {
       effective <- effectiveTreeOf(tree, selection, resolvedScopes)
       scoped     = MitigationApplication.scoped(tree, selection, resolvedScopes)
+      records    = MitigationApplication.recordsByNode(scoped)
       cache     <- caches.forWorkspace(seedEntityId)
       // One tree fingerprint serves the whole batch
       hashes     = ContentHashIndex.build(effective)
       results   <- ZIO.foreach(nodeIds.toList)(id =>
-        distributionForId(effective, hashes, cache, id, seedEntityId, scoped).map(id -> _)
+        distributionForId(effective, hashes, cache, id, seedEntityId, records).map(id -> _)
       )
     } yield results.toMap
 
@@ -113,8 +106,7 @@ final case class CachedResultResolverLive(
     selection: MitigationSelection,
     resolvedScopes: Map[MitigationId, Set[NodeId]]
   ): Task[RiskTree] =
-    ZIO.fromEither(MitigationApplication.effectiveTree(tree, selection, resolvedScopes).toEither)
-      .mapError(errs => ValidationFailed(errs.toList))
+    fromValidation(MitigationApplication.effectiveTree(tree, selection, resolvedScopes))
 
   private def distributionForId(
     tree: RiskTree,
@@ -122,7 +114,7 @@ final case class CachedResultResolverLive(
     cache: ContentCache,
     nodeId: NodeId,
     seedEntityId: SeedEntityId.SeedEntityId,
-    scoped: Map[NodeId, List[Mitigation]]
+    records: Map[NodeId, List[MitigationApplicationRecord]]
   ): Task[LossDistribution] =
     ZIO.fromOption(tree.index.nodes.get(nodeId))
       .orElseFail(ValidationFailed(List(ValidationError(
@@ -130,7 +122,7 @@ final case class CachedResultResolverLive(
         code = ValidationErrorCode.CONSTRAINT_VIOLATION,
         message = s"Node not found in tree index: $nodeId"
       ))))
-      .flatMap(node => distributionOf(tree, hashes, cache, node, seedEntityId, scoped))
+      .flatMap(node => distributionOf(tree, hashes, cache, node, seedEntityId, records))
 
   private def distributionOf(
     tree: RiskTree,
@@ -138,27 +130,24 @@ final case class CachedResultResolverLive(
     cache: ContentCache,
     node: RiskNode,
     seedEntityId: SeedEntityId.SeedEntityId,
-    scoped: Map[NodeId, List[Mitigation]]
+    records: Map[NodeId, List[MitigationApplicationRecord]]
   ): Task[LossDistribution] =
     node match {
       case leaf: RiskLeaf =>
-        rawLeafResult(hashes, cache, leaf, seedEntityId).map { raw =>
-          // Result-stage transform on the finished leaf operand, applied after
-          // the cache read and never stored — it produces no new content to key
-          // an entry by (ADR-009, ADR-034). None when nothing result-stage scopes
-          // the leaf, so the raw cached value passes through unchanged.
-          MitigationApplication.resultTransformFor(leaf.id, scoped) match {
-            case None    => raw
-            case Some(t) => RiskResult.fromTrialOutcomes(leaf.id, t.run(raw.trialOutcomes), raw.provenances)
-          }
-        }
+        for {
+          content <- rawLeafResult(hashes, cache, leaf, seedEntityId)
+          losses   = NodeLosses.leaf(leaf.id, content.outcomes, content.provenance)
+          applied  = records.getOrElse(leaf.id, Nil)
+          value   <- fromValidation(LossDistribution.decorate(
+                       losses.nodeId, losses.trials, Some(losses.provenance), applied,
+                       MitigationApplication.run(applied, _)))
+        } yield value
 
       case portfolio: RiskPortfolio =>
         for {
-          // Parallel child resolution: children root disjoint subtrees (single-parent
-          // tree), and TrialOutcomes aggregation is associative and commutative, so
-          // evaluation order cannot change the aggregated figures. foreachPar
-          // preserves list order, keeping provenance order identical to sequential.
+          // Children root disjoint subtrees and the aggregation is associative
+          // and commutative, so evaluation order cannot change the figures.
+          // foreachPar preserves list order (ADR-009 §4).
           childResults <- ZIO.foreachPar(portfolio.childIds.toList) { childId =>
             ZIO.fromOption(tree.index.nodes.get(childId))
               .orElseFail(ValidationFailed(List(ValidationError(
@@ -166,51 +155,40 @@ final case class CachedResultResolverLive(
                 code = ValidationErrorCode.CONSTRAINT_VIOLATION,
                 message = s"Child node not found in tree index: $childId"
               ))))
-              .flatMap(childNode => distributionOf(tree, hashes, cache, childNode, seedEntityId, scoped))
+              .flatMap(childNode => distributionOf(tree, hashes, cache, childNode, seedEntityId, records))
           }
           _ <- ZIO.when(childResults.isEmpty) {
             ZIO.fail(ValidationFailed(List(ValidationError(
               field = s"riskPortfolio.${portfolio.id}.childIds",
               code = ValidationErrorCode.EMPTY_COLLECTION,
-              message = s"RiskPortfolio '${portfolio.id}' has no children"
+              message = ValidationMessages.portfolioHasNoChildren
             ))))
           }
-          // ⊕ mitigated(children): the commutative fold over already-mitigated
-          // children. Portfolios are never cached, and the aggregate is always a
-          // plain combine of its children, mitigated or not — the raw aggregate
-          // is never mutated to carry a mitigation (ADR-034).
-          combined <- ZIO.fromEither(RiskResultGroup.create(portfolio.id, childResults*).toEither)
-            .mapError(errors => ValidationFailed(errors.toList))
-        } yield {
-          // mitigated(P) = f_P(⊕ mitigated(children)). With no result-stage
-          // mitigation scoping P the group is returned unchanged, so child
-          // structure and drill-down are preserved and the value is identical to
-          // the un-mitigated path. A binding transform cannot be a
-          // RiskResultGroup, whose constructor pins the aggregate to
-          // combine(children), so it collapses to a flat RiskResult carrying the
-          // transformed outcomes and the descendants' provenances (ADR-034).
-          MitigationApplication.resultTransformFor(portfolio.id, scoped) match {
-            case None    => combined
-            case Some(t) => RiskResult.fromTrialOutcomes(portfolio.id, t.run(combined.trialOutcomes), descendantProvenances(combined))
-          }
-        }
+          // ⊕ m(children), then f_P on top. The layer is applied outside the
+          // aggregate claim, so a transformed portfolio keeps its children
+          // (ADR-034 Decision 3). A portfolio carries no provenance of its own
+          // (ADR-003 §2).
+          losses  <- fromValidation(NodeLosses.portfolio(portfolio.id, childResults))
+          applied  = records.getOrElse(portfolio.id, Nil)
+          value   <- fromValidation(LossDistribution.decorate(
+                       losses.nodeId, losses.trials, None, applied,
+                       MitigationApplication.run(applied, _)))
+        } yield value
     }
 
-  /** Every descendant leaf's provenance, in traversal order. A collapsed
-    * transformed portfolio already carries its own descendants' provenances, so
-    * matching `RiskResult` returns them directly without recursing further. */
-  private def descendantProvenances(dist: LossDistribution): List[NodeProvenance] =
-    dist match {
-      case r: RiskResult      => r.provenances
-      case g: RiskResultGroup => g.children.flatMap(descendantProvenances)
-    }
+  /** A `Validation` failure becomes a typed `ValidationFailed` (ADR-010). */
+  private def fromValidation[A](v: Validation[ValidationError, A]): Task[A] =
+    ZIO.fromEither(v.toEither).mapError(errs => ValidationFailed(errs.toList))
 
+  /** Identity-free cached content for one effective leaf. Node identity is
+    * attached one level above, since the same entry may serve any
+    * content-identical leaf. */
   private def rawLeafResult(
     hashes: Map[NodeId, ContentHash],
     cache: ContentCache,
     leaf: RiskLeaf,
     seedEntityId: SeedEntityId.SeedEntityId
-  ): Task[RiskResult] =
+  ): Task[LeafSimResult] =
     for {
       key <- ZIO.fromOption(hashes.get(leaf.id))
         .orElseFail(ValidationFailed(List(ValidationError(
@@ -220,12 +198,8 @@ final case class CachedResultResolverLive(
         ))))
       cached <- cache.get(key)
       result <- cached match {
-        case Some(content) =>
-          // Hit: identity attached at the edge — the entry may have been
-          // written for any content-identical leaf
-          ZIO.succeed(RiskResult.fromTrialOutcomes(leaf.id, content.outcomes, List(content.provenance)))
-        case None =>
-          simulateLeaf(cache, key, leaf, seedEntityId)
+        case Some(content) => ZIO.succeed(content)
+        case None          => simulateLeaf(cache, key, leaf, seedEntityId)
       }
     } yield result
 
@@ -234,7 +208,7 @@ final case class CachedResultResolverLive(
     key: ContentHash,
     leaf: RiskLeaf,
     seedEntityId: SeedEntityId.SeedEntityId
-  ): Task[RiskResult] =
+  ): Task[LeafSimResult] =
     tracing.span("simulateLeaf", SpanKind.INTERNAL) {
       for {
         _         <- tracing.setAttribute("node_id", leaf.id.value)
@@ -244,13 +218,13 @@ final case class CachedResultResolverLive(
         // Always capture provenance (filter at service layer)
         // Rationale: Maintain chain of truth - provenance always in cache
         (sampler, provenance) <- Simulator.createSamplerFromLeaf(leaf, seedEntityId, seed3, seed4)
-        trials                <- Simulator.performTrials(sampler, nTrials, parallelism)
-        outcomes               = TrialOutcomes(nTrials, trials)
-        _                     <- cache.put(key, LeafSimResult(outcomes, provenance))
+        losses                <- Simulator.performTrials(sampler, nTrials, parallelism)
+        content                = LeafSimResult(TrialOutcomes(nTrials, losses), provenance)
+        _                     <- cache.put(key, content)
 
         endTime <- Clock.currentTime(java.util.concurrent.TimeUnit.MILLISECONDS)
         _       <- recordSimulationMetrics(leaf.id.value, nTrials, endTime - startTime)
-      } yield RiskResult.fromTrialOutcomes(leaf.id, outcomes, List(provenance))
+      } yield content
     }
 
   /** Record simulation performance metrics (ADR-002) */

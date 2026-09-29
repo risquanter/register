@@ -7,7 +7,8 @@ import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.domain.data.iron.{NodeId, SeedEntityId, MitigationId}
 
 /**
-  * Service for resolving RiskResult with cache-aside pattern (ADR-015).
+  * Service for resolving a node's LossDistribution with the cache-aside
+  * pattern (ADR-015).
   *
   * Core primitive: `ensureCached(tree, nodeId)` checks cache first, simulates on miss.
   * All query APIs compose on top of this primitive.
@@ -23,10 +24,9 @@ import com.risquanter.register.domain.data.iron.{NodeId, SeedEntityId, Mitigatio
   * `selection` chooses which mitigations a resolution applies and `resolvedScopes`
   * carries the server-resolved per-mitigation node sets. Param-stage transforms
   * are baked into the effective tree so they change the cache-key content;
-  * result-stage transforms are applied at the read edge and never cached
-  * (ADR-034). The defaults (`Inherent` / empty) make the whole
-  * mitigation path identity, so a caller that passes neither resolves the raw,
-  * un-mitigated tree.
+  * result-stage transforms become each node's own layer, applied at the read
+  * edge and never cached (ADR-034). The defaults (`Inherent` / empty) resolve
+  * the raw, un-mitigated tree through the same path.
   *
   * == Usage Pattern ==
   * {{{
@@ -47,7 +47,8 @@ trait CachedResultResolver {
     * 1. Compute the node's content hash from the effective tree (ContentHashIndex)
     * 2. Leaf hit: return cached content with this node's ID attached
     * 3. Leaf miss: simulate, cache under the content hash, return
-    * 4. Portfolio: aggregate child results on every read (never cached)
+    * 4. Portfolio: aggregate the mitigated children on every read (never cached)
+    * 5. Apply this node's own layer to the figures just derived
     *
     * @param tree Risk tree containing the node (provides TreeIndex)
     * @param nodeId Node identifier

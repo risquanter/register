@@ -9,7 +9,8 @@ import com.risquanter.register.domain.data.{
   TransformPipeline, ResultTransformSpec
 }
 import com.risquanter.register.mitigation.{MitigationSelection, ScopeRestriction}
-import com.risquanter.register.simulation.{LossDistribution, RiskResult}
+import com.risquanter.register.simulation.LossDistribution
+import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.iron.{NodeId, MitigationId, SafeName, SeedVarId}
 import com.risquanter.register.foladapter.RiskTreeKnowledgeBase
 import com.risquanter.register.testutil.TestHelpers
@@ -69,11 +70,8 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   // Residual: Alpha (the mitigated leaf) is knocked down to 10; Beta unchanged.
   // So with threshold 50: inherent → {a, b} exceed; residual → only {b}.
 
-  private def flat(id: NodeId, v: Long): RiskResult =
-    withCfg(5)(RiskResult(nodeId = id, outcomes = Map(1 -> v, 2 -> v, 3 -> v, 4 -> v, 5 -> v), provenances = Nil))
-
-  private def widen(res: Map[NodeId, RiskResult]): Map[NodeId, LossDistribution] =
-    res.map { case (k, v) => k -> (v: LossDistribution) }
+  private def flat(id: NodeId, v: Long): LossDistribution =
+    withCfg(5)(leafOf(id, Map(1 -> v, 2 -> v, 3 -> v, 4 -> v, 5 -> v)))
 
   private val inherentResults = Map(aId -> flat(aId, 100L), bId -> flat(bId, 100L))
   private val residualResults  = Map(aId -> flat(aId, 10L),  bId -> flat(bId, 100L))
@@ -83,8 +81,8 @@ object QueryServiceLiveSpec extends ZIOSpecDefault with TestHelpers:
   private val kb = RiskTreeKnowledgeBase(
     RiskTreeKnowledgeBase.schemaFor(tree),
     Map(
-      MitigationSelection.Inherent -> widen(inherentResults),
-      MitigationSelection.Residual -> widen(residualResults)
+      MitigationSelection.Inherent -> inherentResults,
+      MitigationSelection.Residual -> residualResults
     ),
     resolvedScopes
   )

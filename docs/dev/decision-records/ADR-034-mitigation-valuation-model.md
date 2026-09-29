@@ -58,44 +58,56 @@ mitigated(D) = cap15(6 + 8 + 1) = cap15(15) = 15    // parent sees the mitigated
 // authoring "cap D then cap A" yields the identical result
 ```
 
-### 3. The raw aggregate is never mutated, and a transformed node's value is flat
+### 3. The aggregate claim is never mutated; the layer sits outside it
 
-`RiskResultGroup`'s private constructor enforces one claim: its aggregate is the
-combine of its children. `raw` always honours that claim; `mitigated` cannot,
-wherever a transform binds. So a transformed node's mitigated value is a plain
-transformed-outcomes value and is deliberately **not** a `RiskResultGroup`.
+`PortfolioLosses.create` enforces one claim: the aggregate is the combine of the
+children it was given. It derives the total from those children and offers no
+parameter through which a different one could arrive, so the claim cannot be
+made falsely. `raw` always honours it; `mitigated` cannot, wherever a transform
+binds — so the transform is applied **outside** the aggregate rather than
+written into it.
 
-Nothing is lost by this. The value never carried the children-claim, and a type
-asserting it would assert something false. Where each reduction happened stays
-visible: a node's mitigated value and the combine of its children's mitigated
-values differ by exactly that node's transform layer. A client reads a child's
-mitigated value by requesting that node.
+Nothing is lost by this. The aggregate underneath a transformed node still holds
+exactly its children and still equals their combine; the node's own figures are
+the layer applied to that total. Where each reduction happened stays visible: a
+node's mitigated value and the combine of its children's mitigated values differ
+by exactly that node's transform layer. A client reads a child's mitigated value
+by requesting that node.
 
-### 4. Every mitigated reading is a `ValuationResult`; raw is its identity instance
+Because the layer never touches the aggregate claim, applying a transform does
+not change the shape of the answer. A mitigation that happens to change no figure
+returns the same kind of value as one that changes every figure.
 
-The mitigated fold wraps every node it visits, recording what the transform layer
-was applied to and which mitigation applications produced it. The empty record
-list is the identity, so a node with nothing in scope is wrapped too.
+### 4. Every reading carries its layer; raw is the identity instance
+
+The mitigated fold produces at every node it visits a value recording what the
+transform layer was applied to and which mitigation applications produced it. The
+empty record list is the identity, so a node with nothing in scope carries one
+too.
 
 ```scala
-final case class ValuationResult private (
-  override val nodeId: NodeId,
-  source: LossDistribution,                     // the value the layer was applied to
-  applied: List[MitigationApplicationRecord],   // empty = identity = a raw reading
-  override val trialOutcomes: TrialOutcomes
-) extends LossDistribution(nodeId, trialOutcomes)
+final case class LossDistribution private (
+  nodeId: NodeId,
+  trials: TrialOutcomes,                       // after this node's layer
+  source: TrialOutcomes,                       // the figures that layer was applied to
+  applied: List[MitigationApplicationRecord],  // empty = identity = a raw reading
+  provenance: Option[NodeProvenance]           // a simulated leaf has one; a portfolio none
+) extends LECCurve
 ```
 
-Wrapping is unconditional because a no-op mitigation is authorable —
+Recording is unconditional because a no-op mitigation is authorable —
 `ScaleLosses(1.0)`, `ApplyDeductible(0)`, `FilterBelowThreshold(0)` — so
-"wrap when something changed" would make the return type depend on a parameter's
-numeric value. `source` keeps the children reachable at a transformed node.
-Applying an empty pipeline must return the **same** `TrialOutcomes` reference,
-not an equal rebuild, or every untransformed node reallocates its outcome map on
-every read.
+"record when something changed" would make the answer depend on a parameter's
+numeric value. `source` is figures, not a nested value: the value names no
+internal type and holds no reference to another node, so its size is bounded by
+its own node rather than by the subtree beneath it. Applying an empty layer must
+return the **same** `TrialOutcomes` reference, not an equal rebuild, or every
+untransformed node reallocates its outcome map on every read; the factory
+short-circuits and passes one reference twice, which makes that a property of the
+constructed value rather than a rule the transform has to honour.
 
-The decorator is built strictly above the cache boundary: it is constructed from
-values the cache already returned, so no key, entry or hash input changes.
+The layer is applied strictly above the cache boundary: it works on values the
+cache already returned, so no key, entry or hash input changes.
 
 ### 5. Reproducible from raw × active mitigations
 
@@ -110,11 +122,11 @@ yields identical values. There is no stored mitigated tree and no application lo
 ### ❌ Mutating the aggregate to carry a mitigation
 
 ```scala
-// BAD: a builder letting a group's aggregate differ from its children
-RiskResultGroup.withAggregate(nodeId, children, cappedOutcomes)   // aggregate ≠ combine(children)
+// BAD: a builder letting the aggregate differ from its children
+PortfolioLosses.withAggregate(nodeId, children, cappedOutcomes)   // aggregate ≠ combine(children)
 
-// GOOD: the raw group is a pure combine; the cap lives in the mitigated fold
-RiskResultGroup.create(nodeId, children*)                         // aggregate = combine(children)
+// GOOD: the aggregate is a pure combine; the cap is the layer applied on top of it
+PortfolioLosses.create(nodeId, children)                          // aggregate = combine(children)
 ```
 
 ### ❌ Applying a portfolio transform per child
@@ -140,11 +152,11 @@ transformsByPrecedence(node).run( combine(children.map(mitigated)) )
 ### ❌ Deciding the return shape from whether a transform changed anything
 
 ```scala
-// BAD: a no-op mitigation now changes the type the caller receives
-if (outcomes == transformed) raw else ValuationResult(id, raw, records, transformed)
+// BAD: a no-op mitigation now changes the shape the caller receives
+if (records.isEmpty) aggregate else flatten(aggregate, run(records, aggregate))
 
-// GOOD: wrap every visited node; the empty record list is the identity
-ValuationResult(id, raw, records, run(records, raw.trialOutcomes))
+// GOOD: decorate every visited node; the empty record list is the identity
+LossDistribution.decorate(id, source, provenance, records, run(records, _))
 ```
 
 ### ❌ Persisting the mitigated tree or an application log
@@ -163,13 +175,13 @@ store.put(treeId, rawTree)
 
 | Concern | Location | State |
 |---------|----------|-------|
-| Raw fold (cached, mitigation-free) | `RiskResultGroup.create` — combine of children | live |
-| Non-mutation invariant | `RiskResultGroup` private constructor, no exception | live |
+| Raw fold (cached, mitigation-free) | `PortfolioLosses.create` — combine of children | live |
+| Non-mutation invariant | `PortfolioLosses` private constructor, aggregate derived not accepted | live |
 | Leaf-stage mitigated tree | `MitigationApplication.effectiveTree` — drives cache keys | live |
-| Result-stage transform on a leaf | `MitigationApplication.resultTransformFor`, at the resolver edge | live |
-| Result-stage fold onto a portfolio aggregate | `CachedResultResolverLive` — portfolio arm of `distributionOf` | live |
+| A node's result-stage layer | `MitigationApplication.recordsByNode` and `run`, at the resolver edge | live |
+| Layer applied outside the aggregate claim | `LossDistribution.decorate`, called from both arms of `distributionOf` | live |
 | Same-node ordering | `TransformPipeline` step order; `MitigationPrecedence` across mitigations | live |
-| `ValuationResult` and its `applied` records | `LossDistribution` hierarchy; built at the resolver edge | ruled, not yet built |
+| `applied` records on every reading | `LossDistribution.applied` | live |
 
 ---
 

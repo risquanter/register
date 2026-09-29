@@ -4,7 +4,8 @@ import zio.test.*
 
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskNode}
 import com.risquanter.register.mitigation.MitigationSelection
-import com.risquanter.register.simulation.{LossDistribution, RiskResult}
+import com.risquanter.register.simulation.LossDistribution
+import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.domain.data.RiskTree
 import com.risquanter.register.domain.data.iron.NodeId
 import com.risquanter.register.domain.data.iron.SafeName
@@ -69,31 +70,23 @@ object BinderIntegrationSpec extends ZIOSpecDefault with TestHelpers:
 
   // Five-trial outcomes; large enough that gt_loss(p95(x, "inherent"), 1000) is true for both leaves.
   private val cyberResult = withCfg(5) {
-    RiskResult(
-      nodeId = cyberId,
-      outcomes = Map(1 -> 0L, 2 -> 5000L, 3 -> 10000L, 4 -> 20000L, 5 -> 50000L),
-      provenances = Nil
-    )
+    leafOf(cyberId, Map(1 -> 0L, 2 -> 5000L, 3 -> 10000L, 4 -> 20000L, 5 -> 50000L))
   }
   private val hardwareResult = withCfg(5) {
-    RiskResult(
-      nodeId = hardwareId,
-      outcomes = Map(1 -> 500L, 2 -> 1000L, 3 -> 1000L, 4 -> 2000L, 5 -> 8000L),
-      provenances = Nil
-    )
+    leafOf(hardwareId, Map(1 -> 500L, 2 -> 1000L, 3 -> 1000L, 4 -> 2000L, 5 -> 8000L))
   }
   private val rootResult = withCfg(5) {
-    RiskResult(nodeId = rootId, outcomes = Map(1 -> 500L, 2 -> 6000L, 3 -> 11000L, 4 -> 22000L, 5 -> 58000L), provenances = Nil)
+    leafOf(rootId, Map(1 -> 500L, 2 -> 6000L, 3 -> 11000L, 4 -> 22000L, 5 -> 58000L))
   }
   private val itResult = withCfg(5) {
-    RiskResult(nodeId = itId, outcomes = Map(1 -> 500L, 2 -> 6000L, 3 -> 11000L, 4 -> 22000L, 5 -> 58000L), provenances = Nil)
+    leafOf(itId, Map(1 -> 500L, 2 -> 6000L, 3 -> 11000L, 4 -> 22000L, 5 -> 58000L))
   }
-  private val results: Map[NodeId, RiskResult] =
+  private val results: Map[NodeId, LossDistribution] =
     Map(rootId -> rootResult, itId -> itResult, cyberId -> cyberResult, hardwareId -> hardwareResult)
 
   private val kb = RiskTreeKnowledgeBase(
     RiskTreeKnowledgeBase.schemaFor(tree),
-    Map(MitigationSelection.Inherent -> results.map { case (k, v) => k -> (v: LossDistribution) }),
+    Map(MitigationSelection.Inherent -> results),
     Map.empty
   )
 

@@ -45,7 +45,7 @@ The failure has a nameable type; catching it is the conversion layer at the inne
 
 ```scala
 // Math.addExact is the only checked Long addition the JVM offers
-try Validation.succeed(RiskResultGroup(nodeId, results*))
+try Validation.succeed(PortfolioLosses(nodeId, combine(children), children))
 catch case _: ArithmeticException =>
   Validation.fail(ValidationError(s"riskPortfolio.$nodeId",
     ValidationErrorCode.CONSTRAINT_VIOLATION, ValidationMessages.aggregatedLossOverflow))
@@ -136,7 +136,7 @@ def hover(v: js.Dynamic): Option[NodeId]
 
 | Location | Pattern |
 |----------|---------|
-| `LossDistribution.scala` (`RiskResultGroup.create`) | Named-type conversion over a throwing JVM API |
+| `NodeLosses.scala` (`PortfolioLosses.create`) | Named-type conversion over a throwing JVM API |
 | `MetalogDistribution.scala` (`fromPercentiles`) | Undocumented foreign JVM API — `Exception` is the narrowest guaranteed cover (JVM `Error`s still escape) → typed error |
 | `app/state/ChartHoverBridge.scala` (`parseHoverSignal`) | JS-boundary catch-all → total fallback (`Option`) |
 | `app/chart/LecChartParams.scala` (`ChartParams.applyTo`) | JS-boundary catch-all → total fallback (`Unit`) |

@@ -6,27 +6,19 @@
 
 ---
 
-## A naming distinction used throughout
+## The valuation type this plan reads
 
-Two different types are called `LossDistribution`, and this plan names both.
+`LossDistribution` in
+`modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala`
+is one concrete type carrying `nodeId`, `trials`, `source`, `applied` and
+`provenance`, with no subtypes. It is specified by
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and was
+chosen from four candidates written out and run as code in
+`docs/scratch/valuation-prototypes/`.
 
-**old-LossDistribution** is the sealed class in
-`modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala`,
-with `RiskResult` for a simulated leaf and `RiskResultGroup` for an aggregated
-portfolio. Phase 1 is written against it, and an unqualified mention in that
-phase means this one.
-
-**FB-F LossDistribution** is the flat valuation type ruled 2026-09-27 and
-specified by
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md): one
-concrete type carrying `nodeId`, `trials`, `source`, `applied` and
-`provenance`, with no subtypes. It was chosen from four candidates written out
-and run as code in `docs/scratch/valuation-prototypes/`.
-
-Phase 1 is independent of which one is in the tree. **Phase 2 is written against
-FB-F** and lands after it, because a leaf's record is read off the value's own
-`provenance` field. The two plans are aligned on that single point and on
-nothing else: this plan owns the endpoint, that one owns the field.
+A leaf's record is read off that value's own `provenance` field. The two plans
+are aligned on that single point and on nothing else: this plan owns the
+endpoint, that one owns the field.
 
 ---
 
@@ -76,10 +68,9 @@ Identity is attached at the read edge instead. Whether the cache hits or misses,
 the resolver labels the record with the requested node:
 
 ```scala
-// hit
-RiskResult.fromTrialOutcomes(leaf.id, content.outcomes, List(content.provenance))
-// miss
-RiskResult.fromTrialOutcomes(leaf.id, outcomes, List(provenance))
+// hit and miss alike — the cache's own value reaches NodeLosses.leaf, which
+// attaches the requested node's identifier
+NodeLosses.leaf(leaf.id, content.outcomes, content.provenance)
 ```
 
 A portfolio holds no record of its own. No response type in
@@ -261,10 +252,9 @@ def leafProvenances(results: Map[NodeId, LossDistribution]): Map[NodeId, NodePro
   results.iterator.flatMap { case (id, d) => d.provenance.map(id -> _) }.toMap
 ```
 
-No type test: under FB-F every value carries its own record directly, and a
-portfolio's is absent. One record per key holds because the resolver's leaf
-path always produces `List(provenance)`, on both the cache hit and the cache
-miss.
+No type test: every value carries its own record directly, and a portfolio's is
+absent. One record per key holds because the cache value `LeafSimResult` carries
+exactly one `provenance`, on both the cache hit and the cache miss.
 
 ### Controller route
 
@@ -339,47 +329,36 @@ after it.
 | ADR-030 | The controller binds `given Checked[Permission]` before the service call, matching both existing routes | Compliant |
 | ADR-036 | The response carries `NodeId` keys only, which §4 names client-facing; no `WorkspaceId` | Compliant |
 
-### Flagged deviation — two ADRs publish an example this plan does not follow
+### Resolved — the two ADRs now publish attribution by node identifier
 
-ADR-003 §4 and ADR-009 §5 both give the same worked example for how a record is
-attributed to a node:
+ADR-003 §4 and ADR-009 §5 both used to give a child-walk as the worked example
+for how a record is attributed to a node, and ADR-003 §4 stated it as prose as
+well, claiming the records arrive "in child order".
 
-```scala
-group.children.collect { case r: RiskResult => r.nodeId -> r.provenances }
-```
+Both now describe what this plan does: the subtree's leaves come from
+`TreeIndex`, each is resolved under its own identifier, and the result is an
+unordered map, so there is no child order to claim.
 
-ADR-003 §4 states it as prose as well: "Its records are read by walking its
-children and pairing each child's `nodeId` with that child's records, giving the
-union of all leaf provenances in the subtree, in child order."
+The **rule** in ADR-009 §5 was satisfied throughout and did not change: that
+`NodeProvenance` carries no identity of its own, that no flat provenance list is
+exposed, and that nothing is merged onto an aggregate. Only the **example** of
+how identity is supplied moved.
 
-This plan attributes records by resolving each leaf under its own identifier,
-taking the set of leaves from `TreeIndex`. It produces the same records with the
-same node keys. It differs in two respects: it does not descend through
-`RiskResultGroup.children`, and the result is a map, so there is no child order.
-Both ADR passages need amending to describe attribution by node identifier and
-to drop the ordering claim.
-
-Two things are worth separating here. The **rule** in ADR-009 §5 — that
-`NodeProvenance` carries no identity of its own, that the sealed supertype
-exposes no flat provenance list, and that nothing is merged onto an aggregate —
-is satisfied exactly. Only the **example** of how identity is supplied differs.
-
-The ordering claim is inaccurate about the endpoint independently of this, since
-the response type is an unordered map.
-
-**Decision required before implementation:** open decision 1.
+The alternative that was once open — descending through the aggregate's children
+— is no longer expressible. The public value holds no children, and the internal
+`PortfolioLosses` that does is `private[cache]`, so nothing outside the resolver
+can reach them.
 
 ---
 
 ## Open decisions
 
-1. **Amending ADR-003 §4 and ADR-009 §5.** Both publish the child-walk example
-   and ADR-003 §4 adds the "in child order" claim. Either amend both to describe
-   attribution by node identifier and drop the ordering claim, or change this
-   plan to descend through `RiskResultGroup.children` instead. The first keeps
-   the endpoint resolving only the leaves it needs; the second keeps the ADRs
-   untouched at the cost of combining figures at every intermediate portfolio
-   for a result that discards them.
+1. ~~**Amending ADR-003 §4 and ADR-009 §5.**~~ **Closed.** Both were amended to
+   describe attribution by node identifier, and the "in child order" claim was
+   dropped. It was not a choice in the end: the alternative — descending through
+   the aggregate's children — became inexpressible when the valuation type
+   landed, because the public value holds no children and the internal
+   `PortfolioLosses` that does is `private[cache]`.
 
 2. **Whether the endpoint accepts a mitigation selection.** It currently takes
    none and resolves the inherent valuation. Accepting one is technically

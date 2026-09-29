@@ -6,8 +6,9 @@ import zio.test.Assertion.*
 import com.risquanter.register.simulation.{RiskSampler, MetalogDistribution, SeedDerivation, HdrStreams}
 import com.risquanter.register.domain.data.iron.{Probability, OccurrenceProbability, PositiveInt, SeedEntityId, SeedVarId}
 import com.risquanter.register.domain.data.{RiskLeaf, TrialId, Loss, ExpertDistributionParams}
-import com.risquanter.register.simulation.RiskResult
+import com.risquanter.register.simulation.LossDistribution
 import com.risquanter.register.testutil.TestHelpers.{nodeId, idStr}
+import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
 import com.risquanter.register.configs.{SimulationConfig, TestConfigs}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -26,11 +27,11 @@ private object TestSimulator {
   /** Simulate every sampler, at most `maxConcurrentSimulations` at a time. */
   def simulate(
     samplers: Vector[RiskSampler]
-  )(using cfg: SimulationConfig): Task[Vector[RiskResult]] =
+  )(using cfg: SimulationConfig): Task[Vector[LossDistribution]] =
     ZIO.collectAllPar(
       samplers.map { sampler =>
         Simulator.performTrials(sampler, cfg.defaultNTrials, cfg.defaultTrialParallelism)
-          .map(trials => RiskResult(sampler.nodeId, trials, Nil))
+          .map(trials => leafOf(sampler.nodeId, trials))
       }
     ).withParallelism(cfg.maxConcurrentSimulations)
 
@@ -38,9 +39,9 @@ private object TestSimulator {
     * parallel path must match exactly. */
   def simulateSequential(
     samplers: Vector[RiskSampler]
-  )(using cfg: SimulationConfig): Task[Vector[RiskResult]] =
+  )(using cfg: SimulationConfig): Task[Vector[LossDistribution]] =
     ZIO.foreach(samplers) { sampler =>
-      ZIO.attempt(RiskResult(sampler.nodeId, performTrialsSync(sampler, cfg.defaultNTrials), Nil))
+      ZIO.attempt(leafOf(sampler.nodeId, performTrialsSync(sampler, cfg.defaultNTrials)))
     }
 
   /** Every trial of one risk, computed in order on the calling thread. */

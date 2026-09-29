@@ -8,6 +8,7 @@ import com.risquanter.register.domain.data.{
 }
 import com.risquanter.register.domain.data.iron.{MitigationId, NodeId}
 import com.risquanter.register.domain.errors.ValidationError
+import com.risquanter.register.simulation.TrialOutcomes
 
 /**
  * Per-mitigation scope restriction inside a selection: `FullScope`
@@ -91,11 +92,9 @@ object MitigationSelection {
  * - `effectiveTree` — the param-stage half: scoped leaves replaced by their
  *   transformed selves. Output is a normal `RiskTree` revalidated through
  *   `RiskTree.fromNodes` — closure by construction.
- * - `resultTransformFor` — the result-stage half for one node: the composed
- *   pipeline of every ResultStage mitigation scoping it (None when none).
- *   The resolver applies it to a node's finished `TrialOutcomes` — the
- *   combine's operand or finished aggregate, never the summation step
- *   (ADR-009 associativity invariant).
+ * - `recordsByNode` — the result-stage half, as one record list per node.
+ * - `run` — that layer's composed pipeline, applied to a node's finished
+ *   `TrialOutcomes`, never to the summation step (ADR-009).
  * - `applicationRecords` — one record per applied mitigation for one
  *   resolution, describing what the application touched.
  *
@@ -170,16 +169,36 @@ object MitigationApplication {
     }
   }
 
-  /** Composed result-stage transform for one node, precedence order; None
-    * when nothing result-stage scopes it. */
-  def resultTransformFor(
-    nodeId: NodeId,
+  /** One record per result-stage mitigation scoping each node, in precedence
+    * order — the layer that node's valuation applies.
+    *
+    * Parameter-stage transforms are folded into the effective tree before the
+    * content hash is computed, so they shape the figure the layer is applied to
+    * and are never part of the layer. Each record's `resolvedScope` is the
+    * mitigation's whole node set, which is why it is computed once for the tree
+    * rather than per node. */
+  def recordsByNode(
     scoped: Map[NodeId, List[Mitigation]]
-  ): Option[RiskResultTransform] =
-    scoped.getOrElse(nodeId, Nil)
-      .collect { case Mitigation(_, _, _, MitigationSpec.ResultStage(pipeline), _) => pipeline }
+  ): Map[NodeId, List[MitigationApplicationRecord]] = {
+    val scopeOf = resolvedScopeOf(scoped)
+    scoped.view.mapValues { ms =>
+      ms.collect { case m @ Mitigation(_, _, _, MitigationSpec.ResultStage(_), _) =>
+        MitigationApplicationRecord(m.id, m.spec, scopeOf.getOrElse(m, Set.empty), m.precedence)
+      }
+    }.toMap
+  }
+
+  /** The composed transform of one node's layer, applied. An empty layer
+    * returns the same reference it was given. */
+  def run(
+    applied: List[MitigationApplicationRecord],
+    outcomes: TrialOutcomes
+  ): TrialOutcomes =
+    applied
+      .collect { case MitigationApplicationRecord(_, MitigationSpec.ResultStage(pipeline), _, _) => pipeline }
       .map(ResultTransformInterpreter.toTransform)
       .reduceOption(_.andThen(_))
+      .fold(outcomes)(_.run(outcomes))
 
   /** One record per applied mitigation for a single resolution: the node set
     * the application actually touched under this tree version and selection. */
@@ -187,15 +206,20 @@ object MitigationApplication {
     tree: RiskTree,
     selection: MitigationSelection,
     resolvedScopes: Map[MitigationId, Set[NodeId]]
-  ): List[MitigationApplicationRecord] = {
-    val perNode = scoped(tree, selection, resolvedScopes)
-    perNode.toList
+  ): List[MitigationApplicationRecord] =
+    resolvedScopeOf(scoped(tree, selection, resolvedScopes)).toList
+      .map { case (m, nodes) => MitigationApplicationRecord(m.id, m.spec, nodes, m.precedence) }
+      .sortBy(r => (r.precedence.key, r.mitigationId.value))
+
+  /** Invert the per-node view: each mitigation paired with every node it
+    * scopes. This is a record's `resolvedScope`. */
+  private def resolvedScopeOf(
+    scoped: Map[NodeId, List[Mitigation]]
+  ): Map[Mitigation, Set[NodeId]] =
+    scoped.toList
       .flatMap { case (nodeId, ms) => ms.map(_ -> nodeId) }
       .groupMap(_._1)(_._2)
-      .map { case (m, nodes) => MitigationApplicationRecord(m.id, m.spec, nodes.toSet, m.precedence) }
-      .toList
-      .sortBy(r => (r.precedence.key, r.mitigationId.value))
-  }
+      .view.mapValues(_.toSet).toMap
 
   private def inPrecedenceOrder(ms: List[Mitigation]): List[Mitigation] =
     ms.sortBy(m => (m.precedence.key, m.id.value))

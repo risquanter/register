@@ -180,8 +180,8 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("resultTransformFor (result-stage half of the action)")(
-      test("composes pipelines in precedence order") {
+    suite("recordsByNode + run (result-stage half of the action)")(
+      test("a node's layer composes its pipelines in precedence order") {
         val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
         val dFirst = resultDeductible("m-a-ded", 10000L, MitigationPrecedence(-1))
         val scale  = Mitigation.create(
@@ -191,17 +191,41 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
         val t = mkTree(dFirst, scale)
         val scoped = MitigationApplication.scoped(t, MitigationSelection.Residual,
           scopes(dFirst -> Set("cyber"), scale -> Set("cyber")))
-        val composed = MitigationApplication.resultTransformFor(nodeId("cyber"), scoped)
-        assertTrue(composed.map(_.run(outcomes).outcomeOf(1)) == Some(45000L)) // (100K − 10K) × 0.5, not 40K
+        val records = MitigationApplication.recordsByNode(scoped)
+        val layer   = records.getOrElse(nodeId("cyber"), Nil)
+        assertTrue(
+          layer.map(_.mitigationId) == List(dFirst.id, scale.id),
+          MitigationApplication.run(layer, outcomes).outcomeOf(1) == 45000L // (100K − 10K) × 0.5, not 40K
+        )
       },
-      test("None when nothing result-stage scopes the node") {
+      test("a parameter-stage mitigation produces no record") {
+        // Parameter-stage transforms shape the figure the layer is applied to,
+        // and are never part of the layer.
         val m = leafScale("m-scale", 0.5)
         val t = mkTree(m)
-        val scoped = MitigationApplication.scoped(t, MitigationSelection.Residual, scopes(m -> Set("cyber")))
+        val scoped  = MitigationApplication.scoped(t, MitigationSelection.Residual, scopes(m -> Set("cyber")))
+        val records = MitigationApplication.recordsByNode(scoped)
         assertTrue(
-          MitigationApplication.resultTransformFor(nodeId("cyber"), scoped) == None,
-          MitigationApplication.resultTransformFor(nodeId("flood"), scoped) == None
+          records.getOrElse(nodeId("cyber"), Nil).isEmpty,
+          records.getOrElse(nodeId("flood"), Nil).isEmpty
         )
+      },
+      test("each record carries the mitigation's whole node set, not only this node") {
+        // The cap reaches both nodes, so the record on either one names both.
+        val cap = resultCap("m-cap", 1000000L)
+        val t   = mkTree(cap)
+        val scoped  = MitigationApplication.scoped(t, MitigationSelection.Residual,
+          scopes(cap -> Set("cyber", "flood")))
+        val records = MitigationApplication.recordsByNode(scoped)
+        assertTrue(
+          records(nodeId("cyber")).head.resolvedScope == Set(nodeId("cyber"), nodeId("flood")),
+          records(nodeId("flood")).head.resolvedScope == Set(nodeId("cyber"), nodeId("flood"))
+        )
+      },
+      test("an empty layer returns the same reference it was given") {
+        // The identity of the transform monoid.
+        val outcomes = TrialOutcomes(100, Map(1 -> 100000L))
+        assertTrue(MitigationApplication.run(Nil, outcomes) eq outcomes)
       }
     ),
 

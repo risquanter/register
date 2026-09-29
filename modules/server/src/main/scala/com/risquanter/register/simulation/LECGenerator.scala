@@ -2,36 +2,16 @@ package com.risquanter.register.simulation
 
 import scala.collection.immutable.TreeMap
 
-/** Utility for generating Loss Exceedance Curve (LEC) data from simulation outcomes.
-  * 
-  * Key concepts:
-  * - Loss values are in millions: 1L = $1M
-  * - Quantiles represent loss thresholds at specific percentiles
-  * - Exceedance curve shows P(Loss >= x) for various loss levels
-  * 
-  * BCG Implementation Notes:
-  * - Uses evenly-spaced ticks over [minLoss, maxLoss] range
-  * - Default nEntries = 100 provides smooth curves
-  * 
-  * TODO: Future optimization - implement adaptive sampling (Option C):
-  * - Log-scale for fat-tailed distributions
-  * - Percentile-based for critical thresholds
-  * - Hybrid approach with guaranteed key quantiles
+/** Generates Loss Exceedance Curve data from simulation outcomes.
+  *
+  * A curve gives P(Loss >= x) at evenly spaced ticks over [minLoss, maxLoss];
+  * 100 ticks is the default. Loss values are in millions, so 1L = $1M.
   */
 object LECGenerator {
   
-  /** Compute the unconditional VaR at a given percentile.
-    *
-    * Returns Q(p) = X_{(⌈Np⌉)} over the full empirical CDF, including
-    * implicit zero-loss observations from non-occurring trials.
-    *
-    * This is the industry-standard unconditional percentile (VaR):
-    * the loss value below which a fraction p of ALL Monte Carlo trials
-    * fall — not just those where the risk event fired.
-    *
-    * @param result LossDistribution carrying nTrials and sparse outcomeCount
-    * @param p      Percentile as fraction in [0.0, 1.0]
-    * @return Loss value at the unconditional percentile, or 0L if empty / nTrials=0
+  /** The unconditional VaR at percentile `p`: the loss below which a fraction
+    * `p` of all trials fall, counting the zero-loss trials where the risk did
+    * not occur. Returns 0L when there is no simulation data.
     */
   def unconditionalQuantile(result: LossDistribution, p: Double): Long =
     val outcomes = result.outcomeCount
@@ -50,22 +30,11 @@ object LECGenerator {
           .map(_._1)
           .getOrElse(outcomes.lastKey)
 
-  /** Calculate unconditional VaR quantiles from simulation outcomes.
+  /** Unconditional VaR quantiles: p90, p95, p99 and p99.5.
     *
-    * Deliberately tail-only (P90 and up), not P05/P50: for a risk whose
-    * occurrence probability is below 50% (the common case for an
-    * individually-named risk in a register), the unconditional median — and
-    * often lower percentiles too — collapses to 0, which isn't a useful
-    * annotation on its own (the chart's "probability of no loss" statistic
-    * covers that information directly and correctly instead; see
-    * `probabilityOfNoLoss`). P05 remains meaningful only as an *input*
-    * elicitation anchor for the severity distribution (see
-    * `LognormalHelper`/the leaf-creation preview) — a different statistical
-    * question from a quantile of this *output* aggregate distribution.
-    *
-    * @param result Risk simulation result with outcome counts
-    * @return Map of quantile names to loss values
-    *         Keys: "p90", "p95", "p99", "p99.5" (1-in-200, Solvency II SCR)
+    * Tail-only by design. For a risk occurring less than half the time — the
+    * common case — the unconditional median collapses to 0 and says nothing;
+    * `probabilityOfNoLoss` carries that information instead.
     */
   def calculateQuantiles(result: LossDistribution): Map[String, Double] =
     if result.outcomeCount.isEmpty || result.nTrials == 0 then Map.empty
@@ -76,15 +45,9 @@ object LECGenerator {
       "p99.5" -> unconditionalQuantile(result, 0.995).toDouble
     )
 
-  /** Average Annual Loss (AAL) — the mean of the unconditional loss
-    * distribution across all trials, including the implicit zero-loss ones
-    * (trials where the risk didn't occur). The standard actuarial/cat
-    * modeling companion statistic to the tail percentiles above: a
-    * percentile answers "how bad can it get," AAL answers "what should be
-    * budgeted for on average" — a different question, not a quantile.
-    *
-    * @param result LossDistribution carrying nTrials and sparse outcomeCount
-    * @return Mean loss (in millions), or 0.0 if there's no simulation data
+  /** Average Annual Loss: the mean loss across all trials, zero-loss trials
+    * included. A percentile answers how bad it can get; this answers what to
+    * budget for on average. Returns 0.0 when there is no simulation data.
     */
   def averageAnnualLoss(result: LossDistribution): Double =
     if result.nTrials == 0 then 0.0
@@ -92,16 +55,10 @@ object LECGenerator {
       val totalLoss = result.outcomeCount.iterator.map { case (loss, count) => loss.toDouble * count }.sum
       totalLoss / result.nTrials.toDouble
 
-  /** Probability that this risk causes no loss at all in a given trial.
-    * Counts both implicit zeros (trials absent from the sparse `outcomes`
-    * map — the risk simply didn't occur) and any *explicit* zero-valued
-    * outcomes present in `outcomeCount` — the same two sources
-    * `unconditionalQuantile`'s own cumulative walk already treats as "at or
-    * below zero," so this stays consistent with how the tail percentiles
-    * above are computed.
-    *
-    * @param result LossDistribution carrying nTrials and sparse outcomeCount
-    * @return Fraction in [0.0, 1.0], or 1.0 if there's no simulation data
+  /** Probability that this risk causes no loss in a given trial, counting both
+    * trials absent from the sparse map and explicit zero-valued outcomes — the
+    * two sources `unconditionalQuantile` also treats as at or below zero.
+    * Returns 1.0 when there is no simulation data.
     */
   def probabilityOfNoLoss(result: LossDistribution): Double =
     if result.nTrials == 0 then 1.0
@@ -110,28 +67,17 @@ object LECGenerator {
       val explicitZeros = result.outcomeCount.getOrElse(0L, 0).toLong
       (implicitZeros + explicitZeros).toDouble / result.nTrials.toDouble
 
-  /** Find the unconditional VaR at a given percentile.
-    *
-    * Used to clip tick ranges to a meaningful percentile (e.g. p99.5) instead
-    * of `maxLoss`, which is a single extreme outlier and stretches the x-axis
-    * far beyond the informative range.
-    *
-    * @param result     Simulation result with outcome histogram
-    * @param percentile Target percentile in [0, 1] (e.g. 0.995 for p99.5)
-    * @return Loss value at the unconditional percentile, or None if no outcomes
+  /** The unconditional VaR at `percentile`, or None when there are no outcomes.
+    * Clips tick ranges to a meaningful percentile rather than `maxLoss`, which
+    * is one outlier and stretches the x-axis past the informative range.
     */
   def findQuantileLoss(result: LossDistribution, percentile: Double): Option[Long] =
     Option.when(result.nTrials > 0 && result.outcomeCount.nonEmpty) {
       unconditionalQuantile(result, percentile)
     }
   
-  /** Generate Vega-Lite JSON specification for exceedance curve visualization
-    * 
-    * Creates a step chart showing P(Loss >= x) vs Loss
-    * 
-    * @param result Risk simulation result
-    * @param maxPoints Maximum number of data points (default 100 for performance)
-    * @return Vega-Lite JSON as string, or None if no data
+  /** Vega-Lite specification for a step chart of P(Loss >= x) against Loss,
+    * sampled down to `maxPoints`. None when there is no data.
     */
   def generateVegaLiteSpec(result: LossDistribution, maxPoints: Int = 100): Option[String] = {
     val outcomes = result.outcomeCount
@@ -187,22 +133,13 @@ object LECGenerator {
     }
   }
   
-  /** Generate both quantiles and Vega-Lite spec in one pass
-    * More efficient than calling both methods separately
-    */
+  /** Quantiles and Vega-Lite spec together, in one pass over the outcomes. */
   def generateLEC(result: LossDistribution, maxVegaPoints: Int = 100): (Map[String, Double], Option[String]) = {
     (calculateQuantiles(result), generateVegaLiteSpec(result, maxVegaPoints))
   }
   
-  /** Generate evenly-spaced loss ticks for LEC curve sampling
-    * 
-    * BCG approach: Linear spacing over [minLoss, maxLoss * 1.1]
-    * Uses actual minimum from data (not hardcoded 0)
-    * 
-    * @param minLoss Minimum loss observed in simulation results
-    * @param maxLoss Maximum loss observed in simulation results
-    * @param nEntries Number of sample points (default 100)
-    * @return Vector of loss values to sample
+  /** Evenly-spaced loss ticks over [minLoss, maxLoss * 1.1], taking the
+    * minimum from the data rather than assuming zero.
     */
   def getTicks(minLoss: Long, maxLoss: Long, nEntries: Int = 100): Vector[Long] = {
     require(nEntries > 1, "nEntries must be > 1")
@@ -221,12 +158,7 @@ object LECGenerator {
     range.toVector
   }
   
-  /** Generate LEC curve data points (loss → exceedance probability)
-    * 
-    * @param result Risk simulation result
-    * @param nEntries Number of sample points
-    * @return Vector of (loss, exceedanceProbability) tuples
-    */
+  /** Curve points as (loss, exceedance probability) pairs. */
   def generateCurvePoints(result: LossDistribution, nEntries: Int = 100): Vector[(Long, Double)] = {
     if (result.outcomeCount.isEmpty) Vector.empty
     else {
@@ -240,64 +172,36 @@ object LECGenerator {
     }
   }
 
-  /** Upper end of the tick range: the unconditional p99.5 quantile, clipped
-    * so extreme outliers don't stretch the x-axis — EXCEPT when that quantile
-    * falls below the smallest observed loss. That happens for any risk whose
-    * occurrence probability is at or below 0.5%: more than 99.5% of trials
-    * are zero-loss, so the unconditional p99.5 is 0, which would put maxLoss
-    * below minLoss and violate getTicks' precondition. For those rare risks
-    * the true maximum observed loss is used instead, so the curve spans the
-    * actual outcomes.
+  /** Upper end of the tick range: the p99.5 quantile, so outliers do not
+    * stretch the x-axis. Falls back to the observed maximum when that quantile
+    * sits below `minLoss`, which happens for a risk occurring at or below 0.5%
+    * of trials and would otherwise violate `getTicks`' precondition.
     */
   private def clippedMaxLoss(result: LossDistribution): Long = {
     val q = findQuantileLoss(result, 0.995).getOrElse(result.maxLoss)
     if (q < result.minLoss) result.maxLoss else q
   }
 
-  /** Exceedance probability at a tick, with the y-intercept convention.
-    *
-    * At loss = 0 the "at least x" reading is trivially 1.0 for every
-    * distribution, so the curve instead starts at the strict
-    * "more than x" value: 1 - probabilityOfNoLoss — the probability of
-    * losing anything at all. This makes the curve meet the y-axis at the
-    * occurrence-probability plateau (the standard LEC presentation) and
-    * agrees with the chart's own no-loss statistic. Every tick above 0
-    * is the raw simulated probOfExceedance, where the two readings are
-    * identical on integer losses.
+  /** Exceedance probability at a tick. At loss = 0 the "at least x" reading is
+    * trivially 1.0, so the curve starts at the strict "more than x" value
+    * instead, meeting the y-axis at the occurrence-probability plateau. Above
+    * 0 the two readings coincide on integer losses.
     */
   private def exceedanceAt(result: LossDistribution, loss: Long): Double =
     if (loss == 0L) 1.0 - probabilityOfNoLoss(result)
     else result.probOfExceedance(loss).toDouble
   
-  /** Visual-only exceedance threshold for chart tail trimming.
-    *
-    * Ticks where every curve drops below this value are removed from the
-    * rendered chart data. The underlying RiskResult and all analytical
-    * queries (probOfExceedance, quantiles, aggregation) remain unaffected.
-    *
-    * 0.5% corresponds to the Solvency II 1-in-200 year return period —
-    * the most conservative regulatory floor in common use.
-    *
-    * @see docs/LEC-TAIL-TRIMMING.md for full rationale and references.
+  /** Visual-only threshold for tail trimming: ticks where every curve drops
+    * below it are dropped from the rendered data, leaving analytical queries
+    * untouched. 0.5% is the Solvency II 1-in-200 year return period.
     */
   val tailCutoff: Double = 0.005
 
-  /** Generate LEC curves for multiple nodes with a shared tick domain.
-    * 
-    * When displaying multiple LEC curves together, they must share the same
-    * X-axis (loss ticks) for proper comparison. This method:
-    * 1. Computes the combined loss range across all results
-    * 2. Generates a shared tick domain covering that range
-    * 3. Computes exact exceedance probabilities for each result at each tick
-    * 
-    * This is the core of ADR-014's render-time computation strategy:
-    * - No interpolation (mathematically exact probOfExceedance)
-    * - Display-context dependent tick domain
-    * - Cached LossDistribution enables this without re-simulation
-    * 
-    * @param results Map of node ID to LossDistribution (simulation outcomes)
-    * @param nEntries Number of sample points for the shared tick domain
-    * @return Map of node ID to curve points (loss, exceedanceProbability)
+  /** Curves for several nodes over one shared tick domain, so they can be
+    * overlaid and compared on a common x-axis.
+    *
+    * Every probability is computed exactly at each tick rather than
+    * interpolated, which the cached distributions make cheap (ADR-014).
     */
   def generateCurvePointsMulti[K](
     results: Map[K, LossDistribution], 
@@ -329,11 +233,8 @@ object LECGenerator {
     trimTail(evaluated, sharedTicks)
   }
 
-  /** Trim the uninformative tail from evaluated LEC curves.
-    *
-    * Removes trailing ticks where every curve drops below `tailCutoff`,
-    * keeping one tick beyond the last meaningful point for visual continuity.
-    * The underlying RiskResult and all analytical queries remain unaffected.
+  /** Drop trailing ticks where every curve is below `tailCutoff`, keeping one
+    * beyond the last meaningful point for visual continuity.
     */
   private def trimTail[K](
     evaluated: Map[K, Vector[(Long, Double)]],

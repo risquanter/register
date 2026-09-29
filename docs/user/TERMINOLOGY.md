@@ -26,16 +26,18 @@ The **complete empirical distribution** from Monte Carlo simulation, backing the
 
 **Implementation:**
 ```scala
-sealed abstract class LossDistribution extends LECCurve {
-  def outcomes: Map[TrialId, Loss]
-  def outcomeCount: TreeMap[Loss, Int]
-  def nTrials: Int
-}
+final case class LossDistribution private (
+  nodeId: NodeId,
+  trials: TrialOutcomes,                       // after this node's mitigation layer
+  source: TrialOutcomes,                       // the figures that layer was applied to
+  applied: List[MitigationApplicationRecord],  // empty when nothing is applied here
+  provenance: Option[NodeProvenance]
+) extends LECCurve
 ```
 
-**Subtypes:**
-- `RiskResult` - Single risk distribution (leaf node)
-- `RiskResultGroup` - Aggregated distribution (composite node)
+There are no subtypes. One concrete type serves a simulated leaf and an
+aggregated portfolio alike — the difference between them is internal to the
+resolver and is not something a consumer can observe or match on.
 
 ### LEC Curve (Loss Exceedance Curve)
 The **mathematical function**: `Loss → Probability`

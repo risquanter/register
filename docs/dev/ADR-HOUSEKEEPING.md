@@ -172,20 +172,18 @@ in ADR-003 as a decision taken, in the ADR-00X shape:
   `maxConcurrentSimulations` is deliberately not listed: its own scaladoc
   records that nothing reads it.
 
-**Follow-up, carried by PLAN-RISKTRANSFORM slice 5.** Two statements in ADR-003
-are wrong and were left in place untouched, because slice 5 was ruled on
-2026-09-15 to rewrite the paragraphs they sit in:
+**Follow-up: closed.** Two statements in ADR-003 were wrong and are now
+corrected, by the documentation sweep of
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](plans/PLAN-FBF-VALUATION-TRANSPLANT.md) §6:
 
-- The Implementation table's row "Optional provenance capture — ✅ Implemented
-  (`includeProvenance` flag)". The flag sets a tracing attribute and nothing
-  else, and no production caller passes `true`.
-- Decision 4's published derivation
-  `group.children.collect { case r: RiskResult => r.nodeId -> r.provenances }`.
-  That pattern appears nowhere in `src/main`; the live derivation is
-  `descendantProvenances` in `CachedResultResolverLive`, which returns a flat
-  `List[NodeProvenance]` with no node-id pairing.
+- The Implementation table's row on provenance capture now says what the code
+  does — capture is unconditional, and `includeProvenance` sets a tracing
+  attribute and gates nothing.
+- Decision 4's published derivation is now `LossDistribution.leafProvenances`,
+  which keys each record by the node that carries it. The child-walk it used to
+  publish is not merely absent from `src/main`; it is no longer expressible,
+  because the public value holds no children.
 
-Both are recorded in PLAN-RISKTRANSFORM §7.6.9 and its §7.6.10 alignment row.
 Nothing else in T4 is open.
 
 **Found while checking, not fixed here.**
@@ -230,10 +228,11 @@ The live trait takes six parameters — adding `seedEntityId`, `selection` and
 **User's ruling:** update it to the live code where behaviour has not
 fundamentally changed. *Mechanical*, with one caveat.
 
-**Caveat.** The return type is about to move again. PLAN-RISKTRANSFORM §7.6.12
-decision 2 was ruled on 2026-09-15 to narrow it to `ValuationResult`. Doing T5
-before that lands means editing the record twice. Sequence T5 after the
-`ValuationResult` sub-slice, or accept the second edit.
+**No longer sequenced against anything.** The return type has settled: the
+valuation transplant has landed, and `Task[LossDistribution]` is final — that
+type is now one concrete case class rather than the root of a hierarchy, so the
+narrowing §7.6.12 decision 2 asked for happened without the signature changing.
+T5 is a plain mechanical update whenever it is picked up.
 
 ADR-005 carried the same drifted signature and was in this task's scope until it
 was retired to `docs/archive/decision-records/`. An archived record is not
@@ -377,7 +376,6 @@ stands, which is T5.
 
 ## Sequencing
 
-T5 after the `ValuationResult` sub-slice, or accept editing twice — the only
-task still sequenced against other work.
-T1, T2, T3, T4, T6, T7, T8, T9 and T10 are done. T4 leaves one follow-up, the two
-wrong ADR-003 statements, which PLAN-RISKTRANSFORM slice 5 carries.
+No task is sequenced against other work any more. T5 was the last one, and the
+valuation type it waited on has landed.
+T1, T2, T3, T4, T6, T7, T8, T9 and T10 are done; T5 is the only one outstanding.

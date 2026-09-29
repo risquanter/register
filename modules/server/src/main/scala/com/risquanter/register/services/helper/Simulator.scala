@@ -19,35 +19,23 @@ private val DefaultTrialParallelism: PositiveInt =
   math.max(1, Runtime.getRuntime.availableProcessors()).refineUnsafe
 
 /**
- * Monte Carlo simulation of a single risk leaf.
+ * Monte Carlo simulation of a single risk leaf. Walking the tree and
+ * aggregating portfolios belongs to the resolver, not here.
  *
- * Builds a sampler from a leaf definition and runs its trials, storing only the
- * trials where the risk occurred. Walking the tree and aggregating portfolios is
- * the resolver's job, not this object's.
- *
- * Properties the callers rely on:
- * - Sparse storage: zero-loss trials are never materialized.
- * - Determinism: sampling is a pure function of the HDR stream coordinates, so
- *   the same seeds give the same outcomes at any parallelism.
- * - GraalVM Native Image compatible: ZIO fibers, no Scala parallel collections.
+ * Zero-loss trials are never materialized, and sampling is a pure function of
+ * the HDR stream coordinates, so the same seeds give the same outcomes at any
+ * parallelism.
  */
 object Simulator {
 
   /**
-   * Run `nTrials` trials for one risk and return the trials where it occurred.
+   * Run `nTrials` trials and return a sparse map of the trials where the risk
+   * occurred.
    *
-   * Two phases. The occurrence filter runs sequentially over every trial: one
-   * random draw and one comparison each. The loss sampling runs across
-   * `parallelism` fibers, because an inverse-CDF evaluation costs orders of
-   * magnitude more than the occurrence draw. Below 100 successful trials the
-   * fiber overhead outweighs the split, so the loss phase runs sequentially.
-   *
-   * Thread safety: sampler functions are pure (HDR-based determinism).
-   *
-   * @param sampler RiskSampler with occurrence + loss distribution
-   * @param nTrials Total number of trials to simulate (must be positive)
-   * @param parallelism Number of parallel fibers for loss sampling
-   * @return Task of sparse map: trial ID → loss (only non-zero outcomes)
+   * The occurrence filter runs sequentially — one draw and one comparison per
+   * trial. Loss sampling runs across `parallelism` fibers, an inverse-CDF
+   * evaluation costing far more than an occurrence draw; below 100 successful
+   * trials the fiber overhead outweighs the split and it runs sequentially.
    */
   def performTrials(
     sampler: RiskSampler,
@@ -82,24 +70,11 @@ object Simulator {
   }
 
   /**
-   * Create RiskSampler from RiskLeaf definition.
-   * Validates parameters and builds Metalog distribution.
-   * Always captures provenance metadata.
+   * Build a sampler and its provenance record from a leaf definition.
    *
-   * Stochastic identity is assigned data: the streams derive from the
-   * workspace's seedEntityId and the leaf's seedVarId in one place
-   * (SeedDerivation), and the sampler and NodeProvenance consume the same
-   * HdrStreams value, so recorded provenance cannot diverge from what was
-   * simulated.
-   *
-   * Note: leaf.probability is already refined to Probability type at the boundary,
-   * so no additional validation is needed here.
-   *
-   * @param leaf RiskLeaf definition
-   * @param seedEntityId The owning workspace's stochastic identity (HDR Entity axis)
-   * @param seed3 Global seed 3 for HDR random number generation
-   * @param seed4 Global seed 4 for HDR random number generation
-   * @return Tuple of (RiskSampler, NodeProvenance)
+   * Both consume the same `HdrStreams` value, produced by the single
+   * derivation site `SeedDerivation`, so a recorded provenance cannot diverge
+   * from what was simulated.
    */
   private[services] def createSamplerFromLeaf(
     leaf: RiskLeaf,
@@ -122,8 +97,8 @@ object Simulator {
       )
 
       // Provenance records the very same stream tuple the sampler consumes.
-      // Content-only: no node identity — attribution is structural, via the
-      // RiskResult that carries this record.
+      // Content-only: no node identity — attribution is by node, via the
+      // LossDistribution that carries this record beside its own nodeId.
       provenance =
         NodeProvenance(
           entityId = streams.entityId,

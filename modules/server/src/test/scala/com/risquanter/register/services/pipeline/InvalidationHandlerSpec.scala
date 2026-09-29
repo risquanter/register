@@ -5,7 +5,6 @@ import zio.test.*
 import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree}
-import com.risquanter.register.simulation.RiskResult
 import com.risquanter.register.domain.data.iron.*
 import com.risquanter.register.services.sse.SSEHub
 import com.risquanter.register.http.sse.SSEEvent

@@ -4,18 +4,75 @@ import zio.test.*
 import zio.test.Assertion.*
 import zio.prelude.*
 import com.risquanter.register.configs.SimulationConfig
-import com.risquanter.register.domain.data.NodeProvenance
-import com.risquanter.register.domain.data.iron.NodeId
+import com.risquanter.register.domain.data.{
+  LognormalDistributionParams, MitigationApplicationRecord, MitigationPrecedence,
+  MitigationSpec, NodeProvenance, ResultTransformSpec, TransformPipeline
+}
+import com.risquanter.register.domain.data.iron.{NodeId, ValidationUtil}
 import com.risquanter.register.domain.errors.ValidationErrorCode
-import com.risquanter.register.testutil.TestHelpers.nodeId
+import com.risquanter.register.mitigation.MitigationApplication
+import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId}
 import com.risquanter.register.testutil.ConfigTestLoader.withCfg
+import com.risquanter.register.testutil.RiskResultTestSupport.leafOf
+import java.time.Instant
+import io.github.iltotore.iron.refineUnsafe
 
+/** The public valuation type: the members consumers read, the layer `decorate`
+  * applies, and the equality relation. The aggregate's own properties are in
+  * `services.cache.NodeLossesSpec`, which can name the types they exercise.
+  */
 object LossDistributionSpec extends ZIOSpecDefault {
 
+  /** A result-stage layer record capping every trial's loss. `resolvedScope` is
+    * empty because nothing here reads it — the layer is what is under test. */
+  private def capRecord(label: String, cap: Long): MitigationApplicationRecord =
+    MitigationApplicationRecord(
+      mitigationId(label),
+      MitigationSpec.ResultStage(TransformPipeline(List(
+        ResultTransformSpec.CapLosses(ValidationUtil.refineNonNegativeLong(cap).toOption.get)))),
+      Set.empty,
+      MitigationPrecedence.default
+    )
+
+  private def scaleRecord(label: String, factor: Double): MitigationApplicationRecord =
+    MitigationApplicationRecord(
+      mitigationId(label),
+      MitigationSpec.ResultStage(TransformPipeline(List(
+        ResultTransformSpec.ScaleLosses(factor.refineUnsafe)))),
+      Set.empty,
+      MitigationPrecedence.default
+    )
+
+  private val sampleProvenance: NodeProvenance = NodeProvenance(
+    entityId = 1L,
+    occurrenceVarId = 1001L,
+    lossVarId = 2001L,
+    globalSeed3 = 0L,
+    globalSeed4 = 0L,
+    distributionType = "lognormal",
+    distributionParams = LognormalDistributionParams(1000L.refineUnsafe, 5000L.refineUnsafe, 0.9),
+    timestamp = Instant.parse("2026-01-01T00:00:00Z"),
+    metalogDistributionVersion = "1.0.0"
+  )
+
+  /** Build a value with a non-empty layer through the production factory. */
+  private def decorated(
+    id: NodeId,
+    outcomes: Map[Int, Long],
+    applied: List[MitigationApplicationRecord]
+  )(using cfg: SimulationConfig) =
+    LossDistribution.decorate(
+      id,
+      TrialOutcomes(cfg.defaultNTrials, outcomes),
+      None,
+      applied,
+      MitigationApplication.run(applied, _)
+    )
+
   def spec = suite("LossDistributionSpec")(
-    suite("RiskResult - basic functionality")(
+    suite("basic functionality")(
       test("empty result has zero losses") {
-        val result = withCfg(1000) { RiskResult.empty(nodeId("RISK-001")) }
+        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map.empty) }
 
         assertTrue(result.outcomes.isEmpty) &&
         assertTrue(result.maxLoss == 0L) &&
@@ -23,7 +80,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(result.outcomeCount.isEmpty)
       },
       test("single outcome is captured") {
-        val result = withCfg(1000) { RiskResult(nodeId("RISK-001"), Map(5 -> 1000L), Nil) }
+        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map(5 -> 1000L)) }
 
         assertTrue(result.outcomeOf(5) == 1000L) &&
         assertTrue(result.outcomeOf(10) == 0L) &&
@@ -32,11 +89,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
       },
       test("multiple outcomes create frequency distribution") {
         val result = withCfg(1000) {
-          RiskResult(
-            nodeId("RISK-001"),
-            Map(1 -> 1000L, 2 -> 2000L, 3 -> 1000L, 4 -> 3000L),
-            Nil
-          )
+          leafOf(nodeId("RISK-001"), Map(1 -> 1000L, 2 -> 2000L, 3 -> 1000L, 4 -> 3000L))
         }
 
         val expected = Map(1000L -> 2, 2000L -> 1, 3000L -> 1)
@@ -47,26 +100,22 @@ object LossDistributionSpec extends ZIOSpecDefault {
       },
       test("outcomeCount is sorted by loss") {
         val result = withCfg(1000) {
-          RiskResult(
-            nodeId("RISK-001"),
-            Map(1 -> 3000L, 2 -> 1000L, 3 -> 2000L),
-            Nil
-          )
+          leafOf(nodeId("RISK-001"), Map(1 -> 3000L, 2 -> 1000L, 3 -> 2000L))
         }
 
         val keys = result.outcomeCount.keys.toList
         assertTrue(keys == List(1000L, 2000L, 3000L))
       }
     ),
-    suite("RiskResult - probability of exceedance")(
+    suite("probability of exceedance")(
       test("probOfExceedance with no outcomes returns 0") {
-        val result = withCfg(1000) { RiskResult.empty(nodeId("RISK-001")) }
+        val result = withCfg(1000) { leafOf(nodeId("RISK-001"), Map.empty) }
 
         assertTrue(result.probOfExceedance(1000L) == 0.0)
       },
       test("probOfExceedance calculates correctly") {
         val result = withCfg(1000) {
-          RiskResult(
+          leafOf(
             nodeId("RISK-001"),
             Map(
               1 -> 1000L,  // Below threshold
@@ -74,8 +123,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
               3 -> 5000L,  // At threshold
               4 -> 10000L, // Above threshold
               5 -> 15000L  // Above threshold
-            ),
-            Nil
+            )
           )
         }
 
@@ -86,183 +134,181 @@ object LossDistributionSpec extends ZIOSpecDefault {
       },
       test("probOfExceedance handles threshold above max loss") {
         val result = withCfg(1000) {
-          RiskResult(
-            nodeId("RISK-001"),
-            Map(1 -> 1000L, 2 -> 2000L),
-            Nil
-          )
+          leafOf(nodeId("RISK-001"), Map(1 -> 1000L, 2 -> 2000L))
         }
 
         val prob = result.probOfExceedance(10000L)
         assertTrue(prob == 0.0)
       }
     ),
-    suite("LossDistribution.merge - outer join semantics")(
-      test("merges disjoint trial IDs") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(3 -> 3000L, 4 -> 4000L), Nil) }
+    // The outer-join laws are stated at the layer that owns them:
+    // `TrialOutcomes.combine`, which is what the portfolio factory folds with.
+    suite("TrialOutcomes.combine - outer join semantics")(
+      test("combines disjoint trial IDs") {
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(3 -> 3000L, 4 -> 4000L)) }
 
-        val merged = LossDistribution.merge(r1, r2)
+        val merged = TrialOutcomes.combine(r1.trials, r2.trials).outcomes
 
         assertTrue(merged == Map(1 -> 1000L, 2 -> 2000L, 3 -> 3000L, 4 -> 4000L))
       },
-      test("merges overlapping trial IDs by summing losses") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
+      test("combines overlapping trial IDs by summing losses") {
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L)) }
 
-        val merged = LossDistribution.merge(r1, r2)
+        val merged = TrialOutcomes.combine(r1.trials, r2.trials).outcomes
 
         assertTrue(merged == Map(1 -> 1500L, 2 -> 2000L, 3 -> 3000L))
       },
-      test("merges with empty result is identity") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val empty = withCfg(100) { RiskResult.empty(nodeId("EMPTY")) }
+      test("combining with an empty result is identity") {
+        val r1    = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
+        val empty = withCfg(100) { leafOf(nodeId("EMPTY"), Map.empty) }
 
-        val merged = LossDistribution.merge(r1, empty)
+        val merged = TrialOutcomes.combine(r1.trials, empty.trials).outcomes
 
         assertTrue(merged == r1.outcomes)
       },
-      test("merges three results correctly") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 2000L, 2 -> 500L), Nil) }
-        val r3 = withCfg(100) { RiskResult(nodeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L), Nil) }
+      test("combines three results correctly") {
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 2000L, 2 -> 500L)) }
+        val r3 = withCfg(100) { leafOf(nodeId("risk-003"), Map(2 -> 1500L, 3 -> 3000L)) }
 
-        val merged = LossDistribution.merge(r1, r2, r3)
+        val merged = List(r1, r2, r3).map(_.trials).reduce(TrialOutcomes.combine).outcomes
 
         assertTrue(merged == Map(1 -> 3000L, 2 -> 2000L, 3 -> 3000L))
       }
     ),
-    suite("RiskResultGroup - aggregation")(
-      test("empty group has no outcomes") {
-        val group = withCfg(1000) { RiskResultGroup.create(nodeId("TOTAL")).toEither.toOption.get }
+    suite("decorate - the node's own layer")(
+      test("an empty layer leaves the figures unchanged by reference") {
+        val value = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
 
-        assertTrue(group.children.isEmpty) &&
-        assertTrue(group.outcomes.isEmpty) &&
-        assertTrue(group.maxLoss == 0L)
+        // Reference equality, not structural: an unmitigated node holds one
+        // outcome map, not two.
+        assertTrue(value.applied.isEmpty) &&
+        assertTrue(value.trials eq value.source)
       },
-      test("single child group equals child") {
-        val child = withCfg(100) {
-          RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil)
+      test("a binding layer changes trials and leaves source at the pre-layer figure") {
+        val applied = List(capRecord("cap-a", 1500L))
+        val value   = withCfg(100) {
+          decorated(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), applied).toEither.toOption.get
         }
-        val group = withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), child).toEither.toOption.get }
 
-        assertTrue(group.outcomes == child.outcomes) &&
-        assertTrue(group.maxLoss == child.maxLoss) &&
-        assertTrue(group.children == List(child))
+        assertTrue(value.applied == applied) &&
+        assertTrue(value.source.outcomes == Map(1 -> 1000L, 2 -> 2000L)) &&
+        assertTrue(value.trials.outcomes == Map(1 -> 1000L, 2 -> 1500L)) &&
+        assertTrue(!(value.trials eq value.source))
       },
-      test("multiple children are aggregated") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 500L, 3 -> 3000L), Nil) }
+      test("a layer of two records composes them in the order given") {
+        // Cap at 1500 then scale by 2 gives 3000; scaling first would give 1500.
+        val applied = List(capRecord("cap-a", 1500L), scaleRecord("scale-a", 2.0))
+        val value   = withCfg(100) {
+          decorated(nodeId("risk-001"), Map(1 -> 4000L), applied).toEither.toOption.get
+        }
 
-        val group = withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), r1, r2).toEither.toOption.get }
-
-        // Aggregated outcomes: trial 1 = 1500, trial 2 = 2000, trial 3 = 3000
-        assertTrue(group.outcomes == Map(1 -> 1500L, 2 -> 2000L, 3 -> 3000L)) &&
-        assertTrue(group.maxLoss == 3000L) &&
-        assertTrue(group.children == List(r1, r2))
+        assertTrue(value.trials.outcomes == Map(1 -> 3000L))
       },
-      test("rejects children with mismatched trial counts") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2 = withCfg(200) { RiskResult(nodeId("risk-002"), Map(2 -> 2000L), Nil) }
-
-        // Alignment guard: misaligned children are a programming error, so the
-        // require propagates through create as an exception (not a ValidationError)
-        assertTrue(
-          try {
-            withCfg(100) { RiskResultGroup.create(nodeId("TOTAL"), r1, r2) }
-            false
-          } catch {
-            case _: IllegalArgumentException => true
-          }
-        )
-      },
-      test("create converts aggregation overflow to a ValidationError") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> Long.MaxValue), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 1L), Nil) }
-
-        val parentId = nodeId("TOTAL")
-        val result = withCfg(100) { RiskResultGroup.create(parentId, r1, r2) }
+      test("a layer that overflows fails with CONSTRAINT_VIOLATION rather than throwing") {
+        // scaleLosses throws on the overflow; decorate converts it (ADR-033 §3).
+        val id     = nodeId("risk-001")
+        val result = withCfg(100) {
+          decorated(id, Map(1 -> Long.MaxValue), List(scaleRecord("scale-a", 2.0)))
+        }
 
         result.toEither match {
           case Left(errors) =>
             assertTrue(
               errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
-              errors.head.field == s"riskPortfolio.${parentId.value}"
+              errors.head.field == s"mitigatedResult.${id.value}"
             )
           case Right(_) => assertTrue(false)
         }
+      },
+      test("a leaf carries exactly one provenance record and a portfolio carries none") {
+        val leaf = withCfg(100) {
+          leafOf(nodeId("risk-001"), Map(1 -> 1000L), Some(sampleProvenance))
+        }
+        val portfolioShaped = withCfg(100) {
+          leafOf(nodeId("TOTAL"), Map(1 -> 1000L))
+        }
+
+        assertTrue(leaf.provenance.contains(sampleProvenance)) &&
+        assertTrue(portfolioShaped.provenance.isEmpty)
+      },
+      test("leafProvenances keys each record by the node that carries it") {
+        val (leafA, leafB, portfolio) = withCfg(100) {
+          (
+            leafOf(nodeId("risk-001"), Map(1 -> 1000L), Some(sampleProvenance)),
+            leafOf(nodeId("risk-002"), Map(1 -> 2000L), Some(sampleProvenance)),
+            leafOf(nodeId("TOTAL"), Map(1 -> 3000L))
+          )
+        }
+
+        val attributed = LossDistribution.leafProvenances(
+          Map(leafA.nodeId -> leafA, leafB.nodeId -> leafB, portfolio.nodeId -> portfolio)
+        )
+
+        assertTrue(attributed.keySet == Set(leafA.nodeId, leafB.nodeId)) &&
+        assertTrue(attributed.values.forall(_ == sampleProvenance))
       }
     ),
-    suite("RiskResult - equality")(
+    suite("equality")(
       test("equal results are equal") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Nil) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L)) }
 
-        assertTrue(Equal[RiskResult].equal(r1, r2))
+        assertTrue(Equal[LossDistribution].equal(r1, r2))
       },
       test("different outcomes are not equal") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 2000L), Nil) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 2000L)) }
 
-        assertTrue(!Equal[RiskResult].equal(r1, r2))
+        assertTrue(!Equal[LossDistribution].equal(r1, r2))
       },
       test("different trial counts are not equal") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
-        val r2 = withCfg(200) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L), Nil) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
+        val r2 = withCfg(200) { leafOf(nodeId("risk-001"), Map(1 -> 1000L)) }
 
-        assertTrue(!Equal[RiskResult].equal(r1, r2))
+        assertTrue(!Equal[LossDistribution].equal(r1, r2))
       },
-      test("equal outcomes with differing provenances are equal (provenance is audit metadata, not identity)") {
-        import com.risquanter.register.domain.data.{NodeProvenance, LognormalDistributionParams}
-        import java.time.Instant
-        import io.github.iltotore.iron.refineUnsafe
-        val params = LognormalDistributionParams(1000L.refineUnsafe, 5000L.refineUnsafe, 0.9)
-        val prov1 = NodeProvenance(
-          entityId = 1L,
-          occurrenceVarId = 1001L,
-          lossVarId = 2001L,
-          globalSeed3 = 0L,
-          globalSeed4 = 0L,
-          distributionType = "lognormal",
-          distributionParams = params,
-          timestamp = Instant.parse("2026-01-01T00:00:00Z"),
-          metalogDistributionVersion = "1.0.0"
+      test("equal outcomes with differing provenance are not equal (the relation is structural over every field)") {
+        val prov2 = sampleProvenance.copy(
+          timestamp = Instant.parse("2026-06-18T12:00:00Z"),
+          metalogDistributionVersion = "1.1.0"
         )
-        val prov2 = prov1.copy(timestamp = Instant.parse("2026-06-18T12:00:00Z"), metalogDistributionVersion = "1.1.0")
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), List(prov1)) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), List(prov2)) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Some(sampleProvenance)) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> 1000L, 2 -> 2000L), Some(prov2)) }
 
-        assertTrue(Equal[RiskResult].equal(r1, r2))
+        assertTrue(!Equal[LossDistribution].equal(r1, r2))
       }
     ),
     suite("edge cases")(
       test("handles large trial IDs") {
-        val result = withCfg(2000000) { RiskResult(nodeId("risk-001"), Map(1000000 -> 1000L), Nil) }
+        val result = withCfg(2000000) { leafOf(nodeId("risk-001"), Map(1000000 -> 1000L)) }
 
         assertTrue(result.outcomeOf(1000000) == 1000L)
       },
       test("handles large loss values") {
         val largeLoss = Long.MaxValue / 2
-        val result    = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> largeLoss), Nil) }
+        val result    = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> largeLoss)) }
 
         assertTrue(result.maxLoss == largeLoss)
       },
-      test("merge handles potential overflow scenario") {
+      test("combine handles potential overflow scenario") {
         // Long.MaxValue/2 + Long.MaxValue/2 = Long.MaxValue - 1: the largest
         // sum that still fits, so the checked addition must accept it
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> Long.MaxValue / 2), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> Long.MaxValue / 2), Nil) }
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue / 2)) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> Long.MaxValue / 2)) }
 
-        val merged = LossDistribution.merge(r1, r2)
+        val merged = TrialOutcomes.combine(r1.trials, r2.trials).outcomes
 
         assertTrue(merged.contains(1))
       },
-      test("merge throws on Long overflow (checked addition)") {
-        val r1 = withCfg(100) { RiskResult(nodeId("risk-001"), Map(1 -> Long.MaxValue), Nil) }
-        val r2 = withCfg(100) { RiskResult(nodeId("risk-002"), Map(1 -> 1L), Nil) }
+      test("combine throws on Long overflow (checked addition)") {
+        val r1 = withCfg(100) { leafOf(nodeId("risk-001"), Map(1 -> Long.MaxValue)) }
+        val r2 = withCfg(100) { leafOf(nodeId("risk-002"), Map(1 -> 1L)) }
 
         assertTrue(
-          try { LossDistribution.merge(r1, r2); false }
+          try { TrialOutcomes.combine(r1.trials, r2.trials); false }
           catch { case _: ArithmeticException => true }
         )
       }

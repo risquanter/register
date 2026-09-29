@@ -2357,9 +2357,11 @@ has landed green (G8).
 | 6 | The interface and the user documentation | not elevated — see §7.6.12 |
 
 Slices 2 to 5 are specified below and carry no open decisions. Slice 1 consumes
-the `ValuationResult` ruling of §8.16, whose five gating decisions are open.
+the valuation type, which is specified by
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and
+carries no open decisions.
 Slice 6 is not elevated in this pass: it is the one part of M4 whose shape the
-twelve rulings do not determine. §7.6.12 lists all seven open decisions.
+twelve rulings do not determine. §7.6.12 lists the remaining open decisions.
 
 #### 7.6.5 Slice 1 — the analysis read path
 
@@ -3663,9 +3665,10 @@ keeps its slot and records the answer in place.
 **Nothing in this list gates slice 1 any longer.** Decision 8 was ruled and the
 plan carrying it has landed; decisions 9 and 10 are moot under §8.17, which also
 satisfies decision 2 by a different route. Each records its resolution in place.
-The two decisions opened in their stead — where `LossDistribution.merge` lives,
-and what `Equal[LossDistribution]` compares — are stated at the end of §8.18,
-which is the implementation-grade specification for that sub-slice.
+The two decisions opened in their stead — what happens to `LossDistribution.merge`,
+and what `Equal[LossDistribution]` compares — are decisions 4 and 5 of
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) §10, which
+is the implementation-grade specification for that sub-slice. Both are ruled.
 
 **Gating the §8.16 sub-slice.** §8.16 rules the design; none of the following was
 ruled by it, and each changes what the code looks like. The reasoning that
@@ -3934,10 +3937,14 @@ the rest of M4, item 40 is marked closed then rather than at the end.
    `RiskResult` and `RiskResultGroup` are the **computed value** types. Only the
    second pair is in question.
 
-   **MOOT 2026-09-25 — §8.17.** The two are internal by construction: they live
-   beside the resolver as `private[cache]` cases of `NodeValuation`, with no
-   consumer outside the fold, so no package split and no visibility decision is
-   needed. The provenance walk stays a two-case match permanently.
+   **Answered by decision 2 of [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) §10.**
+   The two internal cases are `LeafLosses` and `PortfolioLosses`, cases of a
+   `private[cache]` `NodeLosses` living beside the resolver in
+   `services/cache/NodeLosses.scala`. The package split that follows is on the
+   test side only: a spec outside `services.cache` cannot name them, so the
+   aggregate's suites live in `NodeLossesSpec`. There is no provenance walk any
+   more — a subtree's records come from resolving each leaf under its own
+   identifier.
 
 10. **Whether `ValuationResult` should be a subtype of `LossDistribution` at all,
     and whether its name carries its meaning.** A decorator that wraps a value of
@@ -7189,6 +7196,14 @@ assertions; §8.18 writes out what replaces them.
 
 ### 8.17 The mitigated value's type — Option FB (RULED 2026-09-25)
 
+> **Superseded as a specification by
+> [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md),
+> which is the specification for the four valuation types.** This section is
+> retained as informative material: how the work sits in the M4 epic, and the
+> side effects identified while it was being specified. The shape it writes out
+> — a public value holding an internal case through an `origin` field — is not
+> what ships. The shipped value carries figures only and names no internal type.
+
 **What this replaces, precisely.** §8.16 ruled six things. Five stand unchanged:
 uniform wrapping in both directions (point 2), one method rather than two
 (point 3), the empty case being physically the identity (point 4),
@@ -7409,6 +7424,13 @@ reading convenience at the price of two ways to combine.
 ---
 
 ### 8.18 Option FB — implementation-grade elevation (2026-09-25)
+
+> **Superseded as a specification by
+> [`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md).**
+> Retained as informative material for what it identified along the way and
+> carried forward: the `recordsByNode` / `run` split, the scale-overflow fix,
+> the documentation sweep list and the test blast radius. Its two open decisions
+> are decisions 4 and 5 of that plan's §10 and are both ruled.
 
 §8.17 rules the design. This section is the specification that rule authorizes
 code from: exact signatures, file inventory, ADR alignment, open decisions and a
