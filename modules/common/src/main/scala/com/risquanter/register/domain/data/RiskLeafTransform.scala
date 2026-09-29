@@ -266,8 +266,8 @@ object RiskLeafTransform {
         case "lognormal" =>
           Validation.succeed((
             "lognormal", None, None,
-            leaf.minLoss.map(min => (min * f).toLong),
-            leaf.maxLoss.map(max => (max * f).toLong),
+            leaf.minLoss.map(min => Math.round(min * f)),
+            leaf.maxLoss.map(max => Math.round(max * f)),
             None
           ))
         case _ =>
@@ -287,8 +287,8 @@ object RiskLeafTransform {
             case (Some(min), Some(max)) if (min: Long) > 0L =>
               val keep = 1.0 - fraction
               val g = math.sqrt((min: Long).toDouble * (max: Long).toDouble) // geometric mean = log-space midpoint
-              val newMin = (g * math.pow((min: Long).toDouble / g, keep)).toLong
-              val newMax = (g * math.pow((max: Long).toDouble / g, keep)).toLong
+              val newMin = Math.round(g * math.pow((min: Long).toDouble / g, keep))
+              val newMax = Math.round(g * math.pow((max: Long).toDouble / g, keep))
               Validation.succeed(("lognormal", None, None, Some(newMin), Some(newMax), None))
             case _ =>
               Validation.fail(ValidationError(

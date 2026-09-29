@@ -31,7 +31,7 @@ trait RiskSampler {
    * Sample loss amount for a trial (assuming occurrence).
    * 
    * @param trial Trial counter (0-based)
-   * @return Loss amount in base currency units
+   * @return Loss amount in base currency units, rounded to nearest whole unit
    */
   def sampleLoss(trial: Long): Long
   
@@ -53,7 +53,7 @@ object RiskSampler {
    * Create RiskSampler from a loss distribution and a pre-derived HDR stream tuple.
    *
    * The node ID is an identity label only — it never influences any random
-   * stream (old decision 1 = A: no redundant seed parameters). All stochastic
+   * stream; no redundant seed parameters are used. All stochastic
    * identity arrives in `streams`, produced by [[SeedDerivation.streams]]:
    * occurrence and loss use disjoint even/odd var IDs, preventing correlation
    * between "did it occur" and "how much loss".
@@ -94,7 +94,7 @@ object RiskSampler {
       def sampleLoss(trial: Long): Long = {
         val uniform = lossRng(trial)
         val lossAmount = lossDistribution.sample(uniform)
-        lossAmount.toLong
+        Math.round(lossAmount)
       }
     }
   }
