@@ -4051,6 +4051,18 @@ M1–M4 are landed, plan how mitigation-level changes become visible across the
 diff/compare/history surfaces — as a §7.8 implementation-grade continuation of
 this document, presented for approval before any source edit.
 
+**The lognormal severity sub-unit pre-check is part of this frontend scope**
+(routed here from `PLAN-LOGNORMAL-BOUND-POSITIVITY.md`, LBP-D-3). The
+mitigation-authoring/selection UI should warn, before submit, when a
+`ScaleSeverity` factor would drive a targeted leaf's lognormal lower bound below
+the smallest representable unit — using the pure `common` functions
+`RiskLeafTransform.scaleSeverityBounds` / `lowerBoundRepresentable` /
+`minRepresentableFactor` (no JVM libraries; Scala.js-safe) and offering the
+suggested minimum factor `1 / min`. It has no host until this UI exists; until then
+the server-side `INVALID_LOGNORMAL_PARAMS` error that the lognormal-bound plan ships
+is the only signal. It belongs past M4 because it attaches to the
+mitigation-authoring surface M4 introduces.
+
 **The browser change-notification consumer is part of that scope** (Decision 1).
 The server publishes node invalidations and, after M4, mitigation-driven ones
 too; nothing in the single-page app listens, so every publish reaches zero
@@ -8236,3 +8248,211 @@ literal split in `RiskTreeKnowledgeBase` — verified 2026-09-10, but re-verify 
 doc time.
 
 This composes with the existing user-doc TODO (§7.4.1); it does not replace it.
+
+---
+
+## Task (last step) — route the "how to say a loss is dampened" material into user documentation
+
+**The deliverable of this step is a decision about where this material lives, and
+then writing it there.** The material itself is settled and recorded below so that
+nothing has to be re-derived; what is open is which document carries which part of
+it. Do this last, because the answer depends on which user-facing documents exist
+by then.
+
+### The insight to be written up
+
+"This mitigation dampens the losses" is not one statement. It is at least four
+different claims about the world, each with a different mechanism, a different
+stage, and different evidence behind it. Authors conflate them, and the system
+offers no guidance at the point of authoring.
+
+| What the author means | Mechanism | Stage |
+|---|---|---|
+| every loss is proportionally smaller | `ScaleSeverity(f)` | parameter |
+| the bad case is much better, the typical case less so | `Override` with new bounds | parameter |
+| there is now a hard maximum | `capLosses(c)` | result |
+| it happens less often | `LikelihoodTransform.Scale(f)` | parameter |
+| the entity bears a fraction; the rest is transferred | `ScaleLosses(f)` | result |
+| the entity retains the first amount and transfers above it | `applyDeductible(d)`, `insurancePolicy(d, c)` | result |
+| smaller and hard-capped together | `ScaleSeverity(f)` with `capLosses(c)` | both |
+| the loss is better understood, not smaller | re-estimate the leaf's bounds | not a mitigation |
+| the risk no longer exists | remove the node from the tree | not a mitigation |
+
+Two rows of that table are the ones authors get wrong, and both need stating
+explicitly in user terms.
+
+**A measurement is not a mitigation.** Instrumenting a system or running an
+assessment reduces how much the estimator does not know. It does not change how
+variable the outcome is. Recording it as a mitigation credits a control for a
+reduction that came from learning. The deciding question for an author is one
+sentence: *after this control, if the event happens, is the loss smaller?* If the
+honest answer is "no, but we are more confident about it", the right action is to
+revise the leaf's bounds, which the tree's version history records as a revised
+estimate.
+
+**A hard maximum and a revised upper bound are different claims.** An `Override`
+that lowers `maxLoss` says the 95th percentile is now lower, so larger losses are
+unlikely. A `capLosses` cap says losses above the cap cannot reach the entity at
+all, so the probability mass accumulates exactly at the cap. Both reduce the
+figures; only one of them is usually true.
+
+### The formula that replaces the deleted spread contraction
+
+`DistributionTransform.Narrow` contracted a lognormal's spread toward its geometric
+mean. It is deleted by `PLAN-LOGNORMAL-BOUND-POSITIVITY.md` (LBP-D-9), on the
+grounds that it raised the distribution's low quantiles — it made small losses less
+possible — while leaving the median unchanged.
+
+Nothing is lost, and the user documentation should say why, because an author who
+wants a narrower range needs to know the supported way to ask for one.
+
+The fit sets the spread parameter σ (sigma, the standard deviation of the
+underlying normal in logarithmic space) from the two bounds:
+
+```
+σ = (ln maxLoss − ln minLoss) / 3.29
+```
+
+The 3.29 is fixed by the method, not chosen here: it is the distance in standard
+deviations between the 5th and 95th percentiles of a standard normal, which is
+2 × 1.645. Because the expression depends only on `ln(maxLoss / minLoss)`, **σ is a
+function of the ratio of the bounds and nothing else.** A contraction that squeezed
+both ends inward was one way to shrink that ratio. Lowering the ceiling alone is
+another, and it reaches every value the contraction could.
+
+For any contraction fraction, this `Override` produces the identical σ with the
+floor left where it was:
+
+```
+minLoss' = minLoss
+maxLoss' = minLoss × (maxLoss / minLoss) ^ (1 − fraction)
+```
+
+Worked on a leaf whose bounds are 1 000 and 50 000 — figures chosen here as an
+illustration, not drawn from any fixture:
+
+| | bounds | σ | median | mean |
+|---|---|---|---|---|
+| baseline | 1 000 .. 50 000 | 1.1891 | 7 071 | 14 339 |
+| contraction at 0.5 | 2 659 .. 18 803 | 0.5945 | 7 071 | 8 438 |
+| `Override(1 000, 7 071)` | 1 000 .. 7 071 | 0.5945 | 2 659 | 3 173 |
+
+The σ values match exactly, at fractions 0.25, 0.5 and 0.75 alike. The `Override`
+keeps the floor at 1 000 rather than raising it to 2 659, lowers the median rather
+than leaving it untouched, and reduces the expected loss by 78% rather than 41%.
+
+That last row is also the plainest statement of why the contraction was the wrong
+instrument: its median is bit-identical to the baseline, so it never reduced the
+loss at all. It reduced only the uncertainty, and raised the floor.
+
+The author-facing form of the formula is simpler than the algebra, and the
+documentation should lead with it: **state the post-control range you believe.** An
+author who writes the bounds directly is making a calibrated estimate. An author
+who applies a dimensionless contraction factor cannot see what it did to the floor.
+
+### The insight behind the formula, stated on its own
+
+**σ is a function of the ratio of the two bounds and of nothing else.** Every way of
+reducing the spread of a lognormal leaf is therefore some way of reducing that
+ratio, and there are exactly three: raise the floor, lower the ceiling, or both.
+The deleted contraction did both at once, in fixed proportion. Lowering the ceiling
+alone reaches every value the contraction could, which is why the capability
+survives its deletion.
+
+A consequence that the documentation must state, because it is counter-intuitive
+and it bounds what any mitigation can claim: **no refit that reduces σ is a
+reduction at every loss level.** The fit pins the 5th percentile at `minLoss` and
+the 95th at `maxLoss`, so holding `minLoss` fixed and lowering `maxLoss` pivots the
+whole distribution about the 5th percentile. Quantiles above that point fall;
+quantiles below it rise. On the worked leaf, with the ceiling cut to 7 071:
+
+| percentile | baseline | after |
+|---|---|---|
+| 0.1th | 179 | 423 |
+| 1st | 445 | 667 |
+| 5th | 1 000 | 1 000 |
+| 50th | 7 071 | 2 659 |
+| 95th | 49 991 | 7 070 |
+
+The 5th percentile is unchanged by construction, the extreme lower tail rises, and
+everything from the 10th percentile upward falls. That is unavoidable for any
+reparameterisation: the only way to reduce a spread without raising anything is to
+clip the sampled values rather than refit the distribution, which is what
+`capLosses` does at the result stage.
+
+The practical difference from the deleted contraction is which number moves. The
+contraction raised the author's own declared 5th percentile, from 1 000 to 2 659,
+and left the median untouched. Lowering the ceiling leaves the declared 5th
+percentile exactly where the author put it and halves the median. One moves a
+figure the author stated; the other moves only the region below it, where losses
+are smallest in absolute terms.
+
+### Open question — should the ceiling reduction be its own transform?
+
+**This question is open and belongs to this step.** It is recorded here rather than
+answered because the answer depends on whether a mitigation-authoring interface
+exists by the time this step runs.
+
+`Override` can express the ceiling reduction, but only one leaf at a time, because
+it carries absolute numbers. `ScaleSeverity` is documented as broadcasting across a
+heterogeneous target set: one mitigation scoping fifty leaves with fifty different
+bound pairs applies the same factor to each of them. An `Override` cannot do that —
+it would force all fifty leaves to identical bounds. So for the usual case, a
+control that tightens the worst case across many different risks, `Override` is not
+a substitute; it is fifty manual edits.
+
+That is the argument for a parameterised transform. Against it: the vocabulary grows
+by another case that must be designed, validated, serialised, tested and documented;
+and the absolute form has a methodological advantage, because an author who writes
+the bounds is making a calibrated estimate while an author who applies a
+dimensionless factor cannot see what it did to the lower tail.
+
+If the transform is added, its parameterisation is a second question, and the two
+candidates have identical reach but very different intelligibility:
+
+```
+a ceiling factor      maxLoss' = maxLoss × f,                      minLoss unchanged
+a log-range fraction  maxLoss' = minLoss × (maxLoss / minLoss)^k,  minLoss unchanged
+```
+
+The first reads as "the worst case is now 60% of what it was". The second reads as
+"retain 50% of the logarithmic range", which no author will reason about correctly.
+Both reach every attainable σ. The recommendation carried into this step is the
+ceiling factor, and it is a recommendation, not a ruling.
+
+Whichever way this is decided, the user documentation differs: with the transform,
+it documents an operation; without it, it documents the formula and the manual
+`Override`. So this question is settled before the documents are written, not
+after.
+
+### What this step has to decide
+
+Where each part of the material above belongs. The parts divide, and they do not
+all belong in the same place:
+
+- **The authoring menu and the two conflation warnings** are guidance for whoever
+  writes a mitigation. Candidate homes: a new mitigation-authoring guide; a section
+  of the user-facing mitigation documentation that the §7.4.1 TODO covers; or a
+  sibling section of the targeting-semantics note in the preceding task, since both
+  are "what the author needs to know before writing a mitigation".
+- **The σ formula and the `Override` construction** are reference material. They
+  may belong with the menu, or in a distributions reference alongside the existing
+  explanation of how a lognormal leaf is fitted from its bounds.
+- **"A measurement is not a mitigation" and "no transform may assert a risk has
+  ceased to exist"** are not guidance. They are binding constraints on what the
+  model permits, so their home is an architecture decision record — ADR-034 governs
+  mitigation valuation and is the candidate — with the user documentation stating
+  the rule and pointing at it.
+
+Deciding that split is the step; writing the documents is the rest of it. Present
+the split for approval before writing, since it determines how many documents this
+creates.
+
+**Authoring constraint:** every figure in the written documentation must be
+recomputed against the code as it stands at the time of writing, not copied from
+the table above. The figures here were computed from
+`LognormalHelper.fromLognormal90CI` and the lognormal mean identity
+`exp(μ + σ² / 2)`; the construction assumes the parameter-stage transform still
+reaches the bounds through `RiskLeafTransform.distributionFields`. Re-verify both
+at documentation time. The documents follow the project's user-documentation style
+rules, which differ from this plan's.
