@@ -6,6 +6,10 @@ user-invokable: true
 
 # ADR Constraints Reference — Register
 
+**This skill owns which design constraints bind.** It is the distillation of the accepted ADRs, so that upholding them does not require reading all of `docs/dev/decision-records/`. It is lossy by design: it keeps each rule and drops its reasoning, so it cannot carry an interaction between two rules. Before writing code, check **When this skill is not enough** below — that section lists what you must be touching to need the full ADRs, and **Known interactions** records the traps that live between them.
+
+It does not own the domain concepts (`docs/user/TERMINOLOGY.md`), how the system is built (`docs/dev/ARCHITECTURE.md`), or what is being built (`docs/dev/plans/`).
+
 ## Boundary ownership
 
 | Concern | Owner | Never in |
@@ -33,6 +37,10 @@ user-invokable: true
 | Sealed error hierarchy | `sealed trait AppError` subtype | Any new error condition |
 | Effect sequencing | `for`-comprehension / `ZIO.foreach` | Sequential or parallel effects |
 | Reactive state | `Signal` derivation from `Var` (Laminar ADR-019) | Any UI state |
+| Combining trial data | `TrialOutcomes.combine` / its `Commutative` instance (ADR-009) | Aggregating a portfolio from its children |
+| Reproducible draw | `SeedDerivation.streams` coordinates (ADR-003) | Any sampling |
+| Startup dependency gate | `StartupReadiness.awaitReady` in `ZLayer` wiring (ADR-031) | Waiting on a dependency at boot |
+| User-input string type | Iron `Match[...]` whitelist, narrowest the domain permits (ADR-029) | Any `String`-backed input type |
 
 ---
 
@@ -103,6 +111,46 @@ serialization/escaping helpers.
 ✅ INSTEAD: typed error codes (`ValidationErrorCode`) with safe human-readable messages.
 *ADR-010, ADR-035*
 
+❌ NEVER give a `String`-backed user-input type only `Not[Blank] & MaxLength[N]`.
+✅ INSTEAD: add a `Match[...]` whitelist as narrow as the business domain permits,
+excluding every character that carries special meaning in a downstream parser
+(`"`, `(`, `)`, `&`, `<`, `>` for a display name).
+*ADR-029*
+
+❌ NEVER concatenate a user string into text that will be parsed again.
+✅ INSTEAD: reach a downstream interpreter only through parameterised, structured or
+AST-level interfaces — a per-sort literal validator (`riskNameToId.get`,
+`NodeId.fromString`), the typed Quill DSL, zio-json codecs, Laminar `textContent`.
+Never string interpolation followed by a second parse; `innerHTML` is never called.
+*ADR-029*
+
+❌ NEVER call a `WorkspaceStore` or `RiskTreeService` method from another service for
+cross-cutting orchestration.
+✅ INSTEAD: orchestrate in the HTTP handler's `serverLogic` for-comprehension or a
+background orchestrator — those are the only valid call sites, because only there is
+the authorization check visible and compiler-enforced.
+*ADR-030*
+
+❌ NEVER call a service method that reads or mutates workspace or tree data without
+`authz.check()` bound as a `given` earlier in the same handler.
+✅ INSTEAD: bind the check first; a call site that genuinely cannot carries an
+`// exempt:` comment with an approved reason (`workspaceStore.resolve` is the Layer 0
+capability gate).
+*ADR-030*
+
+❌ NEVER let a confidential internal identifier cross the client boundary in either
+direction — not in a response body, header or error message, and not accepted as a
+path segment, query parameter, header or body field, even on an endpoint that also
+checks a capability.
+✅ INSTEAD: accept `WorkspaceKeySecret` and derive `WorkspaceId` server-side via
+`WorkspaceStore.resolve`. A value that embeds one is confined as if it were one
+(`BranchRef` embeds `WorkspaceId`), made safe by construction rather than scrubbed
+afterwards. The ADR-022 credential checklist does **not** apply: these may appear in
+server logs, internal storage paths and merge commit messages — what closes them at
+the boundary is enumeration-oracle / BOLA (Broken Object-Level Authorization) risk,
+not secret leakage.
+*ADR-036*
+
 ### Frontend
 
 ❌ NEVER let a child component create internal `Var`s for state that the parent coordinates.
@@ -116,6 +164,12 @@ serialization/escaping helpers.
 ❌ NEVER write mutable cross-component state outside `FormState` or `BuilderState`.
 ✅ INSTEAD: assign new state to exactly one layer (field-level vs assembly-level) before writing.
 *ADR-019*
+
+❌ NEVER put SPA routing logic anywhere but the baked-in `nginx.conf`.
+✅ INSTEAD: nginx serves the built assets and applies Accept-header discrimination on
+`/w/*`; content-hashed static assets carry `Cache-Control: public, immutable,
+max-age=31536000` and `X-Content-Type-Options: nosniff`.
+*ADR-027*
 
 ### Exception catching
 
@@ -132,6 +186,15 @@ serialization/escaping helpers.
 ❌ NEVER build container images manually outside the documented 5-step order.
 ✅ INSTEAD: follow the build-order in the `register-dev` skill (base → builder → app layers).
 *ADR-026*
+
+❌ NEVER commit a CA private key, or reference one from the repository.
+✅ INSTEAD: only public certs and non-sensitive generated artifacts are referenced;
+private keys are generated locally and stay outside git.
+*ADR-023*
+
+❌ NEVER expose a local cluster entry point over plain HTTP.
+✅ INSTEAD: HTTPS first; HTTP is redirect-only or explicitly marked local-only.
+*ADR-023*
 
 ### Supply chain (ADR-020)
 
@@ -150,6 +213,142 @@ serialization/escaping helpers.
 ❌ NEVER run `npm install`/`npm update` without explicit prior user authorization.
 ✅ INSTEAD: ask first; then resolve → audit → install → audit → `npm audit signatures`.
 *ADR-020 §8–§9; supply-chain + register-dev skills*
+
+---
+
+### Simulation, caching and equality
+
+- The cache stores trial outcomes, never rendered curves. The value is
+  `LeafSimResult` — the `TrialOutcomes` carrier plus a content-only
+  `NodeProvenance` that carries no node identity (ADR-014).
+- There is no cache invalidation. The key is the content hash of the leaf's
+  `LeafSimContent` projection, recomputed on every read, so an edited leaf
+  hashes to a new key and misses; stale entries become unreachable orphans
+  (ADR-014, ADR-032).
+- The algebra lives on `TrialOutcomes`, never on a result type.
+  `LossDistribution` is the product `NodeId × TrialOutcomes`: the node id is a
+  label from tree context, only the trial data combines. `combine` is an
+  outer-join pointwise sum and enforces same-`nTrials` alignment (ADR-009).
+- Two equality relations, chosen by the question asked, never conflated
+  (ADR-032): the **domain content hash** (`ContentHashIndex`, the
+  `LeafSimContent` projection for a leaf, Merkle over sorted child hashes for a
+  portfolio) answers "does this change simulation results?"; the **storage
+  hash** (Irmin blob hash over the full persisted node JSON) answers "did the
+  stored artifact change, can a merge conflict here?". Semantic diff uses the
+  domain relation, so a renamed or moved node reports `Identical`.
+- Simulation writes the cache and reads query it. `CachedResultResolver` owns
+  the `ensureCached` primitive; the cache stays pure storage and never
+  simulates (ADR-015).
+- Every draw is a pure function of the trial number and four seed coordinates.
+  `SeedDerivation.streams` is the only place stream coordinates are computed.
+  A leaf's occurrence stream is `2 * seedVarId` and its loss stream
+  `2 * seedVarId + 1`, so the two are disjoint from each other and from every
+  other leaf's (ADR-003).
+
+### Mitigation valuation (ADR-034)
+
+- Two valuations, computed separately. `raw` is the mitigation-free commutative
+  fold: cached, and never altered by a mitigation. `mitigated` is a second fold
+  computed at the read edge and never stored.
+- Each node applies its own transforms to the combine of its children's
+  **mitigated** values. Never apply a transform to a cached raw total — it
+  cannot see a reduction already applied below it, and the result is wrong, not
+  merely approximate.
+- Transforms compose by position, never by authoring order. `mitigated` folds
+  leaves-upward so a child's transform acts before its parent aggregates;
+  within one mitigation `TransformPipeline` steps run in list order; across
+  mitigations on one node `MitigationPrecedence` orders them.
+
+### Persistence and scenarios (ADR-004a)
+
+- Irmin holds one whole-node JSON blob per path:
+  `workspaces/<wsId>/risk-trees/<treeId>/nodes/<nodeId>`.
+- Scenarios are Irmin **branches**, never paths: `scenarios.<wsId>.<name-slug>`
+  (Irmin rejects `/` in branch names). An absent branch selector means `main`.
+- Each user action produces exactly one commit; the Irmin log is the
+  user-visible history.
+- GraphQL is the only Irmin↔ZIO channel, with a single writer.
+
+### Startup readiness versus request-path resilience (ADR-031)
+
+- One question routes every retry loop: does it protect an individual in-flight
+  request, or gate the process's lifecycle on a dependency becoming reachable?
+  Request retries, circuit breaking and per-request timeouts belong to Istio;
+  startup readiness to application bootstrap; liveness and restart policy to
+  Kubernetes.
+- A startup readiness gate is permitted in Scala only if it is **bounded** by a
+  total budget, **fail-closed** (exits after the budget so the orchestrator
+  restarts), **boot-only**, and **confined to `ZLayer` wiring** — never inside
+  a request handler.
+- The bound is elapsed time, not attempt count. Backoff base and cap are code
+  constants; only the budget is configuration.
+- Not-ready is a typed failure on the error channel, never a Boolean. The probe
+  keeps its typed error so the failure after the budget carries the real cause.
+
+### Observability (ADR-002)
+
+- Telemetry answers *what happened*, logging answers *why it failed*. Request
+  flow tracing and business metrics go to OpenTelemetry spans and metrics, not
+  to log lines.
+- `ZIO.logError` for error diagnostics with stack traces, `ZIO.logDebug` for
+  development debugging, `ZIO.logInfo` for the audit trail.
+
+### Query evaluation (ADR-028)
+
+- `vql-engine` is a JVM dependency of `server`. Queries are evaluated
+  server-side with direct access to the simulation cache; client-side
+  (Scala.js) evaluation is ruled out.
+- `RiskTreeKnowledgeBase(tree, results)` builds the model: structural facts
+  into a `KnowledgeBase`, then `KnowledgeSourceModel.toModel()`, then
+  augmentation with simulation-backed functions (`p95`, `p99`, `lec`) and typed
+  comparison predicates (`gt_loss`, `gt_prob`).
+
+### Imports (ADR-011)
+
+- Imports go at file top after the package declaration, and short names are
+  used throughout. A local import is only for disambiguation.
+
+---
+
+## When this skill is not enough — read the full ADRs
+
+A distillation keeps each rule and drops its reasoning, so it cannot carry an
+**interaction** between two rules: an interaction is written in neither rule's
+text and appears only when both are applied to the same code. Completeness of
+coverage does not fix that — the information was never in the parts.
+
+So do not wait to notice that a constraint here is insufficient. A cross-cutting
+concern announces itself by *what you are touching*, not by a felt gap. Touching
+any of these means reading the named ADRs in full before writing code:
+
+| Touching | Read in full |
+|---|---|
+| Authorization, an authorization boundary, or a capability check | ADR-024, ADR-030, ADR-021, ADR-012 |
+| Anything crossing the client boundary — a DTO, endpoint, header or error message | ADR-036, ADR-035, ADR-010, ADR-017 |
+| A parser, or any path where user text reaches an interpreter | ADR-029, ADR-028 |
+| A cached type, a hash projection, or a content-equality relation | ADR-014, ADR-032, ADR-009 |
+| The mitigation fold, or adding a transform | ADR-034, ADR-014 |
+| A retry, timeout, or readiness loop | ADR-031, ADR-012 |
+| Persistence paths, branch naming, or commit granularity | ADR-004a, ADR-036 |
+| Seeding or sampling | ADR-003, ADR-009 |
+
+---
+
+## Known interactions — what no single ADR states
+
+Each row is a trap that exists only between ADRs. This table is the one part of
+this skill that is not derivable from the ADRs individually, so a plan that
+creates a new interaction adds a row here (Plan Quality Gate item 3).
+
+| ADRs | The trap |
+|---|---|
+| ADR-036 × ADR-022 | The credential checklist R1–R8 does **not** apply to a confidential internal identifier. Knowing ADR-022 well leads to over-applying it and reporting a server log line or a storage path as a leak. What closes a confidential identifier at the boundary is enumeration-oracle / BOLA risk, not secret leakage. |
+| ADR-034 × ADR-014 | `raw` is cached; `mitigated` is never stored. Applying a transform to a cached `raw` total is **wrong, not approximate** — it cannot see a reduction already applied below it. Only folding the mitigated children attributes each reduction to the layer it happened at. |
+| ADR-032 × ADR-014 | Two hashes exist over the same node. The cache key uses the **domain content** relation (`LeafSimContent` projection); the Irmin blob hash answers a different question. Picking the wrong one breaks caching silently — both are plausible and neither errors. |
+| ADR-030 × ADR-024 × ADR-021 | `workspaceStore.resolve` is the Layer 0 capability gate and is the one call that legitimately precedes `authz.check()`. Not knowing this produces either a false bypass report against correct code, or a missed real bypass behind an `// exempt:` that looks like it. |
+| ADR-029 × ADR-028 | The FOL query parser is a live boundary taking user-typed text. Node references resolve through per-sort literal validators (`riskNameToId.get`, `NodeId.fromString`) and are never interpolated — a query built by interpolation is re-parsed and is the injection path. |
+| ADR-031 × ADR-012 | A retry loop belongs to Istio or to application bootstrap, decided by one test: in-flight request, or process lifecycle. A readiness gate inside a request handler violates both ADRs at once. |
+| ADR-036 × ADR-004a | `BranchRef` embeds `WorkspaceId` in the scenario branch name, so a branch-typed error that reaches the wire leaks a confined identifier. Such an error stays branch-typed internally and is translated by its service-layer caller before the boundary. |
 
 ---
 
@@ -180,6 +379,22 @@ Issue: [what problem arose]
 Options: A) … B) … C) …
 Decision needed: [single specific closed question]
 ```
+
+---
+
+## Obligations that come with a constraint
+
+Two constraints above require an action rather than only forbidding one. These
+are not Decision Triggers — the escape-hatch list stays verbatim-aligned with
+working-protocol — but skipping them leaves the constraint unenforceable.
+
+- **A new parser boundary is documented in ADR-029.** If a code path introduces
+  a boundary that is not in that ADR's boundary table, add it there and show
+  that it honours the no-re-parse discipline (ADR-029 §3).
+- **An unchecked call site carries its reason.** A call to workspace or tree
+  data without `authz.check()` in scope needs an `// exempt:` comment naming an
+  approved reason; an unexplained one is a silent authorization bypass
+  (ADR-030 §2).
 
 ---
 
