@@ -15,9 +15,9 @@ This meta-ADR defines the structure, style, and content depth for all ADRs.
 
 ### Header (Required)
 ```markdown
-# ADR-NNN: [Concise Decision Title]
+# ADR-NNN: [Concise Decision Title]   ← EXAMPLE, ADR-00X template — not a live ADR
 
-**Status:** [Proposed | Accepted | Accepted (awaiting implementation)| Deprecated | Superseded by ADR-XXX]  
+**Status:** [Proposed | Accepted | Accepted (awaiting implementation) | Accepted (implemented) | Amended | Deprecated | Superseded by ADR-XXX]  
 **Date:** YYYY-MM-DD  
 **Tags:** [3-5 relevant tags]
 ```
@@ -37,7 +37,7 @@ Avoid: *current*, *existing*, *previously*, *old approach*, *the old X*. Express
 
 **Example (from ADR-001):**
 ```markdown
-## Context
+## Context   ← EXAMPLE, ADR-00X template — not a live ADR
 
 - External input (HTTP, JSON) is **untrusted**
 - Domain objects must be **correct by construction**
@@ -57,9 +57,9 @@ Avoid: *current*, *existing*, *previously*, *old approach*, *the old X*. Express
 
 **Example (from ADR-001):**
 ```markdown
-## Decision
+## Decision   ← EXAMPLE, ADR-00X template — not a live ADR
 
-### 1. Smart Constructor Pattern
+### 1. Smart Constructor Pattern   ← EXAMPLE, ADR-00X template — not a live ADR
 
 Domain objects expose `create()` returning `Validation[ValidationError, DomainObject]`:
 
@@ -90,9 +90,9 @@ object RiskLeaf {
 
 **Example (from ADR-001):**
 ```markdown
-## Code Smells
+## Code Smells   ← EXAMPLE, ADR-00X template — not a live ADR
 
-### ❌ Validation in Service Layer
+### ❌ Validation in Service Layer   ← EXAMPLE, ADR-00X template — not a live ADR
 
 ```scala
 // BAD: Service validates raw types
@@ -117,7 +117,7 @@ def computeLEC(nTrials: PositiveInt, depth: NonNegativeInt) = {
 
 **Example (from ADR-001):**
 ```markdown
-## Implementation
+## Implementation   ← EXAMPLE, ADR-00X template — not a live ADR
 
 | Location | Pattern |
 |----------|---------|
@@ -185,7 +185,7 @@ def computeLEC(nTrials: PositiveInt, depth: NonNegativeInt) = {
 - Structure (Context → Decision → Code Smells → Implementation)
 - Depth (concise code examples, minimal prose)
 - Style (bullets, code-first, prescriptive)
-- Length (~160 lines)
+- Length (the 100-200 target; ADR-001 is itself 206 lines and over it)
 
 ---
 

@@ -1,5 +1,12 @@
 # Risk Register Terminology
 
+This document explains the domain concepts and how they work: what a risk,
+a loss, a loss distribution, an LEC and a mitigation are, how risks compose,
+and the workflow from defining risks to a curve. It is the place to start on
+anything to do with simulation or mitigation.
+
+How the system is built is in [docs/dev/ARCHITECTURE.md](../dev/ARCHITECTURE.md).
+
 ## Core Concepts
 
 ### Risk
@@ -135,11 +142,11 @@ object TrialOutcomes {
 **You combine Loss Distributions, not LEC functions directly:**
 
 ```scala
-val risk1: RiskResult = simulate(riskSampler1, nTrials)
-val risk2: RiskResult = simulate(riskSampler2, nTrials)
+val risk1: LossDistribution = simulate(riskSampler1, nTrials)
+val risk2: LossDistribution = simulate(riskSampler2, nTrials)
 
 // Combine distributions (sum losses per trial)
-val combined: RiskResult = risk1 combine risk2
+val combined: LossDistribution = risk1 combine risk2
 
 // Compute LEC from combined distribution
 val lecFunction: Loss => BigDecimal = 
@@ -173,7 +180,7 @@ val cyberRisk = RiskSampler.fromDistribution(
 
 ### 2. Simulate (Generate Loss Distribution)
 ```scala
-val distribution: RiskResult = 
+val distribution: LossDistribution =
   simulate(cyberRisk, nTrials = 10000)
 ```
 

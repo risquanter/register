@@ -1,8 +1,15 @@
 # Risk Register - Architecture Documentation
 
-**Last Updated:** February 9, 2026  
-**Status:** Active Development  
-**Version:** 0.1.0
+**This document owns how the system is built**: layer boundaries, dependency
+direction, data flow through a simulation, the repository and cache contracts,
+and the concurrency model. Everything in it describes the code as it now is.
+
+It does not own three things. The domain concepts — what a risk, a loss
+distribution, an LEC or a mitigation *is* — are in
+[docs/user/TERMINOLOGY.md](../user/TERMINOLOGY.md). The binding design
+constraints are in the `adr-constraints` skill. What is being built and whether
+it is done is in [docs/dev/plans/](plans/) — so this document carries no
+roadmap, no future sections and no status markers.
 
 ---
 
@@ -10,17 +17,17 @@
 
 1. [Executive Summary](#executive-summary)
 2. [Current Architecture State](#current-architecture-state)
-3. [Architectural Strengths](#architectural-strengths)
-4. [Known Architectural Gaps](#known-architectural-gaps)
-5. [Technology Stack](#technology-stack)
-6. [Domain Model](#domain-model)
-7. [Layered Architecture](#layered-architecture)
-8. [Data Flow](#data-flow)
-9. [Validation Strategy](#validation-strategy)
-10. [Parallel Execution Model](#parallel-execution-model)
-11. [Testing Strategy](#testing-strategy)
-12. [Future Roadmap](#future-roadmap)
-13. [Deployment Architecture](#deployment-architecture)
+3. [Architectural Considerations](#architectural-considerations)
+4. [Technology Stack](#technology-stack)
+5. [Domain Model](#domain-model)
+6. [Layered Architecture](#layered-architecture)
+7. [Data Flow](#data-flow)
+8. [Validation Strategy](#validation-strategy)
+9. [Parallel Execution Model](#parallel-execution-model)
+10. [Testing Strategy](#testing-strategy)
+11. [Data Volume and Caching](#data-volume-and-caching)
+12. [Scope and Responsibilities](#scope-and-responsibilities)
+13. [Implementation Status](#implementation-status)
 14. [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogram-for-million-scale-trials)
 15. [Appendix B: ZIO Metrics Bridge for Runtime Observability](#appendix-b-zio-metrics-bridge-for-runtime-observability)
 
@@ -31,7 +38,6 @@
 **Risk Register** is a functional Scala application for hierarchical Monte Carlo risk simulation. It enables users to model complex risk portfolios as trees, execute simulations, and analyze Loss Exceedance Curves (LECs).
 
 **Current State:**
-- ✅ 657 tests passing (356 common + 301 server)
 - ✅ Core simulation engine functional with parallel execution
 - ✅ Type-safe domain model using Iron refinement types
 - ✅ Clean separation of concerns (domain/service/HTTP layers)
@@ -90,8 +96,9 @@ case class RiskPortfolio(..., childIds: Array[NodeId], parentId: Option[NodeId])
 // ZIO structured concurrency for tree traversal
 ZIO.collectAllPar(children.map(simulate)).withParallelism(8)
 
-// Scala parallel collections for CPU-bound trials
-successfulTrials.par.map(computeLoss).toVector
+// ZIO fiber batches for CPU-bound trial loss sampling
+ZIO.foreachPar(batches)(batch => ZIO.attempt(batch.map(sampleLoss)))
+  .withParallelism(parallelism)
 ```
 
 **Benefits:**
@@ -123,7 +130,7 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
 
 ### **DTO/Domain Model Separation** (Implemented)
 
-**Status:** ✅ Complete (see IMPLEMENTATION_PLAN.md Phase 2)
+**Status:** ✅ Complete
 
 **Approach:** Validation-during-parsing with private intermediate DTOs
 
@@ -150,22 +157,6 @@ val appLayer = ZLayer.make[RiskTreeController & Server](
 **Current:** ZIO logging (`ZIO.logInfo`, `logWarning`, `logDebug`, `logError`) used throughout all service layers per ADR-002. Routed via `zio-logging-slf4j2` bridge to Logback with env-configurable levels (`LOG_LEVEL`). OpenTelemetry tracing and metrics are a separate pipeline from logging, wired by `TelemetryLive.configured` as a single SDK serving both signals. Which exporter it builds comes from `register.telemetry.exporter`, which defaults to `otlp` and is overridden per environment with `REGISTER_TELEMETRY_EXPORTER`. Under `otlp` the data goes to the collector, which republishes it in Prometheus format on port 8889; under `console` it is printed on the server's own output, for running without a collector.
 
 **Remaining (production deployment):** Swap Logback plain-text encoder to JSON encoder (e.g., `logstash-logback-encoder`) for structured log aggregation in containerised environments. Request-ID correlation and user context headers are Kubernetes deployment concerns, not application-level gaps.
-
----
-
-### **User Context Extraction** (Future)
-
-**Status:** Planned for Kubernetes deployment
-
-**Strategy:** Trust service mesh for authentication, extract user context from injected headers (`X-User-Id`, `X-User-Roles`), propagate via ZIO FiberRef for audit logging.
-
----
-
-### **Rate Limiting** (Future)
-
-**Status:** Delegated to infrastructure (Kubernetes Ingress + Service Mesh)
-
-**Strategy:** Multi-layer approach with infrastructure handling network/service-level limits, application handling business logic limits (e.g., concurrent LEC computations per user).
 
 ---
 
@@ -399,13 +390,13 @@ CachedResultResolver.ensureCached(tree, nodeId, seedEntityId,
   │  Inherent, the raw figure with no mitigation applied. resolvedScopes
   │  carries the node set each mitigation was resolved to.
   │
-  ├─→ Cache hit: Return cached RiskResult
+  ├─→ Cache hit: Return cached LossDistribution
   │
   └─→ Cache miss:
-      ├─→ RiskLeaf: Create Metalog → Sample trials → RiskResult
+      ├─→ RiskLeaf: Create Metalog → Sample trials → LossDistribution
       └─→ RiskPortfolio: Simulate children in parallel → Aggregate
   ↓
-RiskResult (leaf content cached in ContentCache by ContentHash; portfolios re-aggregated per read)
+LossDistribution (leaf content cached in ContentCache by ContentHash; portfolios re-aggregated per read)
   ↓
 LECGenerator.generateCurvePoints
   ↓
@@ -475,7 +466,7 @@ Left(Chunk("id too short", "name blank", "probability out of range"))
 
 ## Parallel Execution Model
 
-### **Current Implementation: Hybrid Approach** ✅
+### **Two Levels of ZIO Concurrency**
 
 #### **Level 1: ZIO Structured Concurrency (Tree Traversal)**
 ```scala
@@ -491,33 +482,30 @@ ZIO.foreachPar(
 - **Error handling:** Failures don't crash thread pool
 - **Configurable:** `withParallelism(n)` controls concurrency
 
-#### **Level 2: Scala Parallel Collections (Trial Computation)**
-```scala
-// Compute losses in parallel (CPU-bound)
-val successfulTrials = trials.filter(_.occurred).par
-val losses = successfulTrials.map { trial => computeLoss(trial) }.toVector
-```
+#### **Level 2: ZIO Fiber Batches (Trial Loss Sampling)**
 
-**Benefits:**
-- **Efficient:** Leverages work-stealing thread pool
-- **Simple:** Familiar collection API
-- **Deterministic:** Same seed = same results
-
-### **Proposed Migration: Pure ZIO** (Optional Future Enhancement)
+`Simulator.performTrials` splits the two phases of a leaf simulation by cost.
+The occurrence filter is one draw and one comparison per trial, so it runs
+sequentially. Loss sampling is an inverse-CDF evaluation costing far more, so
+it is split across fibers:
 
 ```scala
-// Replace .par.map with ZIO.foreachPar
-ZIO.foreachPar(successfulTrials) { trial =>
-  ZIO.attempt(computeLoss(trial))
-}.withParallelism(parallelism)
+val batchSize = math.max(1, successfulTrials.size / parallelism)
+ZIO.foreachPar(successfulTrials.grouped(batchSize).toVector) { batch =>
+  ZIO.attempt(batch.map(trial => (trial, sampler.sampleLoss(trial.toLong))))
+}.map(_.flatten.toMap).withParallelism(parallelism)
 ```
 
-**Additional Benefits:**
-- **Interruptible:** Can cancel long simulations
-- **Telemetry:** Trace parallel execution spans
-- **Error recovery:** Better failure handling
-
-**Status:** Optional - current implementation provides excellent performance characteristics
+**Properties:**
+- **Batched, not per-trial:** one fiber per batch, batch size derived from the
+  parallelism, so fiber overhead is paid once per batch
+- **Sequential below 100 successful trials:** under that size the fiber
+  overhead outweighs the split
+- **Default parallelism:** one fiber per available processor
+- **Deterministic at any parallelism:** sampling is a pure function of the HDR
+  stream coordinates, so the same seeds give the same outcomes however the
+  batches are scheduled
+- **Sparse:** zero-loss trials are never materialized
 
 ---
 
@@ -597,93 +585,11 @@ test("parallel vs sequential produce identical results") {
 }
 ```
 
-#### **4. Integration Tests** (Planned)
-```scala
-// Testcontainers for Redis rate limiting
-test("rate limiter persists across restarts") {
-  withTestcontainers(redis, app) { ... }
-}
-
-// Testcontainers for PostgreSQL repository
-test("repository persists risk trees") {
-  withTestcontainers(postgres) { ... }
-}
-```
-
-#### **5. Load Tests** (Future)
-```scala
-// K3s cluster + k6 load testing
-test("handles 100 concurrent requests") {
-  k6.run(scenario = "spike_test.js")
-}
-```
-
 ---
 
-## Future Roadmap
+## Data Volume and Caching
 
-### **Intended Use Cases (Not Yet Implemented)**
-
-#### **1. Iterative Tree Building**
-```
-User Flow:
-1. Create initial tree (POST /risk-trees)
-2. Compute LEC (GET /risk-trees/:id/lec)
-3. Modify tree (PUT /risk-trees/:id)
-4. Re-compute LEC
-5. Compare results
-```
-
-**Technical Needs:**
-- ✅ Already have: CRUD for risk trees
-- 🔄 Future: Tree diff visualization
-- 🔄 Future: Incremental recomputation (only changed branches)
-
-#### **2. Visual Tree Navigation**
-```
-Frontend Features:
-- Focus on a node (zoom in)
-- Expand/collapse portfolio levels
-- Drill down to leaf details
-- Show LEC at each level
-```
-
-**Technical Needs:**
-- ✅ Already have: Per-node LEC via `LECCurveResponse` (flat structure, client-side navigation)
-- ✅ Implemented: Frontend (Scala.js + Laminar + Vega-Lite)
-- 🔄 Future: Memoization/caching of expanded nodes
-
-#### **3. Scenario Analysis**
-```
-Workflow:
-1. Baseline: Original risk tree
-2. Scenario 1: Increase probability of cyber attack
-3. Scenario 2: Add a mitigation and read the residual valuation
-4. Compare: Baseline vs Scenario 1 vs Scenario 2
-```
-
-**Technical Needs:**
-- ✅ Already have: Can create multiple trees
-- 🔄 Future: Scenario branching (fork from baseline)
-- 🔄 Future: Visual comparison (side-by-side LECs)
-- 🔄 Future: Delta calculation (quantile differences)
-
-#### **4. Metalog-Based Reproducibility**
-```
-Persistence Strategy:
-- Store: Metalog coefficients (~10 doubles)
-- Don't store: Raw trial data (~10K doubles)
-- Benefit: Compact, reproducible, fast
-```
-
-**Technical Needs:**
-- ✅ Already have: Metalog distribution fitting
-- ✅ Already have: Can reconstruct distribution from coefficients
-- 🔄 Future: Store Metalog in database (not just in-memory)
-
-### **Architectural Considerations for Future Features**
-
-#### **No Streaming/Pagination Needed**
+### **No Streaming/Pagination Needed**
 **Why?**
 - ✅ Tree depth: Typically 3-5 levels (fits in memory)
 - ✅ Tree size: Hundreds of nodes, not millions
@@ -694,82 +600,26 @@ Persistence Strategy:
 **Handling large result sets:**
 - ❌ Raw trial data not returned (10K doubles = 80KB) - Metalog representation used instead
 - ❌ Tree node pagination not required - full tree loaded on demand
-- ✅ Future consideration: WebSocket for real-time progress updates
-- ✅ Future consideration: Caching computed LECs via memoization
 
-#### **Caching Strategy** ✅ (Implemented — content-addressed, milestone 2b Phase A)
+### **Caching Strategy** ✅ (Implemented — content-addressed)
 ```scala
 // ContentCacheRegistry: one ContentCache per workspace, keyed by seedEntityId
 trait ContentCacheRegistry:
   def forWorkspace(seedEntityId: SeedEntityId): UIO[ContentCache]
 
-// ContentCache: content-addressed leaf result cache (DD-15: leaves only)
+// ContentCache: content-addressed leaf result cache; leaves only
 trait ContentCache:
   def get(key: ContentHash): UIO[Option[LeafSimResult]]
   def put(key: ContentHash, value: LeafSimResult): UIO[Unit]
   def stats: UIO[CacheStats]
 
-// Cache key: ContentHash = sha256(LeafSimContent projection) — DD-14/DD-16
+// Cache key: ContentHash = sha256(LeafSimContent projection)
 // There is NO invalidation: an edited leaf hashes to a new key and misses;
 // stale entries become unreachable orphans (EvictionStrategy's concern).
 // Portfolio results are never cached — re-aggregated from children per read.
 ```
 
-#### **Incremental Recomputation (Future)**
-```
-When user modifies a single node:
-1. Identify affected subtree (node + ancestors)
-2. Recompute only that branch (O(depth))
-3. Aggregate up to root (O(log n))
-4. Don't recompute sibling branches (cached)
-
-Performance:
-- Current: Full tree recomputation (O(n))
-- Future: Incremental (O(log n))
-- Benefit: 10x faster for small changes
-```
-
----
-
-## Deployment Architecture
-
-### **Kubernetes Production Setup** (Intended)
-
-```
-┌─────────────────────────────────────────────────┐
-│ Ingress Controller (nginx/traefik)              │
-│  - TLS termination                               │
-│  - Rate limiting (100 req/sec per IP)           │
-│  - Path routing                                  │
-└─────────────────────────────────────────────────┘
-                     ↓
-┌─────────────────────────────────────────────────┐
-│ Service Mesh (Istio/Linkerd)                    │
-│  - mTLS between services                         │
-│  - JWT validation (Keycloak)                    │
-│  - Circuit breakers                              │
-│  - Telemetry collection                         │
-│  - Authorization (OPA policies)                  │
-│  - Injects headers: X-User-Id, X-User-Roles     │
-└─────────────────────────────────────────────────┘
-                     ↓
-┌─────────────────────────────────────────────────┐
-│ Risk Register Service (Deployment)               │
-│  - Replicas: 3 (horizontal scaling)             │
-│  - Resources: 1 CPU, 2Gi memory per pod         │
-│  - Health probes: /health, /ready on port 8091  │
-│  - API: port 8090 (mTLS STRICT)                 │
-│  - Stateless (can scale horizontally)           │
-│  - Trusts service mesh for auth                 │
-└─────────────────────────────────────────────────┘
-      ↓                           ↓
-┌──────────────────┐    ┌─────────────────────┐
-│ PostgreSQL       │    │ Redis               │
-│  - Risk trees    │    │  - Rate limiting    │
-│  - Scenarios     │    │  - LEC cache        │
-│  - Audit logs    │    │  - Session state    │
-└──────────────────┘    └─────────────────────┘
-```
+## Scope and Responsibilities
 
 ### **Component Responsibilities**
 
@@ -800,8 +650,6 @@ Performance:
 
 ## Implementation Status
 
-**For detailed phase tracking, task lists, and implementation plans, see `IMPLEMENTATION_PLAN.md`.**
-
 Key completed work:
 - ✅ Configuration management (ZIO Config with application.conf)
 - ✅ DTO/Domain separation (validation-during-parsing)
@@ -812,7 +660,6 @@ Key completed work:
 
 ## Appendix A: HDR Histogram for Million-Scale Trials
 
-**Date:** January 8, 2026  
 **Decision:** High Dynamic Range (HDR) Histogram approach evaluated and determined to be **Not Applicable**  
 **Status:** ✅ Sparse storage validated as optimal for this use case
 
@@ -989,5 +836,3 @@ For development, the current business metrics (operations counter, simulation du
 ---
 
 **Document Status:** Architecture reference (stable)
-**Last Updated:** February 9, 2026
-**Implementation Tracking:** See IMPLEMENTATION_PLAN.md
