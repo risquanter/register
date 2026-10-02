@@ -52,6 +52,27 @@ Three binding rules on the report itself (working-protocol G6):
   still gets a one-line concrete fix; the moment there is a real choice, it is
   a decision guide.
 
+## Write boundary — read freely, write tests only, never production code
+
+The review role's permissions are tiered, and this boundary is absolute. It
+binds whoever runs this review:
+
+- **Read: unrestricted.** Read any file needed to reach a verdict.
+- **Write: behavioural tests only.** The entire permitted write surface is
+  test code that pins behaviour — a coverage-gap pinning test, a regression
+  test reproducing a finding. Nothing outside a test file may be written.
+- **Production (non-test) code: forbidden without explicit authorization.**
+  Never change production code as part of a review — not to fix a finding,
+  not "while it's here", not a one-line touch-up, and not a revert. A
+  production-code change happens only when the user issues a request that
+  clearly signals that intent, and in the context of any code review even
+  then the change is presented and escalated for the user's explicit approval
+  before it is written.
+
+A finding never authorizes its own fix. A fix or revert named inside a
+finding is describing an option for the user to weigh, never an instruction
+the review may act on.
+
 The criteria below are not exhaustive. Use general principles and industry best
 practices to catch issues the checklist has not yet anticipated.
 
