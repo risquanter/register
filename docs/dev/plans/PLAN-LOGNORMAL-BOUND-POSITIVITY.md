@@ -1,11 +1,22 @@
 # Plan — lognormal bound positivity (`PositiveLong`), outward rounding, and the sub-unit mitigation error
 
 **Status:** Draft presented for approval — **all decisions ruled (LBP-D-1 through
-LBP-D-9; LBP-D-4 is superseded by LBP-D-6).** One prerequisite stands outside the
-decisions: §12 cannot delete the `"narrow"` codec arm until the live Irmin store is
-confirmed to hold no mitigation carrying that operation. G3 coverage begins when
-the user approves this document and points the approval token at it; until then no
-source edit is authorized.
+LBP-D-9; LBP-D-4 is superseded by LBP-D-6), and no prerequisite stands outside
+them.** G3 coverage begins when the user approves this document and points the
+approval token at it; until then no source edit is authorized.
+
+**No tree that has already been saved can be affected by the three tightened
+validation rules.** No trees have been saved: there is no Irmin backend holding
+any. The point would otherwise matter, because all three rules run on the way out
+as well as on the way in — `RiskLeaf`'s decoder is `mapOrFail` over
+`RiskLeaf.create`, so reading a saved leaf re-runs the same validation that
+accepted it, and `RiskTreeRepositoryIrmin.readNodesAt` fails the entire tree read
+on the first node that will not decode. A leaf saved with a `minLoss` of zero (§3)
+or an expert quantile of zero (§10), or a mitigation saved with the operation
+`"narrow"` (§12), would therefore stop its whole tree from opening rather than
+failing only at simulation. With nothing saved there is nothing to re-read, and a
+backend populated from the committed fixtures is clean too: no file under
+`examples/` carries a zero bound, a zero quantile, or that operation.
 
 **Goal.** A lognormal leaf's CI bounds (`minLoss` = P05, `maxLoss` = P95) feed a
 logarithm in the distribution fit, so both must be strictly positive. The codebase
@@ -184,10 +195,14 @@ the inventory. Each is corrected in the same pass as the code it describes.
 | `RiskLeafFormState.scala` | "Lognormal mode: requires minLoss < maxLoss (both non-negative)" | the bounds are positive, not merely non-negative |
 | `RiskLeafFormState.scala` | "Lognormal mode: minLoss validation using Iron NonNegativeLong" (and the same line for maxLoss) | names the old refinement |
 | `RiskLeafTransform.scala` | "requires a positive minLoss — log space is undefined at 0" | still true, but the requirement now holds by type rather than by guard, which is what the sentence should say |
+| `RiskLeafFormState.scala` | "Expert mode: quantiles validation (non-negative loss amounts)" | §10 makes the quantiles strictly positive, so "non-negative" names the rule the change replaces |
+| `ValidationMessages.scala` | `quantilesMustBeNonNegative`, "Quantiles must be non-negative" | the same: §10 replaces this message, so both the value name and its text are stale |
 
 One further correction, in a file already in scope, which this plan's own premise
-exposes. `RiskNode.scala` describes the lognormal bounds as an "80% CI" in two
-places, once as "80% CI lower bound in millions". The fit implemented in
+exposes. `RiskNode.scala` describes the lognormal bounds as an "80% CI" in three
+places — once in the mode summary at line 57, and once each in the `@param` lines
+for `minLoss` and `maxLoss`, as "80% CI lower bound in millions" and the matching
+upper-bound line. The fit implemented in
 `LognormalHelper.scala` uses the 5th and 95th percentiles, which is a 90%
 confidence interval, and this plan's goal statement says the same. The scaladoc is
 wrong as it stands and is corrected to 90%. The "in millions" half of that sentence
@@ -284,10 +299,13 @@ case DistributionTransform.ScaleSeverity(f) =>
 ```
 
 The `(Some, Some)` match keeps a fallback branch for exhaustivity, because both
-bounds are `Option`. That branch is unreachable for a lognormal leaf — the
-class-body `require` (§3b) guarantees both bounds are present — so it is kept and
-its message says so rather than advising the user to supply a bound they already
-supplied.
+bounds are `Option`. That branch is unreachable for a lognormal leaf: the
+class-body `require` (§3b) guarantees both bounds are present. It therefore raises
+no error of its own and emits no message. It passes whichever bounds it was given
+straight through, and `RiskLeaf.create` — which `applyTo` calls on the result —
+rejects a lognormal leaf with a missing bound with the existing message for that
+case. Adding a second message here would mean writing user-facing text for a state
+the type system already prevents.
 
 There is no `Narrow` branch. `DistributionTransform.Narrow` is deleted by this plan
 (§12).
@@ -464,11 +482,13 @@ lognormal branch, because the refinement runs first in both and an unreachable
 branch in a `Validation` path reads as live code. Written out in §3b.
 
 ### LBP-D-9 — `DistributionTransform.Narrow` — RULED: deleted
-`Narrow` is the only operation in the mitigation vocabulary that increases a loss.
-It raises the distribution's low quantiles while lowering the high ones, so turning
-its single parameter up makes small losses progressively impossible. It also
-reduces expected loss by up to half while leaving the median bit-identical, which
-is the figure a reviewer checks. Every real mechanism that compresses loss spread
+`Narrow` raises the author's own declared 5th percentile — on the worked leaf, from
+1 000 to 2 659 — while leaving the median bit-identical. Raising a low quantile is
+not unique to it: the fit pins the 5th percentile at `minLoss` and the 95th at
+`maxLoss`, so any refit that reduces the spread parameter pivots the distribution
+and something below the pivot rises. What is specific to `Narrow` is *which* figure
+moves. It moves one the author wrote down, and leaves untouched the median a
+reviewer checks, while cutting the mean by up to half. Every real mechanism that compresses loss spread
 is one-sided — a cap, a floor, a blast-radius limit — and the one mechanism that
 matches `Narrow`'s shape reduces uncertainty about the loss rather than the loss.
 Written out in §12, with the `Override` construction that reproduces any
@@ -530,12 +550,22 @@ allowance does not reach across modules.
 **Integration:**
 - new: modules/server-it/src/test/scala/com/risquanter/register/http/LognormalBoundPositivityItSpec.scala
 
-Seven further test files construct one of the three scale operations with a factor
-of `0.5` or `0.8`. Iron refines those literals against the new `RetentionFactor`
-constraint at compile time, so they compile unchanged and are deliberately absent
-from this list: `CachedResultResolverSpec`, `MitigationScopeResolverSpec`,
-`MitigationApplicationSpec`, `MitigationStalenessSpec`, `RiskTreeServiceLiveSpec`,
-`MitigationEntitySpec` and `ResultTransformSpecSpec`.
+Further test files construct one of the three scale operations, and are absent from
+this list for two different reasons, both deliberate.
+
+Six pass a literal factor of `0.5`, `0.8` or `1.0`, which the compiler refines
+against the new `RetentionFactor` constraint, so they compile with no edit at all:
+`MitigationScopeResolverSpec`, `MitigationStalenessSpec`, `RiskTreeServiceLiveSpec`,
+`MitigationEntitySpec`, `ResultTransformSpecSpec` and
+`ResultTransformInterpreterSpec`.
+
+Two do need an edit, and are reached without an inventory entry by the gate's
+same-module test allowance: `CachedResultResolverSpec` and
+`MitigationApplicationSpec` both pass a run-time-refined `NonNegativeDouble` into
+`ScaleSeverity`, which no longer typechecks, so each switches to
+`refineRetentionFactor` (§11). Both live under `modules/server/src/test/`, and this
+list names `modules/server/src/main/.../RiskResultTransform.scala`, which authorizes
+any test edit in that same module.
 
 If implementation reaches a file this list does not name, that denial is the
 deviation escalation: stop, present the path, and wait for the inventory to be
@@ -577,9 +607,27 @@ which is a deliverable of this section, because it decides whether any existing
 tree is already producing meaningless figures rather than an error.
 
 **The change.** In `Distribution.create`, the quantile element test moves from
-`qt < 0.0` to `qt <= 0.0`, and `ValidationMessages` gains a positive-quantile
-message to replace the non-negative wording. In `RiskLeafFormState`, the expert
-quantile field validation matches it, so the form rejects a zero before submit.
+`qt < 0.0` to `qt <= 0.0`. In `RiskLeafFormState`, the expert quantile field's own
+test moves from `values.exists(_ < 0)` to `values.exists(_ <= 0)`, so the form
+rejects a zero before submit. Both report the same new message, which replaces
+`quantilesMustBeNonNegative` in `ValidationMessages.scala`:
+
+```scala
+val quantilesMustBePositive: String =
+  "Quantile loss amounts must be greater than zero — the distribution fit takes their logarithm"
+```
+
+The clause after the dash states the reason, which is the established pattern for
+the explained messages in that file — `percentilesMustBeStrictlyIncreasing` and
+`quantilesMustBeStrictlyIncreasing` are both written that way.
+
+**The two sides currently disagree, and this consolidates them.** The shared value
+`quantilesMustBeNonNegative` has exactly one reader, the client form at
+`RiskLeafFormState.scala:158`. The server does not use it: `Distribution.create`
+carries its own inline string, `"Quantile loss amount must be non-negative"`, so the
+same rejection reads differently depending on which side produced it. The new value
+replaces both, and `Distribution.create`'s inline literal becomes a reference to it.
+The old value is then unreferenced and is deleted.
 
 **Scope note.** This tightens the wire contract: a client sending a zero quantile
 for an expert leaf starts receiving a 400 where it previously received a stored
@@ -665,7 +713,7 @@ canonical form. No outcome is discarded.
 // Refinement for a retention factor: a fraction of a figure that is kept
 def refineRetentionFactor(value: Double, fieldPath: String = "factor"): Either[List[ValidationError], RetentionFactor] = {
   value
-    .refineEither[GreaterEqual[0.0] & LessEqual[1.0]]
+    .refineEither[Greater[0.0] & LessEqual[1.0]]
     .left
     .map(_ => List(ValidationError(
       field = fieldPath,
@@ -674,6 +722,42 @@ def refineRetentionFactor(value: Double, fieldPath: String = "factor"): Either[L
     )))
 }
 ```
+
+The error code is `INVALID_RANGE`, which is what `refineShrinkFraction` already
+uses for the same kind of failure, so the HTTP status and the error shape are
+unchanged.
+
+**The message**, in `ValidationMessages.scala`, taking the slot
+`shrinkFractionOutOfRange` occupies in the numeric section (§12 deletes that
+value):
+
+```scala
+val retentionFactorOutOfRange: String =
+  "Mitigation factor must be greater than 0 and at most 1 — a mitigation reduces a figure, so it can neither increase it nor remove it entirely"
+```
+
+Three things about the wording follow the file's existing conventions rather than
+being chosen here.
+
+The range is spelled out longhand instead of with the `(exclusive)` or
+`(inclusive)` suffix that `probabilityOutOfRange` and
+`occurrenceProbabilityOutOfRange` use. Those suffixes describe an interval whose
+two endpoints are both open or both closed. `RetentionFactor` is open at zero and
+closed at one, which neither suffix can state. `shrinkFractionOutOfRange` is the
+one existing message with the same shape and solves it the same way: "must be at
+least 0 and below 1".
+
+The clause after the dash is there because the range alone does not explain the
+rejection a user will actually hit. Someone entering `0` means "this control
+removes the risk", and a message giving only the bounds reads as an off-by-one
+quibble rather than a statement that the model does not accept that claim (§11a).
+The file uses this dash-clause form for exactly this case — a rule that is clear
+but whose reason is not — in `percentilesMustBeStrictlyIncreasing` and
+`quantilesMustBeStrictlyIncreasing`, and nowhere else.
+
+The subject is "Mitigation factor" rather than "Factor" because every other
+message in the file names the domain quantity: "Occurrence probability",
+"Minimum loss", "Narrowing fraction".
 
 **The three adopting signatures:**
 
@@ -763,14 +847,25 @@ unconstructible rather than because their assertion was wrong:
 | `RiskResultTransformSpec.scala` | `ScaleLosses(2.0)` in a result-stage pipeline | same substitution |
 | `RiskResultTransformSpec.scala` | `scaleLosses(0.0)` zero-loss filter case | deleted, and replaced by a boundary-rejection case: `refineRetentionFactor(0.0)` fails. The `filter(_._2 > 0)` path it exercised stays covered by the existing `scaleLosses(0.001)` case, where small losses still round to zero. |
 | `RiskLeafTransformSpec.scala` | `LikelihoodTransform.Scale(4.0)` clamp case | a boundary-rejection case: `refineRetentionFactor(4.0)` fails |
+| `RiskLeafTransformSpec.scala` | the closure property test's generator, `Gen.double(0.1, 2.0).map(_.refineUnsafe)` typed `Gen[Any, NonNegativeDouble]`, feeding `Scale(lf)` and `ScaleSeverity(df)` | `Gen.double(0.1, 1.0)` typed `Gen[Any, RetentionFactor]`. Two separate breaks: the element type is no longer the one either constructor accepts, and the range's upper half would make `refineUnsafe` throw at run time. |
+| `CachedResultResolverSpec.scala` | `ScaleSeverity(ValidationUtil.refineNonNegativeDouble(factor).toOption.get)` in `leafScaleSeverity` | `refineRetentionFactor` in place of `refineNonNegativeDouble` |
+| `MitigationApplicationSpec.scala` | the same construction in `leafScale` | the same substitution |
 | `LossDistributionSpec.scala` | `scaleRecord(…, 2.0)` at two sites, one of them the layer-overflow case over `Map(1 -> Long.MaxValue)` | the overflow case keeps `Long.MaxValue` with factor `1.0`; the other case takes a factor at or below 1 |
 
-Every other test that constructs one of these three operations uses a factor of
-`0.5` or `0.8` and compiles unchanged, because Iron refines a literal against the
-new constraint at compile time: `CachedResultResolverSpec`,
-`MitigationScopeResolverSpec`, `MitigationApplicationSpec`,
-`MitigationStalenessSpec`, `RiskTreeServiceLiveSpec`, `MitigationEntitySpec` and
-`ResultTransformSpecSpec`. They are therefore not in the inventory.
+The two `refineNonNegativeDouble` rows above are in the table rather than in the
+compiles-unchanged list below for a reason worth stating, because the distinction
+decides which list every such site belongs in. A literal factor is refined by the
+compiler against whatever constraint the parameter declares, so `Scale(0.5)`
+retypes for free. A factor refined at run time does not: `refineNonNegativeDouble`
+returns a `NonNegativeDouble`, and an Iron refined type `A :| C` is declared a
+subtype of `A` alone, so `NonNegativeDouble` is not a subtype of `RetentionFactor`
+and the call does not compile. Both of these files pass a run-time-refined value.
+
+Every other test that constructs one of these three operations passes a literal
+factor of `0.5`, `0.8` or `1.0` and compiles unchanged: `MitigationScopeResolverSpec`,
+`MitigationStalenessSpec`, `RiskTreeServiceLiveSpec`, `MitigationEntitySpec`,
+`ResultTransformSpecSpec` and `ResultTransformInterpreterSpec`. They need no edit,
+so they are not in the inventory.
 
 **Documentation this invalidates.** `docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`
 §8.2 justifies `LossDistribution`'s fallible construction with the sentence
@@ -848,13 +943,16 @@ The decoder's fallback arm already rejects an unknown operation —
 payload carrying `"op": "narrow"` is rejected with that message once the arm is
 gone. No new error path is needed.
 
-**One check before the codec arm is deleted, and it is a prerequisite rather than a
-step.** A stored mitigation carrying `"op": "narrow"` would stop decoding, and a
-tree read that reaches it would fail. There is no mitigation-authoring interface —
-the only match for "mitigation" under `modules/app/src` is a test file — and no
-example data uses the operation, so the expected answer is that nothing exists. The
-answer must come from the live Irmin store rather than from that reasoning. If a
-record does exist, this section stops and the migration is presented as a decision.
+**No saved mitigation can carry the deleted operation.** A mitigation whose stored
+JSON held `"op": "narrow"` would stop decoding once the arm is gone, and
+`RiskTreeRepositoryIrmin.readNodesAt` fails the whole tree read on the first node
+that will not decode, so one such mitigation would prevent its tree from opening.
+No mitigations have been saved — there is no Irmin backend holding any — and
+nothing under `examples/` carries the operation, so a backend populated from the
+committed fixtures holds none either. There is also no mitigation-authoring view in
+the client through which one could have been written; the only match for
+"mitigation" under `modules/app/src` is a test file. The deletion is therefore an
+ordinary step with no data condition attached.
 
 **Verification.** `sbt "commonJVM/test; server/test"` and `sbt app/test` green,
 with `RiskLeafTransformSpec` carrying one added case: a transform payload with

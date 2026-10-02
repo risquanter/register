@@ -22,14 +22,15 @@ roadmap, no future sections and no status markers.
 5. [Domain Model](#domain-model)
 6. [Layered Architecture](#layered-architecture)
 7. [Data Flow](#data-flow)
-8. [Validation Strategy](#validation-strategy)
-9. [Parallel Execution Model](#parallel-execution-model)
-10. [Testing Strategy](#testing-strategy)
-11. [Data Volume and Caching](#data-volume-and-caching)
-12. [Scope and Responsibilities](#scope-and-responsibilities)
-13. [Implementation Status](#implementation-status)
-14. [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogram-for-million-scale-trials)
-15. [Appendix B: ZIO Metrics Bridge for Runtime Observability](#appendix-b-zio-metrics-bridge-for-runtime-observability)
+8. [Storage and the Read Path](#storage-and-the-read-path)
+9. [Validation Strategy](#validation-strategy)
+10. [Parallel Execution Model](#parallel-execution-model)
+11. [Testing Strategy](#testing-strategy)
+12. [Data Volume and Caching](#data-volume-and-caching)
+13. [Scope and Responsibilities](#scope-and-responsibilities)
+14. [Implementation Status](#implementation-status)
+15. [Appendix A: HDR Histogram for Million-Scale Trials](#appendix-a-hdr-histogram-for-million-scale-trials)
+16. [Appendix B: ZIO Metrics Bridge for Runtime Observability](#appendix-b-zio-metrics-bridge-for-runtime-observability)
 
 ---
 
@@ -406,6 +407,66 @@ LECCurveResponse (JSON)
 **Key Insight:** Configuration (POST) and Computation (GET /lec) are separate.
 - **POST:** Fast, synchronous, persists tree definition
 - **GET /lec:** Computes per-node, caches results, incremental recomputation
+
+---
+
+## Storage and the Read Path
+
+The names this section fixes are the ones to use when writing about persistence,
+here and in plans. They are the names the code uses.
+
+### What the pieces are called
+
+**Irmin backend** — the content-addressed store that holds trees between
+requests. Content-addressed means a value is identified by the hash of its
+contents, which is what gives Irmin its Git-like history and branching. It is
+reached over GraphQL, and `RiskTreeRepositoryIrmin` is the only component that
+talks to it.
+
+**Stored tree** — a risk tree that has been saved into the Irmin backend. A tree
+that has never been saved is not a stored tree, and nothing about this section
+applies to it.
+
+**Node value** — the JSON text one node is saved as. A tree is not one document:
+each `RiskNode` is written separately, at its own `IrminPath`. A tree with twelve
+leaves is twelve node values.
+
+**Saved mitigation** — a mitigation is stored under its own path prefix, not
+inside a node value, and is read back by `readMitigationsAt` rather than by the
+method that reads nodes.
+
+**Tree read** — reconstructing a stored tree. `readNodesAt` lists the node paths
+at a commit, fetches each node value, and decodes each one.
+
+**Decode** — turning one node value back into a `RiskLeaf` or a `RiskPortfolio`.
+`decodeNode` attempts the leaf decoder first and the portfolio decoder second,
+because a node value carries no field saying which it is.
+
+### Validation runs on the way out, not only on the way in
+
+This is the non-obvious property, and the reason the vocabulary above matters when
+a validation rule changes.
+
+`RiskLeaf`'s JSON decoder is `mapOrFail` over `RiskLeaf.create`, the same smart
+constructor that validates an incoming API request. Decoding a saved leaf
+therefore re-runs the full validation that accepted it originally. Validation is
+not a gate the data passes once on the way in; it runs again on every tree read.
+
+Two consequences follow.
+
+**Tightening a validation rule reaches data already saved.** The cause is that
+the rule runs during decode. The symptom is that a node value saved under the
+looser rule stops decoding. Because `readNodesAt` fails on the first node that
+will not decode, the effect is not a single bad leaf — the whole tree read fails,
+so the tree does not open at all. The fix is to establish before tightening a
+rule that no stored tree holds a value the new rule rejects.
+
+**A failed leaf decode is reported as a portfolio error.** The cause is the order
+in `decodeNode`: the leaf decoder is tried first, and when it fails the portfolio
+decoder is tried on the same node value. `Either.orElse` keeps the second error
+and discards the first. The symptom is a message complaining about missing
+portfolio fields, naming nothing about the field that actually failed. When
+diagnosing a decode failure on a leaf, the reported error is not the real one.
 
 ---
 
