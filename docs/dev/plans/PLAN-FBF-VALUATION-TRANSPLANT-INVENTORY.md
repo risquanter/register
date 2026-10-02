@@ -20,3 +20,5 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/common/src/main/scala/com/risquanter/register/domain/data/Mitigation.scala
 - modules/common/src/main/scala/com/risquanter/register/domain/data/iron/ValidationMessages.scala
 - build.sbt
+- modules/server/src/main/scala/com/risquanter/register/simulation/RiskSampler.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/data/RiskLeafTransform.scala
