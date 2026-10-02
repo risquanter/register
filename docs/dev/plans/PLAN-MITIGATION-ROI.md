@@ -45,7 +45,6 @@ that differences base-vs-mitigated curves.
 Confirmed by reading the current sources:
 
 **`modules/server/.../simulation/LossDistribution.scala`**
-- `Loss` is `Long` = **whole millions of dollars** (`1L` = $1M).
 - `TrialOutcomes(nTrials: PositiveInt, outcomes: Map[TrialId, Loss])` — a sparse
   per-trial loss vector; a commutative monoid whose `combine` is a per-trial
   pointwise sum via `Math.addExact` (overflow → `ArithmeticException` →
@@ -81,6 +80,12 @@ Confirmed by reading the current sources:
   accumulated cross-field rules. A cost field would be added here and threaded
   through the private `Raw` codec.
 
+**`modules/server/.../mitigation/RiskResultTransform.scala`**
+- The five result-stage operations that produce a mitigated per-trial figure:
+  `applyDeductible`, `capLosses`, `scaleLosses`, `filterBelowThreshold`,
+  `insurancePolicy`. Each is applied to a node's finished per-trial figures, so
+  a mitigated figure is available at every node without re-simulating.
+
 **Net:** the data needed for benefit is present and retained; what is missing is
 (1) a cost input on the mitigation, (2) a TVaR computation, (3) the read-side
 ROI assembly and a base-vs-mitigated overlay.
@@ -107,8 +112,27 @@ this plan is readable on its own:
 - **TVaR (Tail Value at Risk / expected shortfall)** — the mean loss in the worst
   tail beyond a quantile (e.g. mean of the worst 1%). Subadditive and
   tail-focused; `ΔTVaR` is the **non-circular** deliverable: two mitigations with
-  identical `ΔAAL` can have `ΔTVaR` differing by an order of magnitude (scratch
-  §5 worked example). This is why TVaR is worth adding.
+  identical `ΔAAL` of $2M can have `ΔTVaR` of $40M and $5M, an 8× separation the
+  mean cannot see (scratch §5 worked example). This is why TVaR is worth adding.
+- **`ΔTVaR` is defined on two independent rankings, and this is a specification,
+  not an implementation detail.** A tail statistic is defined on a *selected* set
+  of trials, and the selection moves when the mitigation is applied. `ΔTVaR` is
+  therefore `TVaR(base trials, ranked)` minus `TVaR(mitigated trials, ranked
+  again from scratch)`. It is **not** the mean saving over the trials that were
+  worst in the base run — that second quantity is a tail *attribution* (how much
+  of a given tail one risk or control accounts for), it answers a different
+  question, and the two disagree by any amount. The scratch §5 example is exactly
+  a case where they disagree. Whichever is implemented must be named in the
+  signature and the scaladoc.
+- **A tail read averages a share of trials, not a set of loss levels.** The
+  requested share rarely lands exactly on a trial boundary, and several trials
+  can share one loss value, so the cutoff usually falls inside a group of
+  equals. The average must therefore cover exactly the requested share of
+  trials, giving the trials at the cutoff the fraction of weight that still
+  fits. A method that instead selects every trial at or above the cutoff loss
+  value averages the wrong number of trials. The scratch §5 example is the
+  extreme case: the entire worst 1% sits inside one group of equal-valued
+  trials twice that size, so such a method averages twice the intended share.
 - **NPV / discounting (scratch §7).** For multi-year cost shapes (upfront +
   maintenance), a pluggable discount rate `r` lets a CFO trade future money
   against present money: `PV = FV / (1+r)^t`. Default `r = 0` (no discounting);
@@ -136,10 +160,12 @@ decisions in §5.
   and the OD-4 "mitigation-blind" simulation identity. This is a hard constraint
   on where the cost field is projected, and it interacts with Decision 4.
 - **ADR-018 (nominal wrappers) + ADR-001 (domain types) + correct-by-construction.**
-  A cost is money, and `Loss` is `Long`-millions — it cannot represent a
-  $250k/yr fee. Cost therefore needs its own value type with its own precision,
-  built by a smart constructor at the boundary, not reusing `Loss`. The unit and
-  precision choice is a sub-decision inside Decision 4.
+  A cost and a loss are different quantities. A cost is a contracted amount a
+  buyer agrees to pay; a loss is a simulated outcome. They are added to nothing
+  in common, they are not interchangeable in any expression, and only one of
+  them is user-entered. Cost therefore gets its own value type with its own
+  precision, built by a smart constructor at the boundary, rather than reusing
+  `Loss`. The unit and precision choice is a sub-decision inside Decision 4.
 - **ADR-014 (cache outcomes, not curves).** TVaR and every ROI number are
   **read-side computations over the retained per-trial sample** — no
   re-simulation, no new cached artifact. TVaR lands as a field on the existing
@@ -149,6 +175,15 @@ decisions in §5.
   overflow / divide-by-zero / invalid-rate through the established
   `Validation` / typed-error path, not throw. `Math.addExact` precedent already
   exists for the per-trial sums.
+- **Any approximation applied to a loss must be unbiased, because every ROI
+  figure is a difference.** `ΔAAL`, `ΔTVaR`, ROSI and NPV all subtract a
+  mitigated figure from a base figure. An approximation that moves values in one
+  direction only — rather than symmetrically about zero — lands entirely on the
+  mitigated side of that subtraction, so its error accumulates across trials
+  instead of cancelling and the reported benefit is wrong by the accumulated
+  amount rather than by the per-trial amount. This is a constraint on any
+  conversion or narrowing the ROI path introduces, independently of how a loss
+  is represented.
 - **Correct-by-construction (validate once at the boundary).** A `MitigationCost`
   smart constructor (`create(...): Validation[ValidationError, MitigationCost]`)
   validates the fee shape once; services receive an already-valid value. A
@@ -163,8 +198,9 @@ decisions in §5.
 ## 5. Sequencing prerequisite
 
 The **single-mitigation, single-node ROI read-out** (cost field + TVaR + ΔAAL /
-ΔTVaR + ROSI/NPV numbers) is largely standalone: it needs the cost field, the
-TVaR computation, and read-side assembly.
+ΔTVaR + ROSI/NPV numbers) is standalone: it needs the cost field, the TVaR
+computation, and read-side assembly, and nothing else in the repository gates
+it.
 
 The **with-vs-without portfolio overlay (scratch §6)** depends on the
 mitigation-selection / compare view that is **PLAN-RISKTRANSFORM M3/M4** work
@@ -198,7 +234,7 @@ whole read-out is built around, so it needs to be both meaningful and honest.
   show the *same* ΔAAL. Offering ΔTVaR beside it restores the tail picture.
   *Example:* Leaf A (rare $60M breach, 5%) mitigated to $20M and Leaf B
   (frequent $5M fraud, 40%) eliminated both show `ΔAAL ≈ $2M`; but
-  `ΔTVaR(99%) ≈ $40M` for A vs `≈ $2M` for B — only ΔTVaR separates them.
+  `ΔTVaR(99%) = $40M` for A vs `= $5M` for B — only ΔTVaR separates them.
 - **(1b) `ΔTVaR` as the default headline.** Leads with the tail, which is where
   risk-transfer decisions actually bite. But TVaR needs a chosen tail level
   (99%? 99.5%?), is less intuitive as a "how much does it save" number, and for
@@ -285,11 +321,13 @@ it carries. This is the one decision that touches the domain model and ADR-032.
   a stated requirement.
 
 **Sub-decision (monetary unit/precision), applies under 4a or 4b.**
-- `Loss` is `Long`-millions and **cannot** hold a $250k/yr fee. Cost needs its
-  own value type. Candidates: (i) a `Money` nominal wrapper over minor units
-  (`Long` cents/dollars) with a smart constructor; (ii) `BigDecimal` with a
-  fixed scale and currency; (iii) `Long` whole-dollars. This is an ADR-018 /
-  ADR-001 value-type choice and must be ruled together with the shape.
+- A cost is a distinct quantity from a loss (§4) and gets its own value type.
+  Candidates: (i) a `Money` nominal wrapper over minor units (`Long`
+  cents/dollars) with a smart constructor; (ii) `BigDecimal` with a fixed scale
+  and currency; (iii) `Long` whole-dollars. The deciding requirement is the
+  smallest fee the product must express and whether money arithmetic may lose
+  precision. This is an ADR-018 / ADR-001 value-type choice and must be ruled
+  together with the shape.
 
 **ADR-032 constraint (binds all options).** Wherever cost lands, it rides the
 **storage** blob (versioned/diffed/merged) but is **excluded from the domain /

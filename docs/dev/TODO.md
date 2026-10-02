@@ -31,6 +31,30 @@ landed; it is independent of 3 and 5.
 
 ---
 
+## Loss unit is an uninterpreted `Long` — docs say `1L = $1M`, data enters dollars verbatim
+
+**Symptom.** Scaladoc and user docs state the `Loss` unit is millions (`1L = $1M`:
+`docs/user/TERMINOLOGY.md`, `LECGenerator.scala`, `RiskNode.scala` "lower bound in
+millions"), but no code scales by `1e6` — `Loss` is a raw `Long` and the lognormal
+fit takes `log` of the raw value. The example/test data contradicts the convention:
+it enters full dollar figures (`minLoss: 1000000` in
+`examples/demo-enterprise-tree.json` and `DemoEnterpriseScriptSpec.scala`), which
+under `1L = $1M` would mean $1 trillion.
+
+**Consequence.** The unit is effectively "whatever the user typed", interpreted as
+dollars in practice. The `1L = $1M` label is misleading and inconsistent across the
+scaladoc, the LEC axis/tooltip labels, the API tutorial, and the form hint
+("Quantiles (loss in $M)"). It also sets how coarse the integer grid is relative to
+real inputs, which is what makes the lognormal sub-unit mitigation case
+(`docs/dev/plans/PLAN-LOGNORMAL-BOUND-POSITIVITY.md`) rare rather than frequent.
+
+**Not yet scoped.** Decide the canonical convention (dollars verbatim vs a declared
+unit with real scaling), then reconcile scaladoc, `TERMINOLOGY.md`, LEC axis/tooltip
+labels, the API tutorial, and the form hints. Surfaced 2026-10-01 while reviewing
+the lognormal bound positivity plan.
+
+---
+
 ## ✅ 1. "Will retry" banner text has no backing implementation — RESOLVED 2026-07-09
 
 **Resolution:** `retryable: Boolean` removed from `GlobalError.NetworkError`

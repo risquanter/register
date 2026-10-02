@@ -4,8 +4,9 @@
 > a from-first-principles conception of how the tool could express return on
 > investment (ROI) for a mitigation, given the Loss Exceedance Curves (LECs) the
 > engine already produces and a cost model of {yearly fee} or {upfront implementation
-> fee + yearly maintenance fee}. When this graduates, it appends to
-> `PLAN-RISKTRANSFORM.md` (one plan per workstream); it does not become its own plan.
+> fee + yearly maintenance fee}. The derivations here are the source material for
+> `docs/dev/plans/PLAN-MITIGATION-ROI.md`, which carries the decisions, the code
+> grounding and the ADR constraints; this note is kept, not superseded.
 >
 > Ties to: `DEPENDENCE.md` (with-vs-without at the portfolio node; TVaR; tail
 > allocation), `LEC-TAIL-TRIMMING.md` (0.5% render trim is visualization-only, full
@@ -171,16 +172,35 @@ Two candidate mitigations, **deliberately tuned to the same ΔAAL = \$2M/yr**:
 By the mean-benefit (ΔAAL) metric these are **identical** — same \$2M/yr, same NPV
 input. Now read the **tail**.
 
-**The tail.** Rank all 10,000 trials by total portfolio loss; take the worst 1% (worst
-100). Those worst trials are dominated by breach years (A contributes ≥ \$60M; B at most
-\$5M). So `TVaR99` (mean loss of the worst 100) ≈ \$62M.
+**The tail — enumerate the joint outcomes before ranking anything.** The two leaves are
+independent, so the 10,000 trials fall into exactly four groups:
 
-- **M_A** removes \$40M from **every** one of those worst trials → `TVaR99` ≈ \$22M.
-  **ΔTVaR ≈ \$40M.**
-- **M_B** removes \$5M only where B is present in the worst trials (~40% of them) →
-  `TVaR99` ≈ \$60M. **ΔTVaR ≈ \$2M.**
+| Both fire | A only | B only | Neither |
+|---|---|---|---|
+| 2% → 200 trials at \$65M | 3% → 300 trials at \$60M | 38% → 3,800 trials at \$5M | 57% → 5,700 trials at \$0 |
 
-**Same ΔAAL (\$2M), ΔTVaR different by 20×** (\$40M vs \$2M). The mitigation that
+Rank by total portfolio loss and take the worst 1% — the worst **100** trials. There are
+**200** trials at \$65M, so every one of the worst 100 is a trial in which **both** leaves
+fired, and `TVaR99` (the mean loss of the worst 100) is exactly **\$65M**.
+
+Writing the four groups out is not pedantry; it is the point. The worst 100 are not a
+random sample of breach years, they are the **largest** of them, and a breach year is
+largest precisely when the fraud fired too. Selection into the tail conditions on B, so
+inside the tail B contributes its full \$5M with probability 1, not its unconditional
+average of \$2M. Independence in the model does not survive conditioning on the total
+being extreme. Charging a sibling risk into the tail at its unconditional frequency is the
+standard way to get this calculation wrong, and it understates the tail.
+
+Now each mitigation, each **re-ranked on its own trials**:
+
+- **M_A** (\$60M → \$20M): the groups become 200 at \$25M, 300 at \$20M, 3,800 at \$5M,
+  5,700 at \$0. The worst 100 come from the 200 at \$25M, so `TVaR99` = **\$25M** and
+  **ΔTVaR = \$40M**.
+- **M_B** (B eliminated): the groups become 500 at \$60M and 9,500 at \$0. The worst 100
+  come from the 500 at \$60M, so `TVaR99` = **\$60M** and **ΔTVaR = \$5M**. Eliminating B
+  removes B's full \$5M from every trial in the base tail, because B fired in all of them.
+
+**Same ΔAAL (\$2M each), ΔTVaR different by 8×** (\$40M vs \$5M). The mitigation that
 protects the portfolio's solvency is obviously M_A — and **nothing in the AAL or the
 input frequencies says so.** Only aggregating the joint per-trial losses and reading the
 tail does. Note the reframing this forces: `P(M_A pays off in a year)` is still ≈5% (its
@@ -188,6 +208,16 @@ frequency, the trivial number from §4) — but that is plainly the wrong questi
 \$40M tail reduction is the number worth computing, and it is a pure product of
 aggregation. This is the concrete, non-circular payoff of the architecture, and it is the
 `co-TVaR` / tail-contribution idea parked in `DEPENDENCE.md` (c).
+
+**The general rule the example forces.** A tail statistic is defined on a **selected** set
+of trials, and the selection moves when the mitigation is applied. So `ΔTVaR` is
+`TVaR(base trials, ranked)` minus `TVaR(mitigated trials, ranked separately)` — two
+independent rankings. It is **not** the average saving over the trials that were worst in
+the base run. Those are two different quantities with two different meanings, and both are
+worth having: the re-ranked difference is how much tail the mitigation removes, while the
+average saving over a fixed tail set is a tail *attribution* — how much of that tail one
+risk or one control accounts for. An implementation must name which one it computes; they
+can disagree by any amount, and they disagree here.
 
 **Where to measure.** At the **nearest enclosing portfolio node**, with-vs-without the
 mitigation, exactly as `DEPENDENCE.md` (a) prescribes — because the tail is a portfolio
