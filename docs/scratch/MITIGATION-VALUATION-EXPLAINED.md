@@ -450,10 +450,16 @@ cannot reach a second node. And the aggregate claim — "my total is the combine
 my children" — does not live on it at all; it lives one level below, on an
 internal type the fold builds and no consumer can name.
 
-Construction has to be able to fail, for one real reason: `ScaleLosses` takes a
-factor that may exceed 1, so applying a transform can overflow. The aggregation
-path already converts that arithmetic overflow into a `ValidationError`, and the
-layer's own overflow is converted the same way.
+Construction has to be able to fail, for one real reason: aggregating children
+sums their losses, and a sum can pass `Long.MaxValue`. The aggregation path
+converts that arithmetic overflow into a `ValidationError`, and the layer's own
+overflow is converted the same way.
+
+A scale factor is no longer among the reasons. `ScaleLosses` takes a
+`RetentionFactor`, which is above 0 and at most 1, so scaling can never raise a
+loss. One overflow remains reachable through it, and it is a representation
+limit rather than a factor: a loss at the top of the `Long` range trips the guard
+even at a factor of exactly 1, because `Long.MaxValue.toDouble` rounds up.
 
 ### 8.3 The construction algorithm
 
