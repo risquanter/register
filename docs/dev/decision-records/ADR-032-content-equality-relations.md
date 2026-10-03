@@ -34,8 +34,8 @@ final case class LeafSimContent(
   distributionType: DistributionType,
   percentiles: Option[Array[Double]],
   quantiles: Option[Array[Double]],
-  minLoss: Option[NonNegativeLong],
-  maxLoss: Option[NonNegativeLong],
+  minLoss: Option[PositiveLong],
+  maxLoss: Option[PositiveLong],
   terms: Option[PositiveInt]
 )
 

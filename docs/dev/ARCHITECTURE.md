@@ -215,8 +215,8 @@ RiskNode (sealed trait)
 │   ├── probability: Probability (0.0 < p < 1.0)
 │   ├── percentiles: Option[Array[Double]]      // Expert mode
 │   ├── quantiles: Option[Array[Double]]         // Expert mode
-│   ├── minLoss: Option[NonNegativeLong]         // Lognormal mode
-│   ├── maxLoss: Option[NonNegativeLong]         // Lognormal mode
+│   ├── minLoss: Option[PositiveLong]            // Lognormal mode (feeds a logarithm)
+│   ├── maxLoss: Option[PositiveLong]            // Lognormal mode (feeds a logarithm)
 │   └── parentId: Option[NodeId]                 // None for root
 │
 └── RiskPortfolio (branch node - aggregation)

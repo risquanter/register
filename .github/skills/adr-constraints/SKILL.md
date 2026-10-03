@@ -258,6 +258,17 @@ private keys are generated locally and stay outside git.
   leaves-upward so a child's transform acts before its parent aggregates;
   within one mitigation `TransformPipeline` steps run in list order; across
   mitigations on one node `MitigationPrecedence` orders them.
+- A mitigation may reduce a risk; none may eliminate it, and the rule has two
+  enforcement points. A type at the boundary where the parameter decides it:
+  the three scale operations take a `RetentionFactor` (above 0, at most 1),
+  `LikelihoodTransform.Override` a `ResidualProbability` (same interval), and
+  `CapLosses` a `PositiveLong`. A check in `LossDistribution.decorate` where the
+  outcomes decide it: a deductible at or above every loss, a threshold above
+  every loss, or a scale factor small enough that every loss rounds to zero,
+  annihilate only against particular outcomes, so `decorate` refuses a layer
+  that leaves no loss where there was one. A figure that
+  increases is stated absolutely through an `Override`. A risk that no longer
+  exists is removed from the tree, not scaled to nothing.
 
 ### Persistence and scenarios (ADR-004a)
 
@@ -349,6 +360,7 @@ creates a new interaction adds a row here (Plan Quality Gate item 3).
 | ADR-029 × ADR-028 | The FOL query parser is a live boundary taking user-typed text. Node references resolve through per-sort literal validators (`riskNameToId.get`, `NodeId.fromString`) and are never interpolated — a query built by interpolation is re-parsed and is the injection path. |
 | ADR-031 × ADR-012 | A retry loop belongs to Istio or to application bootstrap, decided by one test: in-flight request, or process lifecycle. A readiness gate inside a request handler violates both ADRs at once. |
 | ADR-036 × ADR-004a | `BranchRef` embeds `WorkspaceId` in the scenario branch name, so a branch-typed error that reaches the wire leaks a confined identifier. Such an error stays branch-typed internally and is translated by its service-layer caller before the boundary. |
+| ADR-034 × ADR-001 | "No mitigation may eliminate a risk" has TWO enforcement points, and ADR-001's validate-at-the-boundary rule accounts for only one. A type closes the cases the parameter decides alone (`RetentionFactor`, `ResidualProbability`, a `PositiveLong` cap). The cases the outcomes decide — a deductible at or above every loss, a threshold above every loss, a scale factor small enough that every loss rounds to zero — cannot be typed at all, because the same parameter is ordinary for one node and annihilating for another; `LossDistribution.decorate` catches those by comparing the layer's result against its source. The scale factor is the proof that tightening a type cannot replace the check: its bound is already as tight as the methodology allows, and the precision is lost in the rounding, not the parameter. A new transform has to be checked against the layer check, not assumed covered by a type. `ResidualProbability` is also narrower than `OccurrenceProbability` on purpose: an author may declare a leaf that never occurs, a mitigation may not set its probability to zero. |
 
 ---
 

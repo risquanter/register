@@ -115,6 +115,61 @@ Stored state is the raw tree (versioned) and the mitigation definitions. Mitigat
 values are re-derived on demand; identical `(raw version, active mitigation set)`
 yields identical values. There is no stored mitigated tree and no application log.
 
+### 6. A mitigation may reduce a risk; none may eliminate it
+
+A residual risk of exactly zero asserts that the control cannot fail, and controls
+fail. A model that admits a zero residual has removed control failure from the
+analysis, which is the thing a risk register exists to keep visible. The exclusion
+is methodological, not arithmetic.
+
+The three scale operations carry this in their type. `LikelihoodTransform.Scale`,
+`DistributionTransform.ScaleSeverity` and `ResultTransformSpec.ScaleLosses` all
+take a `RetentionFactor` — above 0 and at most 1 — so a factor of zero is rejected
+at the boundary with a message, and a factor above 1 is rejected too, because a
+figure that increases is stated absolutely through an `Override` rather than as a
+factor.
+
+A risk that genuinely no longer exists is not a mitigated risk: the system was
+decommissioned, the data deleted, the business line exited. That is removal of the
+node from the tree, which leaves an audit trail in the tree's history. It is not a
+transform applied to a node that remains.
+
+The rule has two enforcement points, because the paths to a zero residual divide
+on whether the parameter annihilates on its own.
+
+**A type at the boundary, where the parameter decides it.** `Override` takes a
+`ResidualProbability` and `CapLosses` a `PositiveLong`, so a probability of zero
+and a cap of zero are refused before any handler runs. `ResidualProbability` is
+deliberately narrower than `OccurrenceProbability`: an author may declare a leaf
+that never occurs, which is a statement about the world, while a mitigation may
+not set the probability to zero, which claims a control cannot fail.
+
+**A check at the layer boundary, where the outcomes decide it.** Three parameters
+annihilate only against particular trial outcomes: a deductible at or above every
+loss, a threshold above every loss, and a scale factor small enough that every
+loss rounds to zero and is dropped by `scaleLosses`' sparse-storage filter. The
+same deductible is ordinary for a node whose losses run in the millions and
+annihilating for one whose losses run in the thousands, and a factor of `0.001`
+is harmless against millions and fatal against hundreds. No type can close any of
+the three, so `LossDistribution.decorate` compares the node's source outcomes
+against the layer's result and refuses a layer that leaves no loss where there was
+one. The comparison is what makes it safe: a node whose outcomes held no loss to
+begin with has a zero residual the simulation produced, not one a mitigation
+asserted, and is not refused.
+
+The scale factor is the case that shows why the check cannot be replaced by
+tightening the types. Its bound is already as tight as the methodology allows —
+above 0 and at most 1 — and it still annihilates, because the loss of precision
+happens in the rounding, not in the parameter.
+
+Adding a transform therefore means deciding its annihilating case against the
+layer check, rather than assuming a factor bound covers it.
+
+One thing is not an instance of the rule: `applyDeductible` and `scaleLosses` end
+with `.filter(_._2 > 0)`. `TrialOutcomes.outcomeOf` reads an absent trial as `0L`,
+so a stored zero and an absent entry are the same value and the filter puts a zero
+into its canonical form. No outcome is discarded.
+
 ---
 
 ## Code Smells
