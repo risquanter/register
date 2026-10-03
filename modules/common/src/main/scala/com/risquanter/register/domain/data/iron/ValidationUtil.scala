@@ -157,6 +157,18 @@ object ValidationUtil {
       )))
   }
 
+  // Refinement for positive long values (must be > 0)
+  def refinePositiveLong(value: Long, fieldPath: String = "value"): Either[List[ValidationError], PositiveLong] = {
+    value
+      .refineEither[Greater[0L]]
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.valueMustBePositive
+      )))
+  }
+
   // Refinement for seed entity IDs (HDR Entity axis: 1 <= v < 10^8; 0 reserved)
   def refineSeedEntityId(value: Long, fieldPath: String = "seedEntityId"): Either[List[ValidationError], SeedEntityId.SeedEntityId] = {
     value
@@ -247,17 +259,41 @@ object ValidationUtil {
       )))
   }
 
-  // Refinement for a Narrow contraction fraction: >= 0.0 and strictly < 1.0
-  // (1.0 would collapse a distribution to its median). NaN fails
-  // GreaterEqual[0.0] by IEEE 754 comparison.
-  def refineShrinkFraction(value: Double, fieldPath: String = "fraction"): Either[List[ValidationError], ShrinkFraction] = {
+  // Refinement for a retention factor: a fraction of a figure that is kept
+  def refineRetentionFactor(value: Double, fieldPath: String = "factor"): Either[List[ValidationError], RetentionFactor] = {
     value
-      .refineEither[GreaterEqual[0.0] & Less[1.0]]
+      .refineEither[Greater[0.0] & LessEqual[1.0]]
       .left
       .map(_ => List(ValidationError(
         field = fieldPath,
         code = ValidationErrorCode.INVALID_RANGE,
-        message = ValidationMessages.shrinkFractionOutOfRange
+        message = ValidationMessages.retentionFactorOutOfRange
+      )))
+  }
+
+  // Refinement for a probability a mitigation may assert: above 0, at most 1
+  def refineResidualProbability(value: Double, fieldPath: String = "probability"): Either[List[ValidationError], ResidualProbability] = {
+    value
+      .refineEither[Greater[0.0] & LessEqual[1.0]]
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.residualProbabilityOutOfRange
+      )))
+  }
+
+  // Refinement for a loss cap: the largest loss the entity bears, at least 1.
+  // Shares refinePositiveLong's constraint and differs only in its message,
+  // which states why a cap of zero is refused rather than only the bound.
+  def refineLossCap(value: Long, fieldPath: String = "cap"): Either[List[ValidationError], PositiveLong] = {
+    value
+      .refineEither[Greater[0L]]
+      .left
+      .map(_ => List(ValidationError(
+        field = fieldPath,
+        code = ValidationErrorCode.INVALID_RANGE,
+        message = ValidationMessages.lossCapMustBePositive
       )))
   }
 

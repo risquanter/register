@@ -29,7 +29,7 @@ object NodeLossesSpec extends ZIOSpecDefault {
     MitigationApplicationRecord(
       mitigationId(label),
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(ValidationUtil.refineNonNegativeLong(cap).toOption.get)))),
+        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap).toOption.get)))),
       Set.empty,
       MitigationPrecedence.default
     )

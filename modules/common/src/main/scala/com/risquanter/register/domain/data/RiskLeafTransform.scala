@@ -3,8 +3,8 @@ package com.risquanter.register.domain.data
 import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
 import com.risquanter.register.domain.data.iron.{
-  DistributionType, NonNegativeDouble, NonNegativeLong, OccurrenceProbability,
-  PositiveInt, ShrinkFraction, ValidationUtil
+  DistributionType, PositiveInt, PositiveLong, ResidualProbability,
+  RetentionFactor, ValidationMessages, ValidationUtil
 }
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
@@ -17,11 +17,14 @@ sealed trait LikelihoodTransform
 object LikelihoodTransform {
   case object Keep extends LikelihoodTransform
 
-  /** Relative: probability × factor, clamped into the closed [0, 1] domain on application. */
-  final case class Scale(factor: NonNegativeDouble) extends LikelihoodTransform
+  /** Relative: probability × factor. The factor is at most 1 and the probability
+    * at most 1, so the product stays inside the closed [0, 1] domain. */
+  final case class Scale(factor: RetentionFactor) extends LikelihoodTransform
 
-  /** Absolute: the expert-supplied post-mitigation probability. */
-  final case class Override(probability: OccurrenceProbability) extends LikelihoodTransform
+  /** Absolute: the expert-supplied post-mitigation probability. Strictly above
+    * zero — an author may declare a leaf that never occurs, but a mitigation may
+    * not assert that a risk has been prevented. */
+  final case class Override(probability: ResidualProbability) extends LikelihoodTransform
 
   given Equal[LikelihoodTransform] = Equal.default
 
@@ -37,10 +40,10 @@ object LikelihoodTransform {
     JsonDecoder[Raw].mapOrFail {
       case Raw("keep", None, None) => Right(Keep)
       case Raw("scale", Some(f), None) =>
-        ValidationUtil.refineNonNegativeDouble(f, "factor").map(Scale(_))
+        ValidationUtil.refineRetentionFactor(f, "factor").map(Scale(_))
           .left.map(_.map(_.message).mkString("; "))
       case Raw("override", None, Some(p)) =>
-        ValidationUtil.refineOccurrenceProbability(p, "probability").map(Override(_))
+        ValidationUtil.refineResidualProbability(p, "probability").map(Override(_))
           .left.map(_.map(_.message).mkString("; "))
       case other => Left(s"invalid likelihood transform: op '${other.op}' with mismatched fields")
     }
@@ -58,8 +61,8 @@ final case class OverrideDistributionParams private (
   distributionType: DistributionType,
   percentiles: Option[Array[Double]],
   quantiles: Option[Array[Double]],
-  minLoss: Option[NonNegativeLong],
-  maxLoss: Option[NonNegativeLong],
+  minLoss: Option[PositiveLong],
+  maxLoss: Option[PositiveLong],
   terms: Option[PositiveInt]
 ) {
   // Array fields compare by reference under case-class equality; content
@@ -88,8 +91,8 @@ object OverrideDistributionParams {
     distributionType: DistributionType,
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
-    minLoss: Option[NonNegativeLong],
-    maxLoss: Option[NonNegativeLong],
+    minLoss: Option[PositiveLong],
+    maxLoss: Option[PositiveLong],
     terms: Option[PositiveInt],
     fieldPrefix: String = "overrideParams"
   ): Validation[ValidationError, OverrideDistributionParams] =
@@ -134,8 +137,8 @@ object OverrideDistributionParams {
   private def optRefineLong(
     v: Option[Long],
     field: String
-  ): Validation[ValidationError, Option[NonNegativeLong]] = v match {
-    case Some(l) => ValidationUtil.toValidation(ValidationUtil.refineNonNegativeLong(l, field)).map(Some(_))
+  ): Validation[ValidationError, Option[PositiveLong]] = v match {
+    case Some(l) => ValidationUtil.toValidation(ValidationUtil.refinePositiveLong(l, field)).map(Some(_))
     case None    => Validation.succeed(None)
   }
 }
@@ -144,20 +147,21 @@ object OverrideDistributionParams {
  * Param-stage transform on a leaf's loss distribution. One semantic operation
  * interpreted per representation (uniform-op semantics):
  *
- * - `ScaleSeverity` — lognormal: scales both CI bounds; expert: scales the
- *   quantile values. Broadcasts across a heterogeneous target set.
- * - `Narrow` — contracts the spread toward the median. Lognormal: symmetric
- *   shrink in log space around the geometric mean of the bounds (requires a
- *   positive minLoss — log space is undefined at 0). Expert: quantile values
- *   pulled affinely toward the interpolated median (monotonicity preserved).
+ * - `ScaleSeverity` — the loss an occurrence produces is smaller, because a
+ *   control changed what it costs. Applies before simulation, so the leaf is
+ *   re-simulated from the scaled parameters. Lognormal: scales both CI bounds,
+ *   multiplying every quantile by the factor and leaving the spread parameter
+ *   unchanged. Expert: scales the quantile values, with the same effect on the
+ *   fitted distribution. Broadcasts across a heterogeneous target set, and applies
+ *   alongside `ResultTransformSpec.ScaleLosses` on the same node — that one scales
+ *   what the entity bears of a loss this one has already reduced.
  * - `Override` — absolute replacement (representation-agnostic).
  */
 sealed trait DistributionTransform
 
 object DistributionTransform {
   case object Keep extends DistributionTransform
-  final case class ScaleSeverity(factor: NonNegativeDouble) extends DistributionTransform
-  final case class Narrow(fraction: ShrinkFraction) extends DistributionTransform
+  final case class ScaleSeverity(factor: RetentionFactor) extends DistributionTransform
   final case class Override(params: OverrideDistributionParams) extends DistributionTransform
 
   given Equal[DistributionTransform] = Equal.default
@@ -174,16 +178,12 @@ object DistributionTransform {
     JsonEncoder[Raw].contramap {
       case Keep             => Raw("keep", None, None, None)
       case ScaleSeverity(f) => Raw("scaleSeverity", Some(f), None, None)
-      case Narrow(fr)       => Raw("narrow", None, Some(fr), None)
       case Override(p)      => Raw("override", None, None, Some(p))
     },
     JsonDecoder[Raw].mapOrFail {
       case Raw("keep", None, None, None) => Right(Keep)
       case Raw("scaleSeverity", Some(f), None, None) =>
-        ValidationUtil.refineNonNegativeDouble(f, "factor").map(ScaleSeverity(_))
-          .left.map(_.map(_.message).mkString("; "))
-      case Raw("narrow", None, Some(fr), None) =>
-        ValidationUtil.refineShrinkFraction(fr, "fraction").map(Narrow(_))
+        ValidationUtil.refineRetentionFactor(f, "factor").map(ScaleSeverity(_))
           .left.map(_.map(_.message).mkString("; "))
       case Raw("override", None, None, Some(p)) => Right(Override(p))
       case other => Left(s"invalid distribution transform: op '${other.op}' with mismatched fields")
@@ -220,7 +220,7 @@ object RiskLeafTransform {
 
     val newProbability: Double = t.likelihood match {
       case LikelihoodTransform.Keep        => leaf.probability
-      case LikelihoodTransform.Scale(f)    => math.min(1.0, leaf.probability * f)
+      case LikelihoodTransform.Scale(f)    => leaf.probability * f
       case LikelihoodTransform.Override(p) => p
     }
 
@@ -243,6 +243,19 @@ object RiskLeafTransform {
     }
   }
 
+  /** Severity-scaled lognormal CI bounds: lower floored, upper ceiled. Outward
+    * rounding only widens the fitted interval (σ never shrinks) and preserves the
+    * strict `min < max` ordering whenever the continuous scaled bounds differ. */
+  def scaleSeverityBounds(min: Long, max: Long, factor: Double): (Long, Long) =
+    (Math.floor(min * factor).toLong, Math.ceil(max * factor).toLong)
+
+  /** A scaled lower bound is representable when it stays at the positive floor
+    * (≥ 1 whole unit). Below that it floors to 0 and cannot be fit. */
+  def lowerBoundRepresentable(scaledMin: Long): Boolean = scaledMin >= 1L
+
+  /** Smallest severity factor that keeps `min` representable (`min * f ≥ 1`). */
+  def minRepresentableFactor(min: Long): Double = 1.0 / min.toDouble
+
   private type DistFields =
     (String, Option[Array[Double]], Option[Array[Double]], Option[Long], Option[Long], Option[Int])
 
@@ -264,12 +277,25 @@ object RiskLeafTransform {
     case DistributionTransform.ScaleSeverity(f) =>
       leaf.distributionType.toString match {
         case "lognormal" =>
-          Validation.succeed((
-            "lognormal", None, None,
-            leaf.minLoss.map(min => Math.round(min * f)),
-            leaf.maxLoss.map(max => Math.round(max * f)),
-            None
-          ))
+          (leaf.minLoss, leaf.maxLoss) match {
+            case (Some(min), Some(max)) =>
+              val (newMin, newMax) = scaleSeverityBounds(min, max, f)
+              if (!lowerBoundRepresentable(newMin))
+                Validation.fail(ValidationError(
+                  field   = s"$fieldPrefix.minLoss",
+                  code    = ValidationErrorCode.INVALID_LOGNORMAL_PARAMS,
+                  message = ValidationMessages.mitigationLowersMinLossBelowFloor(
+                              min, minRepresentableFactor(min))
+                ))
+              else
+                Validation.succeed(("lognormal", None, None, Some(newMin), Some(newMax), None))
+            // Unreachable for a lognormal leaf: RiskLeaf's class invariant
+            // guarantees both bounds are present. Passes them through so
+            // RiskLeaf.create reports the missing-bound case with its own message.
+            case _ =>
+              Validation.succeed(("lognormal", None, None,
+                leaf.minLoss.map(m => m: Long), leaf.maxLoss.map(m => m: Long), None))
+          }
         case _ =>
           Validation.succeed((
             "expert",
@@ -280,53 +306,10 @@ object RiskLeafTransform {
           ))
       }
 
-    case DistributionTransform.Narrow(fraction) =>
-      leaf.distributionType.toString match {
-        case "lognormal" =>
-          (leaf.minLoss, leaf.maxLoss) match {
-            case (Some(min), Some(max)) if (min: Long) > 0L =>
-              val keep = 1.0 - fraction
-              val g = math.sqrt((min: Long).toDouble * (max: Long).toDouble) // geometric mean = log-space midpoint
-              val newMin = Math.round(g * math.pow((min: Long).toDouble / g, keep))
-              val newMax = Math.round(g * math.pow((max: Long).toDouble / g, keep))
-              Validation.succeed(("lognormal", None, None, Some(newMin), Some(newMax), None))
-            case _ =>
-              Validation.fail(ValidationError(
-                field = s"$fieldPrefix.minLoss",
-                code = ValidationErrorCode.INVALID_COMBINATION,
-                message = "Narrow on a lognormal leaf requires a positive minLoss (log-space contraction is undefined at 0)"
-              ))
-          }
-        case _ =>
-          val keep = 1.0 - fraction
-          val narrowed = for {
-            ps <- leaf.percentiles
-            qs <- leaf.quantiles
-          } yield {
-            val m = interpolatedMedian(ps, qs)
-            qs.map(q => m + (q - m) * keep)
-          }
-          Validation.succeed(("expert", leaf.percentiles, narrowed, None, None, leaf.terms.map(_.toInt)))
-      }
   }
 
   private def currentFields(leaf: RiskLeaf): DistFields =
     (leaf.distributionType.toString, leaf.percentiles, leaf.quantiles,
      leaf.minLoss.map(l => l: Long), leaf.maxLoss.map(l => l: Long), leaf.terms.map(_.toInt))
 
-  /** Linear interpolation of the quantile at p = 0.5 from (percentile, quantile)
-    * pairs; clamps to the outermost quantile when 0.5 lies outside the stated
-    * percentile range. Arrays are the leaf's validated expert-mode pair
-    * (equal length, ascending percentiles). */
-  private def interpolatedMedian(percentiles: Array[Double], quantiles: Array[Double]): Double = {
-    val p = 0.5
-    if (p <= percentiles.head) quantiles.head
-    else if (p >= percentiles.last) quantiles.last
-    else {
-      val i = percentiles.indexWhere(_ >= p)
-      val (p0, p1) = (percentiles(i - 1), percentiles(i))
-      val (q0, q1) = (quantiles(i - 1), quantiles(i))
-      if (p1 == p0) q0 else q0 + (q1 - q0) * (p - p0) / (p1 - p0)
-    }
-  }
 }

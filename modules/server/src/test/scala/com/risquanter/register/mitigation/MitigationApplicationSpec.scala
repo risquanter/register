@@ -58,7 +58,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       mitigationId(label), name(label), pred,
       MitigationSpec.LeafStage(
         RiskLeafTransform(LikelihoodTransform.Keep,
-          DistributionTransform.ScaleSeverity(com.risquanter.register.domain.data.iron.ValidationUtil.refineNonNegativeDouble(factor).toOption.get)),
+          DistributionTransform.ScaleSeverity(com.risquanter.register.domain.data.iron.ValidationUtil.refineRetentionFactor(factor).toOption.get)),
         None, None),
       precedence).toEither.toOption.get
 
@@ -68,7 +68,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
       mitigationId(label), name(label), pred,
       MitigationSpec.LeafStage(
         RiskLeafTransform(
-          LikelihoodTransform.Override(com.risquanter.register.domain.data.iron.ValidationUtil.refineOccurrenceProbability(prob).toOption.get),
+          LikelihoodTransform.Override(com.risquanter.register.domain.data.iron.ValidationUtil.refineResidualProbability(prob).toOption.get),
           DistributionTransform.Keep),
         Some(stamp), Some(nodeId(anchor))),
       precedence).toEither.toOption.get
@@ -78,7 +78,7 @@ object MitigationApplicationSpec extends ZIOSpecDefault {
     Mitigation.create(
       mitigationId(label), name(label), pred,
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(com.risquanter.register.domain.data.iron.ValidationUtil.refineNonNegativeLong(cap).toOption.get)))),
+        ResultTransformSpec.CapLosses(com.risquanter.register.domain.data.iron.ValidationUtil.refineLossCap(cap).toOption.get)))),
       precedence).toEither.toOption.get
 
   private def resultDeductible(label: String, d: Long,

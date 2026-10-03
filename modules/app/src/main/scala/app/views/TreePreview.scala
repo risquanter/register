@@ -6,7 +6,7 @@ import app.state.{TreeBuilderState, PortfolioDraft, LeafDraft, FormMode, FormTar
 import app.components.{Icons, TreeNodeRow}
 import app.components.ConfirmGuard.proceedOrConfirm
 import com.risquanter.register.domain.data.Distribution
-import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, NonNegativeLong, DistributionType}
+import com.risquanter.register.domain.data.iron.{SafeName, OccurrenceProbability, DistributionType}
 
 /**
  * Hierarchical tree preview rendered from TreeBuilderState signals.
@@ -29,8 +29,8 @@ object TreePreview:
       probability: OccurrenceProbability,
       percentiles: Option[Array[Double]],
       quantiles:   Option[Array[Double]],
-      minLoss:     Option[NonNegativeLong],
-      maxLoss:     Option[NonNegativeLong]
+      minLoss:     Option[Long],
+      maxLoss:     Option[Long]
     ) extends TreeNode(n)
 
     def iconSvg: SvgElement = this match
@@ -95,8 +95,8 @@ object TreePreview:
           probability = l.probability,
           percentiles = l.distribution.percentiles,
           quantiles   = l.distribution.quantiles,
-          minLoss     = l.distribution.minLoss,
-          maxLoss     = l.distribution.maxLoss
+          minLoss     = l.distribution.minLoss.map(identity),
+          maxLoss     = l.distribution.maxLoss.map(identity)
         )
         (node, l.parent.map(_.value))
       }

@@ -272,6 +272,137 @@ object ValidationUtilSpec extends ZIOSpecDefault {
       }
     ),
     
+    suite("refinePositiveLong")(
+      test("rejects zero — a lognormal bound feeds a logarithm") {
+        val result = ValidationUtil.refinePositiveLong(0L, "minLoss")
+        assertTrue(result.isLeft)
+      },
+
+      test("accepts one whole unit, the smallest representable bound") {
+        val result = ValidationUtil.refinePositiveLong(1L, "minLoss")
+        assertTrue(
+          result.isRight &&
+          result.contains(1L)
+        )
+      },
+
+      test("rejects negative number") {
+        val result = ValidationUtil.refinePositiveLong(-1L, "minLoss")
+        assertTrue(result.isLeft)
+      },
+
+      test("error message includes parameter name") {
+        val result = ValidationUtil.refinePositiveLong(0L, "maxLoss")
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(errors => errors.head.field.contains("maxLoss"))
+        )
+      }
+    ),
+
+    suite("refineRetentionFactor")(
+      test("accepts the smallest positive double") {
+        val result = ValidationUtil.refineRetentionFactor(Double.MinPositiveValue, "factor")
+        assertTrue(result.isRight)
+      },
+
+      test("accepts a factor of exactly one — a mitigation that reduces nothing") {
+        val result = ValidationUtil.refineRetentionFactor(1.0, "factor")
+        assertTrue(
+          result.isRight &&
+          result.contains(1.0)
+        )
+      },
+
+      test("rejects zero — no transform may assert a risk has ceased to exist") {
+        val result = ValidationUtil.refineRetentionFactor(0.0, "factor")
+        assertTrue(result.isLeft)
+      },
+
+      test("rejects a factor above one — an increase is stated through an Override") {
+        assertTrue(
+          ValidationUtil.refineRetentionFactor(1.0000001, "factor").isLeft,
+          ValidationUtil.refineRetentionFactor(2.0, "factor").isLeft
+        )
+      },
+
+      test("rejects not-a-number, which fails the lower bound under IEEE 754") {
+        val result = ValidationUtil.refineRetentionFactor(Double.NaN, "factor")
+        assertTrue(result.isLeft)
+      },
+
+      test("error message includes parameter name") {
+        val result = ValidationUtil.refineRetentionFactor(0.0, "severityFactor")
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(errors => errors.head.field.contains("severityFactor"))
+        )
+      }
+    ),
+
+    suite("refineResidualProbability")(
+      test("accepts the smallest positive double") {
+        assertTrue(ValidationUtil.refineResidualProbability(Double.MinPositiveValue, "probability").isRight)
+      },
+
+      test("accepts a probability of exactly one") {
+        val result = ValidationUtil.refineResidualProbability(1.0, "probability")
+        assertTrue(
+          result.isRight &&
+          result.contains(1.0)
+        )
+      },
+
+      test("rejects zero — a mitigation cannot assert a risk has been prevented") {
+        assertTrue(ValidationUtil.refineResidualProbability(0.0, "probability").isLeft)
+      },
+
+      test("rejects a probability above one") {
+        assertTrue(
+          ValidationUtil.refineResidualProbability(1.0000001, "probability").isLeft,
+          ValidationUtil.refineResidualProbability(2.0, "probability").isLeft
+        )
+      },
+
+      test("rejects not-a-number, which fails the lower bound under IEEE 754") {
+        assertTrue(ValidationUtil.refineResidualProbability(Double.NaN, "probability").isLeft)
+      },
+
+      test("error message includes parameter name") {
+        val result = ValidationUtil.refineResidualProbability(0.0, "mitigatedProbability")
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(errors => errors.head.field.contains("mitigatedProbability"))
+        )
+      }
+    ),
+
+    suite("refineLossCap")(
+      test("accepts a cap of one, the smallest loss the entity can bear") {
+        val result = ValidationUtil.refineLossCap(1L, "cap")
+        assertTrue(
+          result.isRight &&
+          result.contains(1L)
+        )
+      },
+
+      test("rejects zero — the entity would bear nothing") {
+        assertTrue(ValidationUtil.refineLossCap(0L, "cap").isLeft)
+      },
+
+      test("rejects a negative cap") {
+        assertTrue(ValidationUtil.refineLossCap(-1L, "cap").isLeft)
+      },
+
+      test("its message states why, not only the bound") {
+        val result = ValidationUtil.refineLossCap(0L, "cap")
+        assertTrue(
+          result.isLeft &&
+          result.left.exists(_.head.message.contains("transfer cannot fail"))
+        )
+      }
+    ),
+
     suite("refineProbability")(
       test("accepts value between 0 and 1") {
         val result = ValidationUtil.refineProbability(0.5)

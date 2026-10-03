@@ -112,6 +112,16 @@ object ProvenanceSpec extends ZIOSpecDefault {
         assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
       },
 
+      test("LognormalDistributionParams rejects a minLoss of zero") {
+        val json = """{"minLoss":0,"maxLoss":50000000,"confidenceInterval":0.9}"""
+        assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
+      },
+
+      test("LognormalDistributionParams rejects a maxLoss of zero") {
+        val json = """{"minLoss":1000000,"maxLoss":0,"confidenceInterval":0.9}"""
+        assertTrue(json.fromJson[LognormalDistributionParams].isLeft)
+      },
+
       test("LognormalDistributionParams rejects negative maxLoss") {
         val json = """{"minLoss":1000000,"maxLoss":-1,"confidenceInterval":0.9}"""
         assertTrue(json.fromJson[LognormalDistributionParams].isLeft)

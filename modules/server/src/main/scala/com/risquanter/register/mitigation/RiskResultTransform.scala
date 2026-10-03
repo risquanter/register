@@ -1,7 +1,7 @@
 package com.risquanter.register.mitigation
 
 import zio.prelude.*
-import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, ValidationMessages}
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationMessages}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 import com.risquanter.register.simulation.TrialOutcomes
 
@@ -141,7 +141,7 @@ object RiskResultTransform {
    * // Loss of 500000 remains 500000
    * }}}
    */
-  def capLosses(cap: NonNegativeLong): RiskResultTransform = RiskResultTransform { to =>
+  def capLosses(cap: PositiveLong): RiskResultTransform = RiskResultTransform { to =>
     val capped = to.outcomes.map { case (trial, loss) =>
       trial -> Math.min(loss, cap)
     }
@@ -156,11 +156,13 @@ object RiskResultTransform {
    * Scaled losses round to the nearest whole unit, so the error cancels across
    * trials instead of accumulating in one direction.
    *
-   * A factor above 1 can take a loss past `Long.MaxValue`. The overflow bound
-   * is conservative: doubles lose integer precision near 2^63, so it rejects a
-   * narrow band that would have narrowed correctly.
+   * A loss at the top of the `Long` range overflows even at a factor of exactly
+   * 1, because `Long.MaxValue.toDouble` rounds up and the product then compares
+   * at or above that bound. The overflow bound is conservative for the same
+   * reason: doubles lose integer precision near 2^63, so it rejects a narrow
+   * band that would have scaled correctly.
    *
-   * @param factor Scaling multiplier (non-negative)
+   * @param factor Fraction of each loss the entity bears (above 0, at most 1)
    * @return Transformation scaling losses
    *
    * @example
@@ -169,7 +171,7 @@ object RiskResultTransform {
    * // Loss of 100000 becomes 80000
    * }}}
    */
-  def scaleLosses(factor: NonNegativeDouble): RiskResultTransform = RiskResultTransform { to =>
+  def scaleLosses(factor: RetentionFactor): RiskResultTransform = RiskResultTransform { to =>
     val scaled = to.outcomes.map { case (trial, loss) =>
       val product = loss * factor
       // Narrowing would saturate silently at Long.MaxValue; throw instead, and
@@ -190,12 +192,12 @@ object RiskResultTransform {
    * policy would zero out every loss it covers.
    *
    * @param deductible Amount subtracted first (non-negative)
-   * @param cap Maximum after deductible applied (non-negative)
+   * @param cap Maximum after deductible applied (at least 1)
    * @return Validation with the combined transformation, or the cross-field error
    */
   def insurancePolicy(
     deductible: NonNegativeLong,
-    cap: NonNegativeLong
+    cap: PositiveLong
   ): Validation[ValidationError, RiskResultTransform] =
     if (cap > deductible)
       Validation.succeed(

@@ -101,7 +101,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
     Mitigation.create(
       mitigationId(label), mitName(label), pred,
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(ValidationUtil.refineNonNegativeLong(cap).toOption.get)))),
+        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap).toOption.get)))),
       precedence).toEither.toOption.get
 
   private def leafScaleSeverity(label: String, factor: Double): Mitigation =
@@ -109,7 +109,7 @@ object CachedResultResolverSpec extends ZIOSpecDefault {
       mitigationId(label), mitName(label), pred,
       MitigationSpec.LeafStage(
         RiskLeafTransform(LikelihoodTransform.Keep,
-          DistributionTransform.ScaleSeverity(ValidationUtil.refineNonNegativeDouble(factor).toOption.get)),
+          DistributionTransform.ScaleSeverity(ValidationUtil.refineRetentionFactor(factor).toOption.get)),
         None, None),
       MitigationPrecedence.default).toEither.toOption.get
 

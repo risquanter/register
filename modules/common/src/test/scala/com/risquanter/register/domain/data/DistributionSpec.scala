@@ -52,6 +52,47 @@ object DistributionSpec extends ZIOSpecDefault:
 
     ),
 
+    suite("expert mode — quantile positivity")(
+
+      test("a quantile of exactly zero is rejected — the metalog fit takes its logarithm") {
+        val result = Distribution.create(
+          distributionType = "expert",
+          minLoss          = None,
+          maxLoss          = None,
+          percentiles      = Some(Array(0.05, 0.50, 0.95)),
+          quantiles        = Some(Array(0.0, 5000.0, 25000.0)),
+          fieldPrefix      = "request"
+        )
+        assertFailWithCode(result, "request.quantiles[0]", ValidationErrorCode.INVALID_RANGE)
+      },
+
+      test("the smallest positive quantile is accepted") {
+        assertTrue(
+          Distribution.create(
+            distributionType = "expert",
+            minLoss          = None,
+            maxLoss          = None,
+            percentiles      = Some(Array(0.05, 0.50, 0.95)),
+            quantiles        = Some(Array(Double.MinPositiveValue, 5000.0, 25000.0)),
+            fieldPrefix      = "request"
+          ).isSuccess
+        )
+      },
+
+      test("a negative quantile is still rejected") {
+        val result = Distribution.create(
+          distributionType = "expert",
+          minLoss          = None,
+          maxLoss          = None,
+          percentiles      = Some(Array(0.05, 0.50, 0.95)),
+          quantiles        = Some(Array(-1.0, 5000.0, 25000.0)),
+          fieldPrefix      = "request"
+        )
+        assertFailWithCode(result, "request.quantiles[0]", ValidationErrorCode.INVALID_RANGE)
+      }
+
+    ),
+
     suite("requireStrictlyIncreasing — quantiles")(
 
       test("non-monotone quantiles produce INVALID_COMBINATION on request.quantiles") {

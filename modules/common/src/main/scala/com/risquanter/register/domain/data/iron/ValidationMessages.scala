@@ -43,7 +43,12 @@ object ValidationMessages:
   val valueMustBePositive: String       = "Value must be greater than zero"
   val capMustExceedDeductible: String   = "Cap must be greater than deductible"
   val aggregatedLossOverflow: String    = "Aggregated loss exceeds the maximum representable value"
-  val shrinkFractionOutOfRange: String  = "Narrowing fraction must be at least 0 and below 1"
+  val retentionFactorOutOfRange: String =
+    "Mitigation factor must be greater than 0 and at most 1 — a mitigation reduces a figure, so it can neither increase it nor remove it entirely"
+  val residualProbabilityOutOfRange: String =
+    "Mitigated probability must be greater than 0 and at most 1 — a mitigation reduces the chance a risk occurs, so it cannot remove the possibility entirely"
+  val lossCapMustBePositive: String =
+    "Loss cap must be greater than 0 — a cap of zero would leave the entity bearing nothing, which states that the transfer cannot fail"
   val portfolioHasNoChildren: String    = "Portfolio must have at least one child"
 
   // ══════════════════════════════════════════════════════════════════
@@ -92,6 +97,12 @@ object ValidationMessages:
     s"$field must be a whole number"
   val minMustBeLessThanMax: String      = "Minimum loss must be less than maximum loss"
 
+  val mitigationEliminatesRisk: String =
+    "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap or the scale factor, lower the deductible, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
+
+  def mitigationLowersMinLossBelowFloor(min: Long, minFactor: Double): String =
+    f"This mitigation reduces the minimum loss below 1, the smallest representable whole unit. The leaf's minimum loss is $min, so the smallest severity factor that still applies here is $minFactor%.3e (1 / $min)."
+
   // ══════════════════════════════════════════════════════════════════
   // Expert mode — percentiles / quantiles
   // ══════════════════════════════════════════════════════════════════
@@ -103,7 +114,8 @@ object ValidationMessages:
 
   val quantilesRequired: String         = "Quantiles are required for expert mode"
   val quantilesFormat: String           = "Enter comma-separated quantile values (loss amounts)"
-  val quantilesMustBeNonNegative: String = "Quantiles must be non-negative"
+  val quantilesMustBePositive: String =
+    "Quantile loss amounts must be greater than zero — the distribution fit takes their logarithm"
   val quantilesMustBeStrictlyIncreasing: String =
     "Quantiles must be strictly increasing — a higher percentile must correspond to a higher loss value"
 

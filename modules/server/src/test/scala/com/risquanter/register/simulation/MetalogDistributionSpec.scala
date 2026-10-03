@@ -122,6 +122,30 @@ object MetalogDistributionSpec extends ZIOSpecDefault {
       }
     ),
     
+    suite("fromPercentiles - zero quantile in lower-bounded mode")(
+      // Lower-bounded mode applies Keelin's transform z = ln(x - L). With
+      // L = 0.0 that is ln(x), so a quantile of exactly 0 reaches ln(0) = -inf
+      // and neither the fitter nor validateBounds guards against it. The fit
+      // then fails and the failure is returned on the error channel, rather
+      // than producing non-finite coefficients a caller could mistake for a
+      // real distribution. Distribution.create rejects a zero quantile before
+      // simulation; this covers the library edge directly.
+      test("a zero quantile fails the fit rather than fitting to nonsense") {
+        val percentiles = probArray(0.1, 0.5, 0.9)
+        val quantiles = Array(0.0, 50.0, 200.0)
+
+        val result = MetalogDistribution.fromPercentiles(
+          percentiles,
+          quantiles,
+          terms = 3,
+          lower = Some(0.0),
+          upper = None
+        )
+
+        assertTrue(result.isLeft)
+      }
+    ),
+
     suite("fromPercentiles - defensive validation")(
       test("rejects empty percentiles array") {
         val percentiles = Array.empty[Probability]

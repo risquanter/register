@@ -7,7 +7,7 @@ import com.risquanter.register.domain.data.{
   MitigationApplicationRecord, MitigationPrecedence, MitigationSpec,
   ResultTransformSpec, TransformPipeline
 }
-import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, PositiveInt, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, PositiveInt, PositiveLong, RetentionFactor, ValidationUtil}
 import com.risquanter.register.domain.errors.ValidationErrorCode
 import com.risquanter.register.simulation.{LossDistribution, TrialOutcomes}
 import com.risquanter.register.testutil.TestHelpers.{mitigationId, nodeId}
@@ -35,14 +35,18 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
   val genLoss: Gen[Any, NonNegativeLong] =
     Gen.long(100L, 50000L).map(_.refineUnsafe)
 
+  /** Generate loss caps, which must be at least 1 */
+  val genCap: Gen[Any, PositiveLong] =
+    Gen.long(100L, 50000L).map(_.refineUnsafe)
+
   /** Generate scale factors */
-  val genScaleFactor: Gen[Any, NonNegativeDouble] =
-    Gen.double(0.1, 2.0).map(_.refineUnsafe)
+  val genScaleFactor: Gen[Any, RetentionFactor] =
+    Gen.double(0.1, 1.0).map(_.refineUnsafe)
 
   /** Generate simple RiskResultTransform (deductible, cap, scale, or filter) */
   val genSimpleTransform: Gen[Any, RiskResultTransform] = Gen.oneOf(
     genLoss.map(RiskResultTransform.applyDeductible),
-    genLoss.map(RiskResultTransform.capLosses),
+    genCap.map(RiskResultTransform.capLosses),
     genScaleFactor.map(RiskResultTransform.scaleLosses),
     genLoss.map(RiskResultTransform.filterBelowThreshold)
   )
@@ -210,13 +214,12 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         }
       },
 
-      test("scale by 0.0 removes all losses") {
-        check(genTrialOutcomes) { outcomes =>
-          val transform = RiskResultTransform.scaleLosses(0.0)
-          val scaled = transform.run(outcomes)
+      test("a factor of 0.0 is rejected at the boundary — no transform may eliminate a risk") {
+        assertTrue(ValidationUtil.refineRetentionFactor(0.0).isLeft)
+      },
 
-          assertTrue(scaled.outcomes.isEmpty)
-        }
+      test("a factor above 1.0 is rejected at the boundary") {
+        assertTrue(ValidationUtil.refineRetentionFactor(2.0).isLeft)
       },
 
       test("scaling rounds to nearest rather than toward zero") {
@@ -244,11 +247,12 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         )
       },
 
-      test("a scale factor that takes a loss past Long.MaxValue throws instead of saturating") {
-        // Narrowing would saturate silently, presenting an over-scaled loss as
-        // a real figure.
+      test("a loss at the top of the Long range throws instead of saturating") {
+        // Narrowing the double back to Long would saturate silently, presenting
+        // an over-scaled loss as a real figure. A factor of exactly 1 reaches
+        // the guard because Long.MaxValue.toDouble rounds up.
         val outcomes  = TrialOutcomes(100, Map(1 -> Long.MaxValue))
-        val transform = RiskResultTransform.scaleLosses(2.0)
+        val transform = RiskResultTransform.scaleLosses(1.0)
 
         assertTrue(
           try { transform.run(outcomes); false }
@@ -261,7 +265,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
         val id      = nodeId("risk-001")
         val applied = List(MitigationApplicationRecord(
           mitigationId("scale-over"),
-          MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.ScaleLosses(2.0)))),
+          MitigationSpec.ResultStage(TransformPipeline(List(ResultTransformSpec.ScaleLosses(1.0)))),
           Set.empty,
           MitigationPrecedence.default
         ))
@@ -317,7 +321,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
       test("insurancePolicy fails when cap <= deductible (property test)") {
         check(genLoss, genLoss) { (loss1, loss2) =>
           val deductible: NonNegativeLong = if (loss1 >= loss2) loss1 else loss2
-          val cap: NonNegativeLong = if (loss1 >= loss2) loss2 else loss1
+          val cap: PositiveLong = (if (loss1 >= loss2) loss2 else loss1: Long).refineUnsafe
 
           // cap <= deductible must yield a validation failure
           assertTrue(RiskResultTransform.insurancePolicy(deductible, cap).toEither.isLeft)
@@ -326,7 +330,7 @@ object RiskResultTransformSpec extends ZIOSpecDefault {
 
       test("insurancePolicy succeeds when cap > deductible") {
         check(genLoss, Gen.long(1L, 10000L)) { (deductible, gap) =>
-          val cap: NonNegativeLong = (deductible + gap).refineUnsafe
+          val cap: PositiveLong = (deductible + gap).refineUnsafe
 
           assertTrue(RiskResultTransform.insurancePolicy(deductible, cap).toEither.isRight)
         }

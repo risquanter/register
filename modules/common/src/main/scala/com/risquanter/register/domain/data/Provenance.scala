@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonEncoder, JsonDecoder}
 import java.time.Instant
-import com.risquanter.register.domain.data.iron.{PositiveInt, NonNegativeLong, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{PositiveInt, PositiveLong, ValidationUtil}
 import io.github.iltotore.iron.*
 
 /**
@@ -43,8 +43,8 @@ case class ExpertDistributionParams(
 
 /** Lognormal distribution parameters using the BCG 90% CI approach. */
 case class LognormalDistributionParams(
-  minLoss: NonNegativeLong,
-  maxLoss: NonNegativeLong,
+  minLoss: PositiveLong,
+  maxLoss: PositiveLong,
   confidenceInterval: Double
 ) extends DistributionParams
 
@@ -69,8 +69,8 @@ object LognormalDistributionParams {
   given codec: JsonCodec[LognormalDistributionParams] = JsonCodec(
     JsonEncoder[Raw].contramap(p => Raw(p.minLoss, p.maxLoss, p.confidenceInterval)),
     Raw.rawCodec.decoder.mapOrFail { raw =>
-      (ValidationUtil.refineNonNegativeLong(raw.minLoss, "minLoss"),
-       ValidationUtil.refineNonNegativeLong(raw.maxLoss, "maxLoss")) match {
+      (ValidationUtil.refinePositiveLong(raw.minLoss, "minLoss"),
+       ValidationUtil.refinePositiveLong(raw.maxLoss, "maxLoss")) match {
         case (Right(min), Right(max)) => Right(LognormalDistributionParams(min, max, raw.confidenceInterval))
         case (Left(e1), Left(e2))     => Left((e1 ++ e2).map(_.message).mkString("; "))
         case (Left(e), _)             => Left(e.map(_.message).mkString("; "))

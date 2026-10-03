@@ -364,7 +364,75 @@ object RiskLeafSpec extends ZIOSpecDefault {
         assertTrue(result.isSuccess)
       }
     ),
+    suite("Tapir schema matches the JSON wire names")(
+      // The zio-json codec and the Tapir schema are derived independently: the
+      // codec encodes through RiskLeafRaw, the schema reads this case class's
+      // own field names. @jsonField renames two fields for zio-json only, so
+      // the schema has to carry the same rename or the generated OpenAPI
+      // describes properties that are not on the wire.
+      test("the derived schema names id and name, not safeId and safeName") {
+        import sttp.tapir.Schema
+        import sttp.tapir.SchemaType
+        import sttp.tapir.generic.auto.*
+        import com.risquanter.register.http.codecs.IronTapirCodecs.given
+
+        def namesOf(s: Schema[?]): List[String] = s.schemaType match
+          case p: SchemaType.SProduct[?] => p.fields.map(_.name.encodedName)
+          case _                         => Nil
+
+        val leafNames      = namesOf(Schema.derived[RiskLeaf])
+        val portfolioNames = namesOf(Schema.derived[RiskPortfolio])
+
+        assertTrue(
+          leafNames.contains("id"),
+          leafNames.contains("name"),
+          !leafNames.contains("safeId"),
+          !leafNames.contains("safeName"),
+          portfolioNames.contains("id"),
+          portfolioNames.contains("name"),
+          !portfolioNames.contains("safeId"),
+          !portfolioNames.contains("safeName")
+        )
+      }
+    ),
+
     suite("Lognormal Mode Validation")(
+      test("rejects a minLoss of zero — the bound feeds a logarithm in the fit") {
+        val result = RiskLeaf.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(0L),
+          maxLoss = Some(1000L),
+          seedVarId = 25L
+        )
+        assertTrue(result.isFailure)
+      },
+      test("rejects a maxLoss of zero") {
+        val result = RiskLeaf.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(0L),
+          maxLoss = Some(0L),
+          seedVarId = 25L
+        )
+        assertTrue(result.isFailure)
+      },
+      test("accepts bounds of one and two, the smallest ordered positive pair") {
+        val result = RiskLeaf.create(
+          id = idStr("valid-id"),
+          name = "Valid Name",
+          distributionType = "lognormal",
+          probability = 0.5,
+          minLoss = Some(1L),
+          maxLoss = Some(2L),
+          seedVarId = 25L
+        )
+        assertTrue(result.isSuccess)
+      },
       test("rejects lognormal mode without minLoss") {
         val result = RiskLeaf.create(
           id = idStr("valid-id"),

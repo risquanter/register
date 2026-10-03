@@ -60,6 +60,15 @@ object ResultTransformSpecSpec extends ZIOSpecDefault {
       },
       test("invalid parameters are rejected at decode") {
         assertTrue("""{"op":"capLosses","cap":-5}""".fromJson[ResultTransformSpec].isLeft)
+      },
+      test("a cap of zero is rejected at decode — the entity would bear nothing") {
+        assertTrue("""{"op":"capLosses","cap":0}""".fromJson[ResultTransformSpec].isLeft)
+      },
+      test("an insurance policy with a cap of zero is rejected at decode") {
+        assertTrue(
+          """{"op":"insurancePolicy","deductible":0,"cap":0}"""
+            .fromJson[ResultTransformSpec].isLeft
+        )
       }
     ),
 

@@ -22,7 +22,7 @@ enum RiskLeafField:
  * - SafeName: non-blank, max 50 chars
  * - Probability: 0.0 < p < 1.0 (exclusive - open interval)
  * - Expert mode: requires percentiles + quantiles of equal length
- * - Lognormal mode: requires minLoss < maxLoss (both non-negative)
+ * - Lognormal mode: requires minLoss < maxLoss (both positive)
  */
 final class RiskLeafFormState extends FormState[RiskLeafField]:
   import RiskLeafField.*
@@ -147,7 +147,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
       case _ => None
     }
   
-  /** Expert mode: quantiles validation (non-negative loss amounts) */
+  /** Expert mode: quantiles validation (positive loss amounts) */
   private val quantilesErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(quantilesVar.signal).map {
       case (DistributionMode.Expert, v) =>
@@ -155,7 +155,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
         else
           val values = parseDoubleList(v)
           if values.isEmpty then Some(ValidationMessages.quantilesFormat)
-          else if values.exists(_ < 0) then Some(ValidationMessages.quantilesMustBeNonNegative)
+          else if values.exists(_ <= 0) then Some(ValidationMessages.quantilesMustBePositive)
           else if !ValidationUtil.isStrictlyIncreasing(values) then
             Some(ValidationMessages.quantilesMustBeStrictlyIncreasing)
           else None
@@ -176,7 +176,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
         case _ => None
       }
   
-  /** Lognormal mode: minLoss validation using Iron NonNegativeLong */
+  /** Lognormal mode: minLoss validation using Iron PositiveLong */
   private val minLossErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(minLossVar.signal).map {
       case (DistributionMode.Lognormal, v) =>
@@ -184,13 +184,13 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
         else parseLong(v) match
           case None => Some(ValidationMessages.lossMustBeWholeNumber("Minimum loss"))
           case Some(n) => 
-            ValidationUtil.refineNonNegativeLong(n, "minLoss") match
+            ValidationUtil.refinePositiveLong(n, "minLoss") match
               case Right(_) => None
               case Left(errors) => Some(errors.head.message)
       case _ => None
     }
   
-  /** Lognormal mode: maxLoss validation using Iron NonNegativeLong */
+  /** Lognormal mode: maxLoss validation using Iron PositiveLong */
   private val maxLossErrorRaw: Signal[Option[String]] =
     distributionModeVar.signal.combineWith(maxLossVar.signal).map {
       case (DistributionMode.Lognormal, v) =>
@@ -198,7 +198,7 @@ final class RiskLeafFormState extends FormState[RiskLeafField]:
         else parseLong(v) match
           case None => Some(ValidationMessages.lossMustBeWholeNumber("Maximum loss"))
           case Some(n) =>
-            ValidationUtil.refineNonNegativeLong(n, "maxLoss") match
+            ValidationUtil.refinePositiveLong(n, "maxLoss") match
               case Right(_) => None
               case Left(errors) => Some(errors.head.message)
       case _ => None

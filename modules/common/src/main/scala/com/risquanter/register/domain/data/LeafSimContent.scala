@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
 import zio.json.{JsonEncoder, DeriveJsonEncoder}
-import com.risquanter.register.domain.data.iron.{DistributionType, OccurrenceProbability, NonNegativeLong, PositiveInt, SeedVarId}
+import com.risquanter.register.domain.data.iron.{DistributionType, OccurrenceProbability, PositiveInt, PositiveLong, SeedVarId}
 
 /**
  * The simulation-relevant projection of a `RiskLeaf` — the leaf cache-key
@@ -32,8 +32,8 @@ final case class LeafSimContent(
   distributionType: DistributionType,
   percentiles: Option[Array[Double]],
   quantiles: Option[Array[Double]],
-  minLoss: Option[NonNegativeLong],
-  maxLoss: Option[NonNegativeLong],
+  minLoss: Option[PositiveLong],
+  maxLoss: Option[PositiveLong],
   terms: Option[PositiveInt]
 )
 

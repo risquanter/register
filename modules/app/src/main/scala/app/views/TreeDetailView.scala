@@ -55,8 +55,8 @@ object TreeDetailView:
         id          = Some(leaf.id),
         percentiles = leaf.percentiles,
         quantiles   = leaf.quantiles,
-        minLoss     = leaf.minLoss,
-        maxLoss     = leaf.maxLoss
+        minLoss     = leaf.minLoss.map(identity),
+        maxLoss     = leaf.maxLoss.map(identity)
       )
     case portfolio: RiskPortfolio =>
       TreeNodeRow.portfolioTooltip(

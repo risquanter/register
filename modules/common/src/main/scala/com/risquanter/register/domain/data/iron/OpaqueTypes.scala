@@ -72,6 +72,9 @@ type NonNegativeLong = Long :| GreaterEqual[0L]
 // Positive integers (must be > 0)
 type PositiveInt = Int :| Greater[0]
 
+// Positive long values (must be > 0) — e.g. lognormal CI bounds, which feed a logarithm
+type PositiveLong = Long :| Greater[0L]
+
 // Non-negative integers (>= 0)
 type NonNegativeInt = Int :| GreaterEqual[0]
 
@@ -89,11 +92,21 @@ type NonNegativeInt = Int :| GreaterEqual[0]
 // foldable for literal autoRefine in this Iron version.
 type NonNegativeDouble = Double :| (GreaterEqual[0.0] & LessEqual[1.7976931348623157e308])
 
-// Contraction fraction for DistributionTransform.Narrow: how far a loss
-// distribution's spread is pulled toward its median. 0.0 = no contraction;
-// values approach but never reach 1.0 (full collapse to the median is not a
-// distribution). NaN fails GreaterEqual[0.0] by IEEE 754 comparison.
-type ShrinkFraction = Double :| (GreaterEqual[0.0] & Less[1.0])
+// Fraction of a figure a mitigation keeps: strictly above 0 and at most 1. A
+// scale operation reduces and can never eliminate — a residual risk of exactly
+// zero is not a defensible estimate, because it removes control failure from the
+// analysis. A figure that increases is stated absolutely through an Override,
+// never as a factor. NaN fails the lower constraint by IEEE 754 comparison.
+type RetentionFactor = Double :| (Greater[0.0] & LessEqual[1.0])
+
+// Probability a mitigation may assert for a risk that remains in the tree:
+// strictly above 0 and at most 1. A mitigation reduces the chance of an
+// occurrence and can never remove the possibility, because a residual of
+// exactly zero asserts the control cannot fail. Distinct from
+// OccurrenceProbability, whose closed interval is correct for a leaf's own
+// declared probability: an author may state that an event never occurs, a
+// mitigation may not state that it has been prevented.
+type ResidualProbability = Double :| (Greater[0.0] & LessEqual[1.0])
 
 /**
  * Common constant values for Iron refined types.

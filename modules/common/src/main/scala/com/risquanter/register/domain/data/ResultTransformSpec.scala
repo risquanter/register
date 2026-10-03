@@ -2,7 +2,7 @@ package com.risquanter.register.domain.data
 
 import zio.prelude.*
 import zio.json.{JsonCodec, JsonEncoder, JsonDecoder, DeriveJsonCodec}
-import com.risquanter.register.domain.data.iron.{NonNegativeDouble, NonNegativeLong, ValidationMessages, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{NonNegativeLong, PositiveLong, RetentionFactor, ValidationMessages, ValidationUtil}
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
 
 /**
@@ -22,18 +22,27 @@ sealed trait ResultTransformSpec
 object ResultTransformSpec {
 
   final case class ApplyDeductible(deductible: NonNegativeLong)     extends ResultTransformSpec
-  final case class CapLosses(cap: NonNegativeLong)                  extends ResultTransformSpec
-  final case class ScaleLosses(factor: NonNegativeDouble)           extends ResultTransformSpec
+  /** The largest loss the entity bears. Strictly positive — a cap of zero would
+    * leave it bearing nothing, which states that the transfer cannot fail. */
+  final case class CapLosses(cap: PositiveLong)                     extends ResultTransformSpec
+  /** The entity bears this fraction of each loss; the rest falls elsewhere, by
+    * transfer or by an agreed share. The loss itself is unchanged — this scales
+    * cached trial outcomes at the read edge rather than re-simulating, and it is
+    * the only proportional scaling that can be ordered against a deductible or a
+    * cap. Applies alongside `DistributionTransform.ScaleSeverity` on the same
+    * node — that one states the loss got smaller, this one states who pays for
+    * it, and both factors apply. */
+  final case class ScaleLosses(factor: RetentionFactor)             extends ResultTransformSpec
   final case class FilterBelowThreshold(threshold: NonNegativeLong) extends ResultTransformSpec
 
   /** Deductible-then-cap pair; cross-field rule `cap > deductible` (ADR-001). */
-  final case class InsurancePolicy private (deductible: NonNegativeLong, cap: NonNegativeLong)
+  final case class InsurancePolicy private (deductible: NonNegativeLong, cap: PositiveLong)
       extends ResultTransformSpec
 
   object InsurancePolicy {
     def create(
       deductible: NonNegativeLong,
-      cap: NonNegativeLong
+      cap: PositiveLong
     ): Validation[ValidationError, InsurancePolicy] =
       if (cap > deductible) Validation.succeed(InsurancePolicy(deductible, cap))
       else
@@ -89,7 +98,7 @@ object ResultTransformSpec {
     JsonEncoder[RawCap].contramap(s => RawCap(Op.capLosses, s.cap)),
     JsonDecoder[RawCap].mapOrFail { raw =>
       requireOp(Op.capLosses, raw.op) {
-        ValidationUtil.refineNonNegativeLong(raw.cap, "cap")
+        ValidationUtil.refineLossCap(raw.cap, "cap")
           .map(CapLosses(_)).left.map(firstError)
       }
     }
@@ -99,7 +108,7 @@ object ResultTransformSpec {
     JsonEncoder[RawScale].contramap(s => RawScale(Op.scaleLosses, s.factor)),
     JsonDecoder[RawScale].mapOrFail { raw =>
       requireOp(Op.scaleLosses, raw.op) {
-        ValidationUtil.refineNonNegativeDouble(raw.factor, "factor")
+        ValidationUtil.refineRetentionFactor(raw.factor, "factor")
           .map(ScaleLosses(_)).left.map(firstError)
       }
     }
@@ -120,7 +129,7 @@ object ResultTransformSpec {
     JsonDecoder[RawPolicy].mapOrFail { raw =>
       requireOp(Op.insurancePolicy, raw.op) {
         (ValidationUtil.refineNonNegativeLong(raw.deductible, "deductible"),
-         ValidationUtil.refineNonNegativeLong(raw.cap, "cap")) match {
+         ValidationUtil.refineLossCap(raw.cap, "cap")) match {
           case (Right(d), Right(c)) => InsurancePolicy.create(d, c).toEither.left.map(e => firstError(e.toList))
           case (Left(e1), Left(e2)) => Left(firstError(e1 ++ e2))
           case (Left(e), _)         => Left(firstError(e))

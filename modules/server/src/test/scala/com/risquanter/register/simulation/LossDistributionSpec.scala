@@ -29,7 +29,7 @@ object LossDistributionSpec extends ZIOSpecDefault {
     MitigationApplicationRecord(
       mitigationId(label),
       MitigationSpec.ResultStage(TransformPipeline(List(
-        ResultTransformSpec.CapLosses(ValidationUtil.refineNonNegativeLong(cap).toOption.get)))),
+        ResultTransformSpec.CapLosses(ValidationUtil.refineLossCap(cap).toOption.get)))),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -39,6 +39,24 @@ object LossDistributionSpec extends ZIOSpecDefault {
       mitigationId(label),
       MitigationSpec.ResultStage(TransformPipeline(List(
         ResultTransformSpec.ScaleLosses(factor.refineUnsafe)))),
+      Set.empty,
+      MitigationPrecedence.default
+    )
+
+  private def deductibleRecord(label: String, deductible: Long): MitigationApplicationRecord =
+    MitigationApplicationRecord(
+      mitigationId(label),
+      MitigationSpec.ResultStage(TransformPipeline(List(
+        ResultTransformSpec.ApplyDeductible(ValidationUtil.refineNonNegativeLong(deductible).toOption.get)))),
+      Set.empty,
+      MitigationPrecedence.default
+    )
+
+  private def thresholdRecord(label: String, threshold: Long): MitigationApplicationRecord =
+    MitigationApplicationRecord(
+      mitigationId(label),
+      MitigationSpec.ResultStage(TransformPipeline(List(
+        ResultTransformSpec.FilterBelowThreshold(ValidationUtil.refineNonNegativeLong(threshold).toOption.get)))),
       Set.empty,
       MitigationPrecedence.default
     )
@@ -199,19 +217,19 @@ object LossDistributionSpec extends ZIOSpecDefault {
         assertTrue(!(value.trials eq value.source))
       },
       test("a layer of two records composes them in the order given") {
-        // Cap at 1500 then scale by 2 gives 3000; scaling first would give 1500.
-        val applied = List(capRecord("cap-a", 1500L), scaleRecord("scale-a", 2.0))
+        // Cap at 1500 then scale by 0.5 gives 750; scaling first would give 1500.
+        val applied = List(capRecord("cap-a", 1500L), scaleRecord("scale-a", 0.5))
         val value   = withCfg(100) {
           decorated(nodeId("risk-001"), Map(1 -> 4000L), applied).toEither.toOption.get
         }
 
-        assertTrue(value.trials.outcomes == Map(1 -> 3000L))
+        assertTrue(value.trials.outcomes == Map(1 -> 750L))
       },
       test("a layer that overflows fails with CONSTRAINT_VIOLATION rather than throwing") {
         // scaleLosses throws on the overflow; decorate converts it (ADR-033 §3).
         val id     = nodeId("risk-001")
         val result = withCfg(100) {
-          decorated(id, Map(1 -> Long.MaxValue), List(scaleRecord("scale-a", 2.0)))
+          decorated(id, Map(1 -> Long.MaxValue), List(scaleRecord("scale-a", 1.0)))
         }
 
         result.toEither match {
@@ -222,6 +240,71 @@ object LossDistributionSpec extends ZIOSpecDefault {
             )
           case Right(_) => assertTrue(false)
         }
+      },
+      test("a deductible at or above every loss is refused — a mitigation cannot eliminate a risk") {
+        // A deductible is data-dependent: 5000 is ordinary against losses in the
+        // millions and annihilating against these. No type can close it, so the
+        // layer boundary compares the figures before and after.
+        val id     = nodeId("risk-001")
+        val result = withCfg(100) {
+          decorated(id, Map(1 -> 1000L, 2 -> 2000L), List(deductibleRecord("ded-a", 5000L)))
+        }
+
+        result.toEither match {
+          case Left(errors) =>
+            assertTrue(
+              errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION,
+              errors.head.field == s"mitigatedResult.${id.value}",
+              errors.head.message.contains("residual of exactly zero")
+            )
+          case Right(_) => assertTrue(false)
+        }
+      },
+      test("a threshold above every loss is refused for the same reason") {
+        val id     = nodeId("risk-001")
+        val result = withCfg(100) {
+          decorated(id, Map(1 -> 1000L, 2 -> 2000L), List(thresholdRecord("thr-a", 5000L)))
+        }
+
+        result.toEither match {
+          case Left(errors) =>
+            assertTrue(errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION)
+          case Right(_) => assertTrue(false)
+        }
+      },
+      test("a layer that leaves one loss standing is accepted") {
+        val id    = nodeId("risk-001")
+        val value = withCfg(100) {
+          decorated(id, Map(1 -> 1000L, 2 -> 9000L), List(deductibleRecord("ded-a", 5000L)))
+            .toEither.toOption.get
+        }
+
+        assertTrue(value.trials.outcomes == Map(2 -> 4000L))
+      },
+      test("a small positive scale factor that rounds every loss to zero is also refused") {
+        // scaleLosses rounds to nearest and then drops zeros, so a factor well
+        // inside (0, 1] annihilates a node whose losses are all small. The
+        // factor bound cannot catch this; the layer comparison does.
+        val id     = nodeId("risk-001")
+        val result = withCfg(100) {
+          decorated(id, Map(1 -> 100L, 2 -> 300L), List(scaleRecord("scale-a", 0.001)))
+        }
+
+        result.toEither match {
+          case Left(errors) =>
+            assertTrue(errors.head.code == ValidationErrorCode.CONSTRAINT_VIOLATION)
+          case Right(_) => assertTrue(false)
+        }
+      },
+      test("a node whose outcomes held no loss is not refused — nothing was eliminated") {
+        // The zero residual here is what the simulation produced, not what a
+        // mitigation asserted, so the rule must not fire.
+        val id     = nodeId("risk-001")
+        val result = withCfg(100) {
+          decorated(id, Map(1 -> 0L), List(capRecord("cap-a", 1000L)))
+        }
+
+        assertTrue(result.toEither.isRight)
       },
       test("a leaf carries exactly one provenance record and a portfolio carries none") {
         val leaf = withCfg(100) {

@@ -95,7 +95,9 @@ final case class LossDistribution private (
 object LossDistribution {
 
   /** Apply this node's result-stage layer to `source`. An empty layer passes `source` twice
-    * (reference equality, no rebuild). Layer overflow is converted to `CONSTRAINT_VIOLATION` (ADR-033 §3). */
+    * (reference equality, no rebuild). Two failures are converted to
+    * `CONSTRAINT_VIOLATION`: layer overflow (ADR-033 §3), and a layer that leaves no loss
+    * where the node had one, which no mitigation may assert (ADR-034 §6). */
   def decorate(
     nodeId: NodeId,
     source: TrialOutcomes,
@@ -106,8 +108,19 @@ object LossDistribution {
     if (applied.isEmpty)
       Validation.succeed(LossDistribution(nodeId, source, source, Nil, provenance))
     else
-      try Validation.succeed(LossDistribution(nodeId, run(source), source, applied, provenance))
+      try {
+        val mitigated = run(source)
+        if (eliminatesEveryLoss(source, mitigated)) Validation.fail(layerEliminatesRisk(nodeId))
+        else Validation.succeed(LossDistribution(nodeId, mitigated, source, applied, provenance))
+      }
       catch { case _: ArithmeticException => Validation.fail(layerOverflow(nodeId)) }
+
+  /** A layer eliminates the risk when the node had at least one loss and the
+    * layer leaves none. A node whose outcomes held no loss to begin with is not
+    * caught: its zero residual is what the simulation produced, not what a
+    * mitigation asserted. */
+  private def eliminatesEveryLoss(source: TrialOutcomes, mitigated: TrialOutcomes): Boolean =
+    source.outcomes.exists(_._2 > 0L) && !mitigated.outcomes.exists(_._2 > 0L)
 
   /** Each simulated leaf's provenance record, keyed by the node carrying it.
     * Portfolio entries contribute nothing, having no record of their own. */
@@ -119,6 +132,13 @@ object LossDistribution {
       field   = s"mitigatedResult.${nodeId.value}",
       code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
       message = ValidationMessages.aggregatedLossOverflow
+    )
+
+  private def layerEliminatesRisk(nodeId: NodeId): ValidationError =
+    ValidationError(
+      field   = s"mitigatedResult.${nodeId.value}",
+      code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message = ValidationMessages.mitigationEliminatesRisk
     )
 
   /** Structural equality over every field; two readings differing only in timestamp are not equal. */

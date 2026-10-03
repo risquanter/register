@@ -3,7 +3,8 @@ package com.risquanter.register.domain.data
 import zio.test.*
 import zio.json.{EncoderOps, DecoderOps}
 import io.github.iltotore.iron.{autoRefine, refineUnsafe}
-import com.risquanter.register.domain.data.iron.{NonNegativeDouble, ShrinkFraction, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{RetentionFactor, ValidationUtil}
+import com.risquanter.register.domain.errors.ValidationErrorCode
 import com.risquanter.register.testutil.TestHelpers.{idStr, nodeId, unsafeGet}
 
 /**
@@ -56,7 +57,7 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
         )
       },
       test("property: output always passes the leaf smart constructor") {
-        val factors: Gen[Any, NonNegativeDouble] = Gen.double(0.1, 2.0).map(_.refineUnsafe)
+        val factors: Gen[Any, RetentionFactor] = Gen.double(0.1, 1.0).map(_.refineUnsafe)
         check(factors, factors) { (lf, df) =>
           val t = RiskLeafTransform(LikelihoodTransform.Scale(lf), DistributionTransform.ScaleSeverity(df))
           val logn = RiskLeafTransform.applyTo(t, lognormalLeaf())
@@ -71,9 +72,14 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
         val out = apply(RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.Keep), lognormalLeaf(prob = 0.4))
         assertTrue(math.abs(out.probability - 0.2) < 1e-9)
       },
-      test("Scale clamps at 1.0") {
-        val out = apply(RiskLeafTransform(LikelihoodTransform.Scale(4.0), DistributionTransform.Keep), lognormalLeaf(prob = 0.4))
-        assertTrue((out.probability: Double) == 1.0)
+      test("a factor above 1 is rejected at the boundary, so no clamp is needed") {
+        assertTrue(ValidationUtil.refineRetentionFactor(4.0).isLeft)
+      },
+      test("Override cannot state a probability of zero — no mitigation eliminates a risk") {
+        assertTrue(
+          ValidationUtil.refineResidualProbability(0.0).isLeft,
+          ValidationUtil.refineResidualProbability(0.05).isRight
+        )
       },
       test("Override replaces the probability") {
         val out = apply(RiskLeafTransform(LikelihoodTransform.Override(0.05), DistributionTransform.Keep), lognormalLeaf(prob = 0.4))
@@ -89,6 +95,27 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
           out.maxLoss.map(l => l: Long) == Some(50000L)
         )
       },
+      test("lognormal: outward rounding keeps adjacent bounds apart") {
+        // Round-to-nearest sent 50.5 and 51.005 both to 51, collapsing the
+        // interval and failing with "minLoss must be < maxLoss".
+        val out = apply(
+          RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.ScaleSeverity(0.505)),
+          lognormalLeaf(min = 100L, max = 101L))
+        assertTrue(
+          out.minLoss.map(l => l: Long) == Some(50L),
+          out.maxLoss.map(l => l: Long) == Some(52L)
+        )
+      },
+      test("lognormal: a sub-unit lower bound is rejected, naming the smallest workable factor") {
+        val result = RiskLeafTransform.applyTo(
+          RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.ScaleSeverity(0.0005)),
+          lognormalLeaf(min = 1000L, max = 100000L))
+        val errors = result.toEither.swap.toOption.toList.flatMap(_.toChunk.toList)
+        assertTrue(
+          errors.exists(_.code == ValidationErrorCode.INVALID_LOGNORMAL_PARAMS),
+          errors.exists(_.message.contains("1.000e-03"))
+        )
+      },
       test("expert: scales quantiles, percentiles unchanged") {
         val out = apply(RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.ScaleSeverity(0.5)), expertLeaf())
         assertTrue(
@@ -98,32 +125,25 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
       }
     ),
 
-    suite("distribution component — Narrow")(
-      test("lognormal: contracts toward the geometric mean, order preserved") {
-        val base = lognormalLeaf(min = 1000L, max = 100000L) // geometric mean = 10000
-        val out = apply(RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.Narrow(0.5)), base)
-        val newMin = out.minLoss.map(l => l: Long).get
-        val newMax = out.maxLoss.map(l => l: Long).get
-        assertTrue(newMin > 1000L, newMax < 100000L, newMin < newMax)
-      },
-      test("lognormal with minLoss 0 is rejected (log space undefined)") {
-        val base = lognormalLeaf(min = 0L, max = 100000L)
-        val result = RiskLeafTransform.applyTo(
-          RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.Narrow(0.5)), base)
-        assertTrue(result.toEither.isLeft)
-      },
-      test("expert: pulls quantiles toward the interpolated median, monotone") {
-        val out = apply(RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.Narrow(0.5)), expertLeaf())
-        val qs = out.quantiles.get
-        // median at p=0.5 is 5000; q' = 5000 + (q - 5000) * 0.5
+    suite("bound arithmetic")(
+      test("scaleSeverityBounds floors the lower bound and ceils the upper") {
         assertTrue(
-          qs.sameElements(Array(3000.0, 5000.0, 12500.0)),
-          qs.sliding(2).forall(p => p(0) <= p(1))
+          RiskLeafTransform.scaleSeverityBounds(100L, 101L, 0.505) == ((50L, 52L)),
+          RiskLeafTransform.scaleSeverityBounds(1000L, 100000L, 0.5) == ((500L, 50000L)),
+          RiskLeafTransform.scaleSeverityBounds(7L, 9L, 1.0) == ((7L, 9L))
         )
       },
-      test("fraction 0 is a no-op on expert quantiles") {
-        val out = apply(RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.Narrow(0.0)), expertLeaf())
-        assertTrue(out.quantiles.get.sameElements(Array(1000.0, 5000.0, 20000.0)))
+      test("lowerBoundRepresentable holds at one whole unit and fails below it") {
+        assertTrue(
+          RiskLeafTransform.lowerBoundRepresentable(1L),
+          !RiskLeafTransform.lowerBoundRepresentable(0L)
+        )
+      },
+      test("minRepresentableFactor is the reciprocal of the lower bound") {
+        assertTrue(
+          RiskLeafTransform.minRepresentableFactor(1000L) == 0.001,
+          RiskLeafTransform.minRepresentableFactor(40000L) == 0.000025
+        )
       }
     ),
 
@@ -173,13 +193,17 @@ object RiskLeafTransformSpec extends ZIOSpecDefault {
         val transforms = List(
           RiskLeafTransform.identity,
           RiskLeafTransform(LikelihoodTransform.Scale(0.5), DistributionTransform.ScaleSeverity(0.8)),
-          RiskLeafTransform(LikelihoodTransform.Override(0.05), DistributionTransform.Narrow(0.3)),
+          RiskLeafTransform(LikelihoodTransform.Override(0.05), DistributionTransform.Keep),
           RiskLeafTransform(LikelihoodTransform.Keep, DistributionTransform.Override(expertOverride))
         )
         assertTrue(transforms.forall(t => t.toJson.fromJson[RiskLeafTransform] == Right(t)))
       },
-      test("invalid narrow fraction rejected at decode") {
-        assertTrue("""{"op":"narrow","fraction":1.0}""".fromJson[DistributionTransform].isLeft)
+      test("the removed narrow operation is rejected as an unknown op") {
+        val result = """{"op":"narrow","fraction":1.0}""".fromJson[DistributionTransform]
+        assertTrue(
+          result.isLeft,
+          result.swap.toOption.exists(_.contains("invalid distribution transform: op 'narrow'"))
+        )
       }
     )
   )

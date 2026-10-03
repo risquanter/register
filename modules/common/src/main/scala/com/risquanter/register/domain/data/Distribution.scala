@@ -1,7 +1,7 @@
 package com.risquanter.register.domain.data
 
 import zio.prelude.Validation
-import com.risquanter.register.domain.data.iron.{DistributionType, NonNegativeLong, PositiveInt, ValidationUtil}
+import com.risquanter.register.domain.data.iron.{DistributionType, PositiveInt, PositiveLong, ValidationMessages, ValidationUtil}
 import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
 import com.risquanter.register.domain.data.iron.ValidationMessages
 import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
@@ -12,8 +12,8 @@ import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCo
   */
 final case class Distribution(
   distributionType: DistributionType,
-  minLoss: Option[NonNegativeLong],
-  maxLoss: Option[NonNegativeLong],
+  minLoss: Option[PositiveLong],
+  maxLoss: Option[PositiveLong],
   percentiles: Option[Array[Double]],
   quantiles: Option[Array[Double]],
   terms: Option[PositiveInt]
@@ -45,11 +45,11 @@ object Distribution {
   ): Validation[ValidationError, Distribution] = {
     val distTypeV = toValidation(ValidationUtil.refineDistributionType(distributionType, s"$fieldPrefix.distributionType"))
     val minV = minLoss match {
-      case Some(v) => toValidation(ValidationUtil.refineNonNegativeLong(v, s"$fieldPrefix.minLoss")).map(Some(_))
+      case Some(v) => toValidation(ValidationUtil.refinePositiveLong(v, s"$fieldPrefix.minLoss")).map(Some(_))
       case None    => Validation.succeed(None)
     }
     val maxV = maxLoss match {
-      case Some(v) => toValidation(ValidationUtil.refineNonNegativeLong(v, s"$fieldPrefix.maxLoss")).map(Some(_))
+      case Some(v) => toValidation(ValidationUtil.refinePositiveLong(v, s"$fieldPrefix.maxLoss")).map(Some(_))
       case None    => Validation.succeed(None)
     }
     val termsV: Validation[ValidationError, Option[PositiveInt]] = terms match {
@@ -66,8 +66,8 @@ object Distribution {
                 ValidationError(s"$fieldPrefix.percentiles[$i]", ValidationErrorCode.INVALID_RANGE, "Percentile must be strictly in (0, 1)")
             }
             val qtErrors = q.toList.zipWithIndex.collect {
-              case (qt, i) if qt.isNaN || qt.isInfinite || qt < 0.0 =>
-                ValidationError(s"$fieldPrefix.quantiles[$i]", ValidationErrorCode.INVALID_RANGE, "Quantile loss amount must be non-negative")
+              case (qt, i) if qt.isNaN || qt.isInfinite || qt <= 0.0 =>
+                ValidationError(s"$fieldPrefix.quantiles[$i]", ValidationErrorCode.INVALID_RANGE, ValidationMessages.quantilesMustBePositive)
             }
             val allElementErrors = pctErrors ++ qtErrors
             val elementV: Validation[ValidationError, Unit] = toValidation(

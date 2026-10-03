@@ -2,7 +2,8 @@ package com.risquanter.register.domain.data
 
 import zio.json.{JsonCodec, DeriveJsonCodec, JsonDecoder, JsonEncoder, jsonField}
 import sttp.tapir.Schema
-import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, NonNegativeLong, NodeId, PositiveInt, SeedVarId}
+import sttp.tapir.Schema.annotations.encodedName
+import com.risquanter.register.domain.data.iron.{SafeId, SafeName, DistributionType, Probability, OccurrenceProbability, PositiveLong, NodeId, PositiveInt, SeedVarId}
 import com.risquanter.register.domain.data.iron.ValidationMessages
 
 /** Recursive ADT representing a risk hierarchy tree.
@@ -54,14 +55,14 @@ object RiskNode {
   * 
   * Distribution Modes:
   * - Expert Opinion: distributionType="expert", provide percentiles + quantiles
-  * - Lognormal (BCG): distributionType="lognormal", provide minLoss + maxLoss (80% CI)
+  * - Lognormal (BCG): distributionType="lognormal", provide minLoss + maxLoss (90% CI)
   * 
   * Domain Model: Uses Iron refined types for type safety
   * - safeId: SafeId (3-30 alphanumeric chars + hyphen/underscore)
   * - safeName: SafeName (non-blank, max 50 chars)
   * - distributionType: DistributionType ("expert" or "lognormal")
   * - probability: Probability (0.0 < p < 1.0)
-  * - minLoss/maxLoss: NonNegativeLong (>= 0)
+  * - minLoss/maxLoss: PositiveLong (> 0 — both feed a logarithm in the distribution fit)
   * 
   * @param safeId Unique identifier (Iron refined type)
   * @param safeName Human-readable risk name (Iron refined type)
@@ -69,23 +70,26 @@ object RiskNode {
   * @param probability Risk occurrence probability [0.0, 1.0]
   * @param percentiles Expert opinion: percentiles [0.0, 1.0] (expert mode only)
   * @param quantiles Expert opinion: loss values in millions (expert mode only)
-  * @param minLoss Lognormal: 80% CI lower bound in millions (lognormal mode only)
-  * @param maxLoss Lognormal: 80% CI upper bound in millions (lognormal mode only)
+  * @param minLoss Lognormal: 90% CI lower bound in millions (lognormal mode only)
+  * @param maxLoss Lognormal: 90% CI upper bound in millions (lognormal mode only)
   * @param seedVarId Stochastic identity: selects the leaf's HDR random streams
   *                  (occurrence = 2k, loss = 2k+1). Assigned at the creation
   *                  boundary, immutable, unique per tree. Independent of the
   *                  app identity (SafeId) — see PLAN-SEED-IDENTITY.md.
   */
 final case class RiskLeaf private (
-  @jsonField("id") safeId: SafeId.SafeId,
-  @jsonField("name") safeName: SafeName.SafeName,
+  // Both annotations are required and name the same wire field: @jsonField
+  // renames it for the zio-json codec, @encodedName for the Tapir schema that
+  // generates the OpenAPI document. They are read by different derivations.
+  @jsonField("id") @encodedName("id") safeId: SafeId.SafeId,
+  @jsonField("name") @encodedName("name") safeName: SafeName.SafeName,
   parentId: Option[NodeId],
   distributionType: DistributionType,
   probability: OccurrenceProbability,
   percentiles: Option[Array[Double]],
   quantiles: Option[Array[Double]],
-  minLoss: Option[NonNegativeLong],
-  maxLoss: Option[NonNegativeLong],
+  minLoss: Option[PositiveLong],
+  maxLoss: Option[PositiveLong],
   terms: Option[PositiveInt],
   seedVarId: SeedVarId.SeedVarId
 ) extends RiskNode {
@@ -94,7 +98,8 @@ final case class RiskLeaf private (
   require(
     distributionType.toString match {
       case "expert" => percentiles.exists(_.nonEmpty) && quantiles.exists(_.nonEmpty)
-      case "lognormal" => minLoss.isDefined && maxLoss.isDefined && minLoss.get < maxLoss.get
+      case "lognormal" =>
+        minLoss.isDefined && maxLoss.isDefined && minLoss.get > 0L && minLoss.get < maxLoss.get
       case _ => true
     },
     s"RiskLeaf invariant violated: $distributionType mode missing required fields or invalid bounds"
@@ -127,8 +132,8 @@ object RiskLeaf {
     probability: OccurrenceProbability,
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
-    minLoss: Option[NonNegativeLong],
-    maxLoss: Option[NonNegativeLong],
+    minLoss: Option[PositiveLong],
+    maxLoss: Option[PositiveLong],
     parentId: Option[NodeId],
     terms: Option[PositiveInt],
     seedVarId: SeedVarId.SeedVarId
@@ -144,8 +149,8 @@ object RiskLeaf {
    * @param probability Plain double [0.0, 1.0] (will be refined to Probability)
    * @param percentiles Optional array of percentiles (expert mode)
    * @param quantiles Optional array of loss quantiles (expert mode)
-   * @param minLoss Optional min loss (lognormal mode, will be refined to NonNegativeLong)
-   * @param maxLoss Optional max loss (lognormal mode, will be refined to NonNegativeLong)
+   * @param minLoss Optional min loss (lognormal mode, will be refined to PositiveLong)
+   * @param maxLoss Optional max loss (lognormal mode, will be refined to PositiveLong)
    * @param seedVarId Stochastic identity (will be refined to SeedVarId)
    * @return Validation with all errors accumulated, or valid RiskLeaf
    */
@@ -222,7 +227,7 @@ object RiskLeaf {
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
     fieldPrefix: String
-  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[NonNegativeLong], Option[NonNegativeLong])] = {
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[PositiveLong], Option[PositiveLong])] = {
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     
     (percentiles, quantiles) match {
@@ -285,14 +290,14 @@ object RiskLeaf {
     minLoss: Option[Long],
     maxLoss: Option[Long],
     fieldPrefix: String
-  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[NonNegativeLong], Option[NonNegativeLong])] = {
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[PositiveLong], Option[PositiveLong])] = {
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     import com.risquanter.register.domain.data.iron.ValidationUtil.toValidation
     
     (minLoss, maxLoss) match {
       case (Some(min), Some(max)) =>
-        val minV = toValidation(ValidationUtil.refineNonNegativeLong(min, s"$fieldPrefix.minLoss"))
-        val maxV = toValidation(ValidationUtil.refineNonNegativeLong(max, s"$fieldPrefix.maxLoss"))
+        val minV = toValidation(ValidationUtil.refinePositiveLong(min, s"$fieldPrefix.minLoss"))
+        val maxV = toValidation(ValidationUtil.refinePositiveLong(max, s"$fieldPrefix.maxLoss"))
 
         // Validate both, then check cross-field constraint
         Validation.validateWith(minV, maxV) { (validMin, validMax) =>
@@ -311,13 +316,13 @@ object RiskLeaf {
   //    path (OverrideDistributionParams) ──
 
   private def requireMinBelowMax(
-    min: NonNegativeLong,
-    max: NonNegativeLong,
+    min: PositiveLong,
+    max: PositiveLong,
     fieldPrefix: String
   ): Validation[com.risquanter.register.domain.errors.ValidationError, Unit] = {
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     Validation
-      .fromPredicateWith[ValidationError, (NonNegativeLong, NonNegativeLong)](
+      .fromPredicateWith[ValidationError, (PositiveLong, PositiveLong)](
         ValidationError(
           field = s"$fieldPrefix.minLoss",
           code = ValidationErrorCode.INVALID_RANGE,
@@ -381,8 +386,8 @@ object RiskLeaf {
     distributionType: DistributionType,
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
-    minLoss: Option[NonNegativeLong],
-    maxLoss: Option[NonNegativeLong],
+    minLoss: Option[PositiveLong],
+    maxLoss: Option[PositiveLong],
     terms: Option[PositiveInt],
     fieldPrefix: String
   ): Validation[com.risquanter.register.domain.errors.ValidationError, Unit] =
@@ -405,7 +410,7 @@ object RiskLeaf {
   private def failOnUnknownDistributionType(
     unknown: String,
     fieldPrefix: String
-  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[NonNegativeLong], Option[NonNegativeLong])] = {
+  ): Validation[com.risquanter.register.domain.errors.ValidationError, (Option[PositiveLong], Option[PositiveLong])] = {
     import com.risquanter.register.domain.errors.{ValidationError, ValidationErrorCode}
     
     Validation.fail(ValidationError(
@@ -498,8 +503,10 @@ object RiskLeaf {
   * @param childIds Array of child node IDs (references, not embedded objects)
   */
 final case class RiskPortfolio private (
-  @jsonField("id") safeId: SafeId.SafeId,
-  @jsonField("name") safeName: SafeName.SafeName,
+  // See RiskLeaf: @jsonField is read by the zio-json codec, @encodedName by the
+  // Tapir schema. Both are needed for the two to agree on the wire name.
+  @jsonField("id") @encodedName("id") safeId: SafeId.SafeId,
+  @jsonField("name") @encodedName("name") safeName: SafeName.SafeName,
   parentId: Option[NodeId],
   childIds: Array[NodeId]
 ) extends RiskNode {

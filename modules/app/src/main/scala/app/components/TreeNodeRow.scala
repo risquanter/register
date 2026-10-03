@@ -2,7 +2,7 @@ package app.components
 
 import com.raquo.laminar.api.L.{*, given}
 import org.scalajs.dom.MouseEvent
-import com.risquanter.register.domain.data.iron.{SafeName, NodeId, OccurrenceProbability, NonNegativeLong, DistributionType}
+import com.risquanter.register.domain.data.iron.{SafeName, NodeId, OccurrenceProbability, DistributionType}
 
 /** Unified tree-node row used by both TreePreview (draft state) and
   * TreeDetailView (persisted tree).
@@ -39,8 +39,8 @@ object TreeNodeRow:
     id:          Option[NodeId]          = None,
     percentiles: Option[Array[Double]]   = None,
     quantiles:   Option[Array[Double]]   = None,
-    minLoss:     Option[NonNegativeLong] = None,
-    maxLoss:     Option[NonNegativeLong] = None
+    minLoss:     Option[Long]            = None,
+    maxLoss:     Option[Long]            = None
   ): String =
     val idLine = id.fold("")(n => s"\nID:           ${n.toSafeId.value}")
     val base   = s"${name.value}\n─────────────────────$idLine\nType:         ${distType}\nProbability:  $probability"
