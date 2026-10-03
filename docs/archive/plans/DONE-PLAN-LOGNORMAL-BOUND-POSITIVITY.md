@@ -1,9 +1,16 @@
 # Plan — lognormal bound positivity (`PositiveLong`), outward rounding, and the sub-unit mitigation error
 
-**Status:** Draft presented for approval — **all decisions ruled (LBP-D-1 through
-LBP-D-9; LBP-D-4 is superseded by LBP-D-6), and no prerequisite stands outside
-them.** G3 coverage begins when the user approves this document and points the
-approval token at it; until then no source edit is authorized.
+**Status:** §1–§12 implemented 2026-10-03 at version 0.10.43, all four test tiers
+green. LBP-D-1 through LBP-D-9 ruled (LBP-D-4 is superseded by LBP-D-6). §11a's
+no-elimination rule was absorbed into ADR-034 §6 and the `adr-constraints`
+distillation. What the implementation found that the plan did not state, including
+one item in §7 that was not reachable, is recorded in §13.
+
+**§14 implemented 2026-10-03 at version 0.10.44**, all four tiers green. It closes
+the four remaining ways to express a zero residual that §11a listed and left open,
+ruling LBP-D-10 through LBP-D-12. The rule now has two enforcement points: a type
+at the boundary where the parameter decides the outcome, and a check in
+`LossDistribution.decorate` where the trial outcomes decide it.
 
 **No tree that has already been saved can be affected by the three tightened
 validation rules.** No trees have been saved: there is no Irmin backend holding
@@ -957,3 +964,359 @@ ordinary step with no data condition attached.
 **Verification.** `sbt "commonJVM/test; server/test"` and `sbt app/test` green,
 with `RiskLeafTransformSpec` carrying one added case: a transform payload with
 `"op": "narrow"` fails to decode with the unknown-operation message.
+
+---
+
+## 13. What the implementation found that the plan did not state
+
+**One item in §7 is not reachable.** The second integration case — a mitigation
+whose `ScaleSeverity` drives a bound below one whole unit, checked end to end —
+cannot be written, because no HTTP endpoint accepts a mitigation. There is no
+mitigation route in any endpoint file, which matches §5b's own observation that no
+mitigation-authoring view exists. The §4 error is covered instead by a unit case in
+`RiskLeafTransformSpec` that asserts both the error code and the formatted smallest
+workable factor. The integration spec covers the three cases that are reachable,
+plus a positive-bound control case proving the rejection is specific to zero.
+
+**Three files needed an edit the plan's tables did not name.**
+`IronTapirCodecs.scala` needed `Schema[PositiveLong]`, because `RiskNode`'s Tapir
+schema is derived and a derived schema needs an instance for every field type; this
+was the only compile error the retype produced, and the file was added to the
+inventory. `RiskResultTransformSpec`'s `genScaleFactor` generator needed the same
+retype and range narrowing as the generator §11 does name. `interpolatedMedian` in
+`RiskLeafTransform.scala` was deleted: it was private and the deleted `Narrow`
+expert branch was its only caller.
+
+**The metalog symptom question in §10 is settled.** A quantile of exactly zero
+makes the fit fail, and the failure arrives on the error channel as a `Left`. The
+fitter does not return non-finite coefficients a caller could mistake for a real
+distribution. No tree was producing meaningless figures; an expert leaf with a zero
+quantile would have failed at simulation.
+
+**A separate defect was found and fixed in the same pass.** The zio-json codec and
+the Tapir schema describe the same wire format independently, and they disagreed.
+`RiskLeaf` and `RiskPortfolio` carry `@jsonField("id")` and `@jsonField("name")`,
+which zio-json honours, so the JSON says `id` and `name`. Tapir's derivation does
+not read that annotation and named the two properties `safeId` and `safeName`, so
+the generated OpenAPI document described fields that are not on the wire. Both
+classes now carry Tapir's `@encodedName` alongside, and `RiskLeafSpec` has a
+regression case comparing the derived schema's field names against the wire names.
+
+**`NonNegativeDouble` and `refineNonNegativeDouble` have no production callers**
+now that the three scale operations take a `RetentionFactor`. Only their own tests
+exercise them. They are general-purpose and the plan does not ask for their
+removal, so they were left in place.
+
+---
+
+## 14. Continuation — closing the remaining ways to express a zero residual
+
+**Status:** Presented for approval. Not implemented. The approval token already
+names this plan, and the inventory already lists every file but one; the
+amendment needed is at the end of this section.
+
+**Why this is a continuation and not a new plan.** §11a states the rule that no
+mitigation may assert a risk has ceased to exist, and §13 records that the rule is
+now in ADR-034 §6 while the type reaches only the three scale factors. The four
+remaining paths are the same rule applied to the same transform algebra, so they
+belong to this plan's workstream rather than a separate epic.
+
+### 14a. The two kinds of annihilation, which need different mechanisms
+
+The four paths divide on one question: does the parameter annihilate on its own,
+or only against particular trial outcomes?
+
+**Parameter-annihilating.** `LikelihoodTransform.Override(0.0)` sets the
+occurrence probability to zero, so the leaf never occurs and every loss is zero,
+whatever the outcomes were. `CapLosses(0)` caps every loss at zero. Each is a
+zero residual decided entirely by the number the author wrote, so each is
+closable by a type at the boundary (ADR-001).
+
+**Data-dependent.** `applyDeductible(d)` annihilates when `d` is at or above
+every loss in the node's outcomes, and `filterBelowThreshold(t)` when `t` is
+above every loss. A deductible of 1 000 000 is ordinary for a node whose losses
+run in the millions and annihilating for one whose losses run in the thousands.
+No type can close these, because the parameter alone does not decide the outcome.
+
+`scaleLosses` belongs to this group too, which the first draft of this section
+missed. Its factor is already bounded as tightly as the methodology permits, and
+it still annihilates: a factor of `0.001` takes losses of 100 and 300 to `0.1` and
+`0.3`, both round to zero, and the sparse-storage filter drops them. The loss of
+precision is in the rounding rather than the parameter, so no tightening of
+`RetentionFactor` would reach it.
+
+This is why §11a said each case needs its own judgement. The judgement turns out
+to be the same for all four — a zero residual is not permitted — but the
+enforcement point differs, and that is the part a shared bound could not supply.
+
+### LBP-D-10 — `LikelihoodTransform.Override` probability floor — RULED: a new `(0, 1]` type
+
+`Override` takes a new `ResidualProbability` rather than the existing
+`OccurrenceProbability`, which is the closed interval `[0, 1]`.
+
+The two must stay distinct, because a probability of zero is legitimate in one
+place and not the other. An author may declare a leaf whose occurrence
+probability is zero: that is a statement about the world, and
+`OccurrenceProbability`'s own comment records the closed interval as deliberate
+for exactly that reason. A mitigation may not *set* it to zero: that is a claim
+that a control cannot fail. The rule in ADR-034 §6 binds mitigations, not
+authors, so the narrower type belongs on the transform and the leaf field is
+left alone.
+
+### LBP-D-11 — `CapLosses` cap floor — RULED: `PositiveLong`
+
+A cap is the largest loss the entity bears. A cap of zero states that the entity
+bears nothing, which is a claim that the transfer cannot fail — the insurer can
+deny the claim, exclude the peril, or become insolvent. It is the same defect as
+a retention factor of zero, reached through a financial structure instead of a
+fraction, so it is refused the same way.
+
+`InsurancePolicy` already excludes it without a type: its cross-field rule is
+`cap > deductible` and the deductible is non-negative, so the cap is at least 1
+by arithmetic. Its field is retyped anyway, because `ResultTransformInterpreter`
+turns an `InsurancePolicy` into `applyDeductible(d).andThen(capLosses(c))` and
+`capLosses` now requires a `PositiveLong`.
+
+### LBP-D-12 — the data-dependent pair — RULED: one check in `LossDistribution.decorate`
+
+`decorate` is already the conversion boundary for a layer's arithmetic: it runs
+the composed transform inside a `try` and turns an `ArithmeticException` into a
+`CONSTRAINT_VIOLATION`. It is also the only place that holds the node's source
+outcomes and the layer's result side by side, which is exactly what a
+data-dependent check needs. One check there covers both remaining paths, covers
+`CapLosses(0)` a second time as defense in depth, and covers any future transform
+whose annihilating case nobody anticipated.
+
+The check compares before against after, so a node that never had a loss is not
+caught by it. A portfolio with no occurrences in any trial has a zero residual
+that no mitigation produced, and reporting that as an elimination would be wrong.
+
+### 14b. The new type
+
+In `OpaqueTypes.scala`, after `RetentionFactor`:
+
+```scala
+// Probability a mitigation may assert for a risk that remains in the tree:
+// strictly above 0 and at most 1. A mitigation reduces the chance of an
+// occurrence and can never remove the possibility, because a residual of
+// exactly zero asserts the control cannot fail. Distinct from
+// OccurrenceProbability, whose closed interval is correct for a leaf's own
+// declared probability: an author may state that an event never occurs, a
+// mitigation may not state that it has been prevented.
+type ResidualProbability = Double :| (Greater[0.0] & LessEqual[1.0])
+```
+
+The constraint is identical to `RetentionFactor`'s, so the two are the same type
+to the compiler and are mutually assignable. They are kept separate for the
+reader, because one names a probability and the other a retained fraction. No
+Iron mechanism distinguishes them without an opaque type, and ADR-018's nominal
+wrapper rule covers identifiers sharing an encoding rather than value
+refinements.
+
+### 14c. The two refiners
+
+In `ValidationUtil.scala`, mirroring `refineRetentionFactor`:
+
+```scala
+// Refinement for a probability a mitigation may assert: above 0, at most 1
+def refineResidualProbability(value: Double, fieldPath: String = "probability"): Either[List[ValidationError], ResidualProbability] = {
+  value
+    .refineEither[Greater[0.0] & LessEqual[1.0]]
+    .left
+    .map(_ => List(ValidationError(
+      field = fieldPath,
+      code = ValidationErrorCode.INVALID_RANGE,
+      message = ValidationMessages.residualProbabilityOutOfRange
+    )))
+}
+
+// Refinement for a loss cap: the largest loss the entity bears, at least 1
+def refineLossCap(value: Long, fieldPath: String = "cap"): Either[List[ValidationError], PositiveLong] = {
+  value
+    .refineEither[Greater[0L]]
+    .left
+    .map(_ => List(ValidationError(
+      field = fieldPath,
+      code = ValidationErrorCode.INVALID_RANGE,
+      message = ValidationMessages.lossCapMustBePositive
+    )))
+}
+```
+
+`refineLossCap` duplicates `refinePositiveLong`'s refinement and differs only in
+its message. It exists because `valueMustBePositive` — "Value must be greater
+than zero" — states the bound without the reason, and §11's wording rule applies
+here for the same cause: a user entering `0` means "we bear nothing", and a
+message giving only the bound reads as a quibble rather than a statement that the
+model does not accept the claim.
+
+### 14d. The three messages
+
+In `ValidationMessages.scala`, the first two beside `retentionFactorOutOfRange`
+in the numeric section and the third in the lognormal section's neighbourhood of
+mitigation messages:
+
+```scala
+val residualProbabilityOutOfRange: String =
+  "Mitigated probability must be greater than 0 and at most 1 — a mitigation reduces the chance a risk occurs, so it cannot remove the possibility entirely"
+
+val lossCapMustBePositive: String =
+  "Loss cap must be greater than 0 — a cap of zero would leave the entity bearing nothing, which states that the transfer cannot fail"
+
+val mitigationEliminatesRisk: String =
+  "This mitigation removes every loss from the risk, leaving a residual of exactly zero — a mitigation reduces exposure and cannot assert that a risk has ceased to exist. Raise the cap, lower the deductible, or lower the threshold; a risk that genuinely no longer exists is removed from the tree instead."
+```
+
+All three follow the dash-clause form the file uses for a rule whose reason is
+not self-evident, which §11 established for `retentionFactorOutOfRange`.
+
+### 14e. The adopting signatures
+
+```scala
+// RiskLeafTransform.scala
+final case class Override(probability: ResidualProbability) extends LikelihoodTransform
+
+// ResultTransformSpec.scala
+final case class CapLosses(cap: PositiveLong) extends ResultTransformSpec
+final case class InsurancePolicy private (deductible: NonNegativeLong, cap: PositiveLong)
+
+object InsurancePolicy {
+  def create(
+    deductible: NonNegativeLong,
+    cap: PositiveLong
+  ): Validation[ValidationError, InsurancePolicy]
+}
+
+// RiskResultTransform.scala
+def capLosses(cap: PositiveLong): RiskResultTransform
+```
+
+Four codec sites switch refiner: `LikelihoodTransform`'s `"override"` arm to
+`refineResidualProbability`, `capLossesCodec` to `refineLossCap`, and
+`insurancePolicyCodec`'s cap half to `refineLossCap` while its deductible half
+stays `refineNonNegativeLong`.
+
+### 14f. The elimination check
+
+In `LossDistribution.scala`, `decorate` gains the check and one private helper.
+The `try` block now binds the result before testing it, so the existing overflow
+conversion is unchanged:
+
+```scala
+  def decorate(
+    nodeId: NodeId,
+    source: TrialOutcomes,
+    provenance: Option[NodeProvenance],
+    applied: List[MitigationApplicationRecord],
+    run: TrialOutcomes => TrialOutcomes
+  ): Validation[ValidationError, LossDistribution] =
+    if (applied.isEmpty)
+      Validation.succeed(LossDistribution(nodeId, source, source, Nil, provenance))
+    else
+      try {
+        val mitigated = run(source)
+        if (eliminatesEveryLoss(source, mitigated)) Validation.fail(layerEliminatesRisk(nodeId))
+        else Validation.succeed(LossDistribution(nodeId, mitigated, source, applied, provenance))
+      }
+      catch { case _: ArithmeticException => Validation.fail(layerOverflow(nodeId)) }
+
+  /** A layer eliminates the risk when the node had at least one loss and the
+    * layer leaves none. A node whose outcomes held no loss to begin with is not
+    * caught: its zero residual is what the simulation produced, not what a
+    * mitigation asserted. */
+  private def eliminatesEveryLoss(source: TrialOutcomes, mitigated: TrialOutcomes): Boolean =
+    source.outcomes.exists(_._2 > 0L) && !mitigated.outcomes.exists(_._2 > 0L)
+
+  private def layerEliminatesRisk(nodeId: NodeId): ValidationError =
+    ValidationError(
+      field   = s"mitigatedResult.${nodeId.value}",
+      code    = ValidationErrorCode.CONSTRAINT_VIOLATION,
+      message = ValidationMessages.mitigationEliminatesRisk
+    )
+```
+
+The error code is `CONSTRAINT_VIOLATION`, matching `layerOverflow` in the same
+function, so the HTTP status and error shape of a layer-level failure stay
+uniform.
+
+### 14g. What compiles unchanged, and what needs an edit
+
+Every existing cap and probability literal is already positive, so the two type
+bounds break no literal call site. There is no `CapLosses(0)`, no `capLosses(0)`
+and no `Override(0.0)` anywhere in the repository; every `Override` literal is
+`0.05` and every cap literal is `1000000L` or similar. `InsurancePolicy.create`'s
+three test call sites pass literals and retype for free.
+
+Six run-time-refined sites break, for the reason §11 records: a value refined at
+run time carries its own type, and neither `OccurrenceProbability` nor
+`NonNegativeLong` is a subtype of the narrower type, because the constraints
+differ. A seventh site is a production signature the plan's first draft missed.
+
+| File | Current input | Becomes |
+|---|---|---|
+| `RiskResultTransform.scala` | `insurancePolicy(deductible: NonNegativeLong, cap: NonNegativeLong)` — a second cross-field helper beside `InsurancePolicy.create`, reached because it calls `capLosses(cap)` | `cap: PositiveLong`; its `cap > deductible` rule already guaranteed at least 1 |
+| `MitigationApplicationSpec.scala` | `Override(refineOccurrenceProbability(prob)…)` in `leafOverride`, and `CapLosses(refineNonNegativeLong(cap)…)` in its cap record | `refineResidualProbability` and `refineLossCap` |
+| `RiskResultTransformSpec.scala` | `genLoss.map(capLosses)`, where `genLoss` is `Gen[Any, NonNegativeLong]` | a new `genCap: Gen[Any, PositiveLong]` over the same 100–50 000 range |
+| `RiskResultTransformSpec.scala` | two `val cap: NonNegativeLong` bindings in the `insurancePolicy` property tests | `val cap: PositiveLong`, refined at run time from the generated `Long` |
+| `LossDistributionSpec.scala` | `CapLosses(refineNonNegativeLong(cap)…)` in `capRecord` | `refineLossCap` |
+| `NodeLossesSpec.scala` | the same construction in its own `capRecord` | `refineLossCap` |
+| `CachedResultResolverSpec.scala` | the same construction in its cap record | `refineLossCap` |
+
+`NodeLossesSpec.scala` and `CachedResultResolverSpec.scala` are reached without
+an inventory entry by the gate's same-module test allowance: both live under
+`modules/server/src/test/` and the inventory lists
+`modules/server/src/main/.../RiskResultTransform.scala`.
+
+**Tests to add:**
+
+- `ValidationUtilSpec` — `refineResidualProbability` accepts the smallest
+  positive double and `1.0`, rejects `0.0`, anything above `1.0`, and
+  not-a-number; `refineLossCap` accepts `1` and rejects `0`.
+- `RiskLeafTransformSpec` — a boundary-rejection case for `Override`:
+  `refineResidualProbability(0.0)` fails.
+- `ResultTransformSpecSpec` — a `"capLosses"` payload carrying `0` fails to
+  decode; an `"insurancePolicy"` payload carrying a cap of `0` fails to decode.
+- `LossDistributionSpec` — a deductible at or above every loss is rejected with
+  `CONSTRAINT_VIOLATION`; a threshold above every loss is rejected the same way;
+  a layer that leaves one loss standing succeeds; a node whose source held no
+  loss is **not** rejected, which is the case the before-and-after comparison
+  exists to protect.
+
+### 14h. Documentation this continuation updates
+
+`ADR-034 §6` currently ends with a paragraph naming the four paths the type does
+not reach. That paragraph is replaced by a statement of how each is now closed —
+two by a type at the boundary, two by the layer check — because the ADR is a
+current-state document and the gap will no longer exist. The `adr-constraints`
+distillation's ADR-034 bullet and its `ADR-034 × ADR-001` interaction row are
+updated in the same pass, under Plan Quality Gate item 3; the interaction row's
+trap changes from "the rule is enforced on only three factors" to "the rule has
+two enforcement points, and a new transform has to be checked against the
+data-dependent one rather than assumed covered by a type".
+
+### 14i. Verification plan
+
+```
+sbt "commonJVM/test; server/test"
+sbt app/test
+sbt "serverIt/test"    # leaked-state cleanup first (register-dev skill)
+```
+
+All four tiers green. Report pass/fail only. A red tier in any touched module
+blocks done (G5).
+
+### 14j. Inventory amendment required
+
+Every file above is already on this plan's inventory except one. `LossDistribution.scala`
+holds `decorate` and is not listed, so the amendment is a single line:
+
+```
+docs/dev/plans/PLAN-LOGNORMAL-BOUND-POSITIVITY.md
+modules/server/src/main/scala/com/risquanter/register/simulation/LossDistribution.scala
+```
+
+`ResultTransformSpecSpec.scala` needs no entry: it lives under
+`modules/common/src/test/` and the inventory lists several
+`modules/common/src/main/` files, so the gate's same-module test allowance
+reaches it. `MitigationApplicationSpec.scala` and `LossDistributionSpec.scala`
+are already listed by name.
