@@ -436,9 +436,9 @@ object RiskResultTransform {
   given Identity[RiskResultTransform]
   given Debug[RiskResultTransform]
   def applyDeductible(deductible: NonNegativeLong): RiskResultTransform
-  def capLosses(cap: NonNegativeLong): RiskResultTransform
-  def scaleLosses(factor: NonNegativeDouble): RiskResultTransform
-  def insurancePolicy(deductible: NonNegativeLong, cap: NonNegativeLong): Validation[ValidationError, RiskResultTransform]
+  def capLosses(cap: PositiveLong): RiskResultTransform
+  def scaleLosses(factor: RetentionFactor): RiskResultTransform
+  def insurancePolicy(deductible: NonNegativeLong, cap: PositiveLong): Validation[ValidationError, RiskResultTransform]
   def filterBelowThreshold(threshold: NonNegativeLong): RiskResultTransform
 }
 ```
@@ -458,13 +458,13 @@ New file `domain/data/ResultTransformSpec.scala`:
 sealed trait ResultTransformSpec
 object ResultTransformSpec {
   final case class ApplyDeductible(deductible: NonNegativeLong)     extends ResultTransformSpec
-  final case class CapLosses(cap: NonNegativeLong)                  extends ResultTransformSpec
-  final case class ScaleLosses(factor: NonNegativeDouble)           extends ResultTransformSpec
+  final case class CapLosses(cap: PositiveLong)                     extends ResultTransformSpec
+  final case class ScaleLosses(factor: RetentionFactor)             extends ResultTransformSpec
   final case class FilterBelowThreshold(threshold: NonNegativeLong) extends ResultTransformSpec
-  final case class InsurancePolicy private (deductible: NonNegativeLong, cap: NonNegativeLong)
+  final case class InsurancePolicy private (deductible: NonNegativeLong, cap: PositiveLong)
       extends ResultTransformSpec
   object InsurancePolicy {
-    def create(deductible: NonNegativeLong, cap: NonNegativeLong)
+    def create(deductible: NonNegativeLong, cap: PositiveLong)
         : Validation[ValidationError, InsurancePolicy]              // cross-field: cap > deductible
   }
   def toTransform(spec: ResultTransformSpec): RiskResultTransform   // single exhaustive match
@@ -491,9 +491,12 @@ New file `domain/data/RiskLeafTransform.scala`:
 sealed trait LikelihoodTransform
 object LikelihoodTransform {
   case object Keep extends LikelihoodTransform                              // identity component
-  final case class Scale(factor: NonNegativeDouble) extends LikelihoodTransform
-      // application clamps probability × factor into OccurrenceProbability's domain
-  final case class Override(probability: OccurrenceProbability) extends LikelihoodTransform
+  final case class Scale(factor: RetentionFactor) extends LikelihoodTransform
+      // factor and probability are both at most 1, so probability × factor stays
+      // inside OccurrenceProbability's closed [0, 1] domain and needs no clamp
+  final case class Override(probability: ResidualProbability) extends LikelihoodTransform
+      // strictly above zero: an author may declare a leaf that never occurs,
+      // a mitigation may not assert that a risk has been prevented
   given Equal[LikelihoodTransform] = Equal.default
   given JsonCodec[LikelihoodTransform]
 }
@@ -501,19 +504,20 @@ object LikelihoodTransform {
 sealed trait DistributionTransform
 object DistributionTransform {
   case object Keep extends DistributionTransform
-  final case class ScaleSeverity(factor: NonNegativeDouble) extends DistributionTransform
-      // lognormal: scales minLoss/maxLoss; expert: scales quantiles — one semantic op per representation
-  final case class Narrow(fraction: ShrinkFraction) extends DistributionTransform
-      // contract the spread toward the median by `fraction` (0 = no-op, →1 = collapse);
-      // lognormal: shrink the CI symmetrically in log space; expert: pull quantiles toward the median quantile
+  final case class ScaleSeverity(factor: RetentionFactor) extends DistributionTransform
+      // lognormal: scales minLoss/maxLoss, flooring the lower bound and taking the
+      // ceiling of the upper so the fitted interval can only widen;
+      // expert: scales quantiles — one semantic op per representation
   final case class Override(params: OverrideDistributionParams) extends DistributionTransform
   given Equal[DistributionTransform] = Equal.default
   given JsonCodec[DistributionTransform]
 }
 
-// Iron alias in iron/OpaqueTypes.scala + refine helper in iron/ValidationUtil.scala:
-// type ShrinkFraction = Double :| (GreaterEqual[0.0] & Less[1.0])
-// def refineShrinkFraction(value: Double, fieldPath: String): Either[List[ValidationError], ShrinkFraction]
+// Iron aliases in iron/OpaqueTypes.scala + refine helpers in iron/ValidationUtil.scala:
+// type RetentionFactor     = Double :| (Greater[0.0] & LessEqual[1.0])
+// type ResidualProbability = Double :| (Greater[0.0] & LessEqual[1.0])
+// def refineRetentionFactor(value: Double, fieldPath: String): Either[List[ValidationError], RetentionFactor]
+// def refineResidualProbability(value: Double, fieldPath: String): Either[List[ValidationError], ResidualProbability]
 
 /** Absolute replacement of a leaf's distribution — the expert-supplied post-mitigation shape.
   * Same mode invariant as RiskLeaf (expert ⇒ percentiles+quantiles; lognormal ⇒ minLoss<maxLoss),
@@ -522,8 +526,8 @@ final case class OverrideDistributionParams private (
   distributionType: DistributionType,
   percentiles: Option[Array[Double]],
   quantiles: Option[Array[Double]],
-  minLoss: Option[NonNegativeLong],
-  maxLoss: Option[NonNegativeLong],
+  minLoss: Option[PositiveLong],
+  maxLoss: Option[PositiveLong],
   terms: Option[PositiveInt]
 )
 object OverrideDistributionParams {
@@ -531,9 +535,10 @@ object OverrideDistributionParams {
     distributionType: DistributionType,
     percentiles: Option[Array[Double]],
     quantiles: Option[Array[Double]],
-    minLoss: Option[NonNegativeLong],
-    maxLoss: Option[NonNegativeLong],
-    terms: Option[PositiveInt]
+    minLoss: Option[PositiveLong],
+    maxLoss: Option[PositiveLong],
+    terms: Option[PositiveInt],
+    fieldPrefix: String = "overrideParams"
   ): Validation[ValidationError, OverrideDistributionParams]
   given Equal[OverrideDistributionParams]        // structural; array fields compared by content
   given JsonCodec[OverrideDistributionParams]
@@ -628,11 +633,11 @@ object Mitigation {
 }
 
 /** One record per applied mitigation. It sits on the `applied` field of the
-  * `ValuationResult` the mitigated fold returns, and never inside
+  * `LossDistribution` the mitigated fold returns, and never inside
   * `NodeProvenance`, which carries no identity. It does not cross the wire:
   * a response tags each reading with the mitigation ids that shaped it, and the
   * client already holds each mitigation's spec and resolved scope from the tree
-  * read. (§8.16 rules the placement.) */
+  * read. (Placement specified by `PLAN-FBF-VALUATION-TRANSPLANT.md` §3.2.) */
 final case class MitigationApplicationRecord(
   mitigationId: MitigationId,
   spec: MitigationSpec,
@@ -748,9 +753,11 @@ private[data] def validateModeFields(
   pipeline law `toTransform(a <> b) ≙ toTransform(a) andThen toTransform(b)`;
   `Identity[TransformPipeline]` laws.
 - New `RiskLeafTransformSpec`: `applyTo` produces a valid leaf for every op on
-  both representations; `Keep`/`Keep` is identity; Scale clamping; Narrow
-  contracts spread; Override replaces wholesale; property — output leaf always
-  passes `RiskLeaf.create`.
+  both representations; `Keep`/`Keep` is identity; `Scale` multiplies the
+  probability and stays in range without a clamp; `ScaleSeverity` rounds a
+  lognormal's bounds outward and is refused when the lower bound would fall
+  below 1; Override replaces wholesale; property — output leaf always passes
+  `RiskLeaf.create`.
 - New `MitigationEntitySpec`: `Mitigation.create` cross-field rules (all
   accumulation paths); codec round-trip; precedence ordering incl. tiebreak.
 - New `MitigationApplicationSpec`: `scoped` ordering; `effectiveTree` closure +
@@ -1836,10 +1843,12 @@ Ammendment:
 Written for slices 1 to 5 (§7.6.4 names the slices). Those five carry exact
 signatures, ADR alignment, a verification plan and a file inventory. Slice 6 —
 the interface and the user documentation — is not elevated here. §7.6.12 lists
-the seven open decisions: five gate the `ValuationResult` sub-slice ruled in
-§8.16, which slice 1 consumes, and two gate slice 6. Slices 2 to 5 carry none. No M4 source edit is
-authorized until the approval token names this plan and the edited file appears
-in the shared `## File inventory`.
+the decisions: two gate slice 6, and the rest are closed. Slices 1 to 5 carry
+none. The valuation type slice 1 consumes is built, specified by
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) and
+landed as the one concrete `LossDistribution`, so no sub-slice of §8.16 remains
+to gate. No M4 source edit is authorized until the approval token names this
+plan and the edited file appears in the shared `## File inventory`.
 
 **Signatures below use the current names of the two per-workspace registries:
 `ContentCacheRegistry` and `MitigationScopeResolverRegistry`, both handing out
@@ -1870,7 +1879,7 @@ anchor is wrong — neither is settled silently.
 | A7 | **A selection is a set** — any subset of the tree's mitigations, each with its own scope restriction — and one selection yields exactly **one** mitigated valuation per node. Several mitigations scoping a node compose into one curve, not one curve each. A single-mitigation selection is the one-element case, not a distinct concept. The comparison axis is between selections | `MitigationSelection.Selected`; follows from A4 |
 | A8 | Scope is resolved server-side, per tree version, from a predicate. A predicate that stops binding makes that one mitigation a no-op plus a drift signal; it never fails the request | `MitigationScopeResolverLive`; `ScopeOutcome` |
 | A9 | A selection restricts and can never extend — `NodesOnly` intersects the resolved scope, so an out-of-scope id silently does nothing | `MitigationApplication.scoped` |
-| A10 | The defaults are identity: `Inherent` with empty scopes makes the whole mitigation path a no-op, so an unchanged caller gets an unchanged **figure**. This anchor constrains figures, not representation: under §8.16 an unchanged caller receives a `ValuationResult` whose outcomes are identical to what it reads today | OD-5; the resolver's default arguments |
+| A10 | The defaults are identity: `Inherent` with empty scopes makes the whole mitigation path a no-op, so an unchanged caller gets an unchanged **figure**. This anchor constrains figures, not representation: an unchanged caller receives a `LossDistribution` whose outcomes are identical to what it reads today, with an empty `applied` list and `trials` the same object as `source` | OD-5; the resolver's default arguments |
 | A11 | Nothing mitigated is ever persisted. The effective tree is built per request and discarded | ADR-034 §5 and its persistence code smell |
 | A12 | The cache stores **content**, never mitigations. A param-stage mitigation is cached because it produces new content; a result-stage mitigation is not cached because it produces none | `ContentHashIndex`, `LeafSimContent` |
 
@@ -3516,27 +3525,34 @@ immutable, so a request is answered at the version it names and there is nothing
 for a client's view to diverge from.
 
 **Scope of the ADR amendments — RULED 2026-09-15 (user).** Slice 5 amends the
-four records marked "Amended, slice 5" in §7.6.10, and in ADR-003 and ADR-009 it
-also corrects two statements that were already wrong before this plan touched
-them, because they sit in the same paragraphs:
+records marked "Amended, slice 5" in §7.6.10, which are now ADR-015 and ADR-017.
+ADR-003, ADR-009 and ADR-034 were amended ahead of this slice by
+`PLAN-FBF-VALUATION-TRANSPLANT.md`, because the type change made parts of them
+uncompilable and the sweep landed with it. ADR-033 was renamed to the new
+constructor in that sweep and has since gained `LossDistribution.decorate` as
+its second conversion site, so it too needs nothing from slice 5.
 
-- ADR-003's Implementation table claims optional provenance capture is
+Two statements the ruling also asked for, both already wrong before this plan
+touched them and both now corrected in that sweep:
+
+- ADR-003's Implementation table claimed optional provenance capture was
   implemented via an `includeProvenance` flag. The flag sets a tracing attribute
-  and nothing else, and no production caller passes `true`.
-- ADR-003's Decision 4 and ADR-009 §5 both publish
+  and nothing else, and no production caller passes `true`. The row now says so.
+- ADR-003's Decision 4 and ADR-009 §5 both published
   `group.children.collect { case r: RiskResult => r.nodeId -> r.provenances }`
-  as the provenance derivation. That pattern exists nowhere in `src/main`.
+  as the provenance derivation. That pattern existed nowhere in `src/main` and
+  no longer compiles; both records now describe `LossDistribution.leafProvenances`.
 
-These two are the follow-up step ADR housekeeping task T4 leaves open. T4 itself
-is closed: ADR-003 was rewritten on 2026-09-25 to state the boundary-assigned
-seed-identity decision and to fold its per-node-provenance section into
-Decision 4, and both statements above were left untouched in that pass so that
-slice 5 is their only edit. The section numbering the corrections apply to is
-therefore the new one — Decision 4 and the Implementation table row "Optional
-provenance capture".
+These two were the follow-up step ADR housekeeping task T4 left open, and both
+are now closed. T4 itself closed earlier: ADR-003 was rewritten on 2026-09-25 to
+state the boundary-assigned seed-identity decision and to fold its
+per-node-provenance section into Decision 4, leaving both statements above
+untouched; the valuation sweep then corrected them in the sections that rewrite
+produced — Decision 4 and the Implementation table row "Optional provenance
+capture". Slice 5 therefore has no ADR-003 or ADR-009 work left.
 
 Editing a paragraph while leaving an adjacent falsehood in it is the drift the
-docs-as-current-state rule exists to stop, so both are fixed here. Everything
+docs-as-current-state rule exists to stop, so both were fixed together. Everything
 else the 2026-09-15 ADR review found is housekeeping and is tracked in
 [`docs/dev/ADR-HOUSEKEEPING.md`](../ADR-HOUSEKEEPING.md), not in this plan.
 
@@ -3547,21 +3563,21 @@ else the 2026-09-15 ADR review found is housekeeping and is tracked in
 | ADR-001 (validate once, at the boundary) | The request types carry smart constructors and their decoders run them, so a handler receives a selection that already satisfies both bounds. The one check deliberately outside the decoder — whether a named mitigation exists — is a lookup against a loaded tree, not a field format rule, and the plan says so where it is placed | Compliant |
 | ADR-001 §2 (Iron types in JSON bodies need an explicit Tapir schema) | `Schema[MitigationId]` is added beside the existing `Schema[NodeId]` | Compliant |
 | ADR-002 (drift signals, not failures) | A predicate that no longer binds makes one mitigation a no-op and is logged; it never fails a read | Compliant |
-| ADR-003 (provenance and reproducibility) | Uniform wrapping puts a `ValuationResult` between a portfolio and its children, so the resolver's provenance walk descends through `source` to keep Decision 4's "union of all leaf provenances in its subtree, in child order". ADR-003's Implementation table separately claims optional provenance capture is implemented via `includeProvenance`, which sets a tracing attribute only | Amended, slice 5 |
+| ADR-003 (provenance and reproducibility) | A leaf's record sits on its own `LossDistribution` in `provenance`, and a subtree's records are read by resolving each leaf under its own identifier — no walk descends through a returned value. ADR-003's Implementation table claimed optional provenance capture was implemented via `includeProvenance`, which sets a tracing attribute only | Amended by `PLAN-FBF-VALUATION-TRANSPLANT.md` |
 | ADR-004a (storage mapping) | Unchanged: mitigations are already stored as `mitigations/{id}` blobs and this plan adds no storage shape | Compliant |
-| ADR-009 (associativity of the aggregate) | Result-stage transforms still apply to a finished node value, never inside the summation — compliant and unchanged. But §2 enumerates exactly two subtypes and the Implementation table names them, and a third subtype makes both stale; §5's `children.collect { case r: RiskResult => … }` provenance pattern is superseded by the `source` descent | Amended, slice 5 |
+| ADR-009 (associativity of the aggregate) | Result-stage transforms still apply to a finished node value, never inside the summation — compliant and unchanged. §2 enumerated two subtypes of a sealed hierarchy that no longer exists, and §5 published a `children.collect { case r: RiskResult => … }` pattern that no longer compiles; both now describe the one concrete value and the `private[cache]` family beneath it | Amended by `PLAN-FBF-VALUATION-TRANSPLANT.md` |
 
 | ADR-010 (typed errors, accumulated) | Every new validation returns `ValidationError` with a code, and independent checks accumulate through `Validation.validateWith` | Compliant |
 | ADR-014 (render-time curve computation) | Both valuations of every requested node go through one `generateCurvePointsMulti` call, so the shared tick domain covers them together | Compliant |
-| ADR-015 (query APIs compose on `ensureCached`) | The mitigated reading is a second `ensureCached`/`ensureCachedAll` call with a selection, not a new resolution path — compliant. The ADR writes the resolver trait out verbatim in a form two generations old, and §7.6.12 decision 2 would change it again if the return type is narrowed | Amended, slice 5 |
+| ADR-015 (query APIs compose on `ensureCached`) | The mitigated reading is a second `ensureCached`/`ensureCachedAll` call with a selection, not a new resolution path — compliant. The ADR still writes the resolver trait out verbatim in a form two generations old; the return type is already as narrow as decision 2 asked, because `LossDistribution` ceased to be a base class | Amended, slice 5 |
 
 | ADR-017 (tree API design) | The tree PUT gains two buckets; the ADR is amended in slice 5 rather than contradicted | Amended, slice 5 |
 | ADR-018 (nominal id wrappers) | `MitigationId` stays distinct from `NodeId` and `TreeId` throughout the new types | Compliant |
 | ADR-019 (frontend ownership rules) | Slice 1's browser change touches one state class and adds one pure function beside it; no component gains state | Compliant |
 | ADR-024 (application as a pure enforcement point) | Both analysis handlers keep their `AnalyzeRun` check and the structure handler keeps `ViewTree`; the method change on one endpoint moves no check | Compliant |
 | ADR-032 (two equality relations) | The mitigation diff compares encoded content, not values, for the same array-equality reason the node diff already does | Compliant |
-| ADR-033 (narrowest sound catch) | `ValuationResult.create` catches `ArithmeticException` from the scaled-loss guard and converts it to a `ValidationError`, the same named-type conversion `RiskResultGroup.create` already performs in this file. ADR-033's Implementation table lists `LossDistribution.scala` and gains the second site | Amended, slice 5 |
-| ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. ADR-034 was restructured on 2026-09-14: its Decision 3 states that a transformed node's mitigated value is flat by construction, and its Decision 4 carries the `ValuationResult` ruling that §8.16 records | Compliant; ADR-034 amended |
+| ADR-033 (narrowest sound catch) | `LossDistribution.decorate` catches `ArithmeticException` from the layer's own arithmetic and converts it to a `ValidationError`; `PortfolioLosses.create` does the same for the combine. Both catches name the exception the code they wrap is documented to raise, and ADR-033's Implementation table lists both sites | Amended |
+| ADR-034 (mitigation valuation model) | Two valuations, never one merged value; the mitigated aggregate folds mitigated children; nothing mitigated is persisted. Its Decision 4 now writes out the shipped five-field `LossDistribution`, and its §6 carries the rule that no mitigation may eliminate a risk | Amended by `PLAN-FBF-VALUATION-TRANSPLANT.md` and `DONE-PLAN-LOGNORMAL-BOUND-POSITIVITY.md` |
 | ADR-035 (error leakage prevention) | The internal-error resolution failure reaches the wire as a fixed message with no detail | Compliant |
 | ADR-036 (confidential internal identifiers) | `WorkspaceId` and `BranchRef` stay on internal service signatures and never cross the client boundary. `TreeId`, `NodeId` and `MitigationId` are not confined by this record: it names `WorkspaceId` as its subject and shows `nodeId` as a client-safe reporting field, and every lookup taking a client-supplied node id resolves it inside a tree the caller is already authorized for | Compliant |
 
@@ -3654,33 +3670,42 @@ and `.env.irmin`; closing M4 is the MINOR bump.
 
 #### 7.6.12 Open decisions
 
-Five decisions gate the `ValuationResult` sub-slice ruled in §8.16, which slice 1
-consumes. Two further decisions gate slice 6. Slices 2 to 5 carry none. All seven
-are listed here so the elevation states them rather than implying them.
+Two decisions gate slice 6. Slices 1 to 5 carry none. All of them are listed here
+so the elevation states them rather than implying them.
+
+**The `ValuationResult` sub-slice does not exist and no decision below gates
+slice 1.** §8.16 ruled a fourth case of a sealed `LossDistribution` hierarchy;
+that shape was superseded first by §8.17 and then by
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md), which
+landed one concrete `LossDistribution` carrying figures only, with the aggregate
+claim on a `private[cache]` family beneath it. Decisions 1, 2, 3, 4, 9 and 10
+below all ask where that fourth case lives, what it extends, or how its removal
+is sequenced, so each is void rather than answered; decision 5 was answered by
+inspection and decision 8 was ruled and has landed. Decisions 6 and 7 are the
+two that remain open, and both are slice 6's. Each records its own resolution in
+place, and the text is kept so the sequence of rulings stays readable.
 
 Numbering is kept stable because other sections reference these by number.
 Decision 5 was answered by checking the inventory rather than by a ruling, so it
 keeps its slot and records the answer in place.
 
-**Nothing in this list gates slice 1 any longer.** Decision 8 was ruled and the
-plan carrying it has landed; decisions 9 and 10 are moot under §8.17, which also
-satisfies decision 2 by a different route. Each records its resolution in place.
-The two decisions opened in their stead — what happens to `LossDistribution.merge`,
-and what `Equal[LossDistribution]` compares — are decisions 4 and 5 of
-[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) §10, which
-is the implementation-grade specification for that sub-slice. Both are ruled.
+The two decisions opened in place of 9 and 10 — what happens to
+`LossDistribution.merge`, and what `Equal[LossDistribution]` compares — are
+decisions 4 and 5 of
+[`PLAN-FBF-VALUATION-TRANSPLANT.md`](PLAN-FBF-VALUATION-TRANSPLANT.md) §10. Both
+were ruled there and both have landed.
 
-**Gating the §8.16 sub-slice.** §8.16 rules the design; none of the following was
-ruled by it, and each changes what the code looks like. The reasoning that
-produced the design is in
-[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md)
-and should be read before any of these is answered.
+**What the following asked of the §8.16 design.** §8.16 ruled that design; none
+of the following was ruled by it, and each would have changed what the code
+looked like. The reasoning that produced the design, and the shape that replaced
+it, are in
+[`docs/scratch/MITIGATION-VALUATION-EXPLAINED.md`](../../scratch/MITIGATION-VALUATION-EXPLAINED.md),
+which is the record to read before any of this is re-opened.
 
 **Ruled 2026-09-15 (user):** decisions 1, 2, 3, 4, 6 and 7 below, each recorded
 in place. Decision 5 was answered by checking the inventory rather than by a
 ruling. Two new questions were raised while ruling 1 and 2 and are recorded as
-decisions 8, 9 and 10 at the end of this section; the sub-slice is not elevated until they are
-settled, because each changes where the type lives or what it is.
+decisions 8, 9 and 10 at the end of this section.
 
 1. **Where `ValuationResult` is defined.** It extends `LossDistribution`, whose
    hierarchy is sealed in
@@ -5065,8 +5090,9 @@ constants, and `nameCollisions` still reports them. Placed after
 
 ```scala
   /** Node name → NodeId for the node-sort literal validator's name branch.
-    * Excludes reserved-symbol names (see `nameCollisions`); last-write-wins on
-    * duplicate names until `RiskTree.fromNodes` enforces uniqueness (M2-D3b). */
+    * Excludes reserved-symbol names (see `nameCollisions`). The map is
+    * unambiguous: `RiskTree.fromNodes` rejects duplicate node names, so no two
+    * entries can contend for one key. */
   val nameToId: Map[String, NodeId] =
     tree.index.nodes.iterator.collect {
       case (id, node) if !reservedFolNames.contains(node.name.value) => node.name.value -> id
@@ -5256,9 +5282,10 @@ M2-D3a/M2-D5 — plan execution, not an unplanned trigger. #8: the three specs a
 rewritten to assert on `NodeId` instead of `String`; same behaviours, no
 assertion weakened or removed. No open decisions.
 
-**Determinism note.** The name→id branch is last-write-wins on duplicate names
-until M2-D3b adds node-name uniqueness to `RiskTree.fromNodes` (later M2 slice) —
-identical to today's `nameToNodeId`, so this slice introduces no regression.
+**Determinism note.** The name→id branch is deterministic.
+`RiskTree.requireDistinctNodeNames` rejects duplicate node names inside
+`fromNodes`, so every construction path — write, merge, store-load,
+programmatic — yields a tree in which one name maps to one node.
 
 **Verification plan.**
 
@@ -5290,15 +5317,36 @@ the status column as slices land.
 |---|-------|--------|---------------------------|
 | 1 | **KB id-carrier (Asset → Node)** — sort rename, `NodeId` carrier, `given Extract[NodeId]`, node-reference predicates (`eq` / `named` / `has_id`, §8.12; `=` and the id-or-name guessing validator retired), name-only `Node` literal validator, id-native structural dispatchers, `QueryResponseBuilder`/`QueryServiceLive` flip | **Landed — §8.11 (0.10.19) + §8.12 (0.10.21)** | §8.9 + §8.12 (exact code); §8.7 items 1–2; §8.8 M2-D3a, M2-D5 |
 | 2 | **`MitigationScopeResolver` + `ScopeOutcome`** — results-free KB; `satisfyingSet` turns each targeting predicate into `Set[NodeId]`; per-mitigation success/failure isolation; memoized on `(WorkspaceId, TreeId, BranchRef, CommitHash)`; output `Map[MitigationId, Set[NodeId]]` | **Landed — §8.13 (0.10.22)** | §8.8 M2-D1, M2-D2; §8.2 resolver edge; §8.13 |
-| 3 | **`RiskResultResolver` → `CachedResultResolver` rename + resolver-edge wiring** — edge takes `resolvedScopes: Map[MitigationId, Set[NodeId]]` (not `MitigationSelection`); result-stage transforms applied at the edge, never cached (D3) | Ruled; **exact signatures pending** (§7.2.2 stale box reconciled here) | §8.8 M2-D4; §7.2.2; §8.6 algebra |
-| 4 | **Storage — one Irmin path per mitigation** — `WorkspaceStoragePaths.treeMitigations`; `RiskTreeRepositoryIrmin` read/write; whole-subtree replacement (DD-7); byte-level conflict pre-check (ADR-032) | Ruled; **exact signatures pending** | §7.2.1 |
-| 5 | **`MitigationStaleness.staleOverrides`** — diagnostic-only override-staleness set (frozen-opinion semantics; resolution ignores it); stamp writing on the tree-PUT path | Ruled; **exact signatures pending** | §7.2.2a (OD-6) |
-| 6 | **M2-D3b duplicate-node-name merge guard (A + B)** — pre-merge scan (A) + post-merge `fromNodes` validate-and-revert (B); **adds node-name uniqueness to `RiskTree.fromNodes`**, which also makes slice 1's name→id branch deterministic (removes its last-write-wins caveat) | Ruled; **rides §9 Lever 1**, exact signatures pending | §8.8 M2-D3b; §9 Lever 1; §8.4-4 |
+| 3 | **`RiskResultResolver` → `CachedResultResolver` rename + resolver-edge wiring** — edge takes `resolvedScopes: Map[MitigationId, Set[NodeId]]` (not `MitigationSelection`); result-stage transforms applied at the edge, never cached (D3) | **Landed — §8.14** (§7.2.2 stale box reconciled here) | §8.8 M2-D4; §7.2.2; §8.6 algebra |
+| 4 | **Storage — one Irmin path per mitigation** — `WorkspaceStoragePaths.treeMitigations`; `RiskTreeRepositoryIrmin` read/write; whole-subtree replacement (DD-7); byte-level conflict pre-check (ADR-032) | **Landed — `1c835d7`** | §7.2.1 |
+| 5 | **`MitigationStaleness.staleOverrides`** — diagnostic-only override-staleness set (frozen-opinion semantics; resolution ignores it); stamp writing on the tree-PUT path | **Landed — §8.15, `1c835d7`** | §7.2.2a (OD-6) |
+| 6 | **M2-D3b duplicate-node-name merge guard (A + B)** — pre-merge scan (A) + post-merge `fromNodes` validate-and-undo (B) | **Partly landed; A and B both elevated.** The `fromNodes` node-name invariant landed with §9 Lever 1 (`requireDistinctNodeNames`, 0.10.29). A and B carry exact signatures in §8.19, together with the revert repair path B depends on; M2-D7 ruled A into the same slice, so §8.19 closes M2-D3b | §8.19 (exact code); §8.8 M2-D3b; §9 Lever 1; §8.4-4 |
 
-Cross-slice dependency to remember: slice 1 ships with a last-write-wins name→id
-map (matching today's behaviour); slice 6 tightens it to deterministic by adding
-the `fromNodes` uniqueness invariant. Slice 1 does not block on slice 6 — the
-caveat is documented in §8.9's determinism note.
+The cross-slice dependency this table used to carry is discharged: slice 1's
+name→id map is already deterministic, because the `fromNodes` uniqueness
+invariant landed ahead of it.
+
+What slice 6 still owes is the merge guard itself: no merge-path caller runs the
+merged tree through `fromNodes`. Two mechanisms narrow the exposure, and they
+stand in different relations to the ruling.
+
+Already in place when A + B were ruled: the conflict scan covers
+`risk-trees/{treeId}/meta`, and every `writeTree` rewrites `meta` with a fresh
+`updatedAt`, so a tree edited on both branches conflicts there before any node
+path is reached. The duplicate-name case survives the scan only when both sides
+produce byte-identical metadata, which needs the same millisecond and no
+divergence in `seedVarHighWater`.
+
+Arrived after the ruling: node-name uniqueness joined `fromNodes`, and
+`rebuildTree` routes every load through it, so a merged tree that does violate
+the invariant now fails to load with `RepositoryFailure` instead of being served.
+That is what changed the failure from the silent acceptance M2-D3b describes into
+a loud one.
+
+A and B therefore convert a narrow race that makes one tree unreadable until it
+is reverted into a refused merge with a message naming the duplicate, and make
+the guarantee the whole `fromNodes` invariant set rather than whatever `meta`'s
+timestamp happens to catch.
 
 Files for slices 3–6 are already in the M2 File inventory (they edit or rename
 existing files). Slice 2 is the exception: its resolver, per-workspace registry,
@@ -8132,6 +8180,1827 @@ one. The four assertions it costs are one line each. Option A is defensible if
 `Equal` is understood as a statement about the simulation rather than about the
 reading, which is what it was before this change; that reading is why this is a
 decision rather than a determination.
+
+---
+
+### 8.19 M2 slice 6 — the merge invariant guards and the revert repair path — implementation-grade (2026-10-03, decisions ruled 2026-10-04)
+
+**Scope.** Six changes, shipped together. The first three are the whole of
+M2-D3b plus the repair path mechanism B depends on; the rest follow from
+rulings and a direction this elevation produced.
+
+1. **The pre-merge name scan.** This is mechanism A of M2-D3b: before the merge
+   runs, compute the node set the merge would produce from the blobs the
+   conflict scan already fetched, and refuse with the duplicated names when two
+   nodes of one tree would share a name.
+2. **The post-merge invariant guard.** This is mechanism B of M2-D3b, in the
+   shape ruled on 2026-10-02: after a merge commit lands on main, read every
+   tree in the workspace at the new head through `RiskTree.fromNodes`. If any
+   read fails, move main's pointer back to the pre-merge head by
+   compare-and-set, and refuse the merge with a message carrying the invariant
+   violation.
+3. **The revert repair path.** `revertTree`'s pre-revert read stops aborting
+   the revert when it fails, and the change notification falls back to the
+   restored tree's full node list in that case.
+4. **The merge preview reports the name scan's finding.** `MergePreviewResult`
+   and `MergePreviewResponse` gain a fourth outcome, so the merge modal cannot
+   report a clean merge that mechanism A will refuse.
+5. **Wire-facing errors stop carrying an Irmin branch reference.**
+   `MergeConflict` and `ScenarioHeadStale` carry a `ScenarioName`, so no error
+   response contains a workspace identifier (ADR-036).
+6. **`BranchChoice` gains the inverse of `BranchRef.scenario`**, as a smart
+   constructor on its companion; the private server-side method that duplicated
+   it is removed, and the one other site that decided a branch by equality
+   against `BranchRef.Main` becomes a match.
+
+Three rulings fix this scope. M2-D7 (2026-10-04) put A in this slice rather
+than in a later increment. M2-D8 (2026-10-04) chose extending both preview
+shapes for item 4. M2-D6 (2026-10-04) chose a `ScenarioName` for item 5.
+Item 6 was directed on 2026-10-04 independently of any ruling.
+
+#### 8.19.1 What this slice closes, and why the pieces travel together
+
+Irmin's three-way merge is per storage path and byte-level. It can decide
+whether two sides agree about one path. It cannot decide anything about a
+property of the whole set of paths, because no single path's merge sees the
+others. Global node-name uniqueness is such a property, and so are most of the
+invariants `RiskTree.fromNodes` enforces: seed-variable identifier
+distinctness, the high-water mark covering every seed identifier, mitigation
+identifier and name uniqueness, and the mitigation count bound. Two branches
+can each write a valid node, and the merged set can break any of them.
+
+The merge is therefore the one write path in the system that does not pass
+through `fromNodes`, because the store performs it rather than the
+application. Everything else — create, update, delete, revert, and every read
+— routes through `fromNodes` by way of `rebuildTree`.
+
+That gives the guard its shape. It cannot prevent the commit, because the
+commit is what Irmin produces; it can only inspect the result and undo it. The
+undo is a pointer move rather than a new commit: moving main's pointer back to
+the pre-merge head leaves the merge commit reachable by hash but no longer on
+the branch. The move is guarded by compare-and-set so that a write which
+landed on main between the merge and the undo is never discarded.
+
+The two mechanisms are layered rather than redundant. B's completeness tracks
+whatever `RiskTree.fromNodes` enforces, so it covers every one of those
+invariants and will cover any invariant added later; it pays for that generality
+by writing a commit and taking it back off the branch. A covers one invariant
+and covers it before anything is written, so the ordinary failure never produces
+a commit at all and the message names the duplicated name rather than quoting a
+validation failure. A also cannot be complete on its own: it reads a snapshot
+taken before the merge, so a write landing between the scan and the merge
+defeats it. That is precisely what B catches.
+
+The revert fix travels with the guard because the undo has a failure mode. When
+the compare-and-set is rejected, main keeps the invalid state, and a tree in
+that state cannot be read, updated or deleted — every one of those operations
+begins by reading the head through `fromNodes`. Revert is the only operation
+whose storage half never reads the head: `RiskTreeRepositoryIrmin.revert` reads
+at the target commit and writes forward. Its own scaladoc records this as
+deliberate. But `RiskTreeServiceLive.revertTree` reads the head first anyway,
+for the change notification alone, so that read's failure aborts the revert and
+leaves the tree unrepairable through the API. Shipping the guard without this
+fix would add a failure mode with no recovery.
+
+#### 8.19.2 Exact signatures — mechanism A, the pre-merge name scan
+
+M2-D3b specifies A as "a pre-merge scan over the **already-fetched branch
+blobs**". `ScenarioMergeServiceLive.findConflicts` already fetches, for every
+candidate path, the value on main, the value on the scenario branch, and the
+value at the merge base — and then discards all three, keeping only whether
+they conflicted. A keeps them and derives the merged node set from the same
+three values, so it adds no reads.
+
+**`MergeConflictRule` gains the complement of `isConflict`.** The same three
+values that decide whether a path conflicts also decide what the merge produces
+when it does not, and both are the storage relation of ADR-032:
+
+```scala
+  /** The value Irmin's three-way merge produces for one path that does not
+    * conflict: the two sides agree, or exactly one side moved away from the
+    * base and that side wins. `None` means the path is absent in the result.
+    *
+    * Defined only where `isConflict` is false. The two functions partition the
+    * same three inputs, so a caller decides conflict first and asks for the
+    * merged value second.
+    */
+  def merged(base: Option[String], onMain: Option[String], onScenario: Option[String]): Option[String] =
+    (onMain, onScenario) match
+      case (m, s) if m == s    => m
+      case (m, _) if m == base => onScenario
+      case (m, _)              => m
+```
+
+**The stored-node encoding gets one reader.** `writeTree` stores a node as the
+concrete type's own JSON through `nodeJson`, not as the discriminated form
+`RiskNode`'s derived codec produces, so reading one means trying both concrete
+decoders. `RiskTreeRepositoryIrmin.decodeNode` does that privately today, and A
+needs the same thing. Rather than duplicate it, it moves to the companion of
+the class that writes the encoding:
+
+```scala
+object RiskTreeRepositoryIrmin:
+  val layer: ZLayer[IrminClient, Nothing, RiskTreeRepository] =
+    ZLayer.fromFunction(new RiskTreeRepositoryIrmin(_))
+
+  /** Decode one stored node blob.
+    *
+    * A node is stored as its concrete type's own JSON — `RiskLeaf` or
+    * `RiskPortfolio` — so the two concrete decoders are tried in turn; the
+    * derived `JsonCodec[RiskNode]` expects a discriminated wrapper and does
+    * not read this encoding. Exposed because `ScenarioMergeServiceLive` reads
+    * the same blobs to predict a merge's node set, and the encoding is read in
+    * exactly one place.
+    */
+  def decodeStoredNode(json: String): Either[String, RiskNode] =
+    json.fromJson[RiskLeaf].map(node => node: RiskNode)
+      .orElse(json.fromJson[RiskPortfolio].map(node => node: RiskNode))
+```
+
+The private method becomes a thin wrapper that adds the path to the message:
+
+```scala
+  private def decodeNode(child: IrminPath, json: String): Task[RiskNode] =
+    ZIO.fromEither(
+      RiskTreeRepositoryIrmin.decodeStoredNode(json)
+        .left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err"))
+    )
+```
+
+**The scan keeps the fetched values and answers two questions.** The private
+carrier and the scan result change shape:
+
+```scala
+  /** One candidate path with the three values the merge decides between. */
+  private final case class PathComparison(
+    rel: String,
+    atBase: Option[String],
+    onMain: Option[String],
+    onScenario: Option[String]
+  )
+
+  private final case class MergeScan(
+    conflicts: List[MergeConflictPath],
+    duplicateNames: Map[TreeId, List[String]]
+  )
+```
+
+`findConflicts` becomes `comparePaths`, returning the comparisons rather than
+the verdict. Its body is today's, with the `Option.when(...)` mapping removed so
+the three fetched values survive:
+
+```scala
+  private def comparePaths(wsId: WorkspaceId, branch: BranchRef, base: CommitHash): Task[List[PathComparison]] =
+    for
+      paths       <- candidatePaths(wsId, branch)
+      comparisons <- ZIO.withParallelism(8) {
+                       ZIO.foreachPar(paths.toList.sorted) { rel =>
+                         val abs = IrminPath.unsafeFrom(s"${WorkspaceStoragePaths.workspaceRoot(wsId)}/$rel")
+                         irmin.get(abs, BranchRef.Main)
+                           .zipPar(irmin.get(abs, branch))
+                           .zipPar(irmin.getAtCommit(base, abs))
+                           .map { case (onMain, onScenario, atBase) =>
+                             PathComparison(rel, atBase, onMain, onScenario)
+                           }
+                       }
+                     }
+    yield comparisons
+```
+
+The name check reads the merged value of each node path and groups by tree:
+
+```scala
+  /** Node names the merged result would repeat within one tree, computed from
+    * the same fetched values the conflict list uses.
+    *
+    * Only `nodes/{nodeId}` paths participate, because a tree's name uniqueness
+    * is a property of its node set. A conflicting path is skipped: the merge
+    * will not happen at all. A merged value of `None` was deleted on the
+    * winning side and contributes no name. A path whose node id segment does
+    * not refine is skipped here and caught by the post-merge guard, which reads
+    * through `fromNodes`.
+    */
+  private def duplicateNodeNames(comparisons: List[PathComparison]): Task[Map[TreeId, List[String]]] =
+    val nodeValues = comparisons.flatMap { c =>
+      Option.unless(MergeConflictRule.isConflict(c.atBase, c.onMain, c.onScenario)) {
+        (MergeConflictPath.fromRelativePath(c.rel), MergeConflictRule.merged(c.atBase, c.onMain, c.onScenario))
+      }.collect {
+        case (MergeConflictPath(rel, Some(treeId), Some(_)), Some(json)) => (rel, treeId, json)
+      }
+    }
+    ZIO.foreach(nodeValues) { case (rel, treeId, json) =>
+      ZIO.fromEither(RiskTreeRepositoryIrmin.decodeStoredNode(json))
+        .mapBoth(
+          err  => RepositoryFailure(s"Decode node at $rel: $err"),
+          node => treeId -> node.name.value
+        )
+    }.map { pairs =>
+      pairs
+        .groupMap(_._1)(_._2)
+        .view
+        .mapValues(names => names.groupBy(identity).collect { case (n, ns) if ns.sizeIs > 1 => n }.toList.sorted)
+        .filter(_._2.nonEmpty)
+        .toMap
+    }
+```
+
+`scan` composes the two over one set of comparisons:
+
+```scala
+  private def scan(wsId: WorkspaceId, branch: BranchRef, scenarioHead: CommitHash): Task[MergeScan] =
+    irmin.mainBranch.map(_.flatMap(_.head)).flatMap {
+      case None => ZIO.succeed(MergeScan(Nil, Map.empty))
+      case Some(mainCommit) =>
+        for
+          mainHead    <- ScenarioBranchOps.refineCommitHash(mainCommit.hash)
+          lcas        <- irmin.lca(BranchRef.Main, scenarioHead)
+          base        <- lcas.headOption match
+                           case Some(c) => ScenarioBranchOps.refineCommitHash(c.hash)
+                           case None =>
+                             ZIO.die(new IllegalStateException(
+                               s"no common ancestor between main and ${branch.toBranchRef} — " +
+                               "violates DD-5 (scenarios always fork from an existing commit)"
+                             ))
+          comparisons <- if base == scenarioHead || base == mainHead then ZIO.succeed(Nil)
+                         else comparePaths(wsId, branch, base)
+          conflicts    = comparisons.flatMap(c =>
+                           Option.when(MergeConflictRule.isConflict(c.atBase, c.onMain, c.onScenario))(
+                             MergeConflictPath.fromRelativePath(c.rel)))
+          duplicates  <- duplicateNodeNames(comparisons)
+        yield MergeScan(conflicts, duplicates)
+    }
+```
+
+`merge` gains the rejection, after the byte-level one and before the merge:
+
+```scala
+      _            <- ZIO.when(result.duplicateNames.nonEmpty)(ZIO.fail(MergeConflict(
+                        name,
+                        duplicateNameDetails(result.duplicateNames)
+                      )))
+```
+
+The message is shared with the preview, which reports the same finding
+(§8.19.2d), so it is one function rather than two format strings:
+
+```scala
+  /** One line naming the duplicated names per tree, used by both the merge
+    * refusal and the preview response.
+    */
+  private def duplicateNameDetails(duplicates: Map[TreeId, List[String]]): String =
+    duplicates.toList.sortBy(_._1.value)
+      .map { case (treeId, names) => s"tree ${treeId.value}: ${names.mkString(", ")}" }
+      .mkString("merging would duplicate node name(s) — ", "; ", "")
+```
+
+#### 8.19.2a Exact signatures — mechanism B and the revert path
+
+**`IrminClient` gains a compare-and-set branch-pointer move.** Both existing
+branch operations already go through `test_and_set_branch`:
+`createBranchAt` passes `test: null`, and `deleteBranch` passes
+`set: null`. The undo needs both sides present, which
+`IrminQueries.testAndSetBranch` already supports, so no query changes.
+
+In the trait:
+
+```scala
+  /**
+    * Move a branch's pointer to `to`, but only while its head is still
+    * `expectedHead` (Irmin `test_and_set_branch` with both sides present).
+    *
+    * The compare-and-set is what makes this usable as an undo: a write that
+    * landed on the branch since `expectedHead` was observed makes the move
+    * fail rather than discard that write. Commits left off the branch stay
+    * reachable by hash.
+    *
+    * @param branch Branch whose pointer to move
+    * @param expectedHead The head the caller last observed
+    * @param to Commit the branch should point at
+    * @see BranchHeadStale — the compare-and-set was rejected because the
+    *      branch's head is no longer `expectedHead`; nothing was moved and
+    *      nothing was discarded.
+    */
+  def resetBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit]
+```
+
+In the `IrminClient` companion, beside the other accessors:
+
+```scala
+  def resetBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): ZIO[IrminClient, IrminError, Unit] =
+    ZIO.serviceWithZIO[IrminClient](_.resetBranchTo(branch, expectedHead, to))
+```
+
+In `IrminClientLive`, mirroring `deleteBranch`:
+
+```scala
+  override def resetBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit] =
+    for
+      _        <- ZIO.logInfo(s"Irmin RESET BRANCH: ${branch.toBranchRef} ${expectedHead.value.take(12)} -> ${to.value.take(12)}")
+      query     = IrminQueries.testAndSetBranch(branch, test = Some(expectedHead), set = Some(to))
+      response <- executeQuery[TestAndSetBranchResponse](query)
+      applied  <- extractCasResult(response)
+      _        <- if applied then ZIO.unit else ZIO.fail(BranchHeadStale(branch, expectedHead))
+      _        <- ZIO.logInfo(s"Irmin RESET BRANCH ${branch.toBranchRef}: applied")
+    yield ()
+```
+
+**A new domain error for the merge that could not be undone.** The refused-and-
+undone case reuses `MergeConflict`, which already maps to 409 and already
+carries a details string. The un-undone case is a different situation and must
+not be reported as a conflict: a conflict says retry, and retrying cannot clear
+an invalid state that is live on the branch. In `AppError.scala`, beside
+`MergeConflict`:
+
+```scala
+/** A merge that committed, failed the post-merge invariant check, and could
+  * not be undone: the compare-and-set that would have moved main's pointer
+  * back was rejected because main had moved again. The invalid state is live
+  * on main, and `restoreTo` is the commit the undo would have restored, so it
+  * is the commit to revert each affected tree to. Repeating the merge cannot
+  * clear it.
+  */
+case class MergeUndoFailed(restoreTo: CommitHash, details: String) extends SimError {
+  override def getMessage: String =
+    s"The merge into main left an invalid state that could not be undone; " +
+    s"restore by reverting to ${restoreTo.value}: $details"
+}
+```
+
+The type carries no branch at all. The guard runs only on main, so a branch
+field would hold the same value at every construction site, and omitting it
+keeps one more `BranchRef` away from the wire (ADR-036, and M2-D6 below for the
+two types that do need a branch).
+
+A new code in `ValidationErrorCode.scala`, in the conflict group beside
+`MERGE_CONFLICT`:
+
+```scala
+  case MERGE_UNDO_FAILED extends ValidationErrorCode("MERGE_UNDO_FAILED", "A merge left an invalid state that could not be undone")
+```
+
+`ErrorResponse.encode`'s match on `SimError` is exhaustive with no wildcard, so
+adding the type is a compile error until it is handled. In `ErrorResponse.scala`,
+one new case in that match and the helper it names:
+
+```scala
+    case MergeUndoFailed(restoreTo, details)       => makeMergeUndoFailedResponse(restoreTo, details)
+```
+
+```scala
+  /** 409 rather than 500: the server did not malfunction, and the caller needs
+    * the restore commit in order to act on it.
+    */
+  def makeMergeUndoFailedResponse(restoreTo: CommitHash, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"The merge into main left an invalid state that could not be undone; " +
+      s"restore by reverting to ${restoreTo.value}: $details"
+    val errors = List(
+      ErrorDetail(domain, "merge", ValidationErrorCode.MERGE_UNDO_FAILED, details, requestId),
+      ErrorDetail(domain, "restoreTo", ValidationErrorCode.MERGE_UNDO_FAILED, restoreTo.value, requestId)
+    )
+    (StatusCode.Conflict, ErrorResponse(JsonHttpError(StatusCode.Conflict.code, message, errors)))
+```
+
+`ErrorResponse.decode`'s 409 branch reconstructs `MergeConflict` from a branch
+detail and otherwise degrades to `DataConflict`. The new code joins that branch
+so the type round-trips:
+
+```scala
+        case ValidationErrorCode.MERGE_UNDO_FAILED =>
+          val restoreTo = details.collectFirst { case d if d.field == "restoreTo" => d.message }
+            .flatMap(s => CommitHash.fromString(s).toOption)
+          val undoDetails = details.collectFirst { case d if d.field == "merge" => d.message }
+            .getOrElse(message)
+          restoreTo.fold[Throwable](DataConflict(message))(c => MergeUndoFailed(c, undoDetails))
+```
+
+The SPA needs no change: `GlobalError.fromAppError` ends with
+`case _: SimError => ServerError(msg(e))`, so a new subtype is routed without a
+new case.
+
+**`ScenarioMergeServiceLive` gains the repository and the guard.** The service
+currently takes only an `IrminClient`. The validation read is
+`RiskTreeRepository.getAllForWorkspace`, which already does exactly what the
+guard needs: it resolves one commit for the whole listing, routes every tree
+through `loadTreeAt` and so through `fromNodes`, and returns one `Either` per
+tree. No new reading code.
+
+```scala
+final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepository) extends ScenarioMergeService:
+```
+
+```scala
+object ScenarioMergeServiceLive:
+  val layer: ZLayer[IrminClient & RiskTreeRepository, Nothing, ScenarioMergeService] =
+    ZLayer.fromFunction(new ScenarioMergeServiceLive(_, _))
+```
+
+`merge` keeps its signature. Its body gains the pre-merge head capture and the
+guard:
+
+```scala
+  override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)
+    (using Checked[Permission]): Task[CommitHash] =
+    for
+      branch       <- ScenarioBranchOps.scenarioBranch(wsId, name)
+      maybeHead    <- irmin.getBranch(branch).map(_.flatMap(_.head))
+      scenarioHead <- maybeHead match
+                        case Some(commit) => ScenarioBranchOps.refineCommitHash(commit.hash)
+                        case None =>
+                          ZIO.fail(ValidationFailed(List(ValidationError(
+                            field = "scenario",
+                            code = ValidationErrorCode.NOT_FOUND,
+                            message = s"Scenario '${name.value}' not found in workspace ${wsId.value}"
+                          ))))
+      result       <- scan(wsId, branch, scenarioHead)
+      _            <- ZIO.when(result.conflicts.nonEmpty)(ZIO.fail(MergeConflict(
+                        name,
+                        s"${result.conflicts.size} conflicting path(s): ${result.conflicts.map(_.path).mkString(", ")}"
+                      )))
+      _            <- ZIO.when(result.duplicateNames.nonEmpty)(ZIO.fail(MergeConflict(
+                        name,
+                        duplicateNameDetails(result.duplicateNames)
+                      )))
+      // Captured before the merge so the guard has a commit to move back to.
+      // None means main has no head yet, in which case the merge creates it and
+      // there is no earlier state to restore.
+      mainBefore   <- irmin.mainBranch.map(_.flatMap(_.head))
+                        .flatMap(ZIO.foreach(_)(c => ScenarioBranchOps.refineCommitHash(c.hash)))
+      commit       <- irmin.mergeBranch(branch, BranchRef.Main, mergeMessage(wsId, name))
+                        .catchSome { case IrminMergeConflict(_) =>
+                          ZIO.fail(MergeConflict(
+                            name,
+                            "merge was refused — main changed concurrently and now conflicts; re-run the preview and retry"
+                          ))
+                        }
+      newHead      <- ScenarioBranchOps.refineCommitHash(commit.hash)
+      _            <- guardMergedState(wsId, name, mainBefore, newHead)
+    yield newHead
+```
+
+The guard itself, private to the live implementation:
+
+```scala
+  /** Read every tree in the workspace at `newHead` through `RiskTree.fromNodes`
+    * and undo the merge if any read fails.
+    *
+    * Irmin merges one storage path at a time and byte-for-byte, so it cannot
+    * see an invariant that is a property of the whole node set — global name
+    * uniqueness, seed-variable distinctness, the mitigation bounds. The merge
+    * is the one write path the application does not perform itself, so this is
+    * where those invariants are checked instead of at construction.
+    *
+    * The undo moves main's pointer back under compare-and-set, which refuses
+    * rather than discarding a write that landed in between. A refused undo
+    * leaves the invalid state live, which `MergeUndoFailed` reports with the
+    * commit to revert to.
+    */
+  private def guardMergedState(
+    wsId: WorkspaceId,
+    scenario: ScenarioName.ScenarioName,
+    mainBefore: Option[CommitHash],
+    newHead: CommitHash
+  ): Task[Unit] =
+    repo.getAllForWorkspace(wsId, Revision.At(newHead)).flatMap { loaded =>
+      loaded.collect { case Left(failure) => failure.reason } match
+        case Nil      => ZIO.unit
+        case failures => (mainBefore, failures.mkString("; ")) match
+          case (None, details) =>
+            ZIO.fail(MergeUndoFailed(newHead,
+              s"main had no earlier commit to restore: $details"))
+          case (Some(restoreTo), details) =>
+            irmin.resetBranchTo(BranchRef.Main, expectedHead = newHead, to = restoreTo)
+              .foldZIO(
+                {
+                  case BranchHeadStale(_, _) =>
+                    ZIO.fail(MergeUndoFailed(restoreTo, details))
+                  case other =>
+                    ZIO.fail(MergeUndoFailed(restoreTo,
+                      s"$details (undo also failed: ${other.getMessage})"))
+                },
+                _ => ZIO.fail(MergeConflict(scenario,
+                  s"the merged state breaks a tree invariant, so the merge was undone: $details"))
+              )
+      }
+```
+
+Two consequences of this shape, both accepted.
+
+`getAllForWorkspace` returns a `Left` for a transport failure as well as for an
+invariant violation, because `RiskTreeRepositoryIrmin.handleIrmin` maps every
+`IrminError` to `RepositoryFailure`. The guard therefore cannot tell them
+apart, and a transport failure during the check undoes a merge that was in fact
+valid. That costs a retry and nothing else: the undo is compare-and-set
+guarded, the merge commit stays reachable by hash, and the refusal message
+tells the caller to retry. Separating the two would mean changing what
+`handleIrmin` collapses, which is a deliberate design elsewhere and is not in
+this slice.
+
+The guard validates every tree in the workspace, not only the trees the merge
+touched. A merge can affect any tree in the workspace, so validating all of
+them is the correct set. The count is bounded by
+`REGISTER_WORKSPACE_MAX_TREES`, which is what keeps the read bounded.
+
+**`InvalidationHandler` gains a whole-tree notification.** The trait has one
+implementation, `InvalidationHandlerLive`, and every spec wires that one, so a
+third method touches the trait, the companion accessors and the live class and
+nothing else.
+
+In the trait:
+
+```scala
+  /**
+    * Publish a single event naming every node in `tree`, for a change whose
+    * precise extent cannot be computed.
+    *
+    * `handleMutation` needs both the before and after states to name the nodes
+    * whose figures moved. When the before state is unavailable — it was never
+    * stored, or it cannot be read — this is the honest alternative: every node
+    * is named, so a subscriber re-fetches the whole tree and converges, at the
+    * cost of fetching more than changed. A node that existed before and does
+    * not exist now cannot be named, because it is not in `tree`.
+    *
+    * @param tree The tree as it now stands
+    * @param branch Client-facing branch name the change landed on
+    * @return Notification result containing every node id and subscriber count
+    */
+  def handleWholeTreeChange(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult]
+```
+
+In the companion, beside the other accessors:
+
+```scala
+  def handleWholeTreeChange(tree: RiskTree, branch: BranchChoice): URIO[InvalidationHandler, InvalidationResult] =
+    ZIO.serviceWithZIO[InvalidationHandler](_.handleWholeTreeChange(tree, branch))
+```
+
+In `InvalidationHandlerLive`, reusing the shared publish:
+
+```scala
+  override def handleWholeTreeChange(tree: RiskTree, branch: BranchChoice): UIO[InvalidationResult] =
+    publishInvalidation(tree.id, tree.index.nodes.keys.toList, branch, "Whole-tree change notification")
+```
+
+**`RiskTreeServiceLive.revertTree` tolerates the failed read.** The signature
+does not change. The two edits are the read and the `None` branch:
+
+```scala
+  override def revertTree(wsId: WorkspaceId, id: TreeId, toCommit: CommitHash, branch: BranchRef)(using com.risquanter.register.auth.Checked[com.risquanter.register.auth.Permission]): Task[RiskTree] = {
+    val operation = for {
+      // The head state feeds the change notification and nothing else, so a
+      // failure to read it must not stop the revert. A stored tree that breaks
+      // a tree invariant fails every read, and revert is the only operation
+      // that can repair it, because its storage half reads at the target
+      // commit and never at the head.
+      oldTree  <- repo.getById(wsId, id, Revision.Head(branch)).option.map(_.flatten)
+      reverted <- repo.revert(wsId, id, toCommit, branch)
+      // None covers two situations: the tree was deleted at head, and the head
+      // state could not be read. Both leave no before-state to diff against.
+      _        <- oldTree match
+                    case Some((prev, _)) => invalidationHandler.handleMutation(prev, reverted, clientBranchName(wsId, branch))
+                    case None            => invalidationHandler.handleWholeTreeChange(reverted, clientBranchName(wsId, branch))
+    } yield reverted
+
+    operation.tapBoth(
+      error => logIfUnexpected("revert")(error) *> recordOperation("revert", success = false, Some(extractErrorContext(error))),
+      _ => recordOperation("revert", success = true)
+    )
+  }
+```
+
+`.option` absorbs a transport failure on that read as well as an invariant
+failure, for the same reason the guard cannot separate them: the repository
+collapses both into `RepositoryFailure`. The consequence is bounded — a
+transport problem that defeats the head read also defeats `repo.revert`'s own
+reads a moment later, so the operation still fails; the error then names the
+write rather than the read.
+
+**`Application.scala` — the merge service layer gains the repository.** The
+layer already has an `IrminClient` in scope, and
+`RiskTreeRepositoryIrmin.layer` is `ZLayer[IrminClient, Nothing, RiskTreeRepository]`:
+
+```scala
+  private val irminScenarioMergeServiceLayer: ZLayer[Any, Throwable, ScenarioMergeService] =
+    ZLayer.make[ScenarioMergeService](
+      IrminConfig.layer,
+      IrminClientLive.layer >>> irminHealthCheck,
+      RiskTreeRepositoryIrmin.layer,
+      ScenarioMergeServiceLive.layer
+    )
+```
+
+`ScenarioMergeServiceNotSupported` is unaffected: the `ScenarioMergeService`
+trait's methods do not change.
+
+#### 8.19.2b Exact signatures — the scenario name in wire-facing errors (M2-D6)
+
+ADR-036 requires that no value crossing to a client contains a `WorkspaceId`,
+and `BranchRef.scenario` composes a scenario branch as
+`scenarios.<workspaceId-lowercased>.<slug>`, so a `BranchRef` in an error that
+reaches the wire carries one. Two error types do:
+`ScenarioMergeServiceLive` constructs `MergeConflict` with the scenario branch,
+`ScenarioServiceLive` constructs `ScenarioHeadStale` with it,
+`ScenarioController` passes both straight to the Tapir error output, and the
+encoder writes the branch into the response message and a detail field.
+
+Both take a `ScenarioName`. Neither error can concern main — a merge always
+targets a scenario, and a stale head is always a scenario's — so the precise
+type is the scenario's own name, which is also the type the client used to name
+the resource in the request: `ScenarioName.ScenarioName` is the Tapir path
+parameter on `merge-preview`, `merge` and `delete`.
+
+```scala
+/** Branch merge conflict — requires user intervention. Names the scenario,
+  * never the Irmin `BranchRef`, which embeds the `WorkspaceId` (ADR-036).
+  */
+case class MergeConflict(scenario: ScenarioName.ScenarioName, details: String) extends SimError {
+  override def getMessage: String = s"Merge conflict on scenario ${scenario.value}: $details"
+}
+```
+
+```scala
+/** Scenario delete/duplicate rejected — the branch's head no longer matches
+  * what the caller last observed (concurrent modification). Domain-level
+  * translation of `BranchHeadStale`. Names the scenario for the same reason as
+  * `MergeConflict` (ADR-036). `actual` is `None` when the scenario no longer
+  * exists at all.
+  */
+case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: CommitHash, actual: Option[CommitHash]) extends SimError {
+  override def getMessage: String =
+    s"Scenario ${scenario.value} head is not ${expected.value}" +
+    actual.fold(" (scenario no longer exists)")(a => s" (currently ${a.value})")
+}
+```
+
+**Why `ScenarioName` and not `BranchChoice`.** `BranchChoice` is the system's
+client-facing branch type, so it was the other candidate. The codebase already
+settled this question for an adjacent type, and that decision binds here.
+`ScenarioSource` — what a new scenario forks from — is a separate enum with
+`Main`, `ForkOf(ScenarioName)` and `AtCommit(CommitHash)` cases, and its
+scaladoc records why it is not `BranchChoice`:
+
+> Deliberately NOT `BranchChoice`, despite the identical structure:
+> `BranchChoice` answers "which branch does this request operate on", this
+> answers "what does a new scenario fork from". Reusing one type for two
+> distinct meanings would be the reverse of the ADR-018 principle
+> (semantically distinct concepts sharing an encoding get distinct nominal
+> types).
+
+These errors answer a third question — which scenario failed — so the same
+principle applies and `BranchChoice` would be the reuse it rules out. The
+precedent in the other direction is `ScenarioSummary(name: ScenarioName, head:
+CommitHash)`, which carries a bare `ScenarioName` because a scenario summary
+can never be main. These errors are in that position, so they take the same
+type.
+
+The construction sites, all five in production. The scenario name is already a
+parameter at each, so none of them derives anything:
+
+```scala
+// ScenarioMergeServiceLive — four sites, shown in §8.19.2 and §8.19.2a
+MergeConflict(name, …)
+
+// ScenarioServiceLive, replacing `ZIO.fail(ScenarioHeadStale(branch, expected, actual))`
+ZIO.fail(ScenarioHeadStale(name, expected, actual))
+```
+
+The encoder writes the scenario name and keeps the detail field, renamed from
+`branchName` to `scenario` because it no longer carries a branch reference of
+any kind:
+
+```scala
+  def makeMergeConflictResponse(scenario: ScenarioName.ScenarioName, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"Merge conflict on scenario ${scenario.value}: $details"
+    val errors = List(
+      ErrorDetail(domain, "conflict", ValidationErrorCode.MERGE_CONFLICT, details, requestId),
+      ErrorDetail(domain, "scenario", ValidationErrorCode.MERGE_CONFLICT, scenario.value, requestId)
+    )
+    (StatusCode.Conflict, ErrorResponse(JsonHttpError(StatusCode.Conflict.code, message, errors)))
+```
+
+```scala
+  def makeScenarioHeadStaleResponse(scenario: ScenarioName.ScenarioName, expectedHead: CommitHash, actual: Option[CommitHash], domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"Scenario ${scenario.value} head is not ${expectedHead.value}" +
+      actual.fold(" (scenario no longer exists)")(a => s" (currently ${a.value})")
+    response(StatusCode.Conflict, "scenario", ValidationErrorCode.VERSION_CONFLICT, message, domain, requestId)
+```
+
+The 409 reconstruction in `decode` reads the renamed field through
+`ScenarioName.fromString` instead of `BranchRef.fromString`, keeping the
+existing degrade-to-`DataConflict` fallback for a wire value that does not
+refine:
+
+```scala
+          val scenario = details.collectFirst { case d if d.field == "scenario" => d.message }
+            .flatMap(s => ScenarioName.fromString(s).toOption)
+          val conflictDetails = details.collectFirst { case d if d.field == "conflict" => d.message }
+            .getOrElse(message)
+          scenario.fold[Throwable](DataConflict(message))(s => MergeConflict(s, conflictDetails))
+```
+
+**ADR-036 needs no amendment for this ruling.** `ScenarioName` is what its text
+and its `// GOOD` example already prescribe, and that example —
+`ZIO.fail(MergeConflict(name, s"${conflicts.size} conflicting path(s)"))` —
+compiles against the new declaration where it did not against the old one. The
+ADR is nonetheless edited in this slice for a separate reason, recorded in
+§8.19.3.
+
+#### 8.19.2c Exact signatures — the inverse of `BranchRef.scenario` (directed 2026-10-04)
+
+`BranchRef.scenario(wsId, name)` composes a scenario branch name in
+`OpaqueTypes.scala`. Its inverse exists as `clientBranchName`, a private method
+of `RiskTreeServiceLive` in the `server` module, which strips the prefix the
+composition built. Three defects follow from that placement, and the direction
+to fix them is independent of M2-D6.
+
+The composition and the decomposition must agree character for character, and
+they sit in different modules where nothing makes a divergence visible. They
+move into one file, with the prefix defined once and used by both:
+
+```scala
+object BranchRef:
+  val Main: BranchRef = BranchRef("main")
+
+  /** The prefix every scenario branch name carries, derived from the workspace
+    * (DD-5 naming: `scenarios.<workspaceId-lowercased-ulid>.<name-slug>`).
+    * Defined once because `scenario` composes with it and
+    * `BranchChoice.fromBranchRef` decomposes with it — a divergence between
+    * the two would be silent.
+    */
+  private[iron] def scenarioPrefix(wsId: WorkspaceId): String =
+    s"scenarios.${wsId.value.toLowerCase}."
+
+  def scenario(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Either[List[ValidationError], BranchRef] =
+    fromString(s"${scenarioPrefix(wsId)}${name.value}")
+```
+
+The inverse becomes a smart constructor on `BranchChoice`'s companion,
+returning the same `Either[List[ValidationError], _]` that `BranchRef.scenario`,
+`BranchRef.fromString` and `ScenarioName.fromString` all return. It is the
+shape ADR-001 and ADR-010 prescribe — a construction that can fail is a value
+on an error channel, never a thrown exception — and it replaces an
+`IllegalStateException` thrown from a pure method:
+
+```scala
+  /** The client-facing branch for an Irmin branch reference: the inverse of
+    * `BranchRef.scenario`, so it strips the prefix that composed the name.
+    *
+    * Fails when the remainder is not a valid `ScenarioName`, which means the
+    * branch does not belong to `wsId` or was not composed by `scenario`. The
+    * caller decides what that means; this returns it rather than asserting it
+    * cannot happen.
+    */
+  def fromBranchRef(wsId: WorkspaceId, branch: BranchRef): Either[List[ValidationError], BranchChoice] =
+    branch match
+      case BranchRef.Main => Right(Main)
+      case _              =>
+        ScenarioName
+          .fromString(branch.toBranchRef.stripPrefix(BranchRef.scenarioPrefix(wsId)))
+          .map(Scenario(_))
+```
+
+`ScenarioName.fromString` takes the raw string only — it has no field-path
+parameter, unlike `BranchRef.fromString` — so the errors it returns carry its
+own `"name"` field. Two failure shapes land here and both are correct: a branch
+belonging to a different workspace keeps its whole `scenarios.<other>.<slug>`
+text after the strip, whose dots fail the scenario-name refinement; and the
+reserved name `"main"` is refused by that constructor, so nothing can
+round-trip into a `Scenario` case holding it.
+
+The branching is one `match` on the two cases, not an equality test producing a
+boolean, and the `Either` is threaded with `map` rather than a second `match` on
+its variants. The old method did both of the things that replaces.
+
+`RiskTreeServiceLive` loses `clientBranchName` and calls the constructor. Its
+three call sites — in `update`, `delete` and `revertTree` — pass the result into
+`InvalidationHandler`, which cannot fail, so each needs a decision for the error
+case. The branch always belongs to the
+workspace at these sites — the service composed it from that same workspace
+moments earlier — so the error is unreachable, and the right treatment for an
+unreachable case on an effect channel is `ZIO.die`, matching what
+`ActiveBranch.resolve` already does for the composition in the other direction.
+
+That is a code precedent, not an ADR rule. ADR-033 §5 licenses a thrown
+assertion where the enclosing code has no error channel — a private constructor
+behind a smart constructor, an external-library precondition — and does not
+govern the choice here. What governs it is that the method returns an effect:
+the codebase puts an unreachable-invariant failure in whatever channel the
+enclosing signature already has, and throws only where there is none
+(`RiskTree.fromNodesUnsafe`, `QuillMappings`, `ContentHashIndex`). The defect
+this change removes is that `clientBranchName` was pure, so it had no channel
+and had to throw; giving it one is the fix, and `ZIO.die` is then simply the
+in-channel spelling.
+
+```scala
+  private def clientBranch(wsId: WorkspaceId, branch: BranchRef): UIO[BranchChoice] =
+    BranchChoice.fromBranchRef(wsId, branch) match
+      case Right(choice) => ZIO.succeed(choice)
+      case Left(errors)  => ZIO.die(new IllegalStateException(
+        s"branch ${branch.toBranchRef} is not a branch of workspace ${wsId.value}: " +
+        errors.map(_.message).mkString("; ")))
+```
+
+That keeps the throw out of the pure constructor, where it was wrong, and puts
+the unreachability claim on the effect channel at the one place that can state
+it. The three sites become `clientBranch(wsId, branch).flatMap(...)` instead of
+a bare call.
+
+Mechanism B's guard and the three `MergeConflict` sites in the merge service do
+not use any of this: M2-D6 gives them the `ScenarioName` directly, and they
+never hold a `BranchRef` they need to invert.
+
+**One more site with the same shape, folded in (directed 2026-10-04, shape
+ruled 2026-10-04).** `RiskTreeRepositoryInMemory.requireMain` decides its
+branch with `if branch == BranchRef.Main` and reports the answer by succeeding
+with `Unit` or failing, which its five call sites then decode with
+`requireMain(branch) *> body`. That is one decision expressed twice: the
+encoding `Main → Success`, `non-Main → Failure` is total, so the sequencing
+operator's analysis of success-or-failure carries exactly the information the
+first analysis already had, in a weaker type. Both helpers take the guarded
+effect by name instead, so the match on `BranchRef` produces the continuation
+directly and no round trip through the error channel happens:
+
+```scala
+  /** Runs `effect` for the main branch. This backend has no branches, so any
+    * other branch fails with a typed RepositoryFailure and `effect` is never
+    * evaluated.
+    */
+  private def requireMain[A](branch: BranchRef)(effect: => Task[A]): Task[A] =
+    branch match
+      case BranchRef.Main => effect
+      case _              => ZIO.fail(RepositoryFailure(
+        s"In-memory repository has no branches: requested '${branch.toBranchRef}' (use the Irmin backend for scenario branches)"
+      ))
+
+  /** Runs `effect` for the main branch at its head. A commit pin fails with a
+    * typed ValidationFailed rather than being silently served from main:
+    * point-in-time reads require the Irmin backend.
+    */
+  private def requireMainRevision[A](rev: Revision)(effect: => Task[A]): Task[A] =
+    rev match
+      case Revision.Head(branch) => requireMain(branch)(effect)
+      case Revision.At(_) =>
+        ZIO.fail(ValidationFailed(List(ValidationError(
+          field = "at",
+          code = ValidationErrorCode.NOT_SUPPORTED,
+          message = "point-in-time reads require the Irmin backend"
+        ))))
+```
+
+Each of the five call sites changes from `guard(x) *> body` to `guard(x) {
+body }` with no change inside any body: `create`, `update` and `delete` wrap
+their `ZIO.attempt` block, `getById` and `getAllForWorkspace` their
+`ZIO.succeed`.
+
+The parameter shape is the one `ResultTransformSpec.requireOp` already uses in
+production across five call sites. Its condition is a string comparison, so it
+is correctly an `if`; these two analyse a type's cases, so they match.
+
+Behaviour is unchanged, and the reason is laziness: under `*>` the
+`ZIO.attempt` value was constructed on the non-main path and discarded unrun,
+and under a by-name parameter it is not constructed at all. The failure values
+and messages are identical. `RiskTreeRepositoryInMemoryBranchSpec` covers both
+outcomes already ("main head is served", "a non-main branch request fails with
+a typed `RepositoryFailure`") and needs no change.
+
+`BranchRef` is a `case class` with `val Main`, not a sealed type, so its match
+is a stable-identifier pattern compiling to the same `==` and gains no
+exhaustiveness check; `Revision` is an `enum`, so `requireMainRevision`'s match
+does gain one. The substantive change at both sites is the removed error-channel
+round trip, not the match.
+
+The two other effect-typed guards in the server — `ensureRootPresent` in
+`RiskTreeRepositoryIrmin` and `ensureUniqueTree` in `RiskTreeServiceLive` —
+keep the `Task[Unit]` shape and are out of scope. Neither analyses a type's
+cases: the first tests `nodes.exists(_.id == rootId)` and the second
+`errors.nonEmpty` after an effectful lookup, so both are predicates computed
+over data, and the second could not produce a continuation in any case.
+
+#### 8.19.2d Exact signatures — the preview reports the name scan (M2-D8)
+
+`preview` runs the same `scan` as `merge`, so it already computes the duplicate
+names; it just discards them. Reporting them keeps the preview's promise, which
+is that the user learns a merge is blocked before attempting it. Without this,
+`MergeModal` renders "No conflicts — merging applies this scenario's changes to
+main." with the merge button enabled, and the merge is then refused.
+
+The service-side outcome gains a case:
+
+```scala
+enum MergePreviewResult:
+  case Clean
+  case Conflicts(paths: List[MergeConflictPath])
+  case DuplicateNames(details: String)
+  case ScenarioMissing
+```
+
+`preview` reports the byte-level conflicts first, matching `merge`'s order, so
+the two never disagree about which refusal applies:
+
+```scala
+                       ScenarioBranchOps.refineCommitHash(commit.hash)
+                         .flatMap(scan(wsId, branch, _))
+                         .map(s =>
+                           if s.conflicts.nonEmpty then MergePreviewResult.Conflicts(s.conflicts)
+                           else if s.duplicateNames.nonEmpty then MergePreviewResult.DuplicateNames(duplicateNameDetails(s.duplicateNames))
+                           else MergePreviewResult.Clean)
+```
+
+The wire response gains one optional field rather than a second list, because
+the detail is already one rendered line and both the merge refusal and the
+preview use the same text:
+
+```scala
+/** Response DTO for `GET /w/{key}/scenarios/{name}/merge-preview`.
+  *
+  * `status` is `"clean"` (the merge would apply), `"conflicts"` (`conflicts`
+  * populated — paths changed on both branches), `"duplicate-names"`
+  * (`duplicateNames` populated — the merged node set would repeat a name
+  * within a tree), or `"missing-scenario"` (the scenario does not exist, a
+  * non-error outcome of a read-only preview).
+  */
+final case class MergePreviewResponse(
+  status: String,
+  conflicts: List[MergeConflictEntry],
+  duplicateNames: Option[String] = None
+)
+```
+
+The default keeps every existing construction site compiling and keeps the
+field absent from the two statuses that do not use it.
+
+`ScenarioController.toPreviewResponse` maps the new case:
+
+```scala
+  private def toPreviewResponse(result: MergePreviewResult): MergePreviewResponse = result match
+    case MergePreviewResult.Clean => MergePreviewResponse("clean", Nil)
+    case MergePreviewResult.Conflicts(paths) =>
+      MergePreviewResponse(
+        "conflicts",
+        paths.map(p => MergeConflictEntry(p.path, p.treeId.map(_.value), p.nodeId.map(_.value)))
+      )
+    case MergePreviewResult.DuplicateNames(details) =>
+      MergePreviewResponse("duplicate-names", Nil, Some(details))
+    case MergePreviewResult.ScenarioMissing => MergePreviewResponse("missing-scenario", Nil)
+```
+
+`MergeModal` gains one branch. The merge button needs no change: `mergeEnabled`
+already tests `preview.status == "clean"`, so an unrecognised status disables
+it, which is why a new status is safe to add here:
+
+```scala
+          case "duplicate-names" =>
+            div(
+              div(
+                cls := "merge-modal-error",
+                "Merging would give two risks in one tree the same name:"
+              ),
+              div(cls := "merge-modal-conflicts", result.duplicateNames.getOrElse("")),
+              div(
+                cls := "merge-modal-hint",
+                "Rename one of them on either branch, then re-check."
+              ),
+              recheckButton(state)
+            )
+```
+
+#### 8.19.3 ADR alignment
+
+| ADR | Bearing | Verdict |
+|---|---|---|
+| ADR-001 (validate at the boundary) | Both mechanisms are construction gates for the one write path the application does not perform. | Compliant for the guard — it routes through `RiskTree.fromNodes`, the same smart constructor every other path uses, rather than re-deriving the invariants. A does re-derive one invariant, because it has to answer before the tree exists: there is no constructed `RiskTree` to validate until the merge has produced one. That is why A is a specific early reject and the guard is the general gate, and why A is never the only check. |
+| ADR-004a (persistence, scenarios as branches, one commit per action) | The undo moves a branch pointer instead of writing a commit. | Compliant — a refused merge produces no user-visible history entry, which matches one commit per user action better than a compensating commit would. |
+| ADR-010 (typed error channels) | Three new failure outcomes and one new preview outcome. | Compliant — `MergeConflict` for a name-scan rejection and for the refused-and-undone case, the new `MergeUndoFailed` for the un-undone case, all typed; the preview's fourth case stays a plain enum case, because a missing or blocked preview is a non-error outcome of a read-only call, as `MergePreviewResult` already treats a missing scenario. |
+| ADR-032 (two equality relations) | A predicts a merge outcome; the guard is a domain-level check running after the merge. | Compliant — `MergeConflictRule.merged` compares full persisted values exactly as `isConflict` does, so A stays entirely in the storage relation and never consults a domain content hash, which ADR-032's Code Smells name as the way to get merge prediction wrong. The guard asks a domain question and uses the domain constructor to ask it. The two relations are used for the two different questions and are not mixed. |
+| ADR-033 (narrowest sound catch) | `catchSome` on `BranchHeadStale`, `foldZIO` on the reset. | Compliant — named typed errors on a ZIO channel, no `catch`, no `NonFatal`. |
+| ADR-035 / ADR-036 (error content, confidential identifiers) | Every wire-facing value this slice touches. | Compliant, and it closes a pre-existing violation. `MergeConflict` and `ScenarioHeadStale` stop carrying a `BranchRef`, which embedded the `WorkspaceId` in its scenario branch name and reached the client in both the message and a detail field; they carry a `ScenarioName` (M2-D6), which is what ADR-036's own text prescribes. `MergeUndoFailed` carries no branch at all. The new preview field carries node names and tree ids, neither confidential. |
+| ADR-018 (nominal wrappers for distinct concepts) | Which type names the scenario in these two errors. | Compliant — `ScenarioName` rather than `BranchChoice`, following the decision already recorded on `ScenarioSource` that `BranchChoice` answers one specific question and reusing it for another is the reverse of this ADR. |
+| ADR-001 / ADR-010 (validate at the boundary, typed error channels) | `BranchChoice.fromBranchRef`, the new smart constructor. | Compliant — it returns `Either[List[ValidationError], BranchChoice]`, the shape `BranchRef.scenario`, `BranchRef.fromString` and `ScenarioName.fromString` all return, and it replaces a pure method that threw `IllegalStateException`. The unreachability claim moves to the call site as `ZIO.die` on an effect channel (ADR-033 §5), where `ActiveBranch.resolve` already states the same claim for the composition in the other direction. |
+| ADR-034 (mitigation valuation) | The guard reads trees, including their mitigations. | No interaction — the read is the ordinary load path and computes no valuation. |
+
+**ADR-036 is amended, and the amendment reaches the constraints distillation in
+the same pass** (Plan Quality Gate item 3). The amendment is not about M2-D6's
+choice — the ADR already prescribes `ScenarioName` — but about two things it
+does not currently say.
+
+First, **two substitutes are accepted and the ADR names only one.** A bare
+`ScenarioName` is correct where main cannot occur, which is the case for these
+two errors and for `ScenarioSummary`. `BranchChoice` is correct where main is a
+genuine value, which is the case for the `X-Branch` header, the changed-nodes
+comparison parameters, the scenario-source body, the change-notification event
+tag, and the whole of the client's branch state. The ADR gains that test, so
+the next occurrence is not re-derived or decided by whichever substitute the
+reader saw first.
+
+Second, **masking versus removal.** Redacting the identifier in `toString`
+(ADR-022's technique for credentials) would address exposure through a log,
+which §3 names as one of the routes by which an identifier reaches a client —
+"an audit log surfaced to a client". Masking is recorded as available and
+insufficient: §3 also accepts the identifier in server logs outright, so
+masking addresses only that one route, while removal from the wire closes the
+whole boundary in both directions. Removal stays the prescription; masking is
+noted so a future reader does not propose it as an equivalent.
+
+Two places in the `adr-constraints` skill then need the same update:
+
+- The ADR-036 negative constraint, whose fix text says to confine a value that
+  embeds a confidential identifier. It gains the concrete instruction: a
+  wire-facing error names the scenario, never the `BranchRef`, and the
+  main-is-possible case takes `BranchChoice`.
+- The `ADR-036 × ADR-004a` interaction row, which reads that such an error
+  "stays branch-typed internally and is translated by its service-layer caller
+  before the boundary". After this slice nothing is translated at the boundary
+  on these two paths, because the error is constructed over the client-facing
+  type in the first place. The row is rewritten to state the trap as it then
+  stands: the branch name is the carrier of the workspace identifier, the
+  branch types exist to separate the storage name from the client name, and
+  reaching for `BranchRef` in anything a caller can observe is the mistake.
+
+The skill is mirrored. `.github/skills/adr-constraints/SKILL.md` is the
+canonical copy and `.claude/skills/adr-constraints/SKILL.md` must stay
+byte-identical to it, so both files are edited and compared.
+
+Mechanisms A and B themselves add no constraint and create no new interaction
+between ADRs: A is a check in the storage relation ADR-032 already describes,
+and B routes through the smart constructor ADR-001 already names as the
+construction gate.
+
+#### 8.19.4 Test changes
+
+`modules/server/src/test/.../MergeConflictRuleSpec.scala` — `merged` is a pure
+function over three `Option[String]`s and joins the spec that already covers
+`isConflict`. Cases: both sides equal; main at base so the scenario
+wins; the scenario at base so main wins; a side absent, which is a delete that
+the winner's absence carries through. The spec also asserts the partition — for
+every input triple, exactly one of `isConflict` and a defined `merged` applies.
+
+`modules/server/src/test/.../ScenarioMergeServiceSpec.scala` — mechanism A's
+cases go here, because its fake Irmin can return chosen blobs per path and
+branch: two branches each adding a node with the same name under different node
+ids refuses with both names in the message and never calls `mergeBranch`; the
+same names within one tree but on a conflicting path refuses on the byte-level
+conflict instead, because that check runs first; a node deleted on the winning
+side contributes no name, so a rename-plus-delete pair that would look like a
+duplicate in a naive union merges cleanly; two nodes with the same name in
+**different** trees merge cleanly, because uniqueness is per tree.
+
+The same spec covers mechanism B. It
+constructs `ScenarioMergeServiceLive(FakeMergeIrmin(...))` and gains the
+repository argument. Its fake Irmin gains `resetBranchTo`. New cases: a merged
+state that loads cleanly leaves main at the merge commit and succeeds; a merged
+state with one unloadable tree calls `resetBranchTo` with the pre-merge head as
+`to` and fails `MergeConflict`; the same with `resetBranchTo` failing
+`BranchHeadStale` fails `MergeUndoFailed` carrying the pre-merge commit; a merge
+onto a main with no prior head and an unloadable result fails `MergeUndoFailed`
+naming the merge commit.
+
+The same spec also covers the preview's new outcome: a scan that finds
+duplicated names and no byte-level conflict previews as
+`MergePreviewResult.DuplicateNames` with the same text the refusal uses, and a
+scan that finds both previews as `Conflicts`, matching `merge`'s order.
+
+`modules/common/src/test/.../ErrorResponseSpec.scala` — one new case for
+`MergeUndoFailed`: it encodes to 409 with the restore commit in a detail, and
+decodes back to the same type with the same commit. Its two existing
+`MergeConflict` cases are untouched, because the type does not change in this
+scope.
+
+M2-D6 adds to the same spec: no encoded response for either affected type
+contains the workspace identifier, asserted by building each error for a
+scenario in a known workspace and checking that the workspace id appears in
+neither the message nor any detail value; and the 409 round-trip reconstructs
+`MergeConflict` with the scenario name it was encoded from. Its two existing
+`MergeConflict` cases change from a `BranchRef` to a `ScenarioName`. It also
+changes four `ScenarioHeadStale` construction sites in
+`modules/server/src/test/.../ScenarioServiceLiveSpec.scala` and
+`ScenarioServiceCascadeSpec.scala`, whose assertions ignore that field and are
+otherwise unchanged.
+
+`modules/server/src/test/.../BranchChoiceWireSpec.scala` — this spec already
+covers `BranchChoice`'s wire behaviour and the `"main"` reservation, so
+`fromBranchRef` joins it: `BranchRef.Main`
+yields `Main`; a branch composed by `BranchRef.scenario(wsId, name)` round-trips
+back to `Scenario(name)` for every scenario name the refinement admits; a branch
+composed for a **different** workspace yields a `Left` rather than a wrong
+`Scenario`; and the prefix is the one `scenario` composed with, asserted by
+composing and decomposing rather than by restating the literal.
+
+No SPA spec changes. `ScenarioMergeState` and `MergeModal` have no specs today
+— `modules/app/src/test/scala/app/state/` covers ten other state classes and
+neither of these — so the new status adds no case to an existing suite. The
+merge button needs no test either way, because `mergeEnabled` tests
+`preview.status == "clean"` and any other status disables it; that is also what
+makes adding a status safe rather than fail-open. The `app` module still has to
+compile and its suite still has to be green, because `MergePreviewResponse` is
+a `common` type the SPA consumes.
+
+`modules/server/src/test/.../RiskTreeServiceLiveSpec.scala` — the stub
+repository's `revert` is currently `ZIO.die`; it gains a real implementation,
+and the stub gains a mode whose `getById` on `Revision.Head` fails with
+`RepositoryFailure`. New cases: revert with a readable head succeeds and the
+before-state reaches `handleMutation`; revert with a failing head read still
+succeeds and the whole-tree notification fires instead. Pinning which
+notification fired needs a recording `InvalidationHandler` stub, since the spec
+currently wires the real one; the trait has three methods after this change.
+
+`modules/server-it/src/test/.../ScenarioMergeServiceItSpec.scala` — the shared
+test layer gains `RiskTreeRepositoryIrmin.layer`.
+
+**Its existing fixtures must also become real stored trees (found at
+implementation time, 2026-10-05).** Every case in this spec wrote opaque
+four-byte blobs such as `"a0"` at `risk-trees/{treeId}/nodes/{nodeId}` through
+`IrminClient.set`, with no `meta` and no real node JSON. That was sound while
+nothing read those paths back as a tree. Mechanism B reads every tree in the
+workspace through `RiskTree.fromNodes`, so a workspace of opaque blobs is a
+workspace whose trees cannot be read, and the guard rejects it — correctly. The
+observed failure is `Metadata missing for tree ... but nodes exist`, and it
+broke five previously-passing cases. There is no code change that preserves both
+the guard and those fixtures, because rejecting exactly this state is what the
+guard is for. So each fixture seeds one real tree through
+`RiskTreeRepository.create` (root portfolio plus two leaves, with mitigations
+where the case needs them) and then writes **valid node and mitigation JSON** at
+individual paths to create byte-level divergence. A leaf's `probability` and a
+mitigation's override likelihood are the byte-level levers: two writes of one id
+differing only there are byte-different while both staying valid. Every original
+assertion keeps its intent; only the values it looks for change.
+
+Two new cases against real Irmin, and they have to break **different**
+invariants, because A runs first and would otherwise catch both. Both add a node
+on each side, so both must also write the **same** root-portfolio blob listing
+every new node id on both branches — `fromNodes` checks that each parent link
+has a matching child link, and writing identical root bytes on both sides keeps
+that path out of the conflict set:
+
+- Mechanism A: two branches whose union gives one tree two nodes with the same
+  name, with `meta` left byte-identical so the byte-level scan does not reject
+  first. Assert the call failed `MergeConflict` naming the duplicated name, and
+  that main's head is unchanged — no commit was written.
+- Mechanism B: two branches that break an invariant A does not look at.
+  Seed-variable identifier distinctness is the natural one, since each branch
+  draws `highWater + 1` independently and the two leaves then collide. Assert
+  the call failed `MergeConflict`, and that main's head is back at the
+  pre-merge commit — a commit was written and the pointer was moved off it.
+
+The second case is also the one that shows the two mechanisms are layered
+rather than duplicated: A cannot catch it, and B does.
+
+`modules/server-it/src/test/.../TreeRevertItSpec.scala` — one new case: write a
+tree whose stored state breaks a `fromNodes` invariant, confirm `getById` at
+head fails, then revert through the service and confirm the tree loads again.
+Its layer gains the whole notification stack, because the case goes through
+`RiskTreeService.revertTree` rather than the repository.
+
+The broken state cannot be built with `RiskTree.fromNodesUnsafe`, which
+validates and throws (`RiskTree invariant violated: duplicate node name(s)`,
+observed 2026-10-05). It is written one blob at a time instead —
+`IrminClient.set` of a valid leaf carrying a sibling's name at its own node
+path — which is both the only way to reach the state and the faithful one,
+since writing one path at a time is exactly what the merge does.
+
+#### 8.19.5 Verification plan
+
+```bash
+sbt 'commonJVM/test; server/test'
+sbt app/test
+# clear leaked per-run Docker state first (register-dev skill, Mechanism 1)
+docker ps -a --filter name=register_it_ -q | xargs -r docker rm -f; docker network ls --filter name=register_it_ -q | xargs -r docker network rm; docker volume ls --filter name=register_it_ -q | xargs -r docker volume rm
+sbt 'serverIt/test'
+```
+
+Each must report success. The integration tier needs the
+`local/irmin-prod:3.11-p1` image, which is present; the guard depends on the
+same patched image the merge path already requires, because an unpatched Irmin
+silently swallows a conflicting merge.
+
+#### 8.19.6 Decisions raised when the slice was written — all three ruled
+
+The complex review of this slice's code added two more rulings and one open
+decision; they are in §8.19.8. M2-D9 is open, so this slice does not currently
+confer implementation coverage for the merge-undo path.
+
+- **M2-D6 — the branch value in wire-facing errors. RULED (user, 2026-10-04):
+  a `ScenarioName`.** `MergeConflict` and `ScenarioHeadStale` were declared
+  over `BranchRef`, which embeds the `WorkspaceId` in a scenario branch name.
+  `ScenarioController` passes both failures to the Tapir error output
+  untranslated, so the encoder wrote that identifier into the response message
+  and a detail field on every merge conflict and every stale-head scenario
+  delete. ADR-036 forbids it and names this exact code as its bad example.
+
+  `BranchChoice` was the other candidate, and the decision against it is the
+  one already recorded on `ScenarioSource`: `BranchChoice` answers "which
+  branch does this request operate on", and reusing it for a different question
+  is the reverse of ADR-018. These errors answer "which scenario failed", where
+  main cannot occur, so they take the same bare `ScenarioName` that
+  `ScenarioSummary` carries for the same reason. Exact signatures: §8.19.2b.
+
+  A sweep of every production `BranchChoice` site was run before this was
+  implemented and found none that should change: each one is a place where main
+  is a genuine value, on the server and in the client alike. The sweep's result
+  is recorded in §8.19.2b's reasoning and in the ADR-036 amendment, which gains
+  the test for choosing between the two accepted substitutes.
+
+- **M2-D7 — whether mechanism A joins this slice. RULED (user, 2026-10-04):
+  A ships in this slice.** M2-D3b ruled A and B together, so the slice closes
+  M2-D3b rather than leaving half of it ruled and unbuilt. A's exact signatures
+  are §8.19.2.
+
+- **M2-D8 — what the merge preview reports. RULED (user, 2026-10-04): extend
+  both shapes.** Without this, mechanism A creates a case where the preview
+  reports a clean merge and the merge is then refused, and the SPA surfaces
+  that preview — `ScenarioMergeState` loads it and `MergeModal` renders "No
+  conflicts — merging applies this scenario's changes to main." with the merge
+  button enabled. `MergePreviewResult` gains a `DuplicateNames` case and
+  `MergePreviewResponse` gains an optional `duplicateNames` field carrying the
+  same rendered line the merge refusal uses. The rejected alternative was
+  reporting the names through the existing conflict list: it needs no new
+  field, but it puts a node name in a slot every consumer treats as a storage
+  path, including a modal heading that says so. Exact signatures: §8.19.2d.
+
+#### 8.19.7 File inventory (delta)
+
+Most of what this slice edits is already on the inventory:
+`AppError.scala`, `ErrorResponse.scala`, `OpaqueTypes.scala`, `RiskNode.scala`,
+`ScenarioMergeService.scala`, `RiskTreeServiceLive.scala`,
+`RiskTreeRepositoryIrmin.scala`, `InvalidationHandler.scala`,
+`Application.scala`, `ErrorResponseSpec.scala`,
+`ScenarioMergeServiceItSpec.scala` and `TreeRevertItSpec.scala` all appear
+there already, so mechanism A needs no inventory change of its own. Seven paths
+are new, three of which are already amended in:
+
+Mechanism B:
+
+- `modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala`
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala`
+- `modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClientLive.scala`
+
+M2-D8, the preview's fourth outcome:
+
+- `modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioMergeResponse.scala`
+- `modules/server/src/main/scala/com/risquanter/register/http/controllers/ScenarioController.scala`
+- `modules/app/src/main/scala/app/components/MergeModal.scala`
+
+M2-D6, the scenario name in wire-facing errors:
+
+- `modules/server/src/main/scala/com/risquanter/register/services/ScenarioServiceLive.scala`
+
+The inverse constructor and the `requireMain` cleanup (§8.19.2c) add nothing:
+`OpaqueTypes.scala`, `RiskTreeServiceLive.scala` and
+`RiskTreeRepositoryInMemory.scala` are all already listed.
+
+Two files that might be expected here and are not needed.
+`ScenarioEndpoints.scala` keeps its declared output type — `MergePreviewResponse`
+gains a field, it is not replaced — and `ScenarioMergeState.scala` holds that
+same type, so neither changes.
+
+Every `IrminClient` implementation the new trait method reaches is either
+`IrminClientLive` or a stub under `modules/server/src/test` —
+`ScenarioControllerSpec`, `RiskTreeReadConsistencySpec`,
+`ScenarioMergeServiceSpec` and `ScenarioServiceLiveSpec`. Those four,
+`ScenarioServiceCascadeSpec`, and the `common` unit specs are covered by the
+same-module test authorization, because the inventory lists files under
+`modules/server/src/main` and `modules/common/src/main`. `modules/server-it` has
+no `src/main`, so its specs need explicit entries, and both of the ones this
+slice touches already have them. No `app` test changes, so the `app` module's
+test authorization is not needed.
+
+The paths the hook matches live in
+`docs/dev/plans/PLAN-RISKTRANSFORM-INVENTORY.md`, which only the user writes.
+
+Three files outside `modules/` are edited and need no inventory entry, because
+the hook gates only `modules/**` and `build.sbt`:
+`docs/dev/decision-records/ADR-036-confidential-internal-identifiers.md`, and
+the two mirrored copies of the constraints distillation,
+`.github/skills/adr-constraints/SKILL.md` and
+`.claude/skills/adr-constraints/SKILL.md`. The hook refuses agent writes to
+`.claude/protocol/`, `.claude/hooks/`, `.claude/bin/` and
+`.claude/settings.json`, none of which this touches.
+
+#### 8.19.8 Complex-review rulings (2026-10-07)
+
+A complex design-and-correctness review of this slice's uncommitted code
+produced seven findings. Two are ruled here. One is this slice's first open
+decision since §8.19.6 was written, because the ruled direction turns out to
+need a shape the review did not describe.
+
+- **M2-D9 — the undo can restore main to a baseline that predates another
+  request's commit. RULED (user, 2026-10-07): close the race at its source
+  rather than detect it afterwards.** `ScenarioMergeServiceLive.merge` reads
+  main's head into `mainBefore` in one round trip and merges in another.
+  `IrminClient.mergeBranch` carries no expected head, so Irmin merges against
+  main's actual head at the moment the mutation runs. A commit that lands in
+  that gap becomes a parent of the merge commit. The guard's undo then resets
+  main to `mainBefore`, which discards that commit. The compare-and-set on
+  `resetBranchTo` does not catch it, because nothing moved after the merge
+  commit, so the undo succeeds and nothing is reported.
+
+  **The ruled direction cannot be implemented as an added parameter.** Irmin's
+  mutation is `merge_with_branch(branch:, from:, info:)`, built by
+  `IrminQueries.mergeWithBranch`. It accepts no expected-head argument. The
+  project compiles Irmin from source only to carry an existing patch, so
+  adding a resolver argument would mean extending that patch. The atomic
+  primitive that does exist is `test_and_set_branch(branch:, test:, set:)`,
+  already used by `createBranchAt`, `deleteBranch` and `resetBranchTo`.
+
+  Two shapes implement the ruling with the primitives that exist today, and
+  they differ in what else they change. That is the open decision below.
+
+- **M2-D10 — one definition of node-name uniqueness. RULED (user,
+  2026-10-07): the cross-checks use the same uniqueness semantics the domain
+  validation enforces.** The rule "which names in this collection occur more
+  than once" is written three times. `RiskTree.requireDistinctNodeNames`
+  groups on `node.name.value`. `RiskTreeRequests.requireUniqueNames` groups on
+  the refined name. `ScenarioMergeService.duplicateNodeNames` groups on the
+  refined name per tree. All three agree today, and `SafeName`'s whitelist
+  admits no non-ASCII character, so no normalisation difference can arise
+  between them. What is missing is a single definition, which
+  `SeedVarId.requireDistinct` already provides for the sibling rule — its
+  scaladoc states the split: "The rule itself is defined once on the SeedVarId
+  companion; this boundary layer contributes only the request-scoped field
+  path."
+
+  The detection moves to the `SafeName` companion in
+  `modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`:
+
+```scala
+  /** The names occurring more than once in `names`, ascending. One definition
+    * of node-name uniqueness: the request boundary, `RiskTree.fromNodes` and
+    * the merge name scan all read it, so the three cannot drift apart.
+    */
+  def duplicates(names: Seq[SafeName]): List[SafeName] =
+    names.groupBy(identity).collect { case (n, group) if group.sizeIs > 1 => n }
+      .toList.sortBy(_.value)
+```
+
+  The three callers keep their own field path, error code and message, because
+  each reports against a different locator and each message is asserted by an
+  existing test. Only the detection is shared:
+
+```scala
+  // RiskTree.requireDistinctNodeNames
+  private def requireDistinctNodeNames(nodes: Seq[RiskNode]): Validation[ValidationError, Unit] =
+    SafeName.duplicates(nodes.map(_.name)) match
+      case Nil  => Validation.succeed(())
+      case dups => Validation.fail(ValidationError(
+        field = "nodes.name",
+        code = ValidationErrorCode.AMBIGUOUS_REFERENCE,
+        message = s"duplicate node name(s): ${dups.map(_.value).mkString(", ")}"
+      ))
+```
+
+```scala
+  // RiskTreeRequests.requireUniqueNames
+  private[requests] def requireUniqueNames(allNames: Seq[SafeName.SafeName]): Validation[ValidationError, Set[SafeName.SafeName]] =
+    SafeName.duplicates(allNames) match
+      case Nil  => Validation.succeed(allNames.toSet)
+      case dups => Validation.fail(ValidationError(
+        "request.names",
+        ValidationErrorCode.AMBIGUOUS_REFERENCE,
+        s"Duplicate names: ${dups.map(_.value).mkString(", ")}"
+      ))
+```
+
+```scala
+  // ScenarioMergeService.duplicateNodeNames — the per-tree grouping stays and
+  // the inner duplicate detection becomes the shared one.
+      pairs
+        .groupMap(_._1)(_._2)
+        .view
+        .mapValues(SafeName.duplicates)
+        .filter(_._2.nonEmpty)
+        .toMap
+```
+
+  `requireDistinctNodeNames` grouped on the unrefined `String` and sorted the
+  raw values. It now groups on the refined name and renders at the message.
+  The rendered text is unchanged for every input, because the value
+  `SafeName.duplicates` sorts by is the same string the old code sorted.
+
+  **What this ruling does not change.** The names `"Server Outage"` and
+  `"Server  Outage"` stay distinct, because `SafeName` permits a space and
+  applies no whitespace normalisation. Hypertext collapses repeated
+  whitespace, so those two can render identically in the interface. That
+  property belongs to `SafeName`'s own refinement rather than to any of the
+  three callers, and this ruling makes all three inherit it from one place
+  instead of three. Changing the refinement is a separate question about
+  display names and is not part of this slice.
+
+##### M2-D9 — RULED (user, 2026-10-07): Shape 1
+
+The two shapes are described below for the record. Shape 1 is ruled, and its
+exact signatures are §8.19.9. Two elements of it were not visible when the
+shapes were written, and both widen its scope:
+
+- **`BranchRefConstraint` has to admit a third branch form.** The constraint is
+  `Match["^(main|scenarios\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63})$"]`,
+  so a staging branch name cannot be refined today. Widening it changes a type
+  whose whole purpose is to prove a branch reference is either main or a
+  workspace-scoped scenario, so `BranchChoice.fromBranchRef` has to refuse the
+  new form explicitly rather than rely on refinement failing.
+- **`MergeUndoFailed` loses its only producer and becomes dead.** Shape 1 never
+  publishes an unvalidated merge, so there is no undo and nothing for the type
+  to report. It is removed from `AppError.scala`, from `ErrorResponse.encode`,
+  from the `decode` reconstruction at `ErrorResponse.scala:88`, from
+  `GlobalError.scala`, and from its tests.
+
+##### The two shapes as presented
+
+**Shape 1 — merge off to the side, publish with a compare-and-set.** Create a
+scratch branch at `mainBefore`, merge the scenario into the scratch branch,
+run the guard against the scratch head, then move main with
+`test_and_set_branch(main, test = mainBefore, set = scratchHead)`. Delete the
+scratch branch at the end.
+
+This closes M2-D9 and also removes the interruption window the review reported
+as a separate finding: nothing reaches main until the guard has passed, so
+there is no state to undo, `MergeUndoFailed` loses its only producer, and an
+interruption at any point leaves main exactly as it was. It needs a
+workspace-scoped scratch branch name on `BranchRef`, which embeds the
+`WorkspaceId` like every other `BranchRef` and so never reaches a client
+(ADR-036). One user action still produces one commit, because the branch moves
+are pointer writes and create no commits (ADR-004a).
+
+**What Shape 1 costs in the store.** A branch in Irmin is a mutable name
+pointing at a commit, not stored content. `createBranchAt` issues
+`test_and_set_branch(branch, test: null, set: <existing hash>)` and
+`deleteBranch` issues `test_and_set_branch(branch, test: <head>, set: null)`;
+neither creates a commit. The merge commit itself is created in both shapes,
+because the guard can only read a merged state that exists. A rejected merge
+therefore leaves an unreachable commit under both shapes, which is already the
+case today — `resetBranchTo`'s scaladoc states it: "Commits left off the branch
+stay reachable by hash." Shape 1's whole extra cost over Shape 2 is two
+branch-name writes per merge, one to create the scratch name and one to remove
+it. `ScenarioServiceLive` already creates and deletes branches this way for
+every scenario.
+
+**Shape 2 — keep the merge on main and refuse an unsafe undo.** Leave the
+merge where it is. Before resetting, read the merge commit's parents —
+`IrminCommit.parents: List[String]`, already selected by
+`IrminQueries.mergeWithBranch` — and require that `mainBefore` is among them.
+When it is not, another commit entered the merge, so refuse the automatic undo
+and fail with `MergeUndoFailed`.
+
+**That check is wrong as stated, because of the fast-forward case.**
+`mergeBranch`'s scaladoc says it returns "The merge commit (fast-forwarded head
+when `into` had not moved since the fork)". When main has not moved, there is no
+two-parent commit: main simply advances to the scenario's head, whose parent is
+the scenario's previous commit. A scenario carrying two or more commits
+therefore returns a head whose parents do not include `mainBefore`, and the
+check would refuse a perfectly safe undo. The case where main *has* moved is the
+one the existing integration test pins —
+`IrminMergeSemanticsSpec.scala:77` asserts
+`mergeCommit.parents.toSet == Set(branchHead.hash, mainHead.hash)` after a write
+to main since the fork — so the two-parent shape is established and the
+fast-forward shape is not.
+
+The repair is to branch on the parent count: two or more parents means a real
+merge, and then `mainBefore` must be among them; fewer means a fast-forward,
+which is only possible when main's head was an ancestor of the scenario head,
+which cannot hold if a commit had landed on main. That last step is an inference
+about Irmin's merge semantics rather than something this repository states or
+tests, so Shape 2 additionally requires an integration test establishing the
+fast-forward commit's parent shape before the check can be trusted.
+
+Shape 2 honours the ruling's intent, in that no commit is discarded. It leaves
+main holding an invalid tree whenever the check refuses, and it leaves the
+interruption window to be closed as its own separate change.
+
+**Why this is asked rather than chosen.** Shape 1 subsumes a decision that was
+presented separately, and it deletes the undo path §8.19.2a specifies. It also
+deletes the only producer of `MergeUndoFailed`, whose typed form
+`docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md` §3.2 specifies, so that plan's
+Phase 1 has different content depending on this ruling and should not start
+first. All three are changes to approved plan text, so they are the user's to
+rule rather than a detail of implementing M2-D9.
+
+#### 8.19.9 Exact signatures — M2-D9 Shape 1 — LANDED 2026-10-07
+
+Implemented and green across `commonJVM`, `server`, `app` and `serverIt`. Two
+things differ from the signatures as first written, both named in place below:
+`getBranch` is a fourth method accepting either branch kind, and
+`MergeStagingRef.forScenario` keeps its prefix private to its own companion
+rather than exposing a `stagingPrefix` on `BranchRef`, because
+`BranchChoice.fromBranchRef` no longer needs to refuse by it.
+
+**The staging branch is its own type, and `BranchRefConstraint` is untouched.**
+A branch someone owns and a branch that exists for the duration of one merge
+are different concepts with different valid-value sets, so the refinement is
+what distinguishes them. The three low-level operations both kinds share are
+named by a sealed supertype, following `OpaqueTypes.scala`'s own existing
+`sealed trait UserId`. All of it is in
+`modules/common/src/main/scala/com/risquanter/register/domain/data/iron/OpaqueTypes.scala`,
+because a sealed trait's cases must share its file.
+
+```scala
+/** A branch name the store can be told to create, merge into, or delete.
+  *
+  * Two cases, and they are not interchangeable. `BranchRef` is a branch with a
+  * lineage someone owns — main, or a scenario — so it can be read, written,
+  * listed, and converted to its client-facing `BranchChoice`.
+  * `MergeStagingRef` exists for the duration of one merge: it is created,
+  * merged into, published from, and deleted. Nothing reads it and it has no
+  * client-facing form.
+  */
+sealed trait StoreBranch:
+  def name: String
+```
+
+```scala
+case class BranchRef(toBranchRef: BranchRefStr) extends StoreBranch:
+  def name: String = toBranchRef
+```
+
+```scala
+type MergeStagingRefConstraint =
+  Not[Blank] & MaxLength[160] &
+  Match["^merge-staging\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63}$"]
+
+type MergeStagingRefStr = String :| MergeStagingRefConstraint
+
+/** The branch a scenario's merge is assembled on before it is published to
+  * main. Embeds the `WorkspaceId`, so it is confined exactly as `BranchRef` is
+  * and never crosses the client boundary (ADR-036) — and unlike `BranchRef` it
+  * has no client-facing form to convert to. The constraint is narrower than
+  * `BranchRefConstraint`: it admits no `main` alternative, because a staging
+  * branch is never main.
+  */
+case class MergeStagingRef(toBranchRef: MergeStagingRefStr) extends StoreBranch:
+  def name: String = toBranchRef
+
+object MergeStagingRef:
+  private def prefix(wsId: WorkspaceId): String =
+    s"merge-staging.${wsId.value.toLowerCase}."
+
+  /** Named from the scenario rather than randomly, so a second merge of the
+    * same scenario while one is in flight is refused by `createBranchAt`
+    * rather than interleaved with it. */
+  def forScenario(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Either[List[ValidationError], MergeStagingRef] =
+    s"${prefix(wsId)}${name.value}"
+      .refineEither[MergeStagingRefConstraint]
+      .left.map(err => List(ValidationError(
+        field = "branch",
+        code = ValidationErrorCode.INVALID_FORMAT,
+        message = s"Merge staging branch is invalid: $err"
+      )))
+      .map(MergeStagingRef(_))
+```
+
+`BranchChoice.fromBranchRef` is **unchanged**. It takes a `BranchRef`, and a
+`MergeStagingRef` is not one, so the case it would otherwise have to reject
+cannot be constructed. No runtime refusal arm is added anywhere.
+
+**Four signatures accept either kind**, in `IrminClient.scala`'s trait and its
+accessor object. The remaining nine branch-taking client methods, the four
+repository methods, the history service and the merge scan all keep
+`BranchRef`:
+
+```scala
+  def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit]
+  def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError, Unit]
+  def mergeBranch(from: BranchRef, into: StoreBranch, message: String): IO[IrminError, IrminCommit]
+  def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]]
+```
+
+`from` stays `BranchRef`: only a branch someone owns is ever merged.
+
+`getBranch` is the fourth, and it was not in this section when the signatures
+were first written. The staging branch's cleanup deletes it, and
+`deleteBranch`'s compare-and-set needs the head it is deleting, so the cleanup
+reads the branch. The alternative was to carry the last known staging head in a
+`Ref` and delete with that, which avoids the read but is wrong exactly when it
+matters: if the head is not what the flow assumed, the delete fails and the
+staging branch survives to block the next merge of that scenario. Reading the
+store is the robust form.
+
+`IrminQueries.scala`'s `mergeWithBranch`'s `into` parameter, `testAndSetBranch`'s
+`branch` parameter, and the private `branchSelector` and `branchArg` helpers
+take `StoreBranch` and read `.name`.
+
+**The two compare-and-set failures carry either kind**, because
+`IrminClientLive` builds them from the branch it was handed. In
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/AppError.scala`:
+
+```scala
+case class BranchAlreadyExists(branch: StoreBranch) extends IrminError
+case class BranchHeadStale(branch: StoreBranch, expectedHead: CommitHash) extends IrminError
+```
+
+**A staging failure is a different situation from a scenario failure, and the
+type says so.** `BranchAlreadyExists` in `IrminClient`'s vocabulary means "the
+precondition did not hold"; it does not say which precondition, and a reader of
+the error cannot tell a taken scenario name from a merge already running. Two
+domain errors name the two situations, each carrying only the scenario, so
+neither can hold a workspace identifier by construction:
+
+```scala
+/** A merge of this scenario is already running. The staging branch its merge
+  * assembles on is named from the scenario, so a second concurrent merge of
+  * the same scenario is refused here rather than interleaved with the first.
+  * Retriable once the first finishes. */
+case class MergeAlreadyRunning(scenario: ScenarioName.ScenarioName) extends SimError {
+  override def getMessage: String =
+    s"A merge of scenario ${scenario.value} is already running"
+}
+
+/** Main changed while this merge was being assembled, so the merge was not
+  * published. Nothing was written to main. Re-run the preview and retry. */
+case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends SimError {
+  override def getMessage: String =
+    s"Main changed while merging scenario ${scenario.value}; re-run the preview and retry"
+}
+```
+
+The staging flow translates at the call site, which is the pattern
+`ScenarioServiceLive` already uses for `BranchAlreadyExists`:
+
+```scala
+      _ <- irmin.createBranchAt(staging, mainBefore)
+             .catchSome { case BranchAlreadyExists(_) => ZIO.fail(MergeAlreadyRunning(name)) }
+      …
+      _ <- irmin.moveBranchTo(BranchRef.Main, expectedHead = mainBefore, to = staged)
+             .catchSome { case BranchHeadStale(_, _) => ZIO.fail(MergeTargetMoved(name)) }
+```
+
+So `BranchAlreadyExists` and `BranchHeadStale` never leave the staging flow
+untranslated, and the two safety-net encoders stay unreachable from it.
+
+Two error codes are added to
+`modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala`,
+because no existing code distinguishes these from an ordinary version conflict:
+
+```scala
+  case MERGE_ALREADY_RUNNING extends ValidationErrorCode("MERGE_ALREADY_RUNNING", "A merge of this scenario is already running")
+  case MERGE_TARGET_MOVED extends ValidationErrorCode("MERGE_TARGET_MOVED", "The merge target changed before the merge was published")
+```
+
+Both errors encode to 409 with the scenario in a detail row, and
+`GlobalError.scala` classifies both as the conflict banner alongside the other
+merge outcomes. `PLAN-TYPED-ERROR-STRUCTURE.md` §3.1 folds `MergeTargetMoved`
+into `MergeRefusal.ConcurrentChange`, which is the same information in that
+plan's shape.
+
+**The guarded branch move is renamed**, because after this change its only use
+moves a branch forward and the name `resetBranchTo` would say the opposite. In
+`modules/server/src/main/scala/com/risquanter/register/infra/irmin/IrminClient.scala`,
+both the trait method and the accessor:
+
+```scala
+  /** Point `branch` at `to`, but only while its head is still `expectedHead`
+    * (Irmin `test_and_set_branch` with both sides present).
+    *
+    * The compare-and-set is what makes the move safe in either direction: a
+    * write that landed on the branch since `expectedHead` was observed makes
+    * the move fail rather than discard that write. Commits left off the branch
+    * stay reachable by hash.
+    *
+    * @see BranchHeadStale — the compare-and-set was rejected because the
+    *      branch's head is no longer `expectedHead`; nothing was moved and
+    *      nothing was discarded.
+    */
+  def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit]
+```
+
+Four test doubles override it and are renamed with it:
+`RiskTreeReadConsistencySpec.scala:148`, `ScenarioServiceLiveSpec.scala:55`,
+`ScenarioMergeServiceSpec.scala:128` and `ScenarioControllerSpec.scala:71`.
+
+**The merge assembles on the staging branch and publishes once.** In
+`modules/server/src/main/scala/com/risquanter/register/services/ScenarioMergeService.scala`:
+
+```scala
+  /** Assemble the merge on a staging branch, validate it there, and publish it
+    * to main with one compare-and-set against the head observed before the
+    * merge began.
+    *
+    * Main is never pointed at an unvalidated commit. A guard failure discards
+    * the staging branch and leaves main untouched, so there is no undo. A
+    * commit landing on main while the merge runs makes the publish fail rather
+    * than be absorbed and later discarded, and the caller retries. An
+    * interruption at any point leaves main as it was.
+    *
+    * The staging branch is removed on every exit path. Its name is derived
+    * from the scenario, so a concurrent merge of the same scenario is refused
+    * by `BranchAlreadyExists` rather than interleaved.
+    */
+  private def mergeOnStaging(
+    wsId: WorkspaceId,
+    name: ScenarioName.ScenarioName,
+    scenarioBranch: BranchRef,
+    mainBefore: CommitHash,
+    message: String
+  ): Task[CommitHash]
+```
+
+```scala
+  /** Fails when any tree in the workspace would not load at `staged`.
+    *
+    * Nothing has been published to main at this point, so a failure needs no
+    * repair: the caller discards the staging branch. The repository's own
+    * failure text goes to the log and nowhere else.
+    */
+  private def guardStagedState(
+    wsId: WorkspaceId,
+    scenario: ScenarioName.ScenarioName,
+    staged: CommitHash
+  ): Task[Unit]
+```
+
+The publish failure is a refusal the caller can act on, not a server fault:
+
+```scala
+      _ <- irmin.moveBranchTo(BranchRef.Main, expectedHead = mainBefore, to = staged)
+             .catchSome { case BranchHeadStale(_, _) =>
+               ZIO.fail(MergeConflict(name,
+                 "main changed while the merge ran; re-run the preview and retry"))
+             }
+```
+
+That message is a constant with nothing interpolated into it, so it carries no
+internal value. `docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md` §3.1 replaces it
+with `MergeRefusal.ConcurrentChange`.
+
+**`mainBefore` becomes required rather than optional.** The current signature
+threads `Option[CommitHash]` and dies on `None`. Shape 1 cannot proceed without
+it at all, so the read happens once and fails the effect:
+
+```scala
+      mainBefore <- irmin.mainBranch
+                      .flatMap(b => ZIO.fromOption(b.flatMap(_.head).map(h => commitHash(h.hash)))
+                        .orElseFail(RepositoryFailure("main has no head")))
+```
+
+**`MergeUndoFailed` is removed.** It has one producer, which this change
+deletes. The removals are `AppError.scala:193`, the `encode` case at
+`ErrorResponse.scala:189`, `makeMergeUndoFailedResponse` at
+`ErrorResponse.scala:335`, the `decode` reconstruction at
+`ErrorResponse.scala:88`, the classification at `GlobalError.scala:96`, and the
+four assertions in `ErrorResponseSpec.scala` at `:200`, `:295`, `:298` and
+`:301`–`:303`. `PLAN-TYPED-ERROR-STRUCTURE.md` §3.2 drops the type from its own
+specification in consequence.
+
+**Tests.** `ScenarioMergeServiceSpec.scala`'s `FakeMergeIrmin` gains the branch
+operations the staging flow uses and models merging against the target branch's
+current head rather than returning a canned commit, which is what lets a test
+move main between the staging merge and the publish. The replaced case at
+`:418`, "a refused undo fails MergeUndoFailed carrying the pre-merge commit",
+becomes "a commit landing on main during the merge makes the publish fail and
+leaves that commit in place". `ScenarioMergeServiceItSpec.scala` gains the same
+scenario against real Irmin, plus one case asserting the staging branch is gone
+after both a successful and a refused merge.
+
+#### 8.19.10 Exact signatures — TES-D-4's wire status, as it affects this slice
+
+`MergePreviewResponse.status` becomes a closed type. The type cannot be the
+server's `MergePreviewResult`: that enum lives in `ScenarioMergeService.scala`
+under `modules/server`, which is not cross-compiled, so the Scala.js client
+cannot see it. `ChangedNodesResponse.scala` records the same constraint for its
+own sibling — "`modules/server`, service-layer only — not cross-compiled, hence
+the `String` status here rather than sharing the domain enum directly".
+
+No closed type in `modules/common` carries these four outcomes, so one is added,
+co-located with the response it belongs to in
+`modules/common/src/main/scala/com/risquanter/register/http/responses/ScenarioMergeResponse.scala`
+and following `ValidationErrorCode`'s shape — a value-carrying enum with string
+codecs whose decoder fails on an unrecognised value:
+
+```scala
+/** The outcome of a merge preview as the wire carries it: the shared, closed
+  * restatement of the server's `MergePreviewResult`, which is not
+  * cross-compiled. The client matches on it exhaustively.
+  */
+enum MergePreviewStatus(val wire: String):
+  case Clean           extends MergePreviewStatus("clean")
+  case Conflicts       extends MergePreviewStatus("conflicts")
+  case DuplicateNames  extends MergePreviewStatus("duplicate-names")
+  case ScenarioMissing extends MergePreviewStatus("missing-scenario")
+
+object MergePreviewStatus:
+  given JsonEncoder[MergePreviewStatus] = JsonEncoder[String].contramap(_.wire)
+  given JsonDecoder[MergePreviewStatus] = JsonDecoder[String].mapOrFail { s =>
+    MergePreviewStatus.values.find(_.wire == s)
+      .toRight(s"Unknown merge preview status: $s")
+  }
+```
+
+```scala
+final case class MergePreviewResponse(
+  status: MergePreviewStatus,
+  conflicts: List[MergeConflictEntry],
+  duplicateNames: Option[String] = None
+)
+```
+
+The four wire strings are unchanged, so no deployed response body changes shape.
+The Tapir schema follows `BranchChoice`'s, in
+`modules/common/src/main/scala/com/risquanter/register/http/codecs/IronTapirCodecs.scala`:
+
+```scala
+  given Schema[MergePreviewStatus] = Schema.string.map[MergePreviewStatus](
+    (s: String) => MergePreviewStatus.values.find(_.wire == s)
+  )(_.wire)
+```
+
+`MergeModal.renderPreview`'s `case _ =>` arm is replaced by the four named
+cases. The project compiles an inexhaustive match as an error, so a fifth
+outcome added later cannot reach the client unhandled.
 
 ---
 

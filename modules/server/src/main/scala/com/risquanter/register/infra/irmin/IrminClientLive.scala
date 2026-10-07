@@ -8,7 +8,7 @@ import sttp.client3.httpclient.zio.HttpClientZioBackend
 import sttp.model.{Uri, StatusCode}
 import com.risquanter.register.configs.IrminConfig
 import com.risquanter.register.domain.errors.*
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt, StoreBranch}
 import com.risquanter.register.infra.irmin.model.*
 import com.risquanter.register.infra.irmin.model.ListTreeResponse
 
@@ -37,8 +37,8 @@ final class IrminClientLive private (
     */
   private val MergeConflictPrefix = "merge conflict: "
 
-  private def branchLog(branch: BranchRef): String =
-    if branch == BranchRef.Main then "" else s" [branch=${branch.toBranchRef}]"
+  private def branchLog(branch: StoreBranch): String =
+    if branch == BranchRef.Main then "" else s" [branch=${branch.name}]"
 
   override def get(path: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError, Option[String]] =
     for
@@ -88,10 +88,10 @@ final class IrminClientLive private (
   override def mainBranch: IO[IrminError, Option[IrminBranch]] =
     branchInfo(BranchRef.Main)
 
-  override def getBranch(branch: BranchRef): IO[IrminError, Option[IrminBranch]] =
+  override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
     branchInfo(branch)
 
-  private def branchInfo(branch: BranchRef): IO[IrminError, Option[IrminBranch]] =
+  private def branchInfo(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
     for
       _        <- ZIO.logDebug(s"Irmin GET BRANCH${branchLog(branch)}")
       response <- executeQuery[MainBranchResponse](IrminQueries.getBranchInfo(branch))
@@ -114,9 +114,9 @@ final class IrminClientLive private (
                   )
     yield info
 
-  override def mergeBranch(from: BranchRef, into: BranchRef, message: String): IO[IrminError, IrminCommit] =
+  override def mergeBranch(from: BranchRef, into: StoreBranch, message: String): IO[IrminError, IrminCommit] =
     for
-      _        <- ZIO.logInfo(s"Irmin MERGE: ${from.toBranchRef} → ${into.toBranchRef}")
+      _        <- ZIO.logInfo(s"Irmin MERGE: ${from.toBranchRef} → ${into.name}")
       query     = IrminQueries.mergeWithBranch(from, into, message, defaultAuthor)
       response <- executeQuery[MergeBranchResponse](query)
       commit   <- response.data.flatMap(_.merge_with_branch) match
@@ -144,24 +144,34 @@ final class IrminClientLive private (
       _        <- ZIO.logInfo(s"Irmin REVERT new head: ${newHead.hash.take(12)}")
     yield newHead
 
-  override def createBranchAt(branch: BranchRef, at: CommitHash): IO[IrminError, Unit] =
+  override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit] =
     for
-      _        <- ZIO.logInfo(s"Irmin CREATE BRANCH: ${branch.toBranchRef} at ${at.value.take(12)}")
+      _        <- ZIO.logInfo(s"Irmin CREATE BRANCH: ${branch.name} at ${at.value.take(12)}")
       query     = IrminQueries.testAndSetBranch(branch, test = None, set = Some(at))
       response <- executeQuery[TestAndSetBranchResponse](query)
       applied  <- extractCasResult(response)
       _        <- if applied then ZIO.unit else ZIO.fail(BranchAlreadyExists(branch))
-      _        <- ZIO.logInfo(s"Irmin CREATE BRANCH ${branch.toBranchRef}: applied")
+      _        <- ZIO.logInfo(s"Irmin CREATE BRANCH ${branch.name}: applied")
     yield ()
 
-  override def deleteBranch(branch: BranchRef, currentHead: CommitHash): IO[IrminError, Unit] =
+  override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError, Unit] =
     for
-      _        <- ZIO.logInfo(s"Irmin DELETE BRANCH: ${branch.toBranchRef} at ${currentHead.value.take(12)}")
+      _        <- ZIO.logInfo(s"Irmin DELETE BRANCH: ${branch.name} at ${currentHead.value.take(12)}")
       query     = IrminQueries.testAndSetBranch(branch, test = Some(currentHead), set = None)
       response <- executeQuery[TestAndSetBranchResponse](query)
       applied  <- extractCasResult(response)
       _        <- if applied then ZIO.unit else ZIO.fail(BranchHeadStale(branch, currentHead))
-      _        <- ZIO.logInfo(s"Irmin DELETE BRANCH ${branch.toBranchRef}: applied")
+      _        <- ZIO.logInfo(s"Irmin DELETE BRANCH ${branch.name}: applied")
+    yield ()
+
+  override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit] =
+    for
+      _        <- ZIO.logInfo(s"Irmin MOVE BRANCH: ${branch.name} ${expectedHead.value.take(12)} -> ${to.value.take(12)}")
+      query     = IrminQueries.testAndSetBranch(branch, test = Some(expectedHead), set = Some(to))
+      response <- executeQuery[TestAndSetBranchResponse](query)
+      applied  <- extractCasResult(response)
+      _        <- if applied then ZIO.unit else ZIO.fail(BranchHeadStale(branch, expectedHead))
+      _        <- ZIO.logInfo(s"Irmin MOVE BRANCH ${branch.name}: applied")
     yield ()
 
   override def getCommit(hash: CommitHash): IO[IrminError, Option[IrminCommit]] =

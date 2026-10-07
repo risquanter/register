@@ -3,7 +3,7 @@ package com.risquanter.register.domain.errors
 import scala.concurrent.duration.Duration
 import sttp.model.StatusCode
 import java.time.{Duration as JDuration, Instant}
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, WorkspaceId, WorkspaceKeySecret, TreeId}
+import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, StoreBranch, WorkspaceId, WorkspaceKeySecret, TreeId}
 
 sealed trait AppError extends Throwable
 sealed trait SimError extends AppError
@@ -40,6 +40,17 @@ object RepositoryFailure:
   def isWorkspaceSentinel(e: Throwable): Boolean = e match
     case rf: RepositoryFailure => rf.reason.startsWith(WorkspaceSentinelPrefix)
     case _                     => false
+
+/** One tree in a workspace listing could not be loaded.
+  *
+  * Separate from `RepositoryFailure`, which also covers failures that are about
+  * no single tree — a workspace record, a branch head that will not refine, a
+  * failure rebuilt from a wire that never carried an identity. Here the tree is
+  * always known, so its id is a field rather than text inside `reason`, and
+  * every caller can read it without parsing prose.
+  */
+case class TreeLoadFailure(treeId: TreeId, reason: String) extends SimError:
+  override def getMessage: String = s"Tree ${treeId.value} could not be loaded: $reason"
 
 /** Simulation execution failure - wraps underlying cause with context */
 case class SimulationFailure(simulationId: String, cause: Throwable) extends SimError {
@@ -131,17 +142,24 @@ case class NetworkTimeout(operation: String, duration: Duration) extends IrminEr
   * (branch), not scenario vocabulary: whether this means "scenario name taken"
   * is a judgment ScenarioService makes one layer up, the same way `IrminGraphQLError`
   * is translated into the domain-level `MergeConflict` below, not inside IrminClient.
-  * Non-retriable as-is. */
-case class BranchAlreadyExists(branch: BranchRef) extends IrminError {
-  override def getMessage: String = s"Branch already exists: ${branch.toBranchRef}"
+  * Non-retriable as-is.
+  *
+  * Carries either branch kind, because the client builds it from whichever
+  * branch it was asked to create. Which situation it means differs by kind, and
+  * each caller translates it accordingly: a scenario branch means the name is
+  * taken (`DataConflict`), a staging branch means a merge of that scenario is
+  * already running (`MergeAlreadyRunning`). */
+case class BranchAlreadyExists(branch: StoreBranch) extends IrminError {
+  override def getMessage: String = s"Branch already exists: ${branch.name}"
 }
 
 /** CAS branch-delete rejected (Phase B, DD-5 / A9 fact 2): `test_and_set_branch`
   * with `test: expectedHead` failed because the branch's actual head no longer
   * matches — concurrent modification since it was last read. Non-retriable
-  * without re-reading the branch's current state first. */
-case class BranchHeadStale(branch: BranchRef, expectedHead: CommitHash) extends IrminError {
-  override def getMessage: String = s"Branch ${branch.toBranchRef} head is not ${expectedHead.value}"
+  * without re-reading the branch's current state first. Carries either branch
+  * kind, for the reason given on `BranchAlreadyExists`. */
+case class BranchHeadStale(branch: StoreBranch, expectedHead: CommitHash) extends IrminError {
+  override def getMessage: String = s"Branch ${branch.name} head is not ${expectedHead.value}"
 }
 
 /** A merge refused by the (patched) Irmin backend: the two branches hold
@@ -160,24 +178,52 @@ case class VersionConflict(nodeId: String, expected: String, actual: String) ext
   override def getMessage: String = s"Version conflict on node $nodeId: expected $expected, found $actual"
 }
 
-/** Branch merge conflict - requires user intervention.
-  * `branch` is the typed Irmin branch reference (ADR-018 nominal wrapper).
+/** Branch merge conflict — requires user intervention. Names the scenario,
+  * never the Irmin `BranchRef`, which embeds the `WorkspaceId` (ADR-036). A
+  * merge always targets a scenario, so main is not a reachable value here and
+  * the scenario's own name is the precise type.
   */
-case class MergeConflict(branch: BranchRef, details: String) extends SimError {
-  override def getMessage: String = s"Merge conflict on branch ${branch.toBranchRef}: $details"
+case class MergeConflict(scenario: ScenarioName.ScenarioName, details: String) extends SimError {
+  override def getMessage: String = s"Merge conflict on scenario ${scenario.value}: $details"
 }
 
-/** Scenario delete/duplicate rejected — the branch's head no longer matches what
-  * the caller last observed (concurrent modification). Domain-level translation of
-  * `BranchHeadStale` (`ScenarioService`, milestone-2b Phase B); kept typed like
-  * `MergeConflict.branch` rather than reusing `VersionConflict`'s generic `String`
-  * fields, which would mislabel a branch reference as a `nodeId`.
-  * `actual` is `None` when the branch no longer exists at all.
+/** A merge of this scenario is already running.
+  *
+  * A merge assembles on a staging branch named from the scenario, so a second
+  * concurrent merge of the same scenario collides on that name and is refused
+  * here rather than running alongside the first. Nothing was written. Retriable
+  * once the first merge finishes.
   */
-case class ScenarioHeadStale(branch: BranchRef, expected: CommitHash, actual: Option[CommitHash]) extends SimError {
+case class MergeAlreadyRunning(scenario: ScenarioName.ScenarioName) extends SimError {
   override def getMessage: String =
-    s"Scenario branch ${branch.toBranchRef} head is not ${expected.value}" +
-    actual.fold(" (branch no longer exists)")(a => s" (currently ${a.value})")
+    s"A merge of scenario ${scenario.value} is already running"
+}
+
+/** Main changed while this merge was being assembled, so the merge was not
+  * published.
+  *
+  * The merge is assembled on a staging branch and published to main with one
+  * compare-and-set against the head read before it started. A commit landing on
+  * main in between makes that publish fail, which is what stops the merge from
+  * absorbing the commit and then discarding it. Main is untouched; re-run the
+  * preview and retry.
+  */
+case class MergeTargetMoved(scenario: ScenarioName.ScenarioName) extends SimError {
+  override def getMessage: String =
+    s"Main changed while merging scenario ${scenario.value}; re-run the preview and retry"
+}
+
+/** Scenario delete/duplicate rejected — the branch's head no longer matches
+  * what the caller last observed (concurrent modification). Domain-level
+  * translation of `BranchHeadStale`. Names the scenario for the same reason as
+  * `MergeConflict` (ADR-036): a stale head is always a scenario's, so main is
+  * not a reachable value. `actual` is `None` when the scenario no longer
+  * exists at all.
+  */
+case class ScenarioHeadStale(scenario: ScenarioName.ScenarioName, expected: CommitHash, actual: Option[CommitHash]) extends SimError {
+  override def getMessage: String =
+    s"Scenario ${scenario.value} head is not ${expected.value}" +
+    actual.fold(" (scenario no longer exists)")(a => s" (currently ${a.value})")
 }
 
 /** Scenarios are unavailable in this deployment (repository.type=in-memory has no

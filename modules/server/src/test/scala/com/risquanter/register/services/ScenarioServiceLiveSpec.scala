@@ -5,7 +5,7 @@ import zio.test.*
 import zio.test.Assertion.*
 
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, PositiveInt, StoreBranch}
 import com.risquanter.register.domain.errors.{DataConflict, ScenarioHeadStale, ValidationFailed, IrminError}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
@@ -37,26 +37,32 @@ object ScenarioServiceLiveSpec extends ZIOSpecDefault:
     override def mainBranch: IO[IrminError, Option[IrminBranch]] =
       state.get.map(m => Some(toBranch("main", m.get("main"))))
 
-    override def getBranch(branch: BranchRef): IO[IrminError, Option[IrminBranch]] =
-      state.get.map(m => m.get(branch.toBranchRef).map(h => toBranch(branch.toBranchRef, Some(h))))
+    override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
+      state.get.map(m => m.get(branch.name).map(h => toBranch(branch.name, Some(h))))
 
-    override def createBranchAt(branch: BranchRef, at: CommitHash): IO[IrminError, Unit] =
+    override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit] =
       state.modify { m =>
-        if m.contains(branch.toBranchRef) then (false, m)
-        else (true, m + (branch.toBranchRef -> at))
+        if m.contains(branch.name) then (false, m)
+        else (true, m + (branch.name -> at))
       }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchAlreadyExists(branch)))
 
-    override def deleteBranch(branch: BranchRef, currentHead: CommitHash): IO[IrminError, Unit] =
+    override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError, Unit] =
       state.modify { m =>
-        if m.get(branch.toBranchRef).contains(currentHead) then (true, m - branch.toBranchRef)
+        if m.get(branch.name).contains(currentHead) then (true, m - branch.name)
         else (false, m)
       }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, currentHead)))
+
+    override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit] =
+      state.modify { m =>
+        if m.get(branch.name).contains(expectedHead) then (true, m + (branch.name -> to))
+        else (false, m)
+      }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, expectedHead)))
 
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
-    override def mergeBranch(from: BranchRef, into: BranchRef, message: String) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
+    override def mergeBranch(from: BranchRef, into: StoreBranch, message: String) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))
     override def getAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused by ScenarioServiceLive"))

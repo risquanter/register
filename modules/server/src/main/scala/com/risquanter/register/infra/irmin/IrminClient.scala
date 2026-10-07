@@ -3,7 +3,7 @@ package com.risquanter.register.infra.irmin
 import zio.*
 import com.risquanter.register.infra.irmin.model.*
 import com.risquanter.register.domain.errors.IrminError
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt, StoreBranch}
 
 /**
   * ZIO service interface for Irmin GraphQL client.
@@ -88,7 +88,7 @@ trait IrminClient:
     *
     * @return Branch info with head commit, or None if branch doesn't exist
     */
-  def getBranch(branch: BranchRef): IO[IrminError, Option[IrminBranch]]
+  def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]]
 
   /**
     * Merge a branch into another (Irmin `merge_with_branch`).
@@ -109,7 +109,7 @@ trait IrminClient:
     *         since the fork)
     * @see IrminMergeConflict — the branches conflict; no commit was created
     */
-  def mergeBranch(from: BranchRef, into: BranchRef, message: String): IO[IrminError, IrminCommit]
+  def mergeBranch(from: BranchRef, into: StoreBranch, message: String): IO[IrminError, IrminCommit]
 
   /**
     * Revert a branch to a previous commit (Phase E groundwork).
@@ -132,7 +132,7 @@ trait IrminClient:
     * @see BranchAlreadyExists — fails with this typed error if the branch
     *      already has a head; the CAS itself rejects name collisions.
     */
-  def createBranchAt(branch: BranchRef, at: CommitHash): IO[IrminError, Unit]
+  def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit]
 
   /**
     * Delete a branch via CAS (Phase B, DD-5, A9 fact 2). Only removes the
@@ -145,7 +145,25 @@ trait IrminClient:
     *      doesn't match the branch's actual head (concurrent modification);
     *      never silently deletes the wrong state.
     */
-  def deleteBranch(branch: BranchRef, currentHead: CommitHash): IO[IrminError, Unit]
+  def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError, Unit]
+
+  /**
+    * Move a branch's pointer to `to`, but only while its head is still
+    * `expectedHead` (Irmin `test_and_set_branch` with both sides present).
+    *
+    * The compare-and-set is what makes the move safe in either direction: a
+    * write that landed on the branch since `expectedHead` was observed makes
+    * the move fail rather than discard that write. Commits left off the branch
+    * stay reachable by hash.
+    *
+    * @param branch Branch whose pointer to move
+    * @param expectedHead The head the caller last observed
+    * @param to Commit the branch should point at
+    * @see BranchHeadStale — the compare-and-set was rejected because the
+    *      branch's head is no longer `expectedHead`; nothing was moved and
+    *      nothing was discarded.
+    */
+  def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit]
 
   /**
     * Find a commit by hash.
@@ -238,20 +256,23 @@ object IrminClient:
   def mainBranch: ZIO[IrminClient, IrminError, Option[IrminBranch]] =
     ZIO.serviceWithZIO[IrminClient](_.mainBranch)
 
-  def getBranch(branch: BranchRef): ZIO[IrminClient, IrminError, Option[IrminBranch]] =
+  def getBranch(branch: StoreBranch): ZIO[IrminClient, IrminError, Option[IrminBranch]] =
     ZIO.serviceWithZIO[IrminClient](_.getBranch(branch))
 
-  def mergeBranch(from: BranchRef, into: BranchRef, message: String): ZIO[IrminClient, IrminError, IrminCommit] =
+  def mergeBranch(from: BranchRef, into: StoreBranch, message: String): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.mergeBranch(from, into, message))
 
   def revert(commit: CommitHash, branch: BranchRef): ZIO[IrminClient, IrminError, IrminCommit] =
     ZIO.serviceWithZIO[IrminClient](_.revert(commit, branch))
 
-  def createBranchAt(branch: BranchRef, at: CommitHash): ZIO[IrminClient, IrminError, Unit] =
+  def createBranchAt(branch: StoreBranch, at: CommitHash): ZIO[IrminClient, IrminError, Unit] =
     ZIO.serviceWithZIO[IrminClient](_.createBranchAt(branch, at))
 
-  def deleteBranch(branch: BranchRef, currentHead: CommitHash): ZIO[IrminClient, IrminError, Unit] =
+  def deleteBranch(branch: StoreBranch, currentHead: CommitHash): ZIO[IrminClient, IrminError, Unit] =
     ZIO.serviceWithZIO[IrminClient](_.deleteBranch(branch, currentHead))
+
+  def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): ZIO[IrminClient, IrminError, Unit] =
+    ZIO.serviceWithZIO[IrminClient](_.moveBranchTo(branch, expectedHead, to))
 
   def getCommit(hash: CommitHash): ZIO[IrminClient, IrminError, Option[IrminCommit]] =
     ZIO.serviceWithZIO[IrminClient](_.getCommit(hash))

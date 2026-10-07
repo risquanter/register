@@ -1,6 +1,6 @@
 package com.risquanter.register.infra.irmin
 
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, PositiveInt, StoreBranch}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 
 /**
@@ -18,17 +18,17 @@ import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 object IrminQueries:
 
   /** Selector for read queries: `main`, or the named branch aliased AS `main`
-    * so response decoding is branch-agnostic. The definite `BranchRef` maps
-    * onto Irmin's optional wire argument here — the only place.
+    * so response decoding is branch-agnostic. The definite branch maps onto
+    * Irmin's optional wire argument here — the only place.
     */
-  private def branchSelector(branch: BranchRef): String =
+  private def branchSelector(branch: StoreBranch): String =
     if branch == BranchRef.Main then "main"
-    else s"""main: branch(name: "${branch.toBranchRef}")"""
+    else s"""main: branch(name: "${branch.name}")"""
 
   /** Branch argument fragment for mutations (empty for main). */
-  private def branchArg(branch: BranchRef): String =
+  private def branchArg(branch: StoreBranch): String =
     if branch == BranchRef.Main then ""
-    else s"""branch: "${branch.toBranchRef}", """
+    else s"""branch: "${branch.name}", """
 
   /**
     * Query to get a value at a path.
@@ -198,7 +198,7 @@ object IrminQueries:
     * @param branch Branch to inspect (Main = Irmin's default). Branch queries alias the
     *               result as `main` so the response shape is branch-agnostic.
     */
-  def getBranchInfo(branch: BranchRef = BranchRef.Main): String =
+  def getBranchInfo(branch: StoreBranch = BranchRef.Main): String =
     s"""
     |{
     |  ${branchSelector(branch)} {
@@ -228,7 +228,7 @@ object IrminQueries:
     * @param from Source branch
     * @param into Target branch (Main = Irmin's default branch)
     */
-  def mergeWithBranch(from: BranchRef, into: BranchRef, message: String, author: String): String =
+  def mergeWithBranch(from: BranchRef, into: StoreBranch, message: String, author: String): String =
     val escapedMessage = escapeGraphQLString(message)
     val escapedAuthor = escapeGraphQLString(author)
     s"""
@@ -288,12 +288,12 @@ object IrminQueries:
     * @param test Expected current head (None = branch must not exist)
     * @param set Desired new head (None = delete the branch)
     */
-  def testAndSetBranch(branch: BranchRef, test: Option[CommitHash], set: Option[CommitHash]): String =
+  def testAndSetBranch(branch: StoreBranch, test: Option[CommitHash], set: Option[CommitHash]): String =
     val testArg = test.fold("test: null")(h => s"""test: "${h.value}"""")
     val setArg = set.fold("set: null")(h => s"""set: "${h.value}"""")
     s"""
     |mutation {
-    |  test_and_set_branch(branch: "${branch.toBranchRef}", $testArg, $setArg)
+    |  test_and_set_branch(branch: "${branch.name}", $testArg, $setArg)
     |}
     """.stripMargin.trim
 

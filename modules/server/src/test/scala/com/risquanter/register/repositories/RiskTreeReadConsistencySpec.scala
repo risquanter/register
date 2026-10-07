@@ -7,7 +7,7 @@ import zio.test.Assertion.*
 import io.github.iltotore.iron.*
 
 import com.risquanter.register.domain.data.{RiskTree, RiskLeaf, RiskPortfolio, RiskNode}
-import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, Revision}
+import com.risquanter.register.domain.data.iron.{SafeName, WorkspaceId, TreeId, NodeId, BranchRef, CommitHash, Revision, StoreBranch}
 import com.risquanter.register.domain.errors.{IrminError, RepositoryFailure}
 import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry}
@@ -108,13 +108,13 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
       store: Map[CommitHash, Map[String, String]]
   ) extends IrminClient:
 
-    override def getBranch(branch: BranchRef): IO[IrminError, Option[IrminBranch]] =
+    override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
       for
         _    <- branchCalls.update(_ + 1)
         head <- headRef.get
         _    <- advanceTo.fold[UIO[Unit]](ZIO.unit)(next => headRef.set(Some(next)))
       yield head.map(h =>
-        IrminBranch(branch.toBranchRef, Some(IrminCommit(h.value, h.value, Nil, emptyInfo)))
+        IrminBranch(branch.name, Some(IrminCommit(h.value, h.value, Nil, emptyInfo)))
       )
 
     override def getAtCommit(commit: CommitHash, path: IrminPath): IO[IrminError, Option[String]] =
@@ -141,10 +141,11 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
     override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("remove"))
     override def branches = ZIO.die(unused("branches"))
     override def mainBranch = ZIO.die(unused("mainBranch"))
-    override def mergeBranch(from: BranchRef, into: BranchRef, message: String) = ZIO.die(unused("mergeBranch"))
+    override def mergeBranch(from: BranchRef, into: StoreBranch, message: String) = ZIO.die(unused("mergeBranch"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(unused("revert"))
-    override def createBranchAt(branch: BranchRef, at: CommitHash) = ZIO.die(unused("createBranchAt"))
-    override def deleteBranch(branch: BranchRef, currentHead: CommitHash) = ZIO.die(unused("deleteBranch"))
+    override def createBranchAt(branch: StoreBranch, at: CommitHash) = ZIO.die(unused("createBranchAt"))
+    override def deleteBranch(branch: StoreBranch, currentHead: CommitHash) = ZIO.die(unused("deleteBranch"))
+    override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash) = ZIO.die(unused("moveBranchTo"))
     override def getCommit(hash: CommitHash) = ZIO.die(unused("getCommit"))
     override def getHistory(path: IrminPath, n: com.risquanter.register.domain.data.iron.PositiveInt, branch: BranchRef = BranchRef.Main) = ZIO.die(unused("getHistory"))
     override def lca(branch: BranchRef, commit: CommitHash) = ZIO.die(unused("lca"))
@@ -220,5 +221,37 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
         headResolutions == 1,
         commitsRead == Set(headC1)
       )
+    },
+
+    // ADR-036 confines WorkspaceId to the server: it must never reach a
+    // client-visible surface. getAllForWorkspace's TreeLoadFailure.reason is
+    // one such surface's source value (ScenarioMergeServiceLive.guardMergedState
+    // copies it verbatim into the wire-facing MergeConflict/MergeUndoFailed
+    // details), so this pins what loadTreeAt's internal "missing value"
+    // messages actually contain: the full Irmin path, built from
+    // WorkspaceStoragePaths.treeNodes(wsId, treeId), which embeds wsId.value.
+    // A node listed by listAtCommit but absent from getAtCommit at the SAME
+    // pinned commit should not happen under normal operation (Irmin's content
+    // at a fixed commit is immutable), but nothing in the type system rules
+    // it out, and this is exactly the kind of anomaly the post-merge guard
+    // exists to detect.
+    test("getAllForWorkspace's TreeLoadFailure.reason embeds the WorkspaceId when a listed node's value is missing") {
+      val treeF = tree(treeIdF, Seq(leaf(leaf1Id, 0.1)))
+      val nodesBase = WorkspaceStoragePaths.treeNodes(wsId, treeIdF)
+      // listAtCommit lists leaf1Id as a child because this phantom key starts
+      // with "$nodesBase/leaf1Id/", but no key equals "$nodesBase/leaf1Id"
+      // itself, so getAtCommit for that exact path returns None.
+      val tornStore = Map(WorkspaceStoragePaths.treeMeta(wsId, treeIdF) -> metaOf(treeF).toJson) +
+        (s"$nodesBase/${leaf1Id.value}/phantom" -> "unreachable")
+      for
+        setup       <- scripted(Some(headC1), advanceTo = None, store = Map(headC1 -> tornStore))
+        (repo, _, _) = setup
+        result      <- repo.getAllForWorkspace(wsId, Revision.Head(BranchRef.Main))
+      yield
+        val reasons = result.collect { case Left(f) => f.reason }
+        assertTrue(
+          reasons.exists(_.contains(wsId.value)),
+          reasons.exists(_.startsWith("Missing node value at"))
+        )
     }
   )

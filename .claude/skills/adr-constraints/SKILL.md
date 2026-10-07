@@ -148,8 +148,21 @@ checks a capability.
 afterwards. The ADR-022 credential checklist does **not** apply: these may appear in
 server logs, internal storage paths and merge commit messages — what closes them at
 the boundary is enumeration-oracle / BOLA (Broken Object-Level Authorization) risk,
-not secret leakage.
+not secret leakage. Masking the value in `toString` is not an alternative to
+removing it: it defends one rendering, where removal defends the boundary.
 *ADR-036*
+
+❌ NEVER pick the client-facing substitute for a `BranchRef` by habit. Two are
+accepted and one question chooses between them: **can the value be main?**
+✅ INSTEAD: No → a bare `ScenarioName` (`MergeConflict`, `ScenarioHeadStale`,
+`ScenarioSummary` — a merge always targets a scenario, a stale head is always a
+scenario's, a scenario listing can never list main). Yes → `BranchChoice`, the
+two-case client-facing branch type (`X-Branch`, the changed-nodes comparison
+parameters, the scenario-source body, the change-notification tag, the client's
+own branch state). Reaching for `BranchChoice` where main cannot occur adds an
+unreachable case; reaching for `ScenarioName` where it can forces a second field
+or an `Option` whose absence has to mean main.
+*ADR-036, ADR-018*
 
 ### Frontend
 
@@ -359,7 +372,7 @@ creates a new interaction adds a row here (Plan Quality Gate item 3).
 | ADR-030 × ADR-024 × ADR-021 | `workspaceStore.resolve` is the Layer 0 capability gate and is the one call that legitimately precedes `authz.check()`. Not knowing this produces either a false bypass report against correct code, or a missed real bypass behind an `// exempt:` that looks like it. |
 | ADR-029 × ADR-028 | The FOL query parser is a live boundary taking user-typed text. Node references resolve through per-sort literal validators (`riskNameToId.get`, `NodeId.fromString`) and are never interpolated — a query built by interpolation is re-parsed and is the injection path. |
 | ADR-031 × ADR-012 | A retry loop belongs to Istio or to application bootstrap, decided by one test: in-flight request, or process lifecycle. A readiness gate inside a request handler violates both ADRs at once. |
-| ADR-036 × ADR-004a | `BranchRef` embeds `WorkspaceId` in the scenario branch name, so a branch-typed error that reaches the wire leaks a confined identifier. Such an error stays branch-typed internally and is translated by its service-layer caller before the boundary. |
+| ADR-036 × ADR-004a | **Two** branch-name types embed the `WorkspaceId`, so neither may appear in a wire-facing type: `BranchRef` (main or a scenario) and `MergeStagingRef` (one merge's staging branch). They share the sealed `StoreBranch`, which the four branch primitives on `IrminClient` are declared over; everything that reads or writes tree data stays declared over `BranchRef`, so a staging branch cannot reach it. The two wire-facing scenario errors (`MergeConflict`, `ScenarioHeadStale`) are declared over `ScenarioName` and nothing is translated at the boundary on those paths. A branch-typed `IrminError` (`BranchAlreadyExists`, `BranchHeadStale`) carries a `StoreBranch`, stays internal, and is translated by its service-layer caller — and which situation it means depends on the kind, so each caller translates accordingly (a scenario branch means the name is taken, a staging branch means `MergeAlreadyRunning`). The two safety-net encoders for those errors discard the branch rather than render it. `BranchChoice.fromBranchRef` is the one place a `BranchRef` becomes its client-facing form; it takes `BranchRef` and not `StoreBranch`, so a staging branch is excluded by the type rather than by a check, and `MergeStagingRef` has no client-facing form at all. |
 | ADR-034 × ADR-001 | "No mitigation may eliminate a risk" has TWO enforcement points, and ADR-001's validate-at-the-boundary rule accounts for only one. A type closes the cases the parameter decides alone (`RetentionFactor`, `ResidualProbability`, a `PositiveLong` cap). The cases the outcomes decide — a deductible at or above every loss, a threshold above every loss, a scale factor small enough that every loss rounds to zero — cannot be typed at all, because the same parameter is ordinary for one node and annihilating for another; `LossDistribution.decorate` catches those by comparing the layer's result against its source. The scale factor is the proof that tightening a type cannot replace the check: its bound is already as tight as the methodology allows, and the precision is lost in the rounding, not the parameter. A new transform has to be checked against the layer check, not assumed covered by a type. `ResidualProbability` is also narrower than `OccurrenceProbability` on purpose: an author may declare a leaf that never occurs, a mitigation may not set its probability to zero. |
 
 ---

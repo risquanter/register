@@ -5,7 +5,7 @@ import scala.concurrent.duration.Duration
 import zio.json.{JsonCodec, DeriveJsonCodec}
 import sttp.model.StatusCode
 
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash}
+import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName}
 import com.risquanter.register.domain.errors.FolQueryFailure.*
 
 /** Wrapper for error responses sent to clients */
@@ -40,6 +40,13 @@ object ErrorResponse {
     val firstField = details.headOption.map(_.field).getOrElse("unknown")
     val firstCode = details.headOption.map(_.code).getOrElse(ValidationErrorCode.INTERNAL_ERROR)
 
+    /** The scenario named by the row every scenario error carries, when it
+      * refines. Shared by the three merge outcomes, which each reconstruct over
+      * it and degrade to `DataConflict` when it is absent. */
+    def scenarioFrom(rows: List[ErrorDetail]): Option[ScenarioName.ScenarioName] =
+      rows.collectFirst { case d if d.field == "scenario" => d.message }
+        .flatMap(s => ScenarioName.fromString(s).toOption)
+
     status.code match
       // 400 → disambiguate by code: FOL parse/symbol/bind errors vs general validation
       case 400 => firstCode match
@@ -69,14 +76,18 @@ object ErrorResponse {
           // reconstruct as DataConflict — the frontend already knows the treeId from context.
           DataConflict(message)
         case ValidationErrorCode.MERGE_CONFLICT =>
-          // Non-lossy: the "branchName" detail carries the raw branch reference
-          // (see makeMergeConflictResponse); reconstruct the typed BranchRef.
-          // A wire without a refinable branchName degrades to DataConflict.
-          val branch = details.collectFirst { case d if d.field == "branchName" => d.message }
-            .flatMap(s => BranchRef.fromString(s).toOption)
-          val conflictDetails = details.collectFirst { case d if d.field == "branch" => d.message }
+          // Non-lossy: the "scenario" detail carries the scenario name (see
+          // makeMergeConflictResponse); reconstruct the typed ScenarioName.
+          // A wire without a refinable scenario degrades to DataConflict.
+          val conflictDetails = details.collectFirst { case d if d.field == "conflict" => d.message }
             .getOrElse(message)
-          branch.fold[Throwable](DataConflict(message))(b => MergeConflict(b, conflictDetails))
+          scenarioFrom(details).fold[Throwable](DataConflict(message))(s => MergeConflict(s, conflictDetails))
+        case ValidationErrorCode.MERGE_ALREADY_RUNNING =>
+          // Both merge-concurrency codes carry the scenario and nothing else, so
+          // a wire without a refinable scenario degrades to DataConflict.
+          scenarioFrom(details).fold[Throwable](DataConflict(message))(MergeAlreadyRunning(_))
+        case ValidationErrorCode.MERGE_TARGET_MOVED =>
+          scenarioFrom(details).fold[Throwable](DataConflict(message))(MergeTargetMoved(_))
         case _ => firstField match
           case "version" => VersionConflict("unknown", "unknown", message)  // nodeId lost through HTTP
           case _         => DataConflict(message)
@@ -170,11 +181,16 @@ object ErrorResponse {
     case _: WorkspaceExpiredById                   => makeWorkspaceOpaqueNotFoundResponse()
     case _: TreeNotInWorkspace                     => makeWorkspaceOpaqueNotFoundResponse()
     case RepositoryFailure(reason)                 => makeRepositoryFailureResponse(reason)
+    // Same opaque 500 as RepositoryFailure: the reason is storage-internal and
+    // the tree id alone tells a client nothing it can act on.
+    case TreeLoadFailure(_, reason)                => makeRepositoryFailureResponse(reason)
     case SimulationFailure(id, cause)              => makeSimulationFailureResponse(id)
     case DataConflict(reason)                      => makeDataConflictResponse(reason)
     case VersionConflict(nodeId, expected, actual) => makeVersionConflictResponse(nodeId, expected, actual)
-    case MergeConflict(branch, details)            => makeMergeConflictResponse(branch, details)
-    case ScenarioHeadStale(branch, expected, actual) => makeScenarioHeadStaleResponse(branch, expected, actual)
+    case MergeConflict(scenario, details)          => makeMergeConflictResponse(scenario, details)
+    case MergeAlreadyRunning(scenario)             => makeMergeAlreadyRunningResponse(scenario)
+    case MergeTargetMoved(scenario)                => makeMergeTargetMovedResponse(scenario)
+    case ScenarioHeadStale(scenario, expected, actual) => makeScenarioHeadStaleResponse(scenario, expected, actual)
     case ScenariosNotSupported(reason)             => makeScenariosNotSupportedResponse(reason)
   }
 
@@ -196,16 +212,21 @@ object ErrorResponse {
     * (ScenarioService) before reaching this boundary — these two cases are
     * the safety net if that interception is ever skipped, matching every
     * other IrminError case here.
+    *
+    * Both discard the branch they carry. A `BranchRef` reads
+    * `scenarios.<workspaceId>.<slug>`, so a response naming one would return a
+    * raw workspace identifier (ADR-036), and a client can act on neither the
+    * branch name nor the fact that a translation was missed.
     */
   private def encodeIrminError(error: IrminError): (StatusCode, ErrorResponse) = error match {
     case IrminUnavailable(reason)            => makeServiceUnavailableResponse(reason)
     case NetworkTimeout(operation, duration) => makeNetworkTimeoutResponse(operation, duration)
     case IrminHttpError(status, body)        => makeIrminHttpErrorResponse(status, body)
     case IrminGraphQLError(messages, path)   => makeIrminGraphQlErrorResponse(messages, path)
-    case BranchAlreadyExists(branch)         => makeBranchAlreadyExistsResponse(branch)
-    case BranchHeadStale(branch, expected)   => makeBranchHeadStaleResponse(branch, expected)
+    case BranchAlreadyExists(_)              => makeBranchAlreadyExistsResponse()
+    case BranchHeadStale(_, expected)        => makeBranchHeadStaleResponse(expected)
     // Fallback only: ScenarioMergeService converts this to the domain
-    // MergeConflict (with its BranchRef) before the wire in the merge path.
+    // MergeConflict, which names the scenario, before the wire in the merge path.
     case IrminMergeConflict(reason)          => makeDataConflictResponse(s"merge conflict: $reason", domain = "scenarios")
   }
 
@@ -302,42 +323,75 @@ object ErrorResponse {
     response(StatusCode.Conflict, "version", ValidationErrorCode.VERSION_CONFLICT,
       s"Version conflict on node $nodeId: expected $expected, found $actual", domain, requestId)
 
-  /** Two details by design: field "branch" carries the conflict details, field
-    * "branchName" carries the raw branch reference so `decode` can reconstruct
-    * the typed `BranchRef` without parsing prose (non-lossy round trip).
+  /** Two details by design: field "conflict" carries the conflict details,
+    * field "scenario" carries the scenario name so `decode` can reconstruct the
+    * typed `ScenarioName` without parsing prose (non-lossy round trip). Neither
+    * names the Irmin `BranchRef`, which embeds the `WorkspaceId` (ADR-036).
     */
-  def makeMergeConflictResponse(branch: BranchRef, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    val message = s"Merge conflict on branch ${branch.toBranchRef}: $details"
+  def makeMergeConflictResponse(scenario: ScenarioName.ScenarioName, details: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"Merge conflict on scenario ${scenario.value}: $details"
     val errors = List(
-      ErrorDetail(domain, "branch", ValidationErrorCode.MERGE_CONFLICT, details, requestId),
-      ErrorDetail(domain, "branchName", ValidationErrorCode.MERGE_CONFLICT, branch.toBranchRef, requestId)
+      ErrorDetail(domain, "conflict", ValidationErrorCode.MERGE_CONFLICT, details, requestId),
+      ErrorDetail(domain, "scenario", ValidationErrorCode.MERGE_CONFLICT, scenario.value, requestId)
+    )
+    (StatusCode.Conflict, ErrorResponse(JsonHttpError(StatusCode.Conflict.code, message, errors)))
+
+  /** 409 rather than 500: nothing malfunctioned and nothing was written — the
+    * caller retries once the merge in flight finishes. One detail, the
+    * scenario, which is all the error carries.
+    */
+  def makeMergeAlreadyRunningResponse(scenario: ScenarioName.ScenarioName, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"A merge of scenario ${scenario.value} is already running"
+    val errors = List(
+      ErrorDetail(domain, "scenario", ValidationErrorCode.MERGE_ALREADY_RUNNING, scenario.value, requestId)
+    )
+    (StatusCode.Conflict, ErrorResponse(JsonHttpError(StatusCode.Conflict.code, message, errors)))
+
+  /** 409 rather than 500: main moved before the merge could be published, so
+    * the merge was not applied and main is untouched. The caller re-runs the
+    * preview and retries.
+    */
+  def makeMergeTargetMovedResponse(scenario: ScenarioName.ScenarioName, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"Main changed while merging scenario ${scenario.value}; re-run the preview and retry"
+    val errors = List(
+      ErrorDetail(domain, "scenario", ValidationErrorCode.MERGE_TARGET_MOVED, scenario.value, requestId)
     )
     (StatusCode.Conflict, ErrorResponse(JsonHttpError(StatusCode.Conflict.code, message, errors)))
 
   /** Compare-and-set safety net (see encodeIrminError) — a scenario name collision
     * that reached the HTTP boundary without being translated by ScenarioService.
     * Reuses DUPLICATE_VALUE, the existing code for "this identity is taken".
+    *
+    * Names no branch. A `BranchRef` reads `scenarios.<workspaceId>.<slug>`, so
+    * rendering one into a response body would return a raw workspace
+    * identifier to the client (ADR-036). The identifier stays in the error's
+    * `getMessage`, which reaches server logs only.
     */
-  def makeBranchAlreadyExistsResponse(branch: BranchRef, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+  def makeBranchAlreadyExistsResponse(domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.Conflict, "branch", ValidationErrorCode.DUPLICATE_VALUE,
-      s"Branch already exists: ${branch.toBranchRef}", domain, requestId)
+      "Branch already exists", domain, requestId)
 
   /** Compare-and-set safety net (see encodeIrminError) — a stale branch head
     * (concurrent modification) that reached the HTTP boundary without being
     * translated by ScenarioService. Reuses VERSION_CONFLICT, the existing
     * code for "your expectation of the current state is stale".
+    *
+    * Names no branch, for the reason given on `makeBranchAlreadyExistsResponse`.
+    * The commit hash stays: it identifies no workspace and the client already
+    * receives commit hashes elsewhere.
     */
-  def makeBranchHeadStaleResponse(branch: BranchRef, expectedHead: CommitHash, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+  def makeBranchHeadStaleResponse(expectedHead: CommitHash, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.Conflict, "branch", ValidationErrorCode.VERSION_CONFLICT,
-      s"Branch ${branch.toBranchRef} head is not ${expectedHead.value}", domain, requestId)
+      s"Branch head is not ${expectedHead.value}", domain, requestId)
 
   /** Scenario-level translation of a stale CAS head (see `ScenarioHeadStale`) —
-    * the branch's head no longer matches what the caller last observed.
+    * the scenario's head no longer matches what the caller last observed. Names
+    * the scenario, not the Irmin `BranchRef` (ADR-036).
     */
-  def makeScenarioHeadStaleResponse(branch: BranchRef, expectedHead: CommitHash, actual: Option[CommitHash], domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
-    val message = s"Scenario branch ${branch.toBranchRef} head is not ${expectedHead.value}" +
-      actual.fold(" (branch no longer exists)")(a => s" (currently ${a.value})")
-    response(StatusCode.Conflict, "branch", ValidationErrorCode.VERSION_CONFLICT, message, domain, requestId)
+  def makeScenarioHeadStaleResponse(scenario: ScenarioName.ScenarioName, expectedHead: CommitHash, actual: Option[CommitHash], domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
+    val message = s"Scenario ${scenario.value} head is not ${expectedHead.value}" +
+      actual.fold(" (scenario no longer exists)")(a => s" (currently ${a.value})")
+    response(StatusCode.Conflict, "scenario", ValidationErrorCode.VERSION_CONFLICT, message, domain, requestId)
 
   def makeScenariosNotSupportedResponse(reason: String, domain: String = "scenarios", requestId: Option[String] = None): (StatusCode, ErrorResponse) =
     response(StatusCode.NotImplemented, "scenarios", ValidationErrorCode.NOT_SUPPORTED, reason, domain, requestId)

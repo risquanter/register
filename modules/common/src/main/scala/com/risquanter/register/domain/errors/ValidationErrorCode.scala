@@ -1,6 +1,6 @@
 package com.risquanter.register.domain.errors
 
-import zio.json.{JsonCodec, JsonEncoder, JsonDecoder}
+import zio.json.{JsonEncoder, JsonDecoder}
 
 /** Typed error codes for validation failures.
   * 
@@ -39,6 +39,8 @@ enum ValidationErrorCode(val code: String, val description: String):
   // ── Concurrency codes ─────────────────────────────────────────────────────
   case VERSION_CONFLICT extends ValidationErrorCode("VERSION_CONFLICT", "Optimistic concurrency conflict on resource version")
   case MERGE_CONFLICT extends ValidationErrorCode("MERGE_CONFLICT", "Branch merge conflict")
+  case MERGE_ALREADY_RUNNING extends ValidationErrorCode("MERGE_ALREADY_RUNNING", "A merge of this scenario is already running")
+  case MERGE_TARGET_MOVED extends ValidationErrorCode("MERGE_TARGET_MOVED", "The merge target changed before the merge was published")
 
   // ── Infrastructure codes ──────────────────────────────────────────────────
   case INTERNAL_ERROR extends ValidationErrorCode("INTERNAL_ERROR", "Unexpected server-side error")

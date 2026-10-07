@@ -3,7 +3,6 @@ package com.risquanter.register.http.controllers
 import zio.*
 import zio.json.*
 import zio.test.*
-import zio.test.Assertion.*
 import sttp.client3.*
 import sttp.client3.testing.SttpBackendStub
 import sttp.monad.MonadError
@@ -12,13 +11,14 @@ import sttp.tapir.ztapir.RIOMonadError
 
 import com.risquanter.register.auth.{AuthorizationServiceNoOp, Checked, Permission, UserContextExtractor}
 import com.risquanter.register.configs.TestConfigs
-import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, ScenarioName, WorkspaceId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchRef, BranchChoice, CommitHash, ScenarioName, StoreBranch, WorkspaceId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.IrminError
 import com.risquanter.register.http.requests.{CreateScenarioRequest, ScenarioSourceDto}
 import com.risquanter.register.http.responses.{MergeConflictEntry, MergePreviewResponse, ScenarioResponse, ScenarioSummaryResponse}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.domain.data.iron.PositiveInt
+import com.risquanter.register.repositories.{RiskTreeRepository, RiskTreeRepositoryInMemory}
 import com.risquanter.register.services.{MergeConflictPath, MergePreviewResult, ScenarioMergeService, ScenarioMergeServiceLive, ScenarioServiceLive}
 import com.risquanter.register.services.workspace.{WorkspaceStore, WorkspaceStoreLive}
 
@@ -52,26 +52,32 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
     override def mainBranch: IO[IrminError, Option[IrminBranch]] =
       state.get.map(m => Some(toBranch("main", m.get("main"))))
 
-    override def getBranch(branch: BranchRef): IO[IrminError, Option[IrminBranch]] =
-      state.get.map(m => m.get(branch.toBranchRef).map(h => toBranch(branch.toBranchRef, Some(h))))
+    override def getBranch(branch: StoreBranch): IO[IrminError, Option[IrminBranch]] =
+      state.get.map(m => m.get(branch.name).map(h => toBranch(branch.name, Some(h))))
 
-    override def createBranchAt(branch: BranchRef, at: CommitHash): IO[IrminError, Unit] =
+    override def createBranchAt(branch: StoreBranch, at: CommitHash): IO[IrminError, Unit] =
       state.modify { m =>
-        if m.contains(branch.toBranchRef) then (false, m)
-        else (true, m + (branch.toBranchRef -> at))
+        if m.contains(branch.name) then (false, m)
+        else (true, m + (branch.name -> at))
       }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchAlreadyExists(branch)))
 
-    override def deleteBranch(branch: BranchRef, currentHead: CommitHash): IO[IrminError, Unit] =
+    override def deleteBranch(branch: StoreBranch, currentHead: CommitHash): IO[IrminError, Unit] =
       state.modify { m =>
-        if m.get(branch.toBranchRef).contains(currentHead) then (true, m - branch.toBranchRef)
+        if m.get(branch.name).contains(currentHead) then (true, m - branch.name)
         else (false, m)
       }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, currentHead)))
+
+    override def moveBranchTo(branch: BranchRef, expectedHead: CommitHash, to: CommitHash): IO[IrminError, Unit] =
+      state.modify { m =>
+        if m.get(branch.name).contains(expectedHead) then (true, m + (branch.name -> to))
+        else (false, m)
+      }.flatMap(applied => if applied then ZIO.unit else ZIO.fail(com.risquanter.register.domain.errors.BranchHeadStale(branch, expectedHead)))
 
     override def get(path: IrminPath, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
     override def set(path: IrminPath, value: String, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
     override def setTree(path: IrminPath, entries: List[IrminTreeEntry], message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
     override def remove(path: IrminPath, message: String, branch: BranchRef = BranchRef.Main) = ZIO.die(new NotImplementedError("unused"))
-    override def mergeBranch(from: BranchRef, into: BranchRef, message: String) = ZIO.die(new NotImplementedError("unused"))
+    override def mergeBranch(from: BranchRef, into: StoreBranch, message: String) = ZIO.die(new NotImplementedError("unused"))
     override def revert(commit: CommitHash, branch: BranchRef) = ZIO.die(new NotImplementedError("unused"))
     override def getCommit(commitHash: CommitHash) = ZIO.die(new NotImplementedError("unused"))
     override def getAtCommit(commit: CommitHash, path: IrminPath) = ZIO.die(new NotImplementedError("unused"))
@@ -93,7 +99,11 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
       // that never learns about the workspace key `create` returns here.
       workspaceStore <- ZIO.service[WorkspaceStore].provide(TestConfigs.workspaceLayer >>> WorkspaceStoreLive.layer)
       wsKey          <- workspaceStore.create(None).orDie
-      mergeSvc        = mergeService.getOrElse(new ScenarioMergeServiceLive(FakeIrminClient(state)))
+      // The post-merge guard reads trees back through a repository. This spec
+      // injects its own merge service in every case that exercises a merge, so
+      // the fallback only has to be a real repository, not a configured one.
+      repo           <- ZIO.service[RiskTreeRepository].provide(RiskTreeRepositoryInMemory.layer)
+      mergeSvc        = mergeService.getOrElse(new ScenarioMergeServiceLive(FakeIrminClient(state), repo))
       ctrl           <- ScenarioController.makeZIO
         .provide(
           ZLayer.succeed(new ScenarioServiceLive(FakeIrminClient(state))),
@@ -175,6 +185,43 @@ object ScenarioControllerSpec extends ZIOSpecDefault:
         resp.code.code == 200,
         decoded.status == "conflicts",
         decoded.conflicts == List(MergeConflictEntry(rel, Some(treeUlid), Some(nodeUlid)))
+      )
+    },
+
+    test("merge-preview duplicate-names wire mapping: status discriminator + duplicateNames populated, conflicts empty") {
+      val stub = new ScenarioMergeService:
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[MergePreviewResult] =
+          ZIO.succeed(MergePreviewResult.DuplicateNames("merging would duplicate node name(s) — tree 01ARZ3NDEKTSV4RRFFQ69G5FAV: Alpha"))
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[CommitHash] =
+          ZIO.die(new NotImplementedError("unused by this test"))
+      for
+        (backend, key) <- buildBackend(mergeService = Some(stub))
+        resp <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1/merge-preview").send(backend)
+        body    = orThrow(resp.body.toOption, s"expected success body, got: $resp")
+        decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
+      yield assertTrue(
+        resp.code.code == 200,
+        decoded.status == "duplicate-names",
+        decoded.conflicts == Nil,
+        decoded.duplicateNames.contains("merging would duplicate node name(s) — tree 01ARZ3NDEKTSV4RRFFQ69G5FAV: Alpha")
+      )
+    },
+
+    test("merge-preview clean wire mapping: duplicateNames absent/None when the preview is clean") {
+      val stub = new ScenarioMergeService:
+        override def preview(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[MergePreviewResult] =
+          ZIO.succeed(MergePreviewResult.Clean)
+        override def merge(wsId: WorkspaceId, name: ScenarioName.ScenarioName)(using Checked[Permission]): Task[CommitHash] =
+          ZIO.die(new NotImplementedError("unused by this test"))
+      for
+        (backend, key) <- buildBackend(mergeService = Some(stub))
+        resp <- basicRequest.get(uri"http://localhost/w/${key.reveal}/scenarios/draft-v1/merge-preview").send(backend)
+        body    = orThrow(resp.body.toOption, s"expected success body, got: $resp")
+        decoded = orThrow(body.fromJson[MergePreviewResponse].toOption, s"bad json: $body")
+      yield assertTrue(
+        resp.code.code == 200,
+        decoded.status == "clean",
+        decoded.duplicateNames == None
       )
     },
 

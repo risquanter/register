@@ -6,7 +6,7 @@ import java.time.{Instant, Duration as JDuration}
 import zio.test.*
 import zio.json.*
 import sttp.model.StatusCode
-import com.risquanter.register.domain.data.iron.{BranchRef, WorkspaceId, WorkspaceKeySecret}
+import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, ScenarioName, WorkspaceId, WorkspaceKeySecret}
 import com.risquanter.register.domain.errors.FolQueryFailure
 
 object ErrorResponseSpec extends ZIOSpecDefault {
@@ -180,20 +180,81 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         )
       },
       
-      test("encodes MergeConflict to Conflict (409) with branchName detail") {
-        val branch = BranchRef.fromString("scenarios.ws1.feature-1").toOption.get
-        val error = MergeConflict(branch, "Conflicting changes in node X")
+      test("encodes MergeConflict to Conflict (409) with scenario detail") {
+        val scenario = ScenarioName.fromString("feature-1").toOption.get
+        val error = MergeConflict(scenario, "Conflicting changes in node X")
         val (status, response) = ErrorResponse.encode(error)
 
         assertTrue(
           status == StatusCode.Conflict,
           response.error.code == 409,
           response.error.message.contains("Merge conflict"),
-          response.error.errors.head.field == "branch",
+          response.error.errors.head.field == "conflict",
           response.error.errors.head.message == "Conflicting changes in node X",
           response.error.errors.exists(d =>
-            d.field == "branchName" && d.message == "scenarios.ws1.feature-1"
+            d.field == "scenario" && d.message == "feature-1"
           )
+        )
+      },
+
+      test("encodes MergeAlreadyRunning to Conflict (409) naming the scenario") {
+        val scenario = ScenarioName.fromString("feature-1").toOption.get
+        val (status, response) = ErrorResponse.encode(MergeAlreadyRunning(scenario))
+
+        assertTrue(
+          status == StatusCode.Conflict,
+          response.error.code == 409,
+          response.error.message.contains("already running"),
+          response.error.errors.exists(d =>
+            d.field == "scenario" &&
+            d.code == ValidationErrorCode.MERGE_ALREADY_RUNNING &&
+            d.message == "feature-1"
+          )
+        )
+      },
+
+      test("encodes MergeTargetMoved to Conflict (409) naming the scenario") {
+        val scenario = ScenarioName.fromString("feature-1").toOption.get
+        val (status, response) = ErrorResponse.encode(MergeTargetMoved(scenario))
+
+        assertTrue(
+          status == StatusCode.Conflict,
+          response.error.code == 409,
+          response.error.message.contains("re-run the preview"),
+          response.error.errors.exists(d =>
+            d.field == "scenario" &&
+            d.code == ValidationErrorCode.MERGE_TARGET_MOVED &&
+            d.message == "feature-1"
+          )
+        )
+      },
+
+      // ADR-036: no wire-facing scenario error may carry the WorkspaceId, which
+      // a BranchRef embeds as `scenarios.<workspaceId>.<slug>`. The first two
+      // are built for a scenario in a known workspace. The last two are the
+      // compare-and-set safety nets, which hold a BranchRef directly and must
+      // discard it rather than render it.
+      test("no encoded response for a scenario error contains the workspace id") {
+        val wsId     = WorkspaceId.fromString("01ARZ3NDEKTSV4RRFFQ69G5FAV").toOption.get
+        val scenario = ScenarioName.fromString("feature-1").toOption.get
+        val head     = CommitHash.fromString("b" * 40).toOption.get
+        val branch   = BranchRef.scenario(wsId, scenario).toOption.get
+
+        val encoded = List(
+          ErrorResponse.encode(MergeConflict(scenario, "node X diverged")),
+          ErrorResponse.encode(ScenarioHeadStale(scenario, head, None)),
+          ErrorResponse.encode(BranchAlreadyExists(branch)),
+          ErrorResponse.encode(BranchHeadStale(branch, head))
+        )
+        val everyString = encoded.flatMap { case (_, r) =>
+          r.error.message :: r.error.errors.map(_.message)
+        }
+        val id = wsId.value
+
+        assertTrue(
+          everyString.nonEmpty,
+          branch.toBranchRef.contains(id.toLowerCase),
+          !everyString.exists(s => s.contains(id) || s.contains(id.toLowerCase))
         )
       }
     ),
@@ -226,26 +287,57 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         assertTrue(throwable.isInstanceOf[VersionConflict])
       },
 
-      test("decodes 409 MERGE_CONFLICT with branchName detail to MergeConflict, non-lossy") {
+      test("decodes 409 MERGE_CONFLICT with a scenario detail to MergeConflict, non-lossy") {
         val response = ErrorResponse(
-          JsonHttpError(409, "Merge conflict on branch scenarios.ws1.feature-1: node X diverged", List(
-            ErrorDetail("scenarios", "branch", ValidationErrorCode.MERGE_CONFLICT, "node X diverged"),
-            ErrorDetail("scenarios", "branchName", ValidationErrorCode.MERGE_CONFLICT, "scenarios.ws1.feature-1")
+          JsonHttpError(409, "Merge conflict on scenario feature-1: node X diverged", List(
+            ErrorDetail("scenarios", "conflict", ValidationErrorCode.MERGE_CONFLICT, "node X diverged"),
+            ErrorDetail("scenarios", "scenario", ValidationErrorCode.MERGE_CONFLICT, "feature-1")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
         assertTrue(
           throwable.isInstanceOf[MergeConflict],
-          throwable.asInstanceOf[MergeConflict].branch.toBranchRef == "scenarios.ws1.feature-1",
+          throwable.asInstanceOf[MergeConflict].scenario.value == "feature-1",
           throwable.asInstanceOf[MergeConflict].details == "node X diverged"
         )
       },
 
-      test("decodes 409 MERGE_CONFLICT without a refinable branchName to DataConflict") {
+      test("decodes 409 MERGE_CONFLICT without a refinable scenario to DataConflict") {
         val response = ErrorResponse(
           JsonHttpError(409, "Merge conflict", List(
-            ErrorDetail("scenarios", "branch", ValidationErrorCode.MERGE_CONFLICT, "conflict"),
-            ErrorDetail("scenarios", "branchName", ValidationErrorCode.MERGE_CONFLICT, "NOT A VALID BRANCH!")
+            ErrorDetail("scenarios", "conflict", ValidationErrorCode.MERGE_CONFLICT, "conflict"),
+            ErrorDetail("scenarios", "scenario", ValidationErrorCode.MERGE_CONFLICT, "NOT A VALID NAME!")
+          ))
+        )
+        val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
+        assertTrue(throwable.isInstanceOf[DataConflict])
+      },
+
+      test("round-trips MergeAlreadyRunning through 409, keeping the scenario") {
+        val scenario = ScenarioName.fromString("feature-1").toOption.get
+        val decoded  = ErrorResponse.decode(ErrorResponse.encode(MergeAlreadyRunning(scenario)))
+        assertTrue(
+          decoded.isInstanceOf[MergeAlreadyRunning],
+          decoded.asInstanceOf[MergeAlreadyRunning].scenario.value == "feature-1"
+        )
+      },
+
+      test("round-trips MergeTargetMoved through 409, keeping the scenario") {
+        val scenario = ScenarioName.fromString("feature-1").toOption.get
+        val decoded  = ErrorResponse.decode(ErrorResponse.encode(MergeTargetMoved(scenario)))
+        assertTrue(
+          decoded.isInstanceOf[MergeTargetMoved],
+          decoded.asInstanceOf[MergeTargetMoved].scenario.value == "feature-1"
+        )
+      },
+
+      test("decodes 409 MERGE_TARGET_MOVED without a refinable scenario to DataConflict") {
+        // "***" is outside ScenarioName's input whitelist, so it cannot refine.
+        // A name that merely needs normalising, such as "NOT A NAME", does
+        // refine and would not exercise this path.
+        val response = ErrorResponse(
+          JsonHttpError(409, "main moved", List(
+            ErrorDetail("scenarios", "scenario", ValidationErrorCode.MERGE_TARGET_MOVED, "***")
           ))
         )
         val throwable = ErrorResponse.decode((StatusCode.Conflict, response))
@@ -390,7 +482,7 @@ object ErrorResponseSpec extends ZIOSpecDefault {
         val vc = VersionConflict("n1", "v1", "v2")
         val vcDecoded = ErrorResponse.decode(ErrorResponse.encode(vc))
         // MergeConflict
-        val mc = MergeConflict(BranchRef.fromString("scenarios.ws1.feat").toOption.get, "conflict detail")
+        val mc = MergeConflict(ScenarioName.fromString("feat").toOption.get, "conflict detail")
         val mcDecoded = ErrorResponse.decode(ErrorResponse.encode(mc))
         // IrminUnavailable
         val iu = IrminUnavailable("Connection refused")

@@ -60,6 +60,15 @@ type BranchRefConstraint =
 
 type BranchRefStr = String :| BranchRefConstraint
 
+// Merge staging branch reference — `merge-staging.<workspaceId-lowercased-ulid>
+// .<name-slug>`, the same two-segment shape as a scenario reference under a
+// different prefix. Narrower than BranchRefConstraint: no `main` alternative,
+// because a staging branch is never main.
+type MergeStagingRefConstraint =
+  Not[Blank] & MaxLength[160] & Match["^merge-staging\\.[a-z0-9][a-z0-9_-]{0,63}\\.[a-z0-9][a-z0-9_-]{0,63}$"]
+
+type MergeStagingRefStr = String :| MergeStagingRefConstraint
+
 // Validated URL string — base alias underlying object Url
 type ValidUrl = String :| UrlConstraint
 
@@ -282,8 +291,26 @@ object SafeName:
     def value: SafeNameStr = sn
   
   // Convenience constructor from plain String
-  def fromString(s: String): Either[List[ValidationError], SafeName] = 
+  def fromString(s: String): Either[List[ValidationError], SafeName] =
     ValidationUtil.refineName(s)
+
+  /** The names occurring more than once in `names`, ascending.
+    *
+    * One definition of node-name uniqueness. The request boundary
+    * (`RiskTreeRequests.requireUniqueNames`), the domain constructor
+    * (`RiskTree.fromNodes`) and the scenario merge name scan
+    * (`ScenarioMergeService.duplicateNodeNames`) all read it, so the three
+    * cannot drift apart. Each caller contributes only its own field path and
+    * message. Mirrors the split `SeedVarId.requireDistinct` uses for the
+    * sibling rule.
+    *
+    * Equality is the refined value's own, which is exact: `SafeName` admits no
+    * character outside `A-Za-z0-9 /-`, so no Unicode normalisation can apply,
+    * and a space is significant.
+    */
+  def duplicates(names: Seq[SafeName]): List[SafeName] =
+    names.groupBy(identity).collect { case (n, group) if group.sizeIs > 1 => n }
+      .toList.sortBy(_.value)
 
 // Opaque type for emails
 object Email:
@@ -369,23 +396,48 @@ object MeshServiceUrl:
   def fromString(s: String, fieldPath: String = "url"): Either[List[ValidationError], MeshServiceUrl] =
     Url.fromString(s, fieldPath).map(_.value)
 
-case class BranchRef(toBranchRef: BranchRefStr)
+/** A branch name the store can be told to create, merge into, or delete.
+  *
+  * Two cases, and they are not interchangeable. `BranchRef` is a branch with a
+  * lineage someone owns — main, or a scenario — so it can be read, written,
+  * listed, and converted to its client-facing `BranchChoice`.
+  * `MergeStagingRef` exists for the duration of one merge: it is created,
+  * merged into, published from, and deleted. Nothing reads it and it has no
+  * client-facing form.
+  *
+  * Only the three branch primitives that both kinds share are declared over
+  * this type. Everything that reads or writes tree data stays declared over
+  * `BranchRef`, so a staging branch cannot reach it.
+  */
+sealed trait StoreBranch:
+  def name: String
+
+case class BranchRef(toBranchRef: BranchRefStr) extends StoreBranch:
+  def name: String = toBranchRef
 
 object BranchRef:
   val Main: BranchRef = BranchRef("main")
 
+  /** The prefix every scenario branch reference carries, derived from the
+    * workspace (naming: `scenarios.<workspaceId-lowercased-ulid>.<name-slug>`).
+    * Defined once because `scenario` composes with it and
+    * `BranchChoice.fromBranchRef` decomposes with it — a divergence between the
+    * two would be silent.
+    */
+  private[iron] def scenarioPrefix(wsId: WorkspaceId): String =
+    s"scenarios.${wsId.value.toLowerCase}."
+
   /** Compose a scenario branch reference from an already-validated `WorkspaceId`
-    * and `ScenarioName` (DD-5 naming: `scenarios.<workspaceId-lowercased-ulid>.<name-slug>`).
-    * Both inputs are Iron-refined at their own boundaries (validate once, at the
-    * boundary), so this composition can never fail refinement in practice — callers
-    * treat a `Left` here as an unreachable invariant violation, not a domain error,
-    * mirroring the pattern this replaces in `ScenarioServiceLive`. The client never
-    * supplies a `WorkspaceId`, so a branch composed this way always belongs to the
-    * caller's own workspace by construction (2026-07-20/21 security review) — there
-    * is no separate ownership check to perform.
+    * and `ScenarioName`. Both inputs are Iron-refined at their own boundaries
+    * (validate once, at the boundary), so this composition can never fail
+    * refinement in practice — callers treat a `Left` here as an unreachable
+    * invariant violation, not a domain error. The client never supplies a
+    * `WorkspaceId`, so a branch composed this way always belongs to the caller's
+    * own workspace by construction — there is no separate ownership check to
+    * perform. `BranchChoice.fromBranchRef` is the inverse.
     */
   def scenario(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Either[List[ValidationError], BranchRef] =
-    fromString(s"scenarios.${wsId.value.toLowerCase}.${name.value}")
+    fromString(s"${scenarioPrefix(wsId)}${name.value}")
 
   def fromString(s: String, fieldPath: String = "branch"): Either[List[ValidationError], BranchRef] =
     val sanitized = if s == null then "" else s.trim
@@ -407,6 +459,50 @@ object BranchRef:
   given JsonEncoder[BranchRef] = JsonEncoder[String].contramap(_.toBranchRef)
   given JsonDecoder[BranchRef] = JsonDecoder[String].mapOrFail(s =>
     BranchRef.fromString(s).left.map(_.mkString(", ")))
+
+/** The branch a scenario's merge is assembled on before it is published to
+  * main.
+  *
+  * Embeds the `WorkspaceId`, so it is confined exactly as `BranchRef` is and
+  * never crosses the client boundary (ADR-036) — and unlike `BranchRef` it has
+  * no client-facing form to convert to, so there is nothing to confine at a
+  * codec. It carries no JSON codec for the same reason.
+  */
+case class MergeStagingRef(toBranchRef: MergeStagingRefStr) extends StoreBranch:
+  def name: String = toBranchRef
+
+object MergeStagingRef:
+  private def prefix(wsId: WorkspaceId): String =
+    s"merge-staging.${wsId.value.toLowerCase}."
+
+  /** The staging branch for one scenario's merge.
+    *
+    * Named from the scenario rather than randomly, so a second merge of the
+    * same scenario while one is in flight collides on the branch name and is
+    * refused by `createBranchAt` instead of running alongside the first.
+    *
+    * Both inputs are refined at their own boundaries, so the composition
+    * cannot fail refinement in practice; a `Left` here is an unreachable
+    * invariant violation rather than a domain error, the same as
+    * `BranchRef.scenario`.
+    */
+  def forScenario(
+    wsId: WorkspaceId,
+    name: ScenarioName.ScenarioName
+  ): Either[List[ValidationError], MergeStagingRef] =
+    s"${prefix(wsId)}${name.value}"
+      .refineEither[MergeStagingRefConstraint]
+      .left
+      .map(err =>
+        List(
+          ValidationError(
+            field = "branch",
+            code = ValidationErrorCode.INVALID_FORMAT,
+            message = s"Merge staging branch is invalid: $err"
+          )
+        )
+      )
+      .map(MergeStagingRef(_))
 
 /** Which branch a request or view targets — the single internal spelling of
   * "main vs. a named scenario" on both sides of the wire (closes TODO item
@@ -436,6 +532,22 @@ object BranchChoice:
   /** DD-8 wire shape: absent = main. Use only at wire/codec boundaries. */
   def fromWire(wire: Option[ScenarioName.ScenarioName]): BranchChoice =
     wire.fold(Main)(Scenario(_))
+
+  /** The client-facing branch for an Irmin branch reference: the inverse of
+    * `BranchRef.scenario`, so it strips the prefix that composed the name.
+    *
+    * Fails when the remainder is not a valid `ScenarioName`, which means the
+    * branch does not belong to `wsId` or was not composed by `scenario`. The
+    * caller decides what that means; this returns it rather than asserting it
+    * cannot happen.
+    */
+  def fromBranchRef(wsId: WorkspaceId, branch: BranchRef): Either[List[ValidationError], BranchChoice] =
+    branch match
+      case BranchRef.Main => Right(Main)
+      case _              =>
+        ScenarioName
+          .fromString(branch.toBranchRef.stripPrefix(BranchRef.scenarioPrefix(wsId)))
+          .map(Scenario(_))
 
   /** Explicit string wire shape (E7): "main" or a scenario slug — no
     * absent-means-main state. Used by the required `X-Branch` header codec,

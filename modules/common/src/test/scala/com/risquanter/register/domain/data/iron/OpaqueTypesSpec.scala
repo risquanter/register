@@ -3,7 +3,6 @@ package com.risquanter.register.domain.data.iron
 import zio.test.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import io.github.iltotore.iron.constraint.collection.MaxLength
 
 object OpaqueTypesSpec extends ZIOSpecDefault {
 
@@ -291,6 +290,52 @@ object OpaqueTypesSpec extends ZIOSpecDefault {
           BranchRef.scenario(wsIdUpper, name) == BranchRef.scenario(wsIdLower, name)
         )
       }
+    ),
+
+    suite("SafeName.duplicates — the one definition of node-name uniqueness")(
+      test("no repeated name yields an empty list") {
+        assertTrue(SafeName.duplicates(names("Outage", "Breach", "Fire")).isEmpty)
+      },
+
+      test("a name appearing twice is reported once") {
+        assertTrue(
+          SafeName.duplicates(names("Outage", "Breach", "Outage")).map(_.value) == List("Outage")
+        )
+      },
+
+      test("a name appearing three times is still reported once") {
+        assertTrue(
+          SafeName.duplicates(names("Outage", "Outage", "Outage")).map(_.value) == List("Outage")
+        )
+      },
+
+      test("several repeated names come back ascending, whatever order they occurred in") {
+        assertTrue(
+          SafeName.duplicates(
+            names("Zeta", "Alpha", "Zeta", "Mid", "Alpha", "Mid")
+          ).map(_.value) == List("Alpha", "Mid", "Zeta")
+        )
+      },
+
+      test("an empty input yields an empty list") {
+        assertTrue(SafeName.duplicates(Seq.empty).isEmpty)
+      },
+
+      test("equality is exact, so a doubled inner space makes two distinct names") {
+        // SafeName permits a space and normalises nothing, so these do not
+        // collide. Hypertext collapses the repeated space when rendering, which
+        // is why the property is pinned rather than assumed.
+        assertTrue(SafeName.duplicates(names("Server Outage", "Server  Outage")).isEmpty)
+      },
+
+      test("equality is case-sensitive, so differing case makes two distinct names") {
+        assertTrue(SafeName.duplicates(names("Outage", "outage")).isEmpty)
+      }
     )
   )
+
+  /** Refines each literal, failing the test immediately on one that does not —
+    * every literal here is inside SafeName's whitelist. */
+  private def names(values: String*): Seq[SafeName.SafeName] =
+    values.map(v => SafeName.fromString(v).getOrElse(throw new IllegalArgumentException(s"not a SafeName: $v")))
 }

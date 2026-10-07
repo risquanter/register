@@ -93,6 +93,8 @@ object GlobalError:
     case _: DataConflict    => Conflict(msg(e))
     case _: VersionConflict => Conflict(msg(e))
     case _: MergeConflict   => Conflict(msg(e))
+    case _: MergeAlreadyRunning => Conflict(msg(e))
+    case _: MergeTargetMoved    => Conflict(msg(e))
 
     // Workspace A13 opaque 404 — decoded as RepositoryFailure("workspace:not-found").
     // Route to informational blue banner, not red error.
