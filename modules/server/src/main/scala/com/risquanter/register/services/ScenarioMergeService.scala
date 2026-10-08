@@ -143,7 +143,7 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
                           ZIO.fail(ValidationFailed(List(ValidationError(
                             field = "scenario",
                             code = ValidationErrorCode.NOT_FOUND,
-                            message = s"Scenario '${name.value}' not found in workspace ${wsId.value}"
+                            message = s"Scenario not found: ${name.value}"
                           ))))
       result       <- scan(wsId, branch, scenarioHead)
       _            <- ZIO.when(result.conflicts.nonEmpty)(ZIO.fail(MergeConflict(
@@ -157,12 +157,13 @@ final class ScenarioMergeServiceLive(irmin: IrminClient, repo: RiskTreeRepositor
       // The head the merge is assembled against and published against. A
       // scenario branch can only be created at a commit that already exists and
       // a branch head never moves backwards, so main always holds one by the
-      // time a merge into it runs; an absent head is an invariant violation.
+      // time a merge into it runs. An absent head therefore means the store no
+      // longer holds what it held, which is a storage failure the caller sees
+      // as one rather than a defect.
       mainBefore   <- irmin.mainBranch.map(_.flatMap(_.head))
                         .flatMap {
                           case Some(c) => ScenarioBranchOps.refineCommitHash(c.hash)
-                          case None    => ZIO.die(new IllegalStateException(
-                            s"merge of scenario ${name.value} found no head on main"))
+                          case None    => ZIO.fail(RepositoryFailure("main has no head"))
                         }
       newHead      <- mergeOnStaging(wsId, name, branch, mainBefore)
     yield newHead

@@ -9,7 +9,7 @@ import io.github.iltotore.iron.*
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
 import com.risquanter.register.domain.data.{RiskLeaf, RiskNode, RiskPortfolio, RiskTree}
 import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchRef, CommitHash, NodeId, PositiveInt, Revision, SafeName, StoreBranch, TreeId}
-import com.risquanter.register.domain.errors.{BranchAlreadyExists, BranchHeadStale, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, TreeLoadFailure}
+import com.risquanter.register.domain.errors.{BranchAlreadyExists, BranchHeadStale, IrminError, IrminGraphQLError, IrminMergeConflict, MergeAlreadyRunning, MergeConflict, MergeTargetMoved, RepositoryFailure, TreeLoadFailure}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.{IrminBranch, IrminCommit, IrminInfo, IrminTreeEntry, IrminPath}
 import com.risquanter.register.repositories.RiskTreeRepository
@@ -522,7 +522,7 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
               onRefusal.last.startsWith("delete:merge-staging.")
             )
         },
-        test("no head on main dies — main always holds a commit when a merge runs") {
+        test("no head on main fails RepositoryFailure — the store lost what it held") {
           for
             resets <- Ref.make(List.empty[(CommitHash, CommitHash)])
             revs   <- Ref.make(List.empty[Revision])
@@ -534,12 +534,14 @@ object ScenarioMergeServiceSpec extends ZIOSpecDefault:
             exit   <- svc.merge(ws("ws-guard-nohead"), name("draft-v1")).exit
             calls  <- resets.get
           yield
-            val defect = exit.causeOption.flatMap(_.defects.headOption)
+            val failure = exit.causeOption.flatMap(_.failureOption)
             assertTrue(
-              // a defect, not a typed failure: a merge cannot run against a
-              // branch with no head, and no caller can act on it
-              exit.causeOption.exists(_.failureOption.isEmpty),
-              defect.exists(_.getMessage.contains("no head on main")),
+              // a typed failure on the error channel, not a defect: the caller
+              // sees the same opaque 500 as any other storage failure
+              failure.exists {
+                case RepositoryFailure(reason) => reason == "main has no head"
+                case _                         => false
+              },
               calls.isEmpty
             )
         }

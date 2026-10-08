@@ -1,9 +1,8 @@
 package com.risquanter.register.services
 
 import zio.*
-import io.github.iltotore.iron.*
 import com.risquanter.register.auth.{Checked, Permission}
-import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, ScenarioNameConstraint, BranchRef, CommitHash}
+import com.risquanter.register.domain.data.iron.{WorkspaceId, ScenarioName, BranchChoice, BranchRef, CommitHash}
 import com.risquanter.register.domain.errors.{DataConflict, ScenarioHeadStale, ValidationFailed, ValidationError, ValidationErrorCode, BranchAlreadyExists, BranchHeadStale}
 import com.risquanter.register.infra.irmin.IrminClient
 import com.risquanter.register.infra.irmin.model.IrminBranch
@@ -29,16 +28,14 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
       branch     <- scenarioBranch(wsId, name)
       sourceHead <- resolveSourceHead(wsId, source)
       _          <- irmin.createBranchAt(branch, sourceHead).catchSome { case BranchAlreadyExists(_) =>
-                      ZIO.fail(DataConflict(s"Scenario '${name.value}' already exists in workspace ${wsId.value}"))
+                      ZIO.fail(DataConflict(s"Scenario '${name.value}' already exists"))
                     }
     yield branch
 
   override def list(wsId: WorkspaceId)(using Checked[Permission]): Task[List[ScenarioSummary]] =
-    val prefix = scenarioPrefix(wsId)
     for
       all       <- irmin.branches
-      rawNames   = all.collect { case b if b.startsWith(prefix) => b.stripPrefix(prefix) }
-      names     <- ZIO.foreach(rawNames)(parseScenarioName)
+      names      = all.flatMap(scenarioNameOf(wsId, _))
       summaries <- ZIO.foreach(names)(summaryFor(wsId, _))
     yield summaries
 
@@ -50,7 +47,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                   irmin.getBranch(branch).orElseSucceed(None).flatMap { maybeBranch =>
                     val actualHash = maybeBranch.flatMap(_.head).map(_.hash)
                     ZIO.foreach(actualHash)(refineCommitHash).flatMap { actual =>
-                      ZIO.fail(ScenarioHeadStale(branch, expected, actual))
+                      ZIO.fail(ScenarioHeadStale(name, expected, actual))
                     }
                   }
                 }
@@ -80,7 +77,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
                              ZIO.fail(ValidationFailed(List(ValidationError(
                                field = "source",
                                code = ValidationErrorCode.NOT_FOUND,
-                               message = s"Scenario '${scenario.value}' not found in workspace ${wsId.value}"
+                               message = s"Scenario not found: ${scenario.value}"
                              ))))
         yield head
       case ScenarioSource.AtCommit(commit) =>
@@ -92,7 +89,7 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
             ZIO.fail(ValidationFailed(List(ValidationError(
               field = "source",
               code = ValidationErrorCode.NOT_FOUND,
-              message = s"Commit not found in workspace ${wsId.value}"
+              message = s"Commit not found: ${commit.value}"
             ))))
         }
 
@@ -117,20 +114,23 @@ final class ScenarioServiceLive(irmin: IrminClient) extends ScenarioService:
 
   // ── naming (DD-5/DD-11) ──────────────────────────────────────────────────
 
-  private def scenarioPrefix(wsId: WorkspaceId): String =
-    s"scenarios.${wsId.value.toLowerCase}."
+  /** The scenario name a listed store branch carries, or `None` when the branch
+    * is main, belongs to another workspace, or was not composed by
+    * `BranchRef.scenario`.
+    *
+    * Reads the same inverse `BranchChoice.fromBranchRef` applies, so the
+    * listing and the composition cannot disagree about how a scenario branch is
+    * named. A branch this returns `None` for is skipped rather than failing the
+    * listing: another workspace's branch is not this caller's concern, and the
+    * store holds branch kinds that are nobody's scenario.
+    */
+  private def scenarioNameOf(wsId: WorkspaceId, rawName: String): Option[ScenarioName.ScenarioName] =
+    BranchRef.fromString(rawName).toOption
+      .flatMap(BranchChoice.fromBranchRef(wsId, _).toOption)
+      .collect { case BranchChoice.Scenario(name) => name }
 
   private def scenarioBranch(wsId: WorkspaceId, name: ScenarioName.ScenarioName): Task[BranchRef] =
     ScenarioBranchOps.scenarioBranch(wsId, name)
-
-  private def parseScenarioName(rawSegment: String): Task[ScenarioName.ScenarioName] =
-    rawSegment.refineEither[ScenarioNameConstraint] match
-      case Right(slug) => ZIO.succeed(ScenarioName.ScenarioName(slug))
-      case Left(error) =>
-        ZIO.die(new IllegalStateException(
-          s"branch matched the scenarios.* prefix but its name segment '$rawSegment' is not a valid " +
-          s"ScenarioName: $error — DD-11 invariant violation (only ScenarioService creates these branches)"
-        ))
 
   private def refineCommitHash(raw: String): Task[CommitHash] =
     ScenarioBranchOps.refineCommitHash(raw)
