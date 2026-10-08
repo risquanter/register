@@ -439,8 +439,11 @@ method that reads nodes.
 at a commit, fetches each node value, and decodes each one.
 
 **Decode** — turning one node value back into a `RiskLeaf` or a `RiskPortfolio`.
-`decodeNode` attempts the leaf decoder first and the portfolio decoder second,
-because a node value carries no field saying which it is.
+`RiskTreeRepositoryIrmin.decodeStoredNode` attempts the leaf decoder first and
+the portfolio decoder second, because a node value carries no field saying which
+it is. `decodeNode` wraps it to add the storage path to the failure message, and
+is the form the read path calls. The scenario merge reads the same blobs through
+`decodeStoredNode` to predict a merge's node set.
 
 ### Validation runs on the way out, not only on the way in
 
@@ -462,8 +465,8 @@ so the tree does not open at all. The fix is to establish before tightening a
 rule that no stored tree holds a value the new rule rejects.
 
 **A failed leaf decode is reported as a portfolio error.** The cause is the order
-in `decodeNode`: the leaf decoder is tried first, and when it fails the portfolio
-decoder is tried on the same node value. `Either.orElse` keeps the second error
+in `decodeStoredNode`: the leaf decoder is tried first, and when it fails the
+portfolio decoder is tried on the same node value. `Either.orElse` keeps the second error
 and discards the first. The symptom is a message complaining about missing
 portfolio fields, naming nothing about the field that actually failed. When
 diagnosing a decode failure on a leaf, the reported error is not the real one.

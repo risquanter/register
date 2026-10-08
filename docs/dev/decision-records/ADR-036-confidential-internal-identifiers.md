@@ -58,6 +58,28 @@ branch-typed; it is caught and translated by its service-layer caller before
 anything reaches the wire, and the encoder's branch-free fallback is the backup
 for the path where that translation is skipped.
 
+**Two substitutes are accepted, and one question chooses between them: can the
+value be main?**
+
+- **No — take a bare `ScenarioName`.** The type then refuses the state the
+  caller cannot produce. `MergeConflict` and `ScenarioHeadStale` are in this
+  position: a merge always targets a scenario and a stale head is always a
+  scenario's. So is `ScenarioSummary`, which lists scenarios and can never list
+  main.
+- **Yes — take a `BranchChoice`.** It is the two-case client-facing branch type
+  (`Main` or `Scenario(ScenarioName)`), and it carries no workspace identity by
+  construction. The `X-Branch` header, the changed-nodes comparison parameters,
+  the scenario-source body, the change-notification event tag and the client's
+  own branch state are all in this position.
+
+Neither substitute is a default. Reaching for `BranchChoice` where main cannot
+occur adds an unreachable case; reaching for `ScenarioName` where it can forces
+a second field or an `Option` whose absence has to mean main. A third shape is
+right when the question itself differs: `ScenarioSource` has the same two cases
+plus a commit, and is deliberately its own enum rather than a reused
+`BranchChoice`, because "what does a new scenario fork from" is not "which
+branch does this request operate on" (ADR-018).
+
 ### 3. Lighter Than a Credential
 
 The credential checklist (ADR-022 R1–R8) does **not** apply. A confidential
@@ -78,6 +100,19 @@ something with no server-side scoping power — `WorkspaceKeySecret` itself
 (already how the bootstrap and rotate responses work), never the raw
 `WorkspaceId`. Any new response field, log line, or header that would return a
 `WorkspaceId` to a client is a Decision Trigger — stop and ask.
+
+**Masking is not an alternative to removal.** Redacting the identifier in
+`toString`, the way ADR-022 requires of a credential type, would close one of
+the routes listed above — the audit log surfaced to a client. It is recorded
+here as available and insufficient, so it is not proposed again as an
+equivalent. Two reasons it is not. This record already accepts the identifier
+in server logs outright, so masking buys nothing against the exposure this
+record actually cares about. And masking defends one rendering of the value,
+while removal defends the boundary: a masked `toString` does nothing about a
+response field, a header, a path segment accepted as input, or a value embedded
+in a branch name. Complete removal from the client boundary, in both
+directions, stays the prescription; masking is at most defence in depth behind
+it, and is not required.
 
 ### 4. Identifiers Not Confined by This Record
 
@@ -161,8 +196,36 @@ final case class TreeResponse(treeId: TreeId, ...)
 // BAD: the wire-facing error carries a BranchRef, which embeds the WorkspaceId
 ZIO.fail(MergeConflict(branch, s"conflict on ${branch.value}"))
 
-// GOOD: carry the client-safe substitute (the scenario name)
+// GOOD: carry the client-safe substitute (the scenario name — main cannot occur here)
 ZIO.fail(MergeConflict(name, s"${conflicts.size} conflicting path(s)"))
+```
+
+### ❌ Masking Instead of Removing
+
+```scala
+// BAD: a redacted rendering, left on the wire — the field is still returned,
+// and nothing about a response field, header, or embedded branch name changes
+final case class TreeResponse(treeId: TreeId, workspaceId: WorkspaceId, ...)
+//                                            ^ masked in toString, still encoded
+
+// GOOD: the field is not there
+final case class TreeResponse(treeId: TreeId, ...)
+```
+
+### ❌ Reaching for the Wrong Substitute
+
+```scala
+// BAD: main is not a reachable state for a merge failure — the case is dead
+case class MergeConflict(branch: BranchChoice, details: String)
+
+// GOOD: the type refuses what the caller cannot produce
+case class MergeConflict(scenario: ScenarioName.ScenarioName, details: String)
+
+// BAD: an Option whose None has to be read as "main"
+def changedNodes(a: Option[ScenarioName], b: Option[ScenarioName]): ...
+
+// GOOD: main is a value here, so the two-case type says so
+def changedNodes(a: BranchChoice, b: BranchChoice): ...
 ```
 
 ---
@@ -173,7 +236,11 @@ ZIO.fail(MergeConflict(name, s"${conflicts.size} conflicting path(s)"))
 |----------|---------|
 | Workspace endpoints | Accept `WorkspaceKeySecret`; derive `WorkspaceId` via `WorkspaceStore.resolve` |
 | `MergeConflictPath` | Workspace-relative path; the `WorkspaceId` is parsed out, never carried |
-| Wire-facing errors (`MergeConflict`, translated `DataConflict`) | Carry a `ScenarioName` substitute, not a `BranchRef` |
+| Wire-facing errors (`MergeConflict`, `ScenarioHeadStale`, translated `DataConflict`) | Carry a `ScenarioName`, not a `BranchRef` — main cannot occur in any of them (§2) |
+| `MergeAlreadyRunning`, `MergeTargetMoved` | Carry only a `ScenarioName`; the staging branch they concern has no client-facing form at all |
+| `BranchAlreadyExists`, `BranchHeadStale` | Carry a `StoreBranch` and stay internal; the service layer translates them, and the two safety-net encoders discard the branch rather than render it |
+| `BranchChoice` (`X-Branch`, changed-nodes parameters, scenario-source body, change-notification tag, client branch state) | The substitute where main **is** a value; carries no workspace identity by construction (§2) |
+| `BranchChoice.fromBranchRef` | The one place a `BranchRef` is turned into its client-facing form; the inverse of `BranchRef.scenario`, beside it, sharing one definition of the prefix |
 | `TreeId`, `NodeId`, `MitigationId` | Client-facing; each is resolved only inside a container the caller is already authorized for (§4) |
 
 ---

@@ -8751,13 +8751,19 @@ does not change. The two edits are the read and the `None` branch:
       // a tree invariant fails every read, and revert is the only operation
       // that can repair it, because its storage half reads at the target
       // commit and never at the head.
-      oldTree  <- repo.getById(wsId, id, Revision.Head(branch)).option.map(_.flatten)
+      oldTree  <- repo.getById(wsId, id, Revision.Head(branch))
+                    .catchAll(error =>
+                      ZIO.logWarning(
+                        s"revert of tree ${id.value}: head read failed, notifying the whole tree instead: " +
+                        s"${error.getMessage}"
+                      ).as(None))
       reverted <- repo.revert(wsId, id, toCommit, branch)
+      tag      <- clientBranch(wsId, branch)
       // None covers two situations: the tree was deleted at head, and the head
       // state could not be read. Both leave no before-state to diff against.
       _        <- oldTree match
-                    case Some((prev, _)) => invalidationHandler.handleMutation(prev, reverted, clientBranchName(wsId, branch))
-                    case None            => invalidationHandler.handleWholeTreeChange(reverted, clientBranchName(wsId, branch))
+                    case Some((prev, _)) => invalidationHandler.handleMutation(prev, reverted, tag)
+                    case None            => invalidationHandler.handleWholeTreeChange(reverted, tag)
     } yield reverted
 
     operation.tapBoth(
@@ -8767,12 +8773,14 @@ does not change. The two edits are the read and the `None` branch:
   }
 ```
 
-`.option` absorbs a transport failure on that read as well as an invariant
+The catch absorbs a transport failure on that read as well as an invariant
 failure, for the same reason the guard cannot separate them: the repository
-collapses both into `RepositoryFailure`. The consequence is bounded — a
-transport problem that defeats the head read also defeats `repo.revert`'s own
-reads a moment later, so the operation still fails; the error then names the
-write rather than the read.
+collapses both into `RepositoryFailure`. The log line is the only thing that
+tells them apart afterwards, which is why the read catches and logs rather than
+discarding the error with `.option`. The consequence is bounded — a transport
+problem that defeats the head read also defeats `repo.revert`'s own reads a
+moment later, so the operation still fails; the error then names the write
+rather than the read.
 
 **`Application.scala` — the merge service layer gains the repository.** The
 layer already has an `IrminClient` in scope, and
@@ -9884,8 +9892,7 @@ Four test doubles override it and are renamed with it:
     wsId: WorkspaceId,
     name: ScenarioName.ScenarioName,
     scenarioBranch: BranchRef,
-    mainBefore: CommitHash,
-    message: String
+    mainBefore: CommitHash
   ): Task[CommitHash]
 ```
 
@@ -9903,28 +9910,27 @@ Four test doubles override it and are renamed with it:
   ): Task[Unit]
 ```
 
-The publish failure is a refusal the caller can act on, not a server fault:
+The publish failure is a refusal the caller can act on, not a server fault. It
+fails `MergeTargetMoved`, which carries only the scenario name, so nothing
+internal reaches the client:
 
 ```scala
       _ <- irmin.moveBranchTo(BranchRef.Main, expectedHead = mainBefore, to = staged)
-             .catchSome { case BranchHeadStale(_, _) =>
-               ZIO.fail(MergeConflict(name,
-                 "main changed while the merge ran; re-run the preview and retry"))
-             }
+             .catchSome { case BranchHeadStale(_, _) => ZIO.fail(MergeTargetMoved(name)) }
 ```
-
-That message is a constant with nothing interpolated into it, so it carries no
-internal value. `docs/dev/plans/PLAN-TYPED-ERROR-STRUCTURE.md` §3.1 replaces it
-with `MergeRefusal.ConcurrentChange`.
 
 **`mainBefore` becomes required rather than optional.** The current signature
 threads `Option[CommitHash]` and dies on `None`. Shape 1 cannot proceed without
-it at all, so the read happens once and fails the effect:
+it at all, so the read happens once and fails the effect. The refinement of the
+hash stays a separate step, because `ScenarioBranchOps.refineCommitHash` returns
+an effect:
 
 ```scala
-      mainBefore <- irmin.mainBranch
-                      .flatMap(b => ZIO.fromOption(b.flatMap(_.head).map(h => commitHash(h.hash)))
-                        .orElseFail(RepositoryFailure("main has no head")))
+      mainBefore <- irmin.mainBranch.map(_.flatMap(_.head))
+                      .flatMap {
+                        case Some(c) => ScenarioBranchOps.refineCommitHash(c.hash)
+                        case None    => ZIO.fail(RepositoryFailure("main has no head"))
+                      }
 ```
 
 **`MergeUndoFailed` is removed.** It has one producer, which this change

@@ -2444,3 +2444,132 @@ behaviour is when a stored result is read under a different trial count than
 the runtime's.
 
 Adjacent to item 52 and possibly belongs inside it.
+
+---
+
+## 54. `ErrorDetail.field` is used as a type discriminator, not as a field path — decide the name and the intention, then fix the deviations
+
+`ErrorDetail` is the per-item record inside every HTTP error body. Its own
+scaladoc defines `field` as "JSON path to the problematic field (e.g. `name`,
+`root.children[0].minLoss`)", and ADR-010 §2 defines the same meaning for the
+sibling domain type it is the wire form of:
+
+```scala
+case class ValidationError(
+  field: String,              // JSON path: "root.children[0].minLoss"
+  code: ValidationErrorCode,  // Machine-readable: INVALID_RANGE
+  message: String             // Human-readable: "minLoss must be < maxLoss"
+)
+```
+
+The scenario errors use `field` for something else: as a tag naming what kind of
+row this is, so that `ErrorResponse.decode` can rebuild a typed error from the
+body. `makeMergeConflictResponse` emits one row with `field = "conflict"`
+carrying the conflict text and one with `field = "scenario"` carrying the
+scenario name, and `decode` matches on those two literals. `"conflict"` is not a
+path to anything in a request.
+
+Two things are therefore true at once: `field` means a request path for
+validation errors, and a row discriminator for the scenario errors. A reader
+cannot tell which from the type.
+
+**The deviation is two lines, both in `ErrorResponse.decode`.** The sweep is
+done, and the result is smaller than it looks:
+
+```scala
+47:  val scenario        = details.collectFirst { case d if d.field == "scenario" => d.message }
+82:  val conflictDetails = details.collectFirst { case d if d.field == "conflict" => d.message }
+```
+
+Nothing else reads `field` as a tag. The one other place `decode` touches it is
+the documented use — each detail's `field` becomes the `field` of a
+`ValidationError`, unchanged. Two coarser dispatches exist on
+`details.headOption.map(_.field)` (choosing between `VersionConflict` and
+`DataConflict`, and between repository and simulation failures) and have the
+same character, so they belong in the same pass.
+
+Of the two, `"scenario"` is arguably not a deviation at all: the scenario is
+named by a path parameter of the merge request, so a row pointing at it does
+point at an input field. `"conflict"` names nothing in any request.
+
+**Why the deviation exists, and the straightforward fix.** The tags are there
+for one purpose: so `decode` can rebuild a typed error with its payload, rather
+than parsing the human-readable message. If `decode` stops reconstructing
+payloads it has no reader for, the tags have no job. The only consumer of a
+reconstructed `MergeConflict` is `app/state/GlobalError.scala`, which renders
+`e.safeMessage` and never reads a field; and `decode` already falls back to
+`DataConflict(message)`, which that file maps to the same banner. So the fix
+that respects the original specification, with no new member and no new
+concept, is:
+
+- `field` goes back to meaning a JSON path to an offending input, which for a
+  merge failure is `"scenario"` and nothing else.
+- `code` carries the machine-readable reason, one distinct `ValidationErrorCode`
+  per refusal kind, which is what that member is already for.
+- `message` carries the human-readable text.
+- `decode` reconstructs from `code` alone, and returns `DataConflict(message)`
+  where it cannot do better.
+
+The cost is that the round trip stops being non-lossy for `MergeConflict`, and
+the assertion in
+`modules/common/src/test/scala/com/risquanter/register/domain/errors/ErrorResponseSpec.scala`
+that pins non-lossiness is replaced by one that pins the message surviving.
+
+**Also assess the Google Cloud API error shape as the target.** The envelope
+today is three nested types:
+
+```json
+{
+  "error": {
+    "code": 409,
+    "message": "one sentence covering the whole failure",
+    "errors": [
+      { "domain": "scenarios", "field": "conflict",
+        "code": "MERGE_CONFLICT", "message": "detail text for this one item",
+        "requestId": "optional" }
+    ]
+  }
+}
+```
+
+`ErrorResponse` wraps `JsonHttpError(code, message, errors)`, which wraps
+`List[ErrorDetail(domain, field, code, message, requestId)]`. The enum `code`
+serialises as its bare string and its decoder **fails on an unknown code**, so
+adding a code is a breaking change for an older client.
+
+Google Cloud's error body is understood to be
+`{"error": {"code", "message", "status", "details": [...]}}`, where `status` is
+a canonical string such as `ABORTED` or `NOT_FOUND`, and `details` is a
+heterogeneous list discriminated by an `@type` member with distinct shapes for
+distinct purposes (field violations, machine-readable reason-and-metadata,
+precondition failures). **That description is from recollection and has not been
+checked against Google's published specification; checking it is the first step
+of this item.** The three shapes to weigh:
+
+1. Keep the current single fixed record and give the discriminator its own name.
+2. Adopt a canonical `status` string alongside the numeric code, and let each
+   detail row stay one fixed shape.
+3. Adopt a typed detail union, which is what would let a row carry structured
+   data — a tree id and a list of names, say — instead of rendered prose.
+
+Shape 3 is what the merge errors actually want: `decode` is lossy today
+precisely because a structured payload has to be flattened into one `message`
+string and cannot be parsed back without inventing a separator convention.
+
+**Not codified anywhere.** No ADR defines `ErrorResponse`, `JsonHttpError` or
+`ErrorDetail`. ADR-010 defines the `AppError` hierarchy, `ValidationError`, and
+that the HTTP boundary maps typed errors to status codes without string
+matching. ADR-035 defines that `ErrorResponse` is the only type reaching the
+wire and that `encode` is an exhaustive typed match. The envelope's own members
+are specified only by their scaladoc. Whatever this item decides belongs in an
+ADR, because the shape is a published contract and three documents already
+describe parts of it.
+
+## 55. The Irmin service layers close their resource scope and then keep using the service
+
+`Application.scala` builds each Irmin-backed service inside `ZIO.scoped(...)`,
+extracts the service value, and lets the scope close — then uses that value for
+the rest of the process. It works today only because `sttp`'s backend is built
+with `closeClient = false`, a third-party detail this code neither asserts nor
+tests. Investigation notes, the four affected call sites and three candidate
+shapes: `docs/scratch/LAYER-SCOPE-IMMEDIATE-RELEASE.md`.
