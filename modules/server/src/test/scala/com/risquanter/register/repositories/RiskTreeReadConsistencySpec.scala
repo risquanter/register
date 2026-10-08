@@ -224,12 +224,12 @@ object RiskTreeReadConsistencySpec extends ZIOSpecDefault:
     },
 
     // ADR-036 confines WorkspaceId to the server: it must never reach a
-    // client-visible surface. getAllForWorkspace's TreeLoadFailure.reason is
-    // one such surface's source value (ScenarioMergeServiceLive.guardMergedState
-    // copies it verbatim into the wire-facing MergeConflict/MergeUndoFailed
-    // details), so this pins what loadTreeAt's internal "missing value"
-    // messages actually contain: the full Irmin path, built from
-    // WorkspaceStoragePaths.treeNodes(wsId, treeId), which embeds wsId.value.
+    // client-visible surface. getAllForWorkspace's TreeLoadFailure.reason
+    // embeds it, because loadTreeAt's "missing value" message carries the full
+    // Irmin path built from WorkspaceStoragePaths.treeNodes(wsId, treeId).
+    // This pins that content, which is why the merge guard
+    // (ScenarioMergeServiceLive.guardStagedState) sends the reason to the log
+    // and builds its wire-facing MergeConflict from tree ids and a count.
     // A node listed by listAtCommit but absent from getAtCommit at the SAME
     // pinned commit should not happen under normal operation (Irmin's content
     // at a fixed commit is immutable), but nothing in the type system rules

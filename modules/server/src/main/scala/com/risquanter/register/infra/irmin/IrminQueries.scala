@@ -22,13 +22,15 @@ object IrminQueries:
     * Irmin's optional wire argument here — the only place.
     */
   private def branchSelector(branch: StoreBranch): String =
-    if branch == BranchRef.Main then "main"
-    else s"""main: branch(name: "${branch.name}")"""
+    branch match
+      case BranchRef.Main => "main"
+      case named          => s"""main: branch(name: "${named.name}")"""
 
   /** Branch argument fragment for mutations (empty for main). */
   private def branchArg(branch: StoreBranch): String =
-    if branch == BranchRef.Main then ""
-    else s"""branch: "${branch.name}", """
+    branch match
+      case BranchRef.Main => ""
+      case named          => s"""branch: "${named.name}", """
 
   /**
     * Query to get a value at a path.

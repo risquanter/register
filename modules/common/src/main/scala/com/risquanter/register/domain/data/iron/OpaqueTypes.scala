@@ -405,7 +405,7 @@ object MeshServiceUrl:
   * merged into, published from, and deleted. Nothing reads it and it has no
   * client-facing form.
   *
-  * Only the three branch primitives that both kinds share are declared over
+  * Only the four branch primitives that both kinds share are declared over
   * this type. Everything that reads or writes tree data stays declared over
   * `BranchRef`, so a staging branch cannot reach it.
   */

@@ -2,11 +2,9 @@ package com.risquanter.register.repositories
 
 import zio.*
 import zio.json.*
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.autoCastIron
 import com.risquanter.register.domain.data.{RiskLeaf, RiskPortfolio, RiskTree, RiskNode, Mitigation}
 import com.risquanter.register.domain.data.iron.{TreeId, NodeId, WorkspaceId, BranchRef, CommitHash, Revision}
-import com.risquanter.register.domain.errors.{RepositoryFailure, AppError, IrminError}
+import com.risquanter.register.domain.errors.{RepositoryFailure, TreeLoadFailure, IrminError}
 import com.risquanter.register.infra.irmin.{IrminClient, WorkspaceStoragePaths}
 import com.risquanter.register.infra.irmin.model.{IrminPath, IrminTreeEntry}
 import com.risquanter.register.repositories.model.TreeMetadata
@@ -88,7 +86,7 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
       case Some(head) => loadTreeAt(wsId, id, head).map(_.map(twm => (twm.tree, head)))
     }
 
-  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[RepositoryFailure, RiskTree]]] =
+  override def getAllForWorkspace(wsId: WorkspaceId, rev: Revision): Task[List[Either[TreeLoadFailure, RiskTree]]] =
     val root = IrminPath.unsafeFrom(WorkspaceStoragePaths.treesRoot(wsId))
     // Resolve ONE commit for the whole listing (enumeration + every tree load),
     // so the returned set is a single consistent snapshot.
@@ -98,14 +96,14 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
         handleIrmin(irmin.listAtCommit(head, root)).flatMap { treeIds =>
           ZIO.foreach(treeIds)(treeIdPath =>
             for
+              // The id is parsed before the load, so every entry below can name
+              // the tree it is about without the inner helpers carrying the id.
               treeId  <- parseTreeId(treeIdPath.value)
               loaded  <- loadTreeAt(wsId, treeId, head).either
             yield loaded match
               case Right(Some(value)) => Right(value.tree)
-              case Right(None)        => Left(RepositoryFailure(s"Tree ${treeIdPath.value} not found (missing meta and nodes)"))
-              case Left(err: RepositoryFailure) => Left(err)
-              case Left(err: AppError)          => Left(RepositoryFailure(err.getMessage))
-              case Left(err)                    => Left(RepositoryFailure(err.getMessage))
+              case Right(None)        => Left(TreeLoadFailure(treeId, "missing meta and nodes"))
+              case Left(err)          => Left(TreeLoadFailure(treeId, err.getMessage))
           )
         }
     }
@@ -121,13 +119,9 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
                         mitigations: Seq[Mitigation], message: String, branch: BranchRef): Task[Unit] =
     val entries =
       IrminTreeEntry(IrminPath.unsafeFrom("meta"), meta.toJson) ::
-        nodes.toList.map(node => IrminTreeEntry(IrminPath.unsafeFrom(s"nodes/${node.id.value}"), nodeJson(node))) :::
+        nodes.toList.map(node => IrminTreeEntry(IrminPath.unsafeFrom(s"nodes/${node.id.value}"), RiskTreeRepositoryIrmin.encodeStoredNode(node))) :::
         mitigations.toList.map(m => IrminTreeEntry(IrminPath.unsafeFrom(s"mitigations/${m.id.value}"), m.toJson))
     handleIrmin(irmin.setTree(base, entries, message, branch)).unit
-
-  private def nodeJson(node: RiskNode): String = node match
-    case leaf: RiskLeaf           => leaf.toJson
-    case portfolio: RiskPortfolio => portfolio.toJson
 
   private def decodeMeta(json: String): Task[TreeMetadata] =
     ZIO.fromEither(json.fromJson[TreeMetadata].left.map(err => RepositoryFailure(s"Decode meta failed: $err")))
@@ -145,10 +139,10 @@ final class RiskTreeRepositoryIrmin(irmin: IrminClient) extends RiskTreeReposito
     yield nodes
 
   private def decodeNode(child: IrminPath, json: String): Task[RiskNode] =
-    val decoded: Either[String, RiskNode] =
-      json.fromJson[RiskLeaf].map(node => node: RiskNode)
-        .orElse(json.fromJson[RiskPortfolio].map(node => node: RiskNode))
-    ZIO.fromEither(decoded.left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err")))
+    ZIO.fromEither(
+      RiskTreeRepositoryIrmin.decodeStoredNode(json)
+        .left.map(err => RepositoryFailure(s"Decode node ${child.value}: $err"))
+    )
 
   private def readMitigationsAt(prefix: IrminPath, at: CommitHash): Task[Seq[Mitigation]] =
     for
@@ -276,3 +270,23 @@ private val CurrentSchemaVersion: Int = 2
 object RiskTreeRepositoryIrmin:
   val layer: ZLayer[IrminClient, Nothing, RiskTreeRepository] =
     ZLayer.fromFunction(new RiskTreeRepositoryIrmin(_))
+
+  /** The stored form of one node, written and read here as a pair.
+    *
+    * A node is stored as its concrete type's own JSON — `RiskLeaf` or
+    * `RiskPortfolio` — with no discriminator, so the writer picks the concrete
+    * encoder and the reader tries both decoders in turn. The derived
+    * `JsonCodec[RiskNode]` expects a discriminated wrapper and does not read
+    * this encoding.
+    *
+    * The two halves must agree, so they sit together. `decodeStoredNode` is
+    * public because `ScenarioMergeServiceLive` reads the same blobs to predict
+    * a merge's node set; the writer has no reader outside this package.
+    */
+  private[repositories] def encodeStoredNode(node: RiskNode): String = node match
+    case leaf: RiskLeaf           => leaf.toJson
+    case portfolio: RiskPortfolio => portfolio.toJson
+
+  def decodeStoredNode(json: String): Either[String, RiskNode] =
+    json.fromJson[RiskLeaf].map(node => node: RiskNode)
+      .orElse(json.fromJson[RiskPortfolio].map(node => node: RiskNode))

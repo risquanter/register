@@ -4,15 +4,15 @@ import zio.*
 import zio.test.*
 
 import com.risquanter.register.auth.{Checked, Permission, TestChecked}
-import com.risquanter.register.domain.data.iron.{BranchRef, CommitHash, ScenarioName, WorkspaceId}
+import com.risquanter.register.domain.data.iron.{CommitHash, ScenarioName, WorkspaceId}
 import com.risquanter.register.domain.errors.ScenarioHeadStale
 import com.risquanter.register.testutil.TestHelpers.safeId
 
-/** `cascadeDeleteScenarios` (the extension in `ScenarioService.scala`) used to
-  * give up immediately on a `ScenarioHeadStale` failure — a scenario branch
-  * updated concurrently with workspace teardown would be skipped and silently
-  * orphaned in Irmin forever, the exact leak this cascade exists to close.
-  * Fixed 2026-07-21: one retry against a freshly re-resolved head.
+/** `cascadeDeleteScenarios` (the extension in `ScenarioService.scala`) retries
+  * once against a freshly re-resolved head when a delete fails
+  * `ScenarioHeadStale`. Without the retry, a scenario branch updated
+  * concurrently with workspace teardown would be skipped and left orphaned in
+  * Irmin, which is the leak this cascade exists to close.
   */
 object ScenarioServiceCascadeSpec extends ZIOSpecDefault:
 
@@ -21,7 +21,6 @@ object ScenarioServiceCascadeSpec extends ZIOSpecDefault:
   private val wsId: WorkspaceId = WorkspaceId(safeId("cascade-retry-ws"))
   private def name(s: String): ScenarioName.ScenarioName = ScenarioName.fromString(s).toOption.get
   private def hash(fill: Char): CommitHash = CommitHash.fromString(fill.toString * 40).toOption.get
-  private def branchRef(n: ScenarioName.ScenarioName): BranchRef = BranchRef.scenario(wsId, n).toOption.get
 
   override def spec = suite("ScenarioService.cascadeDeleteScenarios")(
 
@@ -42,7 +41,7 @@ object ScenarioServiceCascadeSpec extends ZIOSpecDefault:
                        },
                        onDelete = (_, _, head) =>
                          if head == staleHead then
-                           ZIO.fail(ScenarioHeadStale(branchRef(scenarioName), staleHead, Some(freshHead)))
+                           ZIO.fail(ScenarioHeadStale(scenarioName, staleHead, Some(freshHead)))
                          else
                            deleted.update(_ :+ head).unit
                      )
@@ -65,7 +64,7 @@ object ScenarioServiceCascadeSpec extends ZIOSpecDefault:
                          if n == 1 then List(ScenarioSummary(scenarioName, staleHead)) else Nil
                        },
                        onDelete = (_, _, _) =>
-                         ZIO.fail(ScenarioHeadStale(branchRef(scenarioName), staleHead, None))
+                         ZIO.fail(ScenarioHeadStale(scenarioName, staleHead, None))
                      )
         exit      <- svc.cascadeDeleteScenarios(wsId).exit
       yield assertTrue(exit.isSuccess) // best-effort: never fails, even when the retry finds nothing left

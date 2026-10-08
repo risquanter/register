@@ -38,7 +38,9 @@ final class IrminClientLive private (
   private val MergeConflictPrefix = "merge conflict: "
 
   private def branchLog(branch: StoreBranch): String =
-    if branch == BranchRef.Main then "" else s" [branch=${branch.name}]"
+    branch match
+      case BranchRef.Main => ""
+      case named          => s" [branch=${named.name}]"
 
   override def get(path: IrminPath, branch: BranchRef = BranchRef.Main): IO[IrminError, Option[String]] =
     for
