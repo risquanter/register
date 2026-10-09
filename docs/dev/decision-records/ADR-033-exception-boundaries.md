@@ -137,6 +137,7 @@ def hover(v: js.Dynamic): Option[NodeId]
 | Location | Pattern |
 |----------|---------|
 | `NodeLosses.scala` (`PortfolioLosses.create`) | Named-type conversion over a throwing JVM API |
+| `LossDistribution.scala` (`decorate`) | Named-type conversion over the layer's own arithmetic, which `scaleLosses` is documented to throw on |
 | `MetalogDistribution.scala` (`fromPercentiles`) | Undocumented foreign JVM API — `Exception` is the narrowest guaranteed cover (JVM `Error`s still escape) → typed error |
 | `app/state/ChartHoverBridge.scala` (`parseHoverSignal`) | JS-boundary catch-all → total fallback (`Option`) |
 | `app/chart/LecChartParams.scala` (`ChartParams.applyTo`) | JS-boundary catch-all → total fallback (`Unit`) |

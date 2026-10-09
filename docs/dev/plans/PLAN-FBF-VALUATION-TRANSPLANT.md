@@ -1,8 +1,11 @@
 # Plan — transplant the FB-F valuation shape into production
 
-**Status:** Draft presented for approval — **no open decisions.** All eight of §10
-are ruled. G3 coverage begins when the user approves this document and points the
-approval token at it; until then no source edit is authorized.
+**Status:** Closed 2026-10-03 — implemented and landed green. **No open
+decisions;** all eight of §10 were ruled. Step 1 (§1) landed as `dc78902` at
+version 0.10.39; the type change (§3 onward) landed as `ad2576c` at 0.10.42,
+followed by the scaladoc trim `6311e95`. One item of §5's scope is outstanding:
+`ProvenanceSpec` carries its content changes but has not yet moved to the
+`simulation` package, which needs the approval token pointed back at this plan.
 **Authority (ruled 2026-09-27, user):** this document is the specification for
 the four valuation types. PLAN-RISKTRANSFORM §8.17 and §8.18 are superseded in
 that respect and are retained as informative material — how this work sits in

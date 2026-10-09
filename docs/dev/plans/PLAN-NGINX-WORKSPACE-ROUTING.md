@@ -291,7 +291,112 @@ event, and its consequence is that open events connections drop and browsers
 reconnect. Given that dynamic scaling is explicitly out of scope, keeping
 startup resilience is worth more than minimal remapping. **This is the one
 judgement inside a ruled decision; it is stated here so it can be overruled
-rather than discovered later.**
+rather than discovered later.** It is now re-opened as NWR-D-1 below.
+
+### NWR-D-1 — percentage buckets or consistent hashing, re-opened 2026-10-03
+
+`NWR` is this plan's code, from its filename. This decision re-opens the
+judgement stated immediately above, because a topology has been proposed that
+changes what the judgement costs.
+
+**What changed.** The proposal is one Irmin store per register instance rather
+than one shared store, with workspaces partitioned across instances by the
+routing hash. The hash then decides where a workspace's data *lives*, not only
+which instance serves it. Everything below follows from that single difference.
+
+**A remap relocates data, not cache.** This plan weighs percentage buckets
+against consistent hashing on the cost of a reshuffle, and finds that cost
+acceptable because it is a cache rebuild and a dropped events connection. Under
+per-instance storage a reshuffled workspace's data sits in a store the serving
+instance cannot reach. Consistent hashing moves roughly one key in N at a scale
+event; percentage buckets move most of them. The difference stops being a
+latency cost and becomes the number of workspaces needing their data moved.
+
+**Workspace creation has no key to hash, and this is a gap rather than a cost.**
+`POST /workspaces` takes `x-user-id` and no path key,
+because the key does not exist yet — the server generates it with `SecureRandom`
+during the request (ADR-021). So nginx cannot route a create request by hash. It
+lands on an arbitrary instance, that instance writes the new workspace's first
+data into its own store, and the key it generated hashes to that same instance
+only one time in N. Every later request for the workspace then routes by hash to
+an instance that does not hold the data.
+
+Two ways to close it, independent of which hashing this decision picks:
+
+- **Generate then place.** The creating instance hashes the key it has just
+  generated. If the result is not itself, it either forwards the create or
+  discards the key and generates another. Discarding is cheap: the key is 128
+  bits of `SecureRandom` output and the acceptance rate is 1/N.
+- **Place then generate.** nginx routes `POST /workspaces` without affinity, and
+  the handling instance generates a key constrained to hash to itself.
+
+Either makes creation and routing agree by construction. A misrouting check is
+still worth having, but it detects a disagreement rather than preventing one.
+
+**`WorkspaceReaper`'s teardown would be addressed to the wrong store, and this
+one has to be solved before the topology can be adopted.**
+
+Deleting a workspace's Irmin data on expiry is implemented and works today.
+`WorkspaceReaper` runs in every instance on its own timer and calls
+`CascadeDelete.workspace`, which reaches `RiskTreeService.cascadeDeleteTrees`,
+which calls `delete(wsId, id, BranchRef.Main)` per tree, which reaches
+`RiskTreeRepositoryIrmin.delete` and issues `setTree(treeRoot, Nil, …)` —
+emptying that tree's paths. With one shared store this works from whichever
+instance observes the expiry, because every instance can reach the data.
+
+Per-instance storage separates two things that are the same thing today. A
+workspace's data location is decided by the routing hash. Its teardown is
+performed by whichever instance's timer fires first. Those are independent, so
+the deletes are issued against the reaping instance's own store. When the data
+lives elsewhere, `RiskTreeRepositoryIrmin.delete` fails at its
+`getTreeWithMeta` head read, `cascadeDeleteTrees` logs the failure and ignores
+it, and the workspace's data stays.
+
+The immediate effect is reclamation rather than a wrong answer: the Postgres row
+is gone, so `workspaceStore.resolve` fails before any request reaches the
+orphan. The cumulative effect is why this is a prerequisite rather than
+housekeeping — every expired workspace whose data sat on another instance leaks
+that data permanently, so each store grows without bound and nothing in the
+system ever reclaims it.
+
+**The obvious fix is not directly available, and the reason is deliberate.**
+Having each reaper handle only the workspaces that hash to itself would need the
+plaintext workspace key, because that is what nginx hashes from the request
+path. The `workspaces` table stores `key_hash`, a SHA-256 digest produced by
+`WorkspaceKeyCrypto.hash`, and never the secret (ADR-022). A digest cannot be
+reversed into the routing input, so the reaper cannot recompute which instance
+owns a row.
+
+Two shapes that do work, to be chosen when this is ruled:
+
+- **Record the placement at creation.** Bootstrap holds the plaintext key, so it
+  can compute the instance selection once and store it as a column on the
+  workspace row. The reaper then filters on that column and only tears down what
+  it owns. This stores an instance index, not a credential.
+- **Invert the direction.** Each instance enumerates the workspaces present in
+  its own store and checks each against Postgres, tearing down the ones whose row
+  is gone. This needs no new column and no key, and it also reclaims orphans
+  created before the fix.
+
+**Decision needed.** Keep `split_clients` with percentage buckets, or adopt
+consistent hashing, given that per-instance Irmin changes a reshuffle from a
+cache cost into a data migration. The startup-resilience property that rejected
+an `upstream` block still has to hold either way.
+
+**What a ruling for consistent hashing commits to.** Consistent hashing is only
+worth adopting here if the per-instance topology is the destination, since the
+shared-store case is what the original judgement already settled. So a ruling
+that way carries two prerequisites with it, and neither is optional:
+
+1. **Creation placement** — one of the two closures above, so a workspace's data
+   is written to the store the hash will route its later requests to.
+2. **Owned teardown** — one of the two shapes above, so expiry reclaims the data
+   wherever it lives rather than leaking it.
+
+Without the first, most new workspaces are unreachable from the moment they are
+created. Without the second, every expired workspace leaks its data and no store
+ever shrinks. A misrouting check is worth having alongside both, but it reports a
+disagreement rather than removing one.
 
 ### The comment that ships with the routing block
 
