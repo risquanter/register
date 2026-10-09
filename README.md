@@ -226,7 +226,7 @@ The system is designed to be deployed with as much or as little infrastructure a
 | Team | `identity` | Keycloak + Istio service mesh on K3S |
 | Enterprise | `fine-grained` | Keycloak + Istio + SpiceDB on K3S|
 
-**The currently open-sourced version of Risquanter ships with full Layer 0 support.** Layer 0 provides a complete, production-ready deployment profile with automatic workspace expiry, rate limiting, key rotation, and all simulation and query features.
+**The currently open-sourced version of Risquanter ships with full Layer 0 support.** Layer 0 provides a complete, production-ready deployment profile with automatic workspace expiry, key rotation, and all simulation and query features.
 
 Layer 1 (Keycloak identity) and Layer 2 (SpiceDB fine-grained ACL) infrastructure and application wiring are implemented in the codebase and documented in [docs/dev/AUTHORIZATION-PLAN.md](docs/dev/AUTHORIZATION-PLAN.md), but their supporting infrastructure components (Keycloak realm provisioning, Istio mesh configuration, SpiceDB schema and CI/CD provisioning) are planned to be open-sourced as a separate repository upon completion and release.
 

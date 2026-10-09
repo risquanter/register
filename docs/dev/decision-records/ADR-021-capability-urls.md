@@ -68,16 +68,23 @@ DELETE /w/{key}                                → delete workspace + cascade tr
 
 ### 4. Rate Limiting & Abuse Prevention
 
-- **Creation rate limit:** max N workspace creations per caller address per hour,
-  counted in-application (`REGISTER_WORKSPACE_MAX_CREATES_PER_IP`, default 5).
-  This holds only because the address is infrastructure-supplied: a proxy
-  appends the real peer to `X-Forwarded-For`, and the application reads the
-  entry its own outermost proxy wrote (`REGISTER_TRUSTED_PROXY_HOPS`), ignoring
-  anything the caller placed to the left of it. Reading the leftmost value
-  instead would count an identity the caller chooses, and the limit would not
-  hold. The in-application counter is the limit in **every** deployment,
-  production included. An edge rate limit at the Istio ingress gateway is
-  additional defence against flooding and is **not implemented**.
+- **Creation rate limit: an edge concern, and the application holds none.**
+  `POST /workspaces` is anonymous in every authorization mode — Layer 0 has no
+  JWT to require, so the mesh admits the request unauthenticated — so this
+  endpoint does need a limit. That limit belongs at the ingress gateway, and the
+  application deliberately implements none.
+  The reason is that only the component holding the connection knows who is
+  calling. Anything further in has to be told, through a forwarded-header
+  convention that must be kept in agreement with the deployment's topology by
+  hand; a wrong value there silently counts an identity the caller chooses, and
+  the limit stops holding with no error and no log line. An application-level
+  per-address limit was implemented and removed for exactly that reason.
+  **This is a known, unclosed gap:** no rate limit exists at the gateway today,
+  so workspace creation is currently unbounded. Building it is required work in
+  the `register-infra` repository.
+  A per-credential limit is a different question and would legitimately sit in
+  the application, because the workspace key is a value the application holds
+  and the edge cannot see (`docs/dev/TODO.md` item 42).
 - **HTTPS-only:** Prevents URL sniffing on the wire
 - **No Referer leakage:** `Referrer-Policy: no-referrer` header on workspace responses
 - **Cache-Control:** `no-store` on workspace responses to prevent proxy caching of keys

@@ -23,3 +23,12 @@ Only the user writes this file, through `.claude/bin/approve-inventory`.
 - modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerSpec.scala
 - modules/server/src/test/scala/com/risquanter/register/configs/TestConfigs.scala
 - modules/common/src/test/scala/com/risquanter/register/domain/errors/ErrorResponseSpec.scala
+- modules/common/src/main/scala/com/risquanter/register/http/endpoints/WorkspaceLifecycleEndpoints.scala
+- modules/common/src/main/scala/com/risquanter/register/domain/errors/ValidationErrorCode.scala
+- modules/server/src/main/scala/com/risquanter/register/Application.scala
+- modules/server/src/test/resources/application.conf
+- modules/server/src/test/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleControllerCascadeSpec.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/HttpTestHarness.scala
+- modules/server-it/src/test/scala/com/risquanter/register/http/support/StubHttpTestHarness.scala
+- modules/app/src/main/scala/app/state/WorkspaceState.scala
+- modules/server/src/main/scala/com/risquanter/register/http/controllers/DistributionPreviewController.scala

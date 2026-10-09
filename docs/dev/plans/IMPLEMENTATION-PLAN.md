@@ -938,12 +938,12 @@ This tier replaces the standalone Phase X by combining:
 | A24 | Sanitise `IrminHttpError` — don't forward upstream body | Low | W.3 | Log full body, return generic message |
 | A25 | Sanitise `RepositoryFailure` — generic message to client | Low | W.3 | Log reason, return "Internal error" |
 | A26 | Audit all 500 responses for information leakage | Low | W.7 | Test assertions on 500 response bodies |
-| A27 | IP-based rate limit on `POST /workspaces` | Medium | W.4 | Already planned (`RateLimiter`) |
-| A28 | Rate limit on resolve/operations per IP | Medium | W.4 | Prevents key brute-force |
+| A27 | Rate limit on `POST /workspaces` | Medium | W.4 | **Open.** An in-application per-address limit was built and then removed: only the component holding the connection knows the caller, so the limit belongs at the ingress gateway (ADR-021 §4). No gateway limit exists yet |
+| A28 | Rate limit on resolve/operations per IP | Medium | W.4 | **Open**, same reason as A27. Key brute force is separately infeasible — the key is 128-bit `SecureRandom` |
 | A29 | Log workspace creation events | Low | W.2 | Inline during implementation |
 | A30 | Log resolve failures (not-found, expired) | Low | W.3 | Inline during implementation |
 | A31 | Log eviction events | Low | W.4 | Already planned in reaper |
-| A32 | Log rate-limit trigger events | Low | W.4 | Inline during implementation |
+| A32 | Log rate-limit trigger events | Low | W.4 | Follows A27 — belongs wherever the limit ends up |
 | A33 | Structured log fields (`workspace_key`, `event_type`, `ip`) | Low | W.2–W.4 | Use existing structured logging |
 | A34 | JWT algorithm allowlist (RS256 only) | Low | Enterprise | No JWT in Layer 0 |
 | A35 | JWT audience validation | Low | Enterprise | Istio `RequestAuthentication` |
@@ -1136,7 +1136,6 @@ register.workspace {
   free-tier {
     ttl = 72h                       # workspace lifetime
     reaper-interval = 5m            # background eviction cycle
-    max-creates-per-ip-per-hour = 5 # rate limit
     max-trees-per-workspace = 10    # prevent abuse
   }
   enterprise {

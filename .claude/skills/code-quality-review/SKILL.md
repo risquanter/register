@@ -318,7 +318,8 @@ carrying the maximum, so the bound is enforced by the decoder before a handler
 runs. A configuration value is not such a bound: an operator setting it is not
 the caller it would have to defend against. The bounds that exist today are the
 10 000-node tree ceiling, the 1 000-mitigation ceiling, the 8 MiB
-`REGISTER_MAX_REQUEST_BYTES` body cap, and `REGISTER_WORKSPACE_MAX_TREES`. Flag
+`REGISTER_MAX_REQUEST_BYTES` body cap, and `REGISTER_WORKSPACE_MAX_TREES`
+(enforced in `WorkspaceStore.addTree` and checked before a tree is written). Flag
 any new unbounded `List[_]`/`Set[_]`
 request body (e.g. a node-ID list with no max-size constraint) as
 **SHOULD-FIX**. Known accepted gaps are tracked in `docs/dev/TODO.md` —
@@ -330,8 +331,13 @@ in its signature (ADR-024) — a method that can be called without that proof
 type is a function-level authorization gap. **MUST-FIX.**
 
 **API6:2023 Unrestricted Access to Sensitive Business Flows.** New
-resource-creation endpoints should be evaluated for abuse potential the same
-way workspace bootstrap already is (`REGISTER_WORKSPACE_MAX_CREATES_PER_IP`).
+resource-creation endpoints must be evaluated for abuse potential. There is no
+per-address limit in the application to copy: workspace bootstrap had one and it
+was removed, because only the component holding the connection knows the caller
+and the limit therefore belongs at the ingress gateway (ADR-021 §4), where it is
+required work and not yet built. So `POST /workspaces` is currently unbounded.
+A per-**credential** limit does belong in the application — the workspace key is
+a value it holds — and none exists either (`docs/dev/TODO.md` item 42).
 **SHOULD-FIX** on a new unguarded creation flow; known accepted gaps are
 tracked in `docs/dev/TODO.md`.
 

@@ -19,7 +19,8 @@ Layer 0 — Workspace Capability (Tier 1.5, IMPLEMENTATION-PLAN.md)
   │  URL: /#/{workspaceKey}/... (SAME URL scheme in ALL layers)
   │  Key role: SOLE CREDENTIAL (true capability)
   │  Knowledge of workspace key = access to all trees in workspace
-  │  Free-tier: TTL-limited, reaper, rate limiting
+  │  Free-tier: TTL-limited, reaper (rate limiting is an edge concern,
+  │               ADR-021 §4 — the application holds none)
   │  Enterprise: same URLs, same keys — but Layer 1+ adds gates
   │
 Layer 1 — Identity + Ownership (this document)

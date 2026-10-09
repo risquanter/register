@@ -251,9 +251,7 @@ Configure via `docker-compose.yml`, `.env` file, or inline overrides.
 | `REGISTER_WORKSPACE_TTL` | `72h` | Workspace time-to-live |
 | `REGISTER_WORKSPACE_IDLE_TIMEOUT` | `1h` | Workspace idle expiry |
 | `REGISTER_WORKSPACE_REAPER_INTERVAL` | `5m` | How often the reaper runs |
-| `REGISTER_WORKSPACE_MAX_CREATES_PER_IP` | `5` | Max workspace creates per IP per hour |
 | `REGISTER_WORKSPACE_MAX_TREES` | `10` | Max risk trees per workspace. A create beyond it is refused with a 400 before the tree is written |
-| `REGISTER_TRUSTED_PROXY_HOPS` | `1` | How many proxies run in front of the server, each appending its peer address to `X-Forwarded-For`. The rate limiter reads the entry the outermost one wrote and ignores anything the caller placed to its left. `1` is this stack (nginx only); set `2` behind the Istio ingress gateway as well. Too high a value makes every request look unidentifiable, so they share one rate-limit window |
 | `OTEL_SERVICE_NAME` | `risk-register` | OpenTelemetry service name |
 | `REGISTER_TELEMETRY_EXPORTER` | `otlp` | Where metrics and traces go. `otlp` sends them to the collector; `console` prints them on the server's own output. Unrelated to `LOG_LEVEL`, which governs application logs |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP endpoint, used when the exporter is `otlp` |

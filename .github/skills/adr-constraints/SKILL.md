@@ -107,15 +107,19 @@ serialization/escaping helpers.
 ✅ INSTEAD: `SecureRandom` — cryptographically secure, required by ADR-021.
 *ADR-021*
 
-❌ NEVER derive a rate-limit or audit identity from the leftmost `X-Forwarded-For`
-entry, or from any request header a caller can set. A caller who varies the value
-gets a fresh window per value, which disables the limit silently — no error, no
-log, the limiter still appears to work.
-✅ INSTEAD: a proxy appends the real peer, and the application reads the entry its
-own outermost proxy wrote, indexed from the right by a configured hop count
-(`REGISTER_TRUSTED_PROXY_HOPS`). A header too short for that count yields no
-identity, and all such requests share one window. The in-application limiter is
-the control in every deployment; an edge limit is additional and unimplemented.
+❌ NEVER implement a per-address rate limit in the application, and never derive
+any identity from a request header a caller can set. Only the component holding
+the connection knows who is calling; everything further in has to be told,
+through a forwarded-header convention kept in agreement with the topology by
+hand. A caller who varies the header, or a convention that drifts from the
+deployment, disables the limit silently — no error, no log, the limiter still
+appears to work.
+✅ INSTEAD: a per-address limit belongs at the ingress gateway. The application
+implements none, and `POST /workspaces` is anonymous in every authorization
+mode, so that gateway limit is required work and does not exist yet — a known
+gap, not a decision to revisit in application code. A per-**credential** limit
+is a different question and does belong here, because the workspace key is a
+value the application holds and the edge cannot see.
 *ADR-021 §4*
 
 ❌ NEVER include secrets, PII, or internal paths in error messages.

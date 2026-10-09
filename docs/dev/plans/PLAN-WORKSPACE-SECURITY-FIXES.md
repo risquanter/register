@@ -16,22 +16,26 @@ on protected reads).
 
 ## Objective
 
-**WSF-D-1 — the creation rate limit counts an identity the caller controls.**
-`WorkspaceLifecycleController.normaliseIp` reads the `X-Forwarded-For` request
-header and takes its leftmost comma-separated value. No proxy in front of the
-application sets that header: `containers/prod/Dockerfile.frontend-prod`
-contains no `proxy_set_header` directive, and nginx forwards a client's headers
-unchanged through `proxy_pass` unless told otherwise. The value the controller
-reads is therefore whatever the caller typed, so varying it per request gives
-each spoofed value its own fresh window of `maxCreatesPerIpPerHour` (default 5,
-`modules/server/src/main/resources/application.conf`). The limit does not hold.
+**WSF-D-1 — the application's per-address rate limit is removed, not repaired.**
+`WorkspaceLifecycleController` identified a caller by the leftmost
+`X-Forwarded-For` entry, a value the caller writes, so varying it per request
+gave each value its own fresh window. Two repairs were attempted and both failed
+on the same structural fact: only the component holding the connection knows who
+is calling, and anything further in has to be told, through a convention kept in
+agreement with the deployment's topology by hand. A configured count of proxy
+hops silently selected a caller-controlled entry whenever the count was wrong,
+and it was set nowhere in `register-infra`, so Kubernetes would have run the
+wrong value. Having nginx overwrite the header removed the forgery but made the
+gateway's own address the identity in Kubernetes, which caps workspace creation
+at the limit for the whole deployment.
 
-Two consequences follow from the same input. The limiter's state is
-`Ref[Map[Option[ClientIp], (Int, Instant)]]`; lapsed windows are ignored when
-read and never removed, so one map entry per distinct spoofed value is retained
-for the process lifetime — an unauthenticated memory-growth path. And the value
-reaches a log annotation in `RateLimiter.checkCreate`, so caller-chosen text
-enters log output (CWE-117).
+`ADR-021` §4 had already placed this control at the ingress gateway for
+production and scoped the in-application counter to standalone use. So the whole
+mechanism is removed from the application and from the development stack.
+
+A per-address limit at the gateway is required work in `register-infra` and does
+not exist, which leaves `POST /workspaces` unbounded. That is recorded in
+`ADR-021` §4 as a known gap rather than left implicit.
 
 **WSF-D-2 — the per-workspace tree ceiling is configured and enforced
 nowhere.** `WorkspaceConfig.maxTreesPerWorkspace` (default 10, env
@@ -56,7 +60,7 @@ this with a `WorkspaceId` that originated from client input."
 
 | Label | Decision | Ruled |
 |---|---|---|
-| WSF-D-1 | Have the proxy write `X-Forwarded-For` and have the application read the entry our outermost proxy wrote, selected by a configured hop count. Evict lapsed windows in the same change. An edge rate limit is **not** part of this fix (see ADR alignment). | user, 2026-10-09 |
+| WSF-D-1 | Remove per-address rate limiting from the application and the development stack entirely. It is an edge concern; the gateway limit is required work in `register-infra` and unbuilt. | user, 2026-10-09 |
 | WSF-D-2 | Enforce `maxTreesPerWorkspace`, with the check also running before a tree is written so a refused association cannot orphan a stored tree. | user, 2026-10-09 |
 | WSF-D-3 | Delete `resolveById`, both implementations, the `byId` index, and the two `*ById` error types. | user, 2026-10-09 |
 
@@ -64,108 +68,56 @@ this with a `WorkspaceId` that originated from client input."
 
 ## Exact signatures
 
-### WSF-D-1 — rate-limit identity
+### WSF-D-1 — what is removed
 
-The extraction moves into `RateLimiter`, which already holds the configuration
-it needs. The controller then passes the raw header and keeps no opinion about
-how a caller is identified.
+Nothing is added. The whole mechanism goes:
 
-`modules/server/src/main/scala/com/risquanter/register/services/workspace/RateLimiter.scala`:
+```
+modules/server/.../services/workspace/RateLimiter.scala       whole file
+modules/server/.../services/workspace/RateLimiterSpec.scala   whole file
+   (trait RateLimiter, RateLimiterLive, case class ClientIp)
+
+configs/WorkspaceConfig.scala              maxCreatesPerIpPerHour
+main/resources/application.conf            its two lines
+test/resources/application.conf            its line
+test/.../configs/TestConfigs.scala         its field
+Application.scala                          RateLimiterLive import + layer
+WorkspaceLifecycleController.scala         the field, the checkCreate call,
+                                           the import, the environment type
+domain/errors/AppError.scala               case class RateLimitExceeded
+domain/errors/ValidationErrorCode.scala    RATE_LIMIT_EXCEEDED
+domain/errors/ErrorResponse.scala          the encode arm, the case 429 decode
+                                           arm, makeRateLimitExceededResponse
+ErrorResponseSpec.scala                    the encode and decode cases
+WorkspaceLifecycleControllerSpec.scala, ...CascadeSpec.scala,
+server-it HttpTestHarness.scala, StubHttpTestHarness.scala
+                                           the layer from each fixture
+```
+
+The endpoint loses its now-unread header input, which changes its arity:
 
 ```scala
-trait RateLimiter:
-  /** Counts one workspace creation against the caller's address.
-    *
-    * Takes the raw `X-Forwarded-For` header rather than an address: which part
-    * of it identifies the caller depends on how many proxies sit in front of
-    * this process, which is configuration this service holds and the caller
-    * does not.
-    */
-  def checkCreate(forwardedFor: Option[String]): IO[RateLimitExceeded, Unit]
+  val bootstrapWorkspaceEndpoint =
+    baseEndpoint
+      .in("workspaces")
+      .post
+      .in(header[Option[UserId.Authenticated]]("x-user-id"))
+      .in(query[Option[SeedEntityId.SeedEntityId]]("seedEntityId"))
+      .in(jsonBody[RiskTreeDefinitionRequest])
+      .out(jsonBody[WorkspaceBootstrapResponse])
 ```
 
-```scala
-final class RateLimiterLive private (
-  ref: Ref[Map[Option[ClientIp], (Int, Instant)]],
-  maxPerHour: Int,
-  trustedProxyHops: Int
-) extends RateLimiter:
+`WorkspaceState.bootstrap` in the single-page application passes a three-element
+tuple to match. That is a wire-shape change (Decision Trigger #1), ruled
+together with the removal.
 
-  /** The caller's address as our own proxies recorded it.
-    *
-    * Each proxy in front of this process appends the address of its immediate
-    * downstream peer to `X-Forwarded-For`. With `trustedProxyHops` of them, the
-    * outermost one's entry sits at index `size - trustedProxyHops`, and
-    * everything to the left of it was written by the caller and is ignored. A
-    * header shorter than that is an absent header or a wrong hop count, and
-    * yields `None` — all unidentifiable requests share one window, so a missing
-    * header cannot buy a fresh one.
-    */
-  private def callerAddress(forwardedFor: Option[String]): Option[ClientIp] =
-    forwardedFor
-      .map(_.split(",").toList.map(_.trim).filter(_.nonEmpty))
-      .flatMap(entries => entries.lift(entries.size - trustedProxyHops))
-      .map(ClientIp.apply)
-```
-
-`checkCreate`'s existing `ref.modify` gains one step, dropping windows that
-have lapsed before writing the new state:
-
-```scala
-        val live = state.filter((_, entry) => entry._2.isAfter(oneHourAgo))
-```
-
-The sweep is linear in the number of live windows per request. That is
-acceptable precisely because this change bounds that number: entries can now
-only come from addresses our own proxies observed.
-
-`modules/server/src/main/scala/com/risquanter/register/configs/WorkspaceConfig.scala`:
-
-```scala
-final case class WorkspaceConfig(
-  ttl: Duration = Duration.ofHours(72),
-  idleTimeout: Duration = Duration.ofHours(1),
-  reaperInterval: Duration = Duration.ofMinutes(5),
-  maxCreatesPerIpPerHour: Int = 5,
-  maxTreesPerWorkspace: Int = 10,
-  trustedProxyHops: Int = 1
-)
-```
-
-The default is 1 because the Docker Compose stack puts exactly one proxy in
-front of the server — the nginx in the frontend image. The Kubernetes
-deployment has two, the Istio ingress gateway and that same nginx, so it sets
-`REGISTER_TRUSTED_PROXY_HOPS=2`.
-
-`modules/server/src/main/resources/application.conf`, in the `workspace` block:
-
-```
-    trustedProxyHops = 1
-    trustedProxyHops = ${?REGISTER_TRUSTED_PROXY_HOPS}
-```
-
-`modules/server/src/main/scala/com/risquanter/register/http/controllers/WorkspaceLifecycleController.scala`
-— `normaliseIp` is deleted and the call becomes:
-
-```scala
-        _      <- rateLimiter.checkCreate(xff)
-```
-
-`containers/prod/Dockerfile.frontend-prod`, once at `server` level inside the
-nginx configuration so every location inherits it:
-
-```
-        # X-Forwarded-For is infrastructure-owned. A client may send one;
-        # appending our peer address means the entry this proxy wrote is the
-        # one the application reads (REGISTER_TRUSTED_PROXY_HOPS).
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-```
-
-`docker-compose.yml`, beside the existing rate-limit variable:
-
-```yaml
-      REGISTER_TRUSTED_PROXY_HOPS: "${REGISTER_TRUSTED_PROXY_HOPS:-1}"
-```
+Development-stack and documentation removals: the `docker-compose.yml`
+environment entry; the `export` in `tests/bats/suite-a-full-prod.bats` and
+`suite-c-in-memory.bats` that raised the limit so those suites could run; the
+`proxy_set_header X-Forwarded-For` line in
+`containers/prod/Dockerfile.frontend-prod`; the `docs/user/DOCKER-DEVELOPMENT.md`
+configuration row; the capability list in `README.md`; and the stale references
+in `AUTHORIZATION-PLAN.md` and `IMPLEMENTATION-PLAN.md` (items A27, A28, A32).
 
 ### WSF-D-2 — tree ceiling
 
@@ -273,18 +225,27 @@ six call sites pin `resolveById`'s own behaviour and go with it.
 
 ## ADR alignment
 
-**ADR-021 §4 is amended by WSF-D-1**, because its current wording is what let
-this defect stand. It reads "In production: Istio rate limiting at ingress; for
-standalone: simple in-app `Ref`-based counter", which presents the two as
-alternatives selected by deployment. Neither half is dispreferred and the
-substitution never happened: the in-app counter runs in every deployment
-including Kubernetes, and no edge rate limit has ever been implemented. What the
-sentence omits is the precondition that makes the in-app counter sound at all —
-that the address it counts is written by infrastructure and not by the caller.
-The replacement states that, gives the correct default, and records the edge
-limit as unimplemented defence in depth rather than as the production choice.
-No new constraint reaches the `adr-constraints` distillation: ADR-021's row
-there concerns `SecureRandom` for token generation, which is unchanged.
+**ADR-021 §4 is amended by WSF-D-1.** Its wording — "In production: Istio rate
+limiting at ingress; for standalone: simple in-app `Ref`-based counter" —
+presented the two as alternatives selected by deployment, which is what let an
+application-level per-address limit be treated as the thing to repair rather than
+the thing to remove. Neither substitution ever happened: the in-application
+counter ran in every deployment including Kubernetes, and no edge limit has ever
+been built.
+
+The replacement states that a per-address limit belongs at the gateway, that the
+application implements none, that `POST /workspaces` is anonymous in every
+authorization mode and therefore currently unbounded, and that building the
+gateway limit is required work in `register-infra`. It also records that a
+per-**credential** limit would legitimately sit in the application, because the
+workspace key is a value the application holds and the edge cannot see
+(`docs/dev/TODO.md` item 42).
+
+One constraint is added to both `adr-constraints` mirrors: never implement a
+per-address rate limit in the application, and never derive any identity from a
+caller-settable header. Both `code-quality-review` mirrors stop citing the
+removed limiter as the model for guarding a new creation flow. ADR-021's existing
+distillation row concerns `SecureRandom` for token generation and is unchanged.
 
 **ADR-036 §4 is amended by WSF-D-3.** Its sentence "`WorkspaceStore.resolveById`
 looks one up in a store spanning every workspace, with no accompanying
@@ -297,13 +258,13 @@ rows are checked for references to the deleted method. `docs/dev/ADR-HOUSEKEEPIN
 and both `code-quality-review` mirrors repeat the same claim and are corrected
 in the same pass.
 
-**ADR-001** — `trustedProxyHops` and `maxTreesPerWorkspace` are counts read from
-configuration, not domain values arriving from a caller, so a raw `Int` is
-correct for both. `callerAddress` takes a raw `String` because it is a parser at
-the boundary where the raw header arrives, which ADR-001's smart-constructor
-exception covers. `ClientIp` stays unrefined, and the reason for that improves: the
-value it now wraps is infrastructure-supplied, so the log-injection concern that
-its current comment does not account for no longer applies.
+**ADR-001** — `maxTreesPerWorkspace` is a count read from configuration, not a
+domain value arriving from a caller, so a raw `Int` is correct. `callerAddress`
+takes a raw `String` because it sits at the boundary where the raw header
+arrives, which ADR-001's smart-constructor exception covers. `ClientIp` stays
+unrefined, and the reason for that improves: the value it now wraps is written
+by the proxy, so the log-injection concern its previous comment did not account
+for no longer applies.
 
 **ADR-030** — `checkTreeCapacity` reads workspace data, so it carries
 `using Checked[Permission]` like every other protected method on the trait. Its
@@ -318,9 +279,9 @@ Deleting the two `*ById` error types removes two types that carried a
 
 ## Open decisions
 
-None. All three fixes are ruled (see the decisions table). Two residual
-behaviours are recorded above rather than left as choices: the check-then-act
-window in WSF-D-2, and the linear window sweep in WSF-D-1.
+None. All three changes are ruled (see the decisions table). One residual
+behaviour is recorded above rather than left as a choice: the check-then-act
+window in WSF-D-2.
 
 ---
 
@@ -380,9 +341,9 @@ Every file touched has its unused imports removed in the same pass.
 
 ## What this plan does not do
 
-It does not add an edge rate limit. ADR-021 §4's unimplemented Istio limit is
-defence in depth against flooding, not the fix for WSF-D-1, and it is left as a
-backlog item rather than folded in.
+It does not add an edge rate limit. ADR-021 §4's gateway limit is required work
+in the `register-infra` repository, outside this plan, and until it exists
+`POST /workspaces` has no limit at all.
 
 It does not change the workspace key's shape, its lifetime, or where it travels.
 The access-log leak and the single-instance affinity for the event hub belong to
