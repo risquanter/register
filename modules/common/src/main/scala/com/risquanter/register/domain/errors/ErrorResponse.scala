@@ -176,9 +176,7 @@ object ErrorResponse {
     case RateLimitExceeded(ip, limit, window)      => makeRateLimitExceededResponse(ip, limit, window)
     // Workspace errors — intentionally collapsed to opaque 404 (A13)
     case _: WorkspaceNotFound                      => makeWorkspaceOpaqueNotFoundResponse()
-    case _: WorkspaceNotFoundById                  => makeWorkspaceOpaqueNotFoundResponse()
     case _: WorkspaceExpired                       => makeWorkspaceOpaqueNotFoundResponse()
-    case _: WorkspaceExpiredById                   => makeWorkspaceOpaqueNotFoundResponse()
     case _: TreeNotInWorkspace                     => makeWorkspaceOpaqueNotFoundResponse()
     case RepositoryFailure(reason)                 => makeRepositoryFailureResponse(reason)
     // Same opaque 500 as RepositoryFailure: the reason is storage-internal and
